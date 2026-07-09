@@ -2,6 +2,7 @@ import { dim, boldCyan, dimCyan } from "./render.js";
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { computeCost } from '../ai/runtime/usage.js';
 
 export type StatusBarField = "model" | "mode" | "tokens" | "session";
 
@@ -217,7 +218,12 @@ export class StatusBar {
       if (field === "tokens" && this.contextLimit > 0) {
         const total = this.usage.inputTokens + this.usage.outputTokens;
         const pct = Math.round((total / this.contextLimit) * 100);
-        parts.push(`${pct}%`);
+        const tokenParts = [`${pct}%`];
+        const cost = computeCost(this.usage, this.model);
+        if (cost > 0) {
+          tokenParts.push(formatCost(cost));
+        }
+        parts.push(tokenParts.join(' · '));
       }
     }
 
@@ -258,6 +264,10 @@ function formatElapsed(ms: number): string {
   }
 
   return `${seconds}s`;
+}
+
+function formatCost(cost: number): string {
+  return `$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
 }
 
 /**

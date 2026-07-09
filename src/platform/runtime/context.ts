@@ -25,7 +25,13 @@ import {
   mergeMcpServerConfigs,
   type McpServerConfigConflict,
 } from '../mcp/config.js';
-import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
+import {
+  createMcpClientConnection,
+  resolveMcpCallToolTimeoutMs,
+  resolveMcpCatalogTimeoutMs,
+  resolveStdioCommand,
+  tryConnect,
+} from '../mcp/transport.js';
 import type { NamedMcpServerConfig } from '../mcp/types.js';
 import {
   BUILT_IN_MCP_CLASSIFICATIONS,
@@ -337,8 +343,8 @@ async function connectWorkspaceMcpServers(
   platform: NodeJS.Platform = process.platform,
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
-  const startupTimeoutMs = resolveMcpStartupTimeoutMs();
-  const callToolTimeoutMs = resolveMcpCallToolTimeoutMs();
+  const globalCatalogTimeoutMs = resolveMcpCatalogTimeoutMs();
+  const globalCallToolTimeoutMs = resolveMcpCallToolTimeoutMs();
 
   for (const server of servers) {
     if (shouldStop()) {
@@ -363,9 +369,14 @@ async function connectWorkspaceMcpServers(
       const cuaManager = new CuaConnectionManager(async () => {
         const conn = await createMcpClientConnection(server.name, frozenSnapshot);
         registerDisposable(conn);
+        const callToolTimeoutMs = frozenSnapshot.timeout?.call ?? globalCallToolTimeoutMs;
         return {
           callToolResult: async (name, input) => {
-            const result = await conn.client.callTool({ name, arguments: input });
+            const result = await conn.client.callTool(
+              { name, arguments: input },
+              undefined,
+              { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true },
+            );
             return normalizeMcpRuntimeToolResult(result);
           },
           dispose: () => conn.dispose(),
@@ -386,10 +397,22 @@ async function connectWorkspaceMcpServers(
 
     let connection: Awaited<ReturnType<typeof createMcpClientConnection>> | undefined;
     try {
-      connection = await createMcpClientConnection(server.name, server);
+      const connectResult = await tryConnect(server.name, server);
+      if (connectResult.status === 'disabled') {
+        capabilityHealth.push({
+          kind: 'mcp',
+          name: connectResult.serverName,
+          status: 'degraded',
+          detail: connectResult.error.message,
+        });
+        continue;
+      }
+      connection = connectResult.connection;
       const activeConnection = connection;
+      const catalogTimeoutMs = server.timeout?.catalog ?? globalCatalogTimeoutMs;
+      const callToolTimeoutMs = server.timeout?.call ?? globalCallToolTimeoutMs;
 
-      const toolsResult = await activeConnection.client.listTools(undefined, { timeout: startupTimeoutMs });
+      const toolsResult = await activeConnection.client.listTools(undefined, { timeout: catalogTimeoutMs });
       const schemas = toolsResult.tools ?? [];
 
       tools.push(

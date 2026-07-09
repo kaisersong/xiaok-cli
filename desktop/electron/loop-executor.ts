@@ -4,6 +4,7 @@ import {
   ArtifactEvidenceRegressionScanner,
 } from './artifact-evidence-regression-loop.js';
 import { CompletionEvidenceStore } from './completion-evidence-store.js';
+import { createLoopFinalizer, type LoopFinalizer } from './loop-finalizer.js';
 import {
   KSWARM_SERVICE_HEALTH_LOOP_ID,
   KSwarmServiceHealthScanner,
@@ -65,6 +66,7 @@ export interface CreateLoopRunnerOptions {
   scanner: LoopScanner;
   scanners?: Record<string, LoopScanner>;
   userLoopTemplateRunner?: UserLoopTemplateRunner;
+  finalizer?: LoopFinalizer;
   now?: () => number;
   staleAfterMs?: number;
 }
@@ -72,6 +74,7 @@ export interface CreateLoopRunnerOptions {
 export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
   const now = options.now ?? (() => Date.now());
   const staleAfterMs = options.staleAfterMs ?? 30 * 60_000;
+  const finalizer = options.finalizer ?? createLoopFinalizer(options.loopStore);
 
   return {
     async runLoopNow(loopId, trigger, signal) {
@@ -166,7 +169,12 @@ export function createLoopRunner(options: CreateLoopRunnerOptions): LoopRunner {
           summary,
           metadata
         );
-        const success = options.loopStore.finishLoopRunSuccess(run.id, runEvidenceIds, finishedAt, summary);
+        const success = finalizer.finishSuccess({
+          runId: run.id,
+          evidenceIds: runEvidenceIds,
+          now: finishedAt,
+          summary,
+        });
         return resultFromPersistedRun(success ?? run);
       } catch (error) {
         const finishedAt = now();

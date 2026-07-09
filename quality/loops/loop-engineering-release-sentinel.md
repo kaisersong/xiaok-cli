@@ -1,227 +1,221 @@
 # Xiaok Loop Engineering Release Sentinel
 
-> Pre-release sentinel check for the Loop Engineering surface.
-> Read-only: no source, tests, config, lockfile, or build artifacts were modified.
-> Only this Markdown artifact was written.
-
 ## Run Metadata
-- Time: 2026-06-29 06:03 CST (epoch 1782684202)
-- Trigger: Xiaok user Loop — "Loop Engineering 发布前哨检查" sentinel
-- Repository: /Users/song/projects/xiaok-cli (branch `master`, HEAD at tag `desktop-v1.4.16`)
-- App Version (installed): **1.4.14** (CFBundleShortVersionString=1.4.14, CFBundleVersion=1.4.14)
-- App Version (source): **1.4.16** (`desktop/package.json` version=1.4.16; git tag `desktop-v1.4.16` at HEAD)
-- App Path: /Applications/xiaok.app (app.asar modified 2026-06-29 00:01:45)
-- Report Path: /Users/song/projects/xiaok-cli/quality/loops/loop-engineering-release-sentinel.md
+- Time: 2026-07-09 06:03:24 CST (context) — 06:08 CST (commands complete)
+- Trigger: User Loop "Loop Engineering 发布前哨检查" (read-only pre-release sentinel)
+- Repository: `/Users/song/projects/xiaok-cli` (branch `master`, HEAD `0b92207f refactor(chat): extract strict skill adherence flow`)
+- App Version: **1.4.19** (`/Applications/xiaok.app/Contents/Info.plist` `CFBundleShortVersionString` = `CFBundleVersion` = `1.4.19`)
+- App Path: `/Applications/xiaok.app` (asar `Contents/Resources/app.asar`, 66 MiB, mtime **2026-07-08 15:56**)
+- Report Path: `/Users/song/projects/xiaok-cli/quality/loops/loop-engineering-release-sentinel.md`
+- Scope: read-only. No source/test/docs/config/package/lockfile/build artifact modified. No git add/commit/push.
 
 ## Executive Summary
-1. **Source is at the released `desktop-v1.4.16` tag, but the locally installed app reports v1.4.14** — the running build is one release behind the tagged/documented code. The sentinel cannot assert the machine matches the documented release until 1.4.16 is rebuilt + reinstalled here.
-2. **No P0 blockers found.** Health, build, and the required loop-settings test are all green; loop diagnostics are correctly mounted on the Loops/Automations page, not General.
-3. **Services healthy:** Intent Broker (4318) healthy, KSwarm (4400) healthy with `brokerConnected=true`, 36 projects loaded, dynamic-workflow features advertised.
-4. **Verification is build-green, not behavior-green.** The required test (`desktop-settings-service-status`, 2/2 pass) and `npm run typecheck` (0 diagnostics) prove integrity/settings status, but neither runs a user loop end-to-end — a live loop smoke is still needed before calling the release behavior-validated.
-5. **Doc gap:** English README has a strong Loop Engineering section, but `README.zh.md` is missing; the required literal UI phrases (`启用调度/关闭调度/批准自动运行`) exist only as functional equivalents. Net: **proceed to ship v1.4.16 source, but block "release-validated on this machine" until the build is reinstalled and a live loop smoke passes.**
+1. **Service + build layer is green.** Intent Broker (`:4318`) and KSwarm (`:4400`) both return HTTP 200 healthy; sibling repos (kswarm, intent-broker, kai-xiaok-plugins) are clean; desktop typecheck is clean (Electron clean, Renderer baseline 0 diagnostics); the requested renderer test `desktop-settings-service-status` passes 2/2.
+2. **xiaok-cli working tree is heavily dirty and ahead of HEAD.** 91 changed files on `master` are uncommitted, including **5 brand-new Loop Engineering modules + their tests** (`loop-command-allowlist.ts`, `loop-contract.ts`, `loop-evaluator.ts`, `loop-finalizer.ts`, `loop-project-claim-store.ts`) plus modified `loop-executor/loop-store/loop-types/DesktopSettings/locales`. This Loop Engineering work is unreleased.
+3. **User-facing README is 2 versions behind source & app.** Both `README.md` and `README.zh-CN.md` "What's New" top out at **v1.4.17**, and neither contains any **v1.4.18** or **v1.4.19** entry, while `package.json` (desktop + root) and the installed Info.plist are all `1.4.19`. The Loop Engineering changes shipped in 1.4.18/1.4.19 are undocumented in the changelog.
+4. **Loop product behavior matches design intent.** Loop diagnostics + user loops render under **Automations → Loops** (the `LoopsPane` is consumed by `AutomationsPage.tsx`); `SettingsTab` has no `loops` entry; `GeneralPane` contains **zero** loop-API calls; all user-loop copy flows through `t.desktopSettings.userLoop*` locale keys in both `zh.ts` and `en.ts`; no duplicate Refresh button-name collision was found.
+5. **Verdict — not a clean go for a Loop Engineering release as-is.** Behavior, i18n, and services are release-ready; **block on the P1 changelog gap (1.4.18/1.4.19 undocumented) and on committing/releasing the unreleased loop modules** before tagging.
 
 ## Health Checks
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| xiaok-cli git status | ⚠️ WARN | `master`, HEAD at tag `desktop-v1.4.16`; 6 uncommitted files (all mobile-related: `desktop/electron/mobile-snapshot.ts`, `desktop/tests/main/mobile-snapshot.test.ts`, `mobile/ios/XiaokMobile/ContentView.swift`, `mobile/ios/XiaokMobile/MobileGatewayClient.swift`, `mobile/ios/XiaokMobileTests/*`, `mobile/ios/XiaokMobileUITests/*`). Not loop-related, but working tree is dirty on top of the release tag. |
-| kswarm git status | ✅ PASS | clean; last commit `5be29cb 2026-06-24 docs: 更新 README 至 v0.9.2` |
-| intent-broker git status | ✅ PASS | clean; last commit `1fd6166 2026-06-23 docs: 同步 README 集成说明至 Xiaok Desktop v1.4.11` |
-| kai-xiaok-plugins git status | ✅ PASS | clean; last commit `4c107b6 2026-06-29 docs: update plugin baseline for desktop v1.4.16` (baseline targets v1.4.16 → consistent with source, inconsistent with installed 1.4.14) |
-| intent-broker health (4318) | ✅ PASS | HTTP 200, `{"ok":true,"status":"healthy","degraded":false}`, 0.0008s |
-| kswarm health (4400) | ✅ PASS | HTTP 200, `{"ok":true,"brokerConnected":true,"projects":36,"features":["dynamic_workflows","workflow_proposals","workflow_progress_batch","workflow_task_strategy","po_generated_workflow_proposals","workflow_budget_cache_recovery","workflow_script_generated_runs"]}`, 0.0005s |
-| desktop renderer Loop settings test | ✅ PASS | `npm run test -- --run tests/renderer/desktop-settings-service-status.test.tsx` → **2 passed (2)**, 161ms |
-| desktop typecheck | ✅ PASS | `npm run typecheck` → "Electron typecheck clean. Renderer baseline gate clean: 0 current diagnostics, 0 resolved since baseline." |
+| xiaok-cli git status | ⚠️ WARN | `master`, **91** changed files uncommitted; 5 untracked new loop modules + tests (`loop-command-allowlist`, `loop-contract`, `loop-evaluator`, `loop-finalizer`, `loop-project-claim-store`). HEAD `0b92207f`. |
+| kswarm git status | ✅ OK | `git status --short` empty (clean). |
+| intent-broker git status | ✅ OK | `git status --short` empty (clean). |
+| kai-xiaok-plugins git status | ✅ OK | `git status --short` empty (clean). |
+| intent-broker health (`:4318/health`) | ✅ OK | HTTP 200, `{"ok":true,"status":"healthy","degraded":false,"reasons":[]}`, updatedAt `2026-07-08T22:03:24Z`. |
+| kswarm health (`:4400/health`) | ✅ OK | HTTP 200, `brokerConnected:true`, `projects:40`, features incl. `dynamic_workflows`, `workflow_proposals`, `workflow_progress_batch`, `po_generated_workflow_proposals`. |
+| desktop renderer loop settings test | ✅ OK | `npm run test -- --run tests/renderer/desktop-settings-service-status.test.tsx --reporter=basic` → **2 passed**, exit 0, 1.31s. *(Note: the loop-specific `desktop-settings-loops.test.tsx` exists in the modified set but was **not** in the required command list — see Recommended Actions.)* |
+| desktop typecheck | ✅ OK | `npm run typecheck` → "Electron typecheck clean. Renderer baseline gate clean: 0 current diagnostics, 0 resolved since baseline." Exit 0. |
 
 ## Loop Documentation Review
 
-**Coverage (good):**
-- `README.md` §"Loop Engineering in Xiaok" (lines 22–47): maps all seven building blocks — **Automation, Work isolation, Skills, Connectors, Sub-agents, Memory, Evidence, Diagnostics** — to concrete Xiaok implementations. ✓
-- A 5-step "smallest useful Xiaok loop" recipe (write skill → add trigger → persist memory → add checker → make failure visible). ✓ (architectural, not a UI walkthrough)
-- README explicitly states **"Loop diagnostics moved out of general settings"** (line 122) and describes actionable diagnostics with anomaly kind / owner / suggested action / log paths (line 141). ✓
-- README documents the full user-loop lifecycle: templates, manual run, schedule linkage, output dir auto-creation, clickable outputs, edit/delete (lines 123–124, 107). ✓
-- Canonical design doc exists: `docs/design/2026-06-15-desktop-automations-loop-schedule-projects-design.md` (Chinese, multi-agent adversarial review ACCEPT, no P0/P1). Defines the rule: *"Automations 是入口；Loop 是业务定义；Schedule 是触发器；Project 是上下文；Run/Evidence 是执行事实。"* ✓
-- Supporting design docs: `2026-06-15-user-loop-card-output-actions.md`, `2026-06-15-desktop-loop-generic-task-completion-design.md` (+ 4 review rounds), `2026-06-22-loop-self-improving-feedback-design-v2.md`. ✓
+**Coverage (present):**
+- `README.md` L22–47 and `README.zh-CN.md` L22–47 both open with a "Loop Engineering in Xiaok" section, including the **building-block table** (Automation / Work isolation / Skills / Connectors / Sub-agents / Memory / Evidence / Diagnostics) and the **"smallest useful Xiaok loop" 5-step recipe** (skill → trigger → memory → checker → visible failure). EN/ZH are structurally parallel.
+- README documents the two built-in production loops (Artifact Evidence Regression Loop, KSwarm Service Health Loop) and explicitly states (L131 EN / L131 ZH): *"Loop diagnostics moved out of general settings"* and group under **Automations** — i.e. the user-facing doc does **not** describe diagnostics under "General Settings". No stale "General Settings" claim found in the README.
+- `docs/design/` (symlink → `mydocs/xiaok-cli/design`) contains a deep Loop Engineering design corpus: `2026-06-12-loop-vs-project-vs-scheduled-task-boundary.md`, `2026-06-12-loop-run-record-and-evidence-contract.md`, `2026-06-15-loop-settings-diagnostics-i18n.md`, `2026-06-15-user-loop-template-scheduled-mvp.md`, `2026-06-19-desktop-loop-edit-delete-design.md`, plus `2026-06-15-desktop-automations-loop-schedule-projects-design.md`. `mydocs/xiaok-cli/` holds 7 Loop Engineering adversarial-review/improvement docs (v1–v4, Jun 24).
+- The i18n/diagnostics design doc (`2026-06-15-loop-settings-diagnostics-i18n.md`) prescribes the Loops-page split, locale keys, and adversarial risks (duplicate polling, i18n gap, accessibility).
 
 **Gaps:**
-- ❌ **`README.zh.md` is missing** (`ls` → No such file). No Chinese top-level onboarding for a Chinese-primary product.
-- ⚠️ **No end-user "create → run → verify → read diagnostics" walkthrough.** The README recipe is conceptual; the actual UI navigation (Automations → Loops → New Markdown Loop → Run now → open output → Diagnostics tab) is only inferable from changelog entries.
-- ⚠️ **No "if your loop fails, where do I look" troubleshooting** as a user-facing doc. Diagnostics are described as a feature, not as a user flow.
-- ⚠️ **Version drift in the doc itself:** README opens "Xiaok Desktop v1.4.16 ships…" and lists v1.4.16 "What's New", but the installed binary is v1.4.14. A user reading README against a 1.4.14 install will see feature claims the running build may lack (HTML artifact editor, save-permission fix, URI/paths bypass fix).
-- ⚠️ **Mixed-language doc corpus:** canonical Loop design is Chinese; README is English.
+1. **P1 — No v1.4.18 / v1.4.19 changelog.** `grep -nE "1\.4\.18|1\.4\.19" README.md README.zh-CN.md` → empty in both. README "What's New" tops at v1.4.17; changelog footer tops at `**v1.4.9**` (with v1.4.0–v1.4.9 only). Source + app are 1.4.19. **The Loop Engineering work shipped in 1.4.18/1.4.19 is invisible in the changelog.**
+2. **P2 — No click-by-click "create & verify a user Loop" walkthrough in README.** The 5-step recipe is conceptual; there is no Desktop UI tutorial ("open Automations → Loops → New Markdown Loop → … → Run now → open output"). Users must infer from UI + design docs.
+3. **P3 — One design doc is stale vs. shipped surface.** `2026-06-15-loop-settings-diagnostics-i18n.md` says "Move … into `Settings > Loops`", but the shipped product lands loops under **Automations → Loops** (`SettingsTab` has no `loops` member). README is correct; only the internal design doc lags.
 
 ## Product Behavior Review
 
-**Loop diagnostics location — ✅ correct.**
-- `renderer/src/components/automations/AutomationsPage.tsx` defines `AutomationsTab = 'overview' | 'schedules' | 'loops' | 'constraints' | 'diagnostics'`; the `diagnostics` tab renders `<LoopsPane sections="diagnostics" />`.
-- `renderer/src/components/settings/GeneralSettings.tsx` has **zero** references to `loop` or `diagnostic`.
-- `getNavItems()` in `DesktopSettings.tsx` lists only: general, mobile, model, skills, channels, mcp, tools, appearance, data, memory, about — **no loops/diagnostics entry in the Settings sidebar.** Migration out of General is verified in code, not just doc.
+All checks are read-only against `desktop/renderer/src`.
 
-**i18n — ✅ symmetric and locale-driven.**
-- No hardcoded English literals found in `LoopsPane` (DesktopSettings.tsx:2063+) or `AutomationsPage.tsx`; all visible text flows through `t.desktopSettings.*` / `t.automations*`. AutomationsPage uses 29 `t.*` references.
-- zh.ts contains the required terms: `loopsTab: "循环"`, `userLoops: "用户循环"`, `newMarkdownLoop: "新建 Markdown 循环"`, `loopDiagnosticsRunNow: "立即运行"`, `createLoop: "创建循环"`, `newLoop: "新建循环"`, `deleteLoopConfirm`, `loopDiagnostics: "Loop 诊断"`, etc.
-- **Locale parity: en.ts and zh.ts each have 3030 top-level keys; 46/46 loop-related keys in both.** No missing-key drift.
-
-**Terminology nuance (partial):**
-- Required literal phrases `启用调度` / `关闭调度` (per-loop schedule enable/disable) are **not** present as exact labels; loops bind to existing scheduled tasks (`createScheduleForLoop: "+ 为此循环创建定时任务"`), so per-loop enable/disable is expressed through the linked schedule, not a loop-scoped toggle.
-- `批准自动运行` (approve auto-run) exists as the functional equivalent `scheduledApproveAuto: "允许自动执行"` with `scheduledApproveAutoNeedsReview` gating. Behavior matches; exact phrase differs.
-
-**Accessibility — ✅ no duplicate-name conflict.**
-- Per-loop run buttons use unique aria-labels (`aria-label={`run-loop-${template.loopId}`}`), as do edit/delete (`edit-loop-{id}`, `delete-loop-{id}`).
-- There is a single global diagnostics Refresh button (`t.desktopSettings.loopDiagnosticsRefresh`). No two buttons share the same accessible name.
-- Minor semantic note (not a conflict): the `RefreshCw` icon is reused for the per-loop "run now" action, while a separate RefreshCw reloads diagnostics — visually similar affordances for different actions.
+- **Loop diagnostics location:** ✅ Correct. `SettingsTab` union = `model | skills | channels | mcp | tools | general | mobile | appearance | data | memory | about` — **no `loops` tab in Settings**. `GeneralPane` body contains **zero** `getLoopDefinitions`/`getLoopRuns`/`getEvidenceAnomalies`/`loopDiagnostics` references. `LoopsPane` (DesktopSettings.tsx L2064) is exported and consumed only by `automations/AutomationsPage.tsx` (L240 `sections="user"`, L252 `sections="diagnostics"`). Diagnostics live on the Loops surface, not General.
+- **Loops UI copy i18n:** ✅ Driven by locale. In the LoopsPane region, copy overwhelmingly comes from `t.desktopSettings.userLoop*` / `t.desktopSettings.loopDiagnostics*`; heuristic scan for hardcoded English string literals in the region returned empty. `console.log('[LoopsPane] …')` calls exist (debug) but are not user-facing.
+- **Chinese locale coverage:** ✅ Concepts present — `loopsTab:"循环"` (zh L1220), `userLoops:"用户循环"` (L1221), `newMarkdownLoop:"新建 Markdown 循环"` (L1225), `loopDiagnosticsRunNow:"立即运行"` (L1255), plus `userLoopScheduleSingle/Multiple/Active/OpenSchedules` (L1245–1248) and `scheduledApproveAuto:"允许自动执行"` (L2608). The literal probe terms "启用调度/关闭调度/批准自动运行" are **not** exact keys, but their semantics are covered by `userLoopSchedule*` and `scheduledApproveAuto` — this is an "equivalent key exists" situation, not a missing-coverage defect.
+- **English locale parity:** ✅ `loopsTab:"Loops"` (en L1269), `newMarkdownLoop:"New Markdown Loop"` (L1274), `loopDiagnosticsRunNow:"Run now"` (L1304), `scheduledApproveAuto:"Approve auto"` (L2628). All required English counterparts present.
+- **Duplicate Refresh button-name collision:** ✅ None found. The built-in diagnostics run-now uses the localized `loopDiagnosticsRunNow`; the user-loop run-now button uses a unique-per-loop slug `aria-label={`run-loop-${template.loopId}`}` (unique per loopId, so no same-name clash). AutomationsPage `RefreshCw` icons sit on overview cards via `title=` attributes, not as duplicate button names.
+- **Minor a11y/i18n asymmetry (P3):** the user-loop run-now button's accessible name is a **non-localized machine slug** `run-loop-${loopId}`, whereas the built-in loop run-now button is localized ("立即运行"/"Run now"). Screen readers read a slug for user loops.
+- **Minor cross-locale wording divergence (P2):** `scheduledApproveAuto` = "Approve auto" (en) vs "允许自动执行" / "allow auto execution" (zh) — same key, different verb polarity (approve vs allow).
 
 ## Adversarial Review
 
-**Maker view (does the current state let a user understand and run a loop?):**
-- Capability set is complete: create a markdown/task-completion loop, run now or via schedule, preview/open output, edit/delete, read diagnostics, review self-improving constraints. Nothing in the code blocks a user from executing a loop.
-- Most valuable surface: the unified Automations page (loops + schedules + constraints + diagnostics + failures), which removes the old Settings/Loops confusion.
-- **Blocking experience #1:** the installed app (1.4.14) lags the documented 1.4.16 — a user following README's v1.4.16 instructions on a 1.4.14 install can hit drift (e.g., HTML editor, save-permission fix).
-- **Blocking experience #2:** Chinese-only users have no `README.zh.md` and must infer the UI flow from English changelog entries.
+**Maker view (can a user understand & run a Loop today?):**
+- A motivated user *can* create and run a Markdown user Loop today: the Automations → Loops → "新建 Markdown 循环 / New Markdown Loop" surface exists, is fully localized, supports manual run + schedule binding + output preview + edit/delete, and the conceptual "smallest useful loop" is explained in both READMEs.
+- Most valuable signals for users: the building-block table, the explicit "diagnostics moved out of General Settings" note, and the clickable output preview.
+- Blocking/irritating experience: **no release notes for 1.4.18/1.4.19** means a user upgrading from 1.4.17 cannot learn what Loop behavior changed; and there is no in-README step-by-step Loop tutorial.
 
-**Checker view (is any conclusion under-evidenced?):**
-- ⚠️ **"Test passed + typecheck clean" ≠ "loops work in the real app."** The required test (`desktop-settings-service-status`) asserts settings/service-status behavior, not loop execution. We have proven build integrity and settings status, not loop behavior. This is the single biggest evidence gap.
-- ✅ Doc-vs-product alignment on the diagnostics migration is real and verified in code (GeneralSettings clean, nav has no loops entry). Not a false claim.
-- ✅ i18n code-layer symmetry is real (3030/3030 keys). But the **doc layer** is asymmetric (English README only) — do not let code-layer symmetry mask doc-layer asymmetry.
-- ⚠️ **Silent-failure risk:** if the running build is genuinely 1.4.14, it predates the v1.4.16 evidence-guard test alignment and the URI/paths bypass fix, so diagnostics themselves could be computed by older guard logic than the source claims. The diagnostics loop could be "healthy" on a build whose evidence rules are stale.
-- ⚠️ A non-zero possibility: `app.asar` was modified 2026-06-29 00:01:45 (recent) yet `Info.plist` still reports 1.4.14 — either a stale plist on a freshly packed build, or a genuine 1.4.14 install. Either way the running app self-identifies as 1.4.14; treat it as 1.4.14 until re-verified.
+**Checker view (are any conclusions under-evidenced?):**
+- ✅ "Behavior matches design" is backed by real source reads (`SettingsTab` union, `GeneralPane` empty-of-loops, `AutomationsPage` consuming `LoopsPane`, locale key presence) — not inferred from a passing build.
+- ⚠️ **"Typecheck/test green" must not be read as "the running app behaves correctly."** Typecheck + 1 renderer file only prove compile + service-status rendering; they do **not** exercise the new unreleased loop modules (`loop-command-allowlist`, `loop-contract`, `loop-evaluator`, `loop-finalizer`, `loop-project-claim-store`). Their dedicated tests exist in the working tree but were **not** run by this sentinel.
+- ⚠️ **"Docs describe what's implemented" has a gap**: the changelog is 2 versions behind, so for 1.4.18/1.4.19 we **cannot** verify doc-vs-behavior at all — there is no doc to compare against.
+- ⚠️ **ZS/EN asymmetry**: `scheduledApproveAuto` approve-vs-allow divergence is a real (minor) single-side-wording risk, not a missing key.
+- ⚠️ **Silent-failure risk**: 91 uncommitted files including the loop-* modules mean the working tree is far ahead of the tagged/released state; if 1.4.19 was built from a different tree than this checkout, the running app's loop behavior is unverified against this source.
 
-**Conflict & resolution:** Maker says "capability complete, ready"; Checker says "build-green ≠ behavior-green, and installed build lags source." **Resolution order:** (1) reinstall 1.4.16 so the running binary matches source, then (2) run a live loop to convert build-green into behavior-green, before declaring the release sentinel "behavior-validated."
+**Conflict resolution:** Maker and Checker agree on the *verdict* (not a clean go) but **disagree on severity of the changelog gap** — Maker treats missing 1.4.18/1.4.19 notes as cosmetic; Checker treats it as a release-sentinel blocker because the sentinel's whole job is to verify docs ↔ shipped loop behavior, and there is no doc for the last 2 versions. **Resolution: treat as P1** (Checker wins) — the changelog must exist before this sentinel can meaningfully pass again.
 
 ## Findings
 
-### P0 — None.
-No app-won't-start, loop-completely-broken, data-corruption, or destructive-misexecution issues found. Services healthy; build + settings test + typecheck green; diagnostics correctly routed.
+### P0
+None. No app-won't-start, loop-unusable, data-corruption, or destructive-execution evidence was found. Services are healthy, typecheck is clean, and the required test passes.
 
 ### P1
-
-**P1-1 · Installed app (1.4.14) lags tagged/released source (1.4.16)**
-- Evidence: `defaults read …/Info.plist CFBundleShortVersionString` → `1.4.14`; `desktop/package.json` version=`1.4.16`; `git describe` → `desktop-v1.4.16` at HEAD; `git tag` shows `desktop-v1.4.16` exists; kai-xiaok-plugins baseline targets v1.4.16.
-- Impact: sentinel runs against a build one release behind the documented code; v1.4.16 fixes (HTML artifact editor, save-permission fix, URI/paths bypass fix, evidence-guard test alignment) may not be present in the running app; README claims do not match the installed binary.
-- Suggested fix: rebuild + reinstall 1.4.16 locally (`npm run build:main && npm run build:renderer && npm run pack:dir`, or the release tag workflow), then re-confirm.
-- Verification: `defaults read …/Info.plist CFBundleShortVersionString` == `1.4.16` AND a live loop run on the rebuilt app.
-
-**P1-2 · `README.zh.md` is missing**
-- Evidence: `ls /Users/song/projects/xiaok-cli/README.zh.md` → No such file; only `README.md` (89 KB) exists.
-- Impact: Chinese-primary users have no localized top-level onboarding for Loop Engineering; contradicts the product's strong zh-locale investment (3030 keys).
-- Suggested fix: author `README.zh.md` mirroring README.md (esp. the Loop Engineering section + "What's New"), or add a `docs/i18n` landing page that points to localized guides.
-- Verification: file exists, non-empty, covers Automation/Work isolation/Skills/Connectors/Sub-agents/Memory/Evidence/Diagnostics mapping and the diagnostics-on-Loops-page statement.
-
-**P1-3 · Verification is build-only, not behavior**
-- Evidence: required test = `desktop-settings-service-status.test.tsx` (settings service status, 2/2 pass); `npm run typecheck` = 0 diagnostics. Neither test creates/runs a user loop or asserts a loop output artifact.
-- Impact: cannot assert "loops actually produce artifacts and diagnostics in the real app"; "build-green" could mask a runtime regression.
-- Suggested fix: add (or run an existing) live-loop smoke: create a markdown loop → Run now → assert the output `.md` exists under the configured output dir AND a loop-run + diagnostics row appears.
-- Verification: smoke produces a real `.md` artifact and an open/seen diagnostics record against the rebuilt 1.4.16 app.
+**P1-1 — README changelog missing v1.4.18 and v1.4.19 (EN + ZH).**
+- Evidence: `package.json` (desktop+root) = `1.4.19`; Info.plist = `1.4.19`; `grep -nE "1\.4\.18|1\.4\.19" README.md README.zh-CN.md` → empty in both; README "What's New" tops at v1.4.17; changelog footer tops at `**v1.4.9**`.
+- Impact: Users upgrading to the shipping version cannot learn what Loop Engineering changed in 1.4.18/1.4.19; this sentinel cannot verify "docs describe current loop behavior" because no docs exist for those versions.
+- Suggested fix: Add v1.4.18 and v1.4.19 entries to **both** READMEs, covering the new loop modules (command-allowlist, contract, evaluator, finalizer, project-claim-store) and any loop-executor/store changes.
+- Verification: `grep -nE "1\.4\.18|1\.4\.19" README.md README.zh-CN.md` returns entries in both files; EN/ZH entries are parallel.
 
 ### P2
+**P2-1 — No step-by-step user Loop creation/verification walkthrough in README.**
+- Evidence: README L41–47 (EN) / L41–47 (ZH) give the conceptual 5-step loop recipe; no Desktop UI click-through tutorial exists in either README.
+- Impact: New users cannot create + validate a user Loop from the README alone; rely on UI affordances and internal design docs.
+- Suggested fix: Add a short "Creating your first user Loop" section (Automations → Loops → New Markdown Loop → fields → Run now → open output → bind schedule).
+- Verification: A doc reviewer can follow the steps end-to-end without consulting design docs.
 
-**P2-1 · Loop UI terminology partial coverage**
-- Evidence: required literal phrases `启用调度` / `关闭调度` are absent as exact labels; only global `automationsGlobalAutoRunPause/Enable` exists. `批准自动运行` exists only as `scheduledApproveAuto: "允许自动执行"`.
-- Impact: docs/tests/specs written against the exact phrases won't match the UI; minor user confusion when following literal instructions.
-- Suggested fix: either add the literal per-loop labels, or update the spec/docs to use the actual labels (`允许自动执行`, linked-schedule model).
-- Verification: `grep` zh.ts/en.ts for the chosen canonical phrases; UI matches doc.
-
-**P2-2 · No end-user "first loop" walkthrough in README**
-- Evidence: README's 5-step recipe is architectural; concrete UI navigation only appears in changelog entries (lines 107, 122–124).
-- Impact: new users must infer the Automations → Loops → New → Run → Diagnostics flow from release notes.
-- Suggested fix: add a short "Your first loop" guide (create → schedule → run → read diagnostics → clear failure) to README or `docs/`.
-- Verification: a new reader can complete a loop using only the doc.
-
-**P2-3 · Working tree dirty on top of the release tag**
-- Evidence: `git status --short` shows 6 modified files, all mobile-related (`mobile-snapshot.ts`, its test, and `mobile/ios/*`).
-- Impact: not loop-blocking, but a release sentinel should ideally run on a clean tree; mobile and desktop changes are interleaved in one workspace.
-- Suggested fix: commit or stash the mobile changes separately before any further release tagging.
-- Verification: `git status --short` empty (or mobile changes on their own branch).
+**P2-2 — `scheduledApproveAuto` verb polarity diverges across locales.**
+- Evidence: en.ts L2628 `"Approve auto"`; zh.ts L2608 `"允许自动执行"` (≈ "Allow auto execution").
+- Impact: Minor cross-language UX inconsistency; same control reads as an *approval* in EN and an *allowance* in ZH.
+- Suggested fix: Align — e.g. zh `"批准自动运行"` or en `"Allow auto"` — pick one verb and mirror it.
+- Verification: Bilingual review confirms identical intent; both locale strings match the chosen verb.
 
 ### P3
+**P3-1 — Design doc stale vs. shipped surface.**
+- Evidence: `docs/design/2026-06-15-loop-settings-diagnostics-i18n.md` says "Move … into `Settings > Loops`"; shipped `SettingsTab` has no `loops` member and loops live under **Automations → Loops** (README correctly says Automations).
+- Impact: Low (internal design doc); could mislead a future contributor.
+- Suggested fix: Annotate the doc with "Final landing surface: Automations → Loops (Settings > Loops was superseded during implementation)."
+- Verification: Doc carries the supersede note.
 
-**P3-1 · `RefreshCw` icon reused for "run now"**
-- Evidence: per-loop run-now button uses `<RefreshCw>` (DesktopSettings.tsx:2597) with aria-label `run-loop-{id}`; diagnostics reload also uses RefreshCw (2706).
-- Impact: visual affordance overlap (refresh icon = run now); not an a11y conflict (aria-labels are unique).
-- Suggested fix: consider a `Play` icon for run-now to disambiguate.
-- Verification: visual review of the Loops pane.
+**P3-2 — User-loop run-now button accessible name is a non-localized slug.**
+- Evidence: DesktopSettings.tsx user-loop run-now button `aria-label={`run-loop-${template.loopId}`}` (RefreshCw icon, no localized text); built-in diagnostics run-now uses `loopDiagnosticsRunNow` ("立即运行"/"Run now").
+- Impact: Screen readers / Chinese users hear "run-loop-<id>" instead of a localized label; a11y + i18n asymmetry between built-in and user loops.
+- Suggested fix: Add a localized visible/aria label (e.g. `userLoopRunNow`) and keep `run-loop-${id}` as `data-testid`.
+- Verification: a11y audit reads localized text in both locales.
 
-**P3-2 · Mixed-language canonical design doc**
-- Evidence: `2026-06-15-desktop-automations-loop-schedule-projects-design.md` is Chinese; README is English.
-- Impact: English-only contributors can't read the canonical Loop design without translation.
-- Suggested fix: add an English summary header or cross-link from README.
-- Verification: doc index has parity entries for both languages.
+**P3-3 — `--reporter=basic` is deprecated (Vitest 3.2.4).**
+- Evidence: Test run prints `DEPRECATED 'basic' reporter is deprecated and will be removed in Vitest v3.`
+- Impact: Next Vitest upgrade will break the release-gate command.
+- Suggested fix: Drop `--reporter=basic` or switch config to `reporters: [["default",{summary:false}]]`.
+- Verification: Command runs with no deprecation warning.
+
+**P3-4 — Unreleased Loop Engineering source is uncommitted in the working tree.**
+- Evidence: `git status --short` shows 5 untracked loop modules + tests and modified loop-executor/store/types; 91 changed files total on `master`, HEAD `0b92207f`.
+- Impact: Release reproducibility risk — if shipped without commit, the tagged tree cannot be reconstructed; also the running app (asar mtime 2026-07-08 15:56) provenance vs. this dirty checkout is unverified.
+- Suggested fix: Commit the loop modules + tests (or move to a release branch) before tagging 1.4.20.
+- Verification: `git status --short` clean for the loop-* files; tag points at a tree containing them.
 
 ## Recommended Next Actions
-
-1. **Rebuild & reinstall desktop v1.4.16 locally** (`npm run pack:dir` or the release-tag workflow); confirm `Info.plist == 1.4.16`. The sentinel must run against the actual released build, not 1.4.14. *(P1-1)*
-2. **Run a live end-to-end user-loop smoke on the installed app:** create a markdown loop → Run now → assert the output `.md` exists and a diagnostics row appears. Convert build-green into behavior-green. *(P1-3)*
-3. **Author `README.zh.md`** mirroring the Loop Engineering section, or add a `docs/i18n` landing page for Chinese users. *(P1-2)*
-4. **Add a "First loop" user walkthrough** (create → schedule → run → read diagnostics → clear failure) to README/docs. *(P2-2)*
-5. **Align doc/required phrases with actual UI labels** (`启用调度/关闭调度/批准自动运行` vs `允许自动执行` + linked-schedule model), or add the literal labels. *(P2-1)*
-6. **Commit/stash the mobile-related uncommitted changes** so the release tree is clean before the next tag. *(P2-3)*
-7. **Minor:** switch the per-loop "run now" icon from `RefreshCw` to `Play` for clearer affordance. *(P3-1)*
+1. **[Block]** Commit the 5 new Loop Engineering modules + tests (`loop-command-allowlist`, `loop-contract`, `loop-evaluator`, `loop-finalizer`, `loop-project-claim-store`) and the modified loop-executor/store/types on `master` (or a release branch) so the released tree is reconstructible. *(P3-4, but gating for reproducibility.)*
+2. **[Block]** Add **v1.4.18 and v1.4.19** changelog entries to **both** `README.md` and `README.zh-CN.md`, explicitly covering the new loop modules and loop-executor/store changes. *(P1-1)*
+3. **[Run]** Execute the loop-focused tests not covered by this sentinel: `tests/renderer/desktop-settings-loops.test.tsx` and the new main-process tests (`loop-command-allowlist`, `loop-contract`, `loop-evaluator`, `loop-project-claim-store`) to confirm the Loops-page + General-clean assertions and the new modules' contracts hold. *(Evidence gap from Phase 4.)*
+4. **[Align]** Reconcile `scheduledApproveAuto` wording across en/zh (approve vs allow). *(P2-2)*
+5. **[Polish]** Localize the user-loop run-now button aria-label for screen-reader parity with the built-in loop run-now button. *(P3-2)*
+6. **[Polish]** Annotate design doc `2026-06-15-loop-settings-diagnostics-i18n.md` to reflect the final Automations landing surface. *(P3-1)*
+7. **[Hygiene]** Replace deprecated `--reporter=basic` in the release gate before the next Vitest upgrade. *(P3-3)*
 
 ## Evidence Appendix
+Commands executed and condensed output (raw logs trimmed to essentials).
 
-Commands actually executed (read-only; no writes except the report file). Outputs trimmed.
+**A. Context**
+```
+$ date "+%Y-%m-%d %H:%M:%S %Z"
+2026-07-09 06:03:24 CST
 
-**Stage 1 — context**
-```
-date                            → 2026-06-29 06:03:22 CST (epoch 1782684202)
-xiaok-cli: git branch           → master
-xiaok-cli: git log -1           → dc98818c 2026-06-29 01:53 fix(desktop): render artifact cards and persist HTML edits on Windows
-xiaok-cli: git status --short   →  M desktop/electron/mobile-snapshot.ts
-                                    M desktop/tests/main/mobile-snapshot.test.ts
-                                    M mobile/ios/XiaokMobile/ContentView.swift
-                                    M mobile/ios/XiaokMobile/MobileGatewayClient.swift
-                                    M mobile/ios/XiaokMobileTests/XiaokMobileModelTests.swift
-                                    M mobile/ios/XiaokMobileUITests/XiaokMobileUITests.swift
-xiaok-cli: git describe         → desktop-v1.4.16   (HEAD at release tag)
-xiaok-cli: git tag (recent)     → desktop-v1.4.16, v1.4.15, v1.4.14, …
-kswarm:      git status         → clean (5be29cb 2026-06-24)
-intent-broker: git status       → clean (1fd6166 2026-06-23)
-kai-xiaok-plugins: git status   → clean (4c107b6 2026-06-29)
-Info.plist CFBundleShortVersionString → 1.4.14
-Info.plist CFBundleVersion             → 1.4.14
-app.asar mtime                        → Jun 29 00:01:45 2026
-desktop/package.json version          → 1.4.16
-curl 4318/health → 200 {"ok":true,"status":"healthy","degraded":false}
-curl 4400/health → 200 {"ok":true,"brokerConnected":true,"projects":36,"features":[dynamic_workflows,workflow_proposals,...]}
-```
+$ git -C /Users/song/projects/xiaok-cli rev-parse --abbrev-ref HEAD
+master
+$ git -C /Users/song/projects/xiaok-cli status --short | wc -l
+91
+# tail of status: untracked loop-command-allowlist.ts, loop-contract.ts,
+# loop-evaluator.ts, loop-finalizer.ts, loop-project-claim-store.ts (+ tests);
+# modified loop-executor/loop-store/loop-types/DesktopSettings/locales/zh.ts/en.ts.
+$ git log --oneline -1
+0b92207f refactor(chat): extract strict skill adherence flow
 
-**Stage 2 — docs**
-```
-ls README.md        → 89045 bytes (present)
-ls README.zh.md     → No such file or directory
-docs symlink        → ../mydocs/xiaok-cli (valid)
-README.md §22-47    → "Loop Engineering in Xiaok" with 8-row building-block table + 5-step minimal loop
-README.md:122       → "Loop diagnostics moved out of general settings"
-README.md:123-124   → user loop templates + clickable outputs
-docs/design/2026-06-15-desktop-automations-loop-schedule-projects-design.md → canonical, Chinese, ACCEPT after qoder/xiaok/cc/codex review
+# sibling repos: git status --short -> empty (clean) for kswarm, intent-broker, kai-xiaok-plugins
+
+$ plutil -p /Applications/xiaok.app/Contents/Info.plist | grep -i version
+"CFBundleShortVersionString" => "1.4.19"
+"CFBundleVersion" => "1.4.19"
+$ ls -la /Applications/xiaok.app/Contents/Resources/app.asar
+-rw-r--r-- ... 69005758 Jul  8 15:56 app.asar
 ```
 
-**Stage 3 — product behavior (read-only)**
+**B. Health endpoints**
 ```
-GeneralSettings.tsx grep loop|diagnostic          → (no matches)  ← diagnostics NOT in General
-AutomationsPage.tsx tabs                          → overview|schedules|loops|constraints|diagnostics; diagnostics → <LoopsPane sections="diagnostics"/>
-DesktopSettings.tsx getNavItems()                 → general,mobile,model,skills,channels,mcp,tools,appearance,data,memory,about (NO loops/diagnostics entry)
-LoopsPane defined in                              → DesktopSettings.tsx:2063 (used only by AutomationsPage)
-zh.ts required terms                              → 循环, 用户循环, 新建 Markdown 循环, 立即运行, 创建循环, 新建循环  ✓
-scheduledApproveAuto (zh)                         → "允许自动执行"  (functional equiv. of 批准自动运行)
-en.ts/zh.ts key counts                            → 3030 / 3030  (parity)
-en.ts/zh.ts loop-related key counts               → 46 / 46      (parity)
-hardcoded English literals in LoopsPane/AutomationsPage → none found
-per-loop run aria-label                           → `run-loop-${loopId}` (unique); single global diagnostics Refresh button → no duplicate-name conflict
+$ curl http://127.0.0.1:4318/health
+HTTP 200  {"ok":true,"status":"healthy","degraded":false,"reasons":[],"channels":[]}
+
+$ curl http://127.0.0.1:4400/health
+HTTP 200  {"ok":true,"brokerConnected":true,"projects":40,
+ "features":["dynamic_workflows","workflow_proposals","workflow_progress_batch",
+ "workflow_task_strategy","po_generated_workflow_proposals",
+ "workflow_budget_cache_recovery","workflow_script_generated_runs"]}
 ```
 
-**Stage 4 — verification commands**
+**C. Version consistency (P1-1 evidence)**
 ```
-cd desktop && npm run test -- --run tests/renderer/desktop-settings-service.test.tsx --reporter=basic
-  → Test Files 1 passed (1) | Tests 2 passed (2) | Duration 1.40s
-  (note: 'basic' reporter deprecation warning only; node v26.0.0, npm 11.12.1)
-
-cd desktop && npm run typecheck
-  → "Electron typecheck clean. Renderer baseline gate clean: 0 current diagnostics, 0 resolved since baseline."
+$ grep -m1 '"version"' desktop/package.json package.json   -> 1.4.19 / 1.4.19
+$ grep -nE "1\.4\.18|1\.4\.19" README.md README.zh-CN.md    -> (empty)
+$ grep -oE "\*\*v1\.4\.[0-9]+\*\*" README.md | sort -u
+**v1.4.0** **v1.4.1** **v1.4.2** **v1.4.5** **v1.4.6** **v1.4.8** **v1.4.9**
+# README "What's New" tops at v1.4.17; no v1.4.18/v1.4.19 anywhere.
 ```
 
-**Environment note:** the default shell `PATH` did not include npm/node; commands were run with `PATH=/opt/homebrew/bin:/usr/local/bin:$HOME/.nvm/versions/node/v24.15.0/bin` prepended. Node resolved to v26.0.0 (nvm v24.15.0 dir contains v26). Re-runnable on a clean machine by sourcing nvm first.
+**D. Product behavior (read-only source reads)**
+```
+# SettingsTab union has NO 'loops' member:
+type SettingsTab = 'model'|'skills'|'channels'|'mcp'|'tools'|'general'
+                  |'mobile'|'appearance'|'data'|'memory'|'about';
+
+# GeneralPane contains zero loop references (awk range grep -> empty).
+# LoopsPane (DesktopSettings.tsx:2064) consumed only by:
+#   automations/AutomationsPage.tsx:240  <LoopsPane sections="user" />
+#   automations/AutomationsPage.tsx:252  <LoopsPane sections="diagnostics" />
+
+# locale keys (zh.ts):
+loopsTab:"循环" | userLoops:"用户循环" | newMarkdownLoop:"新建 Markdown 循环"
+loopDiagnosticsRunNow:"立即运行" | scheduledApproveAuto:"允许自动执行"
+# locale keys (en.ts):
+loopsTab:"Loops" | newMarkdownLoop:"New Markdown Loop"
+loopDiagnosticsRunNow:"Run now" | scheduledApproveAuto:"Approve auto"
+
+# user-loop run-now button: aria-label={`run-loop-${template.loopId}`} (non-localized slug)
+# built-in loop run-now: uses loopDiagnosticsRunNow (localized)
+# duplicate Refresh button-name collision: NONE found.
+```
+
+**E. Commands (Phase 4)**
+```
+$ npm run test -- --run tests/renderer/desktop-settings-service-status.test.tsx --reporter=basic
+ RUN  v3.2.4
+ DEPRECATED 'basic' reporter is deprecated and will be removed in Vitest v3.
+ ✓ tests/renderer/desktop-settings-service-status.test.tsx (2 tests) 152ms
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+ Duration  1.31s
+ EXIT 0
+
+$ npm run typecheck
+> node scripts/typecheck-baseline.mjs
+Electron typecheck clean. Renderer baseline gate clean: 0 current diagnostics, 0 resolved since baseline.
+EXIT 0
+```
 
 ---
-
-*Sentinel status: structural checks PASS; build/settings/typecheck PASS; release-validated-on-this-machine = BLOCKED pending 1.4.16 reinstall + live loop smoke (see P1-1, P1-3).*
+*Sentinel produced read-only. No source/test/docs/config/package/lockfile/build artifact was modified; no git add/commit/push was performed.*

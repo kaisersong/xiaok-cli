@@ -105,6 +105,17 @@ describe('StatusBar', () => {
       expect(stdoutOutput).toContain('50%');
     });
 
+    it('shows estimated cost beside token percentage when pricing is known', () => {
+      statusBar.updateModel('claude-sonnet-4-20250514');
+      statusBar.update({ inputTokens: 6000, outputTokens: 2000 });
+      stdoutOutput = '';
+
+      statusBar.render();
+
+      expect(stdoutOutput).toContain('4%');
+      expect(stdoutOutput).toContain('$0.05');
+    });
+
     it('should display near-full token usage', () => {
       statusBar.update({ inputTokens: 190000, outputTokens: 9000, budget: 200000 });
       stdoutOutput = '';

@@ -31,7 +31,15 @@ describe('OpenAIAdapter', () => {
       apiKey: 'test-key',
       baseURL: 'https://api.kimi.com/coding/v1',
       defaultHeaders: {
-        'User-Agent': 'claude-code/1.0',
+        'User-Agent': 'claude-cli/1.0.0 (external, cli)',
+        'X-Stainless-Lang': null,
+        'X-Stainless-Package-Version': null,
+        'X-Stainless-OS': null,
+        'X-Stainless-Arch': null,
+        'X-Stainless-Runtime': null,
+        'X-Stainless-Runtime-Version': null,
+        'X-Stainless-Retry-Count': null,
+        'X-Stainless-Timeout': null,
       },
     });
   });
@@ -49,7 +57,7 @@ describe('OpenAIAdapter', () => {
     });
     expect(openAIConstructorCalls[0]).not.toMatchObject({
       defaultHeaders: {
-        'User-Agent': 'claude-code/1.0',
+        'User-Agent': 'claude-cli/1.0.0 (external, cli)',
       },
     });
   });

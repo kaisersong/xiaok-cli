@@ -139,6 +139,12 @@ final class XiaokAppStore: ObservableObject {
         return Array(filteredMessages.suffix(limit))
     }
 
+    func visibleMessageItems(for conversationId: String) -> [MessageDisplayItem] {
+        let displayItems = displayMessageItems(for: conversationId)
+        let limit = visibleMessageLimitByConversation[conversationId] ?? 20
+        return Array(displayItems.suffix(limit))
+    }
+
     func artifacts(for conversationId: String) -> [DesktopArtifactSummary] {
         artifacts.filter { artifact in
             artifact.source == conversationId
@@ -146,7 +152,7 @@ final class XiaokAppStore: ObservableObject {
     }
 
     func hasMoreMessages(for conversationId: String) -> Bool {
-        let messageCount = messages.filter { ($0.conversationId ?? "default") == conversationId }.count
+        let messageCount = displayMessageItems(for: conversationId).count
         return (visibleMessageLimitByConversation[conversationId] ?? 20) < messageCount
     }
 
@@ -161,7 +167,7 @@ final class XiaokAppStore: ObservableObject {
     }
 
     func showMoreMessages(for conversationId: String) {
-        let messageCount = messages.filter { ($0.conversationId ?? "default") == conversationId }.count
+        let messageCount = displayMessageItems(for: conversationId).count
         visibleMessageLimitByConversation[conversationId] = min(messageCount, (visibleMessageLimitByConversation[conversationId] ?? 20) + 20)
         objectWillChange.send()
     }
@@ -182,7 +188,8 @@ final class XiaokAppStore: ObservableObject {
     @discardableResult
     func updateGatewayURL(_ rawValue: String) -> Bool {
         let normalizedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = Self.validGatewayURL(from: normalizedValue) else {
+        guard let url = Self.validGatewayURL(from: normalizedValue),
+              Self.isDirectGatewayURL(url) else {
             errorMessage = strings.invalidGatewayURL
             return false
         }
@@ -215,12 +222,9 @@ final class XiaokAppStore: ObservableObject {
             return false
         }
 
-        let gatewayURL = Self.nonEmpty(values["gateway"]).flatMap(Self.validGatewayURL(from:))
-        if Self.nonEmpty(values["gateway"]) != nil && gatewayURL == nil {
-            errorMessage = strings.invalidGatewayURL
-            return false
-        }
-        if let gatewayURL, Self.isLoopbackGatewayURL(gatewayURL) {
+        let rawGateway = Self.nonEmpty(values["gateway"])
+        let parsedGatewayURL = rawGateway.flatMap(Self.validGatewayURL(from:))
+        if rawGateway != nil && parsedGatewayURL == nil {
             errorMessage = strings.invalidGatewayURL
             return false
         }
@@ -232,6 +236,18 @@ final class XiaokAppStore: ObservableObject {
         }
         let relayJWT = Self.nonEmpty(values["relayJWT"]) ?? Self.nonEmpty(values["relayJwt"])
         let relayRoomSecret = Self.nonEmpty(values["relayRoomSecret"])
+        let hasRelayCredentials = relayURL != nil && relayJWT != nil && relayRoomSecret != nil
+        let gatewayURL: URL?
+        if let parsedGatewayURL, Self.isDirectGatewayURL(parsedGatewayURL) {
+            gatewayURL = parsedGatewayURL
+        } else if parsedGatewayURL != nil && hasRelayCredentials {
+            gatewayURL = nil
+        } else if parsedGatewayURL != nil {
+            errorMessage = strings.invalidGatewayURL
+            return false
+        } else {
+            gatewayURL = nil
+        }
 
         desktopId = pairedDesktopId
         accessToken = pairedToken
@@ -471,14 +487,22 @@ final class XiaokAppStore: ObservableObject {
         let conversationId = message.conversationId ?? "default"
         let conversationMessages = messages.filter { ($0.conversationId ?? "default") == conversationId }
         let existingTitle = conversations.first(where: { $0.id == conversationId })?.title
+        let existingPreview = conversations.first(where: { $0.id == conversationId })?.lastMessagePreview
+        let displayItems = MobileMessageDisplayBuilder.displayItems(from: conversationMessages)
+        let preview = MobileMessageDisplayBuilder.previewText(for: message) ?? existingPreview ?? ""
         return ConversationSummary(
             id: conversationId,
-            title: existingTitle ?? message.text.nonEmptyPrefix(maxLength: 80) ?? strings.tasksTitle,
+            title: existingTitle ?? preview.nonEmptyPrefix(maxLength: 80) ?? strings.tasksTitle,
             status: status,
-            lastMessagePreview: message.text,
+            lastMessagePreview: preview,
             updatedAt: message.createdAt,
-            messageCount: conversationMessages.count
+            messageCount: displayItems.count
         )
+    }
+
+    private func displayMessageItems(for conversationId: String) -> [MessageDisplayItem] {
+        let filteredMessages = messages.filter { ($0.conversationId ?? "default") == conversationId }
+        return MobileMessageDisplayBuilder.displayItems(from: filteredMessages)
     }
 
     private func upsertConversation(_ conversation: ConversationSummary) {
@@ -684,16 +708,18 @@ final class XiaokAppStore: ObservableObject {
     private static func storedGatewayURLString(in userDefaults: UserDefaults) -> String {
         if let environmentURL = ProcessInfo.processInfo.environment["XIAOK_MOBILE_GATEWAY_URL"],
            let validEnvironmentURL = validGatewayURL(from: environmentURL) {
-            if !isLoopbackGatewayURL(validEnvironmentURL) {
+            if isDirectGatewayURL(validEnvironmentURL) {
                 userDefaults.set(validEnvironmentURL.absoluteString, forKey: XiaokPreferenceKeys.gatewayURL)
+                return validEnvironmentURL.absoluteString
             }
-            return validEnvironmentURL.absoluteString
+            userDefaults.removeObject(forKey: XiaokPreferenceKeys.gatewayURL)
+            return defaultGatewayURLString
         }
 
         let storedValue = userDefaults.string(forKey: XiaokPreferenceKeys.gatewayURL)
         if let storedValue,
            let storedURL = validGatewayURL(from: storedValue) {
-            if isLoopbackGatewayURL(storedURL) {
+            if !isDirectGatewayURL(storedURL) {
                 userDefaults.removeObject(forKey: XiaokPreferenceKeys.gatewayURL)
                 return defaultGatewayURLString
             }
@@ -757,6 +783,65 @@ final class XiaokAppStore: ObservableObject {
         }
 
         return host == "localhost" || host == "::1" || host.hasPrefix("127.")
+    }
+
+    private static func isDirectGatewayURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(),
+              !isLoopbackGatewayURL(url) else {
+            return false
+        }
+        guard let octets = ipv4Octets(host) else {
+            return true
+        }
+        let a = octets[0]
+        let b = octets[1]
+        let c = octets[2]
+        let d = octets[3]
+
+        if a == 0 || a == 127 {
+            return false
+        }
+        if a == 169 && b == 254 {
+            return false
+        }
+        if a == 100 && (64...127).contains(b) {
+            return false
+        }
+        if a == 198 && (b == 18 || b == 19) {
+            return false
+        }
+        if a == 192 && b == 0 && c == 2 {
+            return false
+        }
+        if a == 198 && b == 51 && c == 100 {
+            return false
+        }
+        if a == 203 && b == 0 && c == 113 {
+            return false
+        }
+        if a >= 224 {
+            return false
+        }
+        if a == 255 && b == 255 && c == 255 && d == 255 {
+            return false
+        }
+        return true
+    }
+
+    private static func ipv4Octets(_ host: String) -> [Int]? {
+        let parts = host.split(separator: ".")
+        guard parts.count == 4 else {
+            return nil
+        }
+        let octets = parts.compactMap { part -> Int? in
+            guard part.allSatisfy(\.isNumber),
+                  let value = Int(part),
+                  (0...255).contains(value) else {
+                return nil
+            }
+            return value
+        }
+        return octets.count == 4 ? octets : nil
     }
 
     private static func validGatewayURL(from rawValue: String) -> URL? {

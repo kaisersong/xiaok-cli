@@ -66,6 +66,193 @@ struct ChatMessage: Codable, Equatable, Identifiable {
     }
 }
 
+struct MessageActivity: Equatable, Identifiable {
+    enum Kind: Equatable {
+        case skill
+        case bash
+        case tool
+    }
+
+    enum Status: Equatable {
+        case running
+        case completed
+        case failed
+        case unknown
+    }
+
+    let id: String
+    let conversationId: String?
+    let kind: Kind
+    let status: Status
+    let title: String
+    let detail: String
+    let createdAt: Date
+}
+
+struct MessageDisplayItem: Equatable, Identifiable {
+    enum Kind: Equatable {
+        case chat(ChatMessage)
+        case activity(MessageActivity)
+    }
+
+    let id: String
+    let kind: Kind
+
+    init(chat message: ChatMessage) {
+        self.id = message.id
+        self.kind = .chat(message)
+    }
+
+    init(activity: MessageActivity) {
+        self.id = activity.id
+        self.kind = .activity(activity)
+    }
+
+    var createdAt: Date {
+        switch kind {
+        case .chat(let message):
+            message.createdAt
+        case .activity(let activity):
+            activity.createdAt
+        }
+    }
+
+    var debugText: String {
+        switch kind {
+        case .chat(let message):
+            message.text
+        case .activity(let activity):
+            activity.detail
+        }
+    }
+}
+
+enum MobileMessageDisplayBuilder {
+    static func displayItems(from messages: [ChatMessage]) -> [MessageDisplayItem] {
+        messages.compactMap(displayItem(from:))
+    }
+
+    static func previewText(for message: ChatMessage) -> String? {
+        displayItem(from: message)?.debugText.nonEmptyPrefix(maxLength: 160)
+    }
+
+    private static func displayItem(from message: ChatMessage) -> MessageDisplayItem? {
+        let displayText = sanitizeDisplayText(message.text)
+        guard !displayText.isEmpty else {
+            return nil
+        }
+        if let activity = activity(from: message, displayText: displayText) {
+            return MessageDisplayItem(activity: activity)
+        }
+        guard message.role != .system else {
+            return nil
+        }
+        if displayText == message.text {
+            return MessageDisplayItem(chat: message)
+        }
+        return MessageDisplayItem(chat: ChatMessage(
+            id: message.id,
+            conversationId: message.conversationId,
+            role: message.role,
+            text: displayText,
+            createdAt: message.createdAt,
+            deliveryStatus: message.deliveryStatus
+        ))
+    }
+
+    private static func sanitizeDisplayText(_ text: String) -> String {
+        let visibleLines = text.components(separatedBy: .newlines).filter { line in
+            !isSystemMetadataLine(line)
+        }
+        return collapseExcessBlankLines(visibleLines.joined(separator: "\n"))
+    }
+
+    private static func isSystemMetadataLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("[SYSTEM:") && trimmed.hasSuffix("]")
+    }
+
+    private static func collapseExcessBlankLines(_ text: String) -> String {
+        var lines: [String] = []
+        var blankCount = 0
+
+        for line in text.components(separatedBy: .newlines) {
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                blankCount += 1
+                if blankCount <= 2 {
+                    lines.append("")
+                }
+            } else {
+                blankCount = 0
+                lines.append(line)
+            }
+        }
+
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func activity(from message: ChatMessage, displayText: String) -> MessageActivity? {
+        guard let title = displayText.components(separatedBy: .newlines).first(where: { line in
+            !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let kind = activityKind(from: title),
+              isActivityTitle(title) else {
+            return nil
+        }
+
+        return MessageActivity(
+            id: message.id,
+            conversationId: message.conversationId,
+            kind: kind,
+            status: activityStatus(from: displayText),
+            title: title,
+            detail: displayText,
+            createdAt: message.createdAt
+        )
+    }
+
+    private static func activityKind(from title: String) -> MessageActivity.Kind? {
+        let lowercasedTitle = title.lowercased()
+        if lowercasedTitle.hasPrefix("skill") {
+            return .skill
+        }
+        if lowercasedTitle.hasPrefix("bash") {
+            return .bash
+        }
+        if lowercasedTitle.hasPrefix("tool") {
+            return .tool
+        }
+        return nil
+    }
+
+    private static func isActivityTitle(_ title: String) -> Bool {
+        let lowercasedTitle = title.lowercased()
+        return title.contains(":")
+            || title.contains("：")
+            || title.contains("完成")
+            || title.contains("失败")
+            || title.contains("调用")
+            || lowercasedTitle.contains("completed")
+            || lowercasedTitle.contains("started")
+            || lowercasedTitle.contains("running")
+            || lowercasedTitle.contains("failed")
+    }
+
+    private static func activityStatus(from text: String) -> MessageActivity.Status {
+        let lowercasedText = text.lowercased()
+        if text.contains("失败") || lowercasedText.contains("failed") || lowercasedText.contains("error") {
+            return .failed
+        }
+        if text.contains("完成") || lowercasedText.contains("completed") || lowercasedText.contains("succeeded") || lowercasedText.contains("success") {
+            return .completed
+        }
+        if text.contains("调用") || lowercasedText.contains("started") || lowercasedText.contains("running") {
+            return .running
+        }
+        return .unknown
+    }
+}
+
 enum MessageDeliveryStatus: String, Codable, Equatable {
     case sending
     case sent
@@ -274,6 +461,22 @@ struct ArtifactPreview: Codable, Equatable {
     let artifact: DesktopArtifactSummary
     let contentType: String
     let text: String?
+    let fileName: String?
+    let dataBase64: String?
+
+    init(
+        artifact: DesktopArtifactSummary,
+        contentType: String,
+        text: String? = nil,
+        fileName: String? = nil,
+        dataBase64: String? = nil
+    ) {
+        self.artifact = artifact
+        self.contentType = contentType
+        self.text = text
+        self.fileName = fileName
+        self.dataBase64 = dataBase64
+    }
 }
 
 struct MobileSnapshot: Codable, Equatable {
@@ -354,27 +557,30 @@ struct MobileSnapshot: Codable, Equatable {
 
         for project in projects {
             let projectMessages = groupedMessages[project.id] ?? []
-            let latestMessage = projectMessages.sorted { $0.createdAt > $1.createdAt }.first
+            let displayItems = MobileMessageDisplayBuilder.displayItems(from: projectMessages)
+            let latestItem = displayItems.sorted { $0.createdAt > $1.createdAt }.first
             conversationsById[project.id] = ConversationSummary(
                 id: project.id,
                 title: project.name,
                 status: conversationStatus(project: project, runningTurn: runningTurn),
-                lastMessagePreview: latestMessage?.text ?? project.name,
-                updatedAt: max(project.updatedAt, latestMessage?.createdAt ?? project.updatedAt),
-                messageCount: projectMessages.count
+                lastMessagePreview: latestItem?.debugText ?? project.name,
+                updatedAt: max(project.updatedAt, latestItem?.createdAt ?? project.updatedAt),
+                messageCount: displayItems.count
             )
         }
 
         for (conversationId, conversationMessages) in groupedMessages where conversationsById[conversationId] == nil {
-            let sortedMessages = conversationMessages.sorted { $0.createdAt > $1.createdAt }
-            let latestMessage = sortedMessages.first
+            let sortedItems = MobileMessageDisplayBuilder.displayItems(from: conversationMessages).sorted { $0.createdAt > $1.createdAt }
+            guard let latestItem = sortedItems.first else {
+                continue
+            }
             conversationsById[conversationId] = ConversationSummary(
                 id: conversationId,
-                title: latestMessage?.text.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyPrefix(maxLength: 80) ?? conversationId,
+                title: latestItem.debugText.nonEmptyPrefix(maxLength: 80) ?? conversationId,
                 status: .completed,
-                lastMessagePreview: latestMessage?.text ?? "",
-                updatedAt: latestMessage?.createdAt ?? Date(),
-                messageCount: conversationMessages.count
+                lastMessagePreview: latestItem.debugText,
+                updatedAt: latestItem.createdAt,
+                messageCount: sortedItems.count
             )
         }
 

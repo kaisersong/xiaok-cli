@@ -48,6 +48,8 @@ export interface MobileArtifactPreview {
   artifact: unknown;
   contentType: string;
   text?: string;
+  fileName?: string;
+  dataBase64?: string;
 }
 
 export interface MobileDesktopHello {
@@ -148,17 +150,23 @@ export function buildMobileGatewayReachableUrls(input: {
   interfaces?: NodeJS.Dict<NetworkInterfaceLike[]>;
 }): string[] {
   const interfaces = input.interfaces ?? networkInterfaces();
-  const addresses = new Set<string>();
+  const addresses = new Map<string, number>();
 
   for (const values of Object.values(interfaces)) {
     for (const value of values ?? []) {
       if (value.internal || value.family !== 'IPv4') continue;
       if (!value.address || value.address.startsWith('127.')) continue;
-      addresses.add(value.address);
+      const priority = mobileDirectGatewayPriority(value.address);
+      if (priority === null) continue;
+      addresses.set(value.address, priority);
     }
   }
 
-  return [...addresses].sort().map((address) => `http://${address}:${input.port}`);
+  return [...addresses.entries()]
+    .sort(([leftAddress, leftPriority], [rightAddress, rightPriority]) => (
+      leftPriority - rightPriority || compareIPv4(leftAddress, rightAddress)
+    ))
+    .map(([address]) => `http://${address}:${input.port}`);
 }
 
 export function buildMobilePairingPayload(input: {
@@ -169,9 +177,10 @@ export function buildMobilePairingPayload(input: {
   relayJwt?: string | null;
 }): MobilePairingPayload {
   const reachableURLs = input.gatewayStatus.reachableURLs
-    .filter((url) => !isLoopbackHttpUrl(url));
+    .filter(isMobileDirectGatewayUrl)
+    .sort(compareMobileGatewayUrlPriority);
   const gatewayURL = reachableURLs[0] ?? (
-    isLoopbackHttpUrl(input.gatewayStatus.baseURL) ? '' : input.gatewayStatus.baseURL
+    isMobileDirectGatewayUrl(input.gatewayStatus.baseURL) ? input.gatewayStatus.baseURL : ''
   );
   const params = new URLSearchParams({
     desktopId: input.identity.desktopId,
@@ -431,14 +440,66 @@ function artifactPreviewIdFromPath(pathname: string): string | null {
   return decodeURIComponent(match[1]);
 }
 
-function isLoopbackHttpUrl(rawValue: string): boolean {
+function isMobileDirectGatewayUrl(rawValue: string): boolean {
   try {
     const url = new URL(rawValue);
-    const host = url.hostname.toLowerCase();
-    return host === 'localhost' || host === '::1' || host.startsWith('127.');
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    return mobileDirectGatewayPriority(url.hostname) !== null;
   } catch {
     return false;
   }
+}
+
+function compareMobileGatewayUrlPriority(left: string, right: string): number {
+  const leftUrl = new URL(left);
+  const rightUrl = new URL(right);
+  return (mobileDirectGatewayPriority(leftUrl.hostname) ?? 99)
+    - (mobileDirectGatewayPriority(rightUrl.hostname) ?? 99)
+    || compareIPv4(leftUrl.hostname, rightUrl.hostname);
+}
+
+function mobileDirectGatewayPriority(address: string): number | null {
+  const octets = parseIPv4(address);
+  if (!octets) return null;
+  const [a, b, c, d] = octets;
+
+  if (a === 0 || a === 127) return null;
+  if (a === 169 && b === 254) return null;
+  if (a === 100 && b >= 64 && b <= 127) return null;
+  if (a === 198 && (b === 18 || b === 19)) return null;
+  if (a === 192 && b === 0 && c === 2) return null;
+  if (a === 198 && b === 51 && c === 100) return null;
+  if (a === 203 && b === 0 && c === 113) return null;
+  if (a >= 224) return null;
+  if (a === 255 && b === 255 && c === 255 && d === 255) return null;
+
+  if (a === 10) return 0;
+  if (a === 172 && b >= 16 && b <= 31) return 0;
+  if (a === 192 && b === 168) return 0;
+  return 1;
+}
+
+function compareIPv4(left: string, right: string): number {
+  const leftOctets = parseIPv4(left) ?? [];
+  const rightOctets = parseIPv4(right) ?? [];
+  for (let i = 0; i < 4; i += 1) {
+    const diff = (leftOctets[i] ?? 0) - (rightOctets[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return left.localeCompare(right);
+}
+
+function parseIPv4(address: string): [number, number, number, number] | null {
+  const parts = address.split('.');
+  if (parts.length !== 4) return null;
+  const octets = parts.map((part) => {
+    if (!/^\d{1,3}$/.test(part)) return NaN;
+    return Number(part);
+  });
+  if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return null;
+  }
+  return octets as [number, number, number, number];
 }
 
 async function buildHello(options: MobileGatewayOptions, port: number): Promise<MobileDesktopHello> {

@@ -54,19 +54,38 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const pastePathsRef = useRef<string[] | null>(null);
   const pasteHandlerRef = useRef<((e: ClipboardEvent) => void) | null>(null);
+  const compositionStartHandlerRef = useRef<(() => void) | null>(null);
+  const compositionEndHandlerRef = useRef<(() => void) | null>(null);
+  const isComposingRef = useRef(false);
   // Set to true when keydown Cmd+V starts a readClipboardFilePaths fetch,
   // so the paste event handler skips its own hasFileItems branch.
   const finderFilesPendingRef = useRef(false);
 
   const textareaCallbackRef = useCallback((el: HTMLTextAreaElement | null) => {
-    // Remove old listener if element changes
-    if (pasteHandlerRef.current && (textareaRef.current || el === null)) {
-      (textareaRef.current ?? el)?.removeEventListener('paste', pasteHandlerRef.current);
+    const previousEl = textareaRef.current;
+    if (previousEl) {
+      if (pasteHandlerRef.current) previousEl.removeEventListener('paste', pasteHandlerRef.current);
+      if (compositionStartHandlerRef.current) previousEl.removeEventListener('compositionstart', compositionStartHandlerRef.current);
+      if (compositionEndHandlerRef.current) previousEl.removeEventListener('compositionend', compositionEndHandlerRef.current);
     }
     (textareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
-    if (!el) return;
+    if (!el) {
+      pasteHandlerRef.current = null;
+      compositionStartHandlerRef.current = null;
+      compositionEndHandlerRef.current = null;
+      isComposingRef.current = false;
+      return;
+    }
 
+    const compositionStartHandler = () => {
+      isComposingRef.current = true;
+    };
+    const compositionEndHandler = () => {
+      isComposingRef.current = false;
+    };
     const handler = (e: ClipboardEvent) => {
+      if (isComposingRef.current) return;
+
       const clipItems = Array.from(e.clipboardData?.items ?? []);
 
       // File path paste takes priority over image paste.
@@ -134,6 +153,10 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
     };
     pasteHandlerRef.current = handler;
+    compositionStartHandlerRef.current = compositionStartHandler;
+    compositionEndHandlerRef.current = compositionEndHandler;
+    el.addEventListener('compositionstart', compositionStartHandler);
+    el.addEventListener('compositionend', compositionEndHandler);
     el.addEventListener('paste', handler);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -217,7 +240,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Intercept Cmd+V to catch Finder file copies where clipboard has no text/plain path.
     // readClipboardFilePaths reads NSFilenamesPboardType which Finder always populates.
-    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && window.xiaokDesktop?.readClipboardFilePaths) {
+    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && !isComposingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
       const valueBeforePaste = internalValue;
       finderFilesPendingRef.current = true;
       window.xiaokDesktop.readClipboardFilePaths().then(fp => {

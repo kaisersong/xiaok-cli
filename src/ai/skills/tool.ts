@@ -125,6 +125,7 @@ export function createSkillTool(skills: SkillMeta[] | SkillCatalog, capabilityRe
 
   return {
     permission: 'safe',
+    companionTools: [createSkillFetchAssetsTool(skills)],
     definition: {
       name: 'skill',
       description: `Execute a skill within the main conversation

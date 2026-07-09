@@ -109,6 +109,7 @@ describe('preload API contract', () => {
       'setGlobalBackgroundAutoRun',
       'openLoopOutputDirectory',
       'readLoopOutputPreview',
+      'readLoopTaskResult',
       'getLoopRuns',
       'getEvidenceAnomalies',
       'runLoopNow',

@@ -5,6 +5,9 @@
  * 使用 @modelcontextprotocol/sdk 提供的 transport classes
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -27,31 +30,47 @@ export interface McpClientConnection {
   dispose(): void;
 }
 
+export type McpConnectionResult =
+  | { status: 'connected'; connection: McpClientConnection }
+  | { status: 'disabled'; serverName: string; error: Error };
+
 export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
+export const DEFAULT_MCP_CATALOG_TIMEOUT_MS = 10_000;
 export const DEFAULT_MCP_CALL_TIMEOUT_MS = 120_000;
+export const DEFAULT_MCP_RESOURCE_TIMEOUT_MS = 30_000;
 
 export function resolveMcpStartupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.XIAOK_MCP_STARTUP_TIMEOUT_MS;
-  if (!raw) {
-    return DEFAULT_MCP_STARTUP_TIMEOUT_MS;
-  }
+  return resolvePositiveTimeout(env.XIAOK_MCP_STARTUP_TIMEOUT_MS, DEFAULT_MCP_STARTUP_TIMEOUT_MS);
+}
 
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_MCP_STARTUP_TIMEOUT_MS;
+export function resolveMcpCatalogTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return resolvePositiveTimeout(env.XIAOK_MCP_CATALOG_TIMEOUT_MS, DEFAULT_MCP_CATALOG_TIMEOUT_MS);
 }
 
 export function resolveMcpCallToolTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.XIAOK_MCP_CALL_TIMEOUT_MS;
-  if (!raw) {
-    return DEFAULT_MCP_CALL_TIMEOUT_MS;
-  }
+  return resolvePositiveTimeout(env.XIAOK_MCP_CALL_TIMEOUT_MS, DEFAULT_MCP_CALL_TIMEOUT_MS);
+}
 
+export function resolveMcpResourceTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return resolvePositiveTimeout(env.XIAOK_MCP_RESOURCE_TIMEOUT_MS, DEFAULT_MCP_RESOURCE_TIMEOUT_MS);
+}
+
+function resolvePositiveTimeout(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_MCP_CALL_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function resolveMcpClientVersion(): string {
+  try {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(moduleDir, '..', '..', '..', 'package.json'), 'utf8')) as {
+      version?: unknown;
+    };
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
 }
 
 export function resolveStdioCommand(
@@ -77,11 +96,11 @@ export async function createMcpClientConnection(
   serverName: string,
   config: McpServerConfig,
 ): Promise<McpClientConnection> {
-  const startupTimeoutMs = resolveMcpStartupTimeoutMs();
+  const startupTimeoutMs = config.timeout?.startup ?? resolveMcpStartupTimeoutMs();
   const transport = await createTransport(serverName, config);
 
   const client = new Client(
-    { name: 'xiaok-cli', version: '0.5.6' },
+    { name: 'xiaok-cli', version: resolveMcpClientVersion() },
     { capabilities: {} },
   );
 
@@ -99,6 +118,22 @@ export async function createMcpClientConnection(
       transport.close?.();
     },
   };
+}
+
+export async function tryConnect(
+  serverName: string,
+  config: McpServerConfig,
+): Promise<McpConnectionResult> {
+  try {
+    const connection = await createMcpClientConnection(serverName, config);
+    return { status: 'connected', connection };
+  } catch (error) {
+    return {
+      status: 'disabled',
+      serverName,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
 }
 
 /**

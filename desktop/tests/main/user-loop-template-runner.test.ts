@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompletionEvidenceStore } from '../../electron/completion-evidence-store.js';
+import { createLoopCommandAllowlist } from '../../electron/loop-command-allowlist.js';
 import { LoopStore } from '../../electron/loop-store.js';
 import { createUserLoopTemplateRunner, type UserLoopTaskPort } from '../../electron/user-loop-template-runner.js';
 import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
@@ -50,11 +51,15 @@ describe('UserLoopTemplateRunner', () => {
       }),
       cancelTask: vi.fn(async () => undefined),
     };
+    const finishSuccess = vi.fn((input: { runId: string; evidenceIds: string[]; now: number; summary: string }) =>
+      loopStore.finishLoopRunSuccess(input.runId, input.evidenceIds, input.now, input.summary)
+    );
     const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
     const runner = createUserLoopTemplateRunner({
       loopStore,
       evidenceStore,
       taskPort,
+      finalizer: { finishSuccess },
       now: () => now,
     });
 
@@ -75,6 +80,12 @@ describe('UserLoopTemplateRunner', () => {
       status: 'success',
       summary: expect.stringContaining('weekly.md'),
       evidenceIds: [expect.any(String)],
+    });
+    expect(finishSuccess).toHaveBeenCalledWith({
+      runId: run.id,
+      evidenceIds: [expect.any(String)],
+      now: expect.any(Number),
+      summary: expect.stringContaining('weekly.md'),
     });
     expect(loopStore.listLoopStages(run.id)).toEqual([
       expect.objectContaining({ stageKind: 'execute', status: 'success' }),
@@ -130,6 +141,117 @@ describe('UserLoopTemplateRunner', () => {
     expect(evidenceStore.listEvidenceForOwner('loop_run', run.id)).toEqual([
       expect.objectContaining({ kind: 'blocked', summary: expect.stringContaining(outputPath) }),
     ]);
+  });
+
+  it('lets the evaluator block markdown success even when the artifact exists', async () => {
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_evaluator_blocked' }),
+      recoverTask: vi.fn(async () => {
+        writeFileSync(outputPath, '# Weekly\n\nDone.\n');
+        return { snapshot: taskSnapshot('task_evaluator_blocked', 'completed') };
+      }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const finishSuccess = vi.fn((input: { runId: string; evidenceIds: string[]; now: number; summary: string }) =>
+      loopStore.finishLoopRunSuccess(input.runId, input.evidenceIds, input.now, input.summary)
+    );
+    const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      finalizer: { finishSuccess },
+      verifierRegistry: {
+        file_exists: async () => ({
+          status: 'blocked',
+          nextActionKind: 'manual_review_required',
+          nextActionSummary: 'Evaluator blocked this artifact pending manual review.',
+        }),
+      },
+      now: () => now,
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'user-loop-1',
+      runId: run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      run: expect.objectContaining({
+        id: run.id,
+        nextActionKind: 'manual_review_required',
+        nextActionSummary: 'Evaluator blocked this artifact pending manual review.',
+      }),
+    });
+    expect(finishSuccess).not.toHaveBeenCalled();
+    expect(loopStore.getLoopRun(run.id)).toMatchObject({ status: 'blocked' });
+  });
+
+  it('runs command_exit_zero criteria through the evaluator before markdown success', async () => {
+    const db = new DatabaseSync(join(rootDir, 'loops.sqlite'));
+    db.prepare(`
+      update user_loop_templates
+      set contract_json = ?
+      where loop_id = ?
+    `).run(JSON.stringify({
+      schemaVersion: 'loop_contract_v1',
+      objective: 'Write a markdown report and run verifier.',
+      triggerPolicy: { kind: 'manual' },
+      successCriteria: [
+        { kind: 'file_exists', pathTemplate: '${outputDirectory}/${outputFileName}', minBytes: 1 },
+        { kind: 'command_exit_zero', commandId: 'node-ok', args: [], cwdPolicy: 'workspace' },
+      ],
+      stopPolicy: { maxConsecutiveFailures: 3 },
+      permissionPolicy: {
+        mode: 'workspace_write',
+        autoRunApproved: false,
+        allowedToolCategories: ['file_write'],
+        approvedTargetRefs: [],
+      },
+      concurrencyPolicy: {
+        perLoop: 'skip_if_running',
+        coalesceMissedRuns: false,
+      },
+    }), 'user-loop-1');
+    db.close();
+
+    const taskPort: UserLoopTaskPort = {
+      createTask: vi.fn().mockResolvedValue({ taskId: 'task_command_verified' }),
+      recoverTask: vi.fn(async () => {
+        writeFileSync(outputPath, '# Weekly\n\nDone.\n');
+        return { snapshot: taskSnapshot('task_command_verified', 'completed') };
+      }),
+      cancelTask: vi.fn(async () => undefined),
+    };
+    const run = expectStarted(loopStore.beginLoopRun('user-loop-1', { kind: 'manual' }, 2_000, 60_000));
+    const runner = createUserLoopTemplateRunner({
+      loopStore,
+      evidenceStore,
+      taskPort,
+      commandAllowlist: createLoopCommandAllowlist([
+        {
+          commandId: 'node-ok',
+          command: process.execPath,
+          args: ['--eval', 'process.exit(0)'],
+          cwdPolicy: 'workspace',
+        },
+      ]),
+      now: () => now,
+    });
+
+    const result = await runner.runTemplateLoop({
+      loopId: 'user-loop-1',
+      runId: run.id,
+      trigger: { kind: 'manual' },
+    });
+
+    expect(result).toMatchObject({ status: 'success' });
+    expect(loopStore.getLoopRun(run.id)).toMatchObject({
+      status: 'success',
+      summary: expect.stringContaining('weekly.md'),
+    });
   });
 
   it('creates the output directory before asking the task to write the markdown artifact', async () => {
@@ -436,8 +558,13 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
     expect(evidence).toHaveLength(1);
     expect(evidence[0]).toMatchObject({
       kind: 'answer',
-      metadata: expect.objectContaining({ taskId: 'task_tc_success', promptPreview: expect.any(String) }),
+      metadata: expect.objectContaining({
+        taskId: 'task_tc_success',
+        promptPreview: expect.any(String),
+        weakSuccess: true,
+      }),
     });
+    expect(evidenceStore.listCompletionRecords({ ownerKind: 'loop_run', ownerId: run.id })).toEqual([]);
   });
 
   it('fails when task fails', async () => {
@@ -492,7 +619,7 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
     expect(taskPort.createTask).not.toHaveBeenCalled();
   });
 
-  it('succeeds for scheduled trigger when autoRunApproved=true', async () => {
+  it('blocks scheduled weak-only task_completion after execution even when autoRunApproved=true', async () => {
     // Create a loop and manually set autoRunApproved (legacy field ignored on create)
     loopStore.createUserLoopTemplate({
       loopId: 'tc-loop-approved',
@@ -524,10 +651,31 @@ describe('UserLoopTemplateRunner — task_completion kind', () => {
       trigger: { kind: 'scheduled' },
     });
 
-    expect(result).toMatchObject({ status: 'success' });
+    expect(result).toMatchObject({
+      status: 'blocked',
+      run: expect.objectContaining({
+        id: run.id,
+        nextActionKind: 'add_success_criterion',
+        nextActionSummary: expect.stringContaining('strong success criterion'),
+      }),
+    });
     expect(taskPort.createTask).toHaveBeenCalledWith(expect.objectContaining({
       permissionMode: 'default',
     }));
+    expect(loopStore.getLoopRun(run.id)).toMatchObject({
+      status: 'blocked',
+      summary: undefined,
+    });
+    expect(evidenceStore.listEvidenceForOwner('loop_run', run.id)).toEqual([
+      expect.objectContaining({
+        kind: 'answer',
+        metadata: expect.objectContaining({ taskId: 'task_approved' }),
+      }),
+      expect.objectContaining({
+        kind: 'blocked',
+        summary: expect.stringContaining('strong success criterion'),
+      }),
+    ]);
   });
 
   it('reports timeout as auto-cancelled', async () => {

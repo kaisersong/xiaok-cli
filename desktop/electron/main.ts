@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor } from 'electron';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createDesktopServices, resumeOneScriptWorkflow } from './desktop-services.js';
@@ -70,6 +70,7 @@ import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let isQuitting = false;
+const MAX_MOBILE_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024;
 
 function debugMain(message: string, extra?: unknown): void {
   const suffix = extra === undefined ? '' : ` ${JSON.stringify(extra)}`;
@@ -174,14 +175,26 @@ function buildArtifactPreview(input: {
   mimeType?: string;
   kind: string;
 }): MobileArtifactPreview | null {
-  if (!input.previewAvailable) return null;
   const contentType = input.mimeType || contentTypeForArtifactKind(input.kind);
+  const fileExists = Boolean(input.filePath && existsSync(input.filePath));
+  if (!input.previewAvailable && !fileExists) return null;
   const preview: MobileArtifactPreview = {
     artifact: input.artifact,
     contentType,
   };
-  if (input.filePath && isTextPreviewKind(input.kind, contentType) && existsSync(input.filePath)) {
+  if (!input.filePath || !fileExists) return preview;
+
+  preview.fileName = basename(input.filePath);
+  if (isTextPreviewKind(input.kind, contentType)) {
     preview.text = readFileSync(input.filePath, 'utf8').slice(0, 200_000);
+    return preview;
+  }
+
+  if (isSystemPreviewFileKind(input.kind, contentType)) {
+    const size = statSync(input.filePath).size;
+    if (size <= MAX_MOBILE_ARTIFACT_FILE_BYTES) {
+      preview.dataBase64 = readFileSync(input.filePath).toString('base64');
+    }
   }
   return preview;
 }
@@ -208,6 +221,15 @@ function isTextPreviewKind(kind: string, contentType: string): boolean {
     || kind === 'html'
     || contentType.startsWith('text/')
     || contentType === 'application/json';
+}
+
+function isSystemPreviewFileKind(kind: string, contentType: string): boolean {
+  return kind === 'pdf'
+    || kind === 'pptx'
+    || kind === 'image'
+    || contentType === 'application/pdf'
+    || contentType.startsWith('image/')
+    || contentType.includes('officedocument');
 }
 
 async function fetchKSwarmProjectsForMobile(kswarmService: ReturnType<typeof createKSwarmService>): Promise<KSwarmProjectLike[]> {

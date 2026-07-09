@@ -5,11 +5,22 @@
  * 支持 stdio/sse/http/ws 四种 transport
  */
 
+export interface McpTimeoutConfig {
+  startup?: number;
+  catalog?: number;
+  call?: number;
+  resource?: number;
+}
+
+interface McpTimeoutConfigHost {
+  timeout?: McpTimeoutConfig;
+}
+
 /**
  * Stdio MCP Server Configuration
  * 启动子进程并通过 stdio 通信
  */
-export interface McpStdioServerConfig {
+export interface McpStdioServerConfig extends McpTimeoutConfigHost {
   type: 'stdio';
   command: string;
   args?: string[];
@@ -20,7 +31,7 @@ export interface McpStdioServerConfig {
  * SSE MCP Server Configuration
  * Server-Sent Events transport
  */
-export interface McpSSEServerConfig {
+export interface McpSSEServerConfig extends McpTimeoutConfigHost {
   type: 'sse';
   url: string;
   headers?: Record<string, string>;
@@ -30,7 +41,7 @@ export interface McpSSEServerConfig {
  * HTTP MCP Server Configuration
  * Streamable HTTP transport
  */
-export interface McpHTTPServerConfig {
+export interface McpHTTPServerConfig extends McpTimeoutConfigHost {
   type: 'http';
   url: string;
   headers?: Record<string, string>;
@@ -39,7 +50,7 @@ export interface McpHTTPServerConfig {
 /**
  * WebSocket MCP Server Configuration
  */
-export interface McpWebSocketServerConfig {
+export interface McpWebSocketServerConfig extends McpTimeoutConfigHost {
   type: 'ws';
   url: string;
 }

@@ -2,6 +2,7 @@ import { dim, boldCyan, dimCyan } from "./render.js";
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { computeCost } from '../ai/runtime/usage.js';
 const DEFAULT_FIELDS = ["model", "mode", "tokens", "session"];
 const VALID_FIELDS = new Set(DEFAULT_FIELDS);
 const LIVE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -162,7 +163,12 @@ export class StatusBar {
             if (field === "tokens" && this.contextLimit > 0) {
                 const total = this.usage.inputTokens + this.usage.outputTokens;
                 const pct = Math.round((total / this.contextLimit) * 100);
-                parts.push(`${pct}%`);
+                const tokenParts = [`${pct}%`];
+                const cost = computeCost(this.usage, this.model);
+                if (cost > 0) {
+                    tokenParts.push(formatCost(cost));
+                }
+                parts.push(tokenParts.join(' · '));
             }
         }
         if (!this.fields.includes("mode") && this.branch) {
@@ -198,6 +204,9 @@ function formatElapsed(ms) {
         return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
     }
     return `${seconds}s`;
+}
+function formatCost(cost) {
+    return `$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`;
 }
 /**
  * Infer context limit from model name.

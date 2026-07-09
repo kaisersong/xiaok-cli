@@ -138,6 +138,27 @@ describe('LoopStore', () => {
         scheduleEnabled: false,
         scheduleTrigger: undefined,
         autoRunApproved: false,
+        contract: expect.objectContaining({
+          schemaVersion: 'loop_contract_v1',
+          objective: 'Summarize the current project state.',
+          successCriteria: [
+            expect.objectContaining({
+              kind: 'file_exists',
+              pathTemplate: '${outputDirectory}/${outputFileName}',
+              minBytes: 1,
+            }),
+          ],
+          permissionPolicy: expect.objectContaining({
+            mode: 'workspace_write',
+            autoRunApproved: false,
+            allowedToolCategories: ['file_write'],
+            approvedTargetRefs: [],
+          }),
+          concurrencyPolicy: {
+            perLoop: 'skip_if_running',
+            coalesceMissedRuns: false,
+          },
+        }),
         createdAt: 1_000,
         updatedAt: 1_000,
       }),
@@ -207,6 +228,32 @@ describe('LoopStore', () => {
         now: 1_000,
       })).toThrow('User loop outputFileName must be a file name, not a path.');
     }
+  });
+
+  it('rejects persisted contracts that fail strict v1 parsing', () => {
+    store.createUserLoopTemplate({
+      loopId: 'corrupt-contract-loop',
+      title: 'Corrupt Contract Loop',
+      kind: 'markdown_file',
+      prompt: 'Write file',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'briefing.md',
+      now: 1_000,
+    });
+
+    const db = new DatabaseSync(dbPath);
+    db.prepare(`
+      update user_loop_templates
+      set contract_json = ?
+      where loop_id = ?
+    `).run(JSON.stringify({
+      schemaVersion: 'loop_contract_v2',
+      objective: 'future contract',
+      successCriteria: [{ kind: 'file_exists', pathTemplate: '${outputDirectory}/${outputFileName}' }],
+    }), 'corrupt-contract-loop');
+    db.close();
+
+    expect(() => store.getUserLoopTemplate('corrupt-contract-loop')).toThrow('Unsupported LoopContract schemaVersion: loop_contract_v2');
   });
 
   it('supports execute and verify stages for user loop templates', () => {
@@ -599,6 +646,24 @@ describe('LoopStore — task_completion kind', () => {
       prompt: 'Check services.',
       outputDirectory: '',
       outputFileName: '',
+      contract: expect.objectContaining({
+        schemaVersion: 'loop_contract_v1',
+        objective: 'Check services.',
+        successCriteria: [
+          { kind: 'task_completed', strength: 'weak' },
+        ],
+        permissionPolicy: expect.objectContaining({
+          mode: 'read_only',
+          autoRunApproved: false,
+        }),
+        concurrencyPolicy: {
+          perLoop: 'skip_if_running',
+          coalesceMissedRuns: false,
+        },
+        legacyPolicy: {
+          requiresHumanApprovalBeforeBackgroundSuccess: true,
+        },
+      }),
     });
   });
 

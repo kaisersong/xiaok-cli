@@ -88,6 +88,7 @@ export function createSkillTool(skills, capabilityRegistry) {
     syncCapabilities();
     return {
         permission: 'safe',
+        companionTools: [createSkillFetchAssetsTool(skills)],
         definition: {
             name: 'skill',
             description: `Execute a skill within the main conversation

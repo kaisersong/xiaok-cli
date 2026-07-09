@@ -3,6 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: '.',
   testMatch: [
+    'tests/e2e/*.spec.ts',
     'e2e-desktop.spec.ts',
     'e2e-settings.spec.ts',
     'e2e-task-switch.spec.ts',

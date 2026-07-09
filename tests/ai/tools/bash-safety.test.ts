@@ -85,6 +85,29 @@ describe('classifyBashCommand', () => {
     it('warns on kill -9', () => {
       expect(classifyBashCommand('kill -9 1234')).toMatchObject({ level: 'warn' });
     });
+
+    it('warns on destructive find commands', () => {
+      expect(classifyBashCommand('find . -name "*.tmp" -delete')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('find . -type f -exec rm {} \\;')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('find . -type f -execdir rm -f {} \\;')).toMatchObject({ level: 'warn' });
+    });
+
+    it('warns on destructive xargs pipelines', () => {
+      expect(classifyBashCommand('find . -name "*.tmp" | xargs rm')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('find . -name "*.tmp" | xargs shred -u')).toMatchObject({ level: 'warn' });
+    });
+
+    it('warns on irreversible file mutation commands', () => {
+      expect(classifyBashCommand('truncate -s 0 app.log')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('shred -u secrets.txt')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('unlink stale.sock')).toMatchObject({ level: 'warn' });
+    });
+
+    it('warns on broad process and service control commands', () => {
+      expect(classifyBashCommand('pkill node')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('systemctl restart postgresql')).toMatchObject({ level: 'warn' });
+      expect(classifyBashCommand('service nginx stop')).toMatchObject({ level: 'warn' });
+    });
   });
 
   describe('auto prompt subset', () => {

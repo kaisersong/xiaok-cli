@@ -62,7 +62,30 @@ struct AppStrings {
     let recentFiles: (Int) -> String
     let tasksTitle: String
     let taskHistoryTitle: String
+    let taskHistorySearchPlaceholder: String
+    let clearSearch: String
+    let taskHistoryPinnedTitle: String
+    let taskHistoryRecentsTitle: String
+    let knowledgeTitle: String
+    let knowledgeEmptyTitle: String
+    let knowledgeEmptyMessage: String
+    let automationsTitle: String
+    let taskSidebarEmptyProjects: String
+    let taskSidebarEmptyAutomations: String
     let newTask: String
+    let taskModeAsk: String
+    let addTaskContext: String
+    let composerContextTitle: String
+    let composerContextDesktop: String
+    let composerContextDesktopDetail: String
+    let composerContextArtifacts: String
+    let composerContextArtifactsDetail: String
+    let composerContextToolAccess: String
+    let composerContextToolAccessDetail: String
+    let copyMessage: String
+    let messageActivityStatus: (MessageActivity.Status) -> String
+    let showActivityDetails: String
+    let hideActivityDetails: String
     let taskWelcomeTitle: String
     let taskWelcomeSubtitle: String
     let suggestedPromptStatus: String
@@ -91,6 +114,9 @@ struct AppStrings {
     let artifactFallbackName: (ArtifactKind) -> String
     let artifactPreviewTitle: String
     let artifactPreviewUnavailable: String
+    let artifactFileInfoTitle: String
+    let artifactFileInfoMessage: String
+    let openOrSaveArtifact: String
     let mermaidDiagram: String
     let loops: String
     let files: String
@@ -158,7 +184,7 @@ extension AppStrings {
         tabWork: "Work",
         tabApprovals: "Approvals",
         tabSettings: "Settings",
-        appTitle: "Xiaok Mobile",
+        appTitle: "XiaoK",
         overviewTitle: "Overview",
         currentTurn: "Current turn",
         noActiveTurn: "No active turn",
@@ -171,7 +197,37 @@ extension AppStrings {
         recentFiles: { "\($0) recent artifacts" },
         tasksTitle: "Tasks",
         taskHistoryTitle: "Task history",
+        taskHistorySearchPlaceholder: "Search tasks",
+        clearSearch: "Clear search",
+        taskHistoryPinnedTitle: "Starred",
+        taskHistoryRecentsTitle: "Recents",
+        knowledgeTitle: "Knowledge",
+        knowledgeEmptyTitle: "No knowledge items yet",
+        knowledgeEmptyMessage: "Knowledge base content from desktop will appear here when mobile sync exposes it.",
+        automationsTitle: "Automations",
+        taskSidebarEmptyProjects: "No projects yet",
+        taskSidebarEmptyAutomations: "No automations yet",
         newTask: "New task",
+        taskModeAsk: "Ask",
+        addTaskContext: "Add context",
+        composerContextTitle: "Add to task",
+        composerContextDesktop: "Desktop context",
+        composerContextDesktopDetail: "Included automatically",
+        composerContextArtifacts: "Artifacts",
+        composerContextArtifactsDetail: "Available after generation",
+        composerContextToolAccess: "Tool access",
+        composerContextToolAccessDetail: "Controlled by desktop",
+        copyMessage: "Copy message",
+        messageActivityStatus: { status in
+            switch status {
+            case .running: "Running"
+            case .completed: "Completed"
+            case .failed: "Failed"
+            case .unknown: "Activity"
+            }
+        },
+        showActivityDetails: "Show activity details",
+        hideActivityDetails: "Hide activity details",
         taskWelcomeTitle: "What are we working on?",
         taskWelcomeSubtitle: "Start a desktop task from your phone. Xiaok will keep the task synced here.",
         suggestedPromptStatus: "Draft a status update",
@@ -214,6 +270,9 @@ extension AppStrings {
         artifactFallbackName: { "\($0.displayText) artifact" },
         artifactPreviewTitle: "Artifact preview",
         artifactPreviewUnavailable: "Preview is not available for this artifact.",
+        artifactFileInfoTitle: "File preview",
+        artifactFileInfoMessage: "This file type opens through iOS system preview or another installed app when the desktop provides file data.",
+        openOrSaveArtifact: "Open or Save",
         mermaidDiagram: "Mermaid diagram",
         loops: "Loops",
         files: "Artifacts",
@@ -325,7 +384,7 @@ extension AppStrings {
         tabWork: "工作",
         tabApprovals: "审批",
         tabSettings: "设置",
-        appTitle: "小 K 移动端",
+        appTitle: "XiaoK",
         overviewTitle: "总览",
         currentTurn: "当前回合",
         noActiveTurn: "没有正在运行的回合",
@@ -338,7 +397,37 @@ extension AppStrings {
         recentFiles: { "\($0) 个近期产物" },
         tasksTitle: "任务",
         taskHistoryTitle: "历史任务",
+        taskHistorySearchPlaceholder: "搜索任务",
+        clearSearch: "清空搜索",
+        taskHistoryPinnedTitle: "星标",
+        taskHistoryRecentsTitle: "最近",
+        knowledgeTitle: "知识库",
+        knowledgeEmptyTitle: "暂无知识库内容",
+        knowledgeEmptyMessage: "桌面端开放知识库同步后，这里会显示可在手机端查看的知识内容。",
+        automationsTitle: "自动化",
+        taskSidebarEmptyProjects: "还没有项目",
+        taskSidebarEmptyAutomations: "还没有自动化",
         newTask: "新建任务",
+        taskModeAsk: "询问",
+        addTaskContext: "添加上下文",
+        composerContextTitle: "添加到任务",
+        composerContextDesktop: "桌面上下文",
+        composerContextDesktopDetail: "自动带入",
+        composerContextArtifacts: "产物",
+        composerContextArtifactsDetail: "生成后可用",
+        composerContextToolAccess: "工具权限",
+        composerContextToolAccessDetail: "由桌面端控制",
+        copyMessage: "复制消息",
+        messageActivityStatus: { status in
+            switch status {
+            case .running: "运行中"
+            case .completed: "已完成"
+            case .failed: "失败"
+            case .unknown: "活动"
+            }
+        },
+        showActivityDetails: "展开活动详情",
+        hideActivityDetails: "收起活动详情",
         taskWelcomeTitle: "今天要推进什么？",
         taskWelcomeSubtitle: "从手机发起桌面端任务，后续消息、产物和状态会同步到这里。",
         suggestedPromptStatus: "起草状态更新",
@@ -381,6 +470,9 @@ extension AppStrings {
         artifactFallbackName: { "\($0.displayText) 产物" },
         artifactPreviewTitle: "产物预览",
         artifactPreviewUnavailable: "这个产物暂时无法预览。",
+        artifactFileInfoTitle: "文件预览",
+        artifactFileInfoMessage: "此类型文件会在桌面端提供文件数据后，通过 iOS 系统预览或其他已安装应用打开。",
+        openOrSaveArtifact: "打开或保存",
         mermaidDiagram: "Mermaid 图",
         loops: "Loop",
         files: "产物",

@@ -5,6 +5,7 @@ import { ArtifactEditableViewer, type AnnotationPayload } from './ArtifactEditab
 import { formatAnnotationForChat } from '../hooks/useArtifactAnnotation';
 import { getDesktopApi } from '../shared/desktop';
 import { useLocale } from '../contexts/LocaleContext';
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 
 interface CanvasPreviewProps {
   filePath: string;
@@ -72,8 +73,114 @@ function isPdfDataUrl(content: string): boolean {
   return /^data:application\/pdf(?:;[^,]*)*;base64,/i.test(content.trimStart());
 }
 
+function decodePdfDataUrl(content: string): Uint8Array {
+  const trimmed = content.trimStart();
+  const commaIndex = trimmed.indexOf(',');
+  if (commaIndex < 0 || !isPdfDataUrl(trimmed)) {
+    throw new Error('invalid_pdf_data_url');
+  }
+  const binary = atob(trimmed.slice(commaIndex + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 function getFileName(path: string): string {
   return path.split(/[\\/]/).pop() || path || 'download';
+}
+
+function PdfCanvasPreview({
+  content,
+  fileName,
+  labels,
+}: {
+  content: string;
+  fileName: string;
+  labels: {
+    label: (fileName: string) => string;
+    rendering: string;
+    failed: string;
+  };
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'rendering' | 'ready' | 'failed'>('rendering');
+
+  useEffect(() => {
+    let cancelled = false;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const renderPdf = async () => {
+      setStatus('rendering');
+      container.replaceChildren();
+      try {
+        const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const data = decodePdfDataUrl(content);
+        const loadingTask = pdfjs.getDocument({ data });
+        const document = await loadingTask.promise;
+
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+          if (cancelled) break;
+          const page = await document.getPage(pageNumber);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const availableWidth = Math.max(320, Math.min(container.clientWidth || 900, 1200) - 32);
+          const scale = Math.max(0.5, Math.min(1.75, availableWidth / baseViewport.width));
+          const viewport = page.getViewport({ scale });
+          const pixelRatio = window.devicePixelRatio || 1;
+          const canvas = window.document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('canvas_context_unavailable');
+
+          canvas.width = Math.floor(viewport.width * pixelRatio);
+          canvas.height = Math.floor(viewport.height * pixelRatio);
+          canvas.style.width = `${viewport.width}px`;
+          canvas.style.height = `${viewport.height}px`;
+          canvas.className = 'max-w-full rounded-sm bg-white shadow-sm';
+          context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+          const pageFrame = window.document.createElement('div');
+          pageFrame.className = 'flex justify-center py-4';
+          pageFrame.appendChild(canvas);
+          container.appendChild(pageFrame);
+
+          await page.render({ canvas: null, canvasContext: context, viewport }).promise;
+          page.cleanup();
+        }
+
+        const destroyDocument = (document as { destroy?: () => Promise<void> | void }).destroy;
+        if (typeof destroyDocument === 'function') {
+          await destroyDocument.call(document);
+        } else if (typeof loadingTask.destroy === 'function') {
+          await loadingTask.destroy();
+        }
+        if (!cancelled) setStatus('ready');
+      } catch {
+        if (!cancelled) setStatus('failed');
+      }
+    };
+
+    void renderPdf();
+    return () => {
+      cancelled = true;
+      container.replaceChildren();
+    };
+  }, [content]);
+
+  return (
+    <div className="h-full overflow-auto bg-[var(--c-bg-page)]" aria-label={labels.label(fileName)}>
+      {status !== 'ready' && (
+        <div className="flex h-full min-h-48 items-center justify-center p-6">
+          <p className="text-xs text-[var(--c-text-tertiary)]">
+            {status === 'failed' ? labels.failed : labels.rendering}
+          </p>
+        </div>
+      )}
+      <div ref={containerRef} className={status === 'ready' ? 'mx-auto w-full max-w-6xl px-3 py-2' : 'hidden'} />
+    </div>
+  );
 }
 
 export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, onRefresh }: CanvasPreviewProps) {
@@ -386,15 +493,18 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
 
         {viewMode === 'preview' && isPdf && (
           pdfSrc ? (
-            <iframe
-              title={`PDF preview: ${fileName}`}
-              src={pdfSrc}
-              sandbox="allow-same-origin"
-              className="h-full w-full border-0 bg-[var(--c-bg-card)]"
+            <PdfCanvasPreview
+              content={pdfSrc}
+              fileName={fileName}
+              labels={{
+                label: t.canvasPreviewPdfLabel,
+                rendering: t.canvasPreviewPdfRendering,
+                failed: t.canvasPreviewPdfFailed,
+              }}
             />
           ) : (
             <div className="flex h-full items-center justify-center p-6">
-              <p className="text-xs text-[var(--c-text-tertiary)]">PDF preview is loading...</p>
+              <p className="text-xs text-[var(--c-text-tertiary)]">{t.canvasPreviewPdfLoading}</p>
             </div>
           )
         )}
@@ -407,7 +517,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
 
         {!hasPreview && !hasCodeView && (
           <div className="flex h-full items-center justify-center p-6">
-            <p className="text-xs text-[var(--c-text-tertiary)]">Preview not available for this file type</p>
+            <p className="text-xs text-[var(--c-text-tertiary)]">{t.canvasPreviewUnavailable}</p>
           </div>
         )}
       </div>

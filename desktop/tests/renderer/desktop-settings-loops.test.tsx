@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   setGlobalBackgroundAutoRun: vi.fn(),
   openLoopOutputDirectory: vi.fn(),
   readLoopOutputPreview: vi.fn(),
+  readLoopTaskResult: vi.fn(),
   getAccountSettings: vi.fn(),
   updateAccountSettings: vi.fn(),
 }));
@@ -46,6 +47,7 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     setGlobalBackgroundAutoRun: mocks.setGlobalBackgroundAutoRun,
     openLoopOutputDirectory: mocks.openLoopOutputDirectory,
     readLoopOutputPreview: mocks.readLoopOutputPreview,
+    readLoopTaskResult: mocks.readLoopTaskResult,
     getAccountSettings: mocks.getAccountSettings,
     updateAccountSettings: mocks.updateAccountSettings,
   },
@@ -212,6 +214,55 @@ describe('Automations Loops page', () => {
     });
     expect(await screen.findByText('# Weekly Briefing')).toBeInTheDocument();
     expect(screen.getByText('Ready.')).toBeInTheDocument();
+  });
+
+  it('shows result actions for task-completion loops and hides file output actions', async () => {
+    mocks.listUserLoopTemplates.mockResolvedValue([
+      {
+        loopId: 'user-loop-1',
+        kind: 'task_completion',
+        prompt: 'Generate today AI briefing.',
+        outputDirectory: '',
+        outputFileName: '',
+        scheduleEnabled: false,
+        autoRunApproved: false,
+        createdAt: 1_000,
+        updatedAt: 2_000,
+      },
+    ]);
+    mocks.getLoopRuns.mockResolvedValue([
+      {
+        id: 'run-user-loop',
+        loopId: 'user-loop-1',
+        status: 'success',
+        trigger: { kind: 'manual' },
+        evidenceIds: ['ev-answer'],
+        startedAt: 3_000,
+        finishedAt: 4_000,
+        updatedAt: 4_000,
+      },
+    ]);
+    mocks.readLoopTaskResult.mockResolvedValue({
+      ok: true,
+      loopId: 'user-loop-1',
+      runId: 'run-user-loop',
+      taskId: 'task-ai-daily',
+      content: '# AI 日报\n\n今日要点。',
+    });
+
+    renderSettings();
+
+    await screen.findByText('Weekly Briefing');
+    expect(screen.queryByRole('button', { name: '打开输出目录: Weekly Briefing' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '预览输出文件: Weekly Briefing' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '查看结果: Weekly Briefing' }));
+
+    await waitFor(() => {
+      expect(mocks.readLoopTaskResult).toHaveBeenCalledWith('user-loop-1');
+    });
+    expect(await screen.findByText('# AI 日报')).toBeInTheDocument();
+    expect(screen.getByText('今日要点。')).toBeInTheDocument();
   });
 
   it('shows duplicate schedule bindings on user loop cards without selecting a primary schedule', async () => {

@@ -46,6 +46,38 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.20 closes the Loop Engineering release gap and makes task-completion loop results visible from the product surface. The release version, Desktop package metadata, package locks, README release notes, related-project README baselines, and Desktop Release workflow default now align on `1.4.20` / `desktop-v1.4.20`.
+
+**What's New in v1.4.20:**
+
+- **Loop Task Results in the UI**: `task_completion` user loops now show a `View Result` action that reads the latest loop-run evidence and task snapshot summary. Loops without file output no longer show output-directory or preview-file buttons that cannot work.
+- **Markdown Loop Output Actions Stay File-Oriented**: `markdown_file` loops keep the existing open-output-directory and preview-output-file controls, so file-producing and answer-producing loops expose the right affordance for their output contract.
+- **Canvas PDF Preview Fix**: PDF artifacts are rendered through `pdfjs-dist` into canvases instead of relying on a sandboxed iframe, fixing blank PDF previews in the Canvas pane while keeping localized loading/failure states.
+- **Mobile Companion Refinement**: Mobile gateway URLs prefer reachable private LAN addresses, avoid loopback/link-local/test ranges, and artifact previews can carry filename and base64 payload metadata for the iOS companion.
+- **Release Documentation Alignment**: The English and Chinese READMEs now document v1.4.18, v1.4.19, and v1.4.20 so the changelog matches the tagged source tree instead of stopping at v1.4.17.
+- **Release Validation Target**: v1.4.20 is prepared with the loop-result IPC tests, loop contract/allowlist/evaluator/project-claim tests, renderer loop UI tests, desktop typecheck/build gates, and the Desktop Release workflow tag `desktop-v1.4.20`.
+
+Xiaok Desktop v1.4.19 turns the loop system from ad-hoc success checks into explicit contracts. User loop templates now persist a `loop_contract_v1` record, background task-completion loops with only weak success criteria are blocked instead of silently succeeding, and loop runs are finalized through one evaluation path.
+
+**What's New in v1.4.19:**
+
+- **LoopContract v1**: User loops now store success criteria, permission mode, concurrency policy, stop policy, and legacy compatibility metadata. Existing templates get a default contract on read, and template edits regenerate the contract from the current loop kind and output target.
+- **Strong Success Criteria**: `markdown_file` loops default to a strong `file_exists` criterion. `task_completion` loops default to weak `task_completed`, and scheduled/background runs must add a strong criterion before they can be marked successful.
+- **Contract Evaluator and Finalizer**: Loop verification returns `success`, `blocked`, or `failed` with evidence IDs and next-action details. The finalizer writes success, blocked, and failed run outcomes through a shared path so diagnostics and learned-constraint extraction see the same state.
+- **Command Criterion Allowlist**: `command_exit_zero` criteria can only run allowlisted commands with bounded dynamic args, safe cwd policies, stream caps, timeouts, and Windows shell handling for fixed commands.
+- **Project Claim Store**: Loop/project coordination gained a SQLite-backed project claim table with TTL renewal, expired-claim replacement, owner checks, and explicit release semantics.
+
+Xiaok Desktop v1.4.18 hardens the runtime around cost visibility, MCP resilience, and staged skill rollback diagnostics. It also keeps the Desktop/iOS companion moving toward one task-centric operating surface.
+
+**What's New in v1.4.18:**
+
+- **Estimated Model Cost Accounting**: Runtime usage can resolve model pricing from `~/.xiaok/pricing.json`, packaged `data/pricing.json`, or the workspace data file, then report estimated cost with explicit confidence.
+- **MCP Timeout and Degraded-Server Handling**: MCP startup, catalog, call-tool, and resource timeouts are independently configurable, and server connection failures can degrade a server instead of crashing the whole runtime.
+- **Current Client Version in MCP Handshake**: MCP clients now read the package version at runtime instead of advertising a stale hardcoded version string.
+- **Skill Companion Tools**: Skill-provided companion tools are registered with the main skill tool, so deferred skill resources can stay accessible without bloating the initial prompt.
+- **Stage Failure Checkpoints**: Staged skill execution captures before/after checkpoints and emits a `xiaok revert <checkpointId>` hint when a failed stage modified files.
+- **Desktop/iOS Companion Progress**: The iOS client is reorganized around a task-first surface with project, artifact, approval, knowledge, automation, and settings sections while preserving desktop snapshot synchronization.
+
 Xiaok Desktop v1.4.17 tightens artifact persistence and release hygiene: transient A2UI artifacts now default to the user Xiaok data directory instead of the source checkout, project HTML/Markdown artifact edits save through the guarded project artifact route, and the desktop release workflow defaults to the `desktop-v1.4.17` tag.
 
 **What's New in v1.4.17:**

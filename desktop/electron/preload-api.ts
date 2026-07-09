@@ -123,6 +123,7 @@ export const PRELOAD_API_KEYS = [
   'setGlobalBackgroundAutoRun',
   'openLoopOutputDirectory',
   'readLoopOutputPreview',
+  'readLoopTaskResult',
   'getLoopRuns',
   'getEvidenceAnomalies',
   'runLoopNow',
@@ -341,6 +342,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   setGlobalBackgroundAutoRun: 'desktop:automations:setGlobalBackgroundAutoRun',
   openLoopOutputDirectory: 'desktop:loops:openOutputDirectory',
   readLoopOutputPreview: 'desktop:loops:readOutputPreview',
+  readLoopTaskResult: 'desktop:loops:readTaskResult',
   getLoopRuns: 'desktop:loops:listRuns',
   getEvidenceAnomalies: 'desktop:loops:listAnomalies',
   runLoopNow: 'desktop:loops:runNow',
@@ -786,6 +788,7 @@ export interface DesktopApi {
   setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
   openLoopOutputDirectory(loopId: string): Promise<unknown>;
   readLoopOutputPreview(loopId: string): Promise<unknown>;
+  readLoopTaskResult(loopId: string): Promise<unknown>;
   getLoopRuns(loopId: string): Promise<unknown[]>;
   getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
   runLoopNow(loopId: string): Promise<unknown>;
@@ -1082,6 +1085,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
     openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId) as Promise<unknown>,
     readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId) as Promise<unknown>,
+    readLoopTaskResult: (loopId) => ipcRenderer.invoke('desktop:loops:readTaskResult', loopId) as Promise<unknown>,
     getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
     getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
     runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,

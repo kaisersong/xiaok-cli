@@ -13,12 +13,26 @@ export interface McpClientConnection {
     client: Client;
     dispose(): void;
 }
+export type McpConnectionResult = {
+    status: 'connected';
+    connection: McpClientConnection;
+} | {
+    status: 'disabled';
+    serverName: string;
+    error: Error;
+};
 export declare const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3000;
+export declare const DEFAULT_MCP_CATALOG_TIMEOUT_MS = 10000;
 export declare const DEFAULT_MCP_CALL_TIMEOUT_MS = 120000;
+export declare const DEFAULT_MCP_RESOURCE_TIMEOUT_MS = 30000;
 export declare function resolveMcpStartupTimeoutMs(env?: NodeJS.ProcessEnv): number;
+export declare function resolveMcpCatalogTimeoutMs(env?: NodeJS.ProcessEnv): number;
 export declare function resolveMcpCallToolTimeoutMs(env?: NodeJS.ProcessEnv): number;
+export declare function resolveMcpResourceTimeoutMs(env?: NodeJS.ProcessEnv): number;
+export declare function resolveMcpClientVersion(): string;
 export declare function resolveStdioCommand(command: string, platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): string;
 /**
  * 创建 MCP client 连接（统一入口）
  */
 export declare function createMcpClientConnection(serverName: string, config: McpServerConfig): Promise<McpClientConnection>;
+export declare function tryConnect(serverName: string, config: McpServerConfig): Promise<McpConnectionResult>;

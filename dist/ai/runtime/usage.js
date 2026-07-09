@@ -1,5 +1,13 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const MODEL_ALIASES = {
+    'claude-sonnet-4': 'claude-sonnet-4-20250514',
+    'claude-opus-4': 'claude-opus-4-20250514',
+    'gpt-4o': 'gpt-4o-2024-08-06',
+};
+let cachedPricingData;
 export function estimateTokens(messages) {
     let chars = 0;
     for (const message of messages) {
@@ -35,6 +43,74 @@ export function mergeUsage(base, next) {
         merged.cacheReadInputTokens = cacheReadInputTokens;
     }
     return merged;
+}
+export function computeCost(usage, model) {
+    const pricing = resolvePricing(model);
+    if (!pricing)
+        return 0;
+    let cost = 0;
+    cost += (usage.inputTokens / 1_000_000) * pricing.inputPer1M;
+    cost += (usage.outputTokens / 1_000_000) * pricing.outputPer1M;
+    if (usage.cacheCreationInputTokens !== undefined && pricing.cacheCreationPer1M !== undefined) {
+        cost += (usage.cacheCreationInputTokens / 1_000_000) * pricing.cacheCreationPer1M;
+    }
+    if (usage.cacheReadInputTokens !== undefined && pricing.cacheReadPer1M !== undefined) {
+        cost += (usage.cacheReadInputTokens / 1_000_000) * pricing.cacheReadPer1M;
+    }
+    return cost;
+}
+export function computeCostWithConfidence(usage, model) {
+    const pricing = resolvePricing(model);
+    if (!pricing) {
+        return { cost: 0, confidence: 'unknown' };
+    }
+    return { cost: computeCost(usage, model), confidence: 'estimated' };
+}
+function resolvePricing(model) {
+    const canonical = MODEL_ALIASES[model] ?? model;
+    const pricingData = getPricingData();
+    const sorted = [...pricingData].sort((a, b) => b.model.length - a.model.length);
+    return sorted.find((pricing) => (canonical === pricing.model ||
+        canonical.startsWith(pricing.model) ||
+        pricing.model.startsWith(canonical)));
+}
+function getPricingData() {
+    if (cachedPricingData !== undefined) {
+        return cachedPricingData;
+    }
+    for (const candidate of pricingCandidates()) {
+        if (!existsSync(candidate)) {
+            continue;
+        }
+        try {
+            const parsed = JSON.parse(readFileSync(candidate, 'utf8'));
+            if (Array.isArray(parsed)) {
+                cachedPricingData = parsed.filter(isModelPricing);
+                return cachedPricingData;
+            }
+        }
+        catch {
+            continue;
+        }
+    }
+    cachedPricingData = [];
+    return cachedPricingData;
+}
+function pricingCandidates() {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    return [
+        join(homedir(), '.xiaok', 'pricing.json'),
+        join(moduleDir, '..', '..', '..', 'data', 'pricing.json'),
+        join(process.cwd(), 'data', 'pricing.json'),
+    ];
+}
+function isModelPricing(value) {
+    if (!value || typeof value !== 'object')
+        return false;
+    const candidate = value;
+    return (typeof candidate.model === 'string' &&
+        typeof candidate.inputPer1M === 'number' &&
+        typeof candidate.outputPer1M === 'number');
 }
 function takeUnique(entries, maxItems) {
     const seen = new Set();

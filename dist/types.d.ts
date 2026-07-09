@@ -65,6 +65,7 @@ export type PermissionClass = 'safe' | 'write' | 'bash';
 export interface Tool {
     definition: ToolDefinition;
     permission: PermissionClass;
+    companionTools?: Tool[];
     execute(input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
 }
 export interface RuntimeHookSink {

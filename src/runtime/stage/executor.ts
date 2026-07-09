@@ -16,6 +16,7 @@ import type { ModelAdapter } from '../../types.js';
 import type { CustomAgentDef } from '../../ai/agents/loader.js';
 import { executeNamedSubAgent } from '../../ai/agents/subagent-executor.js';
 import type { StageDef, StageResult, StageTiming, DebugEvent, StageOutput, StageExecutionResult } from './types.js';
+import { captureCheckpoint, diffCheckpoints } from '../snapshot/checkpoint.js';
 
 const EXECUTION_BUFFER = 4000;
 const SUBAGENT_THRESHOLD_RATE = 0.60;
@@ -88,20 +89,35 @@ export async function executeStagedSkill(
       level: useSubagent ? 'warn' : 'info',
     });
 
-    if (useSubagent) {
-      const result = await executeInSubagent(stage, skill, deps);
-      result.debugEvents = debugEvents.filter(e => e.stage === stageLabel);
-      results.push(result);
-    } else {
-      // For now, always use subagent for skill execution to ensure clean context
-      // Inline path will be added later when needed
-      const result = await executeInSubagent(stage, skill, deps);
-      result.debugEvents = debugEvents.filter(e => e.stage === stageLabel);
-      results.push(result);
-    }
+    // For now, always use subagent for skill execution to ensure clean context.
+    // Inline path will be added later when needed.
+    const result = await executeStageWithCheckpoint(stage, skill, deps, stageLabel, debugEvents);
+    result.debugEvents = debugEvents.filter(e => e.stage === stageLabel);
+    results.push(result);
   }
 
   return { stages, results, debugEvents };
+}
+
+async function executeStageWithCheckpoint(
+  stage: StageDef,
+  skill: SkillMeta | undefined,
+  deps: StageExecutorDeps,
+  stageLabel: string,
+  debugEvents: DebugEvent[],
+): Promise<StageResult> {
+  const startCheckpoint = await captureCheckpoint(deps.cwd, deps.sessionId, stage.id, 'stage-start');
+  const result = await executeInSubagent(stage, skill, deps);
+  const endCheckpoint = await captureCheckpoint(deps.cwd, deps.sessionId, stage.id, 'stage-end');
+
+  if (result.status === 'failed') {
+    const diffs = await diffCheckpoints(startCheckpoint, endCheckpoint);
+    if (diffs.length > 0) {
+      debugEvents.push(createCheckpointWarning(stageLabel, stage.title, diffs.length, startCheckpoint.id));
+    }
+  }
+
+  return result;
 }
 
 async function executeInSubagent(
@@ -223,6 +239,22 @@ function emptyTiming(): StageTiming {
     skillLoadMs: 0,
     skillExecMs: 0,
     artifactReadMs: 0,
+  };
+}
+
+function createCheckpointWarning(
+  stageLabel: string,
+  stageTitle: string,
+  modifiedFiles: number,
+  checkpointId: string,
+): DebugEvent {
+  return {
+    timestamp: Date.now(),
+    phase: 'checkpoint',
+    stage: stageLabel,
+    detail: `Stage "${stageTitle}" failed. ${modifiedFiles} files modified. Run \`xiaok revert ${checkpointId}\` to undo.`,
+    durationMs: 0,
+    level: 'warn',
   };
 }
 

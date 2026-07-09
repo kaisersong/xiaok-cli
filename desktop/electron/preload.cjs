@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input),
   openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId),
   readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId),
+  readLoopTaskResult: (loopId) => ipcRenderer.invoke('desktop:loops:readTaskResult', loopId),
   getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId),
   getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId),
   runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId),

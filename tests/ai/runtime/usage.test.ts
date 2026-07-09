@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { estimateTokens, mergeUsage, shouldCompact, truncateToolResult } from '../../../src/ai/runtime/usage.js';
+import {
+  computeCost,
+  computeCostWithConfidence,
+  estimateTokens,
+  mergeUsage,
+  shouldCompact,
+  truncateToolResult,
+} from '../../../src/ai/runtime/usage.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -178,5 +185,45 @@ describe('truncateToolResult with spill', () => {
     expect(result.content.length).toBeLessThan(20000);
     expect(result.content).toContain('truncated');
     expect(result.spillPath).toBeUndefined();
+  });
+});
+
+describe('computeCost', () => {
+  it('includes input, output, and cache token pricing', () => {
+    const cost = computeCost({
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheCreationInputTokens: 1_000_000,
+      cacheReadInputTokens: 1_000_000,
+    }, 'claude-sonnet-4-20250514');
+
+    expect(cost).toBeCloseTo(22.05, 5);
+  });
+
+  it('uses longest-prefix model matching before broad aliases', () => {
+    const cost = computeCost({
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    }, 'gpt-4o-mini-2024-07-18');
+
+    expect(cost).toBeCloseTo(0.75, 5);
+  });
+
+  it('marks bundled static pricing as estimated and unknown models as unknown', () => {
+    expect(computeCostWithConfidence({
+      inputTokens: 10_000,
+      outputTokens: 5_000,
+    }, 'claude-sonnet-4')).toEqual({
+      cost: expect.any(Number),
+      confidence: 'estimated',
+    });
+
+    expect(computeCostWithConfidence({
+      inputTokens: 10_000,
+      outputTokens: 5_000,
+    }, 'unknown-model')).toEqual({
+      cost: 0,
+      confidence: 'unknown',
+    });
   });
 });

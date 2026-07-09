@@ -338,6 +338,10 @@ export type LoopOutputPreviewView =
   | { ok: true; loopId: string; pathLabel: string; content: string; sizeBytes: number; truncated: boolean }
   | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
 
+export type LoopTaskResultView =
+  | { ok: true; loopId: string; runId: string; content: string; taskId?: string }
+  | { ok: false; loopId: string; error: string; message?: string; runId?: string; taskId?: string };
+
 export interface LoopRunView {
   id: string;
   loopId: string;

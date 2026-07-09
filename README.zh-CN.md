@@ -46,6 +46,38 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.20 补上 Loop Engineering 发布说明缺口，并让 task-completion 类型循环的结果可以直接从产品界面查看。本次发布把 root CLI 元数据、Desktop package 元数据、package locks、README 发布说明、相关项目 README 基线和 Desktop Release workflow 默认值统一到 `1.4.20` / `desktop-v1.4.20`。
+
+**v1.4.20 新特性：**
+
+- **Loop 任务结果可见**：`task_completion` 用户循环现在显示“查看结果”操作，会读取最新 loop run evidence 和 task snapshot summary。没有文件输出的 loop 不再显示无法工作的“打开输出目录”或“预览输出文件”按钮。
+- **Markdown Loop 保持文件操作**：`markdown_file` 循环继续保留打开输出目录和预览输出文件，文件型输出与回答型输出分别展示符合自身合同的操作入口。
+- **Canvas PDF 预览修复**：PDF 产物改为通过 `pdfjs-dist` 渲染到 canvas，不再依赖 sandbox iframe，修复 Canvas 面板里 PDF 预览空白的问题，同时保留本地化的加载/失败状态。
+- **移动端伴随体验细化**：mobile gateway URL 优先选择可达的内网私有地址，并跳过 loopback、link-local 和测试网段；artifact preview 可以携带 filename 和 base64 payload metadata，供 iOS 伴随端使用。
+- **发布文档对齐**：英文和中文 README 现在补齐 v1.4.18、v1.4.19、v1.4.20，changelog 不再停在 v1.4.17，能对应即将打 tag 的源码树。
+- **发布验证目标**：v1.4.20 按 loop-result IPC 测试、loop contract/allowlist/evaluator/project-claim 测试、renderer loop UI 测试、desktop typecheck/build gate，以及 `desktop-v1.4.20` tag 触发的 Desktop Release workflow 准备发布。
+
+Xiaok Desktop v1.4.19 把 loop 系统从临时成功判断推进为显式合同。用户 loop template 现在持久化 `loop_contract_v1`，只有弱成功条件的后台 task-completion loop 会被阻断而不是静默成功，loop run 的成功/阻断/失败也统一进入同一条评估收口。
+
+**v1.4.19 新特性：**
+
+- **LoopContract v1**：用户循环现在保存 success criteria、permission mode、concurrency policy、stop policy 和 legacy compatibility metadata。历史 template 读取时会生成默认合同，template 编辑时会按当前 loop kind 和输出目标重新生成合同。
+- **强成功条件**：`markdown_file` 循环默认使用强 `file_exists` 条件；`task_completion` 循环默认使用弱 `task_completed` 条件，scheduled/background 运行必须补上强条件后才能标记成功。
+- **合同评估器与 Finalizer**：Loop 验证返回 `success`、`blocked` 或 `failed`，并带 evidence IDs 和 next-action 细节。finalizer 统一写入成功、阻断和失败状态，让 diagnostics 与 learned-constraint extraction 看到同一份状态。
+- **命令条件 Allowlist**：`command_exit_zero` 条件只能运行 allowlist 里的命令，动态参数有数量、正则和危险字符校验，cwd policy、输出流大小、超时以及 Windows 固定命令 shell 处理都有边界。
+- **项目 Claim Store**：Loop/project 协调新增 SQLite 持久化 project claim 表，支持 TTL 续租、过期 claim 替换、owner 检查和显式释放。
+
+Xiaok Desktop v1.4.18 加固 runtime 的成本可见性、MCP 韧性和 staged skill 失败回滚诊断，同时继续把 Desktop/iOS 伴随端推进为以任务为中心的操作界面。
+
+**v1.4.18 新特性：**
+
+- **模型成本估算**：runtime usage 可以从 `~/.xiaok/pricing.json`、随包 `data/pricing.json` 或 workspace `data/pricing.json` 解析模型价格，并返回带 confidence 的估算成本。
+- **MCP Timeout 与降级连接**：MCP startup、catalog、call-tool、resource timeout 可以分别配置；server 连接失败时可以降级为 disabled server，而不是让整个 runtime 崩溃。
+- **MCP Handshake 使用当前版本**：MCP client 现在运行时读取 package version，不再发送过期的硬编码版本号。
+- **Skill Companion Tools**：skill tool 可以携带 companion tools 一起注册，skill 资源按需读取能力不必塞进初始 prompt，也不会丢失工具入口。
+- **Stage 失败 Checkpoint**：staged skill 执行会在 stage 前后捕获 checkpoint；如果失败且修改了文件，会给出 `xiaok revert <checkpointId>` 提示。
+- **Desktop/iOS 伴随端推进**：iOS 客户端重组为任务优先界面，包含 project、artifact、approval、knowledge、automation、settings 等区段，并继续复用 desktop snapshot 同步。
+
 Xiaok Desktop v1.4.17 加固产物持久化和发布一致性：临时 A2UI 产物默认写入用户级小 K 数据目录，不再污染源码 checkout；项目 HTML/Markdown 产物编辑通过受保护的项目产物路由保存；Desktop Release workflow 默认 tag 已更新为 `desktop-v1.4.17`。
 
 **v1.4.17 新特性：**

@@ -183,6 +183,30 @@ final class XiaokMobileModelTests: XCTestCase {
         XCTAssertNil(defaults.string(forKey: XiaokPreferenceKeys.accessToken))
     }
 
+    @MainActor
+    func testStoreIgnoresNonDirectPairingGatewayWhenRelayCredentialsArePresent() async {
+        let defaults = UserDefaults(suiteName: "XiaokMobileModelTests-\(UUID().uuidString)")!
+        let store = XiaokAppStore(
+            userDefaults: defaults,
+            desktopDiscovery: StaticDesktopDiscovery(urls: []),
+            relayClient: nil,
+            makeClient: { url in
+                DesktopResolvingMobileGatewayClient(baseURL: url)
+            }
+        )
+        let deepLink = URL(string: "xiaok://mobile/pair?gateway=http%3A%2F%2F100.68.162.5%3A47891&desktopId=desktop-good&token=token-test&relayUrl=wss%3A%2F%2Frelay.example%2Fws&relayJWT=relay-jwt-paired&relayRoomSecret=room-secret-paired")!
+
+        XCTAssertTrue(store.applyPairingURL(deepLink))
+
+        XCTAssertEqual(store.gatewayURLString, "")
+        XCTAssertNil(defaults.string(forKey: XiaokPreferenceKeys.gatewayURL))
+        XCTAssertEqual(defaults.string(forKey: XiaokPreferenceKeys.desktopId), "desktop-good")
+        XCTAssertEqual(defaults.string(forKey: XiaokPreferenceKeys.accessToken), "token-test")
+        XCTAssertEqual(defaults.string(forKey: XiaokPreferenceKeys.relayURL), "wss://relay.example/ws")
+        XCTAssertEqual(defaults.string(forKey: XiaokPreferenceKeys.relayJWT), "relay-jwt-paired")
+        XCTAssertEqual(defaults.string(forKey: XiaokPreferenceKeys.relayRoomSecret), "room-secret-paired")
+    }
+
     func testSnapshotDecodesBoundedDesktopState() throws {
         let json = """
         {
@@ -453,6 +477,151 @@ final class XiaokMobileModelTests: XCTestCase {
         ])
     }
 
+    func testMessageDisplayBuilderFiltersSystemMetadataAndCollapsesToolActivity() throws {
+        let createdAt = Date(timeIntervalSince1970: 1_782_590_400)
+        let items = MobileMessageDisplayBuilder.displayItems(from: [
+            ChatMessage(
+                id: "msg-user",
+                conversationId: "conversation-1",
+                role: .user,
+                text: """
+                [SYSTEM: scheduled_task_id=task-1; timed_action_title=Daily]
+
+                Visible request
+                """,
+                createdAt: createdAt,
+                deliveryStatus: .sent
+            ),
+            ChatMessage(
+                id: "msg-system-only",
+                conversationId: "conversation-1",
+                role: .system,
+                text: "[SYSTEM: hidden=true]",
+                createdAt: createdAt.addingTimeInterval(1),
+                deliveryStatus: .sent
+            ),
+            ChatMessage(
+                id: "msg-natural-tool-text",
+                conversationId: "conversation-1",
+                role: .assistant,
+                text: "- Tool status: rendered markdown, Mermaid, and artifact cards",
+                createdAt: createdAt.addingTimeInterval(2),
+                deliveryStatus: .sent
+            ),
+            ChatMessage(
+                id: "msg-skill-complete",
+                conversationId: "conversation-1",
+                role: .assistant,
+                text: """
+                Skill 完成：swiftui-ui-patterns
+                读取 SKILL.md 成功
+                """,
+                createdAt: createdAt.addingTimeInterval(3),
+                deliveryStatus: .sent
+            ),
+            ChatMessage(
+                id: "msg-bash-complete",
+                conversationId: "conversation-1",
+                role: .assistant,
+                text: """
+                Bash 完成
+                xcodebuild test -scheme XiaokMobile
+                Exit code 0
+                """,
+                createdAt: createdAt.addingTimeInterval(4),
+                deliveryStatus: .sent
+            )
+        ])
+
+        XCTAssertEqual(items.count, 4)
+
+        guard case .chat(let userMessage) = items[0].kind else {
+            return XCTFail("Expected sanitized user chat item")
+        }
+        XCTAssertEqual(userMessage.text, "Visible request")
+
+        guard case .chat(let naturalToolText) = items[1].kind else {
+            return XCTFail("Expected natural tool-status prose to remain chat")
+        }
+        XCTAssertTrue(naturalToolText.text.contains("Tool status"))
+
+        guard case .activity(let skillActivity) = items[2].kind else {
+            return XCTFail("Expected skill completion to become an activity card")
+        }
+        XCTAssertEqual(skillActivity.kind, .skill)
+        XCTAssertEqual(skillActivity.status, .completed)
+        XCTAssertEqual(skillActivity.title, "Skill 完成：swiftui-ui-patterns")
+        XCTAssertTrue(skillActivity.detail.contains("读取 SKILL.md 成功"))
+
+        guard case .activity(let bashActivity) = items[3].kind else {
+            return XCTFail("Expected bash completion to become an activity card")
+        }
+        XCTAssertEqual(bashActivity.kind, .bash)
+        XCTAssertEqual(bashActivity.status, .completed)
+        XCTAssertEqual(bashActivity.title, "Bash 完成")
+        XCTAssertTrue(bashActivity.detail.contains("Exit code 0"))
+
+        let visibleText = items.map(\.debugText).joined(separator: "\n")
+        XCTAssertFalse(visibleText.contains("[SYSTEM:"))
+    }
+
+    @MainActor
+    func testStorePaginatesVisibleMessageItemsAfterFilteringSystemMetadata() throws {
+        let defaults = UserDefaults(suiteName: "XiaokMobileModelTests-\(UUID().uuidString)")!
+        let cachedSnapshot = MobileSnapshot(
+            desktopName: "Cached Desktop",
+            health: .online,
+            lastSyncSequence: 12,
+            runningTurn: nil,
+            messages: (1...25).map { index in
+                ChatMessage(
+                    id: "system-\(index)",
+                    conversationId: "conversation-1",
+                    role: .system,
+                    text: "[SYSTEM: hidden=\(index)]",
+                    createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                    deliveryStatus: .sent
+                )
+            } + (1...25).map { index in
+                ChatMessage(
+                    id: "visible-\(index)",
+                    conversationId: "conversation-1",
+                    role: .assistant,
+                    text: "visible message \(index)",
+                    createdAt: Date(timeIntervalSince1970: TimeInterval(index + 100)),
+                    deliveryStatus: .sent
+                )
+            },
+            conversations: [
+                ConversationSummary(
+                    id: "conversation-1",
+                    title: "Conversation 1",
+                    status: .completed,
+                    lastMessagePreview: "visible message 25",
+                    updatedAt: Date(timeIntervalSince1970: 200),
+                    messageCount: 25
+                )
+            ],
+            projects: [],
+            approvals: [],
+            loops: [],
+            artifacts: []
+        )
+        defaults.set(try JSONEncoder.xiaokMobile.encode(cachedSnapshot), forKey: XiaokPreferenceKeys.snapshotCache)
+
+        let store = XiaokAppStore(client: OfflineMobileGatewayClient(), userDefaults: defaults)
+
+        XCTAssertEqual(store.visibleMessageItems(for: "conversation-1").count, 20)
+        XCTAssertEqual(store.visibleMessageItems(for: "conversation-1").first?.debugText, "visible message 6")
+        XCTAssertTrue(store.hasMoreMessages(for: "conversation-1"))
+
+        store.showMoreMessages(for: "conversation-1")
+
+        XCTAssertEqual(store.visibleMessageItems(for: "conversation-1").count, 25)
+        XCTAssertEqual(store.visibleMessageItems(for: "conversation-1").first?.debugText, "visible message 1")
+        XCTAssertFalse(store.hasMoreMessages(for: "conversation-1"))
+    }
+
     func testMermaidFlowchartParserBuildsRenderableNodesAndEdges() throws {
         let diagram = try XCTUnwrap(MermaidDiagramParser.parse("""
         flowchart LR
@@ -488,9 +657,11 @@ final class XiaokMobileModelTests: XCTestCase {
 
         XCTAssertEqual(store.desktopName, "Xiaok Desktop")
         XCTAssertEqual(store.health, .online)
-        XCTAssertEqual(store.messages.count, 3)
-        XCTAssertEqual(store.conversations.first?.title, "Mobile ready")
-        XCTAssertEqual(store.conversations.first?.messageCount, 3)
+        XCTAssertEqual(store.messages.count, 6)
+        XCTAssertEqual(store.conversations.first?.title, "Mobile mixed demo")
+        XCTAssertEqual(store.conversations.first?.messageCount, 5)
+        XCTAssertEqual(store.visibleMessageItems(for: "mock-ready").count, 5)
+        XCTAssertTrue(store.messages.contains { $0.text.contains("```swift") && $0.text.contains("```mermaid") && $0.text.contains("🚀") })
 
         await store.sendMessage("ping")
 
@@ -511,6 +682,16 @@ final class XiaokMobileModelTests: XCTestCase {
         XCTAssertEqual(preview.artifact.name, "mobile-output.md")
         XCTAssertEqual(preview.contentType, "text/markdown")
         XCTAssertTrue(preview.text?.contains("Mock artifact preview") == true)
+
+        let htmlPreview = try await store.fetchArtifactPreview(id: "artifact-html-dashboard")
+        XCTAssertEqual(htmlPreview.artifact.name, "mobile-dashboard.html")
+        XCTAssertEqual(htmlPreview.contentType, "text/html")
+        XCTAssertTrue(htmlPreview.text?.contains("Rendered mobile dashboard") == true)
+
+        let pdfPreview = try await store.fetchArtifactPreview(id: "artifact-report")
+        XCTAssertEqual(pdfPreview.artifact.name, "report-preview.pdf")
+        XCTAssertEqual(pdfPreview.contentType, "application/pdf")
+        XCTAssertNil(pdfPreview.text)
     }
 
     @MainActor
@@ -674,6 +855,32 @@ final class XiaokMobileModelTests: XCTestCase {
 
         XCTAssertEqual(store.connectionRoute, .relay)
         XCTAssertEqual(store.gatewayURLString, "http://192.168.1.10:47891")
+        XCTAssertEqual(store.desktopName, "Relay Desktop")
+        XCTAssertEqual(store.health, .online)
+    }
+
+    @MainActor
+    func testStoreUsesRelayWhenPersistedGatewayIsNotDirectlyReachable() async {
+        let defaults = UserDefaults(suiteName: "XiaokMobileModelTests-\(UUID().uuidString)")!
+        defaults.set("token-test", forKey: XiaokPreferenceKeys.accessToken)
+        defaults.set("desktop-good", forKey: XiaokPreferenceKeys.desktopId)
+        defaults.set("http://100.68.162.5:47891", forKey: XiaokPreferenceKeys.gatewayURL)
+
+        let store = XiaokAppStore(
+            userDefaults: defaults,
+            desktopDiscovery: StaticDesktopDiscovery(urls: []),
+            relayClient: RelaySnapshotMobileGatewayClient(desktopId: "desktop-good"),
+            makeClient: { url in
+                DesktopResolvingMobileGatewayClient(baseURL: url)
+            }
+        )
+
+        XCTAssertEqual(store.gatewayURLString, "")
+        XCTAssertNil(defaults.string(forKey: XiaokPreferenceKeys.gatewayURL))
+
+        await store.loadInitialSnapshot()
+
+        XCTAssertEqual(store.connectionRoute, .relay)
         XCTAssertEqual(store.desktopName, "Relay Desktop")
         XCTAssertEqual(store.health, .online)
     }

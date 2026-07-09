@@ -64,6 +64,7 @@ import type {
   LoopOutputPreviewView,
   LoopRunView,
   LoopScheduleBindingView,
+  LoopTaskResultView,
   RunLoopNowResultView,
   UserLoopTemplateView,
 } from '../api/types';
@@ -2081,7 +2082,9 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [loopDiagnosticsError, setLoopDiagnosticsError] = useState('');
   const [runningLoopId, setRunningLoopId] = useState<string | null>(null);
   const [loopOutputPreviews, setLoopOutputPreviews] = useState<Record<string, LoopOutputPreviewView | undefined>>({});
+  const [loopTaskResults, setLoopTaskResults] = useState<Record<string, LoopTaskResultView | undefined>>({});
   const [previewingLoopId, setPreviewingLoopId] = useState<string | null>(null);
+  const [viewingTaskResultLoopId, setViewingTaskResultLoopId] = useState<string | null>(null);
   const [showCreateLoop, setShowCreateLoop] = useState(false);
   const [creatingLoop, setCreatingLoop] = useState(false);
   const [createLoopError, setCreateLoopError] = useState('');
@@ -2195,6 +2198,21 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopOutputPreviewUnavailable);
     } finally {
       setPreviewingLoopId(null);
+    }
+  };
+
+  const handleViewLoopTaskResult = async (loopId: string) => {
+    setViewingTaskResultLoopId(loopId);
+    try {
+      const result = await api.readLoopTaskResult(loopId);
+      setLoopTaskResults(prev => ({ ...prev, [loopId]: result }));
+      if (!result.ok) {
+        showToast(result.message || t.desktopSettings.userLoopTaskResultUnavailable);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopTaskResultUnavailable);
+    } finally {
+      setViewingTaskResultLoopId(null);
     }
   };
 
@@ -2492,7 +2510,10 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                 const latestRunFailed = latestRun && (latestRun.status === 'failed' || latestRun.status === 'blocked');
                 const isRunning = runningLoopId === template.loopId;
                 const isPreviewing = previewingLoopId === template.loopId;
+                const isViewingTaskResult = viewingTaskResultLoopId === template.loopId;
+                const isMarkdownLoop = template.kind === 'markdown_file';
                 const outputPreview = loopOutputPreviews[template.loopId];
+                const taskResult = loopTaskResults[template.loopId];
                 const scheduleBinding = loopScheduleBindings[template.loopId];
                 const runResult = loopRunResults[template.loopId];
                 const isAlreadyRunning = !!definition?.activeRunId || runResult?.status === 'already_running';
@@ -2510,14 +2531,18 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                           <div className="mt-0.5 text-xs text-[var(--c-text-secondary)]">{definition.description}</div>
                         ) : null}
                         <div className="mt-2 grid gap-1 break-all text-xs text-[var(--c-text-secondary)]">
-                          <div>
-                            <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.userLoopOutputDirectoryLabel}: </span>
-                            {template.outputDirectory}
-                          </div>
-                          <div>
-                            <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.userLoopOutputFileNameLabel}: </span>
-                            {template.outputFileName}
-                          </div>
+                          {isMarkdownLoop ? (
+                            <>
+                              <div>
+                                <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.userLoopOutputDirectoryLabel}: </span>
+                                {template.outputDirectory}
+                              </div>
+                              <div>
+                                <span className="text-[var(--c-text-tertiary)]">{t.desktopSettings.userLoopOutputFileNameLabel}: </span>
+                                {template.outputFileName}
+                              </div>
+                            </>
+                          ) : null}
                           {scheduleBinding ? (
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                               <span className="rounded-full bg-[var(--c-bg-deep)] px-2 py-0.5 text-[11px] text-[var(--c-text-secondary)]">
@@ -2568,25 +2593,40 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                       </div>
                     )}
                     <div className="mt-3 flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        aria-label={`${t.desktopSettings.userLoopOpenOutputDirectory}: ${loopTitle}`}
-                        onClick={() => void handleOpenLoopOutputDirectory(template.loopId)}
-                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
-                      >
-                        <HardDrive size={14} />
-                        {t.desktopSettings.userLoopOpenOutputDirectory}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`${t.desktopSettings.userLoopPreviewOutputFile}: ${loopTitle}`}
-                        onClick={() => void handlePreviewLoopOutput(template.loopId)}
-                        disabled={isPreviewing}
-                        className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
-                      >
-                        <Eye size={14} />
-                        {isPreviewing ? t.desktopSettings.loopDiagnosticsRunning : t.desktopSettings.userLoopPreviewOutputFile}
-                      </button>
+                      {isMarkdownLoop ? (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`${t.desktopSettings.userLoopOpenOutputDirectory}: ${loopTitle}`}
+                            onClick={() => void handleOpenLoopOutputDirectory(template.loopId)}
+                            className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                          >
+                            <HardDrive size={14} />
+                            {t.desktopSettings.userLoopOpenOutputDirectory}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`${t.desktopSettings.userLoopPreviewOutputFile}: ${loopTitle}`}
+                            onClick={() => void handlePreviewLoopOutput(template.loopId)}
+                            disabled={isPreviewing}
+                            className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                          >
+                            <Eye size={14} />
+                            {isPreviewing ? t.desktopSettings.loopDiagnosticsRunning : t.desktopSettings.userLoopPreviewOutputFile}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          aria-label={`${t.desktopSettings.userLoopViewTaskResult}: ${loopTitle}`}
+                          onClick={() => void handleViewLoopTaskResult(template.loopId)}
+                          disabled={isViewingTaskResult}
+                          className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}
+                        >
+                          <Eye size={14} />
+                          {isViewingTaskResult ? t.desktopSettings.loopDiagnosticsRunning : t.desktopSettings.userLoopViewTaskResult}
+                        </button>
+                      )}
                       <button
                         type="button"
                         aria-label={`run-loop-${template.loopId}`}
@@ -2632,6 +2672,26 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         ) : (
                           <div className="text-xs text-[var(--c-text-secondary)]">
                             {outputPreview.message || t.desktopSettings.userLoopOutputPreviewUnavailable}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    {taskResult ? (
+                      <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
+                        <div className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">
+                          {t.desktopSettings.userLoopTaskResult}
+                        </div>
+                        {taskResult.ok ? (
+                          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-3 text-xs leading-5 text-[var(--c-text-primary)]">
+                            {taskResult.content.split(/\r?\n/).map((line, index) => (
+                              <span key={`${template.loopId}-task-result-${index}`} className="block min-h-[1.25em]">
+                                {line || ' '}
+                              </span>
+                            ))}
+                          </pre>
+                        ) : (
+                          <div className="text-xs text-[var(--c-text-secondary)]">
+                            {taskResult.message || t.desktopSettings.userLoopTaskResultUnavailable}
                           </div>
                         )}
                       </div>

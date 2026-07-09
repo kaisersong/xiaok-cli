@@ -42,10 +42,14 @@ describe('loop executor', () => {
         nextActionKind: 'none',
       }),
     };
+    const finishSuccess = vi.fn(input =>
+      store.finishLoopRunSuccess(input.runId, input.evidenceIds, input.now, input.summary)
+    );
     const runner = createLoopRunner({
       loopStore: store,
       evidenceStore,
       scanner,
+      finalizer: { finishSuccess },
       now: () => now,
       staleAfterMs: 60_000,
     });
@@ -53,6 +57,12 @@ describe('loop executor', () => {
     const result = await runner.runLoopNow(ARTIFACT_LOOP_ID);
 
     expect(result).toMatchObject({ status: 'success' });
+    expect(finishSuccess).toHaveBeenCalledWith({
+      runId: expect.any(String),
+      evidenceIds: [expect.any(String)],
+      now: 2_000,
+      summary: '0 anomalies found',
+    });
     expect(scanner.scan).toHaveBeenCalledWith({ loopRunId: expect.any(String), now: 2_000 });
     const runs = store.listLoopRuns(ARTIFACT_LOOP_ID, 10);
     expect(runs).toHaveLength(1);

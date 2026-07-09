@@ -252,6 +252,20 @@ describe('mobile gateway', () => {
     expect(urls).toEqual(['http://192.168.1.23:47891']);
   });
 
+  it('does not advertise tunnel, CGNAT, or benchmark addresses as phone gateways', () => {
+    const urls = buildMobileGatewayReachableUrls({
+      port: 47891,
+      interfaces: {
+        en0: [{ address: '192.168.31.84', family: 'IPv4', internal: false }],
+        utun6: [{ address: '100.68.162.5', family: 'IPv4', internal: false }],
+        utun1024: [{ address: '198.18.0.0', family: 'IPv4', internal: false }],
+        bridge100: [{ address: '169.254.12.3', family: 'IPv4', internal: false }],
+      },
+    });
+
+    expect(urls).toEqual(['http://192.168.31.84:47891']);
+  });
+
   it('advertises Bonjour on macOS without leaking the desktop id', () => {
     const started: string[][] = [];
     const killed: string[] = [];
@@ -363,5 +377,37 @@ describe('mobile gateway', () => {
     expect(pairing.deepLink).toContain('relayJWT=relay-jwt-test');
     expect(pairing.deepLink).toContain('relayRoomSecret=room-secret-test');
     expect(pairing.deepLink).not.toContain('127.0.0.1');
+  });
+
+  it('does not put non-direct tunnel addresses into the mobile pairing gateway', () => {
+    const pairing = buildMobilePairingPayload({
+      desktopName: 'Test Desktop',
+      identity: {
+        desktopId: 'desktop-test',
+        mobileAccessToken: 'token-test',
+        mobileRelayRoomSecret: 'room-secret-test',
+        createdAt: '2026-06-28T00:00:00.000Z',
+      },
+      gatewayStatus: {
+        running: true,
+        host: '0.0.0.0',
+        port: 47891,
+        baseURL: 'http://127.0.0.1:47891',
+        reachableURLs: [
+          'http://100.68.162.5:47891',
+          'http://192.168.31.84:47891',
+          'http://198.18.0.0:47891',
+        ],
+      },
+      relayUrl: 'wss://relay.example/ws',
+      relayJwt: 'relay-jwt-test',
+    });
+
+    expect(pairing.gatewayURL).toBe('http://192.168.31.84:47891');
+    expect(pairing.reachableURLs).toEqual(['http://192.168.31.84:47891']);
+    expect(pairing.deepLink).toContain('gateway=http%3A%2F%2F192.168.31.84%3A47891');
+    expect(pairing.deepLink).not.toContain('100.68.162.5');
+    expect(pairing.deepLink).not.toContain('198.18.0.0');
+    expect(pairing.deepLink).toContain('relayUrl=wss%3A%2F%2Frelay.example%2Fws');
   });
 });

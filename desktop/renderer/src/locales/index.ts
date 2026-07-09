@@ -1177,6 +1177,9 @@ export interface LocaleStrings {
     userLoopOutputPath: string;
     userLoopOpenOutputDirectory: string;
     userLoopPreviewOutputFile: string;
+    userLoopViewTaskResult: string;
+    userLoopTaskResult: string;
+    userLoopTaskResultUnavailable: string;
     userLoopOutputPreview: string;
     userLoopOutputPreviewUnavailable: string;
     userLoopScheduleSingle: string;
@@ -2629,6 +2632,11 @@ export interface LocaleStrings {
   canvasPreviewOpenSystem: string;
   canvasPreviewDownload: string;
   canvasPreviewRefresh: string;
+  canvasPreviewPdfLabel: (fileName: string) => string;
+  canvasPreviewPdfRendering: string;
+  canvasPreviewPdfFailed: string;
+  canvasPreviewPdfLoading: string;
+  canvasPreviewUnavailable: string;
 
   // canvas panel
   canvasPanelCollapseCanvas: string;

@@ -1,0 +1,33 @@
+[
+  {
+    "model": "claude-sonnet-4-20250514",
+    "inputPer1M": 3,
+    "outputPer1M": 15,
+    "cacheCreationPer1M": 3.75,
+    "cacheReadPer1M": 0.3
+  },
+  {
+    "model": "claude-opus-4-20250514",
+    "inputPer1M": 15,
+    "outputPer1M": 75,
+    "cacheCreationPer1M": 18.75,
+    "cacheReadPer1M": 1.5
+  },
+  {
+    "model": "gpt-4o-mini",
+    "inputPer1M": 0.15,
+    "outputPer1M": 0.6,
+    "cacheReadPer1M": 0.075
+  },
+  {
+    "model": "gpt-4o-2024-08-06",
+    "inputPer1M": 2.5,
+    "outputPer1M": 10,
+    "cacheReadPer1M": 1.25
+  },
+  {
+    "model": "gpt-4",
+    "inputPer1M": 30,
+    "outputPer1M": 60
+  }
+]

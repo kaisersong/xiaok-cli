@@ -3,6 +3,17 @@ import { accessSync, constants as fsConstants } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { CompletionEvidenceStore } from './completion-evidence-store.js';
 import type { CompletionOwnerKind } from './completion-evidence-types.js';
+import {
+  runAllowedLoopCommandCriterion,
+  type LoopCommandAllowlist,
+} from './loop-command-allowlist.js';
+import {
+  evaluateLoopContract,
+  type LoopEvaluation,
+  type LoopVerifierRegistry,
+} from './loop-evaluator.js';
+import { createLoopFinalizer, type LoopFinalizer } from './loop-finalizer.js';
+import { isWeakOnlyBackgroundContract } from './loop-contract.js';
 import type { LoopLLMPort } from './loop-llm-port.js';
 import { extractViaLLM, extractViaRule } from './loop-llm-port.js';
 import { LoopStore } from './loop-store.js';
@@ -25,6 +36,9 @@ export interface CreateUserLoopTemplateRunnerOptions {
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   taskPort: UserLoopTaskPort;
+  finalizer?: LoopFinalizer;
+  verifierRegistry?: LoopVerifierRegistry;
+  commandAllowlist?: LoopCommandAllowlist;
   llmPort?: LoopLLMPort;
   onConstraintAdded?: (constraint: LearnedConstraint) => void;
   now?: () => number;
@@ -85,6 +99,7 @@ export function runPreflight(template: UserLoopTemplate): { ok: true } | { ok: f
 
 export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunnerOptions): UserLoopTemplateRunner {
   const now = options.now ?? (() => Date.now());
+  const finalizer = options.finalizer ?? createLoopFinalizer(options.loopStore);
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const maxRunMs = options.maxRunMs ?? DEFAULT_MAX_RUN_MS;
   const sleep = options.sleep ?? defaultSleep;
@@ -217,35 +232,85 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       }
     }
 
-    const fileCheck = verifyMarkdownFile(outputPath);
-    if (!fileCheck.ok) {
-      const message = `Missing markdown file artifact: ${outputPath}`;
-      const stageEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), message, {
+    const evaluation = await evaluateLoopContract({
+      runId: input.runId,
+      contract: template.contract,
+      registry: {
+        file_exists: async () => {
+          const fileCheck = verifyMarkdownFile(outputPath);
+          if (!fileCheck.ok) {
+            return {
+              status: 'blocked',
+              nextActionKind: 'missing_file_artifact',
+              nextActionSummary: `Missing markdown file artifact: ${outputPath}`,
+            };
+          }
+          return {
+            status: 'passed',
+            summary: `Markdown file artifact verified: ${outputPath}`,
+          };
+        },
+        ...(options.commandAllowlist ? {
+          command_exit_zero: async ({ criterion }) => runAllowedLoopCommandCriterion({
+            allowlist: options.commandAllowlist!,
+            criterion,
+            workspaceRoot: outputTarget.outputDirectory,
+            outputDirectory: outputTarget.outputDirectory,
+          }),
+        } satisfies LoopVerifierRegistry : {}),
+        ...(options.verifierRegistry ?? {}),
+      },
+      evidenceBundle: {
         outputPath,
-        reason: fileCheck.reason,
-      });
-      options.loopStore.finishLoopStageBlocked(verifyStage.id, stageEvidenceIds, message, timestamp(), {
+        outputDirectory: outputTarget.outputDirectory,
+        outputFileName: template.outputFileName,
+        taskId,
+        snapshot,
+      },
+    });
+
+    if (evaluation.status === 'blocked') {
+      const stageEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), evaluation.nextActionSummary, {
         outputPath,
-        reason: fileCheck.reason,
+        nextActionKind: evaluation.nextActionKind,
       });
-      const runEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), message, {
+      options.loopStore.finishLoopStageBlocked(verifyStage.id, stageEvidenceIds, evaluation.nextActionSummary, timestamp(), {
         outputPath,
-        reason: fileCheck.reason,
+        nextActionKind: evaluation.nextActionKind,
       });
-      const blocked = options.loopStore.finishLoopRunBlocked(
-        input.runId,
-        runEvidenceIds,
-        'missing_file_artifact',
-        message,
-        timestamp()
-      );
+      const runEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), evaluation.nextActionSummary, {
+        outputPath,
+        nextActionKind: evaluation.nextActionKind,
+      });
+      const blocked = finalizeEvaluation(finalizer, options.loopStore, {
+        runId: input.runId,
+        evaluation: {
+          ...evaluation,
+          evidenceIds: runEvidenceIds,
+        },
+        now: timestamp(),
+      });
       const result = resultFromRun('blocked', blocked, input.runId, options.loopStore);
       recordDuration(options.loopStore, input.runId, runStartMs, now());
-      // Verify failed: increment ineffective for injected constraints and trigger extraction
       if (injectedConstraintIds.length > 0) {
         options.loopStore.incrementConsecutiveIneffective(injectedConstraintIds);
       }
-      triggerAsyncExtraction(options, input, template, 'missing_file_artifact', fileCheck.reason, snapshot);
+      triggerAsyncExtraction(options, input, template, evaluation.nextActionKind, evaluation.nextActionSummary, snapshot);
+      return result;
+    }
+
+    if (evaluation.status === 'failed') {
+      options.loopStore.finishLoopStageFailure(verifyStage.id, evaluation.failureKind, evaluation.message, evaluation.evidenceIds, timestamp(), {
+        outputPath,
+      });
+      const failed = finalizeEvaluation(finalizer, options.loopStore, {
+        runId: input.runId,
+        evaluation,
+        now: timestamp(),
+      });
+      const result = resultFromRun('failed', failed, input.runId, options.loopStore);
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      triggerAsyncExtraction(options, input, template, evaluation.failureKind, evaluation.message, snapshot);
       return result;
     }
 
@@ -258,7 +323,15 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     const stageEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), summary, outputPath);
     options.loopStore.finishLoopStageSuccess(verifyStage.id, stageEvidenceIds, timestamp(), summary, { outputPath });
     const runEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), summary, outputPath);
-    const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
+    const success = finalizeEvaluation(finalizer, options.loopStore, {
+      runId: input.runId,
+      evaluation: {
+        ...evaluation,
+        evidenceIds: runEvidenceIds,
+        summary,
+      },
+      now: timestamp(),
+    });
     const result = resultFromRun('success', success, input.runId, options.loopStore);
     recordDuration(options.loopStore, input.runId, runStartMs, now());
     return result;
@@ -359,7 +432,37 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       options.evidenceStore, 'loop_run', input.runId, timestamp(), summary,
       { taskId, promptPreview: template.prompt.slice(0, 100) }
     );
-    const success = options.loopStore.finishLoopRunSuccess(input.runId, runEvidenceIds, timestamp(), summary);
+    if (input.trigger.kind === 'scheduled' && isWeakOnlyBackgroundContract(template.contract)) {
+      const nextActionSummary = 'Add a strong success criterion before scheduled task_completion loops can be marked successful.';
+      const blockedEvidenceIds = recordBlockedEvidence(
+        options.evidenceStore,
+        'loop_run',
+        input.runId,
+        timestamp(),
+        nextActionSummary,
+        {
+          reason: 'weak_only_background_contract',
+          loopId: input.loopId,
+          taskId,
+        }
+      );
+      const blocked = options.loopStore.finishLoopRunBlocked(
+        input.runId,
+        [...runEvidenceIds, ...blockedEvidenceIds],
+        'add_success_criterion',
+        nextActionSummary,
+        timestamp()
+      );
+      const result = resultFromRun('blocked', blocked, input.runId, options.loopStore);
+      recordDuration(options.loopStore, input.runId, runStartMs, now());
+      return result;
+    }
+    const success = finalizer.finishSuccess({
+      runId: input.runId,
+      evidenceIds: runEvidenceIds,
+      now: timestamp(),
+      summary,
+    });
     const result = resultFromRun('success', success, input.runId, options.loopStore);
     recordDuration(options.loopStore, input.runId, runStartMs, now());
     return result;
@@ -513,19 +616,19 @@ function recordTaskCompletionEvidence(
     ownerId,
     expectedKinds: ['answer'],
     source: 'loop_stage_contract',
-    confidence: 'explicit',
-    metadata: { loopContract: true, ...metadata },
+    confidence: 'legacy',
+    metadata: { loopContract: true, weakSuccess: true, ...metadata },
     now,
   });
-  evidenceStore.insertEvidence({
+  const evidence = evidenceStore.insertEvidence({
     ownerKind,
     ownerId,
     kind: 'answer',
     summary,
-    metadata: { ...metadata, responseId: metadata.taskId },
+    metadata: { ...metadata, responseId: metadata.taskId, weakSuccess: true },
     now,
   });
-  return evidenceStore.completeOwnerWithEvidence({ ownerKind, ownerId, now }).evidenceIds;
+  return [evidence.id];
 }
 
 function recordFileArtifactEvidence(
@@ -620,6 +723,40 @@ function resultFromRun(
     throw new Error('User loop run did not persist a terminal state.');
   }
   return { status, run: persisted } as UserLoopTemplateRunResult;
+}
+
+function finalizeEvaluation(
+  finalizer: LoopFinalizer,
+  loopStore: LoopStore,
+  input: { runId: string; evaluation: LoopEvaluation; now: number }
+): LoopRun | undefined {
+  if (finalizer.finalizeEvaluation) {
+    return finalizer.finalizeEvaluation(input);
+  }
+  if (input.evaluation.status === 'success') {
+    return finalizer.finishSuccess({
+      runId: input.runId,
+      evidenceIds: input.evaluation.evidenceIds,
+      now: input.now,
+      summary: input.evaluation.summary,
+    });
+  }
+  if (input.evaluation.status === 'blocked') {
+    return loopStore.finishLoopRunBlocked(
+      input.runId,
+      input.evaluation.evidenceIds,
+      input.evaluation.nextActionKind,
+      input.evaluation.nextActionSummary,
+      input.now
+    );
+  }
+  return loopStore.finishLoopRunFailure(
+    input.runId,
+    input.evaluation.failureKind,
+    input.evaluation.message,
+    input.evaluation.evidenceIds,
+    input.now
+  );
 }
 
 function defaultSleep(ms: number): Promise<void> {

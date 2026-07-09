@@ -1,3 +1,5 @@
+import type { LoopContractV1 } from './loop-contract.js';
+
 export const BUILT_IN_LOOP_IDS = {
   ARTIFACT_EVIDENCE_REGRESSION: 'artifact-evidence-regression',
   KSWARM_SERVICE_HEALTH: 'kswarm-service-health',
@@ -50,6 +52,7 @@ export interface UserLoopTemplate {
   scheduleEnabled: boolean;
   scheduleTrigger?: Record<string, unknown>;
   autoRunApproved: boolean;
+  contract: LoopContractV1;
   createdAt: number;
   updatedAt: number;
 }

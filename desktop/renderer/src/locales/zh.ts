@@ -1237,6 +1237,9 @@ export const zh: LocaleStrings = {
     userLoopOutputPath: "输出文件",
     userLoopOpenOutputDirectory: "打开输出目录",
     userLoopPreviewOutputFile: "预览输出文件",
+    userLoopViewTaskResult: "查看结果",
+    userLoopTaskResult: "运行结果",
+    userLoopTaskResultUnavailable: "运行结果还不能查看。",
     userLoopOutputPreview: "输出预览",
     userLoopOutputPreviewUnavailable: "输出文件还不能预览。",
     userLoopScheduleSingle: "1 个计划",
@@ -2694,6 +2697,11 @@ export const zh: LocaleStrings = {
   canvasPreviewOpenSystem: "用系统默认应用打开",
   canvasPreviewDownload: "下载到本地",
   canvasPreviewRefresh: "刷新预览",
+  canvasPreviewPdfLabel: (fileName: string) => `PDF 预览：${fileName}`,
+  canvasPreviewPdfRendering: "正在渲染 PDF 预览...",
+  canvasPreviewPdfFailed: "PDF 预览失败。请使用下载或系统应用打开。",
+  canvasPreviewPdfLoading: "PDF 预览加载中...",
+  canvasPreviewUnavailable: "此文件类型不可预览",
 
   // canvas panel
   canvasPanelCollapseCanvas: "收起 Canvas",

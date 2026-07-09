@@ -12,7 +12,7 @@
 import WebSocket from 'ws';
 
 const CDP_URL = 'http://127.0.0.1:9222/json';
-const PROMPT = '根据claude本月的更新生成报告和演示文档';
+const PROMPT = '基于番茄工作法，生成一份简短 Markdown 报告和一个 HTML 演示文档。不需要联网，两个产物都要写成文件。';
 const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes max
 const POLL_INTERVAL_MS = 5000;
 

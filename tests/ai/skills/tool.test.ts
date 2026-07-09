@@ -5,6 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { createSkillTool } from '../../../src/ai/skills/tool.js';
 import { createSkillCatalog, loadSkills } from '../../../src/ai/skills/loader.js';
+import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 
 describe('skillTool', () => {
   let dir: string;
@@ -117,6 +118,17 @@ strict: true
     const tool = createSkillTool(skills);
     expect(tool.definition.name).toBe('skill');
     expect(tool.definition.inputSchema).toHaveProperty('properties.name');
+  });
+
+  it('registers the asset fetch tool when the skill tool tells agents to use it', async () => {
+    const skills = await loadSkills(dir, dir, { builtinRoots: [] });
+    const tool = createSkillTool(skills);
+    const tools = buildToolList(tool);
+    const registry = new ToolRegistry({}, [tool]);
+
+    expect(tool.definition.description).toContain('skillFetchAssets');
+    expect(tools.map(t => t.definition.name)).toContain('skillFetchAssets');
+    expect(registry.getToolDefinitions().map(t => t.name)).toContain('skillFetchAssets');
   });
 
   it('reads a newly installed skill after the catalog reloads', async () => {

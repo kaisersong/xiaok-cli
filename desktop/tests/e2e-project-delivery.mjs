@@ -19,8 +19,8 @@
  * Prerequisites:
  * - Packaged app installed to /Applications/xiaok.app (NOT dev electron),
  *   launched with --remote-debugging-port=9222.
- * - KSwarm service reachable on http://127.0.0.1:4400 with at least one
- *   runtime-backed agent that can act as PO.
+ * - KSwarm service reachable on http://127.0.0.1:4400 with desktop-hosted
+ *   xiaok-po and xiaok-worker agents registered through the running app.
  * - A valid model/API key configured in the app.
  *
  * Usage: node desktop/tests/e2e-project-delivery.mjs
@@ -35,9 +35,11 @@ const CDP_URL = process.env.CDP_URL || 'http://127.0.0.1:9222/json';
 const KSWARM_BASE = process.env.KSWARM_BASE || 'http://127.0.0.1:4400';
 
 // A small, self-contained goal that should yield at least one real artifact.
+// Keep this offline-friendly. "Latest/2026/current" topics trigger external
+// source evidence contracts and make this smoke test depend on live research.
 const PROJECT_NAME = `E2E-项目交付复验-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}`;
-const GOAL = '用一页 Markdown 总结 2026 年 AI 编程助手的三个关键趋势，并给出简短结论。';
-const REQUIREMENTS = '输出单个 Markdown 文件即可，包含标题、三个趋势小节和一段结论。';
+const GOAL = '用一页 Markdown 总结番茄工作法的三个实践要点，并给出简短结论。';
+const REQUIREMENTS = '输出单个 Markdown 文件即可，包含标题、三个要点小节和一段结论；不需要联网或外部来源。';
 
 const TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes: planning + dispatch + execution + review + deliver
 const POLL_INTERVAL_MS = 5000;
@@ -95,9 +97,22 @@ async function kswarmJson(path, init) {
   return res.json();
 }
 
-async function pickPoAgent() {
+async function pickProjectAgents() {
   const data = await kswarmJson('/agents');
   const agents = Array.isArray(data) ? data : data.agents || data.items || [];
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  const isHostedDesktopAgent = (agent) => (
+    agent
+    && (agent.runtimeSource === 'desktop-agent-runtime'
+      || agent.execution?.mode === 'hosted'
+      || agent.brokerOnline === true)
+  );
+  const poSeed = byId.get('xiaok-po');
+  const workerSeed = byId.get('xiaok-worker');
+  if (isHostedDesktopAgent(poSeed) && isHostedDesktopAgent(workerSeed)) {
+    return { poAgent: 'xiaok-po', workerAgent: 'xiaok-worker' };
+  }
+
   // Prefer an explicit project_owner that KSwarm can actually dispatch to.
   // runtimeHealth can remain "healthy" for CLI agents whose current status is
   // offline, and dispatch will reject those with waiting_for_capable_agent.
@@ -118,16 +133,20 @@ async function pickPoAgent() {
   const candidates = agents
     .filter((a) => Array.isArray(a.roles) && a.roles.includes('project_owner') && isUsable(a))
     .sort((a, b) => score(b) - score(a));
-  if (candidates[0]) return candidates[0].id;
+  const fallbackPo = candidates[0]?.id;
+  if (fallbackPo) {
+    const worker = agents.find((a) => a.id !== fallbackPo && Array.isArray(a.roles) && a.roles.includes('worker') && isUsable(a));
+    if (worker) return { poAgent: fallbackPo, workerAgent: worker.id };
+  }
 
   const roleless = agents.find((a) => (!a.roles || a.roles.length === 0) && isUsable(a));
-  if (roleless) return roleless.id;
-  throw new Error('No usable agent found to act as PO');
+  if (roleless) return { poAgent: roleless.id, workerAgent: roleless.id };
+  throw new Error('No usable agent pair found for project E2E');
 }
 
 // ─── UI-path project creation (via renderer over CDP) ──────────────
 
-async function createProjectViaUiPath(ws, { name, goal, requirements, poAgent }) {
+async function createProjectViaUiPath(ws, { name, goal, requirements, poAgent, workerAgent }) {
   // Reproduce useKSwarmClient.createProject:
   //   1. POST /projects with autoStartPlanning:false (server returns {ok, project, ...})
   //   2. unwrap response.project, require project.id
@@ -144,7 +163,7 @@ async function createProjectViaUiPath(ws, { name, goal, requirements, poAgent })
           goal: ${JSON.stringify(goal)},
           requirements: ${JSON.stringify(requirements)},
           poAgent: ${JSON.stringify(poAgent)},
-          members: [${JSON.stringify(poAgent)}],
+          members: [${JSON.stringify(workerAgent)}],
           enableSummary: true,
           autoStartPlanning: false,
         }),
@@ -165,7 +184,7 @@ async function createProjectViaUiPath(ws, { name, goal, requirements, poAgent })
         requirements: ${JSON.stringify(requirements)},
         planningGuidance: '',
         poAgent: ${JSON.stringify(poAgent)},
-        members: [${JSON.stringify(poAgent)}],
+        members: [${JSON.stringify(workerAgent)}],
       });
       return JSON.stringify({ ok: !!(enqueue && enqueue.ok), stage: 'enqueue', projectId: project.id, enqueue });
     })()
@@ -209,9 +228,10 @@ async function verifyDelivery(projectId) {
 // ─── Main ─────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('[e2e-project] Selecting a PO agent...');
-  const poAgent = await pickPoAgent();
+  console.log('[e2e-project] Selecting project agents...');
+  const { poAgent, workerAgent } = await pickProjectAgents();
   console.log(`[e2e-project] PO agent: ${poAgent}`);
+  console.log(`[e2e-project] Worker agent: ${workerAgent}`);
 
   console.log('[e2e-project] Connecting to renderer over CDP...');
   const wsUrl = await getRendererWsUrl();
@@ -229,6 +249,7 @@ async function main() {
     goal: GOAL,
     requirements: REQUIREMENTS,
     poAgent,
+    workerAgent,
   });
   ws.close();
 

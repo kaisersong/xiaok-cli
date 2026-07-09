@@ -149,4 +149,26 @@ describe('ChatInput clipboard attachments', () => {
     expect(pasteEvent.defaultPrevented).toBe(true);
     expect(input).toHaveValue('');
   });
+
+  it('lets native paste continue during IME composition', async () => {
+    const readClipboardFilePaths = vi.fn().mockResolvedValue(['/tmp/composing.png']);
+    const readClipboardImage = vi.fn().mockResolvedValue('/tmp/composing-screenshot.png');
+    installClipboardApi({ readClipboardFilePaths, readClipboardImage });
+
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
+    const input = screen.getByRole('textbox');
+
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: 'v', metaKey: true });
+    const pasteEvent = pasteClipboard(input, {
+      items: [{ kind: 'file', type: 'image/png' }],
+    });
+
+    expect(pasteEvent.defaultPrevented).toBe(false);
+    await new Promise(r => setTimeout(r, 20));
+    expect(readClipboardFilePaths).not.toHaveBeenCalled();
+    expect(readClipboardImage).not.toHaveBeenCalled();
+    expect(screen.queryByAltText('composing.png')).not.toBeInTheDocument();
+    expect(screen.queryByAltText('composing-screenshot.png')).not.toBeInTheDocument();
+  });
 });

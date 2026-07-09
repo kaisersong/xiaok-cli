@@ -49,7 +49,9 @@ export function buildToolList(
     createRenderUiTool(workspace),
     ...extraTools,
   ];
-  if (skillTool) tools.push(skillTool);
+  if (skillTool) {
+    tools.push(skillTool, ...(skillTool.companionTools ?? []));
+  }
   return tools;
 }
 
@@ -123,6 +125,11 @@ export class ToolRegistry {
       inputSchema: tool.definition.inputSchema,
       execute: async (input) => tool.execute(input),
     });
+    for (const companion of tool.companionTools ?? []) {
+      if (!this.tools.has(companion.definition.name)) {
+        this.registerTool(companion);
+      }
+    }
   }
 
   registerDeferredTool(definition: ToolDefinition): void {

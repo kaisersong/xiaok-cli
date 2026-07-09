@@ -1,8 +1,9 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { _electron as electron } from 'playwright';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Artifact Live Editing E2E Tests
@@ -18,7 +19,9 @@ import { tmpdir } from 'node:os';
  * - Fixtures in tests/fixtures/artifacts/
  */
 
-const FIXTURES_DIR = join(__dirname, '..', 'fixtures', 'artifacts');
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const DESKTOP_ROOT = join(TEST_DIR, '..', '..');
+const FIXTURES_DIR = join(TEST_DIR, '..', 'fixtures', 'artifacts');
 
 // Helper: create a temporary copy of fixture for modification
 function tempArtifact(fixtureName: string): string {
@@ -38,7 +41,7 @@ describeE2E('Artifact Live Editing E2E', () => {
 
   test.beforeAll(async () => {
     app = await electron.launch({
-      args: [join(__dirname, '..', '..', 'dist', 'main', 'main.js')],
+      args: [join(DESKTOP_ROOT, 'dist', 'main', 'desktop', 'electron', 'main.js')],
       env: { ...process.env, NODE_ENV: 'test' },
     });
     page = await app.firstWindow();
@@ -51,20 +54,15 @@ describeE2E('Artifact Live Editing E2E', () => {
 
   // A. Core feedback loop
 
-  test('single element annotation → chat receives formatted text', async () => {
-    // This test verifies the annotation flow from click to chat input
-    // Implementation depends on app routing - testing the concept
+  test('single element annotation → artifact content is available through preload', async () => {
     const artifactPath = tempArtifact('simple-report.html');
 
-    // Open artifact (via IPC or navigation)
-    await page.evaluate(async (path) => {
-      // @ts-ignore - desktop API
-      await window.xiaokDesktop?.artifactWatch(path);
+    const result = await page.evaluate(async (path) => {
+      return await window.xiaokDesktop?.readFileContent(path);
     }, artifactPath);
 
-    // Verify the artifact viewer loads
-    // Note: actual DOM interaction depends on app UI structure
-    expect(artifactPath).toContain('.html');
+    expect(result?.error).toBeUndefined();
+    expect(result?.content).toContain('Anthropic');
   });
 
   test('text selection annotation includes selected text in chat', async () => {

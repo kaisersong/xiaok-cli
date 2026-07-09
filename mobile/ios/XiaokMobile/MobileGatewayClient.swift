@@ -39,15 +39,44 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                     id: "mock-user-ready",
                     conversationId: "mock-ready",
                     role: .user,
-                    text: "prepare mobile ready summary",
+                    text: "Prepare a mixed mobile demo with text, code, Mermaid, artifacts, links, and emoji 🚀",
                     createdAt: baseDate.addingTimeInterval(-120),
+                    deliveryStatus: .sent
+                ),
+                ChatMessage(
+                    id: "mock-system-ready",
+                    conversationId: "mock-ready",
+                    role: .system,
+                    text: "[SYSTEM: scheduled_task_id=mock-ready; timed_action_title=Mobile demo]",
+                    createdAt: baseDate.addingTimeInterval(-115),
                     deliveryStatus: .sent
                 ),
                 ChatMessage(
                     id: "mock-progress-ready",
                     conversationId: "mock-ready",
                     role: .assistant,
-                    text: "## Mobile ready\n\n```mermaid\ngraph TD\nPhone[Phone app] --> Desktop[Mac desktop]\nDesktop --> Artifact[Artifact viewer]\n```",
+                    text: """
+                    ## Mobile mixed demo 🚀
+
+                    Here is a mixed response that should read like a Claude mobile transcript:
+
+                    - ✅ Text summary with inline `mobile-output.md`
+                    - 🧩 Tool status: rendered markdown, Mermaid, and artifact cards
+                    - 🔗 Open [Xiaok Desktop](https://example.com/xiaok) when you need the full workspace
+
+                    ```swift
+                    let artifacts = ["mobile-output.md", "mobile-dashboard.html", "report-preview.pdf"]
+                    print("ready: \\(artifacts.count)")
+                    ```
+
+                    ```mermaid
+                    graph TD
+                    User[User message 🚀] --> Plan[Plan mixed output]
+                    Plan --> Code[Render code block]
+                    Code --> Artifact[Attach artifact card]
+                    Artifact --> Review[Review on phone]
+                    ```
+                    """,
                     createdAt: baseDate.addingTimeInterval(-60),
                     deliveryStatus: .sent
                 ),
@@ -55,19 +84,48 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                     id: "mock-assistant-ready",
                     conversationId: "mock-ready",
                     role: .assistant,
-                    text: "mobile ready\n\nGenerated `mobile-output.md`.\n\nOpen [Xiaok Desktop](https://example.com/xiaok).",
+                    text: """
+                    Generated `mobile-output.md` with a compact handoff:
+
+                    - Emoji status: 🟢 ready, 🟡 review recommended
+                    - Code path: `mobile/ios/XiaokMobile/ContentView.swift`
+                    - Artifact: `mobile-output.md`
+                    """,
                     createdAt: baseDate,
+                    deliveryStatus: .sent
+                ),
+                ChatMessage(
+                    id: "mock-skill-complete",
+                    conversationId: "mock-ready",
+                    role: .assistant,
+                    text: """
+                    Skill 完成：swiftui-ui-patterns
+                    Loaded SwiftUI message layout references.
+                    """,
+                    createdAt: baseDate.addingTimeInterval(10),
+                    deliveryStatus: .sent
+                ),
+                ChatMessage(
+                    id: "mock-bash-complete",
+                    conversationId: "mock-ready",
+                    role: .assistant,
+                    text: """
+                    Bash 完成
+                    xcodebuild test -scheme XiaokMobile
+                    Exit code 0
+                    """,
+                    createdAt: baseDate.addingTimeInterval(20),
                     deliveryStatus: .sent
                 )
             ],
             conversations: [
                 ConversationSummary(
                     id: "mock-ready",
-                    title: "Mobile ready",
+                    title: "Mobile mixed demo",
                     status: .completed,
-                    lastMessagePreview: "mobile ready",
+                    lastMessagePreview: "Mixed text, code, Mermaid, artifacts, links, and emoji",
                     updatedAt: baseDate,
-                    messageCount: 3
+                    messageCount: 5
                 )
             ],
             projects: [
@@ -146,11 +204,23 @@ struct MockMobileGatewayClient: MobileGatewayClient {
                     sizeBytes: 38
                 ),
                 DesktopArtifactSummary(
+                    id: "artifact-html-dashboard",
+                    name: "mobile-dashboard.html",
+                    kind: .html,
+                    source: "mock-ready",
+                    status: .ready,
+                    previewAvailable: true,
+                    mimeType: "text/html",
+                    sizeBytes: 96
+                ),
+                DesktopArtifactSummary(
                     id: "artifact-report",
                     name: "report-preview.pdf",
                     kind: .pdf,
                     source: "project-gateway",
-                    status: .ready
+                    status: .ready,
+                    previewAvailable: true,
+                    mimeType: "application/pdf"
                 ),
                 DesktopArtifactSummary(
                     id: "artifact-gateway-runbook",
@@ -215,10 +285,34 @@ struct MockMobileGatewayClient: MobileGatewayClient {
         guard let artifact = snapshot.artifacts.first(where: { $0.id == id }) else {
             throw URLError(.resourceUnavailable)
         }
+        if artifact.kind == .html {
+            return ArtifactPreview(
+                artifact: artifact,
+                contentType: artifact.mimeType ?? "text/html",
+                text: """
+                <!doctype html>
+                <html>
+                  <body>
+                    <main>
+                      <h1>Rendered mobile dashboard</h1>
+                      <p>This HTML artifact is rendered by WKWebView on iOS.</p>
+                    </main>
+                  </body>
+                </html>
+                """
+            )
+        }
+        if artifact.kind == .pdf {
+            return ArtifactPreview(
+                artifact: artifact,
+                contentType: artifact.mimeType ?? "application/pdf",
+                text: nil
+            )
+        }
         return ArtifactPreview(
             artifact: artifact,
             contentType: artifact.mimeType ?? "text/markdown",
-            text: "# Mock artifact preview\n\n- mobile ready\n- artifact preview works"
+            text: "# Mock artifact preview\n\n- mixed mobile demo 🚀\n- code block, Mermaid, and artifact preview work together"
         )
     }
 }

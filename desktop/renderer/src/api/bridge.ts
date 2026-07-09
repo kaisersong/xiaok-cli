@@ -28,6 +28,7 @@ import type {
   LoopDefinitionView,
   LoopOutputActionResultView,
   LoopOutputPreviewView,
+  LoopTaskResultView,
   LoopRunView,
   LoopScheduleBindingView,
   RunLoopNowResultView,
@@ -431,6 +432,10 @@ export const api = {
 
   async readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView> {
     return await window.xiaokDesktop.readLoopOutputPreview(loopId) as LoopOutputPreviewView;
+  },
+
+  async readLoopTaskResult(loopId: string): Promise<LoopTaskResultView> {
+    return await window.xiaokDesktop.readLoopTaskResult(loopId) as LoopTaskResultView;
   },
 
   async listLoopConstraints(loopId: string): Promise<LearnedConstraintView[]> {

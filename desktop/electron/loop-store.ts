@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createDefaultLoopContract, parseLoopContractV1 } from './loop-contract.js';
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import {
   BUILT_IN_LOOP_IDS,
@@ -50,6 +51,8 @@ interface UserLoopTemplateRow {
   schedule_enabled: number;
   schedule_trigger_json: string | null;
   auto_run_approved: number;
+  contract_json: string | null;
+  contract_schema_version: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -206,6 +209,7 @@ export class LoopStore {
     const ignoredLegacyScheduleFields = legacyScheduleFieldsIn(input);
     const outputDirectory = input.kind === 'task_completion' ? '' : input.outputDirectory;
     const outputFileName = input.kind === 'task_completion' ? '' : input.outputFileName;
+    const contract = createDefaultLoopContract(input);
     return this.transaction(() => {
       this.db.prepare(`
         insert into loop_definitions (
@@ -225,10 +229,12 @@ export class LoopStore {
         insert into user_loop_templates (
           loop_id, kind, prompt, output_directory, output_file_name,
           schedule_action_id, schedule_enabled, schedule_trigger_json, auto_run_approved,
+          contract_json, contract_schema_version,
           created_at, updated_at
         ) values (
           @loopId, @kind, @prompt, @outputDirectory, @outputFileName,
           null, 0, null, 0,
+          @contractJson, @contractSchemaVersion,
           @createdAt, @updatedAt
         )
       `).run({
@@ -237,6 +243,8 @@ export class LoopStore {
         prompt: input.prompt,
         outputDirectory,
         outputFileName,
+        contractJson: JSON.stringify(contract),
+        contractSchemaVersion: contract.schemaVersion,
         createdAt: input.now,
         updatedAt: input.now,
       });
@@ -300,6 +308,8 @@ export class LoopStore {
   updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): UserLoopTemplate | undefined {
     return this.transaction(() => {
       const now = Date.now();
+      const currentTemplate = this.getUserLoopTemplate(loopId);
+      if (!currentTemplate) return undefined;
       if (patch.title !== undefined || patch.description !== undefined) {
         const sets: string[] = ['updated_at = @now'];
         const params: Record<string, unknown> = { loopId, now };
@@ -312,6 +322,31 @@ export class LoopStore {
       if (patch.prompt !== undefined) { tplSets.push('prompt = @prompt'); tplParams.prompt = patch.prompt; }
       if (patch.outputDirectory !== undefined) { tplSets.push('output_directory = @outputDirectory'); tplParams.outputDirectory = patch.outputDirectory; }
       if (patch.outputFileName !== undefined) { tplSets.push('output_file_name = @outputFileName'); tplParams.outputFileName = patch.outputFileName; }
+      if (patch.prompt !== undefined || patch.outputDirectory !== undefined || patch.outputFileName !== undefined) {
+        const nextPrompt = patch.prompt ?? currentTemplate.prompt;
+        const nextOutputDirectory = patch.outputDirectory ?? currentTemplate.outputDirectory;
+        const nextOutputFileName = patch.outputFileName ?? currentTemplate.outputFileName;
+        const nextContract = createDefaultLoopContract(currentTemplate.kind === 'task_completion'
+          ? {
+              kind: 'task_completion',
+              loopId,
+              title: loopId,
+              prompt: nextPrompt,
+              now,
+            }
+          : {
+              kind: 'markdown_file',
+              loopId,
+              title: loopId,
+              prompt: nextPrompt,
+              outputDirectory: nextOutputDirectory,
+              outputFileName: nextOutputFileName,
+              now,
+            });
+        tplSets.push('contract_json = @contractJson', 'contract_schema_version = @contractSchemaVersion');
+        tplParams.contractJson = JSON.stringify(nextContract);
+        tplParams.contractSchemaVersion = nextContract.schemaVersion;
+      }
       if (tplSets.length > 1) {
         this.db.prepare(`update user_loop_templates set ${tplSets.join(', ')} where loop_id = @loopId`).run(tplParams as any);
       }
@@ -940,6 +975,8 @@ export class LoopStore {
         schedule_enabled integer not null default 0,
         schedule_trigger_json text,
         auto_run_approved integer not null default 0,
+        contract_json text,
+        contract_schema_version text,
         created_at integer not null,
         updated_at integer not null,
         foreign key(loop_id) references loop_definitions(id)
@@ -977,6 +1014,8 @@ export class LoopStore {
     this.ensureColumn('loop_definitions', 'deleted_at', 'integer');
     this.ensureColumn('loop_definitions', 'delete_reason', 'text');
     this.ensureColumn('loop_runs', 'duration_ms', 'integer default 0');
+    this.ensureColumn('user_loop_templates', 'contract_json', 'text');
+    this.ensureColumn('user_loop_templates', 'contract_schema_version', 'text');
   }
 
   private ensureColumn(tableName: 'loop_definitions' | 'loop_runs' | 'user_loop_templates', columnName: string, definition: string): void {
@@ -1201,6 +1240,28 @@ export class LoopStore {
   }
 
   private userLoopTemplateRowToRecord(row: UserLoopTemplateRow): UserLoopTemplate {
+    const fallbackInput = row.kind === 'task_completion'
+      ? {
+          kind: 'task_completion' as const,
+          loopId: row.loop_id,
+          title: row.loop_id,
+          prompt: row.prompt,
+          now: row.created_at,
+        }
+      : {
+          kind: 'markdown_file' as const,
+          loopId: row.loop_id,
+          title: row.loop_id,
+          prompt: row.prompt,
+          outputDirectory: row.output_directory,
+          outputFileName: row.output_file_name,
+          now: row.created_at,
+        };
+    const contract = row.contract_json
+      ? parseLoopContractV1(parseJson<unknown>(row.contract_json), {
+          registeredCriteria: ['task_completed', 'file_exists', 'command_exit_zero'],
+        })
+      : createDefaultLoopContract(fallbackInput);
     return {
       loopId: row.loop_id,
       kind: row.kind,
@@ -1211,6 +1272,7 @@ export class LoopStore {
       scheduleEnabled: row.schedule_enabled === 1,
       scheduleTrigger: row.schedule_trigger_json ? parseJson<Record<string, unknown>>(row.schedule_trigger_json) : undefined,
       autoRunApproved: row.auto_run_approved === 1,
+      contract,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

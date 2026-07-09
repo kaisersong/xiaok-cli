@@ -19,7 +19,7 @@ import { createReminderService } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
-import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpStartupTimeoutMs, resolveStdioCommand } from '../mcp/transport.js';
+import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpCatalogTimeoutMs, resolveStdioCommand, tryConnect, } from '../mcp/transport.js';
 import { BUILT_IN_MCP_CLASSIFICATIONS, classifyMcpServer, validateRegistry, } from '../mcp/server-classification.js';
 export async function createPlatformRuntimeContext(options) {
     const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
@@ -234,8 +234,8 @@ async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabi
 }
 async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDisposable, shouldStop = () => false, classificationRegistry = BUILT_IN_MCP_CLASSIFICATIONS, platform = process.platform) {
     const tools = [];
-    const startupTimeoutMs = resolveMcpStartupTimeoutMs();
-    const callToolTimeoutMs = resolveMcpCallToolTimeoutMs();
+    const globalCatalogTimeoutMs = resolveMcpCatalogTimeoutMs();
+    const globalCallToolTimeoutMs = resolveMcpCallToolTimeoutMs();
     for (const server of servers) {
         if (shouldStop()) {
             break;
@@ -256,9 +256,10 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             const cuaManager = new CuaConnectionManager(async () => {
                 const conn = await createMcpClientConnection(server.name, frozenSnapshot);
                 registerDisposable(conn);
+                const callToolTimeoutMs = frozenSnapshot.timeout?.call ?? globalCallToolTimeoutMs;
                 return {
                     callToolResult: async (name, input) => {
-                        const result = await conn.client.callTool({ name, arguments: input });
+                        const result = await conn.client.callTool({ name, arguments: input }, undefined, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
                         return normalizeMcpRuntimeToolResult(result);
                     },
                     dispose: () => conn.dispose(),
@@ -278,9 +279,21 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
         }
         let connection;
         try {
-            connection = await createMcpClientConnection(server.name, server);
+            const connectResult = await tryConnect(server.name, server);
+            if (connectResult.status === 'disabled') {
+                capabilityHealth.push({
+                    kind: 'mcp',
+                    name: connectResult.serverName,
+                    status: 'degraded',
+                    detail: connectResult.error.message,
+                });
+                continue;
+            }
+            connection = connectResult.connection;
             const activeConnection = connection;
-            const toolsResult = await activeConnection.client.listTools(undefined, { timeout: startupTimeoutMs });
+            const catalogTimeoutMs = server.timeout?.catalog ?? globalCatalogTimeoutMs;
+            const callToolTimeoutMs = server.timeout?.call ?? globalCallToolTimeoutMs;
+            const toolsResult = await activeConnection.client.listTools(undefined, { timeout: catalogTimeoutMs });
             const schemas = toolsResult.tools ?? [];
             tools.push(...buildMcpRuntimeTools({ name: server.name, command: '' }, {
                 listTools: async () => schemas,

@@ -25,17 +25,21 @@ vi.mock('electron', () => ({
 }));
 
 import { registerDesktopIpc } from '../../electron/ipc.js';
+import { CompletionEvidenceStore } from '../../electron/completion-evidence-store.js';
 import { LoopStore } from '../../electron/loop-store.js';
 
 describe('desktop loop output action IPC', () => {
   let rootDir: string;
   let loopStore: LoopStore;
+  let evidenceStore: CompletionEvidenceStore;
   let handlers: Map<string, (...args: unknown[]) => unknown>;
 
   beforeEach(async () => {
     rootDir = join(tmpdir(), `xiaok-loop-output-ipc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
-    loopStore = new LoopStore(join(rootDir, 'loops.sqlite'));
+    const dbPath = join(rootDir, 'loops.sqlite');
+    loopStore = new LoopStore(dbPath);
+    evidenceStore = new CompletionEvidenceStore(dbPath);
     handlers = new Map();
     electronMocks.openPath.mockReset();
     electronMocks.openPath.mockResolvedValue('');
@@ -49,6 +53,7 @@ describe('desktop loop output action IPC', () => {
     };
     const loopRuntime = {
       loopStore,
+      evidenceStore,
       scanner: {},
       runner: { runLoopNow: vi.fn() },
       listAnomalies: vi.fn(() => []),
@@ -58,6 +63,11 @@ describe('desktop loop output action IPC', () => {
   });
 
   afterEach(() => {
+    try {
+      evidenceStore.close();
+    } catch {
+      // already closed
+    }
     try {
       loopStore.close();
     } catch {
@@ -140,6 +150,48 @@ describe('desktop loop output action IPC', () => {
       ok: false,
       error: 'output_file_binary',
       loopId: 'user-loop-1',
+    });
+  });
+
+  it('returns the latest task-completion loop result from the task snapshot', async () => {
+    loopStore.createUserLoopTemplate({
+      loopId: 'task-loop-1',
+      title: 'Daily AI Briefing',
+      kind: 'task_completion',
+      prompt: 'Generate today AI briefing.',
+      now: 1_000,
+    });
+    const begin = loopStore.beginLoopRun('task-loop-1', { kind: 'manual' }, 2_000, 60_000);
+    expect(begin.status).toBe('started');
+    if (begin.status !== 'started') return;
+
+    const evidence = evidenceStore.insertEvidence({
+      ownerKind: 'loop_run',
+      ownerId: begin.run.id,
+      kind: 'answer',
+      summary: 'Task completed.',
+      metadata: { taskId: 'task-ai-daily' },
+      now: 3_000,
+    });
+    loopStore.finishLoopRunSuccess(begin.run.id, [evidence.id], 4_000, 'Task task-ai-daily completed.');
+
+    const snapshotDir = join(rootDir, 'data', 'tasks', 'snapshots');
+    mkdirSync(snapshotDir, { recursive: true });
+    writeFileSync(join(snapshotDir, 'task-ai-daily.json'), JSON.stringify({
+      taskId: 'task-ai-daily',
+      status: 'completed',
+      result: { summary: '# AI 日报\n\n今日要点。', artifacts: [] },
+    }), 'utf8');
+
+    const handler = handlers.get('desktop:loops:readTaskResult');
+
+    expect(handler).toBeTypeOf('function');
+    await expect(handler?.({}, 'task-loop-1')).resolves.toEqual({
+      ok: true,
+      loopId: 'task-loop-1',
+      runId: begin.run.id,
+      taskId: 'task-ai-daily',
+      content: '# AI 日报\n\n今日要点。',
     });
   });
 

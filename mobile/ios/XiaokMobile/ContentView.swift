@@ -1,10 +1,11 @@
 import AVFoundation
+import QuickLook
 import SwiftUI
 import UIKit
+import WebKit
 
 struct ContentView: View {
     @StateObject private var store: XiaokAppStore
-    @State private var selectedTab: AppTab = .overview
 
     init(store: XiaokAppStore) {
         _store = StateObject(wrappedValue: store)
@@ -13,54 +14,60 @@ struct ContentView: View {
     var body: some View {
         let strings = store.strings
 
-        TabView(selection: $selectedTab) {
-            OverviewView(store: store, strings: strings, openSettings: openSettings)
-                .tabItem {
-                    Label(strings.tabOverview, systemImage: "gauge.with.dots.needle.67percent")
-                }
-                .tag(AppTab.overview)
-
-            TasksView(store: store, strings: strings, openSettings: openSettings)
-                .tabItem {
-                    Label(strings.tabTasks, systemImage: "checklist")
-                }
-                .tag(AppTab.tasks)
-
-            WorkView(store: store, strings: strings)
-                .tabItem {
-                    Label(strings.tabWork, systemImage: "folder.badge.gearshape")
-                }
-                .tag(AppTab.work)
-
-            ApprovalsView(store: store, strings: strings)
-                .tabItem {
-                    Label(strings.tabApprovals, systemImage: "checkmark.shield")
-                }
-                .tag(AppTab.approvals)
-
-            SettingsView(store: store, strings: strings)
-                .tabItem {
-                    Label(strings.tabSettings, systemImage: "gearshape")
-                }
-                .tag(AppTab.settings)
-        }
+        TasksView(store: store, strings: strings)
         .environment(\.locale, Locale(identifier: store.language.forcedLocaleIdentifier ?? Locale.autoupdatingCurrent.identifier))
         .task {
             await store.loadInitialSnapshot()
         }
     }
-
-    private func openSettings() {
-        selectedTab = .settings
-    }
 }
 
-private enum AppTab {
-    case overview
+private enum TaskSidebarSection: CaseIterable {
     case tasks
-    case work
+    case projects
+    case artifacts
     case approvals
+    case knowledge
+    case automations
     case settings
+
+    var icon: String {
+        switch self {
+        case .tasks:
+            "checklist"
+        case .projects:
+            "folder"
+        case .artifacts:
+            "shippingbox"
+        case .approvals:
+            "checkmark.shield"
+        case .knowledge:
+            "book"
+        case .automations:
+            "clock.arrow.circlepath"
+        case .settings:
+            "gearshape"
+        }
+    }
+
+    func title(strings: AppStrings) -> String {
+        switch self {
+        case .tasks:
+            strings.tasksTitle
+        case .projects:
+            strings.projects
+        case .artifacts:
+            strings.artifactsTitle
+        case .approvals:
+            strings.approvalsTitle
+        case .knowledge:
+            strings.knowledgeTitle
+        case .automations:
+            strings.automationsTitle
+        case .settings:
+            strings.settingsTitle
+        }
+    }
 }
 
 private struct OverviewView: View {
@@ -140,91 +147,82 @@ private struct OverviewView: View {
 private struct TasksView: View {
     @ObservedObject var store: XiaokAppStore
     let strings: AppStrings
-    let openSettings: () -> Void
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
     @State private var activeConversationId: String?
-    @State private var showsTaskHistory = false
-    @State private var selectedArtifact: DesktopArtifactSummary?
+    @State private var mainSection: TaskSidebarSection = .tasks
+    @State private var showsTaskSidebar = false
+    @State private var sidebarSection: TaskSidebarSection = .tasks
+    @State private var showsComposerContext = false
+    @State private var selectedArtifactRoute: ArtifactPreviewRoute?
+    @State private var pendingSelectedArtifactRoute: ArtifactPreviewRoute?
+    @State private var selectedMainProjectId: String?
+    @State private var selectedMainAutomationId: String?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if !store.isDesktopConnected {
-                    ConnectionRequiredBanner(strings: strings, openSettings: openSettings)
-                        .padding()
-                }
-
-                if let conversation = activeConversation {
-                    List {
-                        taskConversationRows(for: conversation)
-                    }
-                    .listStyle(.plain)
-                    .simultaneousGesture(conversationBackGesture)
-                } else {
-                    NewTaskComposerView(
-                        draft: $draft,
+            ZStack(alignment: .leading) {
+                VStack(spacing: 0) {
+                    ClaudeTaskTopBar(
+                        title: activeConversation?.title ?? mainSection.title(strings: strings),
+                        isDetail: activeConversation != nil,
                         strings: strings,
-                        isSending: store.isSending,
-                        isConnected: store.isDesktopConnected,
-                        onSubmit: submitDraft
+                        onMenu: openTaskSidebar,
+                        onBack: closeConversation,
+                        onNewTask: startNewTask
                     )
+                    Divider()
+
+                    if !store.isDesktopConnected {
+                        ConnectionRequiredBanner(strings: strings, openSettings: openSettings)
+                            .padding()
+                    }
+
+                    mainContent
+
+                    if let errorMessage = store.errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                    }
                 }
 
-                if let errorMessage = store.errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
+                if showsTaskSidebar {
+                    TaskSidebarOverlay(
+                        store: store,
+                        strings: strings,
+                        selectedSection: $sidebarSection,
+                        onClose: closeTaskSidebar,
+                        onOpenSection: openMainSection,
+                        onOpenConversation: openConversation,
+                        onStartNewTask: startNewTask
+                    )
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .zIndex(10)
                 }
-
-                if activeConversation != nil {
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !showsTaskSidebar && shouldShowTaskInputBar {
                     TaskInputBar(
                         draft: $draft,
                         strings: strings,
                         isSending: store.isSending,
                         isConnected: store.isDesktopConnected,
+                        onAddContext: {
+                            showsComposerContext = true
+                        },
                         onSubmit: submitDraft
                     )
                 }
             }
-            .navigationTitle(strings.tasksTitle)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if activeConversation != nil {
-                        Button {
-                            closeConversation()
-                        } label: {
-                            Label(strings.back, systemImage: "chevron.left")
-                        }
-                        .accessibilityIdentifier("ConversationBackButton")
-                    }
-                }
-
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        startNewTask()
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .accessibilityLabel(strings.newTask)
-                    .accessibilityIdentifier("NewTaskButton")
-
-                    Button {
-                        showsTaskHistory = true
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                    }
-                    .accessibilityLabel(strings.taskHistoryTitle)
-                    .accessibilityIdentifier("TaskHistoryButton")
-                }
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showsComposerContext) {
+                ComposerContextSheet(strings: strings)
             }
-            .sheet(isPresented: $showsTaskHistory) {
-                TaskHistorySheet(store: store, strings: strings, onOpenConversation: openConversation)
-            }
-            .sheet(item: $selectedArtifact) { artifact in
-                ArtifactPreviewSheet(store: store, artifact: artifact, strings: strings)
+            .fullScreenCover(item: $selectedArtifactRoute, onDismiss: presentPendingArtifactIfNeeded) { route in
+                ArtifactPreviewSheet(store: store, artifact: route.artifact, strings: strings)
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase != .active else {
@@ -233,7 +231,7 @@ private struct TasksView: View {
                 resetTransientTaskState()
             }
             .onDisappear {
-                showsTaskHistory = false
+                showsTaskSidebar = false
             }
         }
     }
@@ -256,54 +254,112 @@ private struct TasksView: View {
         return store.conversations.first { $0.id == activeConversationId }
     }
 
+    private var shouldShowTaskInputBar: Bool {
+        activeConversationId != nil || mainSection == .tasks
+    }
+
     @ViewBuilder
-    private func taskConversationRows(for conversation: ConversationSummary) -> some View {
-        ConversationRow(conversation: conversation, strings: strings)
-
-        let artifacts = store.artifacts(for: conversation.id)
-        if !artifacts.isEmpty {
-            Section(strings.artifactsTitle) {
-                ForEach(artifacts) { artifact in
-                    Button {
-                        selectedArtifact = artifact
-                    } label: {
-                        ArtifactRow(artifact: artifact, strings: strings)
-                    }
-                    .buttonStyle(.plain)
+    private var mainContent: some View {
+        if let conversation = activeConversation {
+            ConversationDetailView(
+                store: store,
+                conversation: conversation,
+                strings: strings,
+                onOpenArtifact: { artifact in
+                    openArtifact(artifact)
                 }
+            )
+            .simultaneousGesture(conversationBackGesture)
+        } else {
+            switch mainSection {
+            case .tasks:
+                NewTaskComposerView(strings: strings)
+            case .projects:
+                TaskProjectsMainView(
+                    store: store,
+                    strings: strings,
+                    selectedProjectId: $selectedMainProjectId,
+                    onOpenArtifact: { artifact in
+                        openArtifact(artifact)
+                    }
+                )
+            case .artifacts:
+                TaskArtifactsMainView(
+                    store: store,
+                    strings: strings,
+                    onOpenArtifact: { artifact in
+                        openArtifact(artifact)
+                    }
+                )
+            case .approvals:
+                TaskApprovalsMainView(store: store, strings: strings)
+            case .knowledge:
+                TaskKnowledgeMainView(strings: strings)
+            case .automations:
+                TaskAutomationsMainView(
+                    store: store,
+                    strings: strings,
+                    selectedAutomationId: $selectedMainAutomationId
+                )
+            case .settings:
+                TaskSettingsMainView(store: store, strings: strings)
             }
         }
+    }
 
-        let messages = store.visibleMessages(for: conversation.id)
-        ForEach(messages) { message in
-            MessageRow(message: message, strings: strings)
+    private func openTaskSidebar() {
+        sidebarSection = activeConversationId == nil ? mainSection : .tasks
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+            showsTaskSidebar = true
         }
-        if store.hasMoreMessages(for: conversation.id) {
-            Button(strings.loadMore) {
-                store.showMoreMessages(for: conversation.id)
-            }
+    }
+
+    private func closeTaskSidebar() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.95)) {
+            showsTaskSidebar = false
         }
     }
 
     private func openConversation(_ conversationId: String) {
+        mainSection = .tasks
+        selectedMainProjectId = nil
+        selectedMainAutomationId = nil
         activeConversationId = conversationId
-        showsTaskHistory = false
+        closeTaskSidebar()
         store.selectConversation(conversationId)
+    }
+
+    private func openMainSection(_ section: TaskSidebarSection) {
+        activeConversationId = nil
+        mainSection = section
+        selectedMainProjectId = nil
+        selectedMainAutomationId = nil
+        closeTaskSidebar()
+    }
+
+    private func openSettings() {
+        openMainSection(.settings)
     }
 
     private func closeConversation() {
         activeConversationId = nil
-        showsTaskHistory = false
+        showsTaskSidebar = false
     }
 
     private func startNewTask() {
         activeConversationId = nil
-        showsTaskHistory = false
+        mainSection = .tasks
+        selectedMainProjectId = nil
+        selectedMainAutomationId = nil
+        closeTaskSidebar()
     }
 
     private func resetTransientTaskState() {
         activeConversationId = nil
-        showsTaskHistory = false
+        mainSection = .tasks
+        selectedMainProjectId = nil
+        selectedMainAutomationId = nil
+        showsTaskSidebar = false
     }
 
     private func submitDraft() {
@@ -313,85 +369,133 @@ private struct TasksView: View {
             await store.sendMessage(text)
             if let selectedConversationId = store.selectedConversationId {
                 activeConversationId = selectedConversationId
-                showsTaskHistory = false
+                mainSection = .tasks
+                selectedMainProjectId = nil
+                selectedMainAutomationId = nil
+                showsTaskSidebar = false
             }
+        }
+    }
+
+    private func openArtifact(_ artifact: DesktopArtifactSummary) {
+        let route = ArtifactPreviewRoute(artifact: artifact)
+        guard selectedArtifactRoute == nil else {
+            pendingSelectedArtifactRoute = route
+            selectedArtifactRoute = nil
+            Task { @MainActor in
+                await Task.yield()
+                presentPendingArtifactIfNeeded()
+            }
+            return
+        }
+        selectedArtifactRoute = route
+    }
+
+    private func presentPendingArtifactIfNeeded() {
+        guard let route = pendingSelectedArtifactRoute else {
+            return
+        }
+        pendingSelectedArtifactRoute = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            selectedArtifactRoute = route
         }
     }
 }
 
-private struct NewTaskComposerView: View {
-    @Binding var draft: String
+private struct ClaudeTaskTopBar: View {
+    let title: String
+    let isDetail: Bool
     let strings: AppStrings
-    let isSending: Bool
-    let isConnected: Bool
-    let onSubmit: () -> Void
-
-    private var suggestions: [String] {
-        [
-            strings.suggestedPromptStatus,
-            strings.suggestedPromptSummarize,
-            strings.suggestedPromptPlan
-        ]
-    }
+    let onMenu: () -> Void
+    let onBack: () -> Void
+    let onNewTask: () -> Void
 
     var body: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 40)
+        HStack(spacing: 10) {
+            if isDetail {
+                Button {
+                    onBack()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel(strings.back)
+                .accessibilityIdentifier("ConversationBackButton")
+            } else {
+                Button {
+                    onMenu()
+                } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel(strings.taskHistoryTitle)
+                .accessibilityIdentifier("TaskMenuButton")
+            }
 
-            VStack(spacing: 8) {
+            Text(title)
+                .font(.headline.weight(.semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("ConversationTopBarTitle")
+
+            if isDetail {
+                Button {
+                    onMenu()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel(strings.taskHistoryTitle)
+                .accessibilityIdentifier("TaskMenuButton")
+            }
+
+            Button {
+                onNewTask()
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .accessibilityLabel(strings.newTask)
+            .accessibilityIdentifier("NewTaskButton")
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 9)
+        .background(Color(uiColor: .systemBackground).opacity(0.96))
+    }
+}
+
+private struct NewTaskComposerView: View {
+    let strings: AppStrings
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Spacer()
+
+            ClaudeWelcomeMark()
+
+            VStack(spacing: 10) {
                 Text(strings.taskWelcomeTitle)
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.medium))
                     .multilineTextAlignment(.center)
                 Text(strings.taskWelcomeSubtitle)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
             }
             .padding(.horizontal)
 
-            VStack(spacing: 12) {
-                TextField(strings.messagePlaceholder, text: $draft, axis: .vertical)
-                    .lineLimit(2...5)
-                    .textFieldStyle(.plain)
-                    .padding(12)
-                    .background(.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .accessibilityIdentifier("MessageInput")
-
-                HStack {
-                    Spacer()
-                    Button {
-                        onSubmit()
-                    } label: {
-                        Label(strings.send, systemImage: "paperplane.fill")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!isConnected || isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityIdentifier("SendMessageButton")
-                }
-            }
-            .padding()
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .padding(.horizontal)
-
-            VStack(spacing: 10) {
-                ForEach(suggestions, id: \.self) { suggestion in
-                    Button {
-                        draft = suggestion
-                    } label: {
-                        Text(suggestion)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .padding(.horizontal)
-
-            Spacer(minLength: 48)
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("NewTaskEmptyState")
     }
 }
 
@@ -400,33 +504,375 @@ private struct TaskInputBar: View {
     let strings: AppStrings
     let isSending: Bool
     let isConnected: Bool
+    let onAddContext: () -> Void
     let onSubmit: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            TextField(strings.messagePlaceholder, text: $draft)
-                .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: 6) {
+            TextField(strings.messagePlaceholder, text: $draft, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                .padding(.bottom, 2)
                 .accessibilityIdentifier("MessageInput")
 
-            Button {
-                onSubmit()
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .accessibilityLabel(strings.send)
+            HStack(spacing: 10) {
+                Button {
+                    onAddContext()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 32, height: 32)
+                        .foregroundStyle(.primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.addTaskContext)
+                .accessibilityIdentifier("AddTaskContextButton")
+
+                Text(strings.taskModeAsk)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color(uiColor: .tertiarySystemFill))
+                    .clipShape(Capsule())
+                    .accessibilityIdentifier("TaskModePill")
+
+                Spacer()
+
+                Button {
+                    onSubmit()
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 38, height: 38)
+                        .foregroundStyle(.white)
+                        .background(isSubmitDisabled ? Color.secondary.opacity(0.35) : Color.accentColor)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isSubmitDisabled)
+                .accessibilityLabel(strings.send)
+                .accessibilityIdentifier("SendMessageButton")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!isConnected || isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityIdentifier("SendMessageButton")
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
         }
-        .padding()
+        .background(Color(uiColor: .systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(Color(uiColor: .separator).opacity(0.35), lineWidth: 0.7)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 16, y: 7)
+        .padding(.horizontal)
+        .padding(.vertical, 7)
         .background(.bar)
+    }
+
+    private var isSubmitDisabled: Bool {
+        !isConnected || isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private struct ClaudeWelcomeMark: View {
+    var body: some View {
+        Image(systemName: "sparkle")
+            .font(.title2.weight(.semibold))
+            .foregroundStyle(Color.orange)
+            .frame(width: 40, height: 40)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ComposerContextSheet: View {
+    let strings: AppStrings
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 18) {
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 36, height: 36)
+                        .background(Color(uiColor: .secondarySystemBackground))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(strings.done)
+
+                Spacer()
+
+                Text(strings.composerContextTitle)
+                    .font(.headline.weight(.semibold))
+
+                Spacer()
+
+                Color.clear
+                    .frame(width: 36, height: 36)
+            }
+
+            VStack(spacing: 10) {
+                ComposerContextRow(
+                    icon: "desktopcomputer",
+                    title: strings.composerContextDesktop,
+                    detail: strings.composerContextDesktopDetail
+                )
+                ComposerContextRow(
+                    icon: "shippingbox",
+                    title: strings.composerContextArtifacts,
+                    detail: strings.composerContextArtifactsDetail
+                )
+                ComposerContextRow(
+                    icon: "wrench.and.screwdriver",
+                    title: strings.composerContextToolAccess,
+                    detail: strings.composerContextToolAccessDetail
+                )
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 18)
+        .padding(.bottom, 12)
+        .presentationDetents([.height(310), .medium])
+        .presentationDragIndicator(.visible)
+        .accessibilityIdentifier("ComposerContextSheet")
+    }
+}
+
+private struct ComposerContextRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+                .background(Color(uiColor: .tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            Text(title)
+                .font(.body.weight(.medium))
+
+            Spacer(minLength: 8)
+
+            Text(detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct ConversationDetailView: View {
+    @ObservedObject var store: XiaokAppStore
+    let conversation: ConversationSummary
+    let strings: AppStrings
+    let onOpenArtifact: (DesktopArtifactSummary) -> Void
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    ConversationSummaryHeader(conversation: conversation, strings: strings)
+
+                    let artifacts = store.artifacts(for: conversation.id)
+                    if !artifacts.isEmpty {
+                        ArtifactAttachmentStrip(
+                            artifacts: artifacts,
+                            strings: strings,
+                            onOpenArtifact: onOpenArtifact
+                        )
+                    }
+
+                    if store.hasMoreMessages(for: conversation.id) {
+                        Button(strings.loadMore) {
+                            store.showMoreMessages(for: conversation.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+
+                    ForEach(messageItems) { item in
+                        MessageDisplayRow(item: item, strings: strings)
+                            .id(item.id)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 18)
+            }
+            .accessibilityIdentifier("TaskConversationScrollView")
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear {
+                scrollToLatestMessage(using: proxy, animated: false)
+            }
+            .onChange(of: conversation.id) { _, _ in
+                scrollToLatestMessage(using: proxy, animated: false)
+            }
+            .onChange(of: messageIdSignature) { _, _ in
+                scrollToLatestMessage(using: proxy, animated: true)
+            }
+        }
+    }
+
+    private var messageItems: [MessageDisplayItem] {
+        store.visibleMessageItems(for: conversation.id)
+    }
+
+    private var messageIdSignature: String {
+        messageItems.map(\.id).joined(separator: "|")
+    }
+
+    private func scrollToLatestMessage(using proxy: ScrollViewProxy, animated: Bool) {
+        guard let latestMessageId = messageItems.last?.id else {
+            return
+        }
+
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.22)) {
+                    proxy.scrollTo(latestMessageId, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(latestMessageId, anchor: .bottom)
+            }
+        }
+    }
+}
+
+private struct ConversationSummaryHeader: View {
+    let conversation: ConversationSummary
+    let strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(strings.conversationStatus(conversation.status))
+                .foregroundStyle(statusColor)
+            Text("·")
+                .foregroundStyle(.tertiary)
+            Text(strings.messageCount(conversation.messageCount))
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption.weight(.medium))
+        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var statusColor: Color {
+        switch conversation.status {
+        case .running: .blue
+        case .waiting: .orange
+        case .completed: .secondary
+        case .failed: .red
+        }
+    }
+}
+
+private struct ArtifactAttachmentStrip: View {
+    let artifacts: [DesktopArtifactSummary]
+    let strings: AppStrings
+    let onOpenArtifact: (DesktopArtifactSummary) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(strings.artifactsTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(artifacts) { artifact in
+                        Button {
+                            onOpenArtifact(artifact)
+                        } label: {
+                            ArtifactAttachmentCard(artifact: artifact, strings: strings)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("TaskConversationArtifact-\(artifact.id)")
+                    }
+                }
+                .padding(.trailing, 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ArtifactAttachmentCard: View {
+    let artifact: DesktopArtifactSummary
+    let strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: iconName)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
+                .background(Color(uiColor: .tertiarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(ArtifactDisplayName.displayName(for: artifact, strings: strings))
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                Text("\(artifact.kind.displayText) · \(strings.artifactStatus(artifact.status))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(minWidth: 210, maxWidth: 260, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground).opacity(0.82))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(uiColor: .separator).opacity(0.25), lineWidth: 0.7)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .contentShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var iconName: String {
+        switch artifact.kind {
+        case .markdown, .text:
+            "doc.text"
+        case .pdf:
+            "doc.richtext"
+        case .pptx:
+            "rectangle.on.rectangle.angled"
+        case .html:
+            "chevron.left.forwardslash.chevron.right"
+        case .image:
+            "photo"
+        case .other:
+            "doc"
+        }
     }
 }
 
 private struct WorkView: View {
     @ObservedObject var store: XiaokAppStore
     let strings: AppStrings
-    @State private var selectedArtifact: DesktopArtifactSummary?
+    @State private var selectedArtifactRoute: ArtifactPreviewRoute?
 
     var body: some View {
         NavigationStack {
@@ -447,7 +893,7 @@ private struct WorkView: View {
                                 artifacts: relatedArtifacts(for: project),
                                 strings: strings,
                                 onOpenArtifact: { artifact in
-                                    selectedArtifact = artifact
+                                    selectedArtifactRoute = ArtifactPreviewRoute(artifact: artifact)
                                 }
                             )
                         } label: {
@@ -471,7 +917,7 @@ private struct WorkView: View {
                 Section(strings.artifactsTitle) {
                     ForEach(store.artifacts) { artifact in
                         Button {
-                            selectedArtifact = artifact
+                            selectedArtifactRoute = ArtifactPreviewRoute(artifact: artifact)
                         } label: {
                             ArtifactRow(artifact: artifact, strings: strings)
                         }
@@ -480,8 +926,8 @@ private struct WorkView: View {
                 }
             }
             .navigationTitle(strings.workTitle)
-            .sheet(item: $selectedArtifact) { artifact in
-                ArtifactPreviewSheet(store: store, artifact: artifact, strings: strings)
+            .fullScreenCover(item: $selectedArtifactRoute) { route in
+                ArtifactPreviewSheet(store: store, artifact: route.artifact, strings: strings)
             }
         }
     }
@@ -535,50 +981,576 @@ private struct ApprovalsView: View {
     }
 }
 
-private struct TaskHistorySheet: View {
+private struct TaskSidebarOverlay: View {
     @ObservedObject var store: XiaokAppStore
     let strings: AppStrings
+    @Binding var selectedSection: TaskSidebarSection
+    let onClose: () -> Void
+    let onOpenSection: (TaskSidebarSection) -> Void
     let onOpenConversation: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
+    let onStartNewTask: () -> Void
 
     var body: some View {
-        NavigationStack {
-            List {
-                if store.isLoadingSnapshot && store.conversations.isEmpty {
-                    HStack {
-                        ProgressView()
-                        Text(strings.refreshing)
+        GeometryReader { proxy in
+            let sidebarWidth = min(proxy.size.width * 0.82, 350)
+
+            ZStack(alignment: .leading) {
+                Color.black.opacity(0.16)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        onClose()
+                    }
+
+                TaskSidebarView(
+                    store: store,
+                    strings: strings,
+                    selectedSection: $selectedSection,
+                    onOpenSection: onOpenSection,
+                    onOpenConversation: onOpenConversation,
+                    onStartNewTask: onStartNewTask
+                )
+                .frame(width: sidebarWidth)
+                .frame(maxHeight: .infinity)
+                .background(Color(uiColor: .systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .shadow(color: .black.opacity(0.16), radius: 18, x: 8, y: 0)
+            }
+        }
+    }
+}
+
+private struct TaskSidebarView: View {
+    @ObservedObject var store: XiaokAppStore
+    let strings: AppStrings
+    @Binding var selectedSection: TaskSidebarSection
+    let onOpenSection: (TaskSidebarSection) -> Void
+    let onOpenConversation: (String) -> Void
+    let onStartNewTask: () -> Void
+    @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(strings.appTitle)
+                .font(.largeTitle.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 22)
+                .padding(.top, 26)
+
+            if !isSearchingTasks {
+                sidebarNavigation
+                    .padding(.horizontal, 18)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    tasksSection
+                }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 18)
+            }
+            .id(selectedSection)
+
+            Button {
+                onStartNewTask()
+            } label: {
+                Label(strings.newTask, systemImage: "plus")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .foregroundStyle(.white)
+                    .background(Color(uiColor: .label))
+                    .clipShape(Capsule())
+            }
+            .accessibilityIdentifier("TaskSidebarNewTaskButton")
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private var sidebarNavigation: some View {
+        VStack(spacing: 4) {
+            ForEach(TaskSidebarSection.allCases, id: \.self) { section in
+                TaskSidebarNavButton(
+                    section: section,
+                    isSelected: selectedSection == section,
+                    strings: strings
+                ) {
+                    onOpenSection(section)
+                }
+            }
+        }
+    }
+
+    private var tasksSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(strings.taskHistorySearchPlaceholder, text: $searchText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($isSearchFocused)
+                    .accessibilityIdentifier("TaskHistorySearchInput")
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        isSearchFocused = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                     }
-                } else if store.conversations.isEmpty {
-                    Text(strings.noTasks)
+                    .accessibilityLabel(strings.clearSearch)
+                    .accessibilityIdentifier("TaskHistorySearchClearButton")
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color(uiColor: .secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            if store.isLoadingSnapshot && store.conversations.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(strings.refreshing)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.footnote)
+            } else if filteredConversations.isEmpty {
+                Text(strings.noTasks)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let pinnedConversation {
+                TaskSidebarSectionLabel(title: strings.taskHistoryPinnedTitle)
+                conversationButton(pinnedConversation)
+            }
+
+            TaskSidebarSectionLabel(title: strings.taskHistoryRecentsTitle)
+            ForEach(recentConversations) { conversation in
+                conversationButton(conversation)
+            }
+
+            if store.hasMoreConversations {
+                Button(strings.loadMore) {
+                    store.showMoreConversations()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private var pinnedConversation: ConversationSummary? {
+        filteredConversations.first
+    }
+
+    private var recentConversations: [ConversationSummary] {
+        guard pinnedConversation != nil else {
+            return filteredConversations
+        }
+        return Array(filteredConversations.dropFirst())
+    }
+
+    private var isSearchingTasks: Bool {
+        isSearchFocused || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private func conversationButton(_ conversation: ConversationSummary) -> some View {
+        Button {
+            onOpenConversation(conversation.id)
+        } label: {
+            ConversationRow(conversation: conversation, strings: strings)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("TaskSidebarConversation-\(conversation.id)")
+    }
+
+    private var filteredConversations: [ConversationSummary] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return store.visibleConversations
+        }
+
+        return store.visibleConversations.filter { conversation in
+            conversation.title.localizedCaseInsensitiveContains(query)
+                || conversation.lastMessagePreview.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+}
+
+private struct TaskSidebarNavButton: View {
+    let section: TaskSidebarSection
+    let isSelected: Bool
+    let strings: AppStrings
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 14) {
+                Image(systemName: section.icon)
+                    .font(.body.weight(.medium))
+                    .frame(width: 24)
+                Text(section.title(strings: strings))
+                    .font(.title3.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(isSelected ? Color(uiColor: .secondarySystemBackground) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("TaskSidebar\(section.accessibilitySuffix)")
+    }
+}
+
+private struct TaskSidebarSectionLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 6)
+    }
+}
+
+private struct TaskProjectsMainView: View {
+    @ObservedObject var store: XiaokAppStore
+    let strings: AppStrings
+    @Binding var selectedProjectId: String?
+    let onOpenArtifact: (DesktopArtifactSummary) -> Void
+
+    var body: some View {
+        if let project = selectedProject {
+            VStack(spacing: 0) {
+                TaskMainBackButton(title: strings.projects, strings: strings) {
+                    selectedProjectId = nil
+                }
+                ProjectDetailView(
+                    project: project,
+                    artifacts: relatedArtifacts(for: project),
+                    strings: strings,
+                    onOpenArtifact: onOpenArtifact
+                )
+            }
+        } else {
+            List {
+                Section(strings.projects) {
+                    if store.isLoadingSnapshot && store.projects.isEmpty {
+                        HStack {
+                            ProgressView()
+                            Text(strings.refreshing)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if store.visibleProjects.isEmpty {
+                        Text(strings.taskSidebarEmptyProjects)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(store.visibleProjects) { project in
+                        Button {
+                            selectedProjectId = project.id
+                        } label: {
+                            ProjectRow(project: project, strings: strings)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("TaskMainProject-\(project.id)")
+                    }
+
+                    if store.hasMoreProjects {
+                        Button(strings.loadMore) {
+                            store.showMoreProjects()
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private var selectedProject: DesktopProjectSummary? {
+        guard let selectedProjectId else {
+            return nil
+        }
+        return store.projects.first { $0.id == selectedProjectId }
+    }
+
+    private func relatedArtifacts(for project: DesktopProjectSummary) -> [DesktopArtifactSummary] {
+        store.artifacts.filter { artifact in
+            artifact.source == project.id || artifact.source == project.name
+        }
+    }
+}
+
+private struct TaskArtifactsMainView: View {
+    @ObservedObject var store: XiaokAppStore
+    let strings: AppStrings
+    let onOpenArtifact: (DesktopArtifactSummary) -> Void
+
+    var body: some View {
+        List {
+            Section(strings.artifactsTitle) {
+                if store.artifacts.isEmpty {
+                    Text(strings.noFiles)
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(store.visibleConversations) { conversation in
+                ForEach(store.artifacts) { artifact in
                     Button {
-                        onOpenConversation(conversation.id)
-                        dismiss()
+                        onOpenArtifact(artifact)
                     } label: {
-                        ConversationRow(conversation: conversation, strings: strings)
+                        ArtifactRow(artifact: artifact, strings: strings)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("TaskMainArtifact-\(artifact.id)")
+                }
+            }
+        }
+        .listStyle(.plain)
+    }
+}
+
+private struct TaskKnowledgeMainView: View {
+    let strings: AppStrings
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(strings.knowledgeTitle)
+                    .font(.title2.weight(.semibold))
+                CardSection {
+                    Text(strings.knowledgeEmptyTitle)
+                        .font(.headline)
+                    Text(strings.knowledgeEmptyMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding()
+        }
+    }
+}
+
+private struct TaskAutomationsMainView: View {
+    @ObservedObject var store: XiaokAppStore
+    let strings: AppStrings
+    @Binding var selectedAutomationId: String?
+
+    var body: some View {
+        if let loop = selectedAutomation {
+            VStack(spacing: 0) {
+                TaskMainBackButton(title: strings.automationsTitle, strings: strings) {
+                    selectedAutomationId = nil
+                }
+                List {
+                    Section(strings.automationsTitle) {
+                        LoopRow(loop: loop, strings: strings)
+                    }
+                }
+                .listStyle(.plain)
+            }
+        } else {
+            List {
+                Section(strings.automationsTitle) {
+                    if store.loops.isEmpty {
+                        Text(strings.taskSidebarEmptyAutomations)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(store.loops) { loop in
+                        Button {
+                            selectedAutomationId = loop.id
+                        } label: {
+                            LoopRow(loop: loop, strings: strings)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("TaskMainAutomation-\(loop.id)")
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private var selectedAutomation: LoopSummary? {
+        guard let selectedAutomationId else {
+            return nil
+        }
+        return store.loops.first { $0.id == selectedAutomationId }
+    }
+}
+
+private struct TaskApprovalsMainView: View {
+    @ObservedObject var store: XiaokAppStore
+    let strings: AppStrings
+
+    var body: some View {
+        List {
+            if store.approvals.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(strings.approvalEmptyTitle)
+                        .font(.headline)
+                    Text(strings.approvalEmptyMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 8)
+                .accessibilityElement(children: .combine)
+            }
+
+            ForEach(store.approvals) { approval in
+                ApprovalRow(
+                    approval: approval,
+                    strings: strings,
+                    isResponding: store.respondingApprovalIds.contains(approval.id),
+                    onApprove: {
+                        Task {
+                            await store.respondToApproval(id: approval.id, decision: .approve)
+                        }
+                    },
+                    onReject: {
+                        Task {
+                            await store.respondToApproval(id: approval.id, decision: .reject)
+                        }
+                    }
+                )
+            }
+        }
+        .listStyle(.plain)
+    }
+}
+
+private struct TaskSettingsMainView: View {
+    @ObservedObject var store: XiaokAppStore
+    let strings: AppStrings
+    @State private var gatewayDraft = ""
+    @State private var showsPairingScanner = false
+
+    var body: some View {
+        Form {
+            Section(strings.desktopConnection) {
+                HStack {
+                    Text(store.desktopName)
+                    Spacer()
+                    Text(strings.desktopHealth(store.health))
+                        .foregroundStyle(store.isDesktopConnected ? .green : .secondary)
                 }
 
-                if store.hasMoreConversations {
-                    Button(strings.loadMore) {
-                        store.showMoreConversations()
+                TextField(strings.gatewayURLPlaceholder, text: $gatewayDraft)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .accessibilityIdentifier("GatewayURLInput")
+
+                Button {
+                    guard store.updateGatewayURL(gatewayDraft) else {
+                        return
                     }
+
+                    Task {
+                        await store.loadInitialSnapshot()
+                    }
+                } label: {
+                    Label(strings.connectToDesktop, systemImage: "link")
+                }
+                .accessibilityIdentifier("ConnectToDesktopButton")
+
+                Button {
+                    showsPairingScanner = true
+                } label: {
+                    Label(strings.scanPairingQRCode, systemImage: "qrcode.viewfinder")
+                }
+                .accessibilityIdentifier("ScanPairingQRCodeButton")
+
+                Text(strings.connectionHint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if let errorMessage = store.errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
                 }
             }
-            .navigationTitle(strings.taskHistoryTitle)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(strings.done) {
-                        dismiss()
-                    }
+
+            Section(strings.language) {
+                Picker(strings.language, selection: languageBinding) {
+                    Text(strings.systemLanguage).tag(AppLanguage.system)
+                    Text(strings.simplifiedChinese).tag(AppLanguage.simplifiedChinese)
+                    Text(strings.english).tag(AppLanguage.english)
                 }
+                .pickerStyle(.segmented)
             }
+
+            Section(strings.diagnostics) {
+                LabeledContent(strings.currentGateway, value: store.gatewayURLString)
+                LabeledContent(strings.currentRoute, value: strings.connectionRoute(store.connectionRoute))
+            }
+        }
+        .onAppear {
+            gatewayDraft = store.gatewayURLString
+        }
+        .onChange(of: store.gatewayURLString) { _, value in
+            gatewayDraft = value
+        }
+        .sheet(isPresented: $showsPairingScanner) {
+            PairingScannerSheet(store: store, strings: strings)
+        }
+    }
+
+    private var languageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { store.language },
+            set: { store.updateLanguage($0) }
+        )
+    }
+}
+
+private struct TaskMainBackButton: View {
+    let title: String
+    let strings: AppStrings
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: "chevron.left")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 11)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(strings.back)
+        .accessibilityIdentifier("TaskMainBackButton")
+    }
+}
+
+private extension TaskSidebarSection {
+    var accessibilitySuffix: String {
+        switch self {
+        case .tasks:
+            "Tasks"
+        case .projects:
+            "Projects"
+        case .artifacts:
+            "Artifacts"
+        case .approvals:
+            "Approvals"
+        case .knowledge:
+            "Knowledge"
+        case .automations:
+            "Automations"
+        case .settings:
+            "Settings"
         }
     }
 }
@@ -672,38 +1644,25 @@ private extension DesktopProjectSummary {
     }
 }
 
+private struct ArtifactPreviewRoute: Identifiable {
+    let id = UUID()
+    let artifact: DesktopArtifactSummary
+}
+
 private struct ArtifactPreviewSheet: View {
     @ObservedObject var store: XiaokAppStore
     let artifact: DesktopArtifactSummary
     let strings: AppStrings
     @Environment(\.dismiss) private var dismiss
     @State private var preview: ArtifactPreview?
+    @State private var previewFileURL: URL?
+    @State private var sharePayload: ArtifactSharePayload?
     @State private var isLoading = false
     @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section(strings.artifactPreviewTitle) {
-                    ArtifactRow(artifact: preview?.artifact ?? artifact, strings: strings)
-                }
-
-                Section {
-                    if isLoading {
-                        HStack {
-                            ProgressView()
-                            Text(strings.refreshing)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else if let text = preview?.text,
-                              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        MessageBodyView(text: text, strings: strings)
-                    } else {
-                        Text(errorMessage ?? strings.artifactPreviewUnavailable)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            previewBody
             .navigationTitle(strings.artifactPreviewTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -716,6 +1675,35 @@ private struct ArtifactPreviewSheet: View {
             .task(id: artifact.id) {
                 await loadPreview()
             }
+            .sheet(item: $sharePayload) { payload in
+                ActivityView(activityItems: payload.items)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var previewBody: some View {
+        if isLoading {
+            VStack(spacing: 12) {
+                ProgressView()
+                Text(strings.refreshing)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let preview {
+            ArtifactPreviewContent(
+                preview: preview,
+                fileURL: previewFileURL,
+                strings: strings,
+                onShare: {
+                    sharePayload = ArtifactSharePayload(items: shareItems(for: preview))
+                }
+            )
+        } else {
+            Text(errorMessage ?? strings.artifactPreviewUnavailable)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
         }
     }
 
@@ -723,12 +1711,225 @@ private struct ArtifactPreviewSheet: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            preview = try await store.fetchArtifactPreview(id: artifact.id)
+            let loadedPreview = try await store.fetchArtifactPreview(id: artifact.id)
+            preview = loadedPreview
+            previewFileURL = writePreviewFileIfNeeded(loadedPreview)
             errorMessage = nil
         } catch {
             errorMessage = strings.artifactPreviewUnavailable
         }
     }
+
+    private func writePreviewFileIfNeeded(_ preview: ArtifactPreview) -> URL? {
+        guard let dataBase64 = preview.dataBase64,
+              let data = Data(base64Encoded: dataBase64) else {
+            return nil
+        }
+        let rawName = preview.fileName ?? ArtifactDisplayName.displayName(for: preview.artifact, strings: strings)
+        let safeName = rawName
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xiaok-mobile-preview-\(preview.artifact.id)-\(safeName)")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    private func shareItems(for preview: ArtifactPreview) -> [Any] {
+        if let previewFileURL {
+            return [previewFileURL]
+        }
+        let name = ArtifactDisplayName.displayName(for: preview.artifact, strings: strings)
+        return ["\(name)\n\(preview.artifact.kind.displayText)\n\(preview.contentType)"]
+    }
+}
+
+private struct ArtifactPreviewContent: View {
+    let preview: ArtifactPreview
+    let fileURL: URL?
+    let strings: AppStrings
+    let onShare: () -> Void
+
+    var body: some View {
+        Group {
+            if isHTMLPreview, let html = preview.text, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HTMLArtifactPreview(html: html)
+                    .ignoresSafeArea(edges: .bottom)
+            } else if let fileURL, shouldUseSystemPreview {
+                QuickLookArtifactPreview(fileURL: fileURL)
+                    .ignoresSafeArea(edges: .bottom)
+            } else if isTextPreview,
+                      let text = preview.text,
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ScrollView {
+                    MessageBodyView(text: text, strings: strings)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                ArtifactFileInfoView(
+                    preview: preview,
+                    strings: strings,
+                    onShare: onShare
+                )
+            }
+        }
+    }
+
+    private var isHTMLPreview: Bool {
+        preview.artifact.kind == .html || preview.contentType == "text/html"
+    }
+
+    private var isTextPreview: Bool {
+        preview.artifact.kind == .markdown
+            || preview.artifact.kind == .text
+            || preview.contentType.hasPrefix("text/")
+    }
+
+    private var shouldUseSystemPreview: Bool {
+        preview.artifact.kind == .pdf
+            || preview.artifact.kind == .pptx
+            || preview.artifact.kind == .image
+            || preview.contentType == "application/pdf"
+            || preview.contentType.hasPrefix("image/")
+            || preview.contentType.contains("officedocument")
+    }
+}
+
+private struct ArtifactFileInfoView: View {
+    let preview: ArtifactPreview
+    let strings: AppStrings
+    let onShare: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: iconName)
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 76, height: 76)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            Text(strings.artifactFileInfoTitle)
+                .font(.title3.weight(.semibold))
+
+            Text(ArtifactDisplayName.displayName(for: preview.artifact, strings: strings))
+                .font(.body.weight(.medium))
+                .multilineTextAlignment(.center)
+
+            Text("\(preview.artifact.kind.displayText) · \(preview.contentType)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Text(strings.artifactFileInfoMessage)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Button {
+                onShare()
+            } label: {
+                Label(strings.openOrSaveArtifact, systemImage: "square.and.arrow.up")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("OpenOrSaveArtifactButton")
+            .padding(.horizontal)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var iconName: String {
+        switch preview.artifact.kind {
+        case .pdf:
+            "doc.richtext"
+        case .pptx:
+            "rectangle.on.rectangle.angled"
+        case .image:
+            "photo"
+        case .html:
+            "chevron.left.forwardslash.chevron.right"
+        case .markdown, .text:
+            "doc.text"
+        case .other:
+            "doc"
+        }
+    }
+}
+
+private struct HTMLArtifactPreview: UIViewRepresentable {
+    let html: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.backgroundColor = .systemBackground
+        webView.isOpaque = false
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.loadHTMLString(html, baseURL: nil)
+    }
+}
+
+private struct QuickLookArtifactPreview: UIViewControllerRepresentable {
+    let fileURL: URL
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(fileURL: fileURL)
+    }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
+        context.coordinator.fileURL = fileURL
+        controller.reloadData()
+    }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        var fileURL: URL
+
+        init(fileURL: URL) {
+            self.fileURL = fileURL
+        }
+
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+            1
+        }
+
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            fileURL as NSURL
+        }
+    }
+}
+
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+private struct ArtifactSharePayload: Identifiable {
+    let id = UUID()
+    let items: [Any]
 }
 
 private struct PairingScannerSheet: View {
@@ -848,6 +2049,12 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        if let testCode = Self.testScannedQRCode {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.emitScannedCode(testCode)
+            }
+            return
+        }
         configureSession()
     }
 
@@ -869,13 +2076,7 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
             return
         }
 
-        didScan = true
-        sessionQueue.async { [session] in
-            if session.isRunning {
-                session.stopRunning()
-            }
-        }
-        onCodeScanned(code)
+        emitScannedCode(code)
     }
 
     deinit {
@@ -922,12 +2123,35 @@ private final class QRCodeScannerViewController: UIViewController, AVCaptureMeta
         }
     }
 
+    private func emitScannedCode(_ code: String) {
+        guard !didScan else {
+            return
+        }
+        didScan = true
+        sessionQueue.async { [session] in
+            if session.isRunning {
+                session.stopRunning()
+            }
+        }
+        onCodeScanned(code)
+    }
+
     private func reportUnavailable() {
         guard !didReportUnavailable else {
             return
         }
         didReportUnavailable = true
         onUnavailable()
+    }
+
+    private static var testScannedQRCode: String? {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["XIAOK_MOBILE_TEST_MODE"] == "1" else {
+            return nil
+        }
+        let value = environment["XIAOK_MOBILE_TEST_SCANNED_QR_CODE"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
     }
 }
 
@@ -1002,6 +2226,9 @@ private struct SettingsView: View {
             .navigationTitle(strings.settingsTitle)
             .onAppear {
                 gatewayDraft = store.gatewayURLString
+            }
+            .onChange(of: store.gatewayURLString) { _, value in
+                gatewayDraft = value
             }
             .sheet(isPresented: $showsPairingScanner) {
                 PairingScannerSheet(store: store, strings: strings)
@@ -1090,6 +2317,8 @@ private struct ConversationRow: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private var statusColor: Color {
@@ -1107,10 +2336,161 @@ private struct MessageRow: View {
     let strings: AppStrings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            MessageBodyView(text: message.text, strings: strings)
+        Group {
+            switch message.role {
+            case .user:
+                HStack {
+                    Spacer(minLength: 48)
+                    MessageBodyView(text: message.text, strings: strings)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(Color(uiColor: .secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .frame(maxWidth: 310, alignment: .leading)
+                }
+            case .assistant:
+                VStack(alignment: .leading, spacing: 8) {
+                    MessageBodyView(text: message.text, strings: strings)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    AssistantMessageActions(text: message.text, strings: strings)
+                }
+            case .system:
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "info.circle")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                    MessageBodyView(text: message.text, strings: strings)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
         }
-        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        .padding(.vertical, message.role == .assistant ? 8 : 3)
+    }
+}
+
+private struct MessageDisplayRow: View {
+    let item: MessageDisplayItem
+    let strings: AppStrings
+
+    var body: some View {
+        switch item.kind {
+        case .chat(let message):
+            MessageRow(message: message, strings: strings)
+        case .activity(let activity):
+            MessageActivityCard(activity: activity, strings: strings)
+        }
+    }
+}
+
+private struct MessageActivityCard: View {
+    let activity: MessageActivity
+    let strings: AppStrings
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: iconName)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .frame(width: 24, height: 24)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(activity.title)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                        Text(strings.messageActivityStatus(activity.status))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? strings.hideActivityDetails : strings.showActivityDetails)
+            .accessibilityIdentifier("MessageActivity-\(activity.id)")
+
+            if isExpanded {
+                Text(activity.detail)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.secondary.opacity(0.10))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .accessibilityIdentifier("MessageActivityDetails-\(activity.id)")
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 3)
+    }
+
+    private var iconName: String {
+        switch activity.kind {
+        case .skill:
+            "sparkles"
+        case .bash:
+            "terminal"
+        case .tool:
+            "wrench.and.screwdriver"
+        }
+    }
+
+    private var statusColor: Color {
+        switch activity.status {
+        case .running:
+            .blue
+        case .completed:
+            .green
+        case .failed:
+            .red
+        case .unknown:
+            .secondary
+        }
+    }
+}
+
+private struct AssistantMessageActions: View {
+    let text: String
+    let strings: AppStrings
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button {
+                UIPasteboard.general.string = text
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(strings.copyMessage)
+            .accessibilityIdentifier("CopyMessageButton")
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 2)
     }
 }
 
@@ -1836,6 +3216,8 @@ private struct ProjectRow: View {
             }
         }
         .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 
@@ -1920,6 +3302,26 @@ private struct ApprovalRow: View {
     }
 }
 
+private enum ArtifactDisplayName {
+    static func displayName(for artifact: DesktopArtifactSummary, strings: AppStrings) -> String {
+        let trimmedName = artifact.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty, !looksInternalArtifactIdentifier(trimmedName) {
+            return trimmedName
+        }
+        return strings.artifactFallbackName(artifact.kind)
+    }
+
+    private static func looksInternalArtifactIdentifier(_ value: String) -> Bool {
+        let lowercased = value.lowercased()
+        return lowercased == "artifact"
+            || lowercased.hasPrefix("artifact:")
+            || lowercased.hasPrefix("artifact_")
+            || lowercased.hasPrefix("artifact-")
+            || lowercased.hasPrefix("artifact_call_")
+            || lowercased.hasPrefix("kswarm:")
+    }
+}
+
 private struct ArtifactRow: View {
     let artifact: DesktopArtifactSummary
     let strings: AppStrings
@@ -1943,21 +3345,7 @@ private struct ArtifactRow: View {
     }
 
     private var displayName: String {
-        let trimmedName = artifact.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedName.isEmpty, !Self.looksInternalArtifactIdentifier(trimmedName) {
-            return trimmedName
-        }
-        return strings.artifactFallbackName(artifact.kind)
-    }
-
-    private static func looksInternalArtifactIdentifier(_ value: String) -> Bool {
-        let lowercased = value.lowercased()
-        return lowercased == "artifact"
-            || lowercased.hasPrefix("artifact:")
-            || lowercased.hasPrefix("artifact_")
-            || lowercased.hasPrefix("artifact-")
-            || lowercased.hasPrefix("artifact_call_")
-            || lowercased.hasPrefix("kswarm:")
+        ArtifactDisplayName.displayName(for: artifact, strings: strings)
     }
 }
 

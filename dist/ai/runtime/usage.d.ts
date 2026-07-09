@@ -9,9 +9,22 @@ export interface CompactionSummary {
     text: string;
     replacedMessages: number;
 }
+export interface ModelPricing {
+    model: string;
+    inputPer1M: number;
+    outputPer1M: number;
+    cacheCreationPer1M?: number;
+    cacheReadPer1M?: number;
+}
+export type CostConfidence = 'estimated' | 'unknown';
 export declare function estimateTokens(messages: Message[]): number;
 export declare function shouldCompact(estimatedTokens: number, contextLimit: number, threshold?: number): boolean;
 export declare function mergeUsage(base: UsageStats, next: UsageStats): UsageStats;
+export declare function computeCost(usage: UsageStats, model: string): number;
+export declare function computeCostWithConfidence(usage: UsageStats, model: string): {
+    cost: number;
+    confidence: CostConfidence;
+};
 export declare function summarizeMessagesForCompaction(messages: Message[]): CompactionSummary;
 export declare function compactMessages(messages: Message[], placeholder?: string, keepRecent?: number): {
     messages: Message[];

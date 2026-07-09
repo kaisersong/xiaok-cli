@@ -10,7 +10,7 @@ import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
 interface RegisterDesktopIpcOptions {
-  loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'scanner' | 'runner' | 'listAnomalies'>;
+  loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'evidenceStore' | 'scanner' | 'runner' | 'listAnomalies'>;
 }
 
 const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
@@ -481,6 +481,11 @@ export async function registerDesktopIpc(
     const loopRuntime = getLoopRuntime(options);
     const id = readLoopId(loopId);
     return readLoopOutputPreview(id, loopRuntime.loopStore.getUserLoopTemplate(id));
+  });
+  ipcMain.handle('desktop:loops:readTaskResult', async (_event, loopId) => {
+    const loopRuntime = getLoopRuntime(options);
+    const id = readLoopId(loopId);
+    return readLoopTaskResult(id, loopRuntime, services.getDataRoot());
   });
   ipcMain.handle('desktop:loops:listRuns', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
@@ -1030,6 +1035,63 @@ async function readLoopOutputPreview(loopId: string, template: UserLoopTemplate 
       pathLabel: target.outputPath,
     };
   }
+}
+
+async function readLoopTaskResult(
+  loopId: string,
+  loopRuntime: NonNullable<RegisterDesktopIpcOptions['loopRuntime']>,
+  dataRoot: string,
+): Promise<Record<string, unknown>> {
+  const latestRun = loopRuntime.loopStore.listLoopRuns(loopId, 1)[0];
+  if (!latestRun) return { ok: false, loopId, error: 'missing_loop_run' };
+  const evidence = loopRuntime.evidenceStore
+    .listEvidenceForOwner('loop_run', latestRun.id)
+    .filter(record => latestRun.evidenceIds.includes(record.id));
+  const taskId = evidence.map(record => readTaskIdFromMetadata(record.metadata)).find(Boolean);
+  if (!taskId) {
+    const fallback = evidence.find(record => record.summary.trim().length > 0)?.summary.trim();
+    if (fallback) return { ok: true, loopId, runId: latestRun.id, content: fallback };
+    return { ok: false, loopId, runId: latestRun.id, error: 'missing_task_result_evidence' };
+  }
+
+  const snapshotPath = join(dataRoot, 'tasks', 'snapshots', `${taskId}.json`);
+  try {
+    const raw = await readFile(snapshotPath, 'utf8');
+    const snapshot = JSON.parse(raw) as unknown;
+    const content = readTaskSnapshotResultSummary(snapshot);
+    if (!content) {
+      const fallback = evidence.find(record => record.summary.trim().length > 0)?.summary.trim();
+      if (fallback) return { ok: true, loopId, runId: latestRun.id, taskId, content: fallback };
+      return { ok: false, loopId, runId: latestRun.id, taskId, error: 'missing_task_result_content' };
+    }
+    return { ok: true, loopId, runId: latestRun.id, taskId, content };
+  } catch (error) {
+    const code = isRecord(error) && typeof error.code === 'string' ? error.code : '';
+    return {
+      ok: false,
+      loopId,
+      runId: latestRun.id,
+      taskId,
+      error: code === 'ENOENT' ? 'missing_task_snapshot' : 'read_task_result_failed',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function readTaskIdFromMetadata(metadata: Record<string, unknown>): string | undefined {
+  const raw = typeof metadata.taskId === 'string'
+    ? metadata.taskId
+    : typeof metadata.responseId === 'string'
+      ? metadata.responseId
+      : '';
+  const taskId = raw.trim();
+  return /^[A-Za-z0-9_-]+$/.test(taskId) ? taskId : undefined;
+}
+
+function readTaskSnapshotResultSummary(snapshot: unknown): string | undefined {
+  if (!isRecord(snapshot) || !isRecord(snapshot.result)) return undefined;
+  const summary = snapshot.result.summary;
+  return typeof summary === 'string' && summary.trim().length > 0 ? summary : undefined;
 }
 
 function resolveUserLoopOutputTarget(

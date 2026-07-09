@@ -1803,7 +1803,7 @@ describe('InProcessTaskRuntimeHost', () => {
     await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'failed', 3000);
     const recovered = await host.recoverTask('task_1');
     expect(recovered.snapshot.status).toBe('failed');
-    expect(recovered.snapshot.salvage?.reason).toBe('aborted');
+    expect(recovered.snapshot.salvage?.reason).toBe('task_watchdog_timeout');
   });
 
   function createHost(runner: TaskRunner): InProcessTaskRuntimeHost {

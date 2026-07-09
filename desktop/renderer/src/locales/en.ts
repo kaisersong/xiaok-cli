@@ -1286,6 +1286,9 @@ export const en: LocaleStrings = {
     userLoopOutputPath: "Output file",
     userLoopOpenOutputDirectory: "Open output directory",
     userLoopPreviewOutputFile: "Preview output file",
+    userLoopViewTaskResult: "View result",
+    userLoopTaskResult: "Run result",
+    userLoopTaskResultUnavailable: "Run result is not available yet.",
     userLoopOutputPreview: "Output preview",
     userLoopOutputPreviewUnavailable: "Output file is not available for preview yet.",
     userLoopScheduleSingle: "1 schedule",
@@ -2714,6 +2717,11 @@ export const en: LocaleStrings = {
   canvasPreviewOpenSystem: "Open with system default app",
   canvasPreviewDownload: "Download locally",
   canvasPreviewRefresh: "Refresh preview",
+  canvasPreviewPdfLabel: (fileName: string) => `PDF preview: ${fileName}`,
+  canvasPreviewPdfRendering: "Rendering PDF preview...",
+  canvasPreviewPdfFailed: "PDF preview failed. Use the download or system-open action.",
+  canvasPreviewPdfLoading: "PDF preview is loading...",
+  canvasPreviewUnavailable: "Preview not available for this file type",
 
   // canvas panel
   canvasPanelCollapseCanvas: "Collapse Canvas",
