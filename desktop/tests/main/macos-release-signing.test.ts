@@ -14,6 +14,7 @@ describe('macOS release signing contract', () => {
         gatekeeperAssess?: boolean;
         notarize?: boolean;
         forceCodeSigning?: boolean;
+        extendInfo?: Record<string, unknown>;
       };
     };
 
@@ -22,6 +23,16 @@ describe('macOS release signing contract', () => {
     expect(config.mac?.gatekeeperAssess).toBe(false);
     expect(config.mac?.notarize).toBe(true);
     expect(config.mac?.forceCodeSigning).not.toBe(true);
+  });
+
+  it('declares microphone usage for the packaged meeting recorder', async () => {
+    const config = JSON.parse(await readFile(join(repoRoot, 'desktop', 'electron-builder.json'), 'utf8')) as {
+      mac?: { extendInfo?: Record<string, unknown> };
+    };
+
+    expect(config.mac?.extendInfo?.NSMicrophoneUsageDescription).toBe(
+      'Xiaok uses the microphone to record meetings locally for transcription and summaries.',
+    );
   });
 
   it('requires Developer ID signing and notarization in the GitHub macOS release job', async () => {

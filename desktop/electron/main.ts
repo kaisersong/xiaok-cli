@@ -11,6 +11,10 @@ import {
   resolveLocalFileOpenPath,
 } from './security.js';
 import {
+  readMediaTypesFromPermissionDetails,
+  shouldAllowMeetingMediaPermission,
+} from './meeting-media-permission-policy.js';
+import {
   findIntentBrokerProtocolUrl,
   registerIntentBrokerProtocolClient,
 } from './intent-broker-protocol.js';
@@ -81,6 +85,23 @@ function debugMain(message: string, extra?: unknown): void {
     appendFileSync(join(logDir, 'main-debug.log'), `${new Date().toISOString()} ${line}\n`);
   } catch {}
   console.log(line);
+}
+
+function registerMeetingMediaPermissionHandlers(window: BrowserWindow): void {
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details) => {
+    return shouldAllowMeetingMediaPermission({
+      permission,
+      mediaTypes: readMediaTypesFromPermissionDetails(details),
+      isTrustedWebContents: webContents === window.webContents,
+    });
+  });
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(shouldAllowMeetingMediaPermission({
+      permission,
+      mediaTypes: readMediaTypesFromPermissionDetails(details),
+      isTrustedWebContents: webContents === window.webContents,
+    }));
+  });
 }
 
 function readRecentTaskSnapshots(dataRoot: string, limit = 20): TaskSnapshot[] {
@@ -341,6 +362,7 @@ async function createWindow(): Promise<BrowserWindow> {
   removeWindowsWindowMenu(window, process.platform);
   attachDesktopContextMenu(window, Menu);
   mainWindow = window;
+  registerMeetingMediaPermissionHandlers(window);
   // KSwarm service — manages kswarm server as a child process
   const kswarmService = createKSwarmService();
   const kswarmStartPromise = kswarmService.start().catch((err) => {

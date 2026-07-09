@@ -7,9 +7,21 @@
  */
 
 export type CollectionScope = 'global' | 'project';
-export type SourceKind = 'file' | 'url' | 'paste';
+export type SourceKind = 'file' | 'url' | 'paste' | 'meeting';
 export type SourceParseStatus = 'pending' | 'parsing' | 'parsed' | 'failed' | 'unsupported';
 export type ChunkEmbeddingStatus = 'pending' | 'embedding' | 'embedded' | 'failed';
+export type MeetingStatus =
+  | 'recording'
+  | 'paused'
+  | 'interrupted'
+  | 'stopping'
+  | 'transcribing'
+  | 'transcribed'
+  | 'summarizing'
+  | 'summary_blocked_by_privacy'
+  | 'saved'
+  | 'failed'
+  | 'cancelled';
 
 export interface Collection {
   id: string;
@@ -64,6 +76,21 @@ export interface Chunk {
   createdAt: number;
 }
 
+export interface MeetingRecord {
+  id: string;
+  sourceId: string;
+  status: MeetingStatus;
+  title: string;
+  audioFilePath: string;
+  audioRetention: 'kept' | 'deleted';
+  summaryProvider: string;
+  summaryProviderHash: string;
+  failureReason: string;
+  startedAt: number;
+  endedAt: number | null;
+  updatedAt: number;
+}
+
 export interface CreateCollectionInput {
   name: string;
   description?: string;
@@ -82,6 +109,36 @@ export interface AddSourceInput {
   filePath?: string;
   mimeType?: string;
   text?: string;
+  byteSize?: number;
+  rawPath?: string;
+  parseStatus?: SourceParseStatus;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateMeetingInput {
+  id?: string;
+  sourceId?: string;
+  status: MeetingStatus;
+  title?: string;
+  audioFilePath?: string;
+  audioRetention?: 'kept' | 'deleted';
+  summaryProvider?: string;
+  summaryProviderHash?: string;
+  failureReason?: string;
+  startedAt: number;
+  endedAt?: number | null;
+}
+
+export interface UpdateMeetingInput {
+  sourceId?: string;
+  status?: MeetingStatus;
+  title?: string;
+  audioFilePath?: string;
+  audioRetention?: 'kept' | 'deleted';
+  summaryProvider?: string;
+  summaryProviderHash?: string;
+  failureReason?: string;
+  endedAt?: number | null;
 }
 
 export interface KbSearchInput {

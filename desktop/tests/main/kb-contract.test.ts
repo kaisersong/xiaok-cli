@@ -77,6 +77,39 @@ describe('KB Contract — KbStore', () => {
     });
   });
 
+  it('persists meeting source metadata and parsed status', () => {
+    const col = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const src = store.addSource({
+      collectionId: col.id,
+      kind: 'meeting',
+      title: 'Weekly Sync',
+      filePath: '/tmp/weekly-sync.wav',
+      byteSize: 32044,
+      parseStatus: 'parsed',
+      metadata: {
+        meetingId: 'meeting-1',
+        durationSeconds: 1,
+        audioRetention: 'kept',
+        participantHints: ['Alice', 'Bob'],
+      },
+    });
+
+    expect(src).toMatchObject({
+      collectionId: col.id,
+      kind: 'meeting',
+      title: 'Weekly Sync',
+      rawPath: '/tmp/weekly-sync.wav',
+      byteSize: 32044,
+      parseStatus: 'parsed',
+      metadata: {
+        meetingId: 'meeting-1',
+        durationSeconds: 1,
+        audioRetention: 'kept',
+        participantHints: ['Alice', 'Bob'],
+      },
+    });
+  });
+
   it('inserts chunks for a source', () => {
     const col = store.createCollection({ name: 'D', embeddingModelId: 'm', embeddingDim: 384 });
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' });
@@ -86,6 +119,23 @@ describe('KB Contract — KbStore', () => {
     ]);
     expect(chunks).toHaveLength(2);
     expect(chunks[0]).toMatchObject({ idx: 0, text: 'chunk one', embeddingStatus: 'pending' });
+  });
+
+  it('persists meeting chunk timestamps in metadata', () => {
+    const col = store.createCollection({ name: 'Timed Chunks', embeddingModelId: 'm', embeddingDim: 384 });
+    const src = store.addSource({ collectionId: col.id, kind: 'meeting', title: 'Timed Meeting' });
+    const chunks = store.insertChunks(src.id, [
+      {
+        idx: 0,
+        text: 'Alice committed to ship the demo.',
+        charStart: 0,
+        charEnd: 35,
+        metadata: { startTime: 0, endTime: 2.5, transcribeStatus: 'ok' },
+      },
+    ]);
+
+    expect(chunks[0].metadata).toEqual({ startTime: 0, endTime: 2.5, transcribeStatus: 'ok' });
+    expect(store.listChunks(src.id)[0].metadata).toEqual({ startTime: 0, endTime: 2.5, transcribeStatus: 'ok' });
   });
 
   it('marks chunk as embedded', () => {

@@ -13,12 +13,15 @@ import type {
   CollectionState,
   Chunk,
   CreateCollectionInput,
+  CreateMeetingInput,
   GetSourceOutput,
+  MeetingRecord,
   Source,
   AddSourceInput,
   SourceEmbeddingProgress,
   ChunkEmbeddingStatus,
   SourceParseStatus,
+  UpdateMeetingInput,
 } from './kb-types.js';
 import type { KbStore } from './kb-store.js';
 
@@ -90,10 +93,26 @@ const SCHEMA_SQL = `
     created_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS meetings (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    audio_file_path TEXT NOT NULL DEFAULT '',
+    audio_retention TEXT NOT NULL DEFAULT 'kept',
+    summary_provider TEXT NOT NULL DEFAULT 'local-only',
+    summary_provider_hash TEXT NOT NULL DEFAULT '',
+    failure_reason TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_sources_collection ON sources(collection_id);
   CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id, idx);
   CREATE INDEX IF NOT EXISTS idx_chunks_collection ON chunks(collection_id);
   CREATE INDEX IF NOT EXISTS idx_chunk_embeddings_collection ON chunk_embeddings(collection_id);
+  CREATE INDEX IF NOT EXISTS idx_meetings_status ON meetings(status);
 
   CREATE TRIGGER IF NOT EXISTS chunks_count_inc AFTER INSERT ON chunks BEGIN
     UPDATE collections SET chunk_count_cached = chunk_count_cached + 1, updated_at = NEW.created_at WHERE id = NEW.collection_id;
@@ -150,10 +169,24 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   function addSource(input: AddSourceInput): Source {
     const id = randomUUID();
     const ts = now();
+    const rawPath = input.rawPath ?? input.filePath ?? '';
+    const metadataJson = JSON.stringify(input.metadata ?? {});
     db.prepare(`
       INSERT INTO sources (id, collection_id, kind, title, uri, mime_type, sha256, byte_size, raw_path, extracted_text_path, parse_status, parse_error, parse_attempts, chunk_count, metadata_json, created_at, updated_at)
-      VALUES (@id, @collectionId, @kind, @title, @uri, @mimeType, '', 0, @rawPath, '', 'pending', '', 0, 0, '{}', @ts, @ts)
-    `).run({ id, collectionId: input.collectionId, kind: input.kind, title: input.title, uri: input.uri ?? '', mimeType: input.mimeType ?? '', rawPath: input.filePath ?? '', ts });
+      VALUES (@id, @collectionId, @kind, @title, @uri, @mimeType, '', @byteSize, @rawPath, '', @parseStatus, '', 0, 0, @metadataJson, @ts, @ts)
+    `).run({
+      id,
+      collectionId: input.collectionId,
+      kind: input.kind,
+      title: input.title,
+      uri: input.uri ?? '',
+      mimeType: input.mimeType ?? '',
+      byteSize: input.byteSize ?? 0,
+      rawPath,
+      parseStatus: input.parseStatus ?? 'pending',
+      metadataJson,
+      ts,
+    });
     return getSource(id)!;
   }
 
@@ -187,19 +220,33 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return row ?? { embedded: 0, total: 0, failed: 0 };
   }
 
-  function insertChunks(sourceId: string, inputs: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string }>): Chunk[] {
+  function insertChunks(sourceId: string, inputs: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string; metadata?: Record<string, unknown> }>): Chunk[] {
     const src = getSource(sourceId);
     if (!src) throw new Error('Source not found');
     const ts = now();
     const stmt = db.prepare(`
       INSERT INTO chunks (id, source_id, collection_id, idx, text, segmented_text, char_start, char_end, page_index, slide_index, sheet_name, cell_range, embedding_status, embedding_error, embedding_attempts, metadata_json, created_at)
-      VALUES (@id, @sourceId, @collectionId, @idx, @text, NULL, @charStart, @charEnd, @pageIndex, @slideIndex, @sheetName, @cellRange, 'pending', '', 0, '{}', @ts)
+      VALUES (@id, @sourceId, @collectionId, @idx, @text, NULL, @charStart, @charEnd, @pageIndex, @slideIndex, @sheetName, @cellRange, 'pending', '', 0, @metadataJson, @ts)
     `);
     const ids: string[] = [];
     for (const c of inputs) {
       const id = randomUUID();
       ids.push(id);
-      stmt.run({ id, sourceId, collectionId: src.collectionId, idx: c.idx, text: c.text, charStart: c.charStart, charEnd: c.charEnd, pageIndex: c.pageIndex ?? null, slideIndex: c.slideIndex ?? null, sheetName: c.sheetName ?? null, cellRange: c.cellRange ?? null, ts });
+      stmt.run({
+        id,
+        sourceId,
+        collectionId: src.collectionId,
+        idx: c.idx,
+        text: c.text,
+        charStart: c.charStart,
+        charEnd: c.charEnd,
+        pageIndex: c.pageIndex ?? null,
+        slideIndex: c.slideIndex ?? null,
+        sheetName: c.sheetName ?? null,
+        cellRange: c.cellRange ?? null,
+        metadataJson: JSON.stringify(c.metadata ?? {}),
+        ts,
+      });
     }
     return ids.map(id => getChunk(id)!);
   }
@@ -270,6 +317,79 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return outline;
   }
 
+  function createMeeting(input: CreateMeetingInput): MeetingRecord {
+    const id = input.id ?? randomUUID();
+    const ts = now();
+    db.prepare(`
+      INSERT INTO meetings (
+        id, source_id, status, title, audio_file_path, audio_retention,
+        summary_provider, summary_provider_hash, failure_reason,
+        started_at, ended_at, updated_at
+      )
+      VALUES (
+        @id, @sourceId, @status, @title, @audioFilePath, @audioRetention,
+        @summaryProvider, @summaryProviderHash, @failureReason,
+        @startedAt, @endedAt, @updatedAt
+      )
+    `).run({
+      id,
+      sourceId: input.sourceId ?? '',
+      status: input.status,
+      title: input.title ?? '',
+      audioFilePath: input.audioFilePath ?? '',
+      audioRetention: input.audioRetention ?? 'kept',
+      summaryProvider: input.summaryProvider ?? 'local-only',
+      summaryProviderHash: input.summaryProviderHash ?? '',
+      failureReason: input.failureReason ?? '',
+      startedAt: input.startedAt,
+      endedAt: input.endedAt ?? null,
+      updatedAt: ts,
+    });
+    return getMeeting(id)!;
+  }
+
+  function getMeeting(id: string): MeetingRecord | undefined {
+    const row = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    return row ? mapMeeting(row) : undefined;
+  }
+
+  function listMeetings(): MeetingRecord[] {
+    return (db.prepare('SELECT * FROM meetings ORDER BY started_at ASC').all() as Record<string, unknown>[]).map(mapMeeting);
+  }
+
+  function updateMeeting(id: string, input: UpdateMeetingInput): MeetingRecord | undefined {
+    const current = getMeeting(id);
+    if (!current) return undefined;
+    const ts = now();
+    db.prepare(`
+      UPDATE meetings SET
+        source_id = @sourceId,
+        status = @status,
+        title = @title,
+        audio_file_path = @audioFilePath,
+        audio_retention = @audioRetention,
+        summary_provider = @summaryProvider,
+        summary_provider_hash = @summaryProviderHash,
+        failure_reason = @failureReason,
+        ended_at = @endedAt,
+        updated_at = @updatedAt
+      WHERE id = @id
+    `).run({
+      id,
+      sourceId: input.sourceId ?? current.sourceId,
+      status: input.status ?? current.status,
+      title: input.title ?? current.title,
+      audioFilePath: input.audioFilePath ?? current.audioFilePath,
+      audioRetention: input.audioRetention ?? current.audioRetention,
+      summaryProvider: input.summaryProvider ?? current.summaryProvider,
+      summaryProviderHash: input.summaryProviderHash ?? current.summaryProviderHash,
+      failureReason: input.failureReason ?? current.failureReason,
+      endedAt: input.endedAt === undefined ? current.endedAt : input.endedAt,
+      updatedAt: ts,
+    });
+    return getMeeting(id);
+  }
+
   function close(): void {
     db.close();
   }
@@ -279,6 +399,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     createCollection, getCollection, listCollections, renameCollection, deleteCollection,
     addSource, getSource, listSources, deleteSource, retrySource, getSourceEmbeddingProgress,
     insertChunks, listChunks, markChunkEmbedded, markChunkFailed,
+    createMeeting, getMeeting, listMeetings, updateMeeting,
     getCollectionState, getSourceWithContent, close,
   };
 }
@@ -339,5 +460,22 @@ function mapChunk(row: Record<string, unknown>): Chunk {
     embeddingError: row.embedding_error as string,
     metadata: JSON.parse((row.metadata_json as string) || '{}'),
     createdAt: row.created_at as number,
+  };
+}
+
+function mapMeeting(row: Record<string, unknown>): MeetingRecord {
+  return {
+    id: row.id as string,
+    sourceId: row.source_id as string,
+    status: row.status as MeetingRecord['status'],
+    title: row.title as string,
+    audioFilePath: row.audio_file_path as string,
+    audioRetention: row.audio_retention as MeetingRecord['audioRetention'],
+    summaryProvider: row.summary_provider as string,
+    summaryProviderHash: row.summary_provider_hash as string,
+    failureReason: row.failure_reason as string,
+    startedAt: row.started_at as number,
+    endedAt: row.ended_at as number | null,
+    updatedAt: row.updated_at as number,
   };
 }

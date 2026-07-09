@@ -8,6 +8,7 @@ import {
   ensureReportRendererDistCompat,
   ensureReportRendererCssCompat,
   ensureCanvasServerDepsCompat,
+  ensureMeetingTranscriberCompat,
   ensureSlideRendererWheelhouseCompat,
 } from '../../electron/deploy-bundled-plugins.js';
 
@@ -365,6 +366,24 @@ describe('deploy-bundled-plugins', () => {
       expect(existsSync(join(installedPluginDir, 'node_modules', 'fractional-indexing-jittered', 'lib', 'index.js'))).toBe(true);
     });
 
+    it('repairs same-version bundled meeting transcriber files from bundled resources', () => {
+      const bundledPluginDir = join(bundledDir, 'kai-meeting-assistant');
+      const installedPluginDir = join(pluginsDir, 'kai-meeting-assistant');
+      createPluginWithFiles(bundledPluginDir, { name: 'kai-meeting-assistant', version: '0.1.0' }, {
+        'mcp-servers/meeting-transcriber/server.py': 'fixed transcriber',
+        'mcp-servers/meeting-transcriber/requirements.txt': 'openai-whisper\ntruststore\ncertifi\n',
+      });
+      createPluginWithFiles(installedPluginDir, { name: 'kai-meeting-assistant', version: '0.1.0', source: 'bundled' }, {
+        'mcp-servers/meeting-transcriber/server.py': 'old transcriber',
+        'mcp-servers/meeting-transcriber/requirements.txt': 'openai-whisper\n',
+      });
+
+      ensureMeetingTranscriberCompat(installedPluginDir, bundledPluginDir);
+
+      expect(readFileSync(join(installedPluginDir, 'mcp-servers', 'meeting-transcriber', 'server.py'), 'utf8')).toBe('fixed transcriber');
+      expect(readFileSync(join(installedPluginDir, 'mcp-servers', 'meeting-transcriber', 'requirements.txt'), 'utf8')).toContain('truststore');
+    });
+
     it('replaces stale same-version bundled slide wheels with current-platform wheels', () => {
       const installedPluginDir = join(pluginsDir, 'kai-slide-creator');
       const bundledPluginDir = join(bundledDir, 'kai-slide-creator');
@@ -553,6 +572,32 @@ describe('deploy-bundled-plugins', () => {
       expect(result.deployed).toContain('cua-computer-use');
       expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'plugin.json'))).toBe(true);
       expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'cua-computer-use', 'skills', 'computer-use', 'SKILL.md'))).toBe(true);
+    });
+
+    it('deploys the bundled meeting assistant transcriber plugin from packaged resources', async () => {
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      createPluginWithFiles(join(bundledDir, 'kai-meeting-assistant'), {
+        name: 'kai-meeting-assistant',
+        version: '0.1.0',
+      }, {
+        'skills/meeting-summarizer/SKILL.md': '# Meeting Summarizer',
+        'mcp-servers/meeting-transcriber/server.py': '# transcriber',
+        'mcp-servers/meeting-transcriber/requirements.txt': 'openai-whisper\ntruststore\ncertifi\n',
+      });
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toContain('kai-meeting-assistant');
+      expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'kai-meeting-assistant', 'plugin.json'))).toBe(true);
+      expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'kai-meeting-assistant', 'mcp-servers', 'meeting-transcriber', 'server.py'))).toBe(true);
+      expect(readFileSync(join(rootDir, '.xiaok', 'plugins', 'kai-meeting-assistant', 'mcp-servers', 'meeting-transcriber', 'requirements.txt'), 'utf8')).toContain('truststore');
+      expect(existsSync(join(rootDir, '.xiaok', 'plugins', 'kai-meeting-assistant', 'skills', 'meeting-summarizer', 'SKILL.md'))).toBe(true);
     });
 
     it('upgrades the bundled CUA plugin so v0.2 window tools replace stale v0.1 metadata', async () => {

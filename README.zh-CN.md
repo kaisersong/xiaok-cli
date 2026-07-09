@@ -46,6 +46,18 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.21 补上了知识库里的本地 AI 录音流程。知识库首页现在直接提供 **AI录音** 入口；录音界面改为更大的会议式面板，包含醒目的开始按钮、真实麦克风音量波动、暂停/继续、实时转写预览，以及点“完成”后先生成可编辑纪要草稿、再保存到知识库的流程。
+
+**AI 录音与本地转写更新：**
+
+- **知识库首页入口**：`AI录音` 直接出现在知识库首页，不再藏在原来的会议纪要导入流程里。
+- **实时录音交互**：用户点击开始后才开始采集本地麦克风；界面展示来自当前输入流的真实音频强度，支持暂停/继续，并用“完成”结束录音。
+- **本地 Whisper 模型**：转写设置列出 `base`、`small`、`medium`、`large`、`turbo`，展示文件大小、已下载/不完整/未下载状态，并提供 icon-only 下载与卸载操作，模型可以显式切换。
+- **可续传模型下载**：Whisper 模型下载支持 HTTP Range 断点续传、瞬时网络错误重试、保留部分文件、checksum 不匹配时自动整文件重下，并在续传写出多余尾部字节时先截断再校验。
+- **保存前可编辑纪要**：点“完成”后先本地转写并生成纪要草稿，标题会从总结内容提炼并带时间戳；用户可编辑草稿后再保存为知识库来源。
+- **验证结果**：已用打包后的 desktop app 通过 fake microphone WAV 跑真实 renderer 链路：音频波动随输入变化，暂停后音量归零，实时转写出现文本，完成后生成可编辑草稿，保存后知识库出现新来源。
+- **发布对齐**：root CLI 元数据、Desktop package 元数据、package locks、相关项目 README 基线和 Desktop Release workflow 默认值已统一到 `1.4.21` / `desktop-v1.4.21`。
+
 Xiaok Desktop v1.4.20 补上 Loop Engineering 发布说明缺口，并让 task-completion 类型循环的结果可以直接从产品界面查看。本次发布把 root CLI 元数据、Desktop package 元数据、package locks、README 发布说明、相关项目 README 基线和 Desktop Release workflow 默认值统一到 `1.4.20` / `desktop-v1.4.20`。
 
 **v1.4.20 新特性：**

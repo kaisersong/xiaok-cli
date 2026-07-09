@@ -156,8 +156,20 @@ describe('preload API contract', () => {
       'kbAddSource',
       'kbDeleteSource',
       'kbGetCollectionState',
+      'kbGetSourceContent',
       'kbSearch',
       'kbPickFiles',
+      'meetingPickAudioFile',
+      'meetingGetMicrophonePermission',
+      'meetingRequestMicrophonePermission',
+      'meetingListModels',
+      'meetingDownloadModel',
+      'meetingUninstallModel',
+      'meetingSaveRecordedAudio',
+      'meetingTranscribePreview',
+      'meetingDraftRecording',
+      'meetingProcessRecording',
+      'meetingSaveTranscript',
     ]);
   });
 

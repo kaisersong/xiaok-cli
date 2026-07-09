@@ -10,12 +10,15 @@ import type {
   CollectionState,
   Chunk,
   CreateCollectionInput,
+  CreateMeetingInput,
   GetSourceOutput,
   KbSearchInput,
   KbSearchResult,
+  MeetingRecord,
   Source,
   AddSourceInput,
   SourceEmbeddingProgress,
+  UpdateMeetingInput,
 } from './kb-types.js';
 
 export interface KbStore {
@@ -36,10 +39,16 @@ export interface KbStore {
   getSourceEmbeddingProgress(sourceId: string): SourceEmbeddingProgress;
 
   // Chunk operations
-  insertChunks(sourceId: string, chunks: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string }>): Chunk[];
+  insertChunks(sourceId: string, chunks: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string; metadata?: Record<string, unknown> }>): Chunk[];
   listChunks(sourceId: string): Chunk[];
   markChunkEmbedded(chunkId: string): void;
   markChunkFailed(chunkId: string, error: string): void;
+
+  // Meeting operations
+  createMeeting(input: CreateMeetingInput): MeetingRecord;
+  getMeeting(id: string): MeetingRecord | undefined;
+  listMeetings(): MeetingRecord[];
+  updateMeeting(id: string, input: UpdateMeetingInput): MeetingRecord | undefined;
 
   // Aggregated views
   getCollectionState(collectionId: string): CollectionState | undefined;

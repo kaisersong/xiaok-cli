@@ -1,11 +1,12 @@
-import { app, clipboard, dialog, shell, type BrowserWindow, type IpcMain } from 'electron';
-import { lstat, mkdir, open as openFile, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { app, clipboard, dialog, shell, systemPreferences, type BrowserWindow, type IpcMain } from 'electron';
+import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
+import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
@@ -14,6 +15,7 @@ interface RegisterDesktopIpcOptions {
 }
 
 const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
+const MEETING_TRANSCRIBER_ALLOWED_MODELS = new Set(['tiny', 'base', 'small', 'medium', 'large', 'turbo']);
 const DATA_URL_MIME_BY_EXTENSION = new Map<string, string>([
   ['.pdf', 'application/pdf'],
 ]);
@@ -27,6 +29,12 @@ const HTML_EDIT_IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
   ['.avif', 'image/avif'],
 ]);
 
+const meetingAudioPermissionService = createMeetingAudioPermissionService({
+  platform: process.platform,
+  getMediaAccessStatus: (mediaType) => systemPreferences.getMediaAccessStatus(mediaType),
+  askForMediaAccess: (mediaType) => systemPreferences.askForMediaAccess(mediaType),
+});
+
 function getDataUrlMimeType(filePath: string): string | null {
   return DATA_URL_MIME_BY_EXTENSION.get(extname(filePath).toLowerCase()) ?? null;
 }
@@ -39,6 +47,21 @@ function decodeBase64DataUrl(content: string): Buffer | null {
   const match = /^data:[^,;]+(?:;[^,]*)*;base64,([\s\S]*)$/i.exec(content);
   if (!match) return null;
   return Buffer.from(match[1], 'base64');
+}
+
+function decodeBase64Audio(content: string): Buffer {
+  const dataUrl = decodeBase64DataUrl(content);
+  return dataUrl ?? Buffer.from(content, 'base64');
+}
+
+function safeMeetingRecordingFileName(title: unknown): string {
+  const raw = typeof title === 'string' ? title.trim() : '';
+  const base = raw
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'meeting';
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `${Date.now()}-${base}-${suffix}.wav`;
 }
 
 function isPathInside(childPath: string, parentPath: string): boolean {
@@ -110,6 +133,22 @@ function log(level: string, msg: string, ...args: unknown[]) {
   const ts = new Date().toISOString();
   const payload = args.length ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') : '';
   console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
+}
+
+export function parseMeetingTranscriberOptions(input: unknown): { model?: string; language?: string } {
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const model = typeof record.model === 'string' ? record.model.trim() : '';
+  const language = typeof record.language === 'string' ? record.language.trim() : '';
+  const options: { model?: string; language?: string } = {};
+
+  if (model && MEETING_TRANSCRIBER_ALLOWED_MODELS.has(model)) {
+    options.model = model;
+  }
+  if (language && language !== 'auto' && /^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/i.test(language)) {
+    options.language = language;
+  }
+
+  return options;
 }
 
 export async function registerDesktopIpc(
@@ -880,6 +919,152 @@ export async function registerDesktopIpc(
     return result.filePaths;
   });
 
+  ipcMain.handle('desktop:meeting:pickAudioFile', async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'WAV audio', extensions: ['wav'] },
+      ],
+    });
+    if (result.canceled) return null;
+    return result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle('desktop:meeting:getMicrophonePermission', async () => (
+    meetingAudioPermissionService.getStatus()
+  ));
+
+  ipcMain.handle('desktop:meeting:requestMicrophonePermission', async () => (
+    meetingAudioPermissionService.requestPermission()
+  ));
+
+  ipcMain.handle('desktop:meeting:listModels', async () => {
+    const { createMeetingModelService } = await import('./meeting-model-service.js');
+    return createMeetingModelService().listModels();
+  });
+
+  ipcMain.handle('desktop:meeting:downloadModel', async (_event, modelId: string) => {
+    const { createMeetingModelService } = await import('./meeting-model-service.js');
+    return createMeetingModelService().downloadModel(String(modelId ?? ''));
+  });
+
+  ipcMain.handle('desktop:meeting:uninstallModel', async (_event, modelId: string) => {
+    const { createMeetingModelService } = await import('./meeting-model-service.js');
+    return createMeetingModelService().uninstallModel(String(modelId ?? ''));
+  });
+
+  ipcMain.handle('desktop:meeting:saveRecordedAudio', async (_event, input) => {
+    const wavBase64 = typeof input?.wavBase64 === 'string' ? input.wavBase64 : '';
+    if (!wavBase64) return { ok: false, error: 'missing_audio' };
+    if (Buffer.byteLength(wavBase64, 'utf8') > 512 * 1024 * 1024) {
+      return { ok: false, error: 'audio_too_large' };
+    }
+
+    let audioBuffer: Buffer;
+    try {
+      audioBuffer = decodeBase64Audio(wavBase64);
+      const { parsePcm16WavInfo } = await import('./meeting-audio-format.js');
+      parsePcm16WavInfo(audioBuffer);
+    } catch {
+      return { ok: false, error: 'invalid_wav' };
+    }
+
+    const recordingsDir = join(app.getPath('userData'), 'meeting-recordings');
+    await mkdir(recordingsDir, { recursive: true });
+    const filePath = join(recordingsDir, safeMeetingRecordingFileName(input?.title));
+    await writeFile(filePath, audioBuffer);
+    return { ok: true, filePath };
+  });
+
+  ipcMain.handle('desktop:meeting:transcribePreview', async (_event, input) => {
+    const wavBase64 = typeof input?.wavBase64 === 'string' ? input.wavBase64 : '';
+    if (!wavBase64) return { ok: false, error: 'missing_audio' };
+    if (Buffer.byteLength(wavBase64, 'utf8') > 96 * 1024 * 1024) {
+      return { ok: false, error: 'audio_too_large' };
+    }
+
+    let audioBuffer: Buffer;
+    try {
+      audioBuffer = decodeBase64Audio(wavBase64);
+      const { parsePcm16WavInfo } = await import('./meeting-audio-format.js');
+      parsePcm16WavInfo(audioBuffer);
+    } catch {
+      return { ok: false, error: 'invalid_wav' };
+    }
+
+    const previewDir = join(app.getPath('temp'), 'xiaok-meeting-preview');
+    await mkdir(previewDir, { recursive: true });
+    const filePath = join(previewDir, safeMeetingRecordingFileName(input?.title));
+    await writeFile(filePath, audioBuffer);
+    try {
+      const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
+      const transcriber = createLocalMeetingTranscriber(parseMeetingTranscriberOptions(input));
+      const transcription = await transcriber.transcribeFile({
+        audioFilePath: filePath,
+        meetingId: `preview-${Date.now()}`,
+      });
+      return { ok: true, ...transcription };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'preview_transcription_failed',
+      };
+    } finally {
+      await rm(filePath, { force: true }).catch(() => undefined);
+    }
+  });
+
+  ipcMain.handle('desktop:meeting:processRecording', async (_event, input) => {
+    log('info', 'meeting:processRecording', { collectionId: input?.collectionId, title: input?.title });
+    const { createMeetingService } = await import('./meeting-service.js');
+    const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
+    const { createLocalMeetingSummaryService } = await import('./meeting-summary-service.js');
+    const service = createMeetingService({
+      store: getKbStore(),
+      transcriber: createLocalMeetingTranscriber(parseMeetingTranscriberOptions(input)),
+      summaryService: createLocalMeetingSummaryService(),
+    });
+    return service.processRecording({
+      requestSource: 'user',
+      collectionId: String(input?.collectionId ?? ''),
+      title: String(input?.title ?? '').trim() || 'Meeting',
+      audioFilePath: String(input?.audioFilePath ?? ''),
+      summaryProvider: 'local-only',
+    });
+  });
+
+  ipcMain.handle('desktop:meeting:draftRecording', async (_event, input) => {
+    log('info', 'meeting:draftRecording', { title: input?.title });
+    const { createMeetingService } = await import('./meeting-service.js');
+    const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
+    const { createLocalMeetingSummaryService } = await import('./meeting-summary-service.js');
+    const service = createMeetingService({
+      store: getKbStore(),
+      transcriber: createLocalMeetingTranscriber(parseMeetingTranscriberOptions(input)),
+      summaryService: createLocalMeetingSummaryService(),
+    });
+    return service.draftRecording({
+      requestSource: 'user',
+      title: String(input?.title ?? '').trim() || 'Meeting',
+      audioFilePath: String(input?.audioFilePath ?? ''),
+      summaryProvider: 'local-only',
+    });
+  });
+
+  ipcMain.handle('desktop:meeting:saveTranscript', async (_event, input) => {
+    log('info', 'meeting:saveTranscript', { collectionId: input?.collectionId, title: input?.title });
+    const { createMeetingService } = await import('./meeting-service.js');
+    const service = createMeetingService({ store: getKbStore() });
+    return service.saveTranscript({
+      requestSource: 'user',
+      collectionId: String(input?.collectionId ?? ''),
+      title: String(input?.title ?? '').trim() || 'Meeting',
+      audioFilePath: String(input?.audioFilePath ?? ''),
+      transcript: String(input?.transcript ?? ''),
+    });
+  });
+
   ipcMain.handle('desktop:kb:deleteSource', async (_event, id: string) => {
     log('info', 'kb:deleteSource', { id });
     getKbStore().deleteSource(id);
@@ -888,6 +1073,15 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:kb:getCollectionState', async (_event, collectionId: string) => {
     log('info', 'kb:getCollectionState', { collectionId });
     return getKbStore().getCollectionState(collectionId);
+  });
+
+  ipcMain.handle('desktop:kb:getSourceContent', async (_event, input) => {
+    const sourceId = String(input?.sourceId ?? '');
+    const offset = Math.max(0, Number(input?.offset ?? 0) || 0);
+    const requestedLimit = Number(input?.limit ?? 64_000) || 64_000;
+    const limit = Math.min(Math.max(1, requestedLimit), 128_000);
+    log('info', 'kb:getSourceContent', { sourceId, offset, limit });
+    return getKbStore().getSourceWithContent(sourceId, offset, limit);
   });
 
   ipcMain.handle('desktop:kb:search', async (_event, input) => {

@@ -46,6 +46,18 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.21 adds the new local AI recording flow for the Knowledge Base. The Knowledge home page now has an **AI Recording** entry point; the recorder opens as a larger meeting-style panel with a prominent start button, real microphone-level waveform, pause/resume, live transcript preview, and a finish step that generates an editable notes draft before saving anything to the knowledge base.
+
+**AI Recording and Local Transcription Update:**
+
+- **Knowledge-First Entry Point**: `AI Recording` is available directly from the Knowledge Base home page, outside the older meeting-note import surface.
+- **Live Recording Interaction**: Starting recording captures local microphone audio immediately after the user presses Start, shows real audio strength from the active input stream, supports Pause/Resume, and uses `Finish` for the final recording step.
+- **Local Whisper Models**: The transcription settings panel lists `base`, `small`, `medium`, `large`, and `turbo` with file size, downloaded/incomplete/not-downloaded state, icon-only download and uninstall actions, and explicit model switching.
+- **Resumable Model Downloads**: Whisper model downloads use HTTP Range resume, retry transient network failures, keep partial files, recover from checksum mismatch by redownloading from scratch, and truncate trailing bytes before checksum verification when a resumed transfer overshoots.
+- **Editable Notes Before Save**: Finishing a recording runs local transcription and note summarization first, proposes a content-derived title with a timestamp, then lets the user edit the notes draft before saving it as a knowledge source.
+- **Validation**: The packaged desktop app was verified with a fake microphone WAV through the real renderer flow: audio levels changed with the input, Pause zeroed the levels, live transcript lines appeared, Finish generated an editable draft, and Save added the source to the local knowledge collection.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, related-project README baselines, and the Desktop Release workflow default now align on `1.4.21` / `desktop-v1.4.21`.
+
 Xiaok Desktop v1.4.20 closes the Loop Engineering release gap and makes task-completion loop results visible from the product surface. The release version, Desktop package metadata, package locks, README release notes, related-project README baselines, and Desktop Release workflow default now align on `1.4.20` / `desktop-v1.4.20`.
 
 **What's New in v1.4.20:**

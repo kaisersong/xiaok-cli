@@ -170,8 +170,20 @@ export const PRELOAD_API_KEYS = [
   'kbAddSource',
   'kbDeleteSource',
   'kbGetCollectionState',
+  'kbGetSourceContent',
   'kbSearch',
   'kbPickFiles',
+  'meetingPickAudioFile',
+  'meetingGetMicrophonePermission',
+  'meetingRequestMicrophonePermission',
+  'meetingListModels',
+  'meetingDownloadModel',
+  'meetingUninstallModel',
+  'meetingSaveRecordedAudio',
+  'meetingTranscribePreview',
+  'meetingDraftRecording',
+  'meetingProcessRecording',
+  'meetingSaveTranscript',
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -387,8 +399,20 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kbAddSource: 'desktop:kb:addSource',
   kbDeleteSource: 'desktop:kb:deleteSource',
   kbGetCollectionState: 'desktop:kb:getCollectionState',
+  kbGetSourceContent: 'desktop:kb:getSourceContent',
   kbSearch: 'desktop:kb:search',
   kbPickFiles: 'desktop:kb:pickFiles',
+  meetingPickAudioFile: 'desktop:meeting:pickAudioFile',
+  meetingGetMicrophonePermission: 'desktop:meeting:getMicrophonePermission',
+  meetingRequestMicrophonePermission: 'desktop:meeting:requestMicrophonePermission',
+  meetingListModels: 'desktop:meeting:listModels',
+  meetingDownloadModel: 'desktop:meeting:downloadModel',
+  meetingUninstallModel: 'desktop:meeting:uninstallModel',
+  meetingSaveRecordedAudio: 'desktop:meeting:saveRecordedAudio',
+  meetingTranscribePreview: 'desktop:meeting:transcribePreview',
+  meetingDraftRecording: 'desktop:meeting:draftRecording',
+  meetingProcessRecording: 'desktop:meeting:processRecording',
+  meetingSaveTranscript: 'desktop:meeting:saveTranscript',
   // KSwarm proxy
   kswarmProxyGet: 'desktop:kswarm:proxy:get',
   kswarmProxyGetText: 'desktop:kswarm:proxy:getText',
@@ -837,8 +861,20 @@ export interface DesktopApi {
   kbAddSource(input: unknown): Promise<unknown>;
   kbDeleteSource(id: string): Promise<void>;
   kbGetCollectionState(collectionId: string): Promise<unknown>;
+  kbGetSourceContent(input: unknown): Promise<unknown>;
   kbSearch(input: unknown): Promise<unknown[]>;
   kbPickFiles(): Promise<string[]>;
+  meetingPickAudioFile(): Promise<string | null>;
+  meetingGetMicrophonePermission(): Promise<unknown>;
+  meetingRequestMicrophonePermission(): Promise<unknown>;
+  meetingListModels(): Promise<unknown[]>;
+  meetingDownloadModel(modelId: string): Promise<unknown>;
+  meetingUninstallModel(modelId: string): Promise<unknown>;
+  meetingSaveRecordedAudio(input: unknown): Promise<unknown>;
+  meetingTranscribePreview(input: unknown): Promise<unknown>;
+  meetingDraftRecording(input: unknown): Promise<unknown>;
+  meetingProcessRecording(input: unknown): Promise<unknown>;
+  meetingSaveTranscript(input: unknown): Promise<unknown>;
 
   // Thread meta (GTD / pinned)
   getThreadLabels(): Promise<ThreadMetaSnapshot>;
@@ -1150,8 +1186,20 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kbAddSource: (input) => ipcRenderer.invoke('desktop:kb:addSource', input) as Promise<unknown>,
     kbDeleteSource: (id) => ipcRenderer.invoke('desktop:kb:deleteSource', id) as Promise<void>,
     kbGetCollectionState: (collectionId) => ipcRenderer.invoke('desktop:kb:getCollectionState', collectionId) as Promise<unknown>,
+    kbGetSourceContent: (input) => ipcRenderer.invoke('desktop:kb:getSourceContent', input) as Promise<unknown>,
     kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<unknown[]>,
     kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles') as Promise<string[]>,
+    meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<string | null>,
+    meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<unknown>,
+    meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<unknown>,
+    meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<unknown[]>,
+    meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<unknown>,
+    meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<unknown>,
+    meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<unknown>,
+    meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<unknown>,
+    meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<unknown>,
+    meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<unknown>,
+    meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<unknown>,
     getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetaSnapshot>,
     setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
     unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,

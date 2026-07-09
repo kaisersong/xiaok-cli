@@ -4,18 +4,13 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.4.9 adds a local-first Personal Knowledge Base, automation lifecycle refinements, and artifact preview enhancements:
+v1.4.21 adds the local AI recording flow to the Knowledge Base while keeping the Loop Engineering and packaging baselines aligned:
 
-- **Personal Knowledge Base (KB)**: Collection → Source → Chunk data model stored in SQLite. PDF, docx, pptx, and xlsx extraction via pdfjs-dist. Chinese full-text search with jieba segmentation. Agent tool integration through `kb_search`, `kb_get_source`, `kb_list_collections`, and `kb_create_collection`.
-- **Loop Edit/Delete**: User loops can now be modified and removed directly from the Automations panel, completing the CRUD lifecycle for loop management.
-- **Artifact Preview Enhancements**: Fullscreen toggle for artifact previews, HTML artifacts rendered in iframe with `allow-scripts`, and a "send to chat" button to discuss artifacts in the conversation context.
-- **Clickable File Paths**: File paths appearing in messages are now clickable and open in Finder (macOS) or Explorer (Windows). Supports both `/Users/...` and `C:\...` style paths.
-- **Paste Path Detection Fix**: Mixed text containing path-like substrings is no longer misidentified as file paths during paste operations.
-- **Workflow Status Strip Fix**: Fixed left-side clipping of the workflow status strip with fixed positioning.
-- **Generic Task Completion Loops**: `task_completion` as a second loop kind alongside `markdown_file`. Succeeds when the AI task finishes without requiring a file artifact.
-- **Cult-UI Component Foundation**: `AnimatedNumber`, `DirectionAwareTabs`, and `ExpandableCard` (under `desktop/renderer/src/components/ui/`) with spring animations via framer-motion. Cult-UI is **complementary, not a replacement** for the existing design system: the rest of the renderer keeps Tailwind utility classes plus CSS variables (`--c-bg-card`, `--c-border`, `--c-text-primary`, etc.). Cult-UI components are opt-in only for animation-heavy or motion-driven surfaces (currently the Automations tab strip). Tokens still flow from the same `@theme` aliases in `styles/index.css`, so cult-UI components inherit the active light/dark theme without a parallel token tree.
-- **Kimi for Coding Compatibility**: Strips X-Stainless-* fingerprint headers and uses the correct User-Agent format for Kimi endpoints.
-- **KSwarm Stale Service Replacement**: Desktop startup detects version-mismatched KSwarm processes via source hash comparison and replaces them before spawning the correct version.
+- **Knowledge Base AI Recording**: The Knowledge home page exposes an `AI Recording` entry point. The recorder opens as a larger panel with a prominent start button, recording title, real microphone-level waveform, pause/resume, and a `Finish` step.
+- **Live Local Transcription**: Recording shows live transcript lines while audio is still being captured. Finishing a recording saves the captured WAV, runs local transcription, generates an editable notes draft, proposes a content-derived timestamped title, and only then enables saving to the knowledge base.
+- **Whisper Model Management**: Transcription settings list `base`, `small`, `medium`, `large`, and `turbo` with expected file size, downloaded/incomplete/not-downloaded state, and icon-only download/uninstall actions.
+- **Resumable Model Downloads**: Model downloads support HTTP Range resume, transient network retry, partial-file preservation, checksum-mismatch full redownload, and trailing-byte truncation before checksum verification.
+- **Packaged-App Validation**: The unpacked macOS app was launched with a fake microphone WAV and driven through the real renderer flow. Audio levels tracked the input, Pause zeroed the levels, live transcript lines appeared, Finish generated an editable draft, and Save added the note to the local collection.
 
 Earlier release (v1.4.3) fused the dynamic workflow surface into the project kanban:
 

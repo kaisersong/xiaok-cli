@@ -19,7 +19,7 @@ const __dirname = dirname(__filename);
 
 const execFileAsync = promisify(execFile);
 
-const BUNDLED_PLUGINS = ['kai-report-creator', 'kai-slide-creator', 'cua-computer-use', 'kai-infinity-canvas'];
+const BUNDLED_PLUGINS = ['kai-report-creator', 'kai-slide-creator', 'cua-computer-use', 'kai-infinity-canvas', 'kai-meeting-assistant'];
 
 /** Semver-aware: returns true if a >= b */
 function semverGte(a: string, b: string): boolean {
@@ -161,6 +161,26 @@ export function ensureCanvasServerDepsCompat(pluginDir: string, bundledPluginDir
   cpSync(bundledDep, installedDep, { recursive: true });
 }
 
+export function ensureMeetingTranscriberCompat(pluginDir: string, bundledPluginDir: string): void {
+  const files = [
+    join('mcp-servers', 'meeting-transcriber', 'server.py'),
+    join('mcp-servers', 'meeting-transcriber', 'requirements.txt'),
+  ];
+
+  for (const relativePath of files) {
+    const bundledFile = join(bundledPluginDir, relativePath);
+    if (!existsSync(bundledFile)) continue;
+
+    const installedFile = join(pluginDir, relativePath);
+    if (existsSync(installedFile) && readFileSync(installedFile, 'utf8') === readFileSync(bundledFile, 'utf8')) {
+      continue;
+    }
+
+    mkdirSync(dirname(installedFile), { recursive: true });
+    cpSync(bundledFile, installedFile);
+  }
+}
+
 export function ensureSlideRendererWheelhouseCompat(
   pluginDir: string,
   bundledPluginDir: string,
@@ -257,6 +277,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
           if (name === 'kai-infinity-canvas') {
             ensureCanvasServerDepsCompat(dest, src);
           }
+          if (name === 'kai-meeting-assistant') {
+            ensureMeetingTranscriberCompat(dest, src);
+          }
           if (name === 'kai-slide-creator') {
             slideWheelhouseCompatTargets.push({ dest, src });
           }
@@ -274,6 +297,9 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
     }
     if (name === 'kai-infinity-canvas') {
       ensureCanvasServerDepsCompat(dest, src);
+    }
+    if (name === 'kai-meeting-assistant') {
+      ensureMeetingTranscriberCompat(dest, src);
     }
     if (name === 'kai-slide-creator') {
       slideWheelhouseCompatTargets.push({ dest, src });

@@ -133,6 +133,16 @@
       ]
     },
     {
+      "from": "../../kai-xiaok-plugins/plugins/kai-meeting-assistant",
+      "to": "bundled-plugins/kai-meeting-assistant",
+      "filter": [
+        "plugin.json",
+        "skills/**/*",
+        "mcp-servers/meeting-transcriber/**/*.py",
+        "mcp-servers/meeting-transcriber/requirements.txt"
+      ]
+    },
+    {
       "from": "app-update.yml",
       "to": "."
     }
@@ -153,7 +163,10 @@
     "category": "public.app-category.productivity",
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
-    "notarize": true
+    "notarize": true,
+    "extendInfo": {
+      "NSMicrophoneUsageDescription": "Xiaok uses the microphone to record meetings locally for transcription and summaries."
+    }
   },
   "win": {
     "target": [
