@@ -154,6 +154,26 @@ export interface Config {
   automations?: {
     globalBackgroundAutoRunEnabled?: boolean;
   };
+  meeting?: {
+    asr?: {
+      defaultProvider?: 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
+      volcengine?: {
+        appKey?: string;
+        accessKey?: string;
+        endpoint?: string;
+        resourceId?: string;
+      };
+      aliyun?: {
+        apiKey?: string;
+        baseUrl?: string;
+        model?: string;
+        // Legacy NLS fields kept for backward-compatible reads.
+        appKey?: string;
+        accessToken?: string;
+        endpoint?: string;
+      };
+    };
+  };
 }
 
 const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;

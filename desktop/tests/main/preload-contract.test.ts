@@ -162,14 +162,29 @@ describe('preload API contract', () => {
       'meetingPickAudioFile',
       'meetingGetMicrophonePermission',
       'meetingRequestMicrophonePermission',
+      'meetingGetAsrConfig',
+      'meetingSaveAsrConfig',
       'meetingListModels',
       'meetingDownloadModel',
       'meetingUninstallModel',
       'meetingSaveRecordedAudio',
       'meetingTranscribePreview',
+      'meetingStartLiveTranscription',
+      'meetingPushLiveTranscriptionAudio',
+      'meetingFinishLiveTranscription',
+      'meetingCancelLiveTranscription',
       'meetingDraftRecording',
       'meetingProcessRecording',
       'meetingSaveTranscript',
+      'meetingOpenRecorderWindow',
+      'meetingSetRecorderWindowMode',
+      'meetingSetRecorderSessionState',
+      'meetingNotifyRecorderSummaryReady',
+      'meetingNotifyRecordingSaved',
+      'meetingCloseRecorderWindow',
+      'onMeetingRecorderCloseRequested',
+      'onMeetingRecordingSaved',
+      'onMeetingLiveTranscriptionUpdate',
     ]);
   });
 
@@ -444,6 +459,40 @@ describe('preload API contract', () => {
 
     await expect(api.createTaskWithFiles(input)).resolves.toBe(result);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:createTaskWithFiles', input);
+  });
+
+  it('routes independent meeting recorder window commands and events through semantic channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ ok: true }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer) as any;
+
+    await api.meetingOpenRecorderWindow({ collectionId: 'col-1' });
+    await api.meetingSetRecorderWindowMode({ mode: 'compact' });
+    await api.meetingSetRecorderSessionState({ state: 'recording' });
+    await api.meetingNotifyRecorderSummaryReady({ title: '需求讨论' });
+    await api.meetingNotifyRecordingSaved({ collectionId: 'col-1' });
+    await api.meetingCloseRecorderWindow();
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:meetingOpenRecorderWindow', { collectionId: 'col-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:meetingSetRecorderWindowMode', { mode: 'compact' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:meetingSetRecorderSessionState', { state: 'recording' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:meetingNotifyRecorderSummaryReady', { title: '需求讨论' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:meetingNotifyRecordingSaved', { collectionId: 'col-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:meetingCloseRecorderWindow');
+
+    const closeListener = vi.fn();
+    const savedListener = vi.fn();
+    const unsubscribeClose = api.onMeetingRecorderCloseRequested(closeListener);
+    const unsubscribeSaved = api.onMeetingRecordingSaved(savedListener);
+    expect(ipcRenderer.on).toHaveBeenCalledWith('desktop:meetingRecorderCloseRequested', expect.any(Function));
+    expect(ipcRenderer.on).toHaveBeenCalledWith('desktop:meetingRecordingSaved', expect.any(Function));
+    unsubscribeClose();
+    unsubscribeSaved();
+    expect(ipcRenderer.off).toHaveBeenCalledWith('desktop:meetingRecorderCloseRequested', expect.any(Function));
+    expect(ipcRenderer.off).toHaveBeenCalledWith('desktop:meetingRecordingSaved', expect.any(Function));
   });
 
   it('routes timed action review approve / revoke through semantic IPC channels', async () => {

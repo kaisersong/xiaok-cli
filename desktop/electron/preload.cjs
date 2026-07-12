@@ -206,14 +206,44 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile'),
   meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission'),
   meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission'),
+  meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig'),
+  meetingSaveAsrConfig: (input) => ipcRenderer.invoke('desktop:meeting:saveAsrConfig', input),
   meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels'),
   meetingDownloadModel: (modelId) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId),
   meetingUninstallModel: (modelId) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId),
   meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input),
   meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input),
+  meetingStartLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:start', input),
+  meetingPushLiveTranscriptionAudio: (input) => ipcRenderer.invoke('desktop:meeting:live:pushAudio', input),
+  meetingFinishLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:finish', input),
+  meetingCancelLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:cancel', input),
   meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input),
   meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input),
   meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input),
+  meetingOpenRecorderWindow: (input) => ipcRenderer.invoke('desktop:meetingOpenRecorderWindow', input),
+  meetingSetRecorderWindowMode: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderWindowMode', input),
+  meetingSetRecorderSessionState: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderSessionState', input),
+  meetingNotifyRecorderSummaryReady: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecorderSummaryReady', input),
+  meetingNotifyRecordingSaved: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecordingSaved', input),
+  meetingCloseRecorderWindow: () => ipcRenderer.invoke('desktop:meetingCloseRecorderWindow'),
+  onMeetingRecorderCloseRequested(handler) {
+    const channel = 'desktop:meetingRecorderCloseRequested';
+    const listener = () => handler();
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
+  onMeetingRecordingSaved(handler) {
+    const channel = 'desktop:meetingRecordingSaved';
+    const listener = (_event, input) => handler(input);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
+  onMeetingLiveTranscriptionUpdate(handler) {
+    const channel = 'desktop:meeting:live:update';
+    const listener = (_event, input) => handler(input);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
   kswarmProxyGet: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:get', path),
   kswarmProxyGetText: (path) => ipcRenderer.invoke('desktop:kswarm:proxy:getText', path),
   kswarmProxyPost: (path, body) => ipcRenderer.invoke('desktop:kswarm:proxy:post', path, body),

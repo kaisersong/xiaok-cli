@@ -3,8 +3,11 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { KbStore } from './kb-store.js';
 import type { Chunk, MeetingRecord, Source } from './kb-types.js';
 import { parsePcm16WavInfo } from './meeting-audio-format.js';
+import { normalizeTranscriptSegmentText } from './meeting-local-transcriber.js';
+import { createMeetingPunctuationService, type MeetingTextPostProcessor } from './meeting-punctuation-service.js';
 import type {
   MeetingModelBinding,
+  RecordingScenario,
   MeetingSummary,
   MeetingSummaryResult,
   MeetingTranscriptSegment,
@@ -25,6 +28,7 @@ export interface MeetingSummaryServiceLike {
   summarizeMeeting(input: {
     transcript: string;
     segments: MeetingTranscriptSegment[];
+    scenario?: RecordingScenario;
     summaryProvider: string;
     consentSnapshot?: MeetingModelBinding;
   }): Promise<MeetingSummaryResult | { ok: true; summary: MeetingSummary }>;
@@ -33,6 +37,7 @@ export interface MeetingSummaryServiceLike {
 export interface CreateMeetingServiceDeps {
   store: KbStore;
   transcriber?: MeetingTranscriber;
+  punctuationService?: MeetingTextPostProcessor;
   summaryService?: MeetingSummaryServiceLike;
   now?: () => number;
 }
@@ -43,6 +48,7 @@ export interface ProcessRecordingInput {
   title: string;
   audioFilePath: string;
   summaryProvider: string;
+  scenario?: RecordingScenario;
   consentSnapshot?: MeetingModelBinding;
 }
 
@@ -51,7 +57,10 @@ export interface DraftRecordingInput {
   title: string;
   audioFilePath: string;
   summaryProvider: string;
+  scenario?: RecordingScenario;
   consentSnapshot?: MeetingModelBinding;
+  transcript?: string;
+  segments?: MeetingTranscriptSegment[];
 }
 
 export interface SaveMeetingTranscriptInput {
@@ -75,6 +84,7 @@ export type DraftRecordingResult =
     audioFilePath: string;
     transcript: string;
     segments: MeetingTranscriptSegment[];
+    transcriptStatus?: 'ready' | 'unavailable' | 'failed' | 'interrupted';
     summary: MeetingSummary;
     summaryMarkdown: string;
   }
@@ -100,6 +110,7 @@ export interface MeetingService {
 
 export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingService {
   const now = deps.now ?? (() => Date.now());
+  const punctuationService = deps.punctuationService ?? createMeetingPunctuationService();
 
   async function processRecording(input: ProcessRecordingInput): Promise<ProcessRecordingResult> {
     if (input.requestSource === 'agent') {
@@ -132,6 +143,8 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         audioFilePath: input.audioFilePath,
         meetingId: meeting.id,
       });
+      transcription = normalizeMeetingTranscription(transcription);
+      transcription = await restoreMeetingPunctuation(transcription, punctuationService);
     } catch (error) {
       const failed = deps.store.updateMeeting(meeting.id, {
         status: 'failed',
@@ -150,6 +163,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
     const summaryResult = await deps.summaryService.summarizeMeeting({
       transcript: transcription.text,
       segments: transcription.segments,
+      scenario: input.scenario ?? 'meeting',
       summaryProvider: input.summaryProvider,
       consentSnapshot: input.consentSnapshot,
     });
@@ -201,30 +215,38 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
     if (input.requestSource === 'agent') {
       return { ok: false, error: 'agent_meeting_write_forbidden' };
     }
-    if (!deps.transcriber) {
-      return { ok: false, error: 'transcriber_unavailable' };
-    }
     if (!deps.summaryService) {
+      if (!deps.transcriber) {
+        return buildRecordingOnlyDraft(input, now());
+      }
       return { ok: false, error: 'summary_service_unavailable' };
     }
 
-    let transcription: MeetingTranscriptionResult;
-    try {
-      transcription = await deps.transcriber.transcribeFile({
-        audioFilePath: input.audioFilePath,
-        meetingId: randomUUID(),
-      });
-    } catch (error) {
-      return {
-        ok: false,
-        error: 'transcription_failed',
-        reason: error instanceof Error ? error.message : 'transcription_failed',
-      };
+    let transcription = buildProvidedTranscription(input.transcript, input.segments);
+    if (!transcription) {
+      if (!deps.transcriber) {
+        return buildRecordingOnlyDraft(input, now());
+      }
+      try {
+        transcription = await deps.transcriber.transcribeFile({
+          audioFilePath: input.audioFilePath,
+          meetingId: randomUUID(),
+        });
+        transcription = normalizeMeetingTranscription(transcription);
+      } catch (error) {
+        return {
+          ok: false,
+          error: 'transcription_failed',
+          reason: error instanceof Error ? error.message : 'transcription_failed',
+        };
+      }
     }
+    transcription = await restoreMeetingPunctuation(transcription, punctuationService);
 
     const summaryResult = await deps.summaryService.summarizeMeeting({
       transcript: transcription.text,
       segments: transcription.segments,
+      scenario: input.scenario ?? 'meeting',
       summaryProvider: input.summaryProvider,
       consentSnapshot: input.consentSnapshot,
     });
@@ -242,6 +264,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
       audioFilePath: input.audioFilePath,
       transcript: transcription.text,
       segments: transcription.segments,
+      transcriptStatus: 'ready',
       summary: summaryResult.summary,
       summaryMarkdown: formatMeetingSummaryDraft(summaryResult.summary),
     };
@@ -305,9 +328,14 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         nextStatus = 'interrupted';
       } else if (meeting.status === 'summarizing') {
         nextStatus = 'transcribed';
-      } else if (meeting.status === 'transcribing' && meeting.audioFilePath && !existsSync(meeting.audioFilePath)) {
-        nextStatus = 'failed';
-        failureReason = 'audio_missing';
+      } else if (meeting.status === 'transcribing') {
+        if (meeting.audioFilePath && existsSync(meeting.audioFilePath)) {
+          nextStatus = 'interrupted';
+          failureReason = 'transcription_interrupted';
+        } else {
+          nextStatus = 'failed';
+          failureReason = 'audio_missing';
+        }
       }
 
       if (nextStatus && nextStatus !== meeting.status) {
@@ -322,6 +350,97 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
   }
 
   return { processRecording, draftRecording, saveTranscript, recoverMeetings };
+}
+
+function buildRecordingOnlyDraft(input: DraftRecordingInput, timestamp: number): DraftRecordingResult {
+  const title = `${summarizeMeetingTitle({
+    title: input.title,
+    scenario: input.scenario ?? 'meeting',
+    attendees: [],
+    decisions: [],
+    actionItems: [],
+  }, input.title)} - ${formatMeetingTitleTime(timestamp)}`;
+  const summary: MeetingSummary = {
+    title: input.title.trim() || '录音',
+    scenario: input.scenario ?? 'meeting',
+    overview: ['转写不可用，已保留音频。'],
+    attendees: [],
+    decisions: [],
+    actionItems: [],
+  };
+  return {
+    ok: true,
+    suggestedTitle: title,
+    audioFilePath: input.audioFilePath,
+    transcript: '',
+    segments: [],
+    transcriptStatus: 'unavailable',
+    summary,
+    summaryMarkdown: '## 录音\n\n转写不可用，已保留音频。请安装或修复本地转写模型后重试。\n',
+  };
+}
+
+function buildProvidedTranscription(transcript?: string, segments?: MeetingTranscriptSegment[]): MeetingTranscriptionResult | null {
+  const normalizedSegments = (segments ?? []).flatMap((segment) => {
+    const text = normalizeTranscriptSegmentText(segment.text);
+    if (!text) return [];
+    const start = Number(segment.start);
+    const end = Number(segment.end);
+    return [{
+      start: Number.isFinite(start) ? start : 0,
+      end: Number.isFinite(end) ? end : Number.isFinite(start) ? start : 0,
+      text,
+    }];
+  });
+  const text = transcript?.trim()
+    ? normalizeTranscriptSegmentText(transcript.trim())
+    : normalizedSegments.map(segment => segment.text).join('\n').trim();
+  if (!text) return null;
+  return {
+    text,
+    segments: normalizedSegments.length ? normalizedSegments : [{ start: 0, end: 0, text }],
+  };
+}
+
+function normalizeMeetingTranscription(transcription: MeetingTranscriptionResult): MeetingTranscriptionResult {
+  const segments = transcription.segments.flatMap((segment) => {
+    const text = normalizeTranscriptSegmentText(segment.text);
+    if (!text) return [];
+    return [{ ...segment, text }];
+  });
+  const text = segments.length
+    ? segments.map(segment => segment.text).join('\n')
+    : normalizeTranscriptSegmentText(transcription.text);
+  return {
+    text,
+    segments: segments.length ? segments : [{ start: 0, end: 0, text }],
+  };
+}
+
+async function restoreMeetingPunctuation(
+  transcription: MeetingTranscriptionResult,
+  punctuationService: MeetingTextPostProcessor,
+): Promise<MeetingTranscriptionResult> {
+  const result = await punctuationService.restoreFinalPunctuation({
+    text: transcription.text,
+    segments: transcription.segments,
+    language: 'zh',
+  });
+  const segments = result.segments.length
+    ? result.segments.map(segment => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.punctuatedText,
+    }))
+    : [{
+      start: transcription.segments[0]?.start ?? 0,
+      end: transcription.segments.at(-1)?.end ?? 0,
+      text: result.punctuatedText,
+    }];
+  return {
+    text: result.punctuatedText,
+    segments,
+  };
 }
 
 function buildMeetingChunks(segments: MeetingTranscriptSegment[], summary?: MeetingSummary): Array<{
@@ -386,6 +505,11 @@ function formatMeetingSummaryDraft(summary: MeetingSummary): string {
   if (summary.attendees.length) {
     lines.push(`参会人：${summary.attendees.join('、')}`, '');
   }
+  if (summary.overview?.length) {
+    lines.push('### 摘要');
+    for (const item of summary.overview) lines.push(`- ${item}`);
+    lines.push('');
+  }
   if (summary.decisions.length) {
     lines.push('### 决策');
     for (const decision of summary.decisions) lines.push(`- ${decision}`);
@@ -398,7 +522,7 @@ function formatMeetingSummaryDraft(summary: MeetingSummary): string {
     }
     lines.push('');
   }
-  if (!summary.attendees.length && !summary.decisions.length && !summary.actionItems.length) {
+  if (!summary.attendees.length && !summary.overview?.length && !summary.decisions.length && !summary.actionItems.length) {
     lines.push('暂无自动提取的决策或待办。', '');
   }
   return `${lines.join('\n')}\n`;

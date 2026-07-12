@@ -17,6 +17,16 @@ export interface Pcm16WavInfo {
   totalSamples: number;
 }
 
+export interface DecodedPcm16Wav {
+  samples: Float32Array;
+  durationSeconds: number;
+  sampleRate: number;
+}
+
+interface Pcm16WavLayout extends Pcm16WavInfo {
+  dataOffset: number;
+}
+
 export function encodePcm16Wav(input: Pcm16WavInput): Buffer {
   const channels = input.channels ?? 1;
   if (!Number.isInteger(channels) || channels < 1) {
@@ -58,6 +68,37 @@ export function writePcm16WavFile(filePath: string, input: Pcm16WavInput): void 
 }
 
 export function parsePcm16WavInfo(buffer: Buffer): Pcm16WavInfo {
+  const info = readPcm16WavLayout(buffer);
+  return {
+    audioFormat: info.audioFormat,
+    bitsPerSample: info.bitsPerSample,
+    channels: info.channels,
+    dataBytes: info.dataBytes,
+    durationSeconds: info.durationSeconds,
+    sampleRate: info.sampleRate,
+    totalSamples: info.totalSamples,
+  };
+}
+
+export function decodePcm16WavToFloat32(buffer: Buffer): DecodedPcm16Wav {
+  const info = readPcm16WavLayout(buffer);
+  const samples = new Float32Array(info.totalSamples);
+  for (let frame = 0; frame < info.totalSamples; frame += 1) {
+    let mixed = 0;
+    for (let channel = 0; channel < info.channels; channel += 1) {
+      const sampleOffset = info.dataOffset + ((frame * info.channels) + channel) * 2;
+      mixed += buffer.readInt16LE(sampleOffset) / 32768;
+    }
+    samples[frame] = mixed / info.channels;
+  }
+  return {
+    durationSeconds: info.durationSeconds,
+    sampleRate: info.sampleRate,
+    samples,
+  };
+}
+
+function readPcm16WavLayout(buffer: Buffer): Pcm16WavLayout {
   if (buffer.length < 44 || buffer.subarray(0, 4).toString('ascii') !== 'RIFF' || buffer.subarray(8, 12).toString('ascii') !== 'WAVE') {
     throw new Error('Invalid WAV file');
   }
@@ -67,6 +108,7 @@ export function parsePcm16WavInfo(buffer: Buffer): Pcm16WavInfo {
   let bitsPerSample = 0;
   let channels = 0;
   let dataBytes = 0;
+  let dataOffset = -1;
   let sampleRate = 0;
 
   while (offset + 8 <= buffer.length) {
@@ -82,16 +124,20 @@ export function parsePcm16WavInfo(buffer: Buffer): Pcm16WavInfo {
       bitsPerSample = buffer.readUInt16LE(chunkStart + 14);
     } else if (chunkId === 'data') {
       dataBytes = chunkSize;
+      dataOffset = chunkStart;
     }
 
     offset = chunkStart + chunkSize + (chunkSize % 2);
   }
 
-  if (audioFormat !== 1 || bitsPerSample !== 16 || channels < 1 || sampleRate < 1 || dataBytes < 0) {
+  if (audioFormat !== 1 || bitsPerSample !== 16 || channels < 1 || sampleRate < 1 || dataOffset < 0 || dataBytes < 0) {
     throw new Error('Unsupported WAV format');
   }
 
   const bytesPerSampleFrame = channels * 2;
+  if (dataBytes % bytesPerSampleFrame !== 0) {
+    throw new Error('Unsupported WAV format');
+  }
   const totalSamples = dataBytes / bytesPerSampleFrame;
   return {
     audioFormat,
@@ -101,5 +147,6 @@ export function parsePcm16WavInfo(buffer: Buffer): Pcm16WavInfo {
     durationSeconds: dataBytes / (sampleRate * bytesPerSampleFrame),
     sampleRate,
     totalSamples,
+    dataOffset,
   };
 }

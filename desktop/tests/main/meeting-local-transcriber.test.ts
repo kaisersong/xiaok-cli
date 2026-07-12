@@ -12,6 +12,13 @@ function readyModelService(modelId = 'base') {
       path: `/tmp/whisper/${modelId}.pt`,
       downloaded: true,
       status: 'downloaded' as const,
+      capability: 'asr' as const,
+      engineId: 'whisper',
+      packageId: `whisper-${modelId}`,
+      packageType: 'single-file' as const,
+      packageState: 'verified' as const,
+      manifestTrusted: true,
+      runtimeAutoDownloadAllowed: false as const,
     }],
   };
 }
@@ -90,6 +97,64 @@ describe('local meeting transcriber', () => {
     });
   });
 
+  it('prefers timestamped segments and leaves punctuation restoration to the post processor', async () => {
+    const exec = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        text: '張三負責整理需求李四需要確認接口風險',
+        segments: [
+          { start: 0, end: 1.25, text: '張三負責整理需求' },
+          { start: 1.25, end: 2.5, text: '李四需要確認接口風險' },
+        ],
+      }),
+    }));
+    const transcriber = createLocalMeetingTranscriber({
+      pythonCommand: 'python3',
+      scriptPath: '/plugins/kai-meeting-assistant/mcp-servers/meeting-transcriber/server.py',
+      exec,
+      modelService: readyModelService(),
+    });
+
+    const result = await transcriber.transcribeFile({
+      audioFilePath: '/tmp/weekly-sync.wav',
+      meetingId: 'meeting-1',
+    });
+
+    expect(result).toEqual({
+      text: '张三负责整理需求\n李四需要确认接口风险',
+      segments: [
+        { start: 0, end: 1.25, text: '张三负责整理需求' },
+        { start: 1.25, end: 2.5, text: '李四需要确认接口风险' },
+      ],
+    });
+  });
+
+  it('preserves terminal-only Chinese punctuation without guessing spoken clauses', async () => {
+    const exec = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        text: '今天我们测试录音功能然后讨论客户报价李四负责跟进报价。',
+        segments: [
+          { start: 0, end: 5, text: '今天我们测试录音功能然后讨论客户报价李四负责跟进报价。' },
+        ],
+      }),
+    }));
+    const transcriber = createLocalMeetingTranscriber({
+      pythonCommand: 'python3',
+      scriptPath: '/plugins/kai-meeting-assistant/mcp-servers/meeting-transcriber/server.py',
+      exec,
+      modelService: readyModelService(),
+    });
+
+    const result = await transcriber.transcribeFile({
+      audioFilePath: '/tmp/weekly-sync.wav',
+      meetingId: 'meeting-1',
+    });
+
+    expect(result.text).toBe('今天我们测试录音功能然后讨论客户报价李四负责跟进报价。');
+    expect(result.segments).toEqual([
+      { start: 0, end: 5, text: '今天我们测试录音功能然后讨论客户报价李四负责跟进报价。' },
+    ]);
+  });
+
   it('surfaces a local transcriber error when the Python process fails', async () => {
     const exec = vi.fn(async () => {
       throw Object.assign(new Error('process failed'), { stderr: '{"error":"missing_whisper"}' });
@@ -126,6 +191,13 @@ describe('local meeting transcriber', () => {
           path: '/tmp/whisper/medium.pt',
           downloaded: false,
           status: 'incomplete',
+          capability: 'asr' as const,
+          engineId: 'whisper',
+          packageId: 'whisper-medium',
+          packageType: 'single-file' as const,
+          packageState: 'incomplete' as const,
+          manifestTrusted: true,
+          runtimeAutoDownloadAllowed: false as const,
           localSizeBytes: 778_000_000,
           localSizeLabel: '778 MB',
         }],
@@ -158,6 +230,13 @@ describe('local meeting transcriber', () => {
           path: '/tmp/whisper/small.pt',
           downloaded: false,
           status: 'not_downloaded',
+          capability: 'asr' as const,
+          engineId: 'whisper',
+          packageId: 'whisper-small',
+          packageType: 'single-file' as const,
+          packageState: 'missing' as const,
+          manifestTrusted: true,
+          runtimeAutoDownloadAllowed: false as const,
         }],
       },
     });

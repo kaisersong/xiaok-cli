@@ -176,14 +176,29 @@ export const PRELOAD_API_KEYS = [
   'meetingPickAudioFile',
   'meetingGetMicrophonePermission',
   'meetingRequestMicrophonePermission',
+  'meetingGetAsrConfig',
+  'meetingSaveAsrConfig',
   'meetingListModels',
   'meetingDownloadModel',
   'meetingUninstallModel',
   'meetingSaveRecordedAudio',
   'meetingTranscribePreview',
+  'meetingStartLiveTranscription',
+  'meetingPushLiveTranscriptionAudio',
+  'meetingFinishLiveTranscription',
+  'meetingCancelLiveTranscription',
   'meetingDraftRecording',
   'meetingProcessRecording',
   'meetingSaveTranscript',
+  'meetingOpenRecorderWindow',
+  'meetingSetRecorderWindowMode',
+  'meetingSetRecorderSessionState',
+  'meetingNotifyRecorderSummaryReady',
+  'meetingNotifyRecordingSaved',
+  'meetingCloseRecorderWindow',
+  'onMeetingRecorderCloseRequested',
+  'onMeetingRecordingSaved',
+  'onMeetingLiveTranscriptionUpdate',
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -246,6 +261,9 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onKSwarmStatus',
   'onKSwarmWsEvent',
   'onKSwarmConnectionStatus',
+  'onMeetingRecorderCloseRequested',
+  'onMeetingRecordingSaved',
+  'onMeetingLiveTranscriptionUpdate',
 ] as const;
 
 // `LOCAL_CONSTANT_KEYS` are exposed as plain values from preload, never going
@@ -405,14 +423,26 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   meetingPickAudioFile: 'desktop:meeting:pickAudioFile',
   meetingGetMicrophonePermission: 'desktop:meeting:getMicrophonePermission',
   meetingRequestMicrophonePermission: 'desktop:meeting:requestMicrophonePermission',
+  meetingGetAsrConfig: 'desktop:meeting:getAsrConfig',
+  meetingSaveAsrConfig: 'desktop:meeting:saveAsrConfig',
   meetingListModels: 'desktop:meeting:listModels',
   meetingDownloadModel: 'desktop:meeting:downloadModel',
   meetingUninstallModel: 'desktop:meeting:uninstallModel',
   meetingSaveRecordedAudio: 'desktop:meeting:saveRecordedAudio',
   meetingTranscribePreview: 'desktop:meeting:transcribePreview',
+  meetingStartLiveTranscription: 'desktop:meeting:live:start',
+  meetingPushLiveTranscriptionAudio: 'desktop:meeting:live:pushAudio',
+  meetingFinishLiveTranscription: 'desktop:meeting:live:finish',
+  meetingCancelLiveTranscription: 'desktop:meeting:live:cancel',
   meetingDraftRecording: 'desktop:meeting:draftRecording',
   meetingProcessRecording: 'desktop:meeting:processRecording',
   meetingSaveTranscript: 'desktop:meeting:saveTranscript',
+  meetingOpenRecorderWindow: 'desktop:meetingOpenRecorderWindow',
+  meetingSetRecorderWindowMode: 'desktop:meetingSetRecorderWindowMode',
+  meetingSetRecorderSessionState: 'desktop:meetingSetRecorderSessionState',
+  meetingNotifyRecorderSummaryReady: 'desktop:meetingNotifyRecorderSummaryReady',
+  meetingNotifyRecordingSaved: 'desktop:meetingNotifyRecordingSaved',
+  meetingCloseRecorderWindow: 'desktop:meetingCloseRecorderWindow',
   // KSwarm proxy
   kswarmProxyGet: 'desktop:kswarm:proxy:get',
   kswarmProxyGetText: 'desktop:kswarm:proxy:getText',
@@ -517,6 +547,43 @@ export interface TestProviderConnectionResult {
   success: boolean;
   latencyMs?: number;
   error?: string;
+}
+
+export type MeetingAsrProviderId = 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
+
+export interface MeetingAsrConfigSnapshot {
+  defaultProvider: MeetingAsrProviderId;
+  volcengine: {
+    configured: boolean;
+    appKeyConfigured: boolean;
+    accessKeyConfigured: boolean;
+    endpoint?: string;
+    resourceId: string;
+  };
+  aliyun: {
+    configured: boolean;
+    apiKeyConfigured: boolean;
+    baseUrl: string;
+    model: string;
+  };
+}
+
+export interface MeetingSaveAsrConfigInput {
+  defaultProvider?: MeetingAsrProviderId;
+  volcengine?: {
+    appKey?: string;
+    accessKey?: string;
+    endpoint?: string;
+    resourceId?: string;
+    clearAppKey?: boolean;
+    clearAccessKey?: boolean;
+  };
+  aliyun?: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+    clearApiKey?: boolean;
+  };
 }
 
 export interface DesktopMobilePairingInfo {
@@ -867,14 +934,36 @@ export interface DesktopApi {
   meetingPickAudioFile(): Promise<string | null>;
   meetingGetMicrophonePermission(): Promise<unknown>;
   meetingRequestMicrophonePermission(): Promise<unknown>;
+  meetingGetAsrConfig(): Promise<MeetingAsrConfigSnapshot>;
+  meetingSaveAsrConfig(input: MeetingSaveAsrConfigInput): Promise<MeetingAsrConfigSnapshot>;
   meetingListModels(): Promise<unknown[]>;
   meetingDownloadModel(modelId: string): Promise<unknown>;
   meetingUninstallModel(modelId: string): Promise<unknown>;
   meetingSaveRecordedAudio(input: unknown): Promise<unknown>;
   meetingTranscribePreview(input: unknown): Promise<unknown>;
+  meetingStartLiveTranscription(input: { engine: 'aliyun-asr' | 'volcengine-asr'; sampleRate: number; language?: string }): Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+  meetingPushLiveTranscriptionAudio(input: { sessionId: string; pcmBase64: string }): Promise<{ ok: boolean; error?: string }>;
+  meetingFinishLiveTranscription(input: { sessionId: string }): Promise<{ ok: boolean; error?: string }>;
+  meetingCancelLiveTranscription(input: { sessionId: string }): Promise<{ ok: boolean; error?: string }>;
   meetingDraftRecording(input: unknown): Promise<unknown>;
   meetingProcessRecording(input: unknown): Promise<unknown>;
   meetingSaveTranscript(input: unknown): Promise<unknown>;
+  meetingOpenRecorderWindow(input: { collectionId: string }): Promise<{ ok: boolean; error?: string }>;
+  meetingSetRecorderWindowMode(input: { mode: 'workbench' | 'compact' | 'summary' }): Promise<{ ok: boolean }>;
+  meetingSetRecorderSessionState(input: { state: 'idle' | 'recording' | 'processing' | 'summary' }): Promise<{ ok: boolean }>;
+  meetingNotifyRecorderSummaryReady(input: { title: string }): Promise<{ ok: boolean; skipped?: boolean; reason?: string }>;
+  meetingNotifyRecordingSaved(input: { collectionId: string }): Promise<{ ok: boolean }>;
+  meetingCloseRecorderWindow(): Promise<{ ok: boolean }>;
+  onMeetingRecorderCloseRequested(handler: () => void): () => void;
+  onMeetingRecordingSaved(handler: (input: { collectionId: string }) => void): () => void;
+  onMeetingLiveTranscriptionUpdate(handler: (input: {
+    sessionId: string;
+    sentenceId: string;
+    start: number;
+    end: number;
+    text: string;
+    final: boolean;
+  }) => void): () => void;
 
   // Thread meta (GTD / pinned)
   getThreadLabels(): Promise<ThreadMetaSnapshot>;
@@ -1192,14 +1281,44 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<string | null>,
     meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<unknown>,
     meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<unknown>,
+    meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingAsrConfigSnapshot>,
+    meetingSaveAsrConfig: (input) => ipcRenderer.invoke('desktop:meeting:saveAsrConfig', input) as Promise<MeetingAsrConfigSnapshot>,
     meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<unknown[]>,
     meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<unknown>,
     meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<unknown>,
     meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<unknown>,
     meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<unknown>,
+    meetingStartLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:start', input) as ReturnType<DesktopApi['meetingStartLiveTranscription']>,
+    meetingPushLiveTranscriptionAudio: (input) => ipcRenderer.invoke('desktop:meeting:live:pushAudio', input) as ReturnType<DesktopApi['meetingPushLiveTranscriptionAudio']>,
+    meetingFinishLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:finish', input) as ReturnType<DesktopApi['meetingFinishLiveTranscription']>,
+    meetingCancelLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:cancel', input) as ReturnType<DesktopApi['meetingCancelLiveTranscription']>,
     meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<unknown>,
     meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<unknown>,
     meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<unknown>,
+    meetingOpenRecorderWindow: (input) => ipcRenderer.invoke('desktop:meetingOpenRecorderWindow', input) as Promise<{ ok: boolean; error?: string }>,
+    meetingSetRecorderWindowMode: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderWindowMode', input) as Promise<{ ok: boolean }>,
+    meetingSetRecorderSessionState: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderSessionState', input) as Promise<{ ok: boolean }>,
+    meetingNotifyRecorderSummaryReady: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecorderSummaryReady', input) as Promise<{ ok: boolean; skipped?: boolean; reason?: string }>,
+    meetingNotifyRecordingSaved: (input) => ipcRenderer.invoke('desktop:meetingNotifyRecordingSaved', input) as Promise<{ ok: boolean }>,
+    meetingCloseRecorderWindow: () => ipcRenderer.invoke('desktop:meetingCloseRecorderWindow') as Promise<{ ok: boolean }>,
+    onMeetingRecorderCloseRequested: (handler) => {
+      const channel = 'desktop:meetingRecorderCloseRequested';
+      const listener = () => handler();
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.off(channel, listener);
+    },
+    onMeetingRecordingSaved: (handler) => {
+      const channel = 'desktop:meetingRecordingSaved';
+      const listener = (_event: unknown, input: unknown) => handler(input as { collectionId: string });
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.off(channel, listener);
+    },
+    onMeetingLiveTranscriptionUpdate: (handler) => {
+      const channel = 'desktop:meeting:live:update';
+      const listener = (_event: unknown, input: unknown) => handler(input as Parameters<typeof handler>[0]);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.off(channel, listener);
+    },
     getThreadLabels: () => ipcRenderer.invoke('desktop:getThreadLabels') as Promise<ThreadMetaSnapshot>,
     setThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:setThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,
     unsetThreadLabel: (threadId, label) => ipcRenderer.invoke('desktop:unsetThreadLabel', threadId, label) as Promise<ThreadMetaWriteResult>,

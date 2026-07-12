@@ -42,4 +42,20 @@ describe('MeetingService recovery', () => {
     expect(result).toContainEqual({ meetingId: 'meeting-summary', from: 'summarizing', to: 'transcribed' });
     expect(store.getMeeting('meeting-summary')?.status).toBe('transcribed');
   });
+
+  it('marks in-flight transcription as interrupted on startup while keeping the audio for retry', async () => {
+    const audioFilePath = join(rootDir, 'transcribing.wav');
+    writeFileSync(audioFilePath, 'complete wav');
+    store.createMeeting({ id: 'meeting-transcribing', status: 'transcribing', title: 'Transcribing', audioFilePath, startedAt: 10 });
+    const service = createMeetingService({ store });
+
+    const result = await service.recoverMeetings();
+
+    expect(result).toContainEqual({ meetingId: 'meeting-transcribing', from: 'transcribing', to: 'interrupted' });
+    expect(store.getMeeting('meeting-transcribing')).toMatchObject({
+      status: 'interrupted',
+      audioFilePath,
+      failureReason: 'transcription_interrupted',
+    });
+  });
 });

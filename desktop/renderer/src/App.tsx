@@ -16,6 +16,7 @@ export function App() {
     <>
       <ScheduledTaskToast />
       <Routes>
+        <Route path="meeting-recorder/:collectionId" element={<KnowledgePage />} />
         <Route element={<AppLayout />}>
           <Route index element={<WelcomePage />} />
           <Route path="t/:taskId" element={<ChatShell />} />

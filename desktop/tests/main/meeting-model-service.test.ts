@@ -61,27 +61,39 @@ describe('MeetingModelService', () => {
     const models = service.listModels();
     expect(models[0]).toMatchObject({
         id: 'base',
+        capability: 'asr',
+        engineId: 'whisper',
+        packageId: 'whisper-base',
+        packageType: 'single-file',
+        runtimeAutoDownloadAllowed: false,
         sizeBytes: 4,
         sizeLabel: '4 B',
         downloaded: true,
         status: 'downloaded',
+        packageState: 'verified',
         localSizeBytes: 4,
         localSizeLabel: '4 B',
     });
     expect(models[1]).toMatchObject({
       id: 'small',
+      engineId: 'whisper',
+      packageId: 'whisper-small',
       sizeBytes: 8,
       sizeLabel: '8 B',
       downloaded: false,
       status: 'not_downloaded',
+      packageState: 'missing',
     });
     expect(models[1].localSizeBytes).toBeUndefined();
     expect(models[2]).toMatchObject({
       id: 'medium',
+      engineId: 'whisper',
+      packageId: 'whisper-medium',
       sizeBytes: 12,
       sizeLabel: '12 B',
       downloaded: false,
       status: 'incomplete',
+      packageState: 'incomplete',
       localSizeBytes: 3,
       localSizeLabel: '3 B',
     });
@@ -99,14 +111,31 @@ describe('MeetingModelService', () => {
     expect(service.listModels()[0]).toMatchObject({
       id: 'base',
       downloaded: false,
-      status: 'incomplete',
+      status: 'corrupt',
+      packageState: 'corrupt',
       localSizeBytes: 4,
       localSizeLabel: '4 B',
     });
   });
 
+  it('treats built-in manifests as trusted and disallows runtime model autodownload', () => {
+    const service = createMeetingModelService({
+      cacheDir: rootDir,
+      models: [
+        { id: 'base', fileName: 'base.pt', url: 'https://example.com/base.pt', expectedSizeBytes: 4, expectedSha256: 'base-hash' },
+      ],
+    });
+
+    expect(service.listModels()[0]).toMatchObject({
+      manifestTrusted: true,
+      runtimeAutoDownloadAllowed: false,
+    });
+  });
+
   it('keeps built-in OpenAI Whisper model sizes visible for the settings UI', () => {
-    expect(MEETING_TRANSCRIBER_MODEL_REGISTRY.map(model => ({
+    expect(MEETING_TRANSCRIBER_MODEL_REGISTRY
+      .filter(model => (model.engineId ?? 'whisper') === 'whisper')
+      .map(model => ({
       id: model.id,
       fileName: model.fileName,
       expectedSizeBytes: model.expectedSizeBytes,
@@ -117,6 +146,133 @@ describe('MeetingModelService', () => {
       { id: 'large', fileName: 'large-v3.pt', expectedSizeBytes: 3_087_371_615 },
       { id: 'turbo', fileName: 'large-v3-turbo.pt', expectedSizeBytes: 1_617_941_637 },
     ]);
+  });
+
+  it('includes the default sherpa-onnx Paraformer package for Chinese local ASR', () => {
+    const model = MEETING_TRANSCRIBER_MODEL_REGISTRY.find(item => item.id === 'sherpa-onnx-paraformer-zh-small-2024-03-09');
+
+    expect(model).toMatchObject({
+      id: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
+      capability: 'asr',
+      engineId: 'sherpa-onnx-paraformer',
+      packageId: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
+      packageType: 'directory',
+      fileName: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
+      url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2',
+      expectedSizeBytes: 77_920_048,
+      expectedSha256: 'da92b3db5218c5be53aad53e57d1b6e63e7fc98a0e054fbdd6dbe18e9c6b1450',
+      runtimeAutoDownloadAllowed: false,
+      requiredFiles: ['model.int8.onnx', 'tokens.txt'],
+    });
+  });
+
+  it('includes the default sherpa-onnx punctuation package as a separately managed punctuation model', () => {
+    const model = MEETING_TRANSCRIBER_MODEL_REGISTRY.find(item => item.id === 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-int8');
+
+    expect(model).toMatchObject({
+      id: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-int8',
+      capability: 'punctuation',
+      engineId: 'sherpa-onnx-punctuation',
+      packageId: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-int8',
+      packageType: 'directory',
+      fileName: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8',
+      archiveFileName: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2',
+      url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2',
+      expectedSizeBytes: 64_717_756,
+      expectedSha256: 'c0d5aa5f8eeb686032345e180bedf39319dc2e0556781c6264bcadba8328a6e1',
+      runtimeAutoDownloadAllowed: false,
+      requiredFiles: ['model.int8.onnx'],
+    });
+  });
+
+  it('checks directory model packages by required files instead of treating directory size as the model size', () => {
+    const service = createMeetingModelService({
+      cacheDir: rootDir,
+      models: [
+        {
+          id: 'paraformer-small',
+          engineId: 'sherpa-onnx-paraformer',
+          packageId: 'paraformer-small',
+          packageType: 'directory',
+          fileName: 'paraformer-small',
+          url: 'https://example.com/paraformer-small.tar.bz2',
+          expectedSizeBytes: 12,
+          expectedSha256: 'archive-hash',
+          requiredFiles: ['model.int8.onnx', 'tokens.txt'],
+        },
+      ],
+    });
+
+    expect(service.listModels()[0]).toMatchObject({
+      id: 'paraformer-small',
+      engineId: 'sherpa-onnx-paraformer',
+      packageType: 'directory',
+      downloaded: false,
+      status: 'not_downloaded',
+      packageState: 'missing',
+    });
+
+    const modelDir = join(rootDir, 'paraformer-small');
+    mkdirSync(modelDir, { recursive: true });
+    writeFileSync(join(modelDir, 'model.int8.onnx'), Buffer.alloc(4));
+    expect(service.listModels()[0]).toMatchObject({
+      downloaded: false,
+      status: 'incomplete',
+      packageState: 'incomplete',
+    });
+
+    writeFileSync(join(modelDir, 'tokens.txt'), 'a\nb\n');
+    expect(service.listModels()[0]).toMatchObject({
+      downloaded: true,
+      status: 'downloaded',
+      packageState: 'verified',
+      localSizeBytes: expect.any(Number),
+    });
+  });
+
+  it('downloads and extracts directory model packages through the explicit model action', async () => {
+    const archiveBytes = Buffer.from('trusted-paraformer-archive');
+    const hash = sha256File(writeFixture(join(rootDir, 'hash-source.tar.bz2'), archiveBytes));
+    const service = createMeetingModelService({
+      cacheDir: rootDir,
+      models: [
+        {
+          id: 'paraformer-small',
+          engineId: 'sherpa-onnx-paraformer',
+          packageId: 'paraformer-small',
+          packageType: 'directory',
+          fileName: 'paraformer-small',
+          archiveFileName: 'paraformer-small.tar.bz2',
+          url: 'https://example.com/paraformer-small.tar.bz2',
+          expectedSizeBytes: archiveBytes.length,
+          expectedSha256: hash,
+          requiredFiles: ['model.int8.onnx', 'tokens.txt'],
+        },
+      ],
+      downloadFile: async (_url, destination) => {
+        writeFileSync(destination, archiveBytes);
+      },
+      extractArchive: async (archivePath, destinationDir) => {
+        expect(readFileSync(archivePath)).toEqual(archiveBytes);
+        mkdirSync(destinationDir, { recursive: true });
+        writeFileSync(join(destinationDir, 'model.int8.onnx'), Buffer.alloc(4));
+        writeFileSync(join(destinationDir, 'tokens.txt'), 'a\nb\n');
+      },
+    });
+
+    const result = await service.downloadModel('paraformer-small');
+
+    expect(result).toEqual({
+      ok: true,
+      model: expect.objectContaining({
+        id: 'paraformer-small',
+        engineId: 'sherpa-onnx-paraformer',
+        downloaded: true,
+        status: 'downloaded',
+      }),
+    });
+    expect(service.listModels()[0]).toMatchObject({ packageState: 'verified' });
+    expect(existsSync(join(rootDir, 'paraformer-small.tar.bz2'))).toBe(false);
   });
 
   it('downloads a model through an explicit action and verifies size and hash before marking it ready', async () => {
@@ -136,6 +292,40 @@ describe('MeetingModelService', () => {
 
     expect(result).toEqual({ ok: true, model: expect.objectContaining({ id: 'small', downloaded: true, status: 'downloaded' }) });
     expect(service.listModels()[0]).toMatchObject({ id: 'small', downloaded: true, status: 'downloaded' });
+  });
+
+  it('fails over to the next trusted mirror and still verifies with the built-in checksum', async () => {
+    const bytes = Buffer.from('mirror-model');
+    const hash = sha256File(writeFixture(join(rootDir, 'hash-source.pt'), bytes));
+    const urls: string[] = [];
+    const service = createMeetingModelService({
+      cacheDir: rootDir,
+      models: [
+        {
+          id: 'small',
+          fileName: 'small.pt',
+          url: 'https://mirror-a.example.com/small.pt',
+          mirrors: ['https://mirror-b.example.com/small.pt'],
+          expectedSizeBytes: bytes.length,
+          expectedSha256: hash,
+        },
+      ],
+      downloadFile: async (url, destination) => {
+        urls.push(url);
+        if (url.includes('mirror-a')) {
+          throw new Error('download_failed');
+        }
+        writeFileSync(destination, bytes);
+      },
+    });
+
+    const result = await service.downloadModel('small');
+
+    expect(urls).toEqual([
+      'https://mirror-a.example.com/small.pt',
+      'https://mirror-b.example.com/small.pt',
+    ]);
+    expect(result).toEqual({ ok: true, model: expect.objectContaining({ id: 'small', packageState: 'verified' }) });
   });
 
   it('resumes an incomplete model download with an HTTP range request', async () => {

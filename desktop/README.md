@@ -4,13 +4,15 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.4.21 adds the local AI recording flow to the Knowledge Base while keeping the Loop Engineering and packaging baselines aligned:
+v1.4.22 completes the Chinese-first AI recording flow and restores packaged Computer Use readiness while keeping the Loop Engineering and sidecar packaging baselines aligned:
 
-- **Knowledge Base AI Recording**: The Knowledge home page exposes an `AI Recording` entry point. The recorder opens as a larger panel with a prominent start button, recording title, real microphone-level waveform, pause/resume, and a `Finish` step.
-- **Live Local Transcription**: Recording shows live transcript lines while audio is still being captured. Finishing a recording saves the captured WAV, runs local transcription, generates an editable notes draft, proposes a content-derived timestamped title, and only then enables saving to the knowledge base.
-- **Whisper Model Management**: Transcription settings list `base`, `small`, `medium`, `large`, and `turbo` with expected file size, downloaded/incomplete/not-downloaded state, and icon-only download/uninstall actions.
-- **Resumable Model Downloads**: Model downloads support HTTP Range resume, transient network retry, partial-file preservation, checksum-mismatch full redownload, and trailing-byte truncation before checksum verification.
-- **Packaged-App Validation**: The unpacked macOS app was launched with a fake microphone WAV and driven through the real renderer flow. Audio levels tracked the input, Pause zeroed the levels, live transcript lines appeared, Finish generated an editable draft, and Save added the note to the local collection.
+- **Compact AI Recorder**: The Knowledge home page exposes `AI Recording`. Its start surface has an explicit Start action; active recording uses a draggable compact window with real microphone-level waveform, latest transcript sentence, elapsed time, Pause/Resume, Finish, and expand controls. Finish opens the full editor instead of saving immediately.
+- **Local and Online Streaming ASR**: Sherpa-ONNX Paraformer is the default Mandarin real-time engine. Whisper remains available for local fallback and final-file transcription. Users can also configure Alibaba Cloud Model Studio or Volcengine ASR credentials in Voice settings and receive provider-backed streaming text during recording.
+- **Punctuation and Structured Notes**: Final transcript text passes through Chinese punctuation restoration before the notes pipeline produces a timestamped content-derived title, summary, full transcript, decisions, and action items. The draft stays editable until the user explicitly saves it to the Knowledge Base.
+- **Model and Credential Management**: Voice settings show local model size and downloaded/incomplete/missing state with icon-only download, resume, refresh, and uninstall actions. Online provider credentials are stored through the Desktop configuration boundary and are never placed in the meeting plugin registry.
+- **Bundled Meeting Assistant**: Packaging now includes `kai-meeting-assistant` for the local Whisper fallback and meeting-summary skill. Live Sherpa-ONNX and online ASR orchestration remain in the Electron main process.
+- **Computer Use Recovery**: macOS capability checks can start or repair the official CuaDriver dependency, and readiness is invalidated when the packaged `app.asar` changes. Cold-start validation uses real `xiaok_computer_use` list-window and capture calls from the installed app.
+- **Release Validation**: Focused Desktop coverage passes 243 tests with 2 opt-in real-audio cases skipped; plugin packaging/rendering passes 44 tests; cross-platform/preload and CLI CUA boundaries pass 17 tests; the compact recorder passes its Playwright Electron E2E; typecheck, full Desktop build, CLI release build, and unsigned macOS packaging complete successfully.
 
 Earlier release (v1.4.3) fused the dynamic workflow surface into the project kanban:
 

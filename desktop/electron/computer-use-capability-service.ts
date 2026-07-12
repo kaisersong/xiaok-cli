@@ -22,6 +22,7 @@ export interface ComputerUsePreference {
   lastSuccessfulAppBundleId?: string;
   lastSuccessfulAppPath?: string;
   lastSuccessfulTeamId?: string;
+  lastSuccessfulAppAsarSha256?: string;
   lastDriverVersion?: string;
   lastCuaBundleId?: string;
   lastCuaAppPath?: string;
@@ -35,6 +36,7 @@ export interface ComputerUseAppIdentity {
   appPath?: string;
   bundleId?: string;
   teamId?: string;
+  appAsarSha256?: string;
   isPackaged: boolean;
   devServerUrl?: string;
   nodeEnv?: string;
@@ -74,6 +76,7 @@ export function normalizeComputerUsePreference(raw: unknown): ComputerUsePrefere
     ...(typeof value.lastSuccessfulAppBundleId === 'string' ? { lastSuccessfulAppBundleId: value.lastSuccessfulAppBundleId } : {}),
     ...(typeof value.lastSuccessfulAppPath === 'string' ? { lastSuccessfulAppPath: value.lastSuccessfulAppPath } : {}),
     ...(typeof value.lastSuccessfulTeamId === 'string' ? { lastSuccessfulTeamId: value.lastSuccessfulTeamId } : {}),
+    ...(typeof value.lastSuccessfulAppAsarSha256 === 'string' ? { lastSuccessfulAppAsarSha256: value.lastSuccessfulAppAsarSha256 } : {}),
     ...(typeof value.lastDriverVersion === 'string' ? { lastDriverVersion: value.lastDriverVersion } : {}),
     ...(typeof value.lastCuaBundleId === 'string' ? { lastCuaBundleId: value.lastCuaBundleId } : {}),
     ...(typeof value.lastCuaAppPath === 'string' ? { lastCuaAppPath: value.lastCuaAppPath } : {}),
@@ -91,7 +94,7 @@ export function isComputerUseAutoConnectEligibleApp(
   if (preference.schemaVersion !== 1) return { eligible: false, reason: 'preference_migration_required' };
   if (!preference.enabledByUser) return { eligible: false, reason: 'not_enabled_by_user' };
   if (!preference.autoConnectAfterSuccessfulEnablement) return { eligible: false, reason: 'auto_connect_disabled' };
-  if (!preference.lastSuccessfulAt || !preference.lastSuccessfulTeamId) {
+  if (!preference.lastSuccessfulAt) {
     return { eligible: false, reason: 'preference_migration_required' };
   }
   if (preference.autoConnectSuspendedReason) {
@@ -104,10 +107,25 @@ export function isComputerUseAutoConnectEligibleApp(
   if (!identity.appPath?.startsWith('/Applications/')) {
     return { eligible: false, reason: 'not_applications_install' };
   }
+  if (!identity.teamId) {
+    if (preference.lastSuccessfulAppPath !== identity.appPath) {
+      return { eligible: false, reason: 'app_path_mismatch' };
+    }
+    if (!preference.lastSuccessfulAppAsarSha256 || !identity.appAsarSha256) {
+      return { eligible: false, reason: 'installation_fingerprint_missing' };
+    }
+    if (preference.lastSuccessfulAppAsarSha256 !== identity.appAsarSha256) {
+      return { eligible: false, reason: 'installation_fingerprint_mismatch' };
+    }
+    return { eligible: true };
+  }
+  if (!preference.lastSuccessfulTeamId) {
+    return { eligible: false, reason: 'preference_migration_required' };
+  }
   if (preference.lastSuccessfulAppBundleId && identity.bundleId && preference.lastSuccessfulAppBundleId !== identity.bundleId) {
     return { eligible: false, reason: 'bundle_id_mismatch' };
   }
-  if (!identity.teamId || preference.lastSuccessfulTeamId !== identity.teamId) {
+  if (preference.lastSuccessfulTeamId !== identity.teamId) {
     return { eligible: false, reason: 'team_id_mismatch' };
   }
   return { eligible: true };

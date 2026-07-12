@@ -4,6 +4,7 @@ import os from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
+import type { MeetingTranscriber } from './meeting-service.js';
 import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
@@ -16,6 +17,10 @@ interface RegisterDesktopIpcOptions {
 
 const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
 const MEETING_TRANSCRIBER_ALLOWED_MODELS = new Set(['tiny', 'base', 'small', 'medium', 'large', 'turbo']);
+const MEETING_SHERPA_ONNX_ALLOWED_MODELS = new Set(['sherpa-onnx-paraformer-zh-small-2024-03-09']);
+const MEETING_TRANSCRIBER_ALLOWED_ENGINES = new Set(['sherpa-onnx-paraformer', 'whisper', 'volcengine-asr', 'aliyun-asr']);
+const DEFAULT_MEETING_TRANSCRIBER_ENGINE = 'sherpa-onnx-paraformer';
+const MEETING_RECORDING_ALLOWED_SCENARIOS = new Set(['discussion', 'meeting', 'sales']);
 const DATA_URL_MIME_BY_EXTENSION = new Map<string, string>([
   ['.pdf', 'application/pdf'],
 ]);
@@ -135,13 +140,30 @@ function log(level: string, msg: string, ...args: unknown[]) {
   console.log(`[${ts}] [${level}] [ipc] ${msg}${payload}`);
 }
 
-export function parseMeetingTranscriberOptions(input: unknown): { model?: string; language?: string } {
+export type MeetingTranscriberEngineForIpc = 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
+
+export interface MeetingTranscriberOptionsForIpc {
+  engine: MeetingTranscriberEngineForIpc;
+  model?: string;
+  language?: string;
+}
+
+export function parseMeetingTranscriberOptions(input: unknown): MeetingTranscriberOptionsForIpc {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const requestedEngine = typeof record.engine === 'string' ? record.engine.trim() : '';
   const model = typeof record.model === 'string' ? record.model.trim() : '';
   const language = typeof record.language === 'string' ? record.language.trim() : '';
-  const options: { model?: string; language?: string } = {};
+  const engine = MEETING_TRANSCRIBER_ALLOWED_ENGINES.has(requestedEngine)
+    ? requestedEngine as MeetingTranscriberEngineForIpc
+    : MEETING_TRANSCRIBER_ALLOWED_MODELS.has(model)
+      ? 'whisper'
+      : DEFAULT_MEETING_TRANSCRIBER_ENGINE;
+  const options: MeetingTranscriberOptionsForIpc = { engine };
 
-  if (model && MEETING_TRANSCRIBER_ALLOWED_MODELS.has(model)) {
+  if (engine === 'whisper' && model && MEETING_TRANSCRIBER_ALLOWED_MODELS.has(model)) {
+    options.model = model;
+  }
+  if (engine === 'sherpa-onnx-paraformer' && model && MEETING_SHERPA_ONNX_ALLOWED_MODELS.has(model)) {
     options.model = model;
   }
   if (language && language !== 'auto' && /^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/i.test(language)) {
@@ -151,12 +173,155 @@ export function parseMeetingTranscriberOptions(input: unknown): { model?: string
   return options;
 }
 
+async function createMeetingTranscriberForIpc(input: unknown): Promise<MeetingTranscriber> {
+  const options = parseMeetingTranscriberOptions(input);
+  if (options.engine === 'volcengine-asr') {
+    const { loadConfig } = await import('../../src/utils/config.js');
+    const { resolveMeetingVolcengineAsrCredentials } = await import('./meeting-asr-config.js');
+    const { createVolcengineMeetingTranscriber } = await import('./meeting-online-asr-transcriber.js');
+    return createVolcengineMeetingTranscriber(resolveMeetingVolcengineAsrCredentials(await loadConfig()));
+  }
+  if (options.engine === 'aliyun-asr') {
+    const { loadConfig } = await import('../../src/utils/config.js');
+    const { resolveMeetingAliyunAsrCredentials } = await import('./meeting-asr-config.js');
+    const { createAliyunMeetingTranscriber } = await import('./meeting-online-asr-transcriber.js');
+    return createAliyunMeetingTranscriber(resolveMeetingAliyunAsrCredentials(await loadConfig()));
+  }
+  if (options.engine === 'sherpa-onnx-paraformer') {
+    const { createSherpaOnnxParaformerTranscriber } = await import('./meeting-sherpa-onnx-transcriber.js');
+    const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
+    return createFallbackMeetingTranscriber([
+      createSherpaOnnxParaformerTranscriber({ model: options.model }),
+      createLocalMeetingTranscriber(toWhisperFallbackOptions(options)),
+    ]);
+  }
+
+  const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
+  return createLocalMeetingTranscriber(toWhisperFallbackOptions(options));
+}
+
+function toWhisperFallbackOptions(options: MeetingTranscriberOptionsForIpc): { model?: string; language?: string } {
+  return {
+    ...(options.engine === 'whisper' && options.model ? { model: options.model } : {}),
+    ...(options.language ? { language: options.language } : {}),
+  };
+}
+
+function createFallbackMeetingTranscriber(transcribers: MeetingTranscriber[]): MeetingTranscriber {
+  return {
+    async transcribeFile(input) {
+      let lastError: unknown;
+      for (const transcriber of transcribers) {
+        try {
+          return await transcriber.transcribeFile(input);
+        } catch (error) {
+          lastError = error;
+          if (!isMeetingTranscriberFallbackError(error)) {
+            throw error;
+          }
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('transcription_failed');
+    },
+  };
+}
+
+async function restorePreviewPunctuation(transcription: Awaited<ReturnType<MeetingTranscriber['transcribeFile']>>) {
+  const { createMeetingPunctuationService } = await import('./meeting-punctuation-service.js');
+  const punctuationService = createMeetingPunctuationService();
+  const result = await punctuationService.restoreFinalPunctuation({
+    text: transcription.text,
+    segments: transcription.segments,
+    language: 'zh',
+  });
+  return {
+    text: result.punctuatedText,
+    segments: result.segments.map(segment => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.punctuatedText,
+    })),
+  };
+}
+
+function isMeetingTranscriberFallbackError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message === 'sherpa_onnx_runtime_missing'
+    || error.message === 'sherpa_onnx_model_not_downloaded'
+    || error.message === 'sherpa_onnx_model_incomplete';
+}
+
+type MeetingRecordingScenarioForIpc = 'discussion' | 'meeting' | 'sales';
+
+function parseMeetingRecordingScenario(input: unknown): MeetingRecordingScenarioForIpc {
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const scenario = typeof record.scenario === 'string' ? record.scenario.trim() : '';
+  return MEETING_RECORDING_ALLOWED_SCENARIOS.has(scenario)
+    ? scenario as MeetingRecordingScenarioForIpc
+    : 'meeting';
+}
+
+function parseMeetingTranscriptSegments(input: unknown): Array<{ start: number; end: number; text: string }> {
+  if (!Array.isArray(input)) return [];
+  return input.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    const text = typeof record.text === 'string' ? record.text.trim() : '';
+    if (!text) return [];
+    const start = Number(record.start);
+    const end = Number(record.end);
+    return [{
+      start: Number.isFinite(start) ? start : 0,
+      end: Number.isFinite(end) ? end : Number.isFinite(start) ? start : 0,
+      text,
+    }];
+  });
+}
+
+function parseMeetingLiveSessionId(value: unknown): string {
+  const sessionId = typeof value === 'string' ? value.trim() : '';
+  if (!sessionId || sessionId.length > 100 || !/^[a-z0-9-]+$/i.test(sessionId)) {
+    throw new Error('meeting_live_session_not_found');
+  }
+  return sessionId;
+}
+
+function stableMeetingLiveError(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'aliyun_asr_not_configured'
+    || message === 'volcengine_asr_not_configured'
+    || /^(?:aliyun|volcengine|meeting)_live_[a-z0-9_]+(?::[a-z0-9_.-]+)?$/i.test(message)) {
+    return message;
+  }
+  return 'meeting_live_failed';
+}
+
 export async function registerDesktopIpc(
   ipcMain: IpcMain,
   window: BrowserWindow,
   services: DesktopServices,
   options: RegisterDesktopIpcOptions = {}
 ): Promise<void> {
+  const { createAliyunLiveTranscriptionRegistry } = await import('./meeting-aliyun-live-transcriber.js');
+  const { createVolcengineLiveTranscriptionRegistry } = await import('./meeting-volcengine-live-transcriber.js');
+  const meetingAliyunLiveRegistry = createAliyunLiveTranscriptionRegistry();
+  const meetingVolcengineLiveRegistry = createVolcengineLiveTranscriptionRegistry();
+  const meetingLiveSessions = new Map<string, { ownerId: number; provider: 'aliyun' | 'volcengine' }>();
+  const meetingLiveOwnerCleanupRegistered = new Set<number>();
+
+  const cancelMeetingLiveOwner = (ownerId: number) => {
+    meetingAliyunLiveRegistry.cancelOwner(ownerId);
+    meetingVolcengineLiveRegistry.cancelOwner(ownerId);
+    for (const [sessionId, active] of meetingLiveSessions) {
+      if (active.ownerId === ownerId) meetingLiveSessions.delete(sessionId);
+    }
+  };
+
+  const readMeetingLiveSession = (ownerId: number, sessionId: string) => {
+    const active = meetingLiveSessions.get(sessionId);
+    if (!active || active.ownerId !== ownerId) throw new Error('meeting_live_session_not_found');
+    return active;
+  };
   ipcMain.handle('desktop:getModelConfig', async () => {
     log('info', 'getModelConfig');
     const r = await services.getModelConfig();
@@ -939,6 +1104,20 @@ export async function registerDesktopIpc(
     meetingAudioPermissionService.requestPermission()
   ));
 
+  ipcMain.handle('desktop:meeting:getAsrConfig', async () => {
+    const { loadConfig } = await import('../../src/utils/config.js');
+    const { createMeetingAsrConfigSnapshot } = await import('./meeting-asr-config.js');
+    return createMeetingAsrConfigSnapshot(await loadConfig());
+  });
+
+  ipcMain.handle('desktop:meeting:saveAsrConfig', async (_event, input) => {
+    const { loadConfig, saveConfig } = await import('../../src/utils/config.js');
+    const { applyMeetingAsrConfigUpdate, createMeetingAsrConfigSnapshot } = await import('./meeting-asr-config.js');
+    const config = applyMeetingAsrConfigUpdate(await loadConfig(), input ?? {});
+    await saveConfig(config);
+    return createMeetingAsrConfigSnapshot(config);
+  });
+
   ipcMain.handle('desktop:meeting:listModels', async () => {
     const { createMeetingModelService } = await import('./meeting-model-service.js');
     return createMeetingModelService().listModels();
@@ -998,13 +1177,13 @@ export async function registerDesktopIpc(
     const filePath = join(previewDir, safeMeetingRecordingFileName(input?.title));
     await writeFile(filePath, audioBuffer);
     try {
-      const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
-      const transcriber = createLocalMeetingTranscriber(parseMeetingTranscriberOptions(input));
+      const transcriber = await createMeetingTranscriberForIpc(input);
       const transcription = await transcriber.transcribeFile({
         audioFilePath: filePath,
         meetingId: `preview-${Date.now()}`,
       });
-      return { ok: true, ...transcription };
+      const punctuated = await restorePreviewPunctuation(transcription);
+      return { ok: true, ...punctuated };
     } catch (error) {
       return {
         ok: false,
@@ -1015,14 +1194,128 @@ export async function registerDesktopIpc(
     }
   });
 
+  ipcMain.handle('desktop:meeting:live:start', async (event, input) => {
+    try {
+      const engine = input?.engine === 'aliyun-asr' || input?.engine === 'volcengine-asr'
+        ? input.engine as 'aliyun-asr' | 'volcengine-asr'
+        : null;
+      if (!engine) throw new Error('meeting_live_provider_not_supported');
+      const sampleRate = Number(input?.sampleRate);
+      const language = typeof input?.language === 'string' ? input.language.trim() : undefined;
+      const { loadConfig } = await import('../../src/utils/config.js');
+      const config = await loadConfig();
+      const ownerId = event.sender.id;
+      if (!meetingLiveOwnerCleanupRegistered.has(ownerId)) {
+        meetingLiveOwnerCleanupRegistered.add(ownerId);
+        event.sender.once('destroyed', () => {
+          meetingLiveOwnerCleanupRegistered.delete(ownerId);
+          cancelMeetingLiveOwner(ownerId);
+        });
+      }
+      const onUpdate = (activeSessionId: string, update: {
+        sentenceId: string;
+        start: number;
+        end: number;
+        text: string;
+        final: boolean;
+      }) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('desktop:meeting:live:update', { sessionId: activeSessionId, ...update });
+        }
+      };
+      let sessionId: string;
+      let provider: 'aliyun' | 'volcengine';
+      if (engine === 'aliyun-asr') {
+        const { resolveMeetingAliyunAsrCredentials } = await import('./meeting-asr-config.js');
+        const credentials = resolveMeetingAliyunAsrCredentials(config);
+        provider = 'aliyun';
+        sessionId = await meetingAliyunLiveRegistry.start(ownerId, {
+          apiKey: credentials.apiKey,
+          baseUrl: credentials.baseUrl,
+          sampleRate,
+          language,
+        }, onUpdate);
+      } else {
+        const { resolveMeetingVolcengineAsrCredentials } = await import('./meeting-asr-config.js');
+        const credentials = resolveMeetingVolcengineAsrCredentials(config);
+        provider = 'volcengine';
+        sessionId = await meetingVolcengineLiveRegistry.start(ownerId, {
+          ...credentials,
+          sampleRate,
+        }, onUpdate);
+      }
+      meetingLiveSessions.set(sessionId, { ownerId, provider });
+      return { ok: true, sessionId };
+    } catch (error) {
+      return { ok: false, error: stableMeetingLiveError(error) };
+    }
+  });
+
+  ipcMain.handle('desktop:meeting:live:pushAudio', async (event, input) => {
+    try {
+      const sessionId = parseMeetingLiveSessionId(input?.sessionId);
+      const active = readMeetingLiveSession(event.sender.id, sessionId);
+      const pcmBase64 = typeof input?.pcmBase64 === 'string' ? input.pcmBase64 : '';
+      if (!pcmBase64 || Buffer.byteLength(pcmBase64, 'utf8') > 1024 * 1024) {
+        throw new Error('meeting_live_invalid_audio');
+      }
+      const audio = Buffer.from(pcmBase64, 'base64');
+      if (audio.length === 0 || audio.length % 2 !== 0) throw new Error('meeting_live_invalid_audio');
+      if (active.provider === 'aliyun') {
+        meetingAliyunLiveRegistry.pushAudio(event.sender.id, sessionId, audio);
+      } else {
+        meetingVolcengineLiveRegistry.pushAudio(event.sender.id, sessionId, audio);
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: stableMeetingLiveError(error) };
+    }
+  });
+
+  ipcMain.handle('desktop:meeting:live:finish', async (event, input) => {
+    try {
+      const sessionId = parseMeetingLiveSessionId(input?.sessionId);
+      const active = readMeetingLiveSession(event.sender.id, sessionId);
+      try {
+        if (active.provider === 'aliyun') {
+          await meetingAliyunLiveRegistry.finish(event.sender.id, sessionId);
+        } else {
+          await meetingVolcengineLiveRegistry.finish(event.sender.id, sessionId);
+        }
+      } finally {
+        meetingLiveSessions.delete(sessionId);
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: stableMeetingLiveError(error) };
+    }
+  });
+
+  ipcMain.handle('desktop:meeting:live:cancel', async (event, input) => {
+    try {
+      const sessionId = parseMeetingLiveSessionId(input?.sessionId);
+      const active = readMeetingLiveSession(event.sender.id, sessionId);
+      meetingLiveSessions.delete(sessionId);
+      if (active.provider === 'aliyun') {
+        meetingAliyunLiveRegistry.cancel(event.sender.id, sessionId);
+      } else {
+        meetingVolcengineLiveRegistry.cancel(event.sender.id, sessionId);
+      }
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: stableMeetingLiveError(error) };
+    }
+  });
+
   ipcMain.handle('desktop:meeting:processRecording', async (_event, input) => {
     log('info', 'meeting:processRecording', { collectionId: input?.collectionId, title: input?.title });
     const { createMeetingService } = await import('./meeting-service.js');
-    const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
     const { createLocalMeetingSummaryService } = await import('./meeting-summary-service.js');
+    const { createMeetingPunctuationService } = await import('./meeting-punctuation-service.js');
     const service = createMeetingService({
       store: getKbStore(),
-      transcriber: createLocalMeetingTranscriber(parseMeetingTranscriberOptions(input)),
+      transcriber: await createMeetingTranscriberForIpc(input),
+      punctuationService: createMeetingPunctuationService(),
       summaryService: createLocalMeetingSummaryService(),
     });
     return service.processRecording({
@@ -1031,17 +1324,19 @@ export async function registerDesktopIpc(
       title: String(input?.title ?? '').trim() || 'Meeting',
       audioFilePath: String(input?.audioFilePath ?? ''),
       summaryProvider: 'local-only',
+      scenario: parseMeetingRecordingScenario(input),
     });
   });
 
   ipcMain.handle('desktop:meeting:draftRecording', async (_event, input) => {
     log('info', 'meeting:draftRecording', { title: input?.title });
     const { createMeetingService } = await import('./meeting-service.js');
-    const { createLocalMeetingTranscriber } = await import('./meeting-local-transcriber.js');
     const { createLocalMeetingSummaryService } = await import('./meeting-summary-service.js');
+    const { createMeetingPunctuationService } = await import('./meeting-punctuation-service.js');
     const service = createMeetingService({
       store: getKbStore(),
-      transcriber: createLocalMeetingTranscriber(parseMeetingTranscriberOptions(input)),
+      transcriber: await createMeetingTranscriberForIpc(input),
+      punctuationService: createMeetingPunctuationService(),
       summaryService: createLocalMeetingSummaryService(),
     });
     return service.draftRecording({
@@ -1049,6 +1344,9 @@ export async function registerDesktopIpc(
       title: String(input?.title ?? '').trim() || 'Meeting',
       audioFilePath: String(input?.audioFilePath ?? ''),
       summaryProvider: 'local-only',
+      scenario: parseMeetingRecordingScenario(input),
+      transcript: typeof input?.transcript === 'string' ? input.transcript : undefined,
+      segments: parseMeetingTranscriptSegments(input?.segments),
     });
   });
 

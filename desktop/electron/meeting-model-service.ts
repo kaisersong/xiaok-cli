@@ -1,20 +1,33 @@
+import { execFile as execFileCallback } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, statSync, truncateSync, type WriteStream } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, type WriteStream } from 'node:fs';
 import type { ClientRequest, IncomingMessage } from 'node:http';
 import { get as httpGet } from 'node:http';
 import { get as httpsGet } from 'node:https';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 
 export type MeetingModelCheckReason = 'ready' | 'missing' | 'size_mismatch' | 'hash_mismatch';
-export type MeetingModelDownloadStatus = 'downloaded' | 'not_downloaded' | 'incomplete';
+export type MeetingModelDownloadStatus = 'downloaded' | 'not_downloaded' | 'incomplete' | 'corrupt';
+export type MeetingModelPackageState = 'missing' | 'downloading' | 'incomplete' | 'verified' | 'corrupt';
+export type MeetingModelPackageType = 'single-file' | 'directory';
+export type MeetingModelCapability = 'asr' | 'punctuation' | 'vad' | 'speaker';
 
 export interface MeetingModelDefinition {
   id: string;
+  capability?: MeetingModelCapability;
   fileName: string;
   url: string;
+  mirrors?: readonly string[];
   expectedSizeBytes: number;
   expectedSha256: string;
+  engineId?: string;
+  packageId?: string;
+  packageType?: MeetingModelPackageType;
+  archiveFileName?: string;
+  requiredFiles?: readonly string[];
+  runtimeAutoDownloadAllowed?: false;
 }
 
 export interface MeetingModelInfo {
@@ -26,6 +39,13 @@ export interface MeetingModelInfo {
   path: string;
   downloaded: boolean;
   status: MeetingModelDownloadStatus;
+  capability: MeetingModelCapability;
+  engineId: string;
+  packageId: string;
+  packageType: MeetingModelPackageType;
+  packageState: MeetingModelPackageState;
+  manifestTrusted: boolean;
+  runtimeAutoDownloadAllowed: false;
   localSizeBytes?: number;
   localSizeLabel?: string;
 }
@@ -53,14 +73,17 @@ export interface MeetingModelDownloadOptions {
 }
 
 export type MeetingModelDownloadFile = (url: string, destination: string, options: MeetingModelDownloadOptions) => Promise<void>;
+export type MeetingModelExtractArchive = (archivePath: string, destinationDir: string, model: MeetingModelDefinition) => Promise<void>;
 
 const MEETING_MODEL_DOWNLOAD_MAX_ATTEMPTS = 20;
+const execFileAsync = promisify(execFileCallback);
 
 export interface MeetingModelServiceOptions {
   cacheDir?: string;
   env?: NodeJS.ProcessEnv;
   models?: readonly MeetingModelDefinition[];
   downloadFile?: MeetingModelDownloadFile;
+  extractArchive?: MeetingModelExtractArchive;
 }
 
 export function sha256File(filePath: string): string {
@@ -82,6 +105,34 @@ export function checkMeetingModelFile(input: MeetingModelCheckInput): MeetingMod
 }
 
 export const MEETING_TRANSCRIBER_MODEL_REGISTRY: readonly MeetingModelDefinition[] = [
+  {
+    id: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
+    capability: 'asr',
+    engineId: 'sherpa-onnx-paraformer',
+    packageId: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
+    packageType: 'directory',
+    fileName: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
+    archiveFileName: 'sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2',
+    url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2',
+    expectedSizeBytes: 77_920_048,
+    expectedSha256: 'da92b3db5218c5be53aad53e57d1b6e63e7fc98a0e054fbdd6dbe18e9c6b1450',
+    requiredFiles: ['model.int8.onnx', 'tokens.txt'],
+    runtimeAutoDownloadAllowed: false,
+  },
+  {
+    id: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-int8',
+    capability: 'punctuation',
+    engineId: 'sherpa-onnx-punctuation',
+    packageId: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-int8',
+    packageType: 'directory',
+    fileName: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8',
+    archiveFileName: 'sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2',
+    url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2',
+    expectedSizeBytes: 64_717_756,
+    expectedSha256: 'c0d5aa5f8eeb686032345e180bedf39319dc2e0556781c6264bcadba8328a6e1',
+    requiredFiles: ['model.int8.onnx'],
+    runtimeAutoDownloadAllowed: false,
+  },
   {
     id: 'base',
     fileName: 'base.pt',
@@ -139,6 +190,7 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
   const cacheDir = options.cacheDir ?? resolveMeetingWhisperCacheDir(env);
   const models = options.models ?? MEETING_TRANSCRIBER_MODEL_REGISTRY;
   const downloadFile = options.downloadFile ?? downloadMeetingModelFile;
+  const extractArchive = options.extractArchive ?? extractMeetingModelArchive;
 
   function findModel(modelId: string): MeetingModelDefinition {
     const model = models.find(item => item.id === modelId);
@@ -148,6 +200,10 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
 
   function getModelInfo(model: MeetingModelDefinition): MeetingModelInfo {
     const modelPath = join(cacheDir, model.fileName);
+    const baseInfo = buildModelPackageInfo(model);
+    if ((model.packageType ?? 'single-file') === 'directory') {
+      return getDirectoryModelInfo(model, modelPath, baseInfo);
+    }
     if (!existsSync(modelPath)) {
       return {
         id: model.id,
@@ -158,15 +214,24 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
         path: modelPath,
         downloaded: false,
         status: 'not_downloaded',
+        packageState: 'missing',
+        ...baseInfo,
       };
     }
 
     const localSizeBytes = statSync(modelPath).size;
-    const downloaded = checkMeetingModelFile({
+    const check = checkMeetingModelFile({
       path: modelPath,
       expectedSizeBytes: model.expectedSizeBytes,
       expectedSha256: model.expectedSha256,
-    }).ready;
+    });
+    const downloaded = check.ready;
+    const status = downloaded ? 'downloaded' : check.reason === 'hash_mismatch' ? 'corrupt' : 'incomplete';
+    const packageState: MeetingModelPackageState = downloaded
+      ? 'verified'
+      : status === 'corrupt'
+        ? 'corrupt'
+        : 'incomplete';
     return {
       id: model.id,
       fileName: model.fileName,
@@ -175,7 +240,9 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
       cacheDir,
       path: modelPath,
       downloaded,
-      status: downloaded ? 'downloaded' : 'incomplete',
+      status,
+      packageState,
+      ...baseInfo,
       localSizeBytes,
       localSizeLabel: formatMeetingModelSize(localSizeBytes),
     };
@@ -188,12 +255,12 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
     },
     async downloadModel(modelId) {
       const model = findModel(modelId);
+      if ((model.packageType ?? 'single-file') === 'directory') {
+        return downloadDirectoryModelPackage(model, cacheDir, downloadFile, extractArchive, getModelInfo);
+      }
       mkdirSync(cacheDir, { recursive: true });
       const modelPath = join(cacheDir, model.fileName);
-      await downloadFile(model.url, modelPath, {
-        expectedSizeBytes: model.expectedSizeBytes,
-        expectedSha256: model.expectedSha256,
-      });
+      await downloadModelFromMirrors(model, modelPath, downloadFile);
       let check = this.checkModelFile({
         path: modelPath,
         expectedSizeBytes: model.expectedSizeBytes,
@@ -201,10 +268,7 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
       });
       if (!check.ready && check.reason === 'hash_mismatch') {
         rmSync(modelPath, { force: true });
-        await downloadFile(model.url, modelPath, {
-          expectedSizeBytes: model.expectedSizeBytes,
-          expectedSha256: model.expectedSha256,
-        });
+        await downloadModelFromMirrors(model, modelPath, downloadFile);
         check = this.checkModelFile({
           path: modelPath,
           expectedSizeBytes: model.expectedSizeBytes,
@@ -218,10 +282,155 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
     },
     uninstallModel(modelId) {
       const model = findModel(modelId);
-      rmSync(join(cacheDir, model.fileName), { force: true });
+      const isDirectoryPackage = (model.packageType ?? 'single-file') === 'directory';
+      rmSync(join(cacheDir, model.fileName), { recursive: isDirectoryPackage, force: true });
+      if (isDirectoryPackage) {
+        rmSync(join(cacheDir, model.archiveFileName ?? `${model.fileName}.tar.bz2`), { force: true });
+      }
       return { ok: true, model: getModelInfo(model) };
     },
   };
+}
+
+function getDirectoryModelInfo(
+  model: MeetingModelDefinition,
+  modelPath: string,
+  baseInfo: Pick<
+    MeetingModelInfo,
+    'engineId' | 'packageId' | 'packageType' | 'manifestTrusted' | 'runtimeAutoDownloadAllowed' | 'capability'
+  >,
+): MeetingModelInfo {
+  if (!existsSync(modelPath)) {
+    return {
+      id: model.id,
+      fileName: model.fileName,
+      sizeBytes: model.expectedSizeBytes,
+      sizeLabel: formatMeetingModelSize(model.expectedSizeBytes),
+      cacheDir: dirname(modelPath),
+      path: modelPath,
+      downloaded: false,
+      status: 'not_downloaded',
+      packageState: 'missing',
+      ...baseInfo,
+    };
+  }
+
+  const localSizeBytes = calculateLocalPackageSize(modelPath);
+  const stat = statSync(modelPath);
+  const requiredFiles = model.requiredFiles ?? [];
+  const hasRequiredFiles = stat.isDirectory()
+    && requiredFiles.every(requiredFile => existsSync(join(modelPath, requiredFile)));
+  return {
+    id: model.id,
+    fileName: model.fileName,
+    sizeBytes: model.expectedSizeBytes,
+    sizeLabel: formatMeetingModelSize(model.expectedSizeBytes),
+    cacheDir: dirname(modelPath),
+    path: modelPath,
+    downloaded: hasRequiredFiles,
+    status: hasRequiredFiles ? 'downloaded' : 'incomplete',
+    packageState: hasRequiredFiles ? 'verified' : 'incomplete',
+    ...baseInfo,
+    localSizeBytes,
+    localSizeLabel: formatMeetingModelSize(localSizeBytes),
+  };
+}
+
+function calculateLocalPackageSize(path: string): number {
+  if (!existsSync(path)) return 0;
+  const stat = statSync(path);
+  if (!stat.isDirectory()) return stat.size;
+  return readdirSync(path, { withFileTypes: true }).reduce((total, entry) => {
+    const childPath = join(path, entry.name);
+    if (entry.isDirectory()) return total + calculateLocalPackageSize(childPath);
+    if (entry.isFile()) return total + statSync(childPath).size;
+    return total;
+  }, 0);
+}
+
+async function downloadDirectoryModelPackage(
+  model: MeetingModelDefinition,
+  cacheDir: string,
+  downloadFile: MeetingModelDownloadFile,
+  extractArchive: MeetingModelExtractArchive,
+  getModelInfo: (model: MeetingModelDefinition) => MeetingModelInfo,
+): Promise<{ ok: true; model: MeetingModelInfo }> {
+  mkdirSync(cacheDir, { recursive: true });
+  const archivePath = join(cacheDir, model.archiveFileName ?? `${model.fileName}.tar.bz2`);
+  const modelPath = join(cacheDir, model.fileName);
+  await downloadModelFromMirrors(model, archivePath, downloadFile);
+  let check = checkMeetingModelFile({
+    path: archivePath,
+    expectedSizeBytes: model.expectedSizeBytes,
+    expectedSha256: model.expectedSha256,
+  });
+  if (!check.ready && check.reason === 'hash_mismatch') {
+    rmSync(archivePath, { force: true });
+    await downloadModelFromMirrors(model, archivePath, downloadFile);
+    check = checkMeetingModelFile({
+      path: archivePath,
+      expectedSizeBytes: model.expectedSizeBytes,
+      expectedSha256: model.expectedSha256,
+    });
+  }
+  if (!check.ready) {
+    throw new Error(check.reason);
+  }
+
+  rmSync(modelPath, { recursive: true, force: true });
+  await extractArchive(archivePath, modelPath, model);
+  rmSync(archivePath, { force: true });
+  const info = getModelInfo(model);
+  if (!info.downloaded) {
+    throw new Error('model_package_incomplete');
+  }
+  return { ok: true, model: info };
+}
+
+async function extractMeetingModelArchive(
+  archivePath: string,
+  destinationDir: string,
+  _model: MeetingModelDefinition,
+): Promise<void> {
+  mkdirSync(dirname(destinationDir), { recursive: true });
+  await execFileAsync('tar', ['-xjf', archivePath, '-C', dirname(destinationDir)], {
+    timeout: 10 * 60 * 1000,
+  });
+}
+
+function buildModelPackageInfo(model: MeetingModelDefinition): Pick<
+  MeetingModelInfo,
+  'capability' | 'engineId' | 'packageId' | 'packageType' | 'manifestTrusted' | 'runtimeAutoDownloadAllowed'
+> {
+  return {
+    capability: model.capability ?? 'asr',
+    engineId: model.engineId ?? 'whisper',
+    packageId: model.packageId ?? `whisper-${model.id}`,
+    packageType: model.packageType ?? 'single-file',
+    manifestTrusted: true,
+    runtimeAutoDownloadAllowed: false,
+  };
+}
+
+async function downloadModelFromMirrors(
+  model: MeetingModelDefinition,
+  modelPath: string,
+  downloadFile: MeetingModelDownloadFile,
+): Promise<void> {
+  let lastError: unknown;
+  for (const url of [model.url, ...(model.mirrors ?? [])]) {
+    try {
+      await downloadFile(url, modelPath, {
+        expectedSizeBytes: model.expectedSizeBytes,
+        expectedSha256: model.expectedSha256,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      rmSync(modelPath, { force: true });
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('download_failed');
 }
 
 async function downloadMeetingModelFile(url: string, destination: string, options: MeetingModelDownloadOptions): Promise<void> {

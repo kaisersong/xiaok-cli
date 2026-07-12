@@ -763,6 +763,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       ...(computerUseAppIdentity.bundleId ? { lastSuccessfulAppBundleId: computerUseAppIdentity.bundleId } : {}),
       ...(computerUseAppIdentity.appPath ? { lastSuccessfulAppPath: computerUseAppIdentity.appPath } : {}),
       ...(computerUseAppIdentity.teamId ? { lastSuccessfulTeamId: computerUseAppIdentity.teamId } : {}),
+      ...(computerUseAppIdentity.appAsarSha256 ? { lastSuccessfulAppAsarSha256: computerUseAppIdentity.appAsarSha256 } : {}),
       launchMethod: 'open_app',
     };
     persistComputerUsePreference();
@@ -2190,14 +2191,31 @@ function mapComputerUseStartupError(error: unknown): ComputerUseUnavailableError
 function resolveComputerUseAppIdentity(): ComputerUseAppIdentity {
   const appPath = resolveMacAppBundlePath(process.execPath);
   const teamId = appPath ? resolveCodeSignatureTeamId(appPath) : undefined;
+  const appAsarSha256 = appPath && !teamId ? resolveAppAsarSha256(appPath) : undefined;
   return {
     isPackaged: process.env.NODE_ENV !== 'development' && Boolean(appPath),
     ...(appPath ? { appPath } : {}),
     ...(process.env.XIAOK_DESKTOP_BUNDLE_ID ? { bundleId: process.env.XIAOK_DESKTOP_BUNDLE_ID } : {}),
     ...(teamId ? { teamId } : {}),
+    ...(appAsarSha256 ? { appAsarSha256 } : {}),
     ...(process.env.XIAOK_DESKTOP_DEV_SERVER ? { devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER } : {}),
     ...(process.env.NODE_ENV ? { nodeEnv: process.env.NODE_ENV } : {}),
   };
+}
+
+export function resolveAppAsarSha256(appPath: string): string | undefined {
+  const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
+  const previousNoAsar = electronProcess.noAsar;
+  try {
+    electronProcess.noAsar = true;
+    const appAsarPath = join(appPath, 'Contents', 'Resources', 'app.asar');
+    if (!existsSync(appAsarPath)) return undefined;
+    return createHash('sha256').update(readFileSync(appAsarPath)).digest('hex');
+  } catch {
+    return undefined;
+  } finally {
+    electronProcess.noAsar = previousNoAsar;
+  }
 }
 
 function resolveMacAppBundlePath(executablePath: string): string | undefined {

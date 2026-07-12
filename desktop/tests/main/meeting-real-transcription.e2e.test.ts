@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createKbStoreSqlite } from '../../electron/kb-store-sqlite.js';
 import type { KbStore } from '../../electron/kb-store.js';
 import { createLocalMeetingTranscriber } from '../../electron/meeting-local-transcriber.js';
+import { createSherpaOnnxParaformerTranscriber } from '../../electron/meeting-sherpa-onnx-transcriber.js';
+import { createMeetingPunctuationService } from '../../electron/meeting-punctuation-service.js';
 import { createMeetingService } from '../../electron/meeting-service.js';
 import { createLocalMeetingSummaryService } from '../../electron/meeting-summary-service.js';
 
@@ -60,5 +62,41 @@ describe.skipIf(!runRealTranscription)('Meeting assistant real local transcripti
     expect(sourceContent).toMatch(/Alice|demo|ship/i);
     expect(result.chunks.some(chunk => chunk.metadata.kind === 'summary')).toBe(true);
     expect(result.meeting.status).toBe('saved');
-  });
+  }, 30 * 60 * 1000);
+
+  it('transcribes generated Mandarin with local sherpa-onnx and restores punctuation before summary', async () => {
+    const aiffPath = join(rootDir, 'mandarin-speech.aiff');
+    const wavPath = join(rootDir, 'mandarin-speech.wav');
+
+    execFileSync('say', [
+      '-v',
+      'Tingting',
+      '-o',
+      aiffPath,
+      '今天我们讨论客户需求。张三明天下午确认报价。李四下周提交方案。',
+    ]);
+    execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', aiffPath, '-ar', '16000', '-ac', '1', wavPath]);
+
+    const service = createMeetingService({
+      store,
+      transcriber: createSherpaOnnxParaformerTranscriber(),
+      punctuationService: createMeetingPunctuationService(),
+      summaryService: createLocalMeetingSummaryService(),
+    });
+    const draft = await service.draftRecording({
+      requestSource: 'user',
+      title: '中文录音验证',
+      audioFilePath: wavPath,
+      summaryProvider: 'local-only',
+      scenario: 'meeting',
+    });
+
+    expect(draft.ok).toBe(true);
+    if (!draft.ok) return;
+    expect(draft.transcript).toContain('客户需求');
+    expect(draft.transcript).toMatch(/[，。]/);
+    expect(draft.suggestedTitle).toMatch(/ - \d{2}\/\d{2} \d{2}:\d{2}$/);
+    expect(draft.summaryMarkdown).toContain('## 会议纪要');
+    expect(draft.summaryMarkdown).toContain('客户需求');
+  }, 30 * 60 * 1000);
 });

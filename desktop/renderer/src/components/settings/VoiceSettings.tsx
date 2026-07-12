@@ -21,6 +21,25 @@ type Props = {
   initialConfig?: DesktopConfig | null
 }
 
+type MeetingAsrProviderId = 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr'
+
+type MeetingAsrConfigSnapshot = {
+  defaultProvider: MeetingAsrProviderId
+  volcengine: {
+    configured: boolean
+    appKeyConfigured: boolean
+    accessKeyConfigured: boolean
+    endpoint?: string
+    resourceId: string
+  }
+  aliyun: {
+    configured: boolean
+    apiKeyConfigured: boolean
+    baseUrl: string
+    model: string
+  }
+}
+
 const PROVIDERS = [
   { value: 'groq', label: 'Groq' },
   { value: 'openai', label: 'OpenAI' },
@@ -504,6 +523,12 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
     LANGUAGES_BASE.map((l) => l.value === 'zh' ? { ...l, label: ds.voiceLangZh } : l),
     [ds.voiceLangZh],
   )
+  const MEETING_ASR_PROVIDERS = useMemo(() => [
+    { value: 'sherpa-onnx-paraformer' as const, label: t.knowledge.meetingSpeechEngineSherpaOnnxParaformer },
+    { value: 'whisper' as const, label: t.knowledge.meetingSpeechEngineWhisperFallback },
+    { value: 'volcengine-asr' as const, label: t.knowledge.meetingSpeechEngineVolcengineAsr },
+    { value: 'aliyun-asr' as const, label: t.knowledge.meetingSpeechEngineAliyunAsr },
+  ], [t])
 
   const [voiceEnabled, setVoiceEnabled] = useState(false)
   const [voiceLanguage, setVoiceLanguage] = useState('')
@@ -512,6 +537,18 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
   const voiceEnabledRef = useRef(false)
   const [configLoading, setConfigLoading] = useState(true)
   const [voiceCardHovered, setVoiceCardHovered] = useState(false)
+  const [meetingAsrConfig, setMeetingAsrConfig] = useState<MeetingAsrConfigSnapshot | null>(null)
+  const [meetingAsrProvider, setMeetingAsrProvider] = useState<MeetingAsrProviderId>('sherpa-onnx-paraformer')
+  const [meetingAsrDraft, setMeetingAsrDraft] = useState({
+    volcAppKey: '',
+    volcAccessKey: '',
+    volcEndpoint: '',
+    volcResourceId: '',
+    aliyunApiKey: '',
+    aliyunBaseUrl: '',
+  })
+  const [meetingAsrSaving, setMeetingAsrSaving] = useState(false)
+  const [meetingAsrSaved, setMeetingAsrSaved] = useState(false)
 
   const [credentials, setCredentials] = useState<AsrCredential[]>([])
   const [credsLoading, setCredsLoading] = useState(false)
@@ -561,6 +598,27 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
 
   useEffect(() => { void fetchCredentials() }, [fetchCredentials])
 
+  const applyMeetingAsrSnapshot = useCallback((snapshot: MeetingAsrConfigSnapshot) => {
+    setMeetingAsrConfig(snapshot)
+    setMeetingAsrProvider(snapshot.defaultProvider)
+    setMeetingAsrDraft(prev => ({
+      ...prev,
+      volcAppKey: '',
+      volcAccessKey: '',
+      volcEndpoint: snapshot.volcengine.endpoint ?? '',
+      volcResourceId: snapshot.volcengine.resourceId ?? '',
+      aliyunApiKey: '',
+      aliyunBaseUrl: snapshot.aliyun.baseUrl ?? '',
+    }))
+  }, [])
+
+  useEffect(() => {
+    if (!api?.meetingGetAsrConfig) return
+    void api.meetingGetAsrConfig().then(snapshot => {
+      applyMeetingAsrSnapshot(snapshot as MeetingAsrConfigSnapshot)
+    }).catch(() => undefined)
+  }, [api, applyMeetingAsrSnapshot])
+
   const handleToggleVoice = useCallback(async (enabled: boolean) => {
     if (!api || toggleSavingRef.current) return
     toggleSavingRef.current = true
@@ -604,6 +662,34 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
     setDeleteTarget(null)
     await fetchCredentials()
   }, [deleteTarget, accessToken, fetchCredentials])
+
+  const handleSaveMeetingAsr = useCallback(async () => {
+    if (!api?.meetingSaveAsrConfig || meetingAsrSaving) return
+    setMeetingAsrSaving(true)
+    setMeetingAsrSaved(false)
+    try {
+      const snapshot = await api.meetingSaveAsrConfig({
+        defaultProvider: meetingAsrProvider,
+        volcengine: {
+          appKey: meetingAsrDraft.volcAppKey,
+          accessKey: meetingAsrDraft.volcAccessKey,
+          endpoint: meetingAsrDraft.volcEndpoint,
+          resourceId: meetingAsrDraft.volcResourceId,
+        },
+        aliyun: {
+          apiKey: meetingAsrDraft.aliyunApiKey,
+          baseUrl: meetingAsrDraft.aliyunBaseUrl,
+          model: 'fun-asr',
+        },
+      }) as MeetingAsrConfigSnapshot
+      applyMeetingAsrSnapshot(snapshot)
+      setMeetingAsrSaved(true)
+    } catch (err) {
+      console.error('save meeting ASR config failed', err)
+    } finally {
+      setMeetingAsrSaving(false)
+    }
+  }, [api, applyMeetingAsrSnapshot, meetingAsrDraft, meetingAsrProvider, meetingAsrSaving])
 
   if (configLoading) {
     return (
@@ -661,6 +747,128 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
             options={LANGUAGES}
             style={{ minWidth: '140px' }}
           />
+        </div>
+      </div>
+
+      {/* Meeting ASR settings */}
+      <div className={sectionCls}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-medium text-[var(--c-text-heading)]">{ds.meetingAsrSettingsTitle}</h4>
+            <p className="mt-0.5 text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrSettingsDesc}</p>
+          </div>
+          <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${meetingAsrConfig?.volcengine.configured || meetingAsrConfig?.aliyun.configured ? 'bg-green-500/10 text-green-500' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]'}`}>
+            {meetingAsrConfig?.volcengine.configured || meetingAsrConfig?.aliyun.configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+          </span>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label className={fieldLabelCls}>{ds.meetingAsrDefaultProvider}</label>
+            <CustomDropdown
+              value={meetingAsrProvider}
+              onChange={setMeetingAsrProvider}
+              options={MEETING_ASR_PROVIDERS}
+              style={fieldInputStyle}
+            />
+          </div>
+
+          <div className="col-span-2 border-t border-[var(--c-border-subtle)] pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-[var(--c-text-heading)]">{ds.meetingAsrVolcengineTitle}</p>
+              <span className={`rounded-md px-2 py-0.5 text-xs ${meetingAsrConfig?.volcengine.configured ? 'bg-green-500/10 text-green-500' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]'}`}>
+                {meetingAsrConfig?.volcengine.configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={fieldLabelCls}>{ds.meetingAsrAppKey}</label>
+                <input
+                  type="password"
+                  value={meetingAsrDraft.volcAppKey}
+                  onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcAppKey: e.target.value }))}
+                  placeholder={meetingAsrConfig?.volcengine.appKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAppKey}
+                  className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
+                  style={fieldInputStyle}
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>{ds.meetingAsrAccessKey}</label>
+                <input
+                  type="password"
+                  value={meetingAsrDraft.volcAccessKey}
+                  onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcAccessKey: e.target.value }))}
+                  placeholder={meetingAsrConfig?.volcengine.accessKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAccessKey}
+                  className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
+                  style={fieldInputStyle}
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>{ds.meetingAsrEndpoint}</label>
+                <input
+                  value={meetingAsrDraft.volcEndpoint}
+                  onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcEndpoint: e.target.value }))}
+                  className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
+                  style={fieldInputStyle}
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>{ds.meetingAsrResourceId}</label>
+                <input
+                  value={meetingAsrDraft.volcResourceId}
+                  onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcResourceId: e.target.value }))}
+                  className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
+                  style={fieldInputStyle}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="col-span-2 border-t border-[var(--c-border-subtle)] pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-[var(--c-text-heading)]">{ds.meetingAsrAliyunTitle}</p>
+              <span className={`rounded-md px-2 py-0.5 text-xs ${meetingAsrConfig?.aliyun.configured ? 'bg-green-500/10 text-green-500' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]'}`}>
+                {meetingAsrConfig?.aliyun.configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={fieldLabelCls}>{ds.meetingAsrApiKey}</label>
+                <input
+                  type="password"
+                  value={meetingAsrDraft.aliyunApiKey}
+                  onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, aliyunApiKey: e.target.value }))}
+                  aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrApiKey}`}
+                  placeholder={meetingAsrConfig?.aliyun.apiKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrApiKey}
+                  className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
+                  style={fieldInputStyle}
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>{ds.meetingAsrBaseUrl}</label>
+                <input
+                  value={meetingAsrDraft.aliyunBaseUrl}
+                  onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, aliyunBaseUrl: e.target.value }))}
+                  aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrBaseUrl}`}
+                  className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
+                  style={fieldInputStyle}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-end gap-3">
+          {meetingAsrSaved && <span className="text-xs text-green-500">{ds.meetingAsrSaved}</span>}
+          <button
+            type="button"
+            onClick={() => void handleSaveMeetingAsr()}
+            disabled={meetingAsrSaving}
+            className="rounded-[9px] px-3 py-1.5 text-[13px] font-medium text-[var(--c-btn-text)] disabled:opacity-60"
+            style={{ background: 'var(--c-btn-bg)' }}
+          >
+            {meetingAsrSaving ? ds.meetingAsrSaving : ds.meetingAsrSave}
+          </button>
         </div>
       </div>
 

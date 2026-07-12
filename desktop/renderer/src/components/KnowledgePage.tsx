@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, type DragEvent } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Plus, Download, RotateCcw, Trash2, FileText, Globe, ClipboardPaste, Search, BookOpen, Link, Mic, ChevronRight, Settings2 } from 'lucide-react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { Plus, Download, RotateCcw, Trash2, FileText, Globe, ClipboardPaste, Search, BookOpen, Link, Mic, ChevronRight, Settings2, Minimize2, Maximize2, Pause, Play, LoaderCircle, X, Pencil, Check } from 'lucide-react';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface KbCollection {
   id: string;
@@ -46,27 +47,36 @@ interface ActiveMeetingRecording {
   audioLevelData: Float32Array<ArrayBuffer>;
   audioLevelFrameId: number | null;
   audioContext: AudioContext;
+  capturedSamples: number;
   chunks: Float32Array[];
   gain: GainNode;
-  lastPreviewChunkCount: number;
+  liveTranscriptionSessionId: string | null;
   paused: boolean;
-  processor: ScriptProcessorNode;
+  previewChunkCursor: number;
   previewInFlight: boolean;
+  previewPromise: Promise<void> | null;
+  previewTimerId: number | null;
+  processor: ScriptProcessorNode;
   source: MediaStreamAudioSourceNode;
   stream: MediaStream;
 }
 
 interface MeetingPreviewSegment {
+  end?: number;
+  final?: boolean;
+  sentenceId?: string;
   start: number;
   text: string;
 }
 
 interface MeetingModelStatusSnapshot {
   id: string;
+  capability?: 'asr' | 'punctuation' | 'vad' | 'speaker';
+  engineId?: string;
   fileName: string;
   sizeLabel: string;
   downloaded: boolean;
-  status: 'downloaded' | 'not_downloaded' | 'incomplete';
+  status: 'downloaded' | 'not_downloaded' | 'incomplete' | 'corrupt';
   localSizeLabel?: string;
 }
 
@@ -75,12 +85,56 @@ interface MeetingModelActionState {
   kind: 'download' | 'uninstall';
 }
 
-const MEETING_TRANSCRIBER_MODEL_OPTIONS = ['base', 'small', 'medium', 'large', 'turbo'] as const;
+interface MeetingAsrConfigSnapshot {
+  defaultProvider?: MeetingTranscriberEngine;
+  volcengine?: {
+    configured?: boolean;
+    appKeyConfigured?: boolean;
+    accessKeyConfigured?: boolean;
+    endpoint?: string;
+    resourceId?: string;
+  };
+  aliyun?: {
+    configured?: boolean;
+    apiKeyConfigured?: boolean;
+    baseUrl?: string;
+    model?: string;
+  };
+}
+
+interface MeetingSaveAsrConfigInput {
+  defaultProvider?: MeetingTranscriberEngine;
+  volcengine?: {
+    appKey?: string;
+    accessKey?: string;
+    endpoint?: string;
+    resourceId?: string;
+  };
+  aliyun?: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+  };
+}
+
+const MEETING_SHERPA_ONNX_PARA_MODEL = 'sherpa-onnx-paraformer-zh-small-2024-03-09';
+const MEETING_TRANSCRIBER_ENGINE_OPTIONS = ['sherpa-onnx-paraformer', 'whisper', 'volcengine-asr', 'aliyun-asr'] as const;
+const MEETING_TRANSCRIBER_MODEL_OPTIONS = [MEETING_SHERPA_ONNX_PARA_MODEL, 'base', 'small', 'medium', 'large', 'turbo'] as const;
 const MEETING_TRANSCRIBER_LANGUAGE_OPTIONS = ['zh', 'auto', 'en'] as const;
+const MEETING_RECORDING_SCENARIO_OPTIONS = ['discussion', 'meeting', 'sales'] as const;
 const MEETING_AUDIO_LEVEL_BAR_COUNT = 24;
+const MEETING_TRANSCRIBE_PREVIEW_INITIAL_DELAY_MS = 2_000;
+const MEETING_TRANSCRIBE_PREVIEW_INTERVAL_MS = 4_000;
+const MEETING_TRANSCRIBE_PREVIEW_MIN_AUDIO_SECONDS = 1;
 const EMPTY_MEETING_AUDIO_LEVELS = Array.from({ length: MEETING_AUDIO_LEVEL_BAR_COUNT }, () => 0);
+type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
 type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
 type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
+type MeetingRecordingScenario = typeof MEETING_RECORDING_SCENARIO_OPTIONS[number];
+
+function isLocalMeetingTranscriberEngine(engine: MeetingTranscriberEngine): boolean {
+  return engine === 'sherpa-onnx-paraformer' || engine === 'whisper';
+}
 
 function createEmptyMeetingAudioLevels(): number[] {
   return [...EMPTY_MEETING_AUDIO_LEVELS];
@@ -111,16 +165,39 @@ function formatMeetingRecordingTimestamp(date = new Date()): string {
   return `${month}/${day} ${hours}:${minutes}`;
 }
 
-function readStoredMeetingTranscriberModel(): MeetingTranscriberModel {
+function meetingTranscriberEngineForModel(model: MeetingTranscriberModel): MeetingTranscriberEngine {
+  return model === MEETING_SHERPA_ONNX_PARA_MODEL ? 'sherpa-onnx-paraformer' : 'whisper';
+}
+
+function defaultMeetingTranscriberModelForEngine(engine: MeetingTranscriberEngine): MeetingTranscriberModel {
+  if (engine === 'sherpa-onnx-paraformer') return MEETING_SHERPA_ONNX_PARA_MODEL;
+  if (engine === 'whisper') return 'base';
+  return MEETING_SHERPA_ONNX_PARA_MODEL;
+}
+
+function readStoredMeetingTranscriberEngine(): MeetingTranscriberEngine {
   try {
-    const value = localStorage.getItem('meeting-transcriber-model');
-    if (MEETING_TRANSCRIBER_MODEL_OPTIONS.includes(value as MeetingTranscriberModel)) {
-      return value as MeetingTranscriberModel;
+    const value = localStorage.getItem('meeting-transcriber-engine');
+    if (MEETING_TRANSCRIBER_ENGINE_OPTIONS.includes(value as MeetingTranscriberEngine)) {
+      return value as MeetingTranscriberEngine;
     }
   } catch {
     // localStorage may be unavailable in tests or hardened renderer contexts.
   }
-  return 'base';
+  return 'sherpa-onnx-paraformer';
+}
+
+function readStoredMeetingTranscriberModel(engine: MeetingTranscriberEngine): MeetingTranscriberModel {
+  try {
+    const value = localStorage.getItem('meeting-transcriber-model');
+    const model = value as MeetingTranscriberModel;
+    if (MEETING_TRANSCRIBER_MODEL_OPTIONS.includes(model) && meetingTranscriberEngineForModel(model) === engine) {
+      return model;
+    }
+  } catch {
+    // localStorage may be unavailable in tests or hardened renderer contexts.
+  }
+  return defaultMeetingTranscriberModelForEngine(engine);
 }
 
 function readStoredMeetingTranscriberLanguage(): MeetingTranscriberLanguage {
@@ -139,6 +216,10 @@ function meetingTranscriberLanguageForIpc(language: MeetingTranscriberLanguage):
   return language === 'auto' ? undefined : language;
 }
 
+function meetingTranscriberModelForIpc(engine: MeetingTranscriberEngine, model: MeetingTranscriberModel): string | undefined {
+  return isLocalMeetingTranscriberEngine(engine) ? model : undefined;
+}
+
 function normalizeMeetingPreviewSegments(result: { text?: string; segments?: unknown }): MeetingPreviewSegment[] {
   if (Array.isArray(result.segments)) {
     const segments = result.segments.flatMap((item) => {
@@ -147,7 +228,12 @@ function normalizeMeetingPreviewSegments(result: { text?: string; segments?: unk
       const text = typeof record.text === 'string' ? record.text.trim() : '';
       if (!text) return [];
       const start = Number(record.start);
-      return [{ start: Number.isFinite(start) ? start : 0, text }];
+      const end = Number(record.end);
+      return [{
+        start: Number.isFinite(start) ? start : 0,
+        end: Number.isFinite(end) ? end : undefined,
+        text,
+      }];
     });
     if (segments.length > 0) return segments;
   }
@@ -156,6 +242,18 @@ function normalizeMeetingPreviewSegments(result: { text?: string; segments?: unk
     .split(/\r?\n/)
     .map((line, index) => ({ start: index, text: line.trim() }))
     .filter(segment => segment.text);
+}
+
+function countMeetingAudioSamples(chunks: Float32Array[]): number {
+  return chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+}
+
+function offsetMeetingPreviewSegments(segments: MeetingPreviewSegment[], offsetSeconds: number): MeetingPreviewSegment[] {
+  return segments.map(segment => ({
+    start: segment.start + offsetSeconds,
+    end: typeof segment.end === 'number' ? segment.end + offsetSeconds : undefined,
+    text: segment.text,
+  }));
 }
 
 function normalizeMeetingModelStatuses(value: unknown): MeetingModelStatusSnapshot[] {
@@ -167,12 +265,16 @@ function normalizeMeetingModelStatuses(value: unknown): MeetingModelStatusSnapsh
     const fileName = typeof record.fileName === 'string' ? record.fileName : '';
     const sizeLabel = typeof record.sizeLabel === 'string' ? record.sizeLabel : '';
     const rawStatus = typeof record.status === 'string' ? record.status : '';
-    const status = rawStatus === 'downloaded' || rawStatus === 'not_downloaded' || rawStatus === 'incomplete'
+    const status = rawStatus === 'downloaded' || rawStatus === 'not_downloaded' || rawStatus === 'incomplete' || rawStatus === 'corrupt'
       ? rawStatus
       : undefined;
     if (!id || !fileName || !sizeLabel || !status) return [];
     return [{
       id,
+      capability: record.capability === 'punctuation' || record.capability === 'vad' || record.capability === 'speaker'
+        ? record.capability
+        : 'asr',
+      engineId: typeof record.engineId === 'string' ? record.engineId : undefined,
       fileName,
       sizeLabel,
       downloaded: record.downloaded === true,
@@ -189,10 +291,21 @@ function formatMeetingSegmentTime(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 }
 
+function formatMeetingElapsedTime(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 function stopActiveMeetingRecording(active: ActiveMeetingRecording): void {
   if (active.audioLevelFrameId !== null) {
     window.cancelAnimationFrame(active.audioLevelFrameId);
     active.audioLevelFrameId = null;
+  }
+  if (active.previewTimerId !== null) {
+    window.clearTimeout(active.previewTimerId);
+    active.previewTimerId = null;
   }
   active.processor.onaudioprocess = null;
   try { active.source.disconnect(); } catch { /* ignore */ }
@@ -246,10 +359,27 @@ function encodeFloat32ChunksToWavBase64(chunks: Float32Array[], sampleRate: numb
   return btoa(binary);
 }
 
+function encodeFloat32ChunkToPcmBase64(chunk: Float32Array): string {
+  const bytes = new Uint8Array(chunk.length * 2);
+  const view = new DataView(bytes.buffer);
+  for (let index = 0; index < chunk.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, chunk[index] ?? 0));
+    view.setInt16(index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+  }
+  return btoa(binary);
+}
+
 export function KnowledgePage() {
   const { collectionId } = useParams<{ collectionId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useLocale();
+  const isMeetingRecorderWindow = location.pathname.startsWith('/meeting-recorder/')
+    || new URLSearchParams(location.search).get('recorder') === '1';
 
   const [collections, setCollections] = useState<KbCollection[]>([]);
   const [sources, setSources] = useState<KbSource[]>([]);
@@ -279,22 +409,34 @@ export function KnowledgePage() {
   const [meetingRecordingPaused, setMeetingRecordingPaused] = useState(false);
   const [meetingRecordingSaving, setMeetingRecordingSaving] = useState(false);
   const [meetingProcessing, setMeetingProcessing] = useState(false);
+  const [meetingRecorderView, setMeetingRecorderView] = useState<'workbench' | 'compact' | 'summary'>('workbench');
+  const [meetingElapsedMs, setMeetingElapsedMs] = useState(0);
   const [meetingAudioLevels, setMeetingAudioLevels] = useState<number[]>(createEmptyMeetingAudioLevels);
   const [meetingPreviewSegments, setMeetingPreviewSegments] = useState<MeetingPreviewSegment[]>([]);
   const [meetingModelStatuses, setMeetingModelStatuses] = useState<MeetingModelStatusSnapshot[]>([]);
   const [meetingModelStatusesLoading, setMeetingModelStatusesLoading] = useState(false);
   const [meetingModelStatusesError, setMeetingModelStatusesError] = useState('');
   const [meetingModelAction, setMeetingModelAction] = useState<MeetingModelActionState | null>(null);
-  const [meetingTranscriberModel, setMeetingTranscriberModel] = useState<MeetingTranscriberModel>(readStoredMeetingTranscriberModel);
+  const [meetingAsrConfig, setMeetingAsrConfig] = useState<MeetingAsrConfigSnapshot | null>(null);
+  const [meetingAsrSaving, setMeetingAsrSaving] = useState(false);
+  const [meetingTranscriberEngine, setMeetingTranscriberEngine] = useState<MeetingTranscriberEngine>(readStoredMeetingTranscriberEngine);
+  const [meetingTranscriberModel, setMeetingTranscriberModel] = useState<MeetingTranscriberModel>(() => (
+    readStoredMeetingTranscriberModel(readStoredMeetingTranscriberEngine())
+  ));
   const [meetingTranscriberLanguage, setMeetingTranscriberLanguage] = useState<MeetingTranscriberLanguage>(readStoredMeetingTranscriberLanguage);
+  const [meetingRecordingScenario, setMeetingRecordingScenario] = useState<MeetingRecordingScenario>('meeting');
   const [meetingMessage, setMeetingMessage] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
   const [sourceContent, setSourceContent] = useState<KbSourceContent | null>(null);
   const [sourceContentLoading, setSourceContentLoading] = useState(false);
   const [sourceContentError, setSourceContentError] = useState('');
   const meetingTitleRef = useRef('');
+  const meetingTranscriberEngineRef = useRef<MeetingTranscriberEngine>(meetingTranscriberEngine);
   const meetingTranscriberModelRef = useRef<MeetingTranscriberModel>(meetingTranscriberModel);
   const meetingTranscriberLanguageRef = useRef<MeetingTranscriberLanguage>(meetingTranscriberLanguage);
+  const meetingRecordingScenarioRef = useRef<MeetingRecordingScenario>(meetingRecordingScenario);
+  const meetingPreviewSegmentsRef = useRef<MeetingPreviewSegment[]>([]);
   const meetingRecordingRef = useRef<ActiveMeetingRecording | null>(null);
+  const meetingRecorderInitializedRef = useRef(false);
 
   const desktop = getDesktopApi();
 
@@ -322,15 +464,132 @@ export function KnowledgePage() {
     active.audioLevelFrameId = window.requestAnimationFrame(sample);
   };
 
+  const replaceMeetingPreviewSegments = (segments: MeetingPreviewSegment[]) => {
+    meetingPreviewSegmentsRef.current = segments;
+    setMeetingPreviewSegments(segments);
+  };
+
+  const appendMeetingPreviewSegments = (segments: MeetingPreviewSegment[]) => {
+    if (segments.length === 0) return;
+    setMeetingPreviewSegments(prev => {
+      const next = [...prev, ...segments];
+      meetingPreviewSegmentsRef.current = next;
+      return next;
+    });
+  };
+
+  const upsertMeetingLivePreviewSegment = (segment: MeetingPreviewSegment & { sentenceId: string }) => {
+    setMeetingPreviewSegments(prev => {
+      const index = prev.findIndex(item => item.sentenceId === segment.sentenceId);
+      const next = index >= 0
+        ? prev.map((item, itemIndex) => itemIndex === index ? segment : item)
+        : [...prev, segment];
+      meetingPreviewSegmentsRef.current = next;
+      return next;
+    });
+  };
+
+  const runMeetingPreviewTranscription = (active: ActiveMeetingRecording, options: { force?: boolean } = {}): Promise<void> => {
+    if (!desktop?.meetingTranscribePreview || meetingTranscriberEngineRef.current !== 'sherpa-onnx-paraformer') {
+      return Promise.resolve();
+    }
+    if (active.previewInFlight) return active.previewPromise ?? Promise.resolve();
+
+    const startChunkIndex = active.previewChunkCursor;
+    const chunks = active.chunks.slice(startChunkIndex);
+    const sampleCount = countMeetingAudioSamples(chunks);
+    if (sampleCount === 0) return Promise.resolve();
+    if (!options.force && sampleCount / active.audioContext.sampleRate < MEETING_TRANSCRIBE_PREVIEW_MIN_AUDIO_SECONDS) {
+      return Promise.resolve();
+    }
+
+    const offsetSeconds = countMeetingAudioSamples(active.chunks.slice(0, startChunkIndex)) / active.audioContext.sampleRate;
+    const title = readMeetingRecordingTitle();
+    const request = {
+      title,
+      wavBase64: encodeFloat32ChunksToWavBase64(chunks, active.audioContext.sampleRate),
+      engine: meetingTranscriberEngineRef.current,
+      model: meetingTranscriberModelRef.current,
+      ...(meetingTranscriberLanguageForIpc(meetingTranscriberLanguageRef.current)
+        ? { language: meetingTranscriberLanguageForIpc(meetingTranscriberLanguageRef.current) }
+        : {}),
+    };
+
+    active.previewInFlight = true;
+    active.previewPromise = (async () => {
+      try {
+        const result = await desktop.meetingTranscribePreview(request) as { ok?: boolean; text?: string; segments?: unknown };
+        if (result?.ok === false) return;
+        const segments = offsetMeetingPreviewSegments(normalizeMeetingPreviewSegments(result), offsetSeconds);
+        if (segments.length === 0) return;
+        active.previewChunkCursor = startChunkIndex + chunks.length;
+        appendMeetingPreviewSegments(segments);
+      } catch {
+        // Live preview should not interrupt recording; final transcription still runs on finish.
+      } finally {
+        active.previewInFlight = false;
+        active.previewPromise = null;
+      }
+    })();
+    return active.previewPromise;
+  };
+
+  const scheduleMeetingPreviewTranscription = (
+    active: ActiveMeetingRecording,
+    delayMs = MEETING_TRANSCRIBE_PREVIEW_INITIAL_DELAY_MS,
+  ) => {
+    if (active.previewTimerId !== null) {
+      window.clearTimeout(active.previewTimerId);
+      active.previewTimerId = null;
+    }
+    const tick = () => {
+      active.previewTimerId = null;
+      if (meetingRecordingRef.current !== active || active.paused) return;
+      void runMeetingPreviewTranscription(active).finally(() => {
+        if (meetingRecordingRef.current === active && !active.paused) {
+          active.previewTimerId = window.setTimeout(tick, MEETING_TRANSCRIBE_PREVIEW_INTERVAL_MS);
+        }
+      });
+    };
+    active.previewTimerId = window.setTimeout(tick, delayMs);
+  };
+
+  const flushMeetingPreviewTranscription = async (active: ActiveMeetingRecording): Promise<void> => {
+    if (active.previewPromise) {
+      await active.previewPromise.catch(() => undefined);
+    }
+    await runMeetingPreviewTranscription(active, { force: true }).catch(() => undefined);
+  };
+
   const updateMeetingTitle = (value: string) => {
     meetingTitleRef.current = value;
     setMeetingTitle(value);
   };
 
+  const updateMeetingTranscriberEngine = (value: MeetingTranscriberEngine) => {
+    const nextModel = meetingTranscriberEngineForModel(meetingTranscriberModelRef.current) === value
+      ? meetingTranscriberModelRef.current
+      : defaultMeetingTranscriberModelForEngine(value);
+    meetingTranscriberEngineRef.current = value;
+    meetingTranscriberModelRef.current = nextModel;
+    setMeetingTranscriberEngine(value);
+    setMeetingTranscriberModel(nextModel);
+    try {
+      localStorage.setItem('meeting-transcriber-engine', value);
+      localStorage.setItem('meeting-transcriber-model', nextModel);
+    } catch {
+      // best effort only
+    }
+  };
+
   const updateMeetingTranscriberModel = (value: MeetingTranscriberModel) => {
+    const engine = meetingTranscriberEngineForModel(value);
+    meetingTranscriberEngineRef.current = engine;
     meetingTranscriberModelRef.current = value;
+    setMeetingTranscriberEngine(engine);
     setMeetingTranscriberModel(value);
     try {
+      localStorage.setItem('meeting-transcriber-engine', engine);
       localStorage.setItem('meeting-transcriber-model', value);
     } catch {
       // best effort only
@@ -345,6 +604,11 @@ export function KnowledgePage() {
     } catch {
       // best effort only
     }
+  };
+
+  const updateMeetingRecordingScenario = (value: MeetingRecordingScenario) => {
+    meetingRecordingScenarioRef.current = value;
+    setMeetingRecordingScenario(value);
   };
 
   const loadMeetingModelStatuses = useCallback(async () => {
@@ -413,6 +677,28 @@ export function KnowledgePage() {
     } catch { /* ignore */ }
   }, [desktop]);
 
+  const loadMeetingAsrConfig = useCallback(async () => {
+    if (!desktop?.meetingGetAsrConfig) return;
+    try {
+      const snapshot = await desktop.meetingGetAsrConfig() as MeetingAsrConfigSnapshot;
+      setMeetingAsrConfig(snapshot);
+    } catch {
+      setMeetingAsrConfig(null);
+    }
+  }, [desktop]);
+
+  const handleSaveMeetingAsrConfig = useCallback(async (input: MeetingSaveAsrConfigInput): Promise<MeetingAsrConfigSnapshot | null> => {
+    if (!desktop?.meetingSaveAsrConfig || meetingAsrSaving) return null;
+    setMeetingAsrSaving(true);
+    try {
+      const snapshot = await desktop.meetingSaveAsrConfig(input) as MeetingAsrConfigSnapshot;
+      setMeetingAsrConfig(snapshot);
+      return snapshot;
+    } finally {
+      setMeetingAsrSaving(false);
+    }
+  }, [desktop, meetingAsrSaving]);
+
   const loadSources = useCallback(async (cid: string) => {
     if (!desktop?.kbListSources) return;
     try {
@@ -427,6 +713,25 @@ export function KnowledgePage() {
   }, [loadCollections]);
 
   useEffect(() => {
+    meetingPreviewSegmentsRef.current = meetingPreviewSegments;
+  }, [meetingPreviewSegments]);
+
+  useEffect(() => {
+    if (!desktop?.onMeetingLiveTranscriptionUpdate) return;
+    return desktop.onMeetingLiveTranscriptionUpdate((input) => {
+      const active = meetingRecordingRef.current;
+      if (!active?.liveTranscriptionSessionId || input.sessionId !== active.liveTranscriptionSessionId) return;
+      upsertMeetingLivePreviewSegment({
+        sentenceId: input.sentenceId,
+        start: input.start,
+        end: input.end,
+        text: input.text,
+        final: input.final,
+      });
+    });
+  }, [desktop]);
+
+  useEffect(() => {
     if (collectionId) {
       void loadSources(collectionId);
       setSearchResults([]);
@@ -438,12 +743,23 @@ export function KnowledgePage() {
     }
   }, [collectionId, collections, loadSources, navigate]);
 
+  useEffect(() => {
+    if (isMeetingRecorderWindow || !desktop?.onMeetingRecordingSaved) return;
+    return desktop.onMeetingRecordingSaved((input) => {
+      if (input.collectionId !== collectionId) return;
+      void loadSources(input.collectionId);
+      void loadCollections();
+    });
+  }, [collectionId, desktop, isMeetingRecorderWindow, loadCollections, loadSources]);
+
   useEffect(() => () => {
     if (meetingRecordingRef.current) {
+      const sessionId = meetingRecordingRef.current.liveTranscriptionSessionId;
+      if (sessionId) void desktop?.meetingCancelLiveTranscription?.({ sessionId });
       stopActiveMeetingRecording(meetingRecordingRef.current);
       meetingRecordingRef.current = null;
     }
-  }, []);
+  }, [desktop]);
 
   const handleCreateCollection = async () => {
     if (!desktop?.kbCreateCollection || !newCollectionName.trim()) return;
@@ -561,6 +877,8 @@ export function KnowledgePage() {
 
   const cleanupMeetingRecording = () => {
     if (meetingRecordingRef.current) {
+      const sessionId = meetingRecordingRef.current.liveTranscriptionSessionId;
+      if (sessionId) void desktop?.meetingCancelLiveTranscription?.({ sessionId });
       stopActiveMeetingRecording(meetingRecordingRef.current);
       meetingRecordingRef.current = null;
     }
@@ -576,7 +894,7 @@ export function KnowledgePage() {
     setMeetingTranscript('');
     setMeetingSummaryDraft('');
     setMeetingDraftTranscript('');
-    setMeetingPreviewSegments([]);
+    replaceMeetingPreviewSegments([]);
     setMeetingAudioLevels(createEmptyMeetingAudioLevels());
     setMeetingMessage(null);
     setMeetingRecordingPaused(false);
@@ -592,31 +910,75 @@ export function KnowledgePage() {
     setShowMeetingImport(false);
   };
 
-  const handleOpenMeetingRecorder = () => {
+  const initializeMeetingRecorder = () => {
     cleanupMeetingRecording();
+    const storedEngine = readStoredMeetingTranscriberEngine();
+    const storedModel = readStoredMeetingTranscriberModel(storedEngine);
+    const storedLanguage = readStoredMeetingTranscriberLanguage();
+    meetingTranscriberEngineRef.current = storedEngine;
+    meetingTranscriberModelRef.current = storedModel;
+    meetingTranscriberLanguageRef.current = storedLanguage;
+    setMeetingTranscriberEngine(storedEngine);
+    setMeetingTranscriberModel(storedModel);
+    setMeetingTranscriberLanguage(storedLanguage);
     updateMeetingTitle(createDefaultRecordingTitle());
     setMeetingAudioFilePath('');
     setMeetingTranscript('');
     setMeetingSummaryDraft('');
     setMeetingDraftTranscript('');
-    setMeetingPreviewSegments([]);
+    replaceMeetingPreviewSegments([]);
     setMeetingMessage(null);
     setMeetingRecordingPaused(false);
     setMeetingRecordingSaving(false);
     setMeetingProcessing(false);
+    setMeetingElapsedMs(0);
+    setMeetingRecorderView('workbench');
     setShowMeetingRecorder(true);
+  };
+
+  const handleOpenMeetingRecorder = async () => {
+    if (!collectionId || !desktop?.meetingOpenRecorderWindow) return;
+    try {
+      const result = await desktop.meetingOpenRecorderWindow({ collectionId }) as { ok?: boolean; error?: string };
+      if (result?.ok === false) {
+        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed(result.error ?? 'unknown') });
+      }
+    } catch {
+      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('window_open_failed') });
+    }
   };
 
   const handleCloseMeetingRecorder = () => {
     cleanupMeetingRecording();
-    setMeetingPreviewSegments([]);
+    replaceMeetingPreviewSegments([]);
     setMeetingSummaryDraft('');
     setMeetingDraftTranscript('');
     setMeetingAudioLevels(createEmptyMeetingAudioLevels());
     setMeetingRecordingSaving(false);
     setMeetingProcessing(false);
     setShowMeetingRecorder(false);
+    if (isMeetingRecorderWindow) {
+      void desktop?.meetingSetRecorderSessionState?.({ state: 'idle' });
+      void desktop?.meetingCloseRecorderWindow?.();
+    }
   };
+
+  useEffect(() => {
+    if (!isMeetingRecorderWindow || meetingRecorderInitializedRef.current) return;
+    meetingRecorderInitializedRef.current = true;
+    initializeMeetingRecorder();
+    void desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+    void desktop?.meetingSetRecorderSessionState?.({ state: 'idle' });
+    const unsubscribeClose = desktop?.onMeetingRecorderCloseRequested?.(() => {
+      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecorderCloseBlocked });
+    });
+    return () => {
+      unsubscribeClose?.();
+      cleanupMeetingRecording();
+    };
+    // The recorder route is immutable for the lifetime of its BrowserWindow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMeetingRecorderWindow]);
 
   const handlePickMeetingAudio = async () => {
     if (!desktop?.meetingPickAudioFile) return;
@@ -625,34 +987,6 @@ export function KnowledgePage() {
       if (filePath) setMeetingAudioFilePath(filePath);
     } catch {
       setMeetingMessage({ kind: 'error', text: t.knowledge.meetingPickFailed });
-    }
-  };
-
-  const requestMeetingTranscriptPreview = async (active: ActiveMeetingRecording) => {
-    if (!desktop?.meetingTranscribePreview) return;
-    if (active.previewInFlight || active.chunks.length === 0 || active.lastPreviewChunkCount === active.chunks.length) return;
-    active.previewInFlight = true;
-    active.lastPreviewChunkCount = active.chunks.length;
-    try {
-      const title = readMeetingRecordingTitle();
-      const wavBase64 = encodeFloat32ChunksToWavBase64(active.chunks, active.audioContext.sampleRate);
-      const language = meetingTranscriberLanguageForIpc(meetingTranscriberLanguageRef.current);
-      const result = await desktop.meetingTranscribePreview({
-        title,
-        wavBase64,
-        model: meetingTranscriberModelRef.current,
-        ...(language ? { language } : {}),
-      }) as { ok?: boolean; text?: string; segments?: unknown; error?: string };
-      if (meetingRecordingRef.current === active && result?.ok !== false) {
-        const segments = normalizeMeetingPreviewSegments(result);
-        if (segments.length > 0) {
-          setMeetingPreviewSegments(segments);
-        }
-      }
-    } catch {
-      // Preview transcription is best-effort; final transcription still runs after Finish.
-    } finally {
-      active.previewInFlight = false;
     }
   };
 
@@ -665,7 +999,7 @@ export function KnowledgePage() {
     }
 
     cleanupMeetingRecording();
-    setMeetingPreviewSegments([]);
+    replaceMeetingPreviewSegments([]);
     setMeetingSummaryDraft('');
     setMeetingDraftTranscript('');
     setMeetingAudioFilePath('');
@@ -681,12 +1015,38 @@ export function KnowledgePage() {
         }
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const audioContext = new AudioContextCtor();
+      const liveEngine = meetingTranscriberEngineRef.current === 'aliyun-asr'
+        || meetingTranscriberEngineRef.current === 'volcengine-asr'
+        ? meetingTranscriberEngineRef.current
+        : null;
+      const audioContext = new AudioContextCtor(
+        meetingTranscriberEngineRef.current === 'volcengine-asr' ? { sampleRate: 16_000 } : undefined,
+      );
       const source = audioContext.createMediaStreamSource(stream);
       const analyser = audioContext.createAnalyser();
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
       const gain = audioContext.createGain();
       const chunks: Float32Array[] = [];
+      let liveTranscriptionSessionId: string | null = null;
+      let liveTranscriptionError = '';
+
+      if (liveEngine && desktop.meetingStartLiveTranscription) {
+        try {
+          const language = meetingTranscriberLanguageForIpc(meetingTranscriberLanguageRef.current);
+          const result = await desktop.meetingStartLiveTranscription({
+            engine: liveEngine,
+            sampleRate: audioContext.sampleRate,
+            ...(language ? { language } : {}),
+          });
+          if (result.ok && result.sessionId) {
+            liveTranscriptionSessionId = result.sessionId;
+          } else {
+            liveTranscriptionError = result.error ?? `${liveEngine}_live_failed`;
+          }
+        } catch (error) {
+          liveTranscriptionError = error instanceof Error ? error.message : `${liveEngine}_live_failed`;
+        }
+      }
 
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.15;
@@ -697,7 +1057,25 @@ export function KnowledgePage() {
         if (!active || active.paused) return;
         const input = new Float32Array(event.inputBuffer.getChannelData(0));
         chunks.push(input);
-        void requestMeetingTranscriptPreview(active);
+        active.capturedSamples += input.length;
+        setMeetingElapsedMs(Math.round((active.capturedSamples / active.audioContext.sampleRate) * 1000));
+        if (active.liveTranscriptionSessionId && desktop.meetingPushLiveTranscriptionAudio) {
+          const sessionId = active.liveTranscriptionSessionId;
+          void desktop.meetingPushLiveTranscriptionAudio({
+            sessionId,
+            pcmBase64: encodeFloat32ChunkToPcmBase64(input),
+          }).then(result => {
+            if (result.ok || meetingRecordingRef.current !== active || active.liveTranscriptionSessionId !== sessionId) return;
+            active.liveTranscriptionSessionId = null;
+            void desktop.meetingCancelLiveTranscription?.({ sessionId });
+            setMeetingMessage({ kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed(result.error ?? 'aliyun_live_failed') });
+          }).catch(() => {
+            if (meetingRecordingRef.current !== active || active.liveTranscriptionSessionId !== sessionId) return;
+            active.liveTranscriptionSessionId = null;
+            void desktop.meetingCancelLiveTranscription?.({ sessionId });
+            setMeetingMessage({ kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed('aliyun_live_failed') });
+          });
+        }
       };
       source.connect(analyser);
       analyser.connect(processor);
@@ -709,19 +1087,32 @@ export function KnowledgePage() {
         audioLevelData,
         audioLevelFrameId: null,
         audioContext,
+        capturedSamples: 0,
         chunks,
         gain,
-        lastPreviewChunkCount: 0,
+        liveTranscriptionSessionId,
         paused: false,
-        processor,
+        previewChunkCursor: 0,
         previewInFlight: false,
+        previewPromise: null,
+        previewTimerId: null,
+        processor,
         source,
         stream,
       };
       startMeetingAudioLevelSampling(meetingRecordingRef.current);
+      scheduleMeetingPreviewTranscription(meetingRecordingRef.current);
       setMeetingRecording(true);
       setMeetingRecordingPaused(false);
-      setMeetingMessage({ kind: 'success', text: t.knowledge.meetingRecording });
+      setMeetingElapsedMs(0);
+      if (isMeetingRecorderWindow) {
+        setMeetingRecorderView('workbench');
+        void desktop.meetingSetRecorderSessionState?.({ state: 'recording' });
+        void desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+      }
+      setMeetingMessage(liveTranscriptionError
+        ? { kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed(liveTranscriptionError) }
+        : { kind: 'success', text: t.knowledge.meetingRecording });
     } catch {
       cleanupMeetingRecording();
       setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('microphone_unavailable') });
@@ -736,6 +1127,10 @@ export function KnowledgePage() {
       window.cancelAnimationFrame(active.audioLevelFrameId);
       active.audioLevelFrameId = null;
     }
+    if (active.previewTimerId !== null) {
+      window.clearTimeout(active.previewTimerId);
+      active.previewTimerId = null;
+    }
     setMeetingAudioLevels(createEmptyMeetingAudioLevels());
     setMeetingRecordingPaused(true);
     void active.audioContext.suspend?.().catch(() => undefined);
@@ -747,6 +1142,7 @@ export function KnowledgePage() {
     if (!active || !active.paused) return;
     active.paused = false;
     startMeetingAudioLevelSampling(active);
+    scheduleMeetingPreviewTranscription(active);
     setMeetingRecordingPaused(false);
     void active.audioContext.resume?.().catch(() => undefined);
     setMeetingMessage({ kind: 'success', text: t.knowledge.meetingRecording });
@@ -755,15 +1151,27 @@ export function KnowledgePage() {
   const handleStopMeetingRecording = async (options: { draftRecording?: boolean } = {}) => {
     if (!desktop?.meetingSaveRecordedAudio || !meetingRecordingRef.current) return;
     const active = meetingRecordingRef.current;
+    let summaryReady = false;
     meetingRecordingRef.current = null;
     setMeetingRecording(false);
     setMeetingRecordingPaused(false);
     setMeetingAudioLevels(createEmptyMeetingAudioLevels());
     setMeetingRecordingSaving(true);
     setMeetingMessage(null);
+    if (isMeetingRecorderWindow) {
+      setMeetingRecorderView('workbench');
+      void desktop.meetingSetRecorderSessionState?.({ state: 'processing' });
+      void desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+    }
     stopActiveMeetingRecording(active);
 
     try {
+      if (active.liveTranscriptionSessionId && desktop.meetingFinishLiveTranscription) {
+        const sessionId = active.liveTranscriptionSessionId;
+        active.liveTranscriptionSessionId = null;
+        await desktop.meetingFinishLiveTranscription({ sessionId }).catch(() => ({ ok: false }));
+      }
+      await flushMeetingPreviewTranscription(active);
       const title = readMeetingRecordingTitle();
       const wavBase64 = encodeFloat32ChunksToWavBase64(active.chunks, active.audioContext.sampleRate);
       const result = await desktop.meetingSaveRecordedAudio({ title, wavBase64 }) as { ok?: boolean; filePath?: string; error?: string };
@@ -774,15 +1182,32 @@ export function KnowledgePage() {
       setMeetingAudioFilePath(result.filePath);
       setMeetingMessage({ kind: 'success', text: t.knowledge.meetingRecordedAudioSaved });
       if (options.draftRecording && desktop.meetingDraftRecording) {
+        const liveSegments = meetingTranscriberEngineRef.current === 'volcengine-asr'
+          ? meetingPreviewSegmentsRef.current.flatMap(segment => {
+            const text = segment.text.trim();
+            if (!text) return [];
+            return [{ start: segment.start, end: segment.end ?? segment.start, text }];
+          })
+          : [];
+        const liveTranscript = liveSegments.map(segment => segment.text).join('\n').trim();
+        if (meetingTranscriberEngineRef.current === 'volcengine-asr' && !liveTranscript) {
+          setMeetingMessage({ kind: 'error', text: t.knowledge.meetingProcessError('empty_transcription') });
+          return;
+        }
         setMeetingProcessing(true);
         setMeetingMessage({ kind: 'success', text: t.knowledge.meetingTranscribing });
         const draftResult = await desktop.meetingDraftRecording({
           title,
           audioFilePath: result.filePath,
-          model: meetingTranscriberModelRef.current,
+          engine: meetingTranscriberEngineRef.current,
+          ...(meetingTranscriberModelForIpc(meetingTranscriberEngineRef.current, meetingTranscriberModelRef.current)
+            ? { model: meetingTranscriberModelForIpc(meetingTranscriberEngineRef.current, meetingTranscriberModelRef.current) }
+            : {}),
           ...(meetingTranscriberLanguageForIpc(meetingTranscriberLanguageRef.current)
             ? { language: meetingTranscriberLanguageForIpc(meetingTranscriberLanguageRef.current) }
             : {}),
+          scenario: meetingRecordingScenarioRef.current,
+          ...(liveTranscript ? { transcript: liveTranscript, segments: liveSegments } : {}),
         }) as {
           ok?: boolean;
           error?: string;
@@ -799,17 +1224,28 @@ export function KnowledgePage() {
         const draftTranscript = typeof draftResult.transcript === 'string' ? draftResult.transcript : '';
         setMeetingDraftTranscript(draftTranscript);
         setMeetingSummaryDraft(typeof draftResult.summaryMarkdown === 'string' ? draftResult.summaryMarkdown : '');
-        setMeetingPreviewSegments(normalizeMeetingPreviewSegments({ text: draftTranscript, segments: draftResult.segments }));
-        if (typeof draftResult.suggestedTitle === 'string' && draftResult.suggestedTitle.trim()) {
-          updateMeetingTitle(draftResult.suggestedTitle.trim());
-        }
+        replaceMeetingPreviewSegments(normalizeMeetingPreviewSegments({ text: draftTranscript, segments: draftResult.segments }));
+        const finalTitle = typeof draftResult.suggestedTitle === 'string' && draftResult.suggestedTitle.trim()
+          ? draftResult.suggestedTitle.trim()
+          : title;
+        updateMeetingTitle(finalTitle);
         setMeetingMessage({ kind: 'success', text: t.knowledge.meetingDraftReady });
+        summaryReady = true;
+        if (isMeetingRecorderWindow) {
+          setMeetingRecorderView('summary');
+          void desktop.meetingSetRecorderSessionState?.({ state: 'summary' });
+          void desktop.meetingSetRecorderWindowMode?.({ mode: 'summary' });
+          void desktop.meetingNotifyRecorderSummaryReady?.({ title: finalTitle });
+        }
       }
     } catch {
       setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('unknown') });
     } finally {
       setMeetingRecordingSaving(false);
       setMeetingProcessing(false);
+      if (isMeetingRecorderWindow && !summaryReady) {
+        void desktop.meetingSetRecorderSessionState?.({ state: 'idle' });
+      }
     }
   };
 
@@ -860,10 +1296,15 @@ export function KnowledgePage() {
         setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError(result.error ?? 'unknown') });
         return;
       }
+      if (isMeetingRecorderWindow) {
+        await desktop.meetingNotifyRecordingSaved?.({ collectionId });
+        await desktop.meetingCloseRecorderWindow?.();
+        return;
+      }
       setMeetingSummaryDraft('');
       setMeetingDraftTranscript('');
       setMeetingAudioFilePath('');
-      setMeetingPreviewSegments([]);
+      replaceMeetingPreviewSegments([]);
       setShowMeetingRecorder(false);
       await loadSources(collectionId);
       await loadCollections();
@@ -920,6 +1361,46 @@ export function KnowledgePage() {
   };
 
   const selectedCollection = collections.find(c => c.id === collectionId);
+
+  if (isMeetingRecorderWindow) {
+    return (
+      <MeetingRecorderWindowSurface
+        title={meetingTitle}
+        setTitle={updateMeetingTitle}
+        view={meetingRecorderView}
+        recording={meetingRecording}
+        paused={meetingRecordingPaused}
+        elapsedMs={meetingElapsedMs}
+        audioLevels={meetingAudioLevels}
+        previewSegments={meetingPreviewSegments}
+        summaryDraft={meetingSummaryDraft}
+        setSummaryDraft={setMeetingSummaryDraft}
+        draftTranscript={meetingDraftTranscript}
+        transcriberEngine={meetingTranscriberEngine}
+        transcriberLanguage={meetingTranscriberLanguage}
+        scenario={meetingRecordingScenario}
+        setScenario={updateMeetingRecordingScenario}
+        recordingSaving={meetingRecordingSaving}
+        processing={meetingProcessing}
+        draftSaving={meetingSaving}
+        message={meetingMessage}
+        onStartRecording={() => void handleStartMeetingRecording()}
+        onPauseRecording={handlePauseMeetingRecording}
+        onResumeRecording={handleResumeMeetingRecording}
+        onFinishRecording={() => void handleStopMeetingRecording({ draftRecording: true })}
+        onCompact={() => {
+          setMeetingRecorderView('compact');
+          void desktop?.meetingSetRecorderWindowMode?.({ mode: 'compact' });
+        }}
+        onExpand={() => {
+          setMeetingRecorderView('workbench');
+          void desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+        }}
+        onSaveDraft={() => void handleSaveMeetingRecordingDraft()}
+        onCancel={handleCloseMeetingRecorder}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -1231,36 +1712,39 @@ export function KnowledgePage() {
           onCancel={handleCloseMeetingImport}
         />
       )}
-      {showMeetingRecorder && (
+      {showMeetingRecorder && !meetingSummaryDraft.trim() && (
         <MeetingRecorderDialog
           title={meetingTitle}
           setTitle={updateMeetingTitle}
-          audioFilePath={meetingAudioFilePath}
           recording={meetingRecording}
           paused={meetingRecordingPaused}
           audioLevels={meetingAudioLevels}
           previewSegments={meetingPreviewSegments}
-          summaryDraft={meetingSummaryDraft}
-          setSummaryDraft={setMeetingSummaryDraft}
+          transcriberEngine={meetingTranscriberEngine}
           transcriberModel={meetingTranscriberModel}
-          setTranscriberModel={updateMeetingTranscriberModel}
           transcriberLanguage={meetingTranscriberLanguage}
-          setTranscriberLanguage={updateMeetingTranscriberLanguage}
-          modelStatuses={meetingModelStatuses}
-          modelStatusesLoading={meetingModelStatusesLoading}
-          modelStatusesError={meetingModelStatusesError}
-          modelAction={meetingModelAction}
-          onRefreshModelStatuses={loadMeetingModelStatuses}
-          onDownloadModel={handleDownloadMeetingModel}
-          onUninstallModel={handleUninstallMeetingModel}
+          scenario={meetingRecordingScenario}
+          setScenario={updateMeetingRecordingScenario}
           recordingSaving={meetingRecordingSaving}
           processing={meetingProcessing}
-          draftSaving={meetingSaving}
           message={meetingMessage}
           onStartRecording={() => void handleStartMeetingRecording()}
           onPauseRecording={handlePauseMeetingRecording}
           onResumeRecording={handleResumeMeetingRecording}
           onFinishRecording={() => void handleStopMeetingRecording({ draftRecording: true })}
+          onCancel={handleCloseMeetingRecorder}
+        />
+      )}
+      {showMeetingRecorder && meetingSummaryDraft.trim() && (
+        <MeetingSummaryDraftDialog
+          title={meetingTitle}
+          setTitle={updateMeetingTitle}
+          audioFilePath={meetingAudioFilePath}
+          previewSegments={meetingPreviewSegments}
+          summaryDraft={meetingSummaryDraft}
+          setSummaryDraft={setMeetingSummaryDraft}
+          draftSaving={meetingSaving}
+          message={meetingMessage}
           onSaveDraft={() => void handleSaveMeetingRecordingDraft()}
           onCancel={handleCloseMeetingRecorder}
         />
@@ -1431,7 +1915,589 @@ function MeetingImportDialog({
   );
 }
 
+function MeetingAudioWaveform({
+  audioLevels,
+  active,
+  paused,
+  compact = false,
+}: {
+  audioLevels: number[];
+  active: boolean;
+  paused: boolean;
+  compact?: boolean;
+}) {
+  const { t } = useLocale();
+  return (
+    <div
+      className={`flex items-center justify-center gap-1 ${compact ? 'h-6' : 'h-12'}`}
+      role="meter"
+      aria-label={t.knowledge.meetingAudioLevelLabel}
+      aria-valuemin={0}
+      aria-valuemax={1}
+      aria-valuenow={Math.max(...audioLevels, 0)}
+    >
+      {audioLevels.map((level, index) => {
+        const normalized = Math.max(0, Math.min(1, level));
+        const maxHeight = compact ? 24 : 34;
+        return (
+          <span
+            key={index}
+            data-audio-level={normalized.toFixed(2)}
+            className={`w-1 shrink-0 rounded-full transition-[height,background-color] duration-100 ${active && !paused ? 'bg-[var(--c-accent)]' : paused ? 'bg-amber-400' : 'bg-[var(--c-border)]'}`}
+            style={{ height: `${Math.max(4, Math.round(4 + Math.sqrt(normalized) * maxHeight))}px` }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function MeetingRecorderWindowSurface({
+  title,
+  setTitle,
+  view,
+  recording,
+  paused,
+  elapsedMs,
+  audioLevels,
+  previewSegments,
+  summaryDraft,
+  setSummaryDraft,
+  draftTranscript,
+  transcriberEngine,
+  transcriberLanguage,
+  scenario,
+  setScenario,
+  recordingSaving,
+  processing,
+  draftSaving,
+  message,
+  onStartRecording,
+  onPauseRecording,
+  onResumeRecording,
+  onFinishRecording,
+  onCompact,
+  onExpand,
+  onSaveDraft,
+  onCancel,
+}: {
+  title: string;
+  setTitle: (value: string) => void;
+  view: 'workbench' | 'compact' | 'summary';
+  recording: boolean;
+  paused: boolean;
+  elapsedMs: number;
+  audioLevels: number[];
+  previewSegments: MeetingPreviewSegment[];
+  summaryDraft: string;
+  setSummaryDraft: (value: string) => void;
+  draftTranscript: string;
+  transcriberEngine: MeetingTranscriberEngine;
+  transcriberLanguage: MeetingTranscriberLanguage;
+  scenario: MeetingRecordingScenario;
+  setScenario: (value: MeetingRecordingScenario) => void;
+  recordingSaving: boolean;
+  processing: boolean;
+  draftSaving: boolean;
+  message: { kind: 'error' | 'success'; text: string } | null;
+  onStartRecording: () => void;
+  onPauseRecording: () => void;
+  onResumeRecording: () => void;
+  onFinishRecording: () => void;
+  onCompact: () => void;
+  onExpand: () => void;
+  onSaveDraft: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLocale();
+  const [summaryTab, setSummaryTab] = useState<'summary' | 'transcript'>('summary');
+  const [summaryEditing, setSummaryEditing] = useState(false);
+  const busy = recordingSaving || processing;
+  const latestText = previewSegments.at(-1)?.text?.trim() || t.knowledge.meetingTranscriptPreviewEmpty;
+  const transcriptText = draftTranscript.trim() || previewSegments.map(segment => segment.text).join('\n');
+  const elapsed = formatMeetingElapsedTime(elapsedMs);
+  const engineLabels: Record<MeetingTranscriberEngine, string> = {
+    'sherpa-onnx-paraformer': t.knowledge.meetingSpeechEngineSherpaOnnxParaformer,
+    whisper: t.knowledge.meetingSpeechEngineWhisperFallback,
+    'volcengine-asr': t.knowledge.meetingSpeechEngineVolcengineAsr,
+    'aliyun-asr': t.knowledge.meetingSpeechEngineAliyunAsr,
+  };
+  const languageLabels: Record<MeetingTranscriberLanguage, string> = {
+    zh: t.knowledge.meetingLanguageZh,
+    auto: t.knowledge.meetingLanguageAuto,
+    en: t.knowledge.meetingLanguageEn,
+  };
+  const scenarioLabels: Record<MeetingRecordingScenario, string> = {
+    discussion: t.knowledge.meetingScenarioDiscussion,
+    meeting: t.knowledge.meetingScenarioMeeting,
+    sales: t.knowledge.meetingScenarioSales,
+  };
+
+  if (view === 'compact') {
+    return (
+      <main
+        className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--c-bg-card)] px-5 pb-4 pt-3 text-[var(--c-text-primary)]"
+        role="main"
+        aria-label={t.knowledge.meetingRecorderTitle}
+        data-app-region="drag"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      >
+        <div className="flex items-start gap-3">
+          <p className="line-clamp-2 min-h-[52px] min-w-0 flex-1 text-lg leading-7">{latestText}</p>
+          <button type="button" onClick={onExpand} aria-label={t.knowledge.meetingRecorderExpand} title={t.knowledge.meetingRecorderExpand} data-app-region="no-drag" className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <Maximize2 size={18} />
+          </button>
+        </div>
+        <div data-testid="meeting-compact-waveform" className="mt-1">
+          <MeetingAudioWaveform audioLevels={audioLevels} active={recording} paused={paused} compact />
+        </div>
+        <div data-testid="meeting-compact-controls" className="grid grid-cols-[80px_1fr_80px] items-center gap-3" style={{ marginTop: 4 }}>
+          <span className="text-base tabular-nums text-[var(--c-text-secondary)]">{elapsed}</span>
+          <button type="button" onClick={paused ? onResumeRecording : onPauseRecording} aria-label={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} title={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} data-app-region="no-drag" className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-[var(--c-bg-deep)] text-[var(--c-text-primary)] hover:bg-[var(--c-border)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            {paused ? <Play size={22} fill="currentColor" /> : <Pause size={22} fill="currentColor" />}
+          </button>
+          <button type="button" onClick={onFinishRecording} disabled={busy} data-app-region="no-drag" className="rounded-full bg-[var(--c-bg-deep)] px-4 py-2 text-sm font-medium hover:bg-[var(--c-border)] disabled:opacity-50" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            {t.knowledge.meetingRecordStop}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (view === 'summary') {
+    return (
+      <main className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--c-bg-card)] px-14 pb-8 pt-12 text-[var(--c-text-primary)]" role="main" aria-label={t.knowledge.meetingRecorderTitle}>
+        <header className="shrink-0 border-b border-[var(--c-border)] pb-5">
+          <div className="flex items-start justify-between gap-6">
+            <div className="min-w-0 flex-1">
+              <input value={title} onChange={event => setTitle(event.target.value)} aria-label={t.knowledge.meetingRecordingTitleLabel} className="w-full bg-transparent text-3xl font-semibold leading-tight outline-none" />
+              <p className="mt-2 text-sm tabular-nums text-[var(--c-text-tertiary)]">{elapsed}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {summaryTab === 'summary' && (
+                <button type="button" onClick={() => setSummaryEditing(value => !value)} aria-label={summaryEditing ? t.knowledge.meetingRecorderFinishEditing : t.knowledge.meetingRecorderEditSummary} title={summaryEditing ? t.knowledge.meetingRecorderFinishEditing : t.knowledge.meetingRecorderEditSummary} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+                  {summaryEditing ? <Check size={19} /> : <Pencil size={18} />}
+                </button>
+              )}
+              <button type="button" onClick={onCancel} disabled={draftSaving} aria-label={t.knowledge.cancel} title={t.knowledge.cancel} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50">
+                <X size={20} />
+              </button>
+            </div>
+          </div>
+          <div className="mt-7 flex gap-8" role="tablist">
+            <button type="button" role="tab" aria-selected={summaryTab === 'summary'} onClick={() => setSummaryTab('summary')} className={`border-b-2 pb-3 text-base font-medium ${summaryTab === 'summary' ? 'border-[var(--c-text-primary)] text-[var(--c-text-primary)]' : 'border-transparent text-[var(--c-text-tertiary)]'}`}>
+              {t.knowledge.meetingRecorderSummaryTab}
+            </button>
+            <button type="button" role="tab" aria-selected={summaryTab === 'transcript'} onClick={() => setSummaryTab('transcript')} className={`border-b-2 pb-3 text-base font-medium ${summaryTab === 'transcript' ? 'border-[var(--c-text-primary)] text-[var(--c-text-primary)]' : 'border-transparent text-[var(--c-text-tertiary)]'}`}>
+              {t.knowledge.meetingRecorderTranscriptTab}
+            </button>
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto py-7">
+          {summaryTab === 'summary' ? (summaryEditing ? (
+            <textarea value={summaryDraft} onChange={event => setSummaryDraft(event.target.value)} aria-label={t.knowledge.meetingSummaryDraftLabel} className="h-full min-h-[420px] w-full resize-none rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-5 py-4 text-base leading-8 outline-none focus:border-[var(--c-accent)]" />
+          ) : (
+            <div className="meeting-summary-markdown text-base leading-8">
+              <MarkdownRenderer content={summaryDraft} />
+            </div>
+          )) : (
+            <div className="whitespace-pre-wrap text-base leading-8 text-[var(--c-text-secondary)]">{transcriptText || t.knowledge.meetingTranscriptPreviewEmpty}</div>
+          )}
+        </div>
+        {message?.kind === 'error' && <p className="mb-3 text-sm text-red-600">{message.text}</p>}
+        <footer className="flex shrink-0 justify-end border-t border-[var(--c-border)] pt-5">
+          <button type="button" onClick={onSaveDraft} disabled={draftSaving || !summaryDraft.trim()} className="rounded-md bg-[var(--c-accent)] px-5 py-2.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+            {draftSaving ? t.knowledge.meetingSaving : t.knowledge.meetingSave}
+          </button>
+        </footer>
+      </main>
+    );
+  }
+
+  if (busy && !recording) {
+    return (
+      <main className="flex h-screen w-screen flex-col items-center justify-center bg-[var(--c-bg-card)] px-8 text-center text-[var(--c-text-primary)]" role="main" aria-label={t.knowledge.meetingRecorderTitle}>
+        <LoaderCircle size={34} className="animate-spin text-[var(--c-accent)]" />
+        <h1 className="mt-6 text-2xl font-semibold">{t.knowledge.meetingRecorderProcessingTitle}</h1>
+        <p className="mt-3 max-w-lg text-sm leading-6 text-[var(--c-text-secondary)]">{t.knowledge.meetingRecorderProcessingHint}</p>
+        {message && <p className={`mt-5 text-sm ${message.kind === 'error' ? 'text-red-600' : 'text-[var(--c-text-tertiary)]'}`}>{message.text}</p>}
+      </main>
+    );
+  }
+
+  if (!recording) {
+    return (
+      <main className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--c-bg-card)] px-14 pb-10 pt-12 text-[var(--c-text-primary)]" role="main" aria-label={t.knowledge.meetingRecorderTitle}>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-4xl font-semibold leading-tight">{t.knowledge.meetingRecorderTitle}</h1>
+            <p className="mt-3 text-sm text-[var(--c-text-tertiary)]">{engineLabels[transcriberEngine]} / {languageLabels[transcriberLanguage]}</p>
+          </div>
+          <button type="button" onClick={onCancel} aria-label={t.knowledge.cancel} title={t.knowledge.cancel} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-6">
+          <label>
+            <span className="mb-2 block text-sm text-[var(--c-text-secondary)]">{t.knowledge.meetingRecordingTitleLabel}</span>
+            <input type="text" value={title} onChange={event => setTitle(event.target.value)} aria-label={t.knowledge.meetingRecordingTitleLabel} className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-4 py-3 text-base outline-none focus:border-[var(--c-accent)]" />
+          </label>
+          <label>
+            <span className="mb-2 block text-sm text-[var(--c-text-secondary)]">{t.knowledge.meetingScenarioLabel}</span>
+            <select value={scenario} onChange={event => setScenario(event.target.value as MeetingRecordingScenario)} aria-label={t.knowledge.meetingScenarioLabel} className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-4 py-3 text-base outline-none focus:border-[var(--c-accent)]">
+              {MEETING_RECORDING_SCENARIO_OPTIONS.map(option => <option key={option} value={option}>{scenarioLabels[option]}</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={onStartRecording} className="mx-auto mt-5 min-w-56 rounded-md bg-[var(--c-accent)] px-8 py-4 text-lg font-medium text-white shadow-sm hover:opacity-90">
+            <Mic size={20} className="mr-2 inline" />{t.knowledge.meetingRecordStart}
+          </button>
+          {message && <p className={`text-center text-sm ${message.kind === 'error' ? 'text-red-600' : 'text-[var(--c-text-secondary)]'}`}>{message.text}</p>}
+        </div>
+      </main>
+    );
+  }
+
+  const liveHighlights = previewSegments.slice(-4);
+  return (
+    <main className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--c-bg-card)] pt-10 text-[var(--c-text-primary)]" role="main" aria-label={t.knowledge.meetingRecorderTitle}>
+      <header className="flex shrink-0 items-start justify-between border-b border-[var(--c-border)] px-12 pb-5">
+        <div className="min-w-0">
+          <input value={title} onChange={event => setTitle(event.target.value)} aria-label={t.knowledge.meetingRecordingTitleLabel} className="w-full min-w-[360px] bg-transparent text-2xl font-semibold outline-none" />
+          <p className="mt-2 text-sm tabular-nums text-[var(--c-text-tertiary)]">{elapsed} · {paused ? t.knowledge.meetingRecordingPaused : t.knowledge.meetingRecording}</p>
+        </div>
+        <button type="button" onClick={onCompact} aria-label={t.knowledge.meetingRecorderMinimize} title={t.knowledge.meetingRecorderMinimize} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+          <Minimize2 size={19} />
+        </button>
+      </header>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section className="flex min-h-0 flex-col border-r border-[var(--c-border)] px-12 py-7">
+          <h2 className="shrink-0 text-xl font-semibold">{t.knowledge.meetingRecorderTranscriptTitle}</h2>
+          <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-3 text-lg leading-9">
+            {previewSegments.length > 0 ? previewSegments.map((segment, index) => (
+              <p key={`${segment.start}-${index}`} className="mb-4">{segment.text}</p>
+            )) : <p className="text-[var(--c-text-tertiary)]">{t.knowledge.meetingTranscriptPreviewEmpty}</p>}
+          </div>
+        </section>
+        <section className="flex min-h-0 flex-col px-12 py-7">
+          <h2 className="shrink-0 text-xl font-semibold">{t.knowledge.meetingRecorderHighlightsTitle}</h2>
+          <div className="mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto">
+            {liveHighlights.length > 0 ? liveHighlights.map((segment, index) => (
+              <div key={`${segment.start}-${index}`} className="rounded-md bg-[var(--c-bg-deep)] px-5 py-4 text-base leading-7">{segment.text}</div>
+            )) : <p className="text-sm leading-6 text-[var(--c-text-tertiary)]">{t.knowledge.meetingRecorderHighlightsEmpty}</p>}
+          </div>
+        </section>
+      </div>
+      <footer className="grid shrink-0 grid-cols-[90px_minmax(200px,1fr)_56px_90px] items-center gap-5 border-t border-[var(--c-border)] px-12 py-5">
+        <span className="text-lg tabular-nums">{elapsed}</span>
+        <MeetingAudioWaveform audioLevels={audioLevels} active={recording} paused={paused} />
+        <button type="button" onClick={paused ? onResumeRecording : onPauseRecording} aria-label={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} title={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} className="grid h-12 w-12 place-items-center rounded-full bg-[var(--c-bg-deep)] hover:bg-[var(--c-border)]">
+          {paused ? <Play size={21} fill="currentColor" /> : <Pause size={21} fill="currentColor" />}
+        </button>
+        <button type="button" onClick={onFinishRecording} className="rounded-full bg-[var(--c-bg-deep)] px-5 py-2.5 text-sm font-medium hover:bg-[var(--c-border)]">
+          {t.knowledge.meetingRecordStop}
+        </button>
+      </footer>
+      {message?.kind === 'error' && <p className="absolute bottom-24 left-12 text-sm text-red-600">{message.text}</p>}
+    </main>
+  );
+}
+
 function MeetingRecorderDialog({
+  title,
+  setTitle,
+  recording,
+  paused,
+  audioLevels,
+  previewSegments,
+  transcriberEngine,
+  transcriberModel,
+  transcriberLanguage,
+  scenario,
+  setScenario,
+  recordingSaving,
+  processing,
+  message,
+  onStartRecording,
+  onPauseRecording,
+  onResumeRecording,
+  onFinishRecording,
+  onCancel,
+}: {
+  title: string;
+  setTitle: (value: string) => void;
+  recording: boolean;
+  paused: boolean;
+  audioLevels: number[];
+  previewSegments: MeetingPreviewSegment[];
+  transcriberEngine: MeetingTranscriberEngine;
+  transcriberModel: MeetingTranscriberModel;
+  transcriberLanguage: MeetingTranscriberLanguage;
+  scenario: MeetingRecordingScenario;
+  setScenario: (value: MeetingRecordingScenario) => void;
+  recordingSaving: boolean;
+  processing: boolean;
+  message: { kind: 'error' | 'success'; text: string } | null;
+  onStartRecording: () => void;
+  onPauseRecording: () => void;
+  onResumeRecording: () => void;
+  onFinishRecording: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLocale();
+  const engineLabels: Record<MeetingTranscriberEngine, string> = {
+    'sherpa-onnx-paraformer': t.knowledge.meetingSpeechEngineSherpaOnnxParaformer,
+    whisper: t.knowledge.meetingSpeechEngineWhisperFallback,
+    'volcengine-asr': t.knowledge.meetingSpeechEngineVolcengineAsr,
+    'aliyun-asr': t.knowledge.meetingSpeechEngineAliyunAsr,
+  };
+  const languageLabels: Record<MeetingTranscriberLanguage, string> = {
+    zh: t.knowledge.meetingLanguageZh,
+    auto: t.knowledge.meetingLanguageAuto,
+    en: t.knowledge.meetingLanguageEn,
+  };
+  const scenarioLabels: Record<MeetingRecordingScenario, string> = {
+    discussion: t.knowledge.meetingScenarioDiscussion,
+    meeting: t.knowledge.meetingScenarioMeeting,
+    sales: t.knowledge.meetingScenarioSales,
+  };
+  const latestSegment = previewSegments[previewSegments.length - 1];
+  const latestText = latestSegment?.text?.trim() || t.knowledge.meetingTranscriptPreviewEmpty;
+  const busy = recordingSaving || processing;
+  const statusText = recording
+    ? (paused ? t.knowledge.meetingRecordingPaused : t.knowledge.meetingRecording)
+    : recordingSaving
+      ? t.knowledge.meetingRecordingSaving
+      : processing
+        ? t.knowledge.meetingTranscribing
+        : t.knowledge.meetingRecordingReady;
+
+  return (
+    <div
+      className="fixed bottom-5 right-5 z-50 w-[360px] max-w-[calc(100vw-24px)] rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-xl"
+      role="dialog"
+      aria-label={t.knowledge.meetingRecorderTitle}
+      onKeyDown={event => { if (event.key === 'Escape' && !recording && !busy) onCancel(); }}
+    >
+      <div className="border-b border-[var(--c-border)] px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-[var(--c-text-primary)]">{t.knowledge.meetingRecorderTitle}</h3>
+            <p className="mt-1 truncate text-xs text-[var(--c-text-tertiary)]">
+              {engineLabels[transcriberEngine]} / {languageLabels[transcriberLanguage]}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={recording || busy}
+            className="shrink-0 rounded-md border border-[var(--c-border)] px-2 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-40"
+          >
+            {t.knowledge.cancel}
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-3 px-4 py-4">
+        <label className="block">
+          <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingRecordingTitleLabel}</span>
+          <input
+            type="text"
+            value={title}
+            onChange={event => setTitle(event.target.value)}
+            aria-label={t.knowledge.meetingRecordingTitleLabel}
+            disabled={recording || busy}
+            className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)] disabled:opacity-60"
+          />
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingScenarioLabel}</span>
+          <select
+            value={scenario}
+            onChange={event => setScenario(event.target.value as MeetingRecordingScenario)}
+            aria-label={t.knowledge.meetingScenarioLabel}
+            disabled={recording || busy}
+            className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)] disabled:opacity-60"
+          >
+            {MEETING_RECORDING_SCENARIO_OPTIONS.map(option => (
+              <option key={option} value={option}>{scenarioLabels[option]}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2">
+          <span className={`h-2.5 w-2.5 rounded-full ${recording && !paused ? 'animate-pulse bg-red-500' : paused ? 'bg-amber-500' : busy ? 'bg-blue-500' : 'bg-[var(--c-text-tertiary)]'}`} />
+          <span className="min-w-0 flex-1 truncate text-sm text-[var(--c-text-primary)]">{statusText}</span>
+          <span className="shrink-0 text-[11px] text-[var(--c-text-tertiary)]">{transcriberModel}</span>
+        </div>
+
+        {recording ? (
+          <div className="grid grid-cols-[72px_minmax(0,1fr)_72px] gap-2">
+            <button
+              type="button"
+              onClick={paused ? onResumeRecording : onPauseRecording}
+              disabled={busy}
+              className="rounded-md border border-[var(--c-border)] px-3 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+            >
+              {paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause}
+            </button>
+            <button
+              type="button"
+              aria-label={t.knowledge.meetingAudioLevelLabel}
+              disabled
+              className="flex h-10 items-end justify-center gap-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 disabled:opacity-100"
+            >
+              {audioLevels.map((level, index) => {
+                const normalized = Math.max(0, Math.min(1, level));
+                return (
+                  <span
+                    key={index}
+                    data-audio-level={normalized.toFixed(2)}
+                    className={`w-1 shrink-0 rounded-full transition-[height,background-color] duration-100 ${recording && !paused ? 'bg-red-500' : paused ? 'bg-amber-400' : 'bg-[var(--c-border)]'}`}
+                    style={{ height: `${Math.max(4, Math.round(4 + Math.sqrt(normalized) * 26))}px` }}
+                  />
+                );
+              })}
+            </button>
+            <button
+              type="button"
+              onClick={onFinishRecording}
+              disabled={busy}
+              className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              {t.knowledge.meetingRecordStop}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onStartRecording}
+            disabled={busy}
+            className="w-full rounded-lg bg-[var(--c-accent)] px-4 py-3 text-base font-medium text-white shadow-sm hover:opacity-90 disabled:opacity-50"
+          >
+            {recordingSaving ? t.knowledge.meetingRecordingSaving : processing ? t.knowledge.meetingTranscribing : t.knowledge.meetingRecordStart}
+          </button>
+        )}
+
+        <div>
+          <p className="mb-1 text-xs font-medium text-[var(--c-text-secondary)]">{t.knowledge.meetingLatestTranscriptTitle}</p>
+          <p className="line-clamp-2 min-h-[40px] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm leading-5 text-[var(--c-text-primary)]">
+            {latestText}
+          </p>
+        </div>
+
+        {message && (
+          <p className={`text-xs leading-5 ${message.kind === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+            {message.text}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MeetingSummaryDraftDialog({
+  title,
+  setTitle,
+  audioFilePath,
+  previewSegments,
+  summaryDraft,
+  setSummaryDraft,
+  draftSaving,
+  message,
+  onSaveDraft,
+  onCancel,
+}: {
+  title: string;
+  setTitle: (value: string) => void;
+  audioFilePath: string;
+  previewSegments: MeetingPreviewSegment[];
+  summaryDraft: string;
+  setSummaryDraft: (value: string) => void;
+  draftSaving: boolean;
+  message: { kind: 'error' | 'success'; text: string } | null;
+  onSaveDraft: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]" role="presentation" onClick={onCancel} onKeyDown={event => { if (event.key === 'Escape') onCancel(); }}>
+      <div
+        className="flex max-h-[86vh] w-[760px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg"
+        role="dialog"
+        aria-label={t.knowledge.meetingSummaryDraftTitle}
+        onClick={event => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--c-border)] px-5 py-4">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-[var(--c-text-primary)]">{t.knowledge.meetingSummaryDraftTitle}</h3>
+            <p className="mt-1 truncate text-xs text-[var(--c-text-tertiary)]">{t.knowledge.meetingDraftReady}</p>
+          </div>
+          <button type="button" onClick={onCancel} disabled={draftSaving} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)] disabled:opacity-50">
+            {t.knowledge.cancel}
+          </button>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-5">
+          <label className="block">
+            <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingRecordingTitleLabel}</span>
+            <input
+              type="text"
+              value={title}
+              onChange={event => setTitle(event.target.value)}
+              aria-label={t.knowledge.meetingRecordingTitleLabel}
+              className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
+            />
+          </label>
+
+          <label className="flex min-h-[260px] flex-1 flex-col">
+            <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingSummaryDraftLabel}</span>
+            <textarea
+              value={summaryDraft}
+              onChange={event => setSummaryDraft(event.target.value)}
+              aria-label={t.knowledge.meetingSummaryDraftLabel}
+              placeholder={t.knowledge.meetingSummaryDraftPlaceholder}
+              className="min-h-0 flex-1 resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-4 py-3 text-sm leading-6 text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]"
+            />
+          </label>
+
+          {previewSegments.length > 0 && (
+            <div className="max-h-36 overflow-y-auto rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2">
+              <p className="mb-2 text-xs text-[var(--c-text-tertiary)]">{t.knowledge.meetingTranscriptPreviewLabel}</p>
+              <div className="space-y-1" role="list" aria-label={t.knowledge.meetingTranscriptPreviewLabel}>
+                {previewSegments.map((segment, index) => (
+                  <div key={`${index}-${segment.start}-${segment.text}`} role="listitem" className="flex items-start gap-2 text-xs leading-5">
+                    <span className="w-10 shrink-0 text-right tabular-nums text-[var(--c-text-tertiary)]">{formatMeetingSegmentTime(segment.start)}</span>
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[var(--c-text-secondary)]">{segment.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {message && (
+            <p className={`text-xs leading-5 ${message.kind === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+              {message.text}
+            </p>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onSaveDraft}
+              disabled={draftSaving || !summaryDraft.trim() || !audioFilePath}
+              className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            >
+              {draftSaving ? t.knowledge.meetingSaving : t.knowledge.meetingSave}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LegacyMeetingRecorderDialog({
   title,
   setTitle,
   audioFilePath,
@@ -1441,10 +2507,17 @@ function MeetingRecorderDialog({
   previewSegments,
   summaryDraft,
   setSummaryDraft,
+  transcriberEngine,
+  setTranscriberEngine,
   transcriberModel,
   setTranscriberModel,
   transcriberLanguage,
   setTranscriberLanguage,
+  asrConfig,
+  asrConfigSaving,
+  onSaveAsrConfig,
+  scenario,
+  setScenario,
   modelStatuses,
   modelStatusesLoading,
   modelStatusesError,
@@ -1472,10 +2545,17 @@ function MeetingRecorderDialog({
   previewSegments: MeetingPreviewSegment[];
   summaryDraft: string;
   setSummaryDraft: (value: string) => void;
+  transcriberEngine: MeetingTranscriberEngine;
+  setTranscriberEngine: (value: MeetingTranscriberEngine) => void;
   transcriberModel: MeetingTranscriberModel;
   setTranscriberModel: (value: MeetingTranscriberModel) => void;
   transcriberLanguage: MeetingTranscriberLanguage;
   setTranscriberLanguage: (value: MeetingTranscriberLanguage) => void;
+  asrConfig: MeetingAsrConfigSnapshot | null;
+  asrConfigSaving: boolean;
+  onSaveAsrConfig: (input: MeetingSaveAsrConfigInput) => Promise<MeetingAsrConfigSnapshot | null>;
+  scenario: MeetingRecordingScenario;
+  setScenario: (value: MeetingRecordingScenario) => void;
   modelStatuses: MeetingModelStatusSnapshot[];
   modelStatusesLoading: boolean;
   modelStatusesError: string;
@@ -1495,8 +2575,73 @@ function MeetingRecorderDialog({
   onCancel: () => void;
 }) {
   const { t } = useLocale();
+  const ds = t.desktopSettings;
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onlineAsrDraft, setOnlineAsrDraft] = useState({
+    volcAppKey: '',
+    volcAccessKey: '',
+    volcEndpoint: '',
+    volcResourceId: '',
+    aliyunApiKey: '',
+    aliyunBaseUrl: '',
+  });
+  const [onlineAsrSaved, setOnlineAsrSaved] = useState(false);
+  const [onlineAsrError, setOnlineAsrError] = useState('');
   const hasSummaryDraft = summaryDraft.trim().length > 0;
+  const localTranscriberSelected = isLocalMeetingTranscriberEngine(transcriberEngine);
+  const modelStatusById = new Map(modelStatuses.map(model => [model.id, model]));
+  const speechEngineName = (engineId?: string) => {
+    if (engineId === 'sherpa-onnx-paraformer') return t.knowledge.meetingSpeechEngineSherpaOnnxName;
+    if (!engineId || engineId === 'whisper') return t.knowledge.meetingSpeechEngineWhisperName;
+    if (engineId === 'volcengine-asr') return t.knowledge.meetingSpeechEngineVolcengineAsr;
+    if (engineId === 'aliyun-asr') return t.knowledge.meetingSpeechEngineAliyunAsr;
+    return engineId;
+  };
+  const speechModelName = (modelId: MeetingTranscriberModel) => (
+    modelId === MEETING_SHERPA_ONNX_PARA_MODEL
+      ? t.knowledge.meetingSpeechModelSherpaOnnxParaformerSmall
+      : modelId
+  );
+  const speechModelOptionLabel = (modelId: MeetingTranscriberModel) => {
+    const status = modelStatusById.get(modelId);
+    return t.knowledge.meetingSpeechModelOption(
+      speechEngineName(status?.engineId),
+      speechModelName(modelId),
+      status?.sizeLabel,
+    );
+  };
+  const visibleModelOptions = MEETING_TRANSCRIBER_MODEL_OPTIONS.filter(model => (
+    meetingTranscriberEngineForModel(model) === transcriberEngine
+  ));
+  const groupedModelStatuses = [
+    {
+      id: 'asr',
+      title: t.knowledge.meetingSpeechModelsStatusTitle,
+      models: modelStatuses.filter(model => (model.capability ?? 'asr') === 'asr'),
+    },
+    {
+      id: 'punctuation',
+      title: t.knowledge.meetingPunctuationModelsStatusTitle,
+      models: modelStatuses.filter(model => model.capability === 'punctuation'),
+    },
+  ].filter(group => group.models.length > 0);
+  const engineLabels: Record<MeetingTranscriberEngine, string> = {
+    'sherpa-onnx-paraformer': t.knowledge.meetingSpeechEngineSherpaOnnxParaformer,
+    whisper: t.knowledge.meetingSpeechEngineWhisperFallback,
+    'volcengine-asr': t.knowledge.meetingSpeechEngineVolcengineAsr,
+    'aliyun-asr': t.knowledge.meetingSpeechEngineAliyunAsr,
+  };
+  const onlineProviderConfigured = transcriberEngine === 'volcengine-asr'
+    ? asrConfig?.volcengine?.configured === true
+    : transcriberEngine === 'aliyun-asr'
+      ? asrConfig?.aliyun?.configured === true
+      : true;
+  const onlineProviderName = engineLabels[transcriberEngine];
+  const scenarioLabels: Record<MeetingRecordingScenario, string> = {
+    discussion: t.knowledge.meetingScenarioDiscussion,
+    meeting: t.knowledge.meetingScenarioMeeting,
+    sales: t.knowledge.meetingScenarioSales,
+  };
   const statusText = recording
     ? (paused ? t.knowledge.meetingRecordingPaused : t.knowledge.meetingRecording)
     : processing
@@ -1505,46 +2650,113 @@ function MeetingRecorderDialog({
         ? t.knowledge.meetingDraftReady
         : t.knowledge.meetingRecordingReady;
 
+  useEffect(() => {
+    setOnlineAsrDraft(prev => ({
+      ...prev,
+      volcEndpoint: asrConfig?.volcengine?.endpoint ?? '',
+      volcResourceId: asrConfig?.volcengine?.resourceId ?? '',
+      aliyunBaseUrl: asrConfig?.aliyun?.baseUrl ?? '',
+    }));
+  }, [asrConfig]);
+
+  useEffect(() => {
+    setOnlineAsrSaved(false);
+    setOnlineAsrError('');
+  }, [transcriberEngine]);
+
+  const handleSaveOnlineAsrConfig = async () => {
+    if (localTranscriberSelected || asrConfigSaving) return;
+    setOnlineAsrSaved(false);
+    setOnlineAsrError('');
+    const input: MeetingSaveAsrConfigInput = transcriberEngine === 'volcengine-asr'
+      ? {
+          defaultProvider: transcriberEngine,
+          volcengine: {
+            appKey: onlineAsrDraft.volcAppKey,
+            accessKey: onlineAsrDraft.volcAccessKey,
+            endpoint: onlineAsrDraft.volcEndpoint,
+            resourceId: onlineAsrDraft.volcResourceId,
+          },
+        }
+      : {
+          defaultProvider: transcriberEngine,
+          aliyun: {
+            apiKey: onlineAsrDraft.aliyunApiKey,
+            baseUrl: onlineAsrDraft.aliyunBaseUrl,
+            model: 'fun-asr',
+          },
+        };
+    try {
+      const saved = await onSaveAsrConfig(input);
+      if (saved) {
+        setOnlineAsrDraft(prev => ({
+          ...prev,
+          volcAppKey: '',
+          volcAccessKey: '',
+          aliyunApiKey: '',
+        }));
+        setOnlineAsrSaved(true);
+      }
+    } catch (error) {
+      setOnlineAsrError(t.knowledge.meetingOnlineAsrSaveFailed(error instanceof Error ? error.message : 'unknown'));
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]" role="presentation" onClick={onCancel} onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}>
-      <div className="flex max-h-[86vh] w-[920px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg" role="dialog" aria-label={t.knowledge.meetingRecorderTitle} onClick={e => e.stopPropagation()}>
+      <div className="flex max-h-[86vh] w-[920px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg" role="dialog" aria-label={t.knowledge.meetingRecorderTitle} onClick={e => { e.stopPropagation(); setSettingsOpen(false); }}>
         <div className="flex items-center justify-between gap-3 border-b border-[var(--c-border)] px-5 py-4">
           <div className="min-w-0">
             <h3 className="text-sm font-medium text-[var(--c-text-primary)]">{t.knowledge.meetingRecorderTitle}</h3>
             <p className="mt-1 truncate text-xs text-[var(--c-text-tertiary)]">{statusText}</p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <div className="relative">
+            <div className="relative" onClick={e => e.stopPropagation()}>
               <button
                 type="button"
                 onClick={() => {
-                  setSettingsOpen(value => {
-                    const next = !value;
-                    if (next) void onRefreshModelStatuses();
-                    return next;
-                  });
+                  const next = !settingsOpen;
+                  setSettingsOpen(next);
+                  if (next) void onRefreshModelStatuses();
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
               >
                 <Settings2 size={14} /> {t.knowledge.meetingSettings}
               </button>
               {settingsOpen && (
-                <div className="absolute right-0 top-full z-20 mt-2 w-80 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-left shadow-lg">
+                <div className="absolute right-0 top-full z-20 mt-2 w-[420px] max-w-[calc(100vw-48px)] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-left shadow-lg">
                   <div className="space-y-3">
                     <label className="block">
-                      <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingSpeechModelLabel}</span>
+                      <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingSpeechEngineLabel}</span>
                       <select
-                        value={transcriberModel}
-                        onChange={e => setTranscriberModel(e.target.value as MeetingTranscriberModel)}
-                        aria-label={t.knowledge.meetingSpeechModelLabel}
+                        value={transcriberEngine}
+                        onChange={e => setTranscriberEngine(e.target.value as MeetingTranscriberEngine)}
+                        aria-label={t.knowledge.meetingSpeechEngineLabel}
                         disabled={recordingSaving || processing}
                         className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
                       >
-                        {MEETING_TRANSCRIBER_MODEL_OPTIONS.map(model => (
-                          <option key={model} value={model}>{model}</option>
+                        {MEETING_TRANSCRIBER_ENGINE_OPTIONS.map(engine => (
+                          <option key={engine} value={engine}>{engineLabels[engine]}</option>
                         ))}
                       </select>
                     </label>
+
+                    {localTranscriberSelected && (
+                      <label className="block">
+                        <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingSpeechModelLabel}</span>
+                        <select
+                          value={transcriberModel}
+                          onChange={e => setTranscriberModel(e.target.value as MeetingTranscriberModel)}
+                          aria-label={t.knowledge.meetingSpeechModelLabel}
+                          disabled={recordingSaving || processing}
+                          className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                        >
+                          {visibleModelOptions.map(model => (
+                            <option key={model} value={model}>{speechModelOptionLabel(model)}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
 
                     <label className="block">
                       <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingLanguageLabel}</span>
@@ -1560,6 +2772,111 @@ function MeetingRecorderDialog({
                         <option value="en">{t.knowledge.meetingLanguageEn}</option>
                       </select>
                     </label>
+                    {!localTranscriberSelected && (
+                      <div className="rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-medium text-[var(--c-text-secondary)]">{t.knowledge.meetingOnlineAsrConfigTitle}</p>
+                            <p className={`mt-1 text-xs ${onlineProviderConfigured ? 'text-green-700' : 'text-red-600'}`}>
+                              {onlineProviderConfigured
+                                ? t.knowledge.meetingOnlineAsrConfigured(onlineProviderName)
+                                : t.knowledge.meetingOnlineAsrNotConfigured(onlineProviderName)}
+                            </p>
+                          </div>
+                          <span className={`shrink-0 rounded-md px-2 py-0.5 text-[11px] ${onlineProviderConfigured ? 'bg-green-500/10 text-green-700' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-muted)]'}`}>
+                            {onlineProviderConfigured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+                          </span>
+                        </div>
+                        {transcriberEngine === 'volcengine-asr' ? (
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] text-[var(--c-text-secondary)]">{ds.meetingAsrAppKey}</span>
+                              <input
+                                type="password"
+                                value={onlineAsrDraft.volcAppKey}
+                                onChange={e => setOnlineAsrDraft(prev => ({ ...prev, volcAppKey: e.target.value }))}
+                                aria-label={ds.meetingAsrAppKey}
+                                placeholder={asrConfig?.volcengine?.appKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAppKey}
+                                disabled={asrConfigSaving || recordingSaving || processing || recording}
+                                className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2.5 py-1.5 text-xs text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] text-[var(--c-text-secondary)]">{ds.meetingAsrAccessKey}</span>
+                              <input
+                                type="password"
+                                value={onlineAsrDraft.volcAccessKey}
+                                onChange={e => setOnlineAsrDraft(prev => ({ ...prev, volcAccessKey: e.target.value }))}
+                                aria-label={ds.meetingAsrAccessKey}
+                                placeholder={asrConfig?.volcengine?.accessKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAccessKey}
+                                disabled={asrConfigSaving || recordingSaving || processing || recording}
+                                className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2.5 py-1.5 text-xs text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] text-[var(--c-text-secondary)]">{ds.meetingAsrEndpoint}</span>
+                              <input
+                                value={onlineAsrDraft.volcEndpoint}
+                                onChange={e => setOnlineAsrDraft(prev => ({ ...prev, volcEndpoint: e.target.value }))}
+                                aria-label={ds.meetingAsrEndpoint}
+                                disabled={asrConfigSaving || recordingSaving || processing || recording}
+                                className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2.5 py-1.5 text-xs text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] text-[var(--c-text-secondary)]">{ds.meetingAsrResourceId}</span>
+                              <input
+                                value={onlineAsrDraft.volcResourceId}
+                                onChange={e => setOnlineAsrDraft(prev => ({ ...prev, volcResourceId: e.target.value }))}
+                                aria-label={ds.meetingAsrResourceId}
+                                disabled={asrConfigSaving || recordingSaving || processing || recording}
+                                className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2.5 py-1.5 text-xs text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <div className="mt-3 grid grid-cols-2 gap-2">
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] text-[var(--c-text-secondary)]">{ds.meetingAsrApiKey}</span>
+                              <input
+                                type="password"
+                                value={onlineAsrDraft.aliyunApiKey}
+                                onChange={e => setOnlineAsrDraft(prev => ({ ...prev, aliyunApiKey: e.target.value }))}
+                                aria-label={ds.meetingAsrApiKey}
+                                placeholder={asrConfig?.aliyun?.apiKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrApiKey}
+                                disabled={asrConfigSaving || recordingSaving || processing || recording}
+                                className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2.5 py-1.5 text-xs text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="mb-1 block text-[11px] text-[var(--c-text-secondary)]">{ds.meetingAsrBaseUrl}</span>
+                              <input
+                                value={onlineAsrDraft.aliyunBaseUrl}
+                                onChange={e => setOnlineAsrDraft(prev => ({ ...prev, aliyunBaseUrl: e.target.value }))}
+                                aria-label={ds.meetingAsrBaseUrl}
+                                disabled={asrConfigSaving || recordingSaving || processing || recording}
+                                className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2.5 py-1.5 text-xs text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                              />
+                            </label>
+                          </div>
+                        )}
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            {onlineAsrSaved && <span className="text-xs text-green-700">{ds.meetingAsrSaved}</span>}
+                            {onlineAsrError && <span className="text-xs text-red-600">{onlineAsrError}</span>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleSaveOnlineAsrConfig()}
+                            disabled={asrConfigSaving || recordingSaving || processing || recording}
+                            className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            {asrConfigSaving ? ds.meetingAsrSaving : ds.meetingAsrSave}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {localTranscriberSelected && (
                     <div className="border-t border-[var(--c-border)] pt-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-xs font-medium text-[var(--c-text-secondary)]">{t.knowledge.meetingModelDownloadStatusTitle}</p>
@@ -1569,9 +2886,12 @@ function MeetingRecorderDialog({
                       </div>
                       {modelStatusesError ? (
                         <p className="text-xs leading-5 text-red-600">{modelStatusesError}</p>
-                      ) : modelStatuses.length > 0 ? (
-                        <div className="space-y-1.5">
-                          {modelStatuses.map(model => {
+                      ) : groupedModelStatuses.length > 0 ? (
+                        <div className="space-y-3">
+                          {groupedModelStatuses.map(group => (
+                            <div key={group.id} className="space-y-1.5">
+                              <p className="text-[11px] font-medium text-[var(--c-text-tertiary)]">{group.title}</p>
+                              {group.models.map(model => {
                             const actionRunning = modelAction?.modelId === model.id;
                             const downloading = actionRunning && modelAction.kind === 'download';
                             const statusLabel = downloading
@@ -1580,6 +2900,8 @@ function MeetingRecorderDialog({
                               ? t.knowledge.meetingModelStatusDownloaded
                               : model.status === 'incomplete'
                                 ? t.knowledge.meetingModelStatusIncomplete
+                                : model.status === 'corrupt'
+                                  ? t.knowledge.meetingModelStatusCorrupt
                                 : t.knowledge.meetingModelStatusNotDownloaded;
                             const statusClassName = downloading
                               ? 'border-blue-200 bg-blue-50 text-blue-700'
@@ -1587,16 +2909,18 @@ function MeetingRecorderDialog({
                               ? 'border-green-200 bg-green-50 text-green-700'
                               : model.status === 'incomplete'
                                 ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                : model.status === 'corrupt'
+                                  ? 'border-red-200 bg-red-50 text-red-700'
                                 : 'border-[var(--c-border)] bg-[var(--c-bg-page)] text-[var(--c-text-tertiary)]';
                             const actionDisabled = recordingSaving || processing || !!modelAction;
                             const actionLabel = model.status === 'downloaded'
                               ? t.knowledge.meetingModelUninstallAria(model.fileName)
-                              : model.status === 'incomplete'
+                              : model.status === 'incomplete' || model.status === 'corrupt'
                                 ? t.knowledge.meetingModelRedownloadAria(model.fileName)
                                 : t.knowledge.meetingModelDownloadAria(model.fileName);
                             const actionTitle = model.status === 'downloaded'
                               ? t.knowledge.meetingModelUninstall
-                              : model.status === 'incomplete'
+                              : model.status === 'incomplete' || model.status === 'corrupt'
                                 ? t.knowledge.meetingModelRedownload
                                 : t.knowledge.meetingModelDownload;
                             return (
@@ -1620,7 +2944,7 @@ function MeetingRecorderDialog({
                                     >
                                       {model.status === 'downloaded' ? (
                                         <Trash2 size={12} aria-hidden="true" />
-                                      ) : model.status === 'incomplete' ? (
+                                      ) : model.status === 'incomplete' || model.status === 'corrupt' ? (
                                         <RotateCcw size={12} aria-hidden="true" />
                                       ) : (
                                         <Download size={12} aria-hidden="true" />
@@ -1628,19 +2952,22 @@ function MeetingRecorderDialog({
                                     </button>
                                   </div>
                                 </div>
-                                {model.status === 'incomplete' && model.localSizeLabel && (
+                                {(model.status === 'incomplete' || model.status === 'corrupt') && model.localSizeLabel && (
                                   <p className="mt-1 text-[11px] text-[var(--c-text-tertiary)]">
                                     {t.knowledge.meetingModelStatusLocalSize(model.localSizeLabel, model.sizeLabel)}
                                   </p>
                                 )}
                               </div>
                             );
-                          })}
+                              })}
+                            </div>
+                          ))}
                         </div>
                       ) : (
                         <p className="text-xs leading-5 text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusUnavailable}</p>
                       )}
                     </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1664,6 +2991,21 @@ function MeetingRecorderDialog({
                   placeholder={t.knowledge.meetingTitlePlaceholder}
                   className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
                 />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingScenarioLabel}</span>
+                <select
+                  value={scenario}
+                  onChange={e => setScenario(e.target.value as MeetingRecordingScenario)}
+                  aria-label={t.knowledge.meetingScenarioLabel}
+                  disabled={recordingSaving || processing || recording}
+                  className="w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)] disabled:opacity-50"
+                >
+                  {MEETING_RECORDING_SCENARIO_OPTIONS.map(option => (
+                    <option key={option} value={option}>{scenarioLabels[option]}</option>
+                  ))}
+                </select>
               </label>
 
               <div className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-3">

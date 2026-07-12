@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   Settings,
   Cpu,
+  Download,
   Palette,
   Database,
   SlidersHorizontal,
@@ -36,9 +37,12 @@ import {
   ExternalLink,
   Smartphone,
   QrCode,
+  Mic,
+  RotateCcw,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { getDesktopApi } from '../shared/desktop';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
 import { McpErrorRemediationBanner } from './settings/McpErrorRemediationBanner';
@@ -79,7 +83,124 @@ import {
   getOpenLoopAnomalies,
 } from './settings/loopDiagnostics';
 
-type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'appearance' | 'data' | 'memory' | 'about';
+type SettingsTab = 'model' | 'skills' | 'channels' | 'mcp' | 'tools' | 'general' | 'mobile' | 'voice' | 'appearance' | 'data' | 'memory' | 'about';
+type MeetingTranscriberEngine = typeof MEETING_TRANSCRIBER_ENGINE_OPTIONS[number];
+type MeetingTranscriberModel = typeof MEETING_TRANSCRIBER_MODEL_OPTIONS[number];
+type MeetingTranscriberLanguage = typeof MEETING_TRANSCRIBER_LANGUAGE_OPTIONS[number];
+
+interface MeetingAsrConfigSnapshot {
+  defaultProvider?: MeetingTranscriberEngine;
+  volcengine?: {
+    configured?: boolean;
+    appKeyConfigured?: boolean;
+    accessKeyConfigured?: boolean;
+    endpoint?: string;
+    resourceId?: string;
+  };
+  aliyun?: {
+    configured?: boolean;
+    apiKeyConfigured?: boolean;
+    baseUrl?: string;
+    model?: string;
+  };
+}
+
+interface MeetingModelStatusSnapshot {
+  id: string;
+  capability?: 'asr' | 'punctuation' | 'vad' | 'speaker';
+  engineId?: string;
+  fileName: string;
+  sizeLabel: string;
+  downloaded: boolean;
+  status: 'downloaded' | 'not_downloaded' | 'incomplete' | 'corrupt';
+  localSizeLabel?: string;
+}
+
+interface MeetingModelActionState {
+  modelId: string;
+  kind: 'download' | 'uninstall';
+}
+
+const MEETING_SHERPA_ONNX_PARA_MODEL = 'sherpa-onnx-paraformer-zh-small-2024-03-09';
+const MEETING_TRANSCRIBER_ENGINE_OPTIONS = ['sherpa-onnx-paraformer', 'whisper', 'volcengine-asr', 'aliyun-asr'] as const;
+const MEETING_TRANSCRIBER_MODEL_OPTIONS = [MEETING_SHERPA_ONNX_PARA_MODEL, 'base', 'small', 'medium', 'large', 'turbo'] as const;
+const MEETING_TRANSCRIBER_LANGUAGE_OPTIONS = ['zh', 'auto', 'en'] as const;
+
+function meetingTranscriberEngineForModel(model: MeetingTranscriberModel): MeetingTranscriberEngine {
+  return model === MEETING_SHERPA_ONNX_PARA_MODEL ? 'sherpa-onnx-paraformer' : 'whisper';
+}
+
+function defaultMeetingTranscriberModelForEngine(engine: MeetingTranscriberEngine): MeetingTranscriberModel {
+  if (engine === 'sherpa-onnx-paraformer') return MEETING_SHERPA_ONNX_PARA_MODEL;
+  if (engine === 'whisper') return 'base';
+  return MEETING_SHERPA_ONNX_PARA_MODEL;
+}
+
+function readStoredMeetingTranscriberEngine(fallback: MeetingTranscriberEngine = 'sherpa-onnx-paraformer'): MeetingTranscriberEngine {
+  try {
+    const value = localStorage.getItem('meeting-transcriber-engine');
+    if (MEETING_TRANSCRIBER_ENGINE_OPTIONS.includes(value as MeetingTranscriberEngine)) {
+      return value as MeetingTranscriberEngine;
+    }
+  } catch {
+    // localStorage is best effort in renderer tests and hardened contexts.
+  }
+  return fallback;
+}
+
+function readStoredMeetingTranscriberModel(engine: MeetingTranscriberEngine): MeetingTranscriberModel {
+  try {
+    const value = localStorage.getItem('meeting-transcriber-model') as MeetingTranscriberModel | null;
+    if (value && MEETING_TRANSCRIBER_MODEL_OPTIONS.includes(value) && meetingTranscriberEngineForModel(value) === engine) {
+      return value;
+    }
+  } catch {
+    // best effort only
+  }
+  return defaultMeetingTranscriberModelForEngine(engine);
+}
+
+function readStoredMeetingTranscriberLanguage(): MeetingTranscriberLanguage {
+  try {
+    const value = localStorage.getItem('meeting-transcriber-language') as MeetingTranscriberLanguage | null;
+    if (value && MEETING_TRANSCRIBER_LANGUAGE_OPTIONS.includes(value)) return value;
+  } catch {
+    // best effort only
+  }
+  return 'zh';
+}
+
+function isLocalMeetingTranscriberEngine(engine: MeetingTranscriberEngine): boolean {
+  return engine === 'sherpa-onnx-paraformer' || engine === 'whisper';
+}
+
+function normalizeMeetingModelStatuses(value: unknown): MeetingModelStatusSnapshot[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === 'string' ? record.id : '';
+    const fileName = typeof record.fileName === 'string' ? record.fileName : '';
+    const sizeLabel = typeof record.sizeLabel === 'string' ? record.sizeLabel : '';
+    const rawStatus = typeof record.status === 'string' ? record.status : '';
+    const status = rawStatus === 'downloaded' || rawStatus === 'not_downloaded' || rawStatus === 'incomplete' || rawStatus === 'corrupt'
+      ? rawStatus
+      : undefined;
+    if (!id || !fileName || !sizeLabel || !status) return [];
+    return [{
+      id,
+      capability: record.capability === 'punctuation' || record.capability === 'vad' || record.capability === 'speaker'
+        ? record.capability
+        : 'asr',
+      engineId: typeof record.engineId === 'string' ? record.engineId : undefined,
+      fileName,
+      sizeLabel,
+      downloaded: record.downloaded === true,
+      status,
+      localSizeLabel: typeof record.localSizeLabel === 'string' ? record.localSizeLabel : undefined,
+    }];
+  });
+}
 
 interface NavItem {
   key: SettingsTab;
@@ -91,6 +212,7 @@ function getNavItems(t: ReturnType<typeof useLocale>['t']): NavItem[] {
   return [
     { key: 'general', icon: SlidersHorizontal, label: t.desktopSettings.navGeneral },
     { key: 'mobile', icon: Smartphone, label: t.desktopSettings.navMobile },
+    { key: 'voice', icon: Mic, label: t.desktopSettings.voice },
     { key: 'model', icon: Cpu, label: t.desktopSettings.navModel },
     { key: 'skills', icon: Puzzle, label: t.desktopSettings.navSkills },
     { key: 'channels', icon: Globe, label: t.desktopSettings.navChannels },
@@ -162,6 +284,7 @@ export function DesktopSettings({ onClose }: Props) {
           {activeTab === 'tools' && <ToolsPane />}
           {activeTab === 'general' && <GeneralPane />}
           {activeTab === 'mobile' && <MobilePane />}
+          {activeTab === 'voice' && <VoicePane />}
           {activeTab === 'appearance' && <DesktopAppearanceSettings />}
           {activeTab === 'data' && <DataPane />}
           {activeTab === 'memory' && <MemoryPane />}
@@ -201,6 +324,479 @@ const inputCls = 'w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-
 const btnPrimary = 'rounded-lg bg-[var(--c-accent)] px-4 py-2 text-sm text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed';
 const btnSecondary = 'rounded-lg border border-[var(--c-border)] px-4 py-2 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors';
 const btnDanger = 'rounded-lg border border-red-200 px-4 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors';
+
+function VoicePane() {
+  const { t } = useLocale();
+  const ds = t.desktopSettings;
+  const desktop = getDesktopApi();
+  const [engine, setEngine] = useState<MeetingTranscriberEngine>(readStoredMeetingTranscriberEngine);
+  const [model, setModel] = useState<MeetingTranscriberModel>(() => readStoredMeetingTranscriberModel(readStoredMeetingTranscriberEngine()));
+  const [language, setLanguage] = useState<MeetingTranscriberLanguage>(readStoredMeetingTranscriberLanguage);
+  const [asrConfig, setAsrConfig] = useState<MeetingAsrConfigSnapshot | null>(null);
+  const [asrDraft, setAsrDraft] = useState({
+    volcAppKey: '',
+    volcAccessKey: '',
+    volcEndpoint: '',
+    volcResourceId: '',
+    aliyunApiKey: '',
+    aliyunBaseUrl: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [modelStatuses, setModelStatuses] = useState<MeetingModelStatusSnapshot[]>([]);
+  const [modelStatusesLoading, setModelStatusesLoading] = useState(false);
+  const [modelStatusesError, setModelStatusesError] = useState('');
+  const [modelAction, setModelAction] = useState<MeetingModelActionState | null>(null);
+
+  const engineLabels: Record<MeetingTranscriberEngine, string> = {
+    'sherpa-onnx-paraformer': t.knowledge.meetingSpeechEngineSherpaOnnxParaformer,
+    whisper: t.knowledge.meetingSpeechEngineWhisperFallback,
+    'volcengine-asr': t.knowledge.meetingSpeechEngineVolcengineAsr,
+    'aliyun-asr': t.knowledge.meetingSpeechEngineAliyunAsr,
+  };
+  const languageLabels: Record<MeetingTranscriberLanguage, string> = {
+    zh: t.knowledge.meetingLanguageZh,
+    auto: t.knowledge.meetingLanguageAuto,
+    en: t.knowledge.meetingLanguageEn,
+  };
+
+  const modelStatusById = new Map(modelStatuses.map(status => [status.id, status]));
+  const visibleModelOptions = MEETING_TRANSCRIBER_MODEL_OPTIONS.filter(option => (
+    meetingTranscriberEngineForModel(option) === engine
+  ));
+  const groupedModelStatuses = [
+    {
+      id: 'asr',
+      title: t.knowledge.meetingSpeechModelsStatusTitle,
+      models: modelStatuses.filter(item => (item.capability ?? 'asr') === 'asr'),
+    },
+    {
+      id: 'punctuation',
+      title: t.knowledge.meetingPunctuationModelsStatusTitle,
+      models: modelStatuses.filter(item => item.capability === 'punctuation'),
+    },
+  ].filter(group => group.models.length > 0);
+
+  const loadMeetingAsrConfig = useCallback(async () => {
+    if (!desktop?.meetingGetAsrConfig) return;
+    try {
+      const snapshot = await desktop.meetingGetAsrConfig() as MeetingAsrConfigSnapshot;
+      setAsrConfig(snapshot);
+      setAsrDraft(prev => ({
+        ...prev,
+        volcEndpoint: snapshot.volcengine?.endpoint ?? '',
+        volcResourceId: snapshot.volcengine?.resourceId ?? '',
+        aliyunBaseUrl: snapshot.aliyun?.baseUrl ?? '',
+      }));
+      const fallback = snapshot.defaultProvider && MEETING_TRANSCRIBER_ENGINE_OPTIONS.includes(snapshot.defaultProvider)
+        ? snapshot.defaultProvider
+        : 'sherpa-onnx-paraformer';
+      const nextEngine = readStoredMeetingTranscriberEngine(fallback);
+      const nextModel = readStoredMeetingTranscriberModel(nextEngine);
+      const nextLanguage = readStoredMeetingTranscriberLanguage();
+      setEngine(nextEngine);
+      setModel(nextModel);
+      setLanguage(nextLanguage);
+    } catch {
+      setAsrConfig(null);
+    }
+  }, [desktop]);
+
+  const loadMeetingModelStatuses = useCallback(async () => {
+    if (!desktop?.meetingListModels) return;
+    setModelStatusesLoading(true);
+    setModelStatusesError('');
+    try {
+      const result = await desktop.meetingListModels();
+      setModelStatuses(normalizeMeetingModelStatuses(result));
+    } catch (error) {
+      setModelStatuses([]);
+      setModelStatusesError(t.knowledge.meetingModelStatusLoadFailed(error instanceof Error ? error.message : 'unknown'));
+    } finally {
+      setModelStatusesLoading(false);
+    }
+  }, [desktop, t]);
+
+  useEffect(() => {
+    void loadMeetingAsrConfig();
+    void loadMeetingModelStatuses();
+  }, [loadMeetingAsrConfig, loadMeetingModelStatuses]);
+
+  const persistTranscriberChoice = (nextEngine: MeetingTranscriberEngine, nextModel: MeetingTranscriberModel, nextLanguage = language) => {
+    try {
+      localStorage.setItem('meeting-transcriber-engine', nextEngine);
+      localStorage.setItem('meeting-transcriber-model', nextModel);
+      localStorage.setItem('meeting-transcriber-language', nextLanguage);
+    } catch {
+      // best effort only
+    }
+  };
+
+  const updateEngine = (value: MeetingTranscriberEngine) => {
+    const nextModel = meetingTranscriberEngineForModel(model) === value ? model : defaultMeetingTranscriberModelForEngine(value);
+    setEngine(value);
+    setModel(nextModel);
+    setSaved(false);
+    persistTranscriberChoice(value, nextModel);
+  };
+
+  const updateModel = (value: MeetingTranscriberModel) => {
+    const nextEngine = meetingTranscriberEngineForModel(value);
+    setEngine(nextEngine);
+    setModel(value);
+    setSaved(false);
+    persistTranscriberChoice(nextEngine, value);
+  };
+
+  const updateLanguage = (value: MeetingTranscriberLanguage) => {
+    setLanguage(value);
+    setSaved(false);
+    persistTranscriberChoice(engine, model, value);
+  };
+
+  const handleSaveMeetingAsrConfig = async () => {
+    if (!desktop?.meetingSaveAsrConfig || saving) return;
+    setSaving(true);
+    setSaved(false);
+    setSaveError('');
+    persistTranscriberChoice(engine, model, language);
+    const input = engine === 'volcengine-asr'
+      ? {
+          defaultProvider: engine,
+          volcengine: {
+            appKey: asrDraft.volcAppKey,
+            accessKey: asrDraft.volcAccessKey,
+            endpoint: asrDraft.volcEndpoint,
+            resourceId: asrDraft.volcResourceId,
+          },
+        }
+      : engine === 'aliyun-asr'
+        ? {
+          defaultProvider: engine,
+          aliyun: {
+              apiKey: asrDraft.aliyunApiKey,
+              baseUrl: asrDraft.aliyunBaseUrl,
+              model: 'fun-asr',
+            },
+          }
+        : { defaultProvider: engine };
+    try {
+      const snapshot = await desktop.meetingSaveAsrConfig(input) as MeetingAsrConfigSnapshot;
+      setAsrConfig(snapshot);
+      setAsrDraft(prev => ({
+        ...prev,
+        volcAppKey: '',
+        volcAccessKey: '',
+        aliyunApiKey: '',
+        volcEndpoint: snapshot.volcengine?.endpoint ?? prev.volcEndpoint,
+        volcResourceId: snapshot.volcengine?.resourceId ?? prev.volcResourceId,
+        aliyunBaseUrl: snapshot.aliyun?.baseUrl ?? prev.aliyunBaseUrl,
+      }));
+      setSaved(true);
+    } catch (error) {
+      setSaveError(t.knowledge.meetingOnlineAsrSaveFailed(error instanceof Error ? error.message : 'unknown'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDownloadMeetingModel = async (modelId: string) => {
+    if (!desktop?.meetingDownloadModel || modelAction) return;
+    setModelAction({ modelId, kind: 'download' });
+    setModelStatusesError('');
+    try {
+      const result = await desktop.meetingDownloadModel(modelId) as { ok?: boolean; reason?: string; error?: string };
+      await loadMeetingModelStatuses();
+      if (result?.ok === false) {
+        setModelStatusesError(t.knowledge.meetingModelActionFailed(result.reason ?? result.error ?? 'unknown'));
+      }
+      setModelAction(null);
+    } catch (error) {
+      setModelStatusesError(t.knowledge.meetingModelActionFailed(error instanceof Error ? error.message : 'unknown'));
+      setModelAction(null);
+    }
+  };
+
+  const handleUninstallMeetingModel = async (modelId: string) => {
+    if (!desktop?.meetingUninstallModel || modelAction) return;
+    setModelAction({ modelId, kind: 'uninstall' });
+    setModelStatusesError('');
+    try {
+      const result = await desktop.meetingUninstallModel(modelId) as { ok?: boolean; reason?: string; error?: string };
+      await loadMeetingModelStatuses();
+      if (result?.ok === false) {
+        setModelStatusesError(t.knowledge.meetingModelActionFailed(result.reason ?? result.error ?? 'unknown'));
+      }
+      setModelAction(null);
+    } catch (error) {
+      setModelStatusesError(t.knowledge.meetingModelActionFailed(error instanceof Error ? error.message : 'unknown'));
+      setModelAction(null);
+    }
+  };
+
+  const renderProviderStatus = (configured?: boolean) => (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] ${configured ? 'border-green-200 bg-green-50 text-green-700' : 'border-[var(--c-border)] bg-[var(--c-bg-page)] text-[var(--c-text-tertiary)]'}`}>
+      {configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+    </span>
+  );
+
+  const renderModelStatusRow = (item: MeetingModelStatusSnapshot) => {
+    const actionRunning = modelAction?.modelId === item.id;
+    const downloading = actionRunning && modelAction.kind === 'download';
+    const statusLabel = downloading
+      ? t.knowledge.meetingModelStatusDownloading
+      : item.status === 'downloaded'
+        ? t.knowledge.meetingModelStatusDownloaded
+        : item.status === 'incomplete'
+          ? t.knowledge.meetingModelStatusIncomplete
+          : item.status === 'corrupt'
+            ? t.knowledge.meetingModelStatusCorrupt
+            : t.knowledge.meetingModelStatusNotDownloaded;
+    const statusClassName = downloading
+      ? 'border-blue-200 bg-blue-50 text-blue-700'
+      : item.status === 'downloaded'
+        ? 'border-green-200 bg-green-50 text-green-700'
+        : item.status === 'incomplete'
+          ? 'border-amber-200 bg-amber-50 text-amber-700'
+          : item.status === 'corrupt'
+            ? 'border-red-200 bg-red-50 text-red-700'
+            : 'border-[var(--c-border)] bg-[var(--c-bg-page)] text-[var(--c-text-tertiary)]';
+    const actionLabel = item.status === 'downloaded'
+      ? t.knowledge.meetingModelUninstallAria(item.fileName)
+      : item.status === 'incomplete' || item.status === 'corrupt'
+        ? t.knowledge.meetingModelRedownloadAria(item.fileName)
+        : t.knowledge.meetingModelDownloadAria(item.fileName);
+    const actionTitle = item.status === 'downloaded'
+      ? t.knowledge.meetingModelUninstall
+      : item.status === 'incomplete' || item.status === 'corrupt'
+        ? t.knowledge.meetingModelRedownload
+        : t.knowledge.meetingModelDownload;
+    return (
+      <div key={item.id} className="rounded-lg border border-[var(--c-border)] px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium text-[var(--c-text-primary)]">{item.fileName}</p>
+            <p className="mt-0.5 text-[11px] text-[var(--c-text-tertiary)]">{item.sizeLabel}</p>
+          </div>
+          <div data-testid={`voice-model-status-${item.id}`} className="flex shrink-0 items-center gap-1.5">
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] ${statusClassName}`}>
+              {statusLabel}
+            </span>
+            <button
+              type="button"
+              onClick={() => item.status === 'downloaded' ? void handleUninstallMeetingModel(item.id) : void handleDownloadMeetingModel(item.id)}
+              disabled={Boolean(modelAction)}
+              aria-label={actionLabel}
+              title={actionRunning ? t.knowledge.meetingModelActionRunning : actionTitle}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+            >
+              {item.status === 'downloaded' ? (
+                <Trash2 size={13} aria-hidden="true" />
+              ) : item.status === 'incomplete' || item.status === 'corrupt' ? (
+                <RotateCcw size={13} aria-hidden="true" />
+              ) : (
+                <Download size={13} aria-hidden="true" />
+              )}
+            </button>
+          </div>
+        </div>
+        {(item.status === 'incomplete' || item.status === 'corrupt') && item.localSizeLabel && (
+          <p className="mt-1 text-[11px] text-[var(--c-text-tertiary)]">
+            {t.knowledge.meetingModelStatusLocalSize(item.localSizeLabel, item.sizeLabel)}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const modelOptionLabel = (modelId: MeetingTranscriberModel) => {
+    const status = modelStatusById.get(modelId);
+    const displayModel = modelId === MEETING_SHERPA_ONNX_PARA_MODEL
+      ? t.knowledge.meetingSpeechModelSherpaOnnxParaformerSmall
+      : modelId;
+    return t.knowledge.meetingSpeechModelOption(
+      status?.engineId === 'sherpa-onnx-paraformer'
+        ? t.knowledge.meetingSpeechEngineSherpaOnnxName
+        : t.knowledge.meetingSpeechEngineWhisperName,
+      displayModel,
+      status?.sizeLabel,
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <Section>
+        <SectionHeader icon={Mic}>{ds.meetingRecordingSettingsTitle}</SectionHeader>
+        <p className="mb-4 text-sm leading-6 text-[var(--c-text-secondary)]">{ds.meetingRecordingSettingsDesc}</p>
+        <Card>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrDefaultProvider}</span>
+              <select
+                value={engine}
+                onChange={event => updateEngine(event.target.value as MeetingTranscriberEngine)}
+                aria-label={ds.meetingAsrDefaultProvider}
+                className={inputCls}
+              >
+                {MEETING_TRANSCRIBER_ENGINE_OPTIONS.map(option => (
+                  <option key={option} value={option}>{engineLabels[option]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingLanguageLabel}</span>
+              <select
+                value={language}
+                onChange={event => updateLanguage(event.target.value as MeetingTranscriberLanguage)}
+                aria-label={t.knowledge.meetingLanguageLabel}
+                className={inputCls}
+              >
+                {MEETING_TRANSCRIBER_LANGUAGE_OPTIONS.map(option => (
+                  <option key={option} value={option}>{languageLabels[option]}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {isLocalMeetingTranscriberEngine(engine) && (
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingSpeechModelLabel}</span>
+              <select
+                value={model}
+                onChange={event => updateModel(event.target.value as MeetingTranscriberModel)}
+                aria-label={t.knowledge.meetingSpeechModelLabel}
+                className={inputCls}
+              >
+                {visibleModelOptions.map(option => (
+                  <option key={option} value={option}>{modelOptionLabel(option)}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </Card>
+      </Section>
+
+      <Section>
+        <SectionHeader icon={Package}>{ds.meetingRecordingLocalModelsTitle}</SectionHeader>
+        <Card>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-[var(--c-text-secondary)]">{t.knowledge.meetingModelDownloadStatusTitle}</p>
+            {modelStatusesLoading && <span className="text-xs text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusLoading}</span>}
+          </div>
+          {modelStatusesError ? (
+            <p className="text-xs leading-5 text-red-600">{modelStatusesError}</p>
+          ) : groupedModelStatuses.length > 0 ? (
+            <div className="space-y-4">
+              {groupedModelStatuses.map(group => (
+                <div key={group.id} className="space-y-2">
+                  <p className="text-xs font-medium text-[var(--c-text-tertiary)]">{group.title}</p>
+                  {group.models.map(renderModelStatusRow)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs leading-5 text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusUnavailable}</p>
+          )}
+        </Card>
+      </Section>
+
+      <Section>
+        <SectionHeader icon={Server}>{ds.meetingRecordingOnlineProvidersTitle}</SectionHeader>
+        <Card>
+          <div className="space-y-5">
+            <div className="rounded-lg border border-[var(--c-border)] p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-[var(--c-text-primary)]">{ds.meetingAsrVolcengineTitle}</p>
+                {renderProviderStatus(asrConfig?.volcengine?.configured)}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAppKey}</span>
+                  <input
+                    type="password"
+                    value={asrDraft.volcAppKey}
+                    onChange={event => setAsrDraft(prev => ({ ...prev, volcAppKey: event.target.value }))}
+                    aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAppKey}`}
+                    placeholder={asrConfig?.volcengine?.appKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAppKey}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrAccessKey}</span>
+                  <input
+                    type="password"
+                    value={asrDraft.volcAccessKey}
+                    onChange={event => setAsrDraft(prev => ({ ...prev, volcAccessKey: event.target.value }))}
+                    aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAccessKey}`}
+                    placeholder={asrConfig?.volcengine?.accessKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAccessKey}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrEndpoint}</span>
+                  <input
+                    value={asrDraft.volcEndpoint}
+                    onChange={event => setAsrDraft(prev => ({ ...prev, volcEndpoint: event.target.value }))}
+                    aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrEndpoint}`}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrResourceId}</span>
+                  <input
+                    value={asrDraft.volcResourceId}
+                    onChange={event => setAsrDraft(prev => ({ ...prev, volcResourceId: event.target.value }))}
+                    aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrResourceId}`}
+                    className={inputCls}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[var(--c-border)] p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-[var(--c-text-primary)]">{ds.meetingAsrAliyunTitle}</p>
+                {renderProviderStatus(asrConfig?.aliyun?.configured)}
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrApiKey}</span>
+                  <input
+                    type="password"
+                    value={asrDraft.aliyunApiKey}
+                    onChange={event => setAsrDraft(prev => ({ ...prev, aliyunApiKey: event.target.value }))}
+                    aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrApiKey}`}
+                    placeholder={asrConfig?.aliyun?.apiKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrApiKey}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{ds.meetingAsrBaseUrl}</span>
+                  <input
+                    value={asrDraft.aliyunBaseUrl}
+                    onChange={event => setAsrDraft(prev => ({ ...prev, aliyunBaseUrl: event.target.value }))}
+                    aria-label={`${ds.meetingAsrAliyunTitle} ${ds.meetingAsrBaseUrl}`}
+                    className={inputCls}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              {saved && <p className="text-xs text-green-700">{ds.meetingAsrSaved}</p>}
+              {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+            </div>
+            <button type="button" onClick={() => void handleSaveMeetingAsrConfig()} disabled={saving} className={btnPrimary}>
+              {saving ? ds.meetingAsrSaving : ds.meetingAsrSave}
+            </button>
+          </div>
+        </Card>
+      </Section>
+    </div>
+  );
+}
 
 function MobilePane() {
   const { t } = useLocale();

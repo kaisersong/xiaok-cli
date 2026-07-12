@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
+import { createHash } from 'node:crypto';
+import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveAppAsarSha256, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
@@ -32,6 +33,20 @@ describe('desktop services', () => {
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
     delete process.env.XIAOK_CONFIG_DIR;
+  });
+
+  it('hashes the physical app.asar and restores Electron ASAR handling', () => {
+    const appPath = join(rootDir, 'xiaok.app');
+    const appAsarPath = join(appPath, 'Contents', 'Resources', 'app.asar');
+    mkdirSync(join(appPath, 'Contents', 'Resources'), { recursive: true });
+    writeFileSync(appAsarPath, 'xiaok-local-build');
+    const electronProcess = process as NodeJS.Process & { noAsar?: boolean };
+    electronProcess.noAsar = false;
+
+    expect(resolveAppAsarSha256(appPath)).toBe(
+      createHash('sha256').update('xiaok-local-build').digest('hex'),
+    );
+    expect(electronProcess.noAsar).toBe(false);
   });
 
   it('uses successful tool input output_path as artifact evidence when result omits it', () => {
@@ -1164,6 +1179,7 @@ describe('desktop services', () => {
     const cuaPluginDir = join(pluginRootDir, 'cua-computer-use');
     const reportPluginDir = join(pluginRootDir, 'kai-report-creator');
     const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    const dataRoot = join(rootDir, 'data');
     mkdirSync(cuaPluginDir, { recursive: true });
     mkdirSync(reportPluginDir, { recursive: true });
     writeFileSync(join(cuaPluginDir, 'plugin.json'), JSON.stringify({
@@ -1178,7 +1194,7 @@ describe('desktop services', () => {
     }));
 
     const services = createDesktopServices({
-      dataRoot: join(rootDir, 'data'),
+      dataRoot,
       kswarmService: mockKSwarmService(),
       now: () => 300,
       pluginRootDir,
@@ -1197,6 +1213,12 @@ describe('desktop services', () => {
         platform: 'darwin',
         exists: (path) => path === process.execPath,
         runCommand: async () => ({ exitCode: 0, stdout: 'v1.2.3\n', stderr: '' }),
+      },
+      computerUseAppIdentity: {
+        appPath: '/Applications/xiaok.app',
+        appAsarSha256: 'asar-sha-123',
+        isPackaged: true,
+        nodeEnv: 'production',
       },
     });
 
@@ -1217,6 +1239,11 @@ describe('desktop services', () => {
       connected: false,
       enabled: true,
       lastError: expect.stringContaining('/missing/report-renderer'),
+    });
+    expect(JSON.parse(readFileSync(join(dataRoot, 'computer-use-state.json'), 'utf8'))).toMatchObject({
+      enabledByUser: true,
+      lastSuccessfulAppPath: '/Applications/xiaok.app',
+      lastSuccessfulAppAsarSha256: 'asar-sha-123',
     });
   });
 
@@ -1277,6 +1304,67 @@ describe('desktop services', () => {
     expect(services.listPluginMcpServers().find(server => server.name === 'cua-driver')).toMatchObject({
       connected: true,
       toolCount: 1,
+    });
+    await expect(services.executeTool('xiaok_computer_use', { action: 'list_windows', on_screen_only: true }))
+      .resolves.toContain('"ok":true');
+  });
+
+  it('auto-recovers Computer Use for the same explicitly enabled unsigned Applications build', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const cuaPluginDir = join(pluginRootDir, 'cua-computer-use');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    const dataRoot = join(rootDir, 'data');
+    mkdirSync(cuaPluginDir, { recursive: true });
+    mkdirSync(dataRoot, { recursive: true });
+    writeFileSync(join(cuaPluginDir, 'plugin.json'), JSON.stringify({
+      name: 'cua-computer-use',
+      version: '0.1.0',
+      mcpServers: [{ name: 'cua-driver', type: 'stdio', command: process.execPath, args: [serverPath] }],
+    }));
+    writeFileSync(join(dataRoot, 'computer-use-state.json'), JSON.stringify({
+      schemaVersion: 1,
+      enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: 100,
+      lastSuccessfulAppPath: '/Applications/xiaok.app',
+      lastSuccessfulAppAsarSha256: 'asar-sha-123',
+    }));
+
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      pluginRootDir,
+      pluginDependencies: [{
+        pluginName: 'cua-computer-use',
+        dependency: {
+          id: 'cua-driver',
+          kind: 'macos_app_cli',
+          displayName: 'CUA Driver',
+          binaryCandidates: [process.execPath],
+          health: { version: [process.execPath, '--version'] },
+          mcp: { serverName: 'cua-driver', command: process.execPath, args: [serverPath], requiresUserActivation: true },
+        },
+      }],
+      pluginDependencyStatusOptions: {
+        platform: 'darwin',
+        exists: (path) => path === process.execPath,
+        runCommand: async () => ({ exitCode: 0, stdout: 'v1.2.3\n', stderr: '' }),
+      },
+      computerUseAppIdentity: {
+        appPath: '/Applications/xiaok.app',
+        appAsarSha256: 'asar-sha-123',
+        isPackaged: true,
+        nodeEnv: 'production',
+      },
+    });
+
+    await services.registerMcpTools();
+
+    expect(services.getComputerUseCapabilityStatus()).toMatchObject({
+      state: 'ready',
+      mcpConnected: true,
+      wrapperReady: true,
     });
     await expect(services.executeTool('xiaok_computer_use', { action: 'list_windows', on_screen_only: true }))
       .resolves.toContain('"ok":true');

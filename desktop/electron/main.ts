@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -35,6 +35,12 @@ import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
 import { createElectronDesktopNotificationPort } from './desktop-notifications.js';
+import {
+  createMeetingRecorderWindowController,
+  type MeetingRecorderSessionState,
+  type MeetingRecorderWindowController,
+  type MeetingRecorderWindowMode,
+} from './meeting-recorder-window.js';
 import { createDesktopLoopRuntime } from './loop-executor.js';
 import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
@@ -73,6 +79,7 @@ import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let meetingRecorderController: MeetingRecorderWindowController | null = null;
 let isQuitting = false;
 const MAX_MOBILE_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -87,19 +94,21 @@ function debugMain(message: string, extra?: unknown): void {
   console.log(line);
 }
 
-function registerMeetingMediaPermissionHandlers(window: BrowserWindow): void {
+function registerMeetingMediaPermissionHandlers(): void {
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details) => {
     return shouldAllowMeetingMediaPermission({
       permission,
       mediaTypes: readMediaTypesFromPermissionDetails(details),
-      isTrustedWebContents: webContents === window.webContents,
+      isTrustedWebContents: webContents === mainWindow?.webContents
+        || meetingRecorderController?.ownsWebContents(webContents) === true,
     });
   });
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     callback(shouldAllowMeetingMediaPermission({
       permission,
       mediaTypes: readMediaTypesFromPermissionDetails(details),
-      isTrustedWebContents: webContents === window.webContents,
+      isTrustedWebContents: webContents === mainWindow?.webContents
+        || meetingRecorderController?.ownsWebContents(webContents) === true,
     }));
   });
 }
@@ -362,7 +371,61 @@ async function createWindow(): Promise<BrowserWindow> {
   removeWindowsWindowMenu(window, process.platform);
   attachDesktopContextMenu(window, Menu);
   mainWindow = window;
-  registerMeetingMediaPermissionHandlers(window);
+  meetingRecorderController ??= createMeetingRecorderWindowController({
+    BrowserWindow,
+    getMainWindow: () => mainWindow,
+    notificationPort: createElectronDesktopNotificationPort(),
+    platform: process.platform,
+    preloadPath,
+    rendererFile: join(__dirname, '../../../renderer/index.html'),
+    devServer: process.env['XIAOK_DESKTOP_DEV_SERVER'],
+    screen,
+  });
+  registerMeetingMediaPermissionHandlers();
+  const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === window.webContents;
+  const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
+    meetingRecorderController?.ownsWebContents(sender) === true
+  );
+  ipcMain.handle('desktop:meetingOpenRecorderWindow', (event, input: { collectionId?: unknown }) => {
+    if (!isMainWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
+    if (typeof input?.collectionId !== 'string' || !input.collectionId.trim()) {
+      return { ok: false, error: 'collection_id_required' };
+    }
+    return meetingRecorderController!.open({ collectionId: input.collectionId });
+  });
+  ipcMain.handle('desktop:meetingSetRecorderWindowMode', (event, input: { mode?: unknown }) => {
+    if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
+    const mode = input?.mode;
+    if (mode !== 'workbench' && mode !== 'compact' && mode !== 'summary') {
+      return { ok: false, error: 'invalid_mode' };
+    }
+    return meetingRecorderController!.setMode(mode as MeetingRecorderWindowMode);
+  });
+  ipcMain.handle('desktop:meetingSetRecorderSessionState', (event, input: { state?: unknown }) => {
+    if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
+    const state = input?.state;
+    if (state !== 'idle' && state !== 'recording' && state !== 'processing' && state !== 'summary') {
+      return { ok: false, error: 'invalid_state' };
+    }
+    return meetingRecorderController!.setSessionState(state as MeetingRecorderSessionState);
+  });
+  ipcMain.handle('desktop:meetingNotifyRecorderSummaryReady', (event, input: { title?: unknown }) => {
+    if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
+    return meetingRecorderController!.notifySummaryReady({
+      title: typeof input?.title === 'string' ? input.title : '',
+    });
+  });
+  ipcMain.handle('desktop:meetingNotifyRecordingSaved', (event, input: { collectionId?: unknown }) => {
+    if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
+    if (typeof input?.collectionId !== 'string' || !input.collectionId.trim()) {
+      return { ok: false, error: 'collection_id_required' };
+    }
+    return meetingRecorderController!.notifySaved({ collectionId: input.collectionId });
+  });
+  ipcMain.handle('desktop:meetingCloseRecorderWindow', (event) => {
+    if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
+    return meetingRecorderController!.close();
+  });
   // KSwarm service — manages kswarm server as a child process
   const kswarmService = createKSwarmService();
   const kswarmStartPromise = kswarmService.start().catch((err) => {
@@ -1156,6 +1219,7 @@ if (!singleInstanceLock) {
   });
   app.on('before-quit', () => {
     isQuitting = true;
+    meetingRecorderController?.dispose();
     destroyMenuBar();
     debugMain('app:before-quit');
   });

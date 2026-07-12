@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  decodePcm16WavToFloat32,
   encodePcm16Wav,
   parsePcm16WavInfo,
   writePcm16WavFile,
@@ -46,5 +47,26 @@ describe('Meeting audio format', () => {
     const info = parsePcm16WavInfo(readFileSync(filePath));
     expect(info.durationSeconds).toBe(1);
     expect(info.dataBytes).toBe(32_000);
+  });
+
+  it('decodes stereo PCM16 WAV to mono Float32 samples without external buffers', () => {
+    const samples = new Int16Array([
+      32767, 32767,
+      -32768, -32768,
+      16384, -16384,
+    ]);
+    const wav = encodePcm16Wav({ samples, sampleRate: 48_000, channels: 2 });
+
+    const decoded = decodePcm16WavToFloat32(wav);
+
+    expect(decoded.sampleRate).toBe(48_000);
+    expect(decoded.durationSeconds).toBeCloseTo(3 / 48_000);
+    expect(decoded.samples).toBeInstanceOf(Float32Array);
+    expect(decoded.samples.buffer.constructor).toBe(ArrayBuffer);
+    expect(Array.from(decoded.samples)).toEqual([
+      32767 / 32768,
+      -1,
+      0,
+    ]);
   });
 });

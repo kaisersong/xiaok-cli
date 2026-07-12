@@ -46,6 +46,20 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.22 completes the Chinese-first AI recording workflow and restores reliable Computer Use validation. The Knowledge Base opens a compact recorder that stays out of the way during meetings, sales conversations, and ad-hoc discussions; transcription can run locally with Sherpa-ONNX or through user-configured Alibaba Cloud and Volcengine ASR, while the finish flow restores punctuation, generates structured notes, and keeps the result editable before it is saved.
+
+**AI Recording, Streaming ASR, and Computer Use Update:**
+
+- **Compact Recording Flow**: `AI Recording` opens a start surface with an explicit Start button. Once recording begins, it becomes a draggable compact window with a real microphone-level waveform, the latest transcript sentence, elapsed time, Pause/Resume, Finish, and an expand action. Finishing opens the full notes editor instead of saving immediately.
+- **Chinese-First Local ASR**: Sherpa-ONNX Paraformer is the default local real-time engine for Mandarin. Whisper remains available as a local fallback and final-file engine. Settings show model size and downloaded, incomplete, or missing state, with icon-only download, resume, refresh, and uninstall controls.
+- **Alibaba Cloud and Volcengine ASR**: Voice settings let users configure their own Alibaba Cloud Model Studio API key or Volcengine ASR credentials and select the provider explicitly. Both providers use streaming transcription during recording; provider failures remain visible and do not silently substitute fixed or sample text.
+- **Punctuation Restoration**: Final transcripts pass through a dedicated Chinese punctuation restoration stage before note generation. Streaming text remains responsive, while the finalized transcript, summary, decisions, and action items use the restored text rather than regex-based word splitting.
+- **Editable Structured Notes**: Finish waits for the active ASR stream to flush, then produces a content-derived title with a timestamp, summary, full transcript, decisions, and action items. The draft remains editable and is saved to the Knowledge Base only after explicit confirmation.
+- **Computer Use Recovery**: Desktop now diagnoses the packaged CUA capability, starts or repairs the official CuaDriver dependency on macOS, and invalidates stale readiness when the packaged `app.asar` changes. The installed app was cold-start validated through real `xiaok_computer_use` window listing and capture calls.
+- **Bundled Meeting Assistant**: Release packaging now includes `kai-meeting-assistant` as the local Whisper transcription fallback and meeting-summary skill, alongside the existing report, slide, canvas, and Computer Use plugins.
+- **Release Validation**: v1.4.22 passes 243 focused Desktop meeting/ASR/Computer Use tests (2 opt-in real-audio cases skipped), 44 bundled-plugin contract/rendering tests, 5 cross-platform/preload sandbox tests, 12 CLI CUA boundary tests, the recorder-window Playwright E2E, the meeting plugin's 5 Python tests, Desktop typecheck/build, CLI release build, and unsigned macOS packaging with the meeting plugin present in the app bundle.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, related-project README baselines, and the Desktop Release workflow default align on `1.4.22` / `desktop-v1.4.22`.
+
 Xiaok Desktop v1.4.21 adds the new local AI recording flow for the Knowledge Base. The Knowledge home page now has an **AI Recording** entry point; the recorder opens as a larger meeting-style panel with a prominent start button, real microphone-level waveform, pause/resume, live transcript preview, and a finish step that generates an editable notes draft before saving anything to the knowledge base.
 
 **AI Recording and Local Transcription Update:**

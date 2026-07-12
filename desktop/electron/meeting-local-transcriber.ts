@@ -119,17 +119,18 @@ function parseTranscriberStdout(stdout: string): MeetingTranscriptionResult {
     throw new Error('invalid_transcriber_output');
   }
   const record = parsed as Record<string, unknown>;
-  const text = typeof record.text === 'string' ? normalizeTranscriptText(record.text.trim()) : '';
   const rawSegments = Array.isArray(record.segments) ? record.segments : [];
   const segments = rawSegments.flatMap((segment) => {
     if (!segment || typeof segment !== 'object') return [];
     const value = segment as Record<string, unknown>;
     const start = Number(value.start);
     const end = Number(value.end);
-    const segmentText = typeof value.text === 'string' ? normalizeTranscriptText(value.text.trim()) : '';
+    const segmentText = typeof value.text === 'string' ? normalizeTranscriptSegmentText(value.text) : '';
     if (!Number.isFinite(start) || !Number.isFinite(end) || !segmentText) return [];
     return [{ start, end, text: segmentText }];
   });
+  const rawText = typeof record.text === 'string' ? normalizeTranscriptText(record.text.trim()) : '';
+  const text = segments.length ? segments.map(segment => segment.text).join('\n') : normalizeTranscriptSegmentText(rawText);
 
   if (!text && segments.length === 0) {
     throw new Error('empty_transcription');
@@ -151,16 +152,22 @@ const TRADITIONAL_TO_SIMPLIFIED: Record<string, string> = {
   決: '决', 費: '费', 優: '优', 雲: '云', 機: '机', 學: '学', 習: '习', 聽: '听', 說: '说',
   話: '话', 員: '员', 與: '与', 對: '对', 導: '导', 匯: '汇', 報: '报', 將: '将', 產: '产',
   經: '经', 線: '线', 體: '体', 驗: '验', 無: '无', 雙: '双', 單: '单', 刪: '删', 變: '变',
-  檢: '检', 徑: '径', 週: '周',
+  檢: '检', 徑: '径', 週: '周', 確: '确', 險: '险',
   這: '这', 裡: '里', 個: '个', 們: '们', 為: '为', 於: '于', 從: '从', 編: '编', 號: '号',
 };
 
-function normalizeTranscriptText(text: string): string {
+export function normalizeTranscriptText(text: string): string {
   let normalized = '';
   for (const char of text) {
     normalized += TRADITIONAL_TO_SIMPLIFIED[char] ?? char;
   }
   return normalized;
+}
+
+export function normalizeTranscriptSegmentText(text: string): string {
+  return normalizeTranscriptText(text)
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function extractJsonPayload(stdout: string): string {

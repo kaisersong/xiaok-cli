@@ -1,6 +1,6 @@
 {
   "name": "xiaok-desktop",
-  "version": "1.4.21",
+  "version": "1.4.22",
   "private": true,
   "description": "xiaok Desktop Intent Cockpit",
   "author": "xiaok",
@@ -36,6 +36,7 @@
     "fast-glob": "^3.3.2",
     "openai": "^4.77.0",
     "pdfjs-dist": "^6.0.227",
+    "sherpa-onnx-node": "^1.13.4",
     "tailwind-merge": "^3.6.0",
     "ws": "^8.21.0"
   },

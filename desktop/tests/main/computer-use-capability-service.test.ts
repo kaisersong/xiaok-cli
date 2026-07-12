@@ -28,6 +28,24 @@ describe('computer-use capability service', () => {
     })).toEqual({ eligible: true });
   });
 
+  it('allows an explicitly enabled unsigned Applications build only when its path and app.asar fingerprint match', () => {
+    const preference = normalizeComputerUsePreference({
+      schemaVersion: 1,
+      enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: 123,
+      lastSuccessfulAppPath: '/Applications/xiaok.app',
+      lastSuccessfulAppAsarSha256: 'asar-sha-123',
+    });
+
+    expect(isComputerUseAutoConnectEligibleApp(preference, {
+      appPath: '/Applications/xiaok.app',
+      appAsarSha256: 'asar-sha-123',
+      isPackaged: true,
+      nodeEnv: 'production',
+    })).toEqual({ eligible: true });
+  });
+
   it('fails closed for dev server, missing schema, suspended failures, and TeamIdentifier mismatch', () => {
     expect(isComputerUseAutoConnectEligibleApp(normalizeComputerUsePreference({
       schemaVersion: 1,
@@ -77,6 +95,29 @@ describe('computer-use capability service', () => {
       teamId: 'TEAM999',
       isPackaged: true,
     })).toEqual({ eligible: false, reason: 'team_id_mismatch' });
+
+    const unsignedPreference = normalizeComputerUsePreference({
+      schemaVersion: 1,
+      enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true,
+      lastSuccessfulAt: 123,
+      lastSuccessfulAppPath: '/Applications/xiaok.app',
+      lastSuccessfulAppAsarSha256: 'asar-sha-123',
+    });
+    expect(isComputerUseAutoConnectEligibleApp(unsignedPreference, {
+      appPath: '/Applications/xiaok.app',
+      isPackaged: true,
+    })).toEqual({ eligible: false, reason: 'installation_fingerprint_missing' });
+    expect(isComputerUseAutoConnectEligibleApp(unsignedPreference, {
+      appPath: '/Applications/xiaok-preview.app',
+      appAsarSha256: 'asar-sha-123',
+      isPackaged: true,
+    })).toEqual({ eligible: false, reason: 'app_path_mismatch' });
+    expect(isComputerUseAutoConnectEligibleApp(unsignedPreference, {
+      appPath: '/Applications/xiaok.app',
+      appAsarSha256: 'asar-sha-999',
+      isPackaged: true,
+    })).toEqual({ eligible: false, reason: 'installation_fingerprint_mismatch' });
   });
 
   it('uses disabled-by-user error without an enable action when the user explicitly disables Computer Use', () => {

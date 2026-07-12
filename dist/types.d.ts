@@ -162,6 +162,25 @@ export interface Config {
     automations?: {
         globalBackgroundAutoRunEnabled?: boolean;
     };
+    meeting?: {
+        asr?: {
+            defaultProvider?: 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';
+            volcengine?: {
+                appKey?: string;
+                accessKey?: string;
+                endpoint?: string;
+                resourceId?: string;
+            };
+            aliyun?: {
+                apiKey?: string;
+                baseUrl?: string;
+                model?: string;
+                appKey?: string;
+                accessToken?: string;
+                endpoint?: string;
+            };
+        };
+    };
 }
 export declare const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig;
 export declare const DEFAULT_CONFIG: Config;

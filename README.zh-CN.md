@@ -46,6 +46,20 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.22 完成了中文优先的 AI 录音闭环，并恢复了可验证的 Computer Use 能力。知识库现在使用不打扰工作的紧凑录音悬浮窗，适合会议、销售现场和临时讨论；转写既可以使用本地 Sherpa-ONNX，也可以连接用户自行配置的阿里云或火山引擎 ASR。点“完成”后，系统会等待流式结果收口、恢复中文标点、生成结构化纪要，并在保存前允许用户编辑。
+
+**AI 录音、流式 ASR 与 Computer Use 更新：**
+
+- **紧凑录音流程**：`AI录音` 先打开带醒目“开始”按钮的起始界面；开始后收成可拖动的小型悬浮窗，展示真实麦克风音量波动、最近一句转写、录音时长，并提供暂停/继续、完成和展开操作。点“完成”后才打开完整纪要编辑界面，不会直接保存。
+- **中文优先的本地 ASR**：默认本地实时引擎为 Sherpa-ONNX Paraformer，Whisper 保留为本地回退与完整音频转写引擎。设置中会展示模型大小及已下载、不完整、未下载状态，并提供 icon-only 下载、续传、刷新和卸载操作。
+- **阿里云与火山引擎 ASR**：语音设置允许用户填写自己的阿里云百炼 API Key 或火山引擎 ASR 凭据，并显式选择服务商。两种在线服务都在录音过程中持续返回流式转写；服务失败会明确报错，不会静默替换成固定文本或样例内容。
+- **中文标点恢复**：最终转写在生成纪要前经过独立的中文标点恢复阶段。实时文字保持低延迟，最终全文、摘要、决策和待办使用恢复后的文本，不依赖正则分词模拟标点。
+- **可编辑结构化纪要**：点“完成”后先等待当前 ASR 流 flush，再根据内容生成带时间戳的标题，并生成摘要、完整转写、决策和待办。草稿保持可编辑，只有用户确认后才保存到知识库。
+- **Computer Use 自动恢复**：Desktop 会诊断随包 CUA 能力，在 macOS 上启动或修复官方 CuaDriver，并在 `app.asar` 变化时使旧 readiness 失效。安装版已通过冷启动后的真实 `xiaok_computer_use` 窗口枚举与截图调用验证。
+- **内置会议助手插件**：release 打包新增 `kai-meeting-assistant`，提供本地 Whisper 转写回退和会议总结 skill，与既有报告、幻灯片、无限画布和 Computer Use 插件一起随包发布。
+- **发布验证**：v1.4.22 已通过 243 个 Desktop 会议/ASR/Computer Use 聚焦测试（2 个需显式真实音频环境的 case 跳过）、44 个内置插件 contract/真实 renderer 测试、5 个跨平台/preload sandbox 测试、12 个 CLI CUA 边界测试、录音悬浮窗 Playwright E2E、会议插件 5 个 Python 测试、Desktop typecheck/build、CLI release build，以及包含会议插件的 macOS 未签名打包验证。
+- **发布对齐**：root CLI 元数据、Desktop package 元数据、package locks、相关项目 README 基线和 Desktop Release workflow 默认值统一为 `1.4.22` / `desktop-v1.4.22`。
+
 Xiaok Desktop v1.4.21 补上了知识库里的本地 AI 录音流程。知识库首页现在直接提供 **AI录音** 入口；录音界面改为更大的会议式面板，包含醒目的开始按钮、真实麦克风音量波动、暂停/继续、实时转写预览，以及点“完成”后先生成可编辑纪要草稿、再保存到知识库的流程。
 
 **AI 录音与本地转写更新：**
