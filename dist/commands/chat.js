@@ -2724,6 +2724,7 @@ async function runChat(initialInput, opts) {
                                 buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
                                 worktreeManager: platform.worktreeManager,
                                 forkContext: {
+                                    taskId: sessionId,
                                     session: agent.exportSession(),
                                     messages: agent.exportSession().messages,
                                     systemPrompt: await buildPrompt(skills),

@@ -1,1 +1,1 @@
-export const BUILD_TIME = "2026-07-09 10:28";
+export const BUILD_TIME = null;

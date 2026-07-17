@@ -2,6 +2,9 @@ export function buildTaskUnderstanding(input) {
     if (isProjectCreationPrompt(input.prompt)) {
         return buildProjectCreationUnderstanding(input);
     }
+    if (!isSalesDeckOutputPrompt(input.prompt)) {
+        return buildGenericUnderstanding(input);
+    }
     return {
         goal: buildGoal(input.prompt),
         deliverable: '可继续编辑的 PPT 初稿',
@@ -52,6 +55,74 @@ function buildProjectCreationUnderstanding(input) {
 }
 function isProjectCreationPrompt(prompt) {
     return /(?:创建|新建).{0,20}项目|create_project|swarm\s*project/iu.test(prompt);
+}
+function isSalesDeckOutputPrompt(prompt) {
+    const deckFormat = /(?:\bpptx?\b|power\s*point|演示文稿|幻灯片|(?:pitch|sales|slide)\s+deck)/giu;
+    const outputIntent = /(?:生成|制作|创建|新建|撰写|设计|输出|修改|改写|更新|优化|完善|重做|改造|转换(?:成|为)|(?:写|做|出)(?:一(?:个|份|版|套)?|个|份|版|套)?|准备|整理(?:成|为)?|\b(?:create|creating|build|building|draft|drafting|make|making|write|writing|design|designing|edit|editing|revise|revising|update|updating|improve|improving|generate|generating|produce|producing|prepare|preparing)\b)/giu;
+    const negatedAction = /(?:不要|不用|无需|别|禁止|避免|\bdo\s+not|\bdon['’]t|\bnever|\bavoid)\s*$/iu;
+    const deckToActionConnector = /^\s*(?:(?:帮我|给我|请|需要|要|再|重新|needs|should\s+be|must\s+be|please|help\s+me)\s*)*$/iu;
+    const negatedDeckPrefix = /(?:不要|不用|无需|别|禁止|避免)\s*(?:(?:把|将|对)\s*)?(?:(?:这个|这份|这版|这套|该|此|现有(?:的)?)\s*)?$/u;
+    const deckToActionSourceObject = /(?:分析|研究|摘要|总结|关键内容|内容|问题|评审|审阅|解读|翻译|提取|报告|结果)|\b(?:report|analysis|summary|review)\b/iu;
+    return prompt.split(/[,，。.;；!?！？\r\n]+/u).some((fragment) => {
+        for (const action of fragment.matchAll(outputIntent)) {
+            const actionIndex = action.index ?? 0;
+            if (negatedAction.test(fragment.slice(0, actionIndex))) {
+                continue;
+            }
+            const afterAction = fragment.slice(actionIndex + action[0].length);
+            for (const deck of afterAction.matchAll(deckFormat)) {
+                const deckIndex = deck.index ?? 0;
+                const beforeDeck = afterAction.slice(0, deckIndex);
+                const afterDeck = afterAction.slice(deckIndex + deck[0].length);
+                if (!isDeckSourceObject(beforeDeck, afterDeck)) {
+                    return true;
+                }
+            }
+        }
+        for (const deck of fragment.matchAll(deckFormat)) {
+            const deckIndex = deck.index ?? 0;
+            if (negatedDeckPrefix.test(fragment.slice(0, deckIndex))) {
+                continue;
+            }
+            const afterDeck = fragment.slice(deckIndex + deck[0].length);
+            for (const action of afterDeck.matchAll(outputIntent)) {
+                const actionIndex = action.index ?? 0;
+                if (!deckToActionConnector.test(afterDeck.slice(0, actionIndex))) {
+                    continue;
+                }
+                const afterAction = afterDeck.slice(actionIndex + action[0].length);
+                if (!deckToActionSourceObject.test(afterAction)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    });
+}
+function isDeckSourceObject(beforeDeck, afterDeck) {
+    const chineseSourceSuffix = /^\s*(?:(?:的|里的|中的)\s*)?(?:分析|研究|摘要|总结|关键内容|内容|问题|评审|审阅|解读|翻译|提取|报告|结果)(?:报告|结果)?/u;
+    const englishSourcePrefix = /\b(?:report|analysis|summary|review)\b.*\b(?:about|of|on)\b.*$/iu;
+    return chineseSourceSuffix.test(afterDeck) || englishSourcePrefix.test(beforeDeck);
+}
+function buildGenericUnderstanding(input) {
+    return {
+        goal: input.prompt.trim(),
+        deliverable: '任务结果',
+        taskType: 'unknown',
+        audience: '用户',
+        inputs: input.materials.map((material) => ({
+            materialId: material.materialId,
+            name: material.originalName,
+            role: material.role,
+            parseStatus: material.parseStatus,
+            parseSummary: material.parseSummary,
+        })),
+        missingInfo: [],
+        assumptions: [],
+        riskLevel: 'medium',
+        suggestedPlan: [],
+        nextAction: 'execute_task',
+    };
 }
 function inferProjectDeliverable(prompt) {
     if (/报告|markdown|\.md\b/iu.test(prompt)) {

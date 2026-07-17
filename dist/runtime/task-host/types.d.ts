@@ -84,6 +84,7 @@ export type UserAnswer = {
 export type ArtifactKind = 'pptx' | 'pdf' | 'docx' | 'xlsx' | 'html' | 'image' | 'text' | 'a2ui' | 'other';
 export interface ArtifactSummary {
     artifactId: string;
+    sourceTaskId?: string;
     kind: ArtifactKind;
     title: string;
     createdAt: string;
@@ -109,6 +110,9 @@ export interface SalvageSummary {
 export type DesktopTaskEvent = {
     type: 'task_started';
     taskId: string;
+} | {
+    type: 'task_terminal';
+    status: Extract<TaskSnapshotStatus, 'completed' | 'failed' | 'cancelled'>;
 } | {
     type: 'understanding_updated';
     understanding: TaskUnderstanding;
@@ -183,6 +187,25 @@ export interface TaskCreateContext {
     threadId?: string;
     taskIds?: string[];
 }
+export interface ArtifactWorkspaceExecutionScope {
+    kind: 'artifact_workspace_generation';
+    generationRequestId: string;
+    leaseId: string;
+    target?: ArtifactGenerationTarget;
+}
+export interface ArtifactGenerationTarget {
+    workspaceId: string;
+    nodeId: string;
+    placeholderId?: string;
+    sourceArtifactVersionId?: string;
+    generationRequestId: string;
+    leaseId: string;
+    expectedStructureRevision: number;
+    requestedKind: 'image' | 'html' | 'markdown' | 'slides';
+    width?: number;
+    height?: number;
+    referenceVersionIds: string[];
+}
 export interface TaskContextSkip {
     taskId: string;
     reason: TaskContextSkipReason;
@@ -203,6 +226,7 @@ export interface TaskCreateInput {
     watchdogMs?: number;
     maxToolLoopIterations?: number;
     context?: TaskCreateContext;
+    executionScope?: ArtifactWorkspaceExecutionScope;
 }
 export interface TaskSnapshot {
     taskId: string;
@@ -215,6 +239,7 @@ export interface TaskSnapshot {
     result?: TaskResult;
     salvage?: SalvageSummary;
     context?: TaskContextAudit;
+    executionScope?: ArtifactWorkspaceExecutionScope;
     createdAt: number;
     updatedAt: number;
 }
@@ -222,6 +247,11 @@ export interface ActiveTaskRef {
     taskId: string;
 }
 export interface TaskRuntimeHost {
+    prepareTask(input: TaskCreateInput): Promise<{
+        taskId: string;
+        understanding?: TaskUnderstanding;
+    }>;
+    startTask(taskId: string): Promise<void>;
     createTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;

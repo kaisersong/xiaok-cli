@@ -6,6 +6,7 @@ import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
 import type { PromptSnapshot } from './ai/prompts/types.js';
 import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
 import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types.js';
+import type { ArtifactWorkspaceExecutionScope } from './runtime/task-host/types.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: {
@@ -48,6 +49,8 @@ export interface ToolDefinition {
     inputSchema: Record<string, unknown>;
 }
 export interface ToolExecutionContext {
+    taskId: string;
+    executionScope?: ArtifactWorkspaceExecutionScope;
     session: AgentSessionSnapshot;
     messages: Message[];
     systemPrompt: string;

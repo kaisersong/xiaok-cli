@@ -2,7 +2,7 @@ import type { RuntimeEvent } from '../events.js';
 import { type DeliverableGateFunction } from './deliverable-gate.js';
 import type { MaterialRegistry } from './material-registry.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
-import type { DesktopTaskEvent, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskRuntimeHost, TaskSnapshot, TaskUnderstanding, UserAnswer } from './types.js';
+import type { ArtifactWorkspaceExecutionScope, DesktopTaskEvent, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskRuntimeHost, TaskSnapshot, TaskUnderstanding, UserAnswer } from './types.js';
 export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -18,7 +18,14 @@ export interface TaskRunnerInput {
     history: HistoryMessage[];
     permissionMode?: 'plan' | 'auto' | 'default';
     maxToolLoopIterations?: number;
+    executionScope?: ArtifactWorkspaceExecutionScope;
     emitRuntimeEvent(event: RuntimeEvent): void;
+}
+export interface PersistedTaskEvent {
+    taskId: string;
+    eventIndex: number;
+    event: DesktopTaskEvent;
+    snapshot: TaskSnapshot;
 }
 export type TaskRunner = (input: TaskRunnerInput) => Promise<void>;
 export interface InProcessTaskRuntimeHostOptions {
@@ -30,6 +37,7 @@ export interface InProcessTaskRuntimeHostOptions {
     createTaskId?: () => string;
     createSessionId?: () => string;
     taskWatchdogMs?: number;
+    onPersistedEvent?: (input: PersistedTaskEvent) => Promise<void> | void;
     aheGuards?: {
         artifactEvidence?: boolean;
         recoveryContinuity?: boolean;
@@ -63,6 +71,11 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly permissionModes;
     private readonly maxToolLoopIterations;
     constructor(options: InProcessTaskRuntimeHostOptions);
+    prepareTask(input: TaskCreateInput): Promise<{
+        taskId: string;
+        understanding?: TaskUnderstanding;
+    }>;
+    startTask(taskId: string): Promise<void>;
     createTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;

@@ -91,7 +91,7 @@ export class InProcessTaskRuntimeHost {
     constructor(options) {
         this.options = options;
     }
-    async createTask(input) {
+    async prepareTask(input) {
         const taskId = this.createTaskId();
         if (input.permissionMode) {
             this.permissionModes.set(taskId, input.permissionMode);
@@ -122,15 +122,30 @@ export class InProcessTaskRuntimeHost {
             understanding,
             events: [],
             context: contextHistory.audit,
+            executionScope: input.executionScope,
             createdAt: this.now(),
             updatedAt: this.now(),
         };
         await this.saveSnapshot(snapshot);
         await this.appendEvent(taskId, { type: 'task_started', taskId });
         await this.appendEvent(taskId, { type: 'understanding_updated', understanding });
+        return { taskId, understanding };
+    }
+    async startTask(taskId) {
+        const snapshot = await this.requireSnapshot(taskId);
+        if (TERMINAL_STATUSES.has(snapshot.status)) {
+            throw new Error(`task is terminal: ${taskId}`);
+        }
+        if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId)) {
+            throw new Error(`task already started: ${taskId}`);
+        }
         const execPromise = this.executeTask(taskId).catch(() => undefined);
         this.executionPromises.set(taskId, execPromise);
-        return { taskId, understanding };
+    }
+    async createTask(input) {
+        const prepared = await this.prepareTask(input);
+        await this.startTask(prepared.taskId);
+        return prepared;
     }
     async *subscribeTask(taskId, options) {
         const snapshot = await this.requireSnapshot(taskId);
@@ -268,6 +283,7 @@ export class InProcessTaskRuntimeHost {
                 history: [...taskHistory],
                 permissionMode: this.permissionModes.get(taskId),
                 maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
+                executionScope: snapshot.executionScope,
                 emitRuntimeEvent: (event) => {
                     void this.appendRuntimeEvent(taskId, event);
                 },
@@ -290,6 +306,7 @@ export class InProcessTaskRuntimeHost {
                         history: [...taskHistory],
                         permissionMode: this.permissionModes.get(taskId),
                         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
+                        executionScope: snapshot.executionScope,
                         emitRuntimeEvent: (event) => {
                             void this.appendRuntimeEvent(taskId, event);
                         },
@@ -490,17 +507,42 @@ export class InProcessTaskRuntimeHost {
                 updatedAt: this.now(),
             };
             await this.saveSnapshot(next);
+            await this.options.onPersistedEvent?.({
+                taskId,
+                eventIndex: next.events.length - 1,
+                event,
+                snapshot: next,
+            });
             this.pushLiveEvent(taskId, event);
         });
     }
     async updateSnapshot(taskId, patch) {
         await this.enqueueMutation(taskId, async () => {
             const snapshot = await this.requireSnapshot(taskId);
-            await this.saveSnapshot({
+            const terminalStatus = patch.status !== undefined
+                && patch.status !== snapshot.status
+                && TERMINAL_STATUSES.has(patch.status)
+                ? patch.status
+                : undefined;
+            const terminalEvent = terminalStatus
+                ? { type: 'task_terminal', status: terminalStatus }
+                : undefined;
+            const next = {
                 ...snapshot,
                 ...patch,
+                events: terminalEvent ? [...snapshot.events, terminalEvent] : snapshot.events,
                 updatedAt: this.now(),
-            });
+            };
+            await this.saveSnapshot(next);
+            if (terminalEvent) {
+                await this.options.onPersistedEvent?.({
+                    taskId,
+                    eventIndex: next.events.length - 1,
+                    event: terminalEvent,
+                    snapshot: next,
+                });
+                this.pushLiveEvent(taskId, terminalEvent);
+            }
         });
     }
     async enqueueMutation(taskId, action) {

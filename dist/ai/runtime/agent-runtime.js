@@ -23,6 +23,8 @@ export class AgentRuntime {
     promptSnapshot;
     compactRunner;
     memoryStore;
+    taskId;
+    executionScope;
     // 空响应自动重试配置
     static MAX_EMPTY_RETRIES = 2;
     constructor(options) {
@@ -42,6 +44,8 @@ export class AgentRuntime {
         this.refreshModelPolicy();
         this.compactRunner = new CompactRunner(this.adapter);
         this.memoryStore = options.memoryStore;
+        this.taskId = options.taskId;
+        this.executionScope = options.executionScope;
     }
     setAdapter(adapter) {
         this.adapter = adapter;
@@ -326,8 +330,11 @@ export class AgentRuntime {
         const toolDefinitions = this.registry.getToolDefinitions()
             .slice()
             .sort((left, right) => left.name.localeCompare(right.name));
+        const session = this.session.exportSnapshot();
         return {
-            session: this.session.exportSnapshot(),
+            taskId: this.taskId ?? session.sessionId,
+            executionScope: this.executionScope,
+            session,
             messages: this.session.getMessages().map((message) => ({
                 role: message.role,
                 content: message.content.map((block) => ({ ...block })),

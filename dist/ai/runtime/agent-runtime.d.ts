@@ -5,6 +5,7 @@ import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
 import { AgentSessionState } from './session.js';
 import type { MemoryStore } from '../memory/store.js';
+import type { ArtifactWorkspaceExecutionScope } from '../../runtime/task-host/types.js';
 export interface AgentRuntimeOptions {
     adapter: ModelAdapter;
     registry: ToolRegistry;
@@ -17,6 +18,8 @@ export interface AgentRuntimeOptions {
     compactThreshold?: number;
     compactPlaceholder?: string;
     memoryStore?: MemoryStore;
+    taskId?: string;
+    executionScope?: ArtifactWorkspaceExecutionScope;
 }
 export declare class AgentRuntime {
     private adapter;
@@ -34,6 +37,8 @@ export declare class AgentRuntime {
     private promptSnapshot?;
     private compactRunner;
     private readonly memoryStore?;
+    private readonly taskId?;
+    private readonly executionScope?;
     private static readonly MAX_EMPTY_RETRIES;
     constructor(options: AgentRuntimeOptions);
     setAdapter(adapter: ModelAdapter): void;
