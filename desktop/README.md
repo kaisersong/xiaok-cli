@@ -4,15 +4,16 @@ Native desktop surface for xiaok task delivery, scheduled automation, and KSwarm
 
 ## Current Release Focus
 
-v1.4.22 completes the Chinese-first AI recording flow and restores packaged Computer Use readiness while keeping the Loop Engineering and sidecar packaging baselines aligned:
+v1.4.23 introduces the task-owned Artifact Workspace, gives Preview and Canvas independent full-height surfaces, and hardens the sidecar/plugin provenance used by packaged builds:
 
-- **Compact AI Recorder**: The Knowledge home page exposes `AI Recording`. Its start surface has an explicit Start action; active recording uses a draggable compact window with real microphone-level waveform, latest transcript sentence, elapsed time, Pause/Resume, Finish, and expand controls. Finish opens the full editor instead of saving immediately.
-- **Local and Online Streaming ASR**: Sherpa-ONNX Paraformer is the default Mandarin real-time engine. Whisper remains available for local fallback and final-file transcription. Users can also configure Alibaba Cloud Model Studio or Volcengine ASR credentials in Voice settings and receive provider-backed streaming text during recording.
-- **Punctuation and Structured Notes**: Final transcript text passes through Chinese punctuation restoration before the notes pipeline produces a timestamped content-derived title, summary, full transcript, decisions, and action items. The draft stays editable until the user explicitly saves it to the Knowledge Base.
-- **Model and Credential Management**: Voice settings show local model size and downloaded/incomplete/missing state with icon-only download, resume, refresh, and uninstall actions. Online provider credentials are stored through the Desktop configuration boundary and are never placed in the meeting plugin registry.
-- **Bundled Meeting Assistant**: Packaging now includes `kai-meeting-assistant` for the local Whisper fallback and meeting-summary skill. Live Sherpa-ONNX and online ASR orchestration remain in the Electron main process.
-- **Computer Use Recovery**: macOS capability checks can start or repair the official CuaDriver dependency, and readiness is invalidated when the packaged `app.asar` changes. Cold-start validation uses real `xiaok_computer_use` list-window and capture calls from the installed app.
-- **Release Validation**: Focused Desktop coverage passes 243 tests with 2 opt-in real-audio cases skipped; plugin packaging/rendering passes 44 tests; cross-platform/preload and CLI CUA boundaries pass 17 tests; the compact recorder passes its Playwright Electron E2E; typecheck, full Desktop build, CLI release build, and unsigned macOS packaging complete successfully.
+- **Preview / Canvas Surface Separation**: Content Preview and the spatial Canvas are mutually exclusive top-level tabs instead of stacked panes. Responsive and keyboard behavior remain covered by the renderer contract.
+- **Artifact Workspace Runtime**: Main-process services, SQLite storage, narrow preload/IPC APIs, renderer state, revisions, comparisons, task provenance, optimistic updates, and multi-window broadcasts now form one explicit artifact lifecycle.
+- **Safe Editing and Revisions**: HTML and Markdown edits, revision creation, compare views, and artifact mutation stay behind the existing file and security boundaries. Revision and spatial-workspace UI remain beta-gated until separately promoted.
+- **Failed-Task Recovery**: Replayed and live failures preserve partial assistant output, sanitize provider details, and expose localized quota/auth/service guidance instead of leaving a silent task surface.
+- **Result Deduplication**: Duplicate Result summaries are removed only from the display projection; persisted task results and artifact evidence remain intact.
+- **Bundled Slide Plugin 3.2.1**: Packaging includes themes, demos, the vendor manifest, Kingdee assets, and a deterministic packaged-app verifier bound to clean slide-creator source provenance.
+- **Intent Broker Hook Root Fix**: Code paths no longer inherit an unrelated runtime cwd, preventing stale Codex Stop/resume adapter paths while retaining explicit packaged-root overrides.
+- **Release Validation**: The release gate includes source and vendored Python suites, Intent Broker full/collaboration tests, focused CLI and Desktop suites, packaging contracts, typecheck, builds, and unsigned macOS packaging.
 
 Earlier release (v1.4.3) fused the dynamic workflow surface into the project kanban:
 

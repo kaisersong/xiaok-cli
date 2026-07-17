@@ -46,6 +46,19 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.23 turns Canvas into a task-owned artifact workspace and removes the cramped split between content preview and the spatial canvas. Preview and Canvas are now independent, full-height surfaces, while revisions, comparisons, task provenance, and multi-window updates stay attached to the artifact that produced them.
+
+**Artifact Workspace, Canvas, and Release Integrity Update:**
+
+- **Full-Height Preview and Canvas**: Preview and Canvas are mutually exclusive top-level surfaces instead of two vertically stacked panes. The tab interaction preserves keyboard navigation, responsive breakpoints, editor state, and the existing secure preview boundary.
+- **Task-Owned Artifact Workspace**: Artifact sessions, nodes, edges, revisions, comparisons, optimistic updates, and file mutations now flow through explicit main-process, preload, IPC, renderer, and SQLite contracts. Revision and spatial-workspace capabilities remain behind their existing beta flags until they are promoted independently.
+- **Reliable Task Feedback**: Failed and quota-limited tasks replay a localized, sanitized explanation instead of appearing silent. Generic task understanding and terminal events are persisted so a reopened thread retains its actual outcome and partial assistant output.
+- **Cleaner Results**: Result summaries are deduplicated in the display projection without deleting the underlying task result or artifact provenance, keeping history inspectable while avoiding repeated answer blocks.
+- **Complete Slide Plugin Packaging**: Desktop now packages the slide plugin's `themes/**`, `demos/**`, and `vendor-manifest.json`. `kai-slide-creator` 3.2.1 ships with clean source provenance, preset-fidelity gates, and the Kingdee theme assets required by installed builds.
+- **Codex Hook Root Fix**: The bundled Intent Broker now separates its code root from the runtime working directory, preventing Codex Stop and resume hooks from being rewritten to unrelated project paths while preserving packaged-root overrides.
+- **Release Validation**: The release gate covers the full slide-creator suite, vendored plugin integrity, Intent Broker full/collaboration tests, focused CLI task-runtime tests, Desktop main/preload/renderer tests, packaging contracts, typecheck, release builds, and unsigned macOS packaging.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, related-project baselines, and the Desktop Release workflow default align on `1.4.23` / `desktop-v1.4.23`.
+
 Xiaok Desktop v1.4.22 completes the Chinese-first AI recording workflow and restores reliable Computer Use validation. The Knowledge Base opens a compact recorder that stays out of the way during meetings, sales conversations, and ad-hoc discussions; transcription can run locally with Sherpa-ONNX or through user-configured Alibaba Cloud and Volcengine ASR, while the finish flow restores punctuation, generates structured notes, and keeps the result editable before it is saved.
 
 **AI Recording, Streaming ASR, and Computer Use Update:**

@@ -46,6 +46,19 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.23 把 Canvas 升级为任务归属明确的 Artifact Workspace，并解决内容预览区与空间画布上下分割、互相挤压的问题。预览和画布现在是两个独立的全高主界面；版本、对比、任务来源和多窗口更新仍与产生产物的任务保持绑定。
+
+**Artifact Workspace、Canvas 与发布完整性更新：**
+
+- **全高预览与画布**：Preview 和 Canvas 从上下堆叠的两个区域改为互斥的顶层界面。Tab 交互保留键盘导航、响应式断点、编辑状态和既有的安全预览边界。
+- **任务归属的 Artifact Workspace**：artifact session、节点、连线、版本、对比、乐观更新和文件写入现在都有明确的 main process、preload、IPC、renderer 与 SQLite contract。Revision 与 Spatial Workspace 能力继续遵循既有 beta flag，后续可独立决定正式开放节奏。
+- **可靠的失败反馈**：失败或额度受限的任务在重放时会展示本地化、脱敏后的原因，不再表现为“没有执行也没有反馈”。通用任务理解与 terminal event 会持久化，重新打开会话后仍能看到真实结果和已有的部分回复。
+- **更干净的 Result 展示**：只在展示投影中消除重复摘要，不删除底层 `TaskResult` 或 artifact provenance；历史仍可检查，同时避免答案块重复出现。
+- **完整的幻灯片插件打包**：Desktop 现在会打包 slide plugin 的 `themes/**`、`demos/**` 与 `vendor-manifest.json`。`kai-slide-creator` 3.2.1 带有干净的源提交来源、preset fidelity gates，以及安装包运行所需的 Kingdee 主题资产。
+- **Codex Hook 根目录修复**：随包 Intent Broker 将代码根目录与运行时工作目录分离，避免 Codex Stop / resume hook 被改写到无关项目路径，同时保留 packaged root 显式覆盖能力。
+- **发布验证**：发布门禁覆盖 slide-creator 全量测试、vendored plugin 完整性、Intent Broker 全量与 collaboration 测试、CLI task runtime 聚焦测试、Desktop main/preload/renderer 测试、打包合同、typecheck、release build 和 macOS 未签名打包。
+- **发布对齐**：root CLI 元数据、Desktop package 元数据、package locks、相关项目基线和 Desktop Release workflow 默认值统一为 `1.4.23` / `desktop-v1.4.23`。
+
 Xiaok Desktop v1.4.22 完成了中文优先的 AI 录音闭环，并恢复了可验证的 Computer Use 能力。知识库现在使用不打扰工作的紧凑录音悬浮窗，适合会议、销售现场和临时讨论；转写既可以使用本地 Sherpa-ONNX，也可以连接用户自行配置的阿里云或火山引擎 ASR。点“完成”后，系统会等待流式结果收口、恢复中文标点、生成结构化纪要，并在保存前允许用户编辑。
 
 **AI 录音、流式 ASR 与 Computer Use 更新：**
