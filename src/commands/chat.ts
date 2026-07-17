@@ -3143,6 +3143,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
               worktreeManager: platform.worktreeManager,
               forkContext: {
+                taskId: sessionId,
                 session: agent.exportSession(),
                 messages: agent.exportSession().messages,
                 systemPrompt: await buildPrompt(skills),

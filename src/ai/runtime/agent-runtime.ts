@@ -21,6 +21,7 @@ import type { MemoryStore } from '../memory/store.js';
 import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
 import type { TraceBundleV1, TraceToolCall } from '../../runtime/trace/schema.js';
 import { MODEL_OUTPUT_CAP, MODEL_OUTPUT_TRUNCATION_MARKER } from '../../shared/stream-safety/redact.js';
+import type { ArtifactWorkspaceExecutionScope } from '../../runtime/task-host/types.js';
 
 export interface AgentRuntimeOptions {
   adapter: ModelAdapter;
@@ -34,6 +35,8 @@ export interface AgentRuntimeOptions {
   compactThreshold?: number;
   compactPlaceholder?: string;
   memoryStore?: MemoryStore;
+  taskId?: string;
+  executionScope?: ArtifactWorkspaceExecutionScope;
 }
 
 export class AgentRuntime {
@@ -52,6 +55,8 @@ export class AgentRuntime {
   private promptSnapshot?: PromptSnapshot;
   private compactRunner: CompactRunner;
   private readonly memoryStore?: MemoryStore;
+  private readonly taskId?: string;
+  private readonly executionScope?: ArtifactWorkspaceExecutionScope;
 
   // 空响应自动重试配置
   private static readonly MAX_EMPTY_RETRIES = 2;
@@ -73,6 +78,8 @@ export class AgentRuntime {
     this.refreshModelPolicy();
     this.compactRunner = new CompactRunner(this.adapter);
     this.memoryStore = options.memoryStore;
+    this.taskId = options.taskId;
+    this.executionScope = options.executionScope;
   }
 
   setAdapter(adapter: ModelAdapter): void {
@@ -411,8 +418,11 @@ export class AgentRuntime {
       .slice()
       .sort((left, right) => left.name.localeCompare(right.name));
 
+    const session = this.session.exportSnapshot();
     return {
-      session: this.session.exportSnapshot(),
+      taskId: this.taskId ?? session.sessionId,
+      executionScope: this.executionScope,
+      session,
       messages: this.session.getMessages().map((message) => ({
         role: message.role,
         content: message.content.map((block) => ({ ...block })),

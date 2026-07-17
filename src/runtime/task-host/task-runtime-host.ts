@@ -8,6 +8,7 @@ import { NeedsUserQuestionCorrelator } from './question-correlator.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
 import { buildTaskUnderstanding } from './task-understanding.js';
 import type {
+  ArtifactWorkspaceExecutionScope,
   ArtifactKind,
   ArtifactSummary,
   DesktopTaskEvent,
@@ -22,6 +23,7 @@ import type {
   TaskPermissionMode,
   TaskRuntimeHost,
   TaskSnapshot,
+  TaskSnapshotStatus,
   TaskUnderstanding,
   UserAnswer,
 } from './types.js';
@@ -42,7 +44,15 @@ export interface TaskRunnerInput {
   history: HistoryMessage[];
   permissionMode?: 'plan' | 'auto' | 'default';
   maxToolLoopIterations?: number;
+  executionScope?: ArtifactWorkspaceExecutionScope;
   emitRuntimeEvent(event: RuntimeEvent): void;
+}
+
+export interface PersistedTaskEvent {
+  taskId: string;
+  eventIndex: number;
+  event: DesktopTaskEvent;
+  snapshot: TaskSnapshot;
 }
 
 export type TaskRunner = (input: TaskRunnerInput) => Promise<void>;
@@ -56,6 +66,7 @@ export interface InProcessTaskRuntimeHostOptions {
   createTaskId?: () => string;
   createSessionId?: () => string;
   taskWatchdogMs?: number;
+  onPersistedEvent?: (input: PersistedTaskEvent) => Promise<void> | void;
   aheGuards?: {
     artifactEvidence?: boolean;
     recoveryContinuity?: boolean;
@@ -190,7 +201,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
 
   constructor(private readonly options: InProcessTaskRuntimeHostOptions) {}
 
-  async createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+  async prepareTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     const taskId = this.createTaskId();
     if (input.permissionMode) {
       this.permissionModes.set(taskId, input.permissionMode);
@@ -221,6 +232,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       understanding,
       events: [],
       context: contextHistory.audit,
+      executionScope: input.executionScope,
       createdAt: this.now(),
       updatedAt: this.now(),
     };
@@ -228,10 +240,25 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     await this.saveSnapshot(snapshot);
     await this.appendEvent(taskId, { type: 'task_started', taskId });
     await this.appendEvent(taskId, { type: 'understanding_updated', understanding });
+    return { taskId, understanding };
+  }
+
+  async startTask(taskId: string): Promise<void> {
+    const snapshot = await this.requireSnapshot(taskId);
+    if (TERMINAL_STATUSES.has(snapshot.status)) {
+      throw new Error(`task is terminal: ${taskId}`);
+    }
+    if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId)) {
+      throw new Error(`task already started: ${taskId}`);
+    }
     const execPromise = this.executeTask(taskId).catch(() => undefined);
     this.executionPromises.set(taskId, execPromise);
+  }
 
-    return { taskId, understanding };
+  async createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+    const prepared = await this.prepareTask(input);
+    await this.startTask(prepared.taskId);
+    return prepared;
   }
 
   async *subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent> {
@@ -384,6 +411,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         history: [...taskHistory],
         permissionMode: this.permissionModes.get(taskId),
         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
+        executionScope: snapshot.executionScope,
         emitRuntimeEvent: (event) => {
           void this.appendRuntimeEvent(taskId, event);
         },
@@ -406,6 +434,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
             history: [...taskHistory],
             permissionMode: this.permissionModes.get(taskId),
             maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
+            executionScope: snapshot.executionScope,
             emitRuntimeEvent: (event) => {
               void this.appendRuntimeEvent(taskId, event);
             },
@@ -613,6 +642,12 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         updatedAt: this.now(),
       };
       await this.saveSnapshot(next);
+      await this.options.onPersistedEvent?.({
+        taskId,
+        eventIndex: next.events.length - 1,
+        event,
+        snapshot: next,
+      });
       this.pushLiveEvent(taskId, event);
     });
   }
@@ -623,11 +658,30 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   ): Promise<void> {
     await this.enqueueMutation(taskId, async () => {
       const snapshot = await this.requireSnapshot(taskId);
-      await this.saveSnapshot({
+      const terminalStatus = patch.status !== undefined
+        && patch.status !== snapshot.status
+        && TERMINAL_STATUSES.has(patch.status)
+        ? patch.status as Extract<TaskSnapshotStatus, 'completed' | 'failed' | 'cancelled'>
+        : undefined;
+      const terminalEvent: DesktopTaskEvent | undefined = terminalStatus
+        ? { type: 'task_terminal', status: terminalStatus }
+        : undefined;
+      const next: TaskSnapshot = {
         ...snapshot,
         ...patch,
+        events: terminalEvent ? [...snapshot.events, terminalEvent] : snapshot.events,
         updatedAt: this.now(),
-      });
+      };
+      await this.saveSnapshot(next);
+      if (terminalEvent) {
+        await this.options.onPersistedEvent?.({
+          taskId,
+          eventIndex: next.events.length - 1,
+          event: terminalEvent,
+          snapshot: next,
+        });
+        this.pushLiveEvent(taskId, terminalEvent);
+      }
     });
   }
 

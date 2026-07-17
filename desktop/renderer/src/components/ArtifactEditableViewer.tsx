@@ -27,6 +27,8 @@ interface ArtifactEditableViewerProps {
   htmlContent: string;
   /** Absolute path, artifact route, or stable edit target id */
   filePath: string;
+  /** Whether this retained viewer is the active interaction surface. */
+  interactionActive?: boolean;
   /** Optional save implementation for project-scoped artifacts */
   onSaveHtmlEdit?: (content: string) => Promise<{ ok?: boolean; success?: boolean; error?: string } | null | undefined>;
   /** External request to switch the initial viewer mode for a specific open action */
@@ -39,6 +41,10 @@ interface ArtifactEditableViewerProps {
   onFinish: () => void;
   /** Called when user clicks refresh */
   onRefresh?: () => void;
+  /** Notifies the owning canvas while the sandboxed iframe owns keyboard focus. */
+  onIframeFocusChange?: (focused: boolean) => void;
+  /** Lets the owning canvas return focus to the source node. */
+  onIframeFocusReturn?: () => void;
 }
 
 type HtmlEditApplyStatus = 'idle' | 'failed';
@@ -60,15 +66,20 @@ interface HtmlEditDesktopApi {
 export function ArtifactEditableViewer({
   htmlContent,
   filePath,
+  interactionActive = true,
   onSaveHtmlEdit,
   editModeRequest,
   onAnnotation,
   onRevert,
   onFinish,
   onRefresh,
+  onIframeFocusChange,
+  onIframeFocusReturn,
 }: ArtifactEditableViewerProps) {
   const { t } = useLocale();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const interactionActiveRef = useRef(interactionActive);
+  interactionActiveRef.current = interactionActive;
   const lastEditModeRequestIdRef = useRef<number | null>(null);
   const [state, dispatch] = useReducer(artifactEditingReducer, INITIAL_STATE);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,8 +104,29 @@ export function ArtifactEditableViewer({
   const [redoStack, setRedoStack] = useState<Array<{ before: string; after: string }>>([]);
 
   const postToFrame = useCallback((message: Record<string, unknown>) => {
+    const enablesIframeInteraction = message.enabled === true
+      && (message.type === 'xiaok:setEditMode' || message.type === 'xiaok:setAnnotationMode');
+    if (!interactionActiveRef.current && enablesIframeInteraction) return;
     iframeRef.current?.contentWindow?.postMessage(message, '*');
   }, []);
+
+  const annotationModeEnabled = state === 'annotating'
+    || state === 'reviewing'
+    || state === 'timeout_idle';
+
+  useEffect(() => {
+    if (!interactionActive) {
+      postToFrame({ type: 'xiaok:setEditMode', enabled: false });
+      postToFrame({ type: 'xiaok:setAnnotationMode', enabled: false });
+      return;
+    }
+
+    postToFrame({ type: 'xiaok:setEditMode', enabled: htmlEditEnabled });
+    postToFrame({
+      type: 'xiaok:setAnnotationMode',
+      enabled: !htmlEditEnabled && annotationModeEnabled,
+    });
+  }, [annotationModeEnabled, htmlEditEnabled, interactionActive, postToFrame]);
 
   const confirmDiscardDirty = useCallback(() => {
     if (!dirty) return true;
@@ -156,6 +188,7 @@ export function ArtifactEditableViewer({
   // Listen for postMessage from iframe
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
+      if (!interactionActiveRef.current) return;
       if (event.source && iframeRef.current?.contentWindow && event.source !== iframeRef.current.contentWindow) {
         return;
       }
@@ -217,10 +250,10 @@ export function ArtifactEditableViewer({
       postToFrame({ type: 'xiaok:setEditMode', enabled: true });
       return;
     }
-    if (state === 'annotating' || state === 'reviewing' || state === 'timeout_idle') {
+    if (annotationModeEnabled) {
       postToFrame({ type: 'xiaok:setAnnotationMode', enabled: true });
     }
-  }, [htmlEditEnabled, postToFrame, state]);
+  }, [annotationModeEnabled, htmlEditEnabled, postToFrame]);
 
   // Toggle annotation mode
   const handleToggleAnnotate = useCallback(() => {
@@ -482,9 +515,18 @@ export function ArtifactEditableViewer({
         <iframe
           ref={iframeRef}
           src={blobUrl}
-          title="Artifact preview"
+          title={t.artifactWorkspace.previewFrameTitle}
           sandbox="allow-scripts allow-forms allow-popups allow-downloads"
           onLoad={handleIframeLoad}
+          onFocus={() => {
+            if (!interactionActiveRef.current) return;
+            onIframeFocusChange?.(true);
+          }}
+          onBlur={() => {
+            if (!interactionActiveRef.current) return;
+            onIframeFocusChange?.(false);
+            onIframeFocusReturn?.();
+          }}
           className="artifact-editable-iframe"
         />
         <HtmlEditInspector

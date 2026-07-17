@@ -381,6 +381,34 @@ describe('DesktopTaskEvent projection', () => {
     });
   });
 
+  it('does not infer an artifact from an ordinary post_tool_use response', () => {
+    const events = projectRuntimeEventsToDesktopEvents({
+      taskId: 'task_1',
+      events: [{
+        type: 'post_tool_use',
+        sessionId: 's1',
+        turnId: 't1',
+        toolName: 'Write',
+        toolInput: { file_path: '/tmp/report.md' },
+        toolResponse: JSON.stringify({
+          ok: true,
+          artifactPath: '/tmp/report.md',
+          kind: 'markdown',
+          mimeType: 'text/markdown',
+        }),
+        toolUseId: 'tu-write-artifact-shaped',
+      }],
+    });
+
+    expect(events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'artifact_recorded' }),
+    ]));
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'progress', stage: 'completed' }),
+      expect.objectContaining({ type: 'canvas_tool_result', toolName: 'Write' }),
+    ]));
+  });
+
   it('truncates toolResponse to 10KB in canvas_tool_result', () => {
     const largeResponse = 'x'.repeat(20000);
     const trace: RuntimeEvent[] = [

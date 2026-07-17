@@ -10,6 +10,10 @@ import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 interface CanvasPreviewProps {
   filePath: string;
   content: string;
+  interactionActive?: boolean;
+  interactionMode?: 'editable' | 'read_only';
+  onIframeFocusChange?: (focused: boolean) => void;
+  onIframeFocusReturn?: () => void;
   modeRequest?: CanvasPreviewModeRequest;
   /** Called when user submits an annotation from the artifact toolbar */
   onAnnotation?: (message: string) => void;
@@ -183,7 +187,17 @@ function PdfCanvasPreview({
   );
 }
 
-export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, onRefresh }: CanvasPreviewProps) {
+export function CanvasPreview({
+  filePath,
+  content,
+  interactionActive = true,
+  interactionMode = 'editable',
+  onIframeFocusChange,
+  onIframeFocusReturn,
+  modeRequest,
+  onAnnotation,
+  onRefresh,
+}: CanvasPreviewProps) {
   const { t } = useLocale();
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const [markdownEditEnabled, setMarkdownEditEnabled] = useState(false);
@@ -199,6 +213,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
   const isPdf = isPdfFile(filePath);
   const isBinary = isBinaryOfficeFile(filePath);
   const isText = isTextFile(filePath, content);
+  const markdownEditingAllowed = interactionMode === 'editable';
   const fileName = useMemo(() => getFileName(filePath), [filePath]);
   const pdfSrc = useMemo(() => (
     isPdf && isPdfDataUrl(content) ? content.trim() : null
@@ -206,12 +221,12 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
 
   // Create blob URL for HTML preview
   const htmlBlobUrl = useMemo(() => {
-    if (!isHtml || !content) return null;
+    if (!isHtml || !content || interactionMode === 'read_only') return null;
     const blob = new Blob([content], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     iframeSrc.current = url;
     return url;
-  }, [isHtml, content]);
+  }, [isHtml, content, interactionMode]);
 
   // Cleanup blob URL
   useEffect(() => {
@@ -248,7 +263,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
   }, [content, markdownEditEnabled]);
 
   useEffect(() => {
-    if (!isMarkdown || !modeRequest || modeRequest.id === 0 || lastMarkdownEditRequestIdRef.current === modeRequest.id) return;
+    if (!isMarkdown || !markdownEditingAllowed || !modeRequest || modeRequest.id === 0 || lastMarkdownEditRequestIdRef.current === modeRequest.id) return;
     lastMarkdownEditRequestIdRef.current = modeRequest.id;
     if (modeRequest.startInEditMode) {
       setMarkdownDraft(content);
@@ -259,7 +274,11 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
     } else {
       setMarkdownEditEnabled(false);
     }
-  }, [content, isMarkdown, modeRequest]);
+  }, [content, isMarkdown, markdownEditingAllowed, modeRequest]);
+
+  useEffect(() => {
+    if (!markdownEditingAllowed) setMarkdownEditEnabled(false);
+  }, [markdownEditingAllowed]);
 
   const handleAnnotation = useCallback((payload: AnnotationPayload) => {
     if (onAnnotation) {
@@ -311,6 +330,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
   }, [content, fileName, isPdf]);
 
   const handleSaveMarkdown = useCallback(async () => {
+    if (!markdownEditingAllowed) return;
     setMarkdownSaveStatus('saving');
     try {
       const api = getDesktopApi() as { saveFile?: (input: { filePath: string; content: string; purpose?: string }) => Promise<{ ok?: boolean; success?: boolean; error?: string }> } | null;
@@ -325,7 +345,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
     } catch {
       setMarkdownSaveStatus('failed');
     }
-  }, [filePath, markdownDraft, onRefresh]);
+  }, [filePath, markdownDraft, markdownEditingAllowed, onRefresh]);
 
   if (isBinary) {
     return (
@@ -391,7 +411,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
               </button>
             </div>
           )}
-          {isMarkdown && (
+          {isMarkdown && markdownEditingAllowed && (
             <button
               type="button"
               onClick={() => {
@@ -424,19 +444,40 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
 
       {/* Content */}
       <div className={`flex-1 min-h-0 ${isFramedPreview ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
-        {viewMode === 'preview' && isHtml && content && (
+        {viewMode === 'preview' && isHtml && content && interactionMode === 'read_only' && (
+          <iframe
+            srcDoc={content}
+            title={t.artifactWorkspace.previewFrameTitle}
+            sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+            className="artifact-editable-iframe"
+            onFocus={() => {
+              if (!interactionActive) return;
+              onIframeFocusChange?.(true);
+            }}
+            onBlur={() => {
+              if (!interactionActive) return;
+              onIframeFocusChange?.(false);
+              onIframeFocusReturn?.();
+            }}
+          />
+        )}
+
+        {viewMode === 'preview' && isHtml && content && interactionMode === 'editable' && (
           <ArtifactEditableViewer
             htmlContent={content}
             filePath={filePath}
+            interactionActive={interactionActive}
             editModeRequest={modeRequest}
             onAnnotation={handleAnnotation}
             onRevert={handleRevert}
             onFinish={handleFinish}
             onRefresh={onRefresh}
+            onIframeFocusChange={onIframeFocusChange}
+            onIframeFocusReturn={onIframeFocusReturn}
           />
         )}
 
-        {viewMode === 'preview' && isMarkdown && markdownEditEnabled && (
+        {viewMode === 'preview' && isMarkdown && markdownEditingAllowed && markdownEditEnabled && (
           <div className="flex h-full flex-col bg-[var(--c-bg-card)]">
             <div className="flex shrink-0 items-center gap-2 border-b border-[var(--c-border)] px-3 py-2">
               <span className="text-xs font-medium text-[var(--c-text-secondary)]">{t.artifactMarkdownTextLabel}</span>
@@ -479,7 +520,7 @@ export function CanvasPreview({ filePath, content, modeRequest, onAnnotation, on
           </div>
         )}
 
-        {viewMode === 'preview' && isMarkdown && !markdownEditEnabled && (
+        {viewMode === 'preview' && isMarkdown && (!markdownEditingAllowed || !markdownEditEnabled) && (
           <div className="h-full overflow-auto bg-[var(--c-bg-card)] p-4">
             <MarkdownRenderer content={content} />
           </div>

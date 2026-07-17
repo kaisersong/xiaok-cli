@@ -78,6 +78,24 @@ describe('FileTaskSnapshotStore', () => {
       expect.arrayContaining([{ taskId: 'task_1' }, { taskId: 'task_2' }]),
     );
   });
+
+  it('round-trips an artifact workspace execution scope without interpreting it', async () => {
+    const store = new FileTaskSnapshotStore(rootDir);
+    const scoped = {
+      ...createSnapshot('task_workspace', 'running'),
+      executionScope: {
+        kind: 'artifact_workspace_generation' as const,
+        generationRequestId: 'generation-1',
+        leaseId: 'lease-1',
+      },
+    };
+
+    await store.save(scoped);
+
+    expect(await new FileTaskSnapshotStore(rootDir).recoverTask('task_workspace')).toMatchObject({
+      executionScope: scoped.executionScope,
+    });
+  });
 });
 
 function createSnapshot(taskId: string, status: TaskSnapshot['status']): TaskSnapshot {

@@ -683,6 +683,11 @@ async function createWindow(): Promise<BrowserWindow> {
   } catch (err) {
     console.error('[main] recoverStaleTasks failed (startup continues):', err);
   }
+  try {
+    await services.reconcileArtifactWorkspace();
+  } catch (err) {
+    console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
+  }
 
   ipcMain.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
   ipcMain.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));

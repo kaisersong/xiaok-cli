@@ -1,6 +1,12 @@
 const MODEL_AUTH_ERROR_MESSAGE = '模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。'
 const MODEL_SERVICE_ERROR_MESSAGE = '模型服务请求失败，请检查模型配置或稍后重试。'
 
+interface UserFacingErrorOptions {
+  providerAuth?: string
+  providerService?: string
+  modelUsageLimitReached?: (resetAt?: string) => string
+}
+
 function errorText(error: unknown): string {
   if (typeof error === 'string') return error
   if (error instanceof Error) return error.message
@@ -30,13 +36,28 @@ function isProviderResponseDump(text: string): boolean {
   return /^Error:\s*\d{3}\s*[{[]/i.test(text) || /{"error"/i.test(text)
 }
 
-export function sanitizeUserFacingErrorMessage(error: unknown, fallbackMessage = '请求失败'): string {
+function isModelUsageLimitError(text: string): boolean {
+  return /\b429\b/.test(text) && /usage\s+limit|quota|使用上限|限额|额度/i.test(text)
+}
+
+function extractResetAt(text: string): string | undefined {
+  return text.match(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})?/)?.[0]
+}
+
+export function sanitizeUserFacingErrorMessage(
+  error: unknown,
+  fallbackMessage = '请求失败',
+  options?: UserFacingErrorOptions,
+): string {
   const text = errorText(error).trim()
   if (!text) return fallbackMessage
-  if (isProviderAuthError(text)) return MODEL_AUTH_ERROR_MESSAGE
+  if (isProviderAuthError(text)) return options?.providerAuth ?? MODEL_AUTH_ERROR_MESSAGE
+  if (isModelUsageLimitError(text) && options?.modelUsageLimitReached) {
+    return options.modelUsageLimitReached(extractResetAt(text))
+  }
   if (isProviderResponseDump(text)) {
     console.error('[error-display] provider response dump (raw):', text)
-    return MODEL_SERVICE_ERROR_MESSAGE
+    return options?.providerService ?? MODEL_SERVICE_ERROR_MESSAGE
   }
   return text.replace(/^Error:\s*/i, '').trim() || fallbackMessage
 }

@@ -15,6 +15,22 @@ import type {
   DesktopTaskEvent,
   ProtocolId,
   ConnectorTestResult,
+  ArtifactWorkspaceVersionInput,
+  CancelArtifactGenerationInput,
+  CreateArtifactPlaceholderInput,
+  CreateArtifactWorkspaceCollectionInput,
+  CreateArtifactWorkspaceNoteInput,
+  CreateArtifactWorkspaceRelationInput,
+  GetArtifactWorkspaceSnapshotInput,
+  PreferArtifactVersionInput,
+  RecordArtifactWorkspaceEventInput,
+  RemoveArtifactWorkspaceNodeInput,
+  RetryArtifactGenerationInput,
+  SaveArtifactWorkspaceViewportInput,
+  SetArtifactCollectionMembershipInput,
+  SubmitArtifactGenerationInput,
+  UpdateArtifactWorkspaceLayoutInput,
+  UpdateArtifactWorkspaceNoteInput,
 } from '../../../electron/preload-api';
 import type {
   AutomationOverviewSnapshotView,
@@ -547,6 +563,74 @@ export const api = {
   async readFileContent(filePath: string): Promise<{ content: string; error?: string }> {
     log.info('readFileContent', filePath);
     return await window.xiaokDesktop.readFileContent(filePath);
+  },
+
+  async getArtifactWorkspaceSnapshot(input: GetArtifactWorkspaceSnapshotInput) {
+    return await window.xiaokDesktop.getArtifactWorkspaceSnapshot(input);
+  },
+
+  async readArtifactWorkspaceVersionPreview(input: ArtifactWorkspaceVersionInput) {
+    return await window.xiaokDesktop.readArtifactWorkspaceVersionPreview(input);
+  },
+
+  async exportArtifactWorkspaceVersion(input: ArtifactWorkspaceVersionInput) {
+    return await window.xiaokDesktop.exportArtifactWorkspaceVersion(input);
+  },
+
+  async createArtifactPlaceholder(input: CreateArtifactPlaceholderInput) {
+    return await window.xiaokDesktop.createArtifactPlaceholder(input);
+  },
+
+  async submitArtifactGeneration(input: SubmitArtifactGenerationInput) {
+    return await window.xiaokDesktop.submitArtifactGeneration(input);
+  },
+
+  async cancelArtifactGeneration(input: CancelArtifactGenerationInput) {
+    return await window.xiaokDesktop.cancelArtifactGeneration(input);
+  },
+
+  async retryArtifactGeneration(input: RetryArtifactGenerationInput) {
+    return await window.xiaokDesktop.retryArtifactGeneration(input);
+  },
+
+  async preferArtifactVersion(input: PreferArtifactVersionInput) {
+    return await window.xiaokDesktop.preferArtifactVersion(input);
+  },
+
+  async removeArtifactWorkspaceNode(input: RemoveArtifactWorkspaceNodeInput) {
+    return await window.xiaokDesktop.removeArtifactWorkspaceNode(input);
+  },
+
+  async updateArtifactWorkspaceLayout(input: UpdateArtifactWorkspaceLayoutInput) {
+    return await window.xiaokDesktop.updateArtifactWorkspaceLayout(input);
+  },
+
+  async saveArtifactWorkspaceViewport(input: SaveArtifactWorkspaceViewportInput) {
+    return await window.xiaokDesktop.saveArtifactWorkspaceViewport(input);
+  },
+
+  async createArtifactWorkspaceCollection(input: CreateArtifactWorkspaceCollectionInput) {
+    return await window.xiaokDesktop.createArtifactWorkspaceCollection(input);
+  },
+
+  async createArtifactWorkspaceNote(input: CreateArtifactWorkspaceNoteInput) {
+    return await window.xiaokDesktop.createArtifactWorkspaceNote(input);
+  },
+
+  async updateArtifactWorkspaceNote(input: UpdateArtifactWorkspaceNoteInput) {
+    return await window.xiaokDesktop.updateArtifactWorkspaceNote(input);
+  },
+
+  async createArtifactWorkspaceRelation(input: CreateArtifactWorkspaceRelationInput) {
+    return await window.xiaokDesktop.createArtifactWorkspaceRelation(input);
+  },
+
+  async setArtifactCollectionMembership(input: SetArtifactCollectionMembershipInput) {
+    return await window.xiaokDesktop.setArtifactCollectionMembership(input);
+  },
+
+  async recordArtifactWorkspaceEvent(input: RecordArtifactWorkspaceEventInput) {
+    return await window.xiaokDesktop.recordArtifactWorkspaceEvent(input);
   },
 
   // ---------------------

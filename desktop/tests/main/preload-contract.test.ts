@@ -15,6 +15,35 @@ import {
   INVOKE_CHANNEL_BY_KEY,
   KNOWN_UNROUTED_HANDLERS,
 } from '../../electron/preload-api.js';
+import {
+  normalizeArtifactWorkspaceIpcError,
+  sanitizeArtifactWorkspaceIpcInput,
+} from '../../electron/ipc.js';
+
+const ARTIFACT_WORKSPACE_API_KEYS = [
+  'getArtifactWorkspaceSnapshot',
+  'closeArtifactWorkspace',
+  'readArtifactWorkspaceVersionPreview',
+  'exportArtifactWorkspaceVersion',
+  'createArtifactPlaceholder',
+  'submitArtifactGeneration',
+  'cancelArtifactGeneration',
+  'retryArtifactGeneration',
+  'preferArtifactVersion',
+  'removeArtifactWorkspaceNode',
+  'updateArtifactWorkspaceLayout',
+  'saveArtifactWorkspaceViewport',
+  'createArtifactWorkspaceCollection',
+  'createArtifactWorkspaceNote',
+  'updateArtifactWorkspaceNote',
+  'createArtifactWorkspaceRelation',
+  'setArtifactCollectionMembership',
+  'recordArtifactWorkspaceEvent',
+] as const;
+
+const ARTIFACT_WORKSPACE_CHANNEL_BY_KEY = Object.fromEntries(
+  ARTIFACT_WORKSPACE_API_KEYS.map((key) => [key, `desktop:artifactWorkspace:${key}`]),
+);
 
 describe('preload API contract', () => {
   it('exposes only task-semantic APIs', () => {
@@ -42,6 +71,8 @@ describe('preload API contract', () => {
       'openArtifact',
       'openFileInSystemApp',
       'readFileContent',
+      ...ARTIFACT_WORKSPACE_API_KEYS,
+      'onArtifactWorkspaceChanged',
       'selectHtmlEditMedia',
       'listSkills',
       'installSkill',
@@ -209,6 +240,145 @@ describe('preload API contract', () => {
     expect(api).not.toHaveProperty('query');
     expect(api).not.toHaveProperty('execute');
     expect(api).not.toHaveProperty('fs');
+    expect(api).not.toHaveProperty('reconcileArtifactWorkspace');
+    expect(api).not.toHaveProperty('gcArtifactWorkspace');
+    expect(api).not.toHaveProperty('renewArtifactWorkspaceLease');
+    expect(api).not.toHaveProperty('updateArtifactWorkspace');
+    expect(api).not.toHaveProperty('executeCanvasCommand');
+  });
+
+  it('routes exactly seventeen artifact workspace operations and strips main-owned identity fields', async () => {
+    const successfulSnapshot = {
+      ok: true,
+      data: {
+        workspace: { id: 'workspace-1', conversationId: 'conversation-1' },
+        nodes: [],
+        relations: [],
+        versions: [],
+      },
+    };
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(successfulSnapshot),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer) as Record<string, (input: unknown) => Promise<unknown>>;
+    const maliciousInput = {
+      conversationId: 'conversation-1',
+      workspaceRootId: 'root-1',
+      versionId: 'version-1',
+      nodeId: 'node-1',
+      requestSource: 'agent',
+      viewKey: 'renderer-forged-view',
+    };
+
+    for (const key of ARTIFACT_WORKSPACE_API_KEYS) {
+      await api[key]!(maliciousInput);
+    }
+
+    for (const key of ARTIFACT_WORKSPACE_API_KEYS) {
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+        ARTIFACT_WORKSPACE_CHANNEL_BY_KEY[key],
+        expect.not.objectContaining({
+          requestSource: expect.anything(),
+          viewKey: expect.anything(),
+        }),
+      );
+    }
+    expect(JSON.parse(JSON.stringify(successfulSnapshot))).toEqual(successfulSnapshot);
+  });
+
+  it('preserves the stable artifact workspace IPC error envelope', async () => {
+    const errorResult = {
+      ok: false,
+      error: {
+        code: 'layout_revision_conflict',
+        message: 'Layout revision conflict',
+        canonical: { nodeId: 'node-1', x: 32, y: 48, layoutRevision: 3 },
+      },
+    };
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(errorResult),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await expect(api.updateArtifactWorkspaceLayout({
+      conversationId: 'conversation-1',
+      workspaceRootId: 'root-1',
+      patches: [],
+    })).resolves.toEqual(errorResult);
+  });
+
+  it('main sanitizes artifact workspace primitives and never trusts renderer-owned identity', () => {
+    expect(sanitizeArtifactWorkspaceIpcInput('getArtifactWorkspaceSnapshot', {
+      conversationId: 'conversation-1',
+    })).toEqual({
+      conversationId: 'conversation-1',
+      workspaceRootId: 'desktop-artifact-workspace-v1',
+    });
+    expect(sanitizeArtifactWorkspaceIpcInput('submitArtifactGeneration', {
+      conversationId: 'conversation-1',
+      prompt: 'revise',
+      selectedArtifact: {
+        sourceTaskId: 'task-1', artifactId: 'artifact-1', kind: 'markdown',
+        filePath: '/renderer/forbidden.md',
+      },
+      requestedKind: 'markdown',
+      expectedStructureRevision: 0,
+    })).toEqual({
+      conversationId: 'conversation-1',
+      workspaceRootId: 'desktop-artifact-workspace-v1',
+      prompt: 'revise',
+      selectedArtifact: { sourceTaskId: 'task-1', artifactId: 'artifact-1', kind: 'markdown' },
+      requestedKind: 'markdown',
+      expectedStructureRevision: 0,
+    });
+
+    expect(sanitizeArtifactWorkspaceIpcInput('saveArtifactWorkspaceViewport', {
+      conversationId: 'conversation-1',
+      workspaceRootId: 'root-1',
+      viewport: { x: 10, y: 20, zoom: 1.25, injected: true },
+      expectedViewRevision: 2,
+      requestSource: 'agent',
+      viewKey: 'renderer-forged-view',
+      arbitrarySql: 'drop table workspaces',
+    })).toEqual({
+      conversationId: 'conversation-1',
+      workspaceRootId: 'desktop-artifact-workspace-v1',
+      viewport: { x: 10, y: 20, zoom: 1.25 },
+      expectedViewRevision: 2,
+    });
+
+    expect(() => sanitizeArtifactWorkspaceIpcInput('updateArtifactWorkspaceLayout', {
+      conversationId: 'conversation-1',
+      workspaceRootId: 'root-1',
+      patches: [{ nodeId: 'node-1', x: Number.NaN, y: 0, zIndex: 1, expectedLayoutRevision: 0 }],
+    })).toThrow('Invalid artifact workspace layout field: x');
+  });
+
+  it('main normalizes service failures to one serializable error shape', () => {
+    expect(normalizeArtifactWorkspaceIpcError({
+      code: 'layout_revision_conflict',
+      message: 'Layout revision conflict',
+      canonicalNodes: [{ id: 'node-1', x: 4, y: 8 }],
+      fileRef: '/private/app-data/version-1',
+    })).toEqual({
+      ok: false,
+      error: {
+        code: 'layout_revision_conflict',
+        message: 'Layout revision conflict',
+        canonical: [{ id: 'node-1', x: 4, y: 8 }],
+      },
+    });
+    expect(normalizeArtifactWorkspaceIpcError(new Error('/private/path leaked'))).toEqual({
+      ok: false,
+      error: {
+        code: 'runtime_unavailable',
+        message: 'Artifact workspace operation failed',
+      },
+    });
   });
 
   it('routes loop diagnostics through semantic IPC channels', async () => {
@@ -636,6 +806,13 @@ describe('IPC handler ↔ preload key parity', () => {
     const mappedKeys = Object.keys(INVOKE_CHANNEL_BY_KEY).sort();
     const expectedKeys = [...INVOKE_API_KEYS].sort();
     expect(mappedKeys).toEqual(expectedKeys);
+  });
+
+  it('maps the artifact workspace API keys to the exact semantic IPC channels', () => {
+    const mappings = Object.fromEntries(
+      ARTIFACT_WORKSPACE_API_KEYS.map((key) => [key, INVOKE_CHANNEL_BY_KEY[key]]),
+    );
+    expect(mappings).toEqual(ARTIFACT_WORKSPACE_CHANNEL_BY_KEY);
   });
 
   it('every INVOKE_CHANNEL_BY_KEY channel is registered in main process source files', () => {

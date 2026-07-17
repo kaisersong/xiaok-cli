@@ -17,6 +17,50 @@ vi.mock('../../renderer/src/shared/desktop', () => ({
 
 import { ArtifactEditableViewer } from '../../renderer/src/components/ArtifactEditableViewer';
 
+type ArtifactEditableViewerContractProps = React.ComponentProps<typeof ArtifactEditableViewer> & {
+  interactionActive?: boolean;
+};
+
+const ArtifactEditableViewerWithContract = ArtifactEditableViewer as React.ComponentType<
+  ArtifactEditableViewerContractProps
+>;
+
+type ArtifactModeMessage = {
+  type: 'xiaok:setEditMode' | 'xiaok:setAnnotationMode';
+  enabled: boolean;
+  targetOrigin: unknown;
+};
+
+function artifactModeMessages(calls: readonly (readonly unknown[])[]): ArtifactModeMessage[] {
+  const messages: ArtifactModeMessage[] = [];
+  for (const [value, targetOrigin] of calls) {
+    if (!value || typeof value !== 'object') continue;
+    const candidate = value as { type?: unknown; enabled?: unknown };
+    if (
+      (candidate.type === 'xiaok:setEditMode' || candidate.type === 'xiaok:setAnnotationMode')
+      && typeof candidate.enabled === 'boolean'
+    ) {
+      messages.push({ type: candidate.type, enabled: candidate.enabled, targetOrigin });
+    }
+  }
+  return messages;
+}
+
+function expectArtifactModeStage(
+  calls: readonly (readonly unknown[])[],
+  expected: { edit: boolean; annotation: boolean },
+) {
+  const messages = artifactModeMessages(calls);
+  const editMessages = messages.filter(({ type }) => type === 'xiaok:setEditMode');
+  const annotationMessages = messages.filter(({ type }) => type === 'xiaok:setAnnotationMode');
+
+  expect(editMessages.length).toBeGreaterThan(0);
+  expect(annotationMessages.length).toBeGreaterThan(0);
+  expect(editMessages.every(({ enabled }) => enabled === expected.edit)).toBe(true);
+  expect(annotationMessages.every(({ enabled }) => enabled === expected.annotation)).toBe(true);
+  expect(messages.every(({ targetOrigin }) => targetOrigin === '*')).toBe(true);
+}
+
 describe('ArtifactEditableViewer HTML edit flow', () => {
   beforeEach(() => {
     vi.stubGlobal('URL', {
@@ -436,5 +480,119 @@ describe('ArtifactEditableViewer HTML edit flow', () => {
     const saved = mockSaveFile.mock.calls[0][0] as { content: string };
     expect(saved.content).toContain('src="data:image/png;base64,QUJD"');
     expect(saved.content).toContain('<svg viewBox="0 0 4 4"><rect width="4" height="4"/></svg>');
+  });
+
+  it('suspends and restores the local HTML edit mode without remounting the iframe or resetting draft history', async () => {
+    const onSaveHtmlEdit = vi.fn(async () => ({ ok: false as const }));
+    const onAnnotation = vi.fn();
+    const onRevert = vi.fn();
+    const onFinish = vi.fn();
+    const viewer = (interactionActive: boolean) => (
+      <LocaleProvider>
+        <ArtifactEditableViewerWithContract
+          htmlContent="<html><body><h1>Initial</h1></body></html>"
+          filePath="/tmp/xiaok/tasks/report.html"
+          interactionActive={interactionActive}
+          onSaveHtmlEdit={onSaveHtmlEdit}
+          onAnnotation={onAnnotation}
+          onRevert={onRevert}
+          onFinish={onFinish}
+        />
+      </LocaleProvider>
+    );
+    const view = render(viewer(true));
+    const frame = view.container.querySelector('iframe') as HTMLIFrameElement;
+    const expectSavedHtmlToContain = async (expectedText: string) => {
+      const previousCallCount = onSaveHtmlEdit.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: /保存|Save/i }));
+      await waitFor(() => expect(onSaveHtmlEdit).toHaveBeenCalledTimes(previousCallCount + 1));
+      const savedHtml = onSaveHtmlEdit.mock.calls[previousCallCount][0];
+      expect(savedHtml).toContain(`<h1>${expectedText}</h1>`);
+    };
+
+    fireEvent.click(screen.getByRole('button', { name: /直接编辑|Edit HTML/i }));
+    fireEvent(window, new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: {
+        type: 'xiaok:editSelect',
+        payload: {
+          id: 'h1-1',
+          kind: 'text',
+          tagName: 'h1',
+          selector: 'h1',
+          text: 'Initial',
+          outerHtml: '<h1>Initial</h1>',
+          sourceOccurrence: 0,
+        },
+      },
+    }));
+    fireEvent.change(await screen.findByLabelText(/文本内容|Text content/i), {
+      target: { value: 'Old' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^(应用|Apply)$/i }));
+    fireEvent.change(screen.getByLabelText(/文本内容|Text content/i), {
+      target: { value: 'Changed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^(应用|Apply)$/i }));
+    await expectSavedHtmlToContain('Changed');
+
+    const postMessageSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+    const toolbarBeforeSuspend = view.container.querySelector('.artifact-toolbar') as HTMLElement;
+    expect(within(toolbarBeforeSuspend).getByTitle(/撤销|Undo/i)).toBeEnabled();
+    postMessageSpy.mockClear();
+
+    view.rerender(viewer(false));
+    expect(view.container.querySelector('iframe')).toBe(frame);
+    expectArtifactModeStage(postMessageSpy.mock.calls, { edit: false, annotation: false });
+
+    postMessageSpy.mockClear();
+    view.rerender(viewer(true));
+    expect(view.container.querySelector('iframe')).toBe(frame);
+    expectArtifactModeStage(postMessageSpy.mock.calls, { edit: true, annotation: false });
+    await expectSavedHtmlToContain('Changed');
+
+    const toolbarAfterResume = view.container.querySelector('.artifact-toolbar') as HTMLElement;
+    const undoButton = within(toolbarAfterResume).getByTitle(/撤销|Undo/i);
+    expect(undoButton).toBeEnabled();
+    fireEvent.click(undoButton);
+    expect(view.container.querySelector('iframe')).toBe(frame);
+    await expectSavedHtmlToContain('Old');
+
+    const redoButton = within(toolbarAfterResume).getByTitle(/重做|Redo/i);
+    expect(redoButton).toBeEnabled();
+    fireEvent.click(redoButton);
+    expect(view.container.querySelector('iframe')).toBe(frame);
+    await expectSavedHtmlToContain('Changed');
+  });
+
+  it('restores the local annotation mode after an inactive interval', () => {
+    const onAnnotation = vi.fn();
+    const onRevert = vi.fn();
+    const onFinish = vi.fn();
+    const viewer = (interactionActive: boolean) => (
+      <LocaleProvider>
+        <ArtifactEditableViewerWithContract
+          htmlContent="<html><body><h1>Old</h1></body></html>"
+          filePath="/tmp/xiaok/tasks/report.html"
+          interactionActive={interactionActive}
+          onAnnotation={onAnnotation}
+          onRevert={onRevert}
+          onFinish={onFinish}
+        />
+      </LocaleProvider>
+    );
+    const view = render(viewer(true));
+    const frame = view.container.querySelector('iframe') as HTMLIFrameElement;
+    const postMessageSpy = vi.spyOn(frame.contentWindow!, 'postMessage');
+
+    fireEvent.click(screen.getByRole('button', { name: /修订|Revise/i }));
+    postMessageSpy.mockClear();
+    view.rerender(viewer(false));
+    expectArtifactModeStage(postMessageSpy.mock.calls, { edit: false, annotation: false });
+
+    postMessageSpy.mockClear();
+    view.rerender(viewer(true));
+    expect(view.container.querySelector('iframe')).toBe(frame);
+    expectArtifactModeStage(postMessageSpy.mock.calls, { edit: false, annotation: true });
   });
 });

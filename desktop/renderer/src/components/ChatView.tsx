@@ -198,11 +198,45 @@ export interface GeneratedFile {
   name: string;
 }
 
+function normalizeResultComparableText(text: string): string {
+  return text.replace(/\r\n?/g, '\n').trim();
+}
+
+function findAssistantTextInCurrentTurn(messages: ChatMessage[], endIndex: number): string {
+  for (let index = endIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === 'assistant') return message.content;
+    if (message.role === 'user' || message.role === 'result_card') return '';
+  }
+  return '';
+}
+
+function projectResultForDisplay(result: TaskResult | null, assistantText: string): TaskResult | null {
+  if (!result?.summary?.trim() || !assistantText.trim()) return result;
+  if (normalizeResultComparableText(result.summary) !== normalizeResultComparableText(assistantText)) return result;
+  return { ...result, summary: '' };
+}
+
+function hasResultCardContent(result: TaskResult | null, generatedFiles: GeneratedFile[]): boolean {
+  return Boolean(result?.summary?.trim() || result?.artifacts?.length || generatedFiles.length);
+}
+
+function hasResultCardInCurrentTurn(messages: ChatMessage[]): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const role = messages[index].role;
+    if (role === 'result_card') return true;
+    if (role === 'user') return false;
+  }
+  return false;
+}
+
 export interface ArtifactOpenInfo {
   artifactId: string;
+  sourceTaskId?: string;
   title: string;
   kind: string;
   filePath?: string;
+  mimeType?: string;
 }
 
 export interface ArtifactOpenOptions {
@@ -247,6 +281,12 @@ export function ChatView({
   const isAtBottomRef = useRef(true);
   const lastScrollTimeRef = useRef(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const currentTurnAssistantText = findAssistantTextInCurrentTurn(messages, messages.length) || streamingText;
+  const standaloneDisplayResult = projectResultForDisplay(result, currentTurnAssistantText);
+  const standaloneResultEligible = Boolean(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0;
+  const showStandaloneResult = !hasResultCardInCurrentTurn(messages)
+    && standaloneResultEligible
+    && hasResultCardContent(standaloneDisplayResult, generatedFiles);
 
   // Track whether user manually scrolled away from bottom
   useEffect(() => {
@@ -290,8 +330,14 @@ export function ChatView({
       <div ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto" style={{ userSelect: 'text' }}>
         <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
-            {messages.map((msg) => (
-              <div key={msg.id} className={msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''}>
+            {messages.map((msg, index) => {
+              const displayResult = msg.role === 'result_card'
+                ? projectResultForDisplay(msg.result ?? null, findAssistantTextInCurrentTurn(messages, index))
+                : null;
+              const resultGeneratedFiles = msg.generatedFiles ?? [];
+              if (msg.role === 'result_card' && !hasResultCardContent(displayResult, resultGeneratedFiles)) return null;
+              return (
+                <div key={msg.id} className={msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''}>
                 {msg.role === 'user' ? (
                   <>
                     <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text" style={{ background: 'rgb(235,235,235)' }}>
@@ -368,15 +414,15 @@ export function ChatView({
                 ) : msg.role === 'result_card' ? (
                   <div className="group/resultmsg">
                     <ResultCard
-                      result={msg.result ?? null}
-                      generatedFiles={msg.generatedFiles ?? []}
+                      result={displayResult}
+                      generatedFiles={resultGeneratedFiles}
                       onArtifactClick={onArtifactClick}
                       onArtifactOpenExternal={onArtifactOpenExternal}
                     />
-                    {msg.result?.summary?.trim() && (
+                    {displayResult?.summary?.trim() && (
                       <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover/resultmsg:opacity-100">
-                        <CopyButton text={msg.result.summary} />
-                        <SaveToKbButton text={msg.result.summary} />
+                        <CopyButton text={displayResult.summary} />
+                        <SaveToKbButton text={displayResult.summary} />
                       </div>
                     )}
                   </div>
@@ -391,8 +437,9 @@ export function ChatView({
                     </div>
                   </>
                 )}
-              </div>
-            ))}
+                </div>
+              );
+            })}
 
             {/* Streaming assistant text */}
             {streamingText && (
@@ -402,9 +449,9 @@ export function ChatView({
             )}
 
             {/* Result card + generated files (only if not already shown as a message) */}
-            {!messages.some(m => m.role === 'result_card') && ((result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0) ? (
+            {showStandaloneResult ? (
               <ResultCard
-                result={result}
+                result={standaloneDisplayResult}
                 generatedFiles={generatedFiles}
                 onArtifactClick={onArtifactClick}
                 onArtifactOpenExternal={onArtifactOpenExternal}
@@ -646,7 +693,7 @@ function ResultCard({
   };
 
   return (
-    <div className="relative rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
+    <div data-testid="task-result-card" className="relative rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
       {hasSummary && (
         <button
           type="button"
@@ -676,7 +723,14 @@ function ResultCard({
             }
             const ext = a.title?.split('.').pop()?.toUpperCase() || 'FILE';
             const displayTitle = fileBasename(a.title) || a.title;
-            const info = { artifactId: a.artifactId, title: a.title, kind: a.kind, filePath: a.filePath };
+            const info = {
+              artifactId: a.artifactId,
+              sourceTaskId: a.sourceTaskId,
+              title: a.title,
+              kind: a.kind,
+              filePath: a.filePath,
+              mimeType: a.mimeType,
+            };
             return (
               <div key={a.artifactId} className="flex w-full items-center gap-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 transition-colors hover:border-[var(--c-accent)]/50 hover:bg-[var(--c-bg-card)]">
                 <div
@@ -815,9 +869,11 @@ function A2uiResultArtifactPreview({
 
   const info = {
     artifactId: artifact.artifactId,
+    sourceTaskId: artifact.sourceTaskId,
     title: artifact.title,
     kind: artifact.kind,
     filePath: artifact.filePath,
+    mimeType: artifact.mimeType,
   };
   return (
     <div

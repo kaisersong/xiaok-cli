@@ -1,4 +1,5 @@
-import { app, clipboard, dialog, shell, systemPreferences, type BrowserWindow, type IpcMain } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, shell, systemPreferences, type IpcMain, type IpcMainInvokeEvent } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -8,8 +9,342 @@ import type { MeetingTranscriber } from './meeting-service.js';
 import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
+import type { ArtifactWorkspaceErrorCode } from '../shared/artifact-workspace-types.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
+
+const ARTIFACT_WORKSPACE_ERROR_CODES = new Set<ArtifactWorkspaceErrorCode>([
+  'workspace_not_found',
+  'artifact_not_found',
+  'structure_revision_conflict',
+  'layout_revision_conflict',
+  'version_referenced',
+  'permission_denied',
+  'invalid_target',
+  'artifact_kind_mismatch',
+  'artifact_too_large',
+  'artifact_package_invalid',
+  'plugin_unavailable',
+  'runtime_unavailable',
+  'artifact_missing',
+  'feature_disabled',
+  'generation_conflict',
+]);
+
+const ARTIFACT_WORKSPACE_ALLOWED_FIELDS = {
+  getArtifactWorkspaceSnapshot: ['conversationId', 'workspaceRootId', 'selectedArtifact'],
+  closeArtifactWorkspace: ['conversationId', 'workspaceRootId'],
+  readArtifactWorkspaceVersionPreview: ['conversationId', 'workspaceRootId', 'versionId'],
+  exportArtifactWorkspaceVersion: ['conversationId', 'workspaceRootId', 'versionId'],
+  createArtifactPlaceholder: ['conversationId', 'workspaceRootId', 'requestedKind', 'title', 'x', 'y', 'expectedStructureRevision'],
+  submitArtifactGeneration: ['conversationId', 'workspaceRootId', 'placeholderNodeId', 'prompt', 'sourceVersionId', 'selectedArtifact', 'requestedKind', 'expectedStructureRevision'],
+  cancelArtifactGeneration: ['conversationId', 'workspaceRootId', 'generationRequestId'],
+  retryArtifactGeneration: ['conversationId', 'workspaceRootId', 'generationRequestId', 'prompt'],
+  preferArtifactVersion: ['conversationId', 'workspaceRootId', 'lineageId', 'versionId', 'expectedStructureRevision'],
+  removeArtifactWorkspaceNode: ['conversationId', 'workspaceRootId', 'nodeId', 'expectedStructureRevision'],
+  updateArtifactWorkspaceLayout: ['conversationId', 'workspaceRootId', 'patches'],
+  saveArtifactWorkspaceViewport: ['conversationId', 'workspaceRootId', 'viewport', 'expectedViewRevision'],
+  createArtifactWorkspaceCollection: ['conversationId', 'workspaceRootId', 'title', 'x', 'y', 'expectedStructureRevision'],
+  createArtifactWorkspaceNote: ['conversationId', 'workspaceRootId', 'title', 'noteText', 'x', 'y', 'expectedStructureRevision'],
+  updateArtifactWorkspaceNote: ['conversationId', 'workspaceRootId', 'nodeId', 'noteText', 'expectedStructureRevision'],
+  createArtifactWorkspaceRelation: ['conversationId', 'workspaceRootId', 'fromNodeId', 'toNodeId', 'kind', 'order', 'expectedStructureRevision'],
+  setArtifactCollectionMembership: ['conversationId', 'workspaceRootId', 'collectionNodeId', 'memberNodeId', 'included', 'order', 'expectedStructureRevision'],
+  recordArtifactWorkspaceEvent: ['conversationId', 'workspaceRootId', 'eventName', 'requestId', 'dedupeKey', 'metadata'],
+} as const;
+
+const ARTIFACT_WORKSPACE_REQUIRED_FIELDS: Record<ArtifactWorkspaceOperation, readonly string[]> = {
+  getArtifactWorkspaceSnapshot: [],
+  closeArtifactWorkspace: [],
+  readArtifactWorkspaceVersionPreview: ['versionId'],
+  exportArtifactWorkspaceVersion: ['versionId'],
+  createArtifactPlaceholder: ['requestedKind', 'expectedStructureRevision'],
+  submitArtifactGeneration: ['prompt'],
+  cancelArtifactGeneration: ['generationRequestId'],
+  retryArtifactGeneration: ['generationRequestId'],
+  preferArtifactVersion: ['lineageId', 'versionId', 'expectedStructureRevision'],
+  removeArtifactWorkspaceNode: ['nodeId', 'expectedStructureRevision'],
+  updateArtifactWorkspaceLayout: ['patches'],
+  saveArtifactWorkspaceViewport: ['viewport'],
+  createArtifactWorkspaceCollection: ['title', 'expectedStructureRevision'],
+  createArtifactWorkspaceNote: ['noteText', 'expectedStructureRevision'],
+  updateArtifactWorkspaceNote: ['nodeId', 'noteText', 'expectedStructureRevision'],
+  createArtifactWorkspaceRelation: ['fromNodeId', 'toNodeId', 'kind', 'expectedStructureRevision'],
+  setArtifactCollectionMembership: ['collectionNodeId', 'memberNodeId', 'included', 'expectedStructureRevision'],
+  recordArtifactWorkspaceEvent: ['eventName'],
+};
+
+const ARTIFACT_WORKSPACE_REQUESTED_KINDS = new Set(['image', 'html', 'markdown', 'slides']);
+const ARTIFACT_WORKSPACE_RELATION_KINDS = new Set(['derived_from', 'references', 'part_of_collection']);
+const ARTIFACT_WORKSPACE_EVENT_NAMES = new Set([
+  'revision_compare_opened',
+  'revision_branched',
+]);
+
+type ArtifactWorkspaceOperation = keyof typeof ARTIFACT_WORKSPACE_ALLOWED_FIELDS;
+type ArtifactWorkspaceIpcRecord = Record<string, unknown>;
+
+type ArtifactWorkspaceDesktopServices = Record<
+  ArtifactWorkspaceOperation,
+  (input: ArtifactWorkspaceIpcRecord, viewKey?: string) => unknown
+> & {
+  subscribeArtifactWorkspaceChanges?: (listener: (change: { conversationId: string; workspaceId: string }) => void) => () => void;
+  closeArtifactWorkspaceViewKey?: (viewKey: string) => number;
+};
+
+function isRecordValue(value: unknown): value is ArtifactWorkspaceIpcRecord {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function requireNonEmptyString(input: ArtifactWorkspaceIpcRecord, key: string): void {
+  if (typeof input[key] !== 'string' || !(input[key] as string).trim()) {
+    throw Object.assign(new Error(`Invalid artifact workspace field: ${key}`), { code: 'invalid_target' });
+  }
+}
+
+function validateOptionalPrimitiveFields(input: ArtifactWorkspaceIpcRecord): void {
+  const stringFields = [
+    'versionId', 'requestedKind', 'title', 'placeholderNodeId', 'prompt', 'sourceVersionId',
+    'generationRequestId', 'lineageId', 'nodeId', 'noteText', 'fromNodeId', 'toNodeId',
+    'kind', 'collectionNodeId', 'memberNodeId', 'eventName', 'requestId', 'dedupeKey',
+  ];
+  for (const key of stringFields) {
+    if (key in input && typeof input[key] !== 'string') {
+      throw Object.assign(new Error(`Invalid artifact workspace field: ${key}`), { code: 'invalid_target' });
+    }
+  }
+  for (const key of ['x', 'y', 'order', 'expectedStructureRevision', 'expectedViewRevision']) {
+    if (key in input && (typeof input[key] !== 'number' || !Number.isFinite(input[key]))) {
+      throw Object.assign(new Error(`Invalid artifact workspace field: ${key}`), { code: 'invalid_target' });
+    }
+  }
+  if ('included' in input && typeof input.included !== 'boolean') {
+    throw Object.assign(new Error('Invalid artifact workspace field: included'), { code: 'invalid_target' });
+  }
+}
+
+function validateArtifactWorkspaceNestedFields(input: ArtifactWorkspaceIpcRecord): void {
+  for (const artifactField of ['selectedArtifact'] as const) {
+    if (!(artifactField in input)) continue;
+    if (!isRecordValue(input[artifactField])) {
+      throw Object.assign(new Error(`Invalid artifact workspace field: ${artifactField}`), { code: 'invalid_target' });
+    }
+    const selected = input[artifactField];
+    requireNonEmptyString(selected, 'artifactId');
+    for (const key of ['sourceTaskId', 'kind', 'mimeType', 'title']) {
+      if (key in selected && typeof selected[key] !== 'string') {
+        throw Object.assign(new Error(`Invalid artifact workspace selected artifact field: ${key}`), { code: 'invalid_target' });
+      }
+    }
+    input[artifactField] = Object.fromEntries(
+      ['artifactId', 'sourceTaskId', 'kind', 'mimeType', 'title']
+        .filter((key) => key in selected)
+        .map((key) => [key, selected[key]]),
+    );
+  }
+  if ('patches' in input) {
+    if (!Array.isArray(input.patches)) {
+      throw Object.assign(new Error('Invalid artifact workspace field: patches'), { code: 'invalid_target' });
+    }
+    input.patches = input.patches.map((value) => {
+      if (!isRecordValue(value)) {
+        throw Object.assign(new Error('Invalid artifact workspace layout patch'), { code: 'invalid_target' });
+      }
+      requireNonEmptyString(value, 'nodeId');
+      for (const key of ['x', 'y', 'zIndex', 'expectedLayoutRevision']) {
+        if (typeof value[key] !== 'number' || !Number.isFinite(value[key])) {
+          throw Object.assign(new Error(`Invalid artifact workspace layout field: ${key}`), { code: 'invalid_target' });
+        }
+      }
+      return {
+        nodeId: value.nodeId,
+        x: value.x,
+        y: value.y,
+        zIndex: value.zIndex,
+        expectedLayoutRevision: value.expectedLayoutRevision,
+      };
+    });
+  }
+  if ('viewport' in input) {
+    if (!isRecordValue(input.viewport)) {
+      throw Object.assign(new Error('Invalid artifact workspace field: viewport'), { code: 'invalid_target' });
+    }
+    const viewport = input.viewport;
+    for (const key of ['x', 'y', 'zoom']) {
+      if (typeof viewport[key] !== 'number' || !Number.isFinite(viewport[key])) {
+        throw Object.assign(new Error(`Invalid artifact workspace viewport field: ${key}`), { code: 'invalid_target' });
+      }
+    }
+    input.viewport = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
+  }
+  if ('metadata' in input) {
+    if (!isRecordValue(input.metadata)) {
+      throw Object.assign(new Error('Invalid artifact workspace field: metadata'), { code: 'invalid_target' });
+    }
+    const metadata: Record<string, string | number | boolean | null> = {};
+    for (const [key, value] of Object.entries(input.metadata)) {
+      if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) {
+        throw Object.assign(new Error(`Invalid artifact workspace metadata field: ${key}`), { code: 'invalid_target' });
+      }
+      metadata[key] = value as string | number | boolean | null;
+    }
+    input.metadata = metadata;
+  }
+}
+
+export function sanitizeArtifactWorkspaceIpcInput(
+  operation: ArtifactWorkspaceOperation,
+  rawInput: unknown,
+): ArtifactWorkspaceIpcRecord {
+  if (!isRecordValue(rawInput)) {
+    throw Object.assign(new Error('Artifact workspace input must be an object'), { code: 'invalid_target' });
+  }
+  const input = Object.fromEntries(
+    ARTIFACT_WORKSPACE_ALLOWED_FIELDS[operation]
+      .filter((key) => key in rawInput)
+      .map((key) => [key, rawInput[key]]),
+  );
+  requireNonEmptyString(input, 'conversationId');
+  // Renderer-supplied paths/roots are never authorization input. Keep the
+  // legacy field in the wire allowlist for compatibility, then overwrite it
+  // with a main-owned stable opaque identity.
+  input.workspaceRootId = 'desktop-artifact-workspace-v1';
+  for (const key of ARTIFACT_WORKSPACE_REQUIRED_FIELDS[operation]) {
+    if (!(key in input)) {
+      throw Object.assign(new Error(`Missing artifact workspace field: ${key}`), { code: 'invalid_target' });
+    }
+    if (typeof input[key] === 'string') requireNonEmptyString(input, key);
+  }
+  validateOptionalPrimitiveFields(input);
+  validateArtifactWorkspaceNestedFields(input);
+  if ('requestedKind' in input && !ARTIFACT_WORKSPACE_REQUESTED_KINDS.has(input.requestedKind as string)) {
+    throw Object.assign(new Error('Invalid artifact workspace field: requestedKind'), { code: 'invalid_target' });
+  }
+  if (operation === 'submitArtifactGeneration' && !input.placeholderNodeId && !input.sourceVersionId && !input.selectedArtifact) {
+    throw Object.assign(new Error('Artifact generation needs placeholderNodeId, sourceVersionId or selectedArtifact'), { code: 'invalid_target' });
+  }
+  if (operation === 'createArtifactWorkspaceRelation' && !ARTIFACT_WORKSPACE_RELATION_KINDS.has(input.kind as string)) {
+    throw Object.assign(new Error('Invalid artifact workspace field: kind'), { code: 'invalid_target' });
+  }
+  if ('eventName' in input && !ARTIFACT_WORKSPACE_EVENT_NAMES.has(input.eventName as string)) {
+    throw Object.assign(new Error('Invalid artifact workspace field: eventName'), { code: 'invalid_target' });
+  }
+  return input;
+}
+
+function artifactWorkspaceErrorCode(error: unknown): ArtifactWorkspaceErrorCode {
+  if (isRecordValue(error) && typeof error.code === 'string' && ARTIFACT_WORKSPACE_ERROR_CODES.has(error.code as ArtifactWorkspaceErrorCode)) {
+    return error.code as ArtifactWorkspaceErrorCode;
+  }
+  return 'runtime_unavailable';
+}
+
+export function normalizeArtifactWorkspaceIpcError(error: unknown): {
+  ok: false;
+  error: { code: ArtifactWorkspaceErrorCode; message: string; canonical?: unknown };
+} {
+  const record = isRecordValue(error) ? error : {};
+  const canonical = record.canonical ?? record.canonicalSnapshot ?? record.canonicalNodes;
+  const code = artifactWorkspaceErrorCode(error);
+  return {
+    ok: false,
+    error: {
+      code,
+      message: code !== 'runtime_unavailable' && typeof record.message === 'string' && record.message
+        ? record.message
+        : 'Artifact workspace operation failed',
+      ...(canonical === undefined ? {} : { canonical }),
+    },
+  };
+}
+
+function sanitizeArtifactWorkspacePreviewOutput(value: unknown): unknown {
+  if (!isRecordValue(value)) return value;
+  const output = Object.fromEntries(
+    ['versionId', 'kind', 'mimeType', 'title', 'contentKind', 'content']
+      .filter((key) => key in value)
+      .map((key) => [key, value[key]]),
+  );
+  if (output.contentKind === 'package_manifest' && isRecordValue(output.content)) {
+    const isSafeRef = (candidate: unknown): candidate is string => typeof candidate === 'string'
+      && !!candidate
+      && !candidate.startsWith('/')
+      && !candidate.startsWith('\\')
+      && !/^[a-z]:[\\/]/i.test(candidate)
+      && !candidate.split(/[\\/]+/).includes('..');
+    const files = Array.isArray(output.content.files)
+      ? output.content.files.flatMap((file) => {
+          if (!isRecordValue(file) || !isSafeRef(file.path)) return [];
+          if (typeof file.size !== 'number' || !Number.isFinite(file.size) || typeof file.sha256 !== 'string') return [];
+          return [{ path: file.path, size: file.size, sha256: file.sha256 }];
+        })
+      : [];
+    output.content = {
+      entryRef: isSafeRef(output.content.entryRef) ? output.content.entryRef : '',
+      files,
+    };
+  } else if (typeof output.content !== 'string') {
+    output.content = '';
+  }
+  return output;
+}
+
+function sanitizeArtifactWorkspaceSnapshotOutput(value: unknown): unknown {
+  if (!isRecordValue(value)) return value;
+  const output = Object.fromEntries(
+    ['workspace', 'access', 'nodes', 'relations', 'lineages', 'versions', 'generationRequests', 'staging', 'view']
+      .filter((key) => key in value)
+      .map((key) => [key, value[key]]),
+  );
+  if (Array.isArray(output.staging)) {
+    output.staging = output.staging.map((entry) => {
+      if (!isRecordValue(entry)) return entry;
+      const { fileRef: _fileRef, ...safe } = entry;
+      return safe;
+    });
+  }
+  return output;
+}
+
+function sanitizeArtifactWorkspaceExportOutput(value: unknown): unknown {
+  if (!isRecordValue(value)) return value;
+  return {
+    exported: value.exported === true,
+    ...(typeof value.canceled === 'boolean' ? { canceled: value.canceled } : {}),
+  };
+}
+
+async function invokeArtifactWorkspaceOperation(
+  operation: () => unknown,
+  sanitizeData: (value: unknown) => unknown = (value) => value,
+): Promise<unknown> {
+  try {
+    const value = await operation();
+    if (isRecordValue(value) && value.ok === true && 'data' in value) {
+      return { ok: true, data: sanitizeData(value.data) };
+    }
+    if (isRecordValue(value) && value.ok === false) return normalizeArtifactWorkspaceIpcError(value.error);
+    return { ok: true, data: sanitizeData(value) };
+  } catch (error) {
+    return normalizeArtifactWorkspaceIpcError(error);
+  }
+}
+
+function invokeArtifactWorkspaceIpcOperation(
+  services: ArtifactWorkspaceDesktopServices,
+  operation: ArtifactWorkspaceOperation,
+  rawInput: unknown,
+  options: {
+    viewKey?: string;
+    sanitizeData?: (value: unknown) => unknown;
+  } = {},
+): Promise<unknown> {
+  return invokeArtifactWorkspaceOperation(() => {
+    const input = sanitizeArtifactWorkspaceIpcInput(operation, rawInput);
+    return options.viewKey === undefined
+      ? services[operation](input)
+      : services[operation](input, options.viewKey);
+  }, options.sanitizeData);
+}
 
 interface RegisterDesktopIpcOptions {
   loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'evidenceStore' | 'scanner' | 'runner' | 'listAnomalies'>;
@@ -322,6 +657,118 @@ export async function registerDesktopIpc(
     if (!active || active.ownerId !== ownerId) throw new Error('meeting_live_session_not_found');
     return active;
   };
+  const artifactWorkspaceServices = services as DesktopServices & ArtifactWorkspaceDesktopServices;
+  const unsubscribeArtifactWorkspaceChanges = artifactWorkspaceServices.subscribeArtifactWorkspaceChanges?.((change) => {
+    const targets = typeof BrowserWindow?.getAllWindows === 'function'
+      ? BrowserWindow.getAllWindows()
+      : [window];
+    for (const target of targets) {
+      if (!target.isDestroyed()) target.webContents.send('desktop:artifactWorkspace:changed', change);
+    }
+  });
+  const onPrimaryClosed = () => {
+    unsubscribeArtifactWorkspaceChanges?.();
+    artifactWorkspaceServices.closeArtifactWorkspaceViewKey?.('primary');
+  };
+  if (typeof window.once === 'function') window.once('closed', onPrimaryClosed);
+  const secondaryArtifactWorkspaceViewKeys = new Map<number, string>();
+  const artifactWorkspaceViewKey = (event: IpcMainInvokeEvent): string => {
+    const senderWindow = typeof BrowserWindow?.fromWebContents === 'function'
+      ? BrowserWindow.fromWebContents(event.sender)
+      : undefined;
+    if (senderWindow === window || senderWindow?.webContents.id === window.webContents.id || event.sender.id === window.webContents.id) {
+      return 'primary';
+    }
+    const ownerId = senderWindow?.id ?? event.sender.id;
+    const existing = secondaryArtifactWorkspaceViewKeys.get(ownerId);
+    if (existing) return existing;
+    const viewKey = `window-${randomUUID()}`;
+    secondaryArtifactWorkspaceViewKeys.set(ownerId, viewKey);
+    if (typeof senderWindow?.once === 'function') {
+      senderWindow.once('closed', () => {
+        secondaryArtifactWorkspaceViewKeys.delete(ownerId);
+        artifactWorkspaceServices.closeArtifactWorkspaceViewKey?.(viewKey);
+      });
+    }
+    return viewKey;
+  };
+
+  ipcMain.handle('desktop:artifactWorkspace:getArtifactWorkspaceSnapshot', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'getArtifactWorkspaceSnapshot', rawInput, {
+      viewKey: artifactWorkspaceViewKey(event),
+      sanitizeData: sanitizeArtifactWorkspaceSnapshotOutput,
+    });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:closeArtifactWorkspace', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'closeArtifactWorkspace', rawInput, {
+      viewKey: artifactWorkspaceViewKey(event),
+    });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:readArtifactWorkspaceVersionPreview', async (_event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'readArtifactWorkspaceVersionPreview', rawInput, {
+      sanitizeData: sanitizeArtifactWorkspacePreviewOutput,
+    });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:exportArtifactWorkspaceVersion', async (event, rawInput) => {
+    return invokeArtifactWorkspaceOperation(async () => {
+      const input = sanitizeArtifactWorkspaceIpcInput('exportArtifactWorkspaceVersion', rawInput);
+      const prepared = await artifactWorkspaceServices.exportArtifactWorkspaceVersion(input);
+      if (!isRecordValue(prepared) || typeof prepared.sourcePath !== 'string' || typeof prepared.fileName !== 'string') {
+        throw Object.assign(new Error('Artifact workspace export is unavailable'), { code: 'artifact_missing' });
+      }
+      const senderWindow = (typeof BrowserWindow?.fromWebContents === 'function'
+        ? BrowserWindow.fromWebContents(event.sender)
+        : undefined) ?? window;
+      const selected = await dialog.showSaveDialog(senderWindow, { defaultPath: prepared.fileName });
+      if (selected.canceled || !selected.filePath) return { exported: false, canceled: true };
+      await artifactWorkspaceServices.exportArtifactWorkspaceVersion({ ...input, destinationPath: selected.filePath });
+      return { exported: true };
+    }, sanitizeArtifactWorkspaceExportOutput);
+  });
+  ipcMain.handle('desktop:artifactWorkspace:createArtifactPlaceholder', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactPlaceholder', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:submitArtifactGeneration', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'submitArtifactGeneration', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:cancelArtifactGeneration', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'cancelArtifactGeneration', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:retryArtifactGeneration', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'retryArtifactGeneration', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:preferArtifactVersion', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'preferArtifactVersion', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:removeArtifactWorkspaceNode', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'removeArtifactWorkspaceNode', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:updateArtifactWorkspaceLayout', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'updateArtifactWorkspaceLayout', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:saveArtifactWorkspaceViewport', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'saveArtifactWorkspaceViewport', rawInput, {
+      viewKey: artifactWorkspaceViewKey(event),
+    });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:createArtifactWorkspaceCollection', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactWorkspaceCollection', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:createArtifactWorkspaceNote', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactWorkspaceNote', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:updateArtifactWorkspaceNote', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'updateArtifactWorkspaceNote', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:createArtifactWorkspaceRelation', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactWorkspaceRelation', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:setArtifactCollectionMembership', async (event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'setArtifactCollectionMembership', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
+  });
+  ipcMain.handle('desktop:artifactWorkspace:recordArtifactWorkspaceEvent', async (_event, rawInput) => {
+    return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'recordArtifactWorkspaceEvent', rawInput);
+  });
   ipcMain.handle('desktop:getModelConfig', async () => {
     log('info', 'getModelConfig');
     const r = await services.getModelConfig();

@@ -88,6 +88,7 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
       previewAvailable: isPreviewableArtifactKind(kind),
       turnId: event.turnId,
       creator: event.creator ?? 'agent',
+      ...(event.mimeType ? { mimeType: event.mimeType } : {}),
     };
   }
   if (event.type === 'receipt_emitted') {
@@ -119,8 +120,8 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
   }
   if (event.type === 'tool_finished' || event.type === 'post_tool_use') {
     const toolName = event.toolName;
-    if (event.type === 'post_tool_use' && toolName === 'render_ui') {
-      const artifact = renderUiArtifactFromToolResponse(event.toolUseId, event.turnId, event.toolResponse);
+    if (event.type === 'post_tool_use' && event.toolName === 'render_ui') {
+      const artifact = artifactFromToolResponse(event.toolUseId, event.turnId, event.toolResponse);
       if (artifact) return artifact;
     }
     const ok = event.type === 'tool_finished' ? event.ok : true;
@@ -251,30 +252,45 @@ function normalizeArtifactKind(kind: string): ArtifactKind {
   return 'other';
 }
 
-function renderUiArtifactFromToolResponse(toolUseId: string, turnId: string, response: unknown): DesktopTaskEvent | null {
+function artifactFromToolResponse(toolUseId: string, turnId: string, response: unknown): DesktopTaskEvent | null {
   const parsed = typeof response === 'string' ? parseJsonObject(response) : response;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
   const record = parsed as Record<string, unknown>;
   if (record.ok !== true) return null;
   const mimeType = typeof record.mimeType === 'string' ? record.mimeType : '';
-  if (!isA2UIMimeType(mimeType)) return null;
   const filePath = typeof record.artifactPath === 'string' && record.artifactPath.trim()
     ? record.artifactPath.trim()
     : typeof record.output_path === 'string' ? record.output_path.trim() : '';
   if (!filePath) return null;
+  const declaredKind = typeof record.kind === 'string' ? record.kind : '';
+  const kind = isA2UIMimeType(mimeType)
+    ? 'a2ui'
+    : mimeType === 'text/markdown'
+      ? 'text'
+      : mimeType === 'text/html'
+        ? 'html'
+        : mimeType.startsWith('image/')
+          ? 'image'
+          : mimeType.includes('xiaok.slides')
+            ? 'other'
+            : normalizeArtifactKind(declaredKind);
   const label = typeof record.title === 'string' && record.title.trim()
     ? record.title.trim()
-    : filePath.split(/[\\/]/).pop() || 'A2UI artifact';
+    : filePath.split(/[\\/]/).pop() || 'Artifact';
   return {
     type: 'artifact_recorded',
-    artifactId: `artifact_${toolUseId}`,
-    kind: 'a2ui',
+    artifactId: typeof record.artifactId === 'string' && record.artifactId.trim()
+      ? record.artifactId.trim()
+      : `artifact_${toolUseId}`,
+    kind,
     label,
     filePath,
     previewAvailable: true,
     turnId,
-    creator: 'agent',
-    mimeType: mimeType || A2UI_MIME_TYPE,
+    creator: typeof record.creator === 'string' && record.creator.trim()
+      ? record.creator.trim()
+      : 'agent',
+    mimeType: mimeType || (kind === 'a2ui' ? A2UI_MIME_TYPE : undefined),
   };
 }
 

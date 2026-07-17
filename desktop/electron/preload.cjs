@@ -1,6 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const os = require('os');
 
+function sanitizeArtifactWorkspaceInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const { requestSource: _requestSource, viewKey: _viewKey, ...safe } = input;
+  return safe;
+}
+
 contextBridge.exposeInMainWorld('xiaokDesktop', {
   systemUsername: os.userInfo().username,
   getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig'),
@@ -94,6 +100,30 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   getKswarmConfig: () => ipcRenderer.invoke('desktop:getKswarmConfig'),
   saveKswarmConfig: (input) => ipcRenderer.invoke('desktop:saveKswarmConfig', input),
   readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }),
+  getArtifactWorkspaceSnapshot: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:getArtifactWorkspaceSnapshot', sanitizeArtifactWorkspaceInput(input)),
+  closeArtifactWorkspace: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:closeArtifactWorkspace', sanitizeArtifactWorkspaceInput(input)),
+  onArtifactWorkspaceChanged(handler) {
+    const channel = 'desktop:artifactWorkspace:changed';
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
+  readArtifactWorkspaceVersionPreview: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:readArtifactWorkspaceVersionPreview', sanitizeArtifactWorkspaceInput(input)),
+  exportArtifactWorkspaceVersion: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:exportArtifactWorkspaceVersion', sanitizeArtifactWorkspaceInput(input)),
+  createArtifactPlaceholder: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:createArtifactPlaceholder', sanitizeArtifactWorkspaceInput(input)),
+  submitArtifactGeneration: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:submitArtifactGeneration', sanitizeArtifactWorkspaceInput(input)),
+  cancelArtifactGeneration: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:cancelArtifactGeneration', sanitizeArtifactWorkspaceInput(input)),
+  retryArtifactGeneration: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:retryArtifactGeneration', sanitizeArtifactWorkspaceInput(input)),
+  preferArtifactVersion: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:preferArtifactVersion', sanitizeArtifactWorkspaceInput(input)),
+  removeArtifactWorkspaceNode: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:removeArtifactWorkspaceNode', sanitizeArtifactWorkspaceInput(input)),
+  updateArtifactWorkspaceLayout: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:updateArtifactWorkspaceLayout', sanitizeArtifactWorkspaceInput(input)),
+  saveArtifactWorkspaceViewport: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:saveArtifactWorkspaceViewport', sanitizeArtifactWorkspaceInput(input)),
+  createArtifactWorkspaceCollection: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:createArtifactWorkspaceCollection', sanitizeArtifactWorkspaceInput(input)),
+  createArtifactWorkspaceNote: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:createArtifactWorkspaceNote', sanitizeArtifactWorkspaceInput(input)),
+  updateArtifactWorkspaceNote: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:updateArtifactWorkspaceNote', sanitizeArtifactWorkspaceInput(input)),
+  createArtifactWorkspaceRelation: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:createArtifactWorkspaceRelation', sanitizeArtifactWorkspaceInput(input)),
+  setArtifactCollectionMembership: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:setArtifactCollectionMembership', sanitizeArtifactWorkspaceInput(input)),
+  recordArtifactWorkspaceEvent: (input) => ipcRenderer.invoke('desktop:artifactWorkspace:recordArtifactWorkspaceEvent', sanitizeArtifactWorkspaceInput(input)),
   getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats'),
   getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus'),
   restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId),

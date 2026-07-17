@@ -49,4 +49,23 @@ describe('CanvasPreview Markdown text edit flow', () => {
     expect(screen.getByText(/已保存|Saved/i)).toBeInTheDocument();
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps immutable Markdown previews read-only even when an edit-mode request is present', () => {
+    render(
+      <LocaleProvider>
+        <CanvasPreview
+          filePath="/tmp/xiaok/tasks/immutable-revision.md"
+          content={'# Immutable revision\n\nBody'}
+          interactionMode="read_only"
+          modeRequest={{ id: 2, startInEditMode: true }}
+        />
+      </LocaleProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: /直接编辑|Direct edit/i })).toBeNull();
+    expect(screen.queryByLabelText(/Markdown 内容|Markdown content/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /保存|Save/i })).toBeNull();
+    expect(screen.getByText('Immutable revision')).toBeInTheDocument();
+    expect(mockSaveFile).not.toHaveBeenCalled();
+  });
 });

@@ -1,3 +1,39 @@
+export type {
+  ArtifactWorkspaceEventName,
+  ArtifactWorkspaceFeatureAccess,
+  ArtifactWorkspaceLayoutPatch,
+  ArtifactWorkspaceNode,
+  ArtifactWorkspacePreview,
+  ArtifactWorkspaceRelation,
+  ArtifactWorkspaceRelationKind,
+  ArtifactWorkspaceRequestedKind,
+  ArtifactWorkspaceSelectedArtifact,
+  ArtifactWorkspaceSnapshot,
+  ArtifactWorkspaceVersionView,
+  WorkspaceGenerationRequest,
+} from '../../../shared/artifact-workspace-types';
+export type {
+  ArtifactWorkspaceIpcError,
+  ArtifactWorkspaceIpcResult,
+  ArtifactWorkspaceIdentityInput,
+  ArtifactWorkspaceVersionInput,
+  CancelArtifactGenerationInput,
+  CreateArtifactPlaceholderInput,
+  CreateArtifactWorkspaceCollectionInput,
+  CreateArtifactWorkspaceNoteInput,
+  CreateArtifactWorkspaceRelationInput,
+  GetArtifactWorkspaceSnapshotInput,
+  PreferArtifactVersionInput,
+  RecordArtifactWorkspaceEventInput,
+  RemoveArtifactWorkspaceNodeInput,
+  RetryArtifactGenerationInput,
+  SaveArtifactWorkspaceViewportInput,
+  SetArtifactCollectionMembershipInput,
+  SubmitArtifactGenerationInput,
+  UpdateArtifactWorkspaceLayoutInput,
+  UpdateArtifactWorkspaceNoteInput,
+} from '../../../electron/preload-api';
+
 // Thread types (local storage + desktop web-client compatibility)
 export type ThreadMode = 'chat' | 'work';
 export type CollaborationMode = ThreadMode;

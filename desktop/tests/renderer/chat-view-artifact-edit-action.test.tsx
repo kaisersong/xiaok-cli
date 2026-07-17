@@ -70,6 +70,7 @@ describe('ChatView artifact edit action', () => {
         title: 'report.html',
         kind: 'html',
         filePath: '/tmp/report.html',
+        mimeType: 'text/html',
       },
       { startInEditMode: true },
     );
@@ -136,6 +137,7 @@ describe('ChatView artifact edit action', () => {
         title: 'notes.md',
         kind: 'markdown',
         filePath: '/tmp/notes.md',
+        mimeType: 'text/markdown',
       },
       { startInEditMode: true },
     );

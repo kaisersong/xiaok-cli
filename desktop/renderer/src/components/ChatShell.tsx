@@ -7,6 +7,7 @@ import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
+import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
@@ -41,9 +42,13 @@ function normalizeArtifactKind(kind: string): ArtifactKind {
   return ARTIFACT_KINDS.has(kind as ArtifactKind) ? kind as ArtifactKind : 'other';
 }
 
-function artifactSummaryFromEvent(event: Extract<DesktopTaskEvent, { type: 'artifact_recorded' }>): ArtifactSummary {
+function artifactSummaryFromEvent(
+  event: Extract<DesktopTaskEvent, { type: 'artifact_recorded' }>,
+  sourceTaskId?: string,
+): ArtifactSummary {
   return {
     artifactId: event.artifactId,
+    sourceTaskId,
     kind: normalizeArtifactKind(event.kind),
     title: event.label,
     createdAt: event.turnId,
@@ -51,6 +56,17 @@ function artifactSummaryFromEvent(event: Extract<DesktopTaskEvent, { type: 'arti
     filePath: event.filePath,
     mimeType: event.mimeType,
     creator: event.creator ?? 'agent',
+  };
+}
+
+function bindArtifactsToSourceTask(result: TaskResult, sourceTaskId?: string): TaskResult {
+  if (!sourceTaskId || result.artifacts.length === 0) return result;
+  return {
+    ...result,
+    artifacts: result.artifacts.map((artifact) => ({
+      ...artifact,
+      sourceTaskId: artifact.sourceTaskId ?? sourceTaskId,
+    })),
   };
 }
 
@@ -223,10 +239,17 @@ export function ChatShell() {
   const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
   const [canvasPreviewContent, setCanvasPreviewContent] = useState<string | undefined>();
+  const [canvasSourceArtifact, setCanvasSourceArtifact] = useState<ArtifactWorkspaceSelectedArtifact | undefined>();
   const [canvasPreviewModeRequest, setCanvasPreviewModeRequest] = useState({ id: 0, startInEditMode: false });
   // Canvas is per-session: it must close when switching to another conversation
   // and reopen only when returning to the session that opened it. Keyed by taskId.
-  const canvasStateByTaskRef = useRef<Map<string, { open: boolean; expanded: boolean; file?: string; content?: string }>>(new Map());
+  const canvasStateByTaskRef = useRef<Map<string, {
+    open: boolean;
+    expanded: boolean;
+    file?: string;
+    content?: string;
+    sourceArtifact?: ArtifactWorkspaceSelectedArtifact;
+  }>>(new Map());
   const prevCanvasTaskRef = useRef<string | undefined>(undefined);
   const [planSteps, setPlanSteps] = useState<Array<{ id: string; label: string; status: string }>>([]);
   const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
@@ -255,6 +278,7 @@ export function ChatShell() {
   const toolStepsActiveRef = useRef(false);
   const computerUseActionCodesRef = useRef<Set<string>>(new Set());
   const titleLockedRef = useRef(false);
+  const lastLiveErrorRef = useRef<{ taskKey: string; rawMessage: string } | null>(null);
 
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
   const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string } | undefined;
@@ -262,7 +286,7 @@ export function ChatShell() {
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
 
-  const handleEvent = useCallback((rawEvent: { type: string }) => {
+  const handleEvent = useCallback((rawEvent: { type: string }, sourceTaskId?: string) => {
     const event = rawEvent as DesktopTaskEvent;
     console.log('[ChatShell] event:', event.type);
 
@@ -270,6 +294,11 @@ export function ChatShell() {
     if (currentLoadIdRef.current !== taskId) {
       console.log('[ChatShell] ignoring stale event for', taskId, 'current is', currentLoadIdRef.current);
       return;
+    }
+
+    const eventTaskKey = sourceTaskId ?? taskId ?? '';
+    if (event.type !== 'error' || lastLiveErrorRef.current?.taskKey !== eventTaskKey) {
+      lastLiveErrorRef.current = null;
     }
 
     // Collect all events for Canvas
@@ -328,7 +357,7 @@ export function ChatShell() {
         break;
       }
       case 'artifact_recorded': {
-        const artifact = artifactSummaryFromEvent(event);
+        const artifact = artifactSummaryFromEvent(event, sourceTaskId);
         setResult(prev => {
           if (!prev) return prev;
           return {
@@ -342,10 +371,10 @@ export function ChatShell() {
         break;
       }
       case 'result': {
-        const r = (event as { type: 'result'; result: TaskResult }).result;
+        const r = bindArtifactsToSourceTask((event as { type: 'result'; result: TaskResult }).result, sourceTaskId);
         const recordedArtifacts = currentTaskEventsRef.current
           .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
-          .map(artifactSummaryFromEvent);
+          .map((recordedEvent) => artifactSummaryFromEvent(recordedEvent, sourceTaskId));
         const resultWithArtifacts = mergeTaskResultArtifacts(r, recordedArtifacts);
         const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
@@ -416,6 +445,7 @@ export function ChatShell() {
             if (artifactEvent) fp = (artifactEvent as { filePath?: string }).filePath;
           }
           if (fp) {
+            setCanvasSourceArtifact(undefined);
             setCanvasPreviewFile(fp);
             setCanvasExpanded(true);
             sidebarCollapse.setCollapsed(true);
@@ -501,23 +531,54 @@ export function ChatShell() {
       }
       case 'error': {
         const msg = (event as { type: 'error'; message: string }).message;
+        if (lastLiveErrorRef.current?.taskKey === eventTaskKey
+          && lastLiveErrorRef.current.rawMessage === msg) {
+          break;
+        }
+        lastLiveErrorRef.current = { taskKey: eventTaskKey, rawMessage: msg };
+        const partialText = streamRef.current.trim();
+        const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
+          providerAuth: t.chatShell.modelAuthFailed,
+          providerService: t.chatShell.modelServiceFailed,
+          modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
+        });
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
-        setMessages(prev => [...prev, {
-          id: `msg-${Date.now()}-error`,
-          role: 'assistant',
-          content: `Error: ${msg}`,
-        }]);
+        setMessages(prev => {
+          let lastUserMessageIndex = -1;
+          for (let index = prev.length - 1; index >= 0; index -= 1) {
+            if (prev[index].role === 'user') {
+              lastUserMessageIndex = index;
+              break;
+            }
+          }
+          const retainedMessages = lastUserMessageIndex < 0
+            ? prev
+            : prev.filter((message, index) => index <= lastUserMessageIndex || message.role !== 'progress');
+          return [
+            ...retainedMessages,
+            ...(partialText ? [{
+              id: `msg-${Date.now()}-partial`,
+              role: 'assistant' as const,
+              content: partialText,
+            }] : []),
+            {
+              id: `msg-${Date.now()}-error`,
+              role: 'assistant' as const,
+              content: t.chatShell.taskExecutionFailed(reason),
+            },
+          ];
+        });
         setStatus('failed');
         break;
       }
     }
-  }, [taskId]);
+  }, [taskId, t]);
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+  const replaySnapshot = useCallback((snapshot: { taskId?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
@@ -542,12 +603,13 @@ export function ChatShell() {
     if (snapshot?.events && snapshot.events.length > 0) {
       let accumulated = '';
       let lastProgress: ChatMessage | null = null;
+      let lastErrorMessage: string | null = null;
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
       const replayArtifacts: ArtifactSummary[] = [];
       for (const ev of snapshot.events) {
         if (ev.type === 'artifact_recorded') {
-          replayArtifacts.push(artifactSummaryFromEvent(ev));
+          replayArtifacts.push(artifactSummaryFromEvent(ev, snapshot.taskId));
           continue;
         }
         if (ev.type === 'progress_plan_reported') {
@@ -619,8 +681,32 @@ export function ChatShell() {
           }
           accumulated = '';
           lastProgress = null;
+        } else if (ev.type === 'error') {
+          const rawMessage = (ev as { type: 'error'; message: string }).message;
+          if (accumulated.trim()) {
+            msgs.push({
+              id: `msg-assistant-partial-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'assistant',
+              content: accumulated,
+            });
+            accumulated = '';
+          }
+          lastProgress = null;
+          if (rawMessage !== lastErrorMessage) {
+            const reason = sanitizeUserFacingErrorMessage(rawMessage, t.chatShell.taskCreateFailed, {
+              providerAuth: t.chatShell.modelAuthFailed,
+              providerService: t.chatShell.modelServiceFailed,
+              modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
+            });
+            msgs.push({
+              id: `msg-task-error-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'assistant',
+              content: t.chatShell.taskExecutionFailed(reason),
+            });
+            lastErrorMessage = rawMessage;
+          }
         } else if (ev.type === 'result') {
-          const r = (ev as { result: TaskResult }).result;
+          const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.taskId);
           const resultWithArtifacts = mergeTaskResultArtifacts(r, replayArtifacts);
           const assistantContent = accumulated || r.summary;
           if (accumulated || r.summary) {
@@ -652,7 +738,7 @@ export function ChatShell() {
       }
     }
     return { msgs, result: lastResult, events: replayEvents, toolStepsMsgId: replayToolMsgId };
-  }, []);
+  }, [t]);
 
   // Scope the Canvas panel to the active session. On a session switch, persist
   // the outgoing session's canvas state and restore the incoming session's
@@ -667,6 +753,7 @@ export function ChatShell() {
         expanded: canvasExpanded,
         file: canvasPreviewFile,
         content: canvasPreviewContent,
+        sourceArtifact: canvasSourceArtifact,
       });
     }
     prevCanvasTaskRef.current = taskId;
@@ -674,6 +761,7 @@ export function ChatShell() {
     if (saved?.open) {
       setCanvasPreviewFile(saved.file);
       setCanvasPreviewContent(saved.content);
+      setCanvasSourceArtifact(saved.sourceArtifact);
       setCanvasPreviewModeRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
       setCanvasExpanded(saved.expanded);
       setCanvasOpen(true);
@@ -682,6 +770,7 @@ export function ChatShell() {
       setCanvasExpanded(false);
       setCanvasPreviewFile(undefined);
       setCanvasPreviewContent(undefined);
+      setCanvasSourceArtifact(undefined);
       setCanvasPreviewModeRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
     }
     // Intentionally keyed only on taskId: the canvas state read here is the
@@ -756,7 +845,7 @@ export function ChatShell() {
         console.log(`[ChatShell] Loading thread=${taskId.slice(0,8)} title="${threadData.title}" currentTaskId=${threadData.currentTaskId ?? 'none'}`);
         const allMessages: ChatMessage[] = [];
         let lastResult: TaskResult | null = null;
-        let lastStatus: 'idle' | 'running' | 'waiting_user' = 'idle';
+        let lastStatus: 'idle' | 'running' | 'waiting_user' | 'failed' = 'idle';
         let lastTaskIdForSub: string | null = null;
         let lastSubSinceIndex = 0;
         let lastSubToolStepsMsgId: string | null = null;
@@ -771,7 +860,10 @@ export function ChatShell() {
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
               const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
-              const { msgs: replayMsgs, result: replayResult, events: replayEvents, toolStepsMsgId: replayToolStepsMsgId } = replaySnapshot(snapshot, addPrompt);
+              const { msgs: replayMsgs, result: replayResult, events: replayEvents, toolStepsMsgId: replayToolStepsMsgId } = replaySnapshot(
+                { ...snapshot, taskId: snapshot.taskId || tid },
+                addPrompt,
+              );
               console.log(`[ChatShell] Replayed task=${tid} → ${replayMsgs.length} msgs, addPrompt=${addPrompt}`);
               allMessages.push(...replayMsgs);
               // Collect events for Canvas panel (merge into ref after all tasks processed)
@@ -798,6 +890,8 @@ export function ChatShell() {
                   lastSubToolStepsMsgId = replayToolStepsMsgId;
                 } else if (snapshot.status === 'completed') {
                   lastStatus = 'idle';
+                } else if (snapshot.status === 'failed') {
+                  lastStatus = 'failed';
                 }
               }
             }
@@ -826,7 +920,11 @@ export function ChatShell() {
             toolStepsMsgIdRef.current = lastSubToolStepsMsgId;
             toolStepsActiveRef.current = true;
           }
-          unsubRef.current = api.subscribeTask(lastTaskIdForSub, handleEvent, lastSubSinceIndex);
+          unsubRef.current = api.subscribeTask(
+            lastTaskIdForSub,
+            (event) => handleEvent(event, lastTaskIdForSub ?? undefined),
+            lastSubSinceIndex,
+          );
         }
       } else {
         setThread({
@@ -953,7 +1051,7 @@ export function ChatShell() {
 
       // Unsubscribe previous and subscribe new
       unsubRef.current?.();
-      unsubRef.current = api.subscribeTask(newTaskId, handleEvent);
+      unsubRef.current = api.subscribeTask(newTaskId, (event) => handleEvent(event, newTaskId));
     } catch (e) {
       const displayMessage = sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
       log.error('handleSubmit error', JSON.stringify({ message: displayMessage, raw: e instanceof Error ? e.message : String(e) }));
@@ -1094,6 +1192,13 @@ export function ChatShell() {
     sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
     setCanvasPreviewFile(artifact.filePath ?? artifact.title);
     setCanvasPreviewContent(content);
+    setCanvasSourceArtifact({
+      artifactId: artifact.artifactId,
+      kind: artifact.kind,
+      mimeType: artifact.mimeType,
+      title: artifact.title,
+      sourceTaskId: artifact.sourceTaskId ?? thread?.currentTaskId ?? undefined,
+    });
     setCanvasPreviewModeRequest((request) => ({
       id: request.id + 1,
       startInEditMode: Boolean(options?.startInEditMode),
@@ -1101,7 +1206,7 @@ export function ChatShell() {
     setCanvasExpanded(true);
     sidebarCollapse.setCollapsed(true);
     setCanvasOpen(true);
-  }, [sidebarCollapse.collapsed, sidebarCollapse.setCollapsed]);
+  }, [sidebarCollapse.collapsed, sidebarCollapse.setCollapsed, thread?.currentTaskId]);
 
   if (loadError) {
     return (
@@ -1192,6 +1297,7 @@ export function ChatShell() {
             sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
             setCanvasPreviewFile(file.filePath);
             setCanvasPreviewContent(content);
+            setCanvasSourceArtifact(undefined);
             setCanvasPreviewModeRequest((request) => ({ id: request.id + 1, startInEditMode: false }));
             setCanvasExpanded(true);
             sidebarCollapse.setCollapsed(true);
@@ -1203,6 +1309,9 @@ export function ChatShell() {
       {canvasOpen && (
         <CanvasPanel
           events={allEventsRef.current}
+          conversationId={taskId ?? ''}
+          sourceTaskId={thread?.currentTaskId ?? undefined}
+          sourceArtifact={canvasSourceArtifact}
           onClose={() => { setCanvasOpen(false); setCanvasExpanded(false); sidebarCollapse.setCollapsed(sidebarWasCollapsedRef.current); }}
           initialPreviewFile={canvasPreviewFile}
           initialPreviewContent={canvasPreviewContent}

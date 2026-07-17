@@ -15,6 +15,16 @@ import type {
   SearchProviderName,
   FetchProviderName,
 } from '../../src/ai/tools/connectors/config.js';
+import type {
+  ArtifactWorkspaceErrorCode,
+  ArtifactWorkspaceEventName,
+  ArtifactWorkspaceLayoutPatch,
+  ArtifactWorkspacePreview,
+  ArtifactWorkspaceRelationKind,
+  ArtifactWorkspaceRequestedKind,
+  ArtifactWorkspaceSelectedArtifact,
+  ArtifactWorkspaceSnapshot,
+} from '../shared/artifact-workspace-types.js';
 
 // Re-export types for renderer usage
 export type {
@@ -56,6 +66,25 @@ export const PRELOAD_API_KEYS = [
   'openArtifact',
   'openFileInSystemApp',
   'readFileContent',
+  'getArtifactWorkspaceSnapshot',
+  'closeArtifactWorkspace',
+  'readArtifactWorkspaceVersionPreview',
+  'exportArtifactWorkspaceVersion',
+  'createArtifactPlaceholder',
+  'submitArtifactGeneration',
+  'cancelArtifactGeneration',
+  'retryArtifactGeneration',
+  'preferArtifactVersion',
+  'removeArtifactWorkspaceNode',
+  'updateArtifactWorkspaceLayout',
+  'saveArtifactWorkspaceViewport',
+  'createArtifactWorkspaceCollection',
+  'createArtifactWorkspaceNote',
+  'updateArtifactWorkspaceNote',
+  'createArtifactWorkspaceRelation',
+  'setArtifactCollectionMembership',
+  'recordArtifactWorkspaceEvent',
+  'onArtifactWorkspaceChanged',
   'selectHtmlEditMedia',
   'listSkills',
   'installSkill',
@@ -254,6 +283,7 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
   'subscribeTask',
+  'onArtifactWorkspaceChanged',
   'onUpdateStatus',
   'onReminder',
   'onScheduledTaskDue',
@@ -308,6 +338,24 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   openArtifact: 'desktop:openArtifact',
   openFileInSystemApp: 'desktop:openFileInSystemApp',
   readFileContent: 'desktop:readFileContent',
+  getArtifactWorkspaceSnapshot: 'desktop:artifactWorkspace:getArtifactWorkspaceSnapshot',
+  closeArtifactWorkspace: 'desktop:artifactWorkspace:closeArtifactWorkspace',
+  readArtifactWorkspaceVersionPreview: 'desktop:artifactWorkspace:readArtifactWorkspaceVersionPreview',
+  exportArtifactWorkspaceVersion: 'desktop:artifactWorkspace:exportArtifactWorkspaceVersion',
+  createArtifactPlaceholder: 'desktop:artifactWorkspace:createArtifactPlaceholder',
+  submitArtifactGeneration: 'desktop:artifactWorkspace:submitArtifactGeneration',
+  cancelArtifactGeneration: 'desktop:artifactWorkspace:cancelArtifactGeneration',
+  retryArtifactGeneration: 'desktop:artifactWorkspace:retryArtifactGeneration',
+  preferArtifactVersion: 'desktop:artifactWorkspace:preferArtifactVersion',
+  removeArtifactWorkspaceNode: 'desktop:artifactWorkspace:removeArtifactWorkspaceNode',
+  updateArtifactWorkspaceLayout: 'desktop:artifactWorkspace:updateArtifactWorkspaceLayout',
+  saveArtifactWorkspaceViewport: 'desktop:artifactWorkspace:saveArtifactWorkspaceViewport',
+  createArtifactWorkspaceCollection: 'desktop:artifactWorkspace:createArtifactWorkspaceCollection',
+  createArtifactWorkspaceNote: 'desktop:artifactWorkspace:createArtifactWorkspaceNote',
+  updateArtifactWorkspaceNote: 'desktop:artifactWorkspace:updateArtifactWorkspaceNote',
+  createArtifactWorkspaceRelation: 'desktop:artifactWorkspace:createArtifactWorkspaceRelation',
+  setArtifactCollectionMembership: 'desktop:artifactWorkspace:setArtifactCollectionMembership',
+  recordArtifactWorkspaceEvent: 'desktop:artifactWorkspace:recordArtifactWorkspaceEvent',
   selectHtmlEditMedia: 'desktop:selectHtmlEditMedia',
   listSkills: 'desktop:listSkills',
   installSkill: 'desktop:installSkill',
@@ -758,6 +806,124 @@ export interface HtmlEditMediaSelection {
   error?: string;
 }
 
+export interface ArtifactWorkspaceIpcError {
+  code: ArtifactWorkspaceErrorCode;
+  message: string;
+  canonical?: unknown;
+}
+
+export type ArtifactWorkspaceIpcResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: ArtifactWorkspaceIpcError };
+
+export interface ArtifactWorkspaceIdentityInput {
+  conversationId: string;
+  /** @deprecated Main owns the opaque workspace root identity; renderer values are ignored. */
+  workspaceRootId?: string;
+}
+
+export interface GetArtifactWorkspaceSnapshotInput extends ArtifactWorkspaceIdentityInput {
+  selectedArtifact?: ArtifactWorkspaceSelectedArtifact;
+}
+
+export interface ArtifactWorkspaceVersionInput extends ArtifactWorkspaceIdentityInput {
+  versionId: string;
+}
+
+export interface CreateArtifactPlaceholderInput extends ArtifactWorkspaceIdentityInput {
+  requestedKind: ArtifactWorkspaceRequestedKind;
+  title?: string;
+  x?: number;
+  y?: number;
+  expectedStructureRevision: number;
+}
+
+export interface SubmitArtifactGenerationInput extends ArtifactWorkspaceIdentityInput {
+  placeholderNodeId?: string;
+  prompt: string;
+  sourceVersionId?: string;
+  selectedArtifact?: ArtifactWorkspaceSelectedArtifact;
+  requestedKind?: ArtifactWorkspaceRequestedKind;
+  expectedStructureRevision?: number;
+}
+
+export interface CancelArtifactGenerationInput extends ArtifactWorkspaceIdentityInput {
+  generationRequestId: string;
+}
+
+export interface RetryArtifactGenerationInput extends CancelArtifactGenerationInput {
+  prompt?: string;
+}
+
+export interface PreferArtifactVersionInput extends ArtifactWorkspaceVersionInput {
+  lineageId: string;
+  expectedStructureRevision: number;
+}
+
+export interface RemoveArtifactWorkspaceNodeInput extends ArtifactWorkspaceIdentityInput {
+  nodeId: string;
+  expectedStructureRevision: number;
+}
+
+export interface UpdateArtifactWorkspaceLayoutInput extends ArtifactWorkspaceIdentityInput {
+  patches: ArtifactWorkspaceLayoutPatch[];
+}
+
+export interface SaveArtifactWorkspaceViewportInput extends ArtifactWorkspaceIdentityInput {
+  viewport: { x: number; y: number; zoom: number };
+  expectedViewRevision?: number;
+}
+
+export interface CreateArtifactWorkspaceCollectionInput extends ArtifactWorkspaceIdentityInput {
+  title: string;
+  x?: number;
+  y?: number;
+  expectedStructureRevision: number;
+}
+
+export interface CreateArtifactWorkspaceNoteInput extends ArtifactWorkspaceIdentityInput {
+  title?: string;
+  noteText: string;
+  x?: number;
+  y?: number;
+  expectedStructureRevision: number;
+}
+
+export interface UpdateArtifactWorkspaceNoteInput extends ArtifactWorkspaceIdentityInput {
+  nodeId: string;
+  noteText: string;
+  expectedStructureRevision: number;
+}
+
+export interface CreateArtifactWorkspaceRelationInput extends ArtifactWorkspaceIdentityInput {
+  fromNodeId: string;
+  toNodeId: string;
+  kind: ArtifactWorkspaceRelationKind;
+  order?: number;
+  expectedStructureRevision: number;
+}
+
+export interface SetArtifactCollectionMembershipInput extends ArtifactWorkspaceIdentityInput {
+  collectionNodeId: string;
+  memberNodeId: string;
+  included: boolean;
+  order?: number;
+  expectedStructureRevision: number;
+}
+
+export interface RecordArtifactWorkspaceEventInput extends ArtifactWorkspaceIdentityInput {
+  eventName: ArtifactWorkspaceEventName;
+  requestId?: string;
+  dedupeKey?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export function sanitizeArtifactWorkspaceInput<T>(input: T): T {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const { requestSource: _requestSource, viewKey: _viewKey, ...safe } = input as Record<string, unknown>;
+  return safe as T;
+}
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -797,6 +963,25 @@ export interface DesktopApi {
   openArtifact(artifactId: string): Promise<void>;
   openFileInSystemApp(filePath: string): Promise<void>;
   readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
+  getArtifactWorkspaceSnapshot(input: GetArtifactWorkspaceSnapshotInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  closeArtifactWorkspace(input: ArtifactWorkspaceIdentityInput): Promise<ArtifactWorkspaceIpcResult<{ closed: boolean }>>;
+  onArtifactWorkspaceChanged(handler: (change: { conversationId: string; workspaceId: string }) => void): () => void;
+  readArtifactWorkspaceVersionPreview(input: ArtifactWorkspaceVersionInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspacePreview>>;
+  exportArtifactWorkspaceVersion(input: ArtifactWorkspaceVersionInput): Promise<ArtifactWorkspaceIpcResult<{ exported: boolean; canceled?: boolean }>>;
+  createArtifactPlaceholder(input: CreateArtifactPlaceholderInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  submitArtifactGeneration(input: SubmitArtifactGenerationInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  cancelArtifactGeneration(input: CancelArtifactGenerationInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  retryArtifactGeneration(input: RetryArtifactGenerationInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  preferArtifactVersion(input: PreferArtifactVersionInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  removeArtifactWorkspaceNode(input: RemoveArtifactWorkspaceNodeInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  updateArtifactWorkspaceLayout(input: UpdateArtifactWorkspaceLayoutInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  saveArtifactWorkspaceViewport(input: SaveArtifactWorkspaceViewportInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  createArtifactWorkspaceCollection(input: CreateArtifactWorkspaceCollectionInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  createArtifactWorkspaceNote(input: CreateArtifactWorkspaceNoteInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  updateArtifactWorkspaceNote(input: UpdateArtifactWorkspaceNoteInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  createArtifactWorkspaceRelation(input: CreateArtifactWorkspaceRelationInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  setArtifactCollectionMembership(input: SetArtifactCollectionMembershipInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
+  recordArtifactWorkspaceEvent(input: RecordArtifactWorkspaceEventInput): Promise<ArtifactWorkspaceIpcResult<{ recorded: boolean }>>;
   selectHtmlEditMedia(input: { kind: 'image' | 'svg' }): Promise<HtmlEditMediaSelection>;
   listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
   installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
@@ -1116,6 +1301,86 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
     openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<void>,
     readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
+    getArtifactWorkspaceSnapshot: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:getArtifactWorkspaceSnapshot',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['getArtifactWorkspaceSnapshot']>,
+    closeArtifactWorkspace: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:closeArtifactWorkspace',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['closeArtifactWorkspace']>,
+    onArtifactWorkspaceChanged(handler) {
+      const channel = 'desktop:artifactWorkspace:changed';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload as { conversationId: string; workspaceId: string });
+      };
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.off(channel, listener);
+    },
+    readArtifactWorkspaceVersionPreview: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:readArtifactWorkspaceVersionPreview',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['readArtifactWorkspaceVersionPreview']>,
+    exportArtifactWorkspaceVersion: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:exportArtifactWorkspaceVersion',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['exportArtifactWorkspaceVersion']>,
+    createArtifactPlaceholder: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:createArtifactPlaceholder',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['createArtifactPlaceholder']>,
+    submitArtifactGeneration: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:submitArtifactGeneration',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['submitArtifactGeneration']>,
+    cancelArtifactGeneration: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:cancelArtifactGeneration',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['cancelArtifactGeneration']>,
+    retryArtifactGeneration: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:retryArtifactGeneration',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['retryArtifactGeneration']>,
+    preferArtifactVersion: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:preferArtifactVersion',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['preferArtifactVersion']>,
+    removeArtifactWorkspaceNode: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:removeArtifactWorkspaceNode',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['removeArtifactWorkspaceNode']>,
+    updateArtifactWorkspaceLayout: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:updateArtifactWorkspaceLayout',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['updateArtifactWorkspaceLayout']>,
+    saveArtifactWorkspaceViewport: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:saveArtifactWorkspaceViewport',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['saveArtifactWorkspaceViewport']>,
+    createArtifactWorkspaceCollection: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:createArtifactWorkspaceCollection',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['createArtifactWorkspaceCollection']>,
+    createArtifactWorkspaceNote: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:createArtifactWorkspaceNote',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['createArtifactWorkspaceNote']>,
+    updateArtifactWorkspaceNote: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:updateArtifactWorkspaceNote',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['updateArtifactWorkspaceNote']>,
+    createArtifactWorkspaceRelation: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:createArtifactWorkspaceRelation',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['createArtifactWorkspaceRelation']>,
+    setArtifactCollectionMembership: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:setArtifactCollectionMembership',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['setArtifactCollectionMembership']>,
+    recordArtifactWorkspaceEvent: (input) => ipcRenderer.invoke(
+      'desktop:artifactWorkspace:recordArtifactWorkspaceEvent',
+      sanitizeArtifactWorkspaceInput(input),
+    ) as ReturnType<DesktopApi['recordArtifactWorkspaceEvent']>,
     selectHtmlEditMedia: (input) => ipcRenderer.invoke('desktop:selectHtmlEditMedia', input) as Promise<HtmlEditMediaSelection>,
     listSkills: () => ipcRenderer.invoke('desktop:listSkills') as ReturnType<DesktopApi['listSkills']>,
     installSkill: (skillName) => ipcRenderer.invoke('desktop:installSkill', skillName) as Promise<{ success: boolean; message: string }>,

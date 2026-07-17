@@ -83,6 +83,7 @@ export type ArtifactKind = 'pptx' | 'pdf' | 'docx' | 'xlsx' | 'html' | 'image' |
 
 export interface ArtifactSummary {
   artifactId: string;
+  sourceTaskId?: string;
   kind: ArtifactKind;
   title: string;
   createdAt: string;
@@ -110,6 +111,7 @@ export interface SalvageSummary {
 
 export type DesktopTaskEvent =
   | { type: 'task_started'; taskId: string }
+  | { type: 'task_terminal'; status: Extract<TaskSnapshotStatus, 'completed' | 'failed' | 'cancelled'> }
   | { type: 'understanding_updated'; understanding: TaskUnderstanding }
   | { type: 'plan_updated'; plan: PlanStep[] }
   | { type: 'progress'; message: string; stage?: string; eventId: string }
@@ -136,6 +138,27 @@ export interface TaskCreateContext {
   taskIds?: string[];
 }
 
+export interface ArtifactWorkspaceExecutionScope {
+  kind: 'artifact_workspace_generation';
+  generationRequestId: string;
+  leaseId: string;
+  target?: ArtifactGenerationTarget;
+}
+
+export interface ArtifactGenerationTarget {
+  workspaceId: string;
+  nodeId: string;
+  placeholderId?: string;
+  sourceArtifactVersionId?: string;
+  generationRequestId: string;
+  leaseId: string;
+  expectedStructureRevision: number;
+  requestedKind: 'image' | 'html' | 'markdown' | 'slides';
+  width?: number;
+  height?: number;
+  referenceVersionIds: string[];
+}
+
 export interface TaskContextSkip {
   taskId: string;
   reason: TaskContextSkipReason;
@@ -155,6 +178,7 @@ export interface TaskCreateInput {
   watchdogMs?: number;
   maxToolLoopIterations?: number;
   context?: TaskCreateContext;
+  executionScope?: ArtifactWorkspaceExecutionScope;
 }
 
 export interface TaskSnapshot {
@@ -168,6 +192,7 @@ export interface TaskSnapshot {
   result?: TaskResult;
   salvage?: SalvageSummary;
   context?: TaskContextAudit;
+  executionScope?: ArtifactWorkspaceExecutionScope;
   createdAt: number;
   updatedAt: number;
 }
@@ -177,6 +202,8 @@ export interface ActiveTaskRef {
 }
 
 export interface TaskRuntimeHost {
+  prepareTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
+  startTask(taskId: string): Promise<void>;
   createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent>;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;

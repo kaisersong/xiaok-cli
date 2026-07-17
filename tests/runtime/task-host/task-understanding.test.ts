@@ -56,6 +56,120 @@ describe('TaskUnderstanding projection', () => {
     ]);
     expect(understanding.nextAction).toBe('create_project');
   });
+
+  it('keeps ordinary research prompts generic', () => {
+    const prompt = '找YC合伙人Diana Hu最新的视频的关键内容，how to build an AI native company，详细的内容';
+    const understanding = buildTaskUnderstanding({ prompt, materials: [] });
+
+    expect(understanding).toEqual({
+      goal: prompt,
+      deliverable: '任务结果',
+      taskType: 'unknown',
+      audience: '用户',
+      inputs: [],
+      missingInfo: [],
+      assumptions: [],
+      riskLevel: 'medium',
+      suggestedPlan: [],
+      nextAction: 'execute_task',
+    });
+    expect(JSON.stringify(understanding)).not.toMatch(/制造业|PPT|报价表|客户成功案例/);
+  });
+
+  it('does not treat analysis of an existing PPT as sales-deck generation', () => {
+    const prompt = '分析这个 PPT 里写了什么，并告诉我关键问题';
+    const understanding = buildTaskUnderstanding({
+      prompt,
+      materials: [],
+    });
+
+    expect(understanding).toEqual({
+      goal: prompt,
+      deliverable: '任务结果',
+      taskType: 'unknown',
+      audience: '用户',
+      inputs: [],
+      missingInfo: [],
+      assumptions: [],
+      riskLevel: 'medium',
+      suggestedPlan: [],
+      nextAction: 'execute_task',
+    });
+    expect(JSON.stringify(understanding)).not.toMatch(/制造业|报价表|客户成功案例/);
+  });
+
+  it('keeps report generation generic when no deck format is requested', () => {
+    const prompt = '生成一份 AI 研究报告';
+    const understanding = buildTaskUnderstanding({ prompt, materials: [] });
+
+    expect(understanding).toEqual({
+      goal: prompt,
+      deliverable: '任务结果',
+      taskType: 'unknown',
+      audience: '用户',
+      inputs: [],
+      missingInfo: [],
+      assumptions: [],
+      riskLevel: 'medium',
+      suggestedPlan: [],
+      nextAction: 'execute_task',
+    });
+  });
+
+  it.each([
+    '分析这个 PPT，并生成一份研究报告',
+    '不要制作 PPT，只输出研究报告',
+    '不要把这个 PPT 优化',
+    'PPT 并生成研究报告',
+    '写一份这个 PPT 的分析报告',
+    '生成关于这个 PPT 的研究报告',
+    '输出 PPT 分析结果',
+    '输出 PPT 分析报告',
+    '输出 PPT 关键内容',
+    'Write a report about this PowerPoint',
+    'Generate an analysis of this slide deck',
+  ])('keeps mixed or negated deck prompts generic: %s', (prompt) => {
+    const understanding = buildTaskUnderstanding({ prompt, materials: [] });
+
+    expect(understanding).toEqual({
+      goal: prompt,
+      deliverable: '任务结果',
+      taskType: 'unknown',
+      audience: '用户',
+      inputs: [],
+      missingInfo: [],
+      assumptions: [],
+      riskLevel: 'medium',
+      suggestedPlan: [],
+      nextAction: 'execute_task',
+    });
+  });
+
+  it.each([
+    '帮我做个 PPT',
+    '准备一份演示文稿',
+    '整理成 PPT',
+    '出一版 PPT',
+    'Prepare a slide deck for the board',
+    '请把这个 PPT 优化一下',
+    'PPT 帮我生成一版',
+    'This slide deck needs updating',
+  ])('recognizes explicit deck output intent: %s', (prompt) => {
+    const understanding = buildTaskUnderstanding({ prompt, materials: [] });
+
+    expect(understanding.taskType).toBe('sales_deck');
+    expect(understanding.deliverable).toBe('可继续编辑的 PPT 初稿');
+  });
+
+  it('recognizes explicit PowerPoint generation as a sales deck', () => {
+    const understanding = buildTaskUnderstanding({
+      prompt: 'Create a PowerPoint presentation for the customer CIO',
+      materials: [],
+    });
+
+    expect(understanding.taskType).toBe('sales_deck');
+    expect(understanding.deliverable).toBe('可继续编辑的 PPT 初稿');
+  });
 });
 
 function createMaterial(

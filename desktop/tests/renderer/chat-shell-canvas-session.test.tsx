@@ -25,11 +25,25 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     canvasOpen,
     onToggleCanvas,
     onArtifactClick,
+    messages,
   }: {
     canvasOpen: boolean;
     onToggleCanvas: () => void;
+    messages: Array<{
+      role: string;
+      result?: {
+        artifacts?: Array<{
+          artifactId: string;
+          title: string;
+          kind: string;
+          filePath?: string;
+          mimeType?: string;
+          sourceTaskId?: string;
+        }>;
+      };
+    }>;
     onArtifactClick?: (
-      artifact: { artifactId: string; title: string; kind: string; filePath?: string },
+      artifact: { artifactId: string; title: string; kind: string; filePath?: string; mimeType?: string; sourceTaskId?: string },
       options?: { startInEditMode?: boolean },
     ) => void;
   }) => (
@@ -45,6 +59,17 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
       >
         edit-artifact
       </button>
+      {messages.flatMap((message) => message.role === 'result_card'
+        ? (message.result?.artifacts ?? []).map((artifact) => (
+            <button
+              key={artifact.artifactId}
+              type="button"
+              onClick={() => onArtifactClick?.(artifact)}
+            >
+              {`open-${artifact.artifactId}`}
+            </button>
+          ))
+        : [])}
     </div>
   ),
 }));
@@ -52,11 +77,21 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
 vi.mock('../../renderer/src/components/CanvasPanel', () => ({
   CanvasPanel: ({
     initialPreviewModeRequest,
+    conversationId,
+    sourceTaskId,
+    sourceArtifact,
   }: {
     initialPreviewModeRequest?: { id: number; startInEditMode: boolean };
+    conversationId?: string;
+    sourceTaskId?: string;
+    sourceArtifact?: { artifactId: string; kind?: string; mimeType?: string; title?: string; sourceTaskId?: string };
   }) => (
     <div data-testid="canvas-panel">
       <span data-testid="canvas-panel-mode">{initialPreviewModeRequest?.startInEditMode ? 'edit' : 'preview'}</span>
+      <span data-testid="canvas-panel-conversation">{conversationId}</span>
+      <span data-testid="canvas-panel-task">{sourceTaskId}</span>
+      <span data-testid="canvas-panel-artifact">{sourceArtifact?.artifactId}</span>
+      <span data-testid="canvas-panel-artifact-task">{sourceArtifact?.sourceTaskId}</span>
     </div>
   ),
 }));
@@ -162,7 +197,11 @@ describe('ChatShell canvas is scoped per session', () => {
   });
 
   it('passes artifact edit shortcut requests through to CanvasPanel', async () => {
-    mockGetThread.mockImplementation(async (id: string) => thread(id));
+    mockGetThread.mockImplementation(async (id: string) => ({
+      ...thread(id),
+      currentTaskId: 'desktop-task-7',
+      taskIds: ['desktop-task-7'],
+    }));
     mockReadFileContent.mockResolvedValueOnce({ content: '<html><body><h1>Report</h1></body></html>' });
 
     render(
@@ -180,6 +219,57 @@ describe('ChatShell canvas is scoped per session', () => {
 
     await waitFor(() => expect(screen.getByTestId('canvas-open')).toHaveTextContent('open'));
     expect(screen.getByTestId('canvas-panel-mode')).toHaveTextContent('edit');
+    expect(screen.getByTestId('canvas-panel-conversation')).toHaveTextContent('thread-A');
+    expect(screen.getByTestId('canvas-panel-task')).toHaveTextContent('desktop-task-7');
+    expect(screen.getByTestId('canvas-panel-artifact')).toHaveTextContent('artifact-report');
     expect(mockReadFileContent).toHaveBeenCalledWith('/tmp/report.html');
+  });
+
+  it('keeps each historical artifact bound to the task that produced it', async () => {
+    mockGetThread.mockResolvedValue({
+      ...thread('thread-A'),
+      currentTaskId: 'task-B',
+      taskIds: ['task-A', 'task-B'],
+    });
+    mockRecoverTask.mockImplementation(async (taskId: string) => ({
+      snapshot: {
+        taskId,
+        prompt: `prompt-${taskId}`,
+        status: 'completed',
+        events: [
+          {
+            type: 'artifact_recorded',
+            artifactId: `artifact-${taskId}`,
+            kind: 'html',
+            label: `${taskId}.html`,
+            filePath: `/tmp/${taskId}.html`,
+            previewAvailable: true,
+            turnId: `turn-${taskId}`,
+          },
+          {
+            type: 'result',
+            result: { summary: `done-${taskId}`, artifacts: [] },
+          },
+        ],
+      },
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-A']}>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'open-artifact-task-A' }));
+    await waitFor(() => expect(screen.getByTestId('canvas-panel-artifact')).toHaveTextContent('artifact-task-A'));
+    expect(screen.getByTestId('canvas-panel-artifact-task')).toHaveTextContent('task-A');
+
+    fireEvent.click(screen.getByRole('button', { name: 'open-artifact-task-B' }));
+    await waitFor(() => expect(screen.getByTestId('canvas-panel-artifact')).toHaveTextContent('artifact-task-B'));
+    expect(screen.getByTestId('canvas-panel-artifact-task')).toHaveTextContent('task-B');
   });
 });

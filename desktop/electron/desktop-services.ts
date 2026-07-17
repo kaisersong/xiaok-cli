@@ -21,7 +21,7 @@ import {
   loadTaskSnapshotsForSession,
   writeTraceBundleToPath,
 } from '../../src/runtime/trace/exporter.js';
-import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition } from '../../src/types.js';
+import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition, ToolExecutionContext } from '../../src/types.js';
 import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
@@ -205,6 +205,18 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
 }
 import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
 import { buildManagedXiaokAgentPayload } from './managed-xiaok-agent.js';
+import { ArtifactWorkspaceStore } from './artifact-workspace-store.js';
+import { ArtifactWorkspaceFileManager } from './artifact-workspace-files.js';
+import {
+  ArtifactWorkspaceService,
+  type ArtifactWorkspaceFeatureFlags,
+} from './artifact-workspace-service.js';
+import {
+  createArtifactWorkspaceGenerationFileTools,
+  createArtifactWorkspacePluginProducerTool,
+  createArtifactWorkspaceTools,
+  createArtifactWorkspaceUnavailableProducerTool,
+} from './artifact-workspace-tools.js';
 
 // ---- Skill stats types ----
 
@@ -319,6 +331,7 @@ export interface DesktopServicesOptions {
   pluginDependencyStatusOptions?: PluginDependencyStatusOptions;
   computerUseAppIdentity?: ComputerUseAppIdentity;
   computerUsePreferencePath?: string;
+  artifactWorkspaceFeatureFlags?: Partial<ArtifactWorkspaceFeatureFlags>;
 }
 
 const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
@@ -612,6 +625,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     now: options.now,
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
+  const artifactWorkspaceStore = new ArtifactWorkspaceStore({
+    dbPath: join(options.dataRoot, 'artifact-workspace', 'workspace.sqlite'),
+    now: options.now,
+  });
+  const artifactWorkspaceFileManager = new ArtifactWorkspaceFileManager({
+    managedRoot: join(options.dataRoot, 'artifact-workspace', 'managed'),
+  });
+  let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot);
@@ -838,6 +859,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         ? { code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT', message: 'Computer Use 正在连接或连接失败。', userAction: { type: 'reconnect_computer_use', label: '重新连接' } }
         : buildComputerUseNeedsEnablementError();
     }
+    if (!options.targetServerName || options.targetServerName === 'slide-renderer') {
+      artifactGenerationRegistry.registerTool(createArtifactWorkspaceUnavailableProducerTool({
+        name: 'mcp__slide-renderer__render_slide',
+        pluginSource: 'kai-slide-creator',
+        requestedKind: 'slides',
+        properties: {
+          brief_json: { type: 'string', description: '符合 bundled slide renderer schema 的 BRIEF.json' },
+        },
+        required: ['brief_json'],
+      }));
+    }
     try {
       const plugins = await loadPlugins([pluginRootDir]);
       for (const plugin of plugins) {
@@ -919,6 +951,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             }
             for (const tool of mcpTools) {
               registry.registerTool(tool);
+              if (
+                plugin.name === 'kai-slide-creator'
+                && server.name === 'slide-renderer'
+                && tool.definition.name === 'mcp__slide-renderer__render_slide'
+              ) {
+                artifactGenerationRegistry.registerTool(createArtifactWorkspacePluginProducerTool({
+                  generationRoot: artifactGenerationRoot,
+                  resolveRequestedKind: leaseId => artifactWorkspaceStore.getLease(leaseId)?.requestedKind,
+                  tool,
+                  requestedKind: 'slides',
+                  outputFileName: 'slides.html',
+                  pluginSource: 'kai-slide-creator',
+                  mimeType: 'application/vnd.xiaok.slides+html',
+                }));
+              }
             }
             pluginMcpDisposers.push({
               name: server.name,
@@ -999,16 +1046,96 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     };
   };
 
+  const artifactGenerationRoot = join(options.dataRoot, 'artifact-workspace', 'generation');
+  mkdirSync(artifactGenerationRoot, { recursive: true });
+  const artifactGenerationTools = createArtifactWorkspaceGenerationFileTools(
+    artifactGenerationRoot,
+    leaseId => artifactWorkspaceStore.getLease(leaseId)?.requestedKind,
+  );
+  const artifactGenerationRegistry = new ToolRegistry({ autoMode: true }, artifactGenerationTools);
+  artifactGenerationRegistry.registerTool(createArtifactWorkspacePluginProducerTool({
+    generationRoot: artifactGenerationRoot,
+    resolveRequestedKind: leaseId => artifactWorkspaceStore.getLease(leaseId)?.requestedKind,
+    tool: createReportArtifactTool(),
+    requestedKind: 'html',
+    outputFileName: 'report.html',
+    pluginSource: 'kai-report-creator',
+    mimeType: 'text/html',
+  }));
+  artifactGenerationRegistry.registerTool(createArtifactWorkspaceUnavailableProducerTool({
+    name: 'mcp__slide-renderer__render_slide',
+    pluginSource: 'kai-slide-creator',
+    requestedKind: 'slides',
+    properties: {
+      brief_json: { type: 'string', description: '符合 bundled slide renderer schema 的 BRIEF.json' },
+    },
+    required: ['brief_json'],
+  }));
+  const defaultDesktopRunner = createDesktopModelRunnerWithRegistry(
+    registry,
+    tools,
+    options.dataRoot,
+    options.kswarmService,
+    materialRegistry,
+    kswarmCreateProjectToolOptions,
+  );
+  const restrictedArtifactRunner = createDesktopModelRunnerWithRegistry(
+    artifactGenerationRegistry,
+    artifactGenerationTools,
+    options.dataRoot,
+    options.kswarmService,
+    materialRegistry,
+    kswarmCreateProjectToolOptions,
+    { restrictedArtifactGeneration: true },
+  );
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? createDesktopModelRunnerWithRegistry(registry, tools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
+    runner: options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
+      ? restrictedArtifactRunner(input)
+      : defaultDesktopRunner(input)),
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
-    // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts
+    // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    onPersistedEvent: async input => {
+      if (!artifactWorkspaceService) return;
+      try {
+        await artifactWorkspaceService.handlePersistedTaskEvent(input);
+      } catch (error) {
+        console.warn('[artifact-workspace] task event projection failed:', error instanceof Error ? error.message : String(error));
+      }
+    },
   });
+
+  const workspaceService = new ArtifactWorkspaceService({
+    store: artifactWorkspaceStore,
+    snapshotStore,
+    taskHost: host,
+    fileManager: artifactWorkspaceFileManager,
+    workspaceRoot: artifactGenerationRoot,
+    generationRoot: artifactGenerationRoot,
+    allowedRoots: [
+      options.dataRoot,
+      process.cwd(),
+      join(homedir(), '.kswarm', 'projects'),
+      join(homedir(), '.xiaok', 'tasks'),
+    ],
+    featureFlags: {
+      artifactWorkspaceRevisionUi:
+        options.artifactWorkspaceFeatureFlags?.artifactWorkspaceRevisionUi
+        ?? process.env.XIAOK_ARTIFACT_WORKSPACE_REVISION_UI === '1',
+      artifactSpatialWorkspace:
+        options.artifactWorkspaceFeatureFlags?.artifactSpatialWorkspace
+        ?? process.env.XIAOK_ARTIFACT_SPATIAL_WORKSPACE === '1',
+    },
+    now: options.now,
+  });
+  artifactWorkspaceService = workspaceService;
+  for (const tool of createArtifactWorkspaceTools(workspaceService)) {
+    artifactGenerationRegistry.registerTool(tool);
+  }
 
   const createKSwarmTaskHost = (workspaceRoot: string) => {
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
@@ -1375,6 +1502,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
   }
+
+  const runArtifactWorkspaceUserMutation = async <T>(
+    action: string,
+    input: Parameters<ArtifactWorkspaceService['recordPublicMutationFailure']>[0],
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      const result = await operation();
+      if (action !== 'save_viewport') {
+        workspaceService.notifyIdentityChanged({
+          conversationId: String(input.conversationId),
+          workspaceRootId: String(input.workspaceRootId ?? ''),
+        });
+      }
+      return result;
+    } catch (error) {
+      workspaceService.recordPublicMutationFailure(input, action, error);
+      throw error;
+    }
+  };
 
   return {
     registerTimedActionService(service: TimedActionService) {
@@ -1961,6 +2108,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const active = await host.getActiveTasks();
       for (const ref of active) {
         try {
+          const snapshot = await snapshotStore.recoverTask(ref.taskId);
+          if (snapshot?.executionScope?.kind === 'artifact_workspace_generation') {
+            // Workspace reconciliation owns these tasks. The generic stale-task
+            // path would collapse recoverable generation state into failure.
+            continue;
+          }
           await host.recoverTask(ref.taskId);
         } catch {
           // Per-task recovery failure must not block desktop startup.
@@ -1974,6 +2127,125 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     async openArtifact(_artifactId: string): Promise<void> {
       // Artifact opening stays behind the semantic API even before rich preview exists.
+    },
+
+    subscribeArtifactWorkspaceChanges(listener: Parameters<ArtifactWorkspaceService['subscribeChanges']>[0]) {
+      return workspaceService.subscribeChanges(listener);
+    },
+
+    async getArtifactWorkspaceSnapshot(input: Record<string, unknown>, viewKey = 'primary') {
+      const identity = input as unknown as Parameters<ArtifactWorkspaceService['getArtifactWorkspaceSnapshot']>[0];
+      const selected = input.selectedArtifact;
+      if (selected && typeof selected === 'object' && !Array.isArray(selected)) {
+        const artifact = selected as Record<string, unknown>;
+        if (typeof artifact.sourceTaskId === 'string' && typeof artifact.artifactId === 'string') {
+          await workspaceService.recordEligibleArtifactOpened({
+            conversationId: identity.conversationId,
+            workspaceRootId: identity.workspaceRootId,
+            sourceTaskId: artifact.sourceTaskId,
+            artifactId: artifact.artifactId,
+          });
+        }
+      }
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...identity, viewKey });
+    },
+    async closeArtifactWorkspace(input: Record<string, unknown>, viewKey = 'primary') {
+      const identity = input as unknown as Parameters<ArtifactWorkspaceService['closeArtifactWorkspace']>[0];
+      return { closed: workspaceService.closeArtifactWorkspace({ ...identity, viewKey }) };
+    },
+    closeArtifactWorkspaceViewKey(viewKey: string) {
+      return workspaceService.closeArtifactWorkspaceViewKey(viewKey);
+    },
+    async readArtifactWorkspaceVersionPreview(input: Record<string, unknown>) {
+      return workspaceService.readArtifactWorkspaceVersionPreview(
+        input as unknown as Parameters<ArtifactWorkspaceService['readArtifactWorkspaceVersionPreview']>[0],
+      );
+    },
+    async exportArtifactWorkspaceVersion(input: Record<string, unknown>) {
+      return workspaceService.exportArtifactWorkspaceVersion(
+        input as unknown as Parameters<ArtifactWorkspaceService['exportArtifactWorkspaceVersion']>[0],
+      );
+    },
+    async createArtifactPlaceholder(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['createArtifactPlaceholder']>[0];
+      await runArtifactWorkspaceUserMutation('create_placeholder', mutation, () => workspaceService.createArtifactPlaceholder(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async submitArtifactGeneration(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['submitArtifactGeneration']>[0];
+      await runArtifactWorkspaceUserMutation('submit_generation', mutation, () => workspaceService.submitArtifactGeneration(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async cancelArtifactGeneration(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['cancelArtifactGeneration']>[0];
+      await runArtifactWorkspaceUserMutation('cancel_generation', mutation, () => workspaceService.cancelArtifactGeneration(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({
+        conversationId: String(input.conversationId),
+        workspaceRootId: String(input.workspaceRootId),
+        viewKey,
+      });
+    },
+    async retryArtifactGeneration(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['retryArtifactGeneration']>[0];
+      await runArtifactWorkspaceUserMutation('retry_generation', mutation, () => workspaceService.retryArtifactGeneration(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async preferArtifactVersion(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['preferArtifactVersion']>[0];
+      await runArtifactWorkspaceUserMutation('prefer_version', mutation, () => workspaceService.preferArtifactVersion(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async removeArtifactWorkspaceNode(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['removeArtifactWorkspaceNode']>[0];
+      await runArtifactWorkspaceUserMutation('remove_node', mutation, () => workspaceService.removeArtifactWorkspaceNode(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async updateArtifactWorkspaceLayout(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['updateArtifactWorkspaceLayout']>[0];
+      await runArtifactWorkspaceUserMutation('update_layout', mutation, () => workspaceService.updateArtifactWorkspaceLayout(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async saveArtifactWorkspaceViewport(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user', viewKey } as unknown as Parameters<ArtifactWorkspaceService['saveArtifactWorkspaceViewport']>[0];
+      await runArtifactWorkspaceUserMutation('save_viewport', mutation, () => workspaceService.saveArtifactWorkspaceViewport(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async createArtifactWorkspaceCollection(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['createArtifactWorkspaceCollection']>[0];
+      await runArtifactWorkspaceUserMutation('create_collection', mutation, () => workspaceService.createArtifactWorkspaceCollection(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async createArtifactWorkspaceNote(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['createArtifactWorkspaceNote']>[0];
+      await runArtifactWorkspaceUserMutation('create_note', mutation, () => workspaceService.createArtifactWorkspaceNote(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async updateArtifactWorkspaceNote(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['updateArtifactWorkspaceNote']>[0];
+      await runArtifactWorkspaceUserMutation('update_note', mutation, () => workspaceService.updateArtifactWorkspaceNote(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async createArtifactWorkspaceRelation(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['createArtifactWorkspaceRelation']>[0];
+      await runArtifactWorkspaceUserMutation('create_relation', mutation, () => workspaceService.createArtifactWorkspaceRelation(mutation));
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async setArtifactCollectionMembership(input: Record<string, unknown>, viewKey = 'primary') {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['setArtifactCollectionMembership']>[0];
+      await runArtifactWorkspaceUserMutation(
+        input.included === false ? 'remove_collection_member' : 'add_collection_member',
+        mutation,
+        () => workspaceService.setArtifactCollectionMembership(mutation),
+      );
+      return workspaceService.getArtifactWorkspaceSnapshot({ ...mutation, viewKey });
+    },
+    async recordArtifactWorkspaceEvent(input: Record<string, unknown>) {
+      const mutation = { ...input, requestSource: 'user' } as unknown as Parameters<ArtifactWorkspaceService['recordArtifactWorkspaceEvent']>[0];
+      return { recorded: workspaceService.recordArtifactWorkspaceEvent(mutation) };
+    },
+    async reconcileArtifactWorkspace(): Promise<void> {
+      await workspaceService.reconcileStartup();
+      workspaceService.cleanup();
     },
 
     // ---- Channel API (shared config.json) ----
@@ -3975,6 +4247,7 @@ async function executeDesktopTaskTool(
     taskId: string;
     materials: MaterialRecord[];
     materialRegistry?: MaterialRegistry;
+    context: ToolExecutionContext;
   },
 ): Promise<{ ok: boolean; result: string }> {
   if (toolCall.name === 'read_material') {
@@ -3984,7 +4257,7 @@ async function executeDesktopTaskTool(
       materialRegistry: options.materialRegistry,
     });
   }
-  const result = await options.registry.executeTool(toolCall.name, toolCall.input);
+  const result = await options.registry.executeTool(toolCall.name, toolCall.input, options.context);
   return { ok: !result.startsWith('Error'), result };
 }
 
@@ -4133,6 +4406,7 @@ interface ToolLoopContext {
   intentId: string;
   stepId: string;
   taskId: string;
+  executionScope?: TaskRunnerInput['executionScope'];
   materials: MaterialRecord[];
   materialRegistry?: MaterialRegistry;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
@@ -4145,7 +4419,43 @@ interface ToolLoopContext {
   onUsage?: (inputTokens: number, outputTokens: number) => void;
 }
 
-async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
+interface ArtifactWorkspaceToolAck {
+  artifactId: string;
+  artifactPath: string;
+  title: string;
+  kind: string;
+  mimeType?: string;
+  creator: string;
+}
+
+function parseArtifactWorkspaceToolAck(result: string): ArtifactWorkspaceToolAck | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  if (record.ok !== true || record.artifactWorkspaceArtifact !== true) return null;
+  const artifactId = typeof record.artifactId === 'string' ? record.artifactId.trim() : '';
+  const artifactPath = typeof record.artifactPath === 'string' ? record.artifactPath.trim() : '';
+  const kind = typeof record.kind === 'string' ? record.kind.trim() : '';
+  if (!artifactId || !artifactPath || !kind) return null;
+  const title = typeof record.title === 'string' && record.title.trim()
+    ? record.title.trim()
+    : basename(artifactPath) || artifactPath;
+  return {
+    artifactId,
+    artifactPath,
+    title,
+    kind,
+    ...(typeof record.mimeType === 'string' && record.mimeType.trim() ? { mimeType: record.mimeType.trim() } : {}),
+    creator: typeof record.creator === 'string' && record.creator.trim() ? record.creator.trim() : 'agent',
+  };
+}
+
+export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
   reply: string;
   totalToolCalls: number;
   totalInputTokens: number;
@@ -4301,6 +4611,33 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         taskId: ctx.taskId,
         materials: ctx.materials,
         materialRegistry: ctx.materialRegistry,
+        context: {
+          taskId: ctx.taskId,
+          executionScope: ctx.executionScope,
+          session: {
+            sessionId: ctx.sessionId,
+            cwd: ctx.dataRoot,
+            createdAt: ctx.taskStartTime,
+            updatedAt: Date.now(),
+            lineage: [ctx.sessionId],
+            messages: ctx.messages.map((message) => ({
+              role: message.role,
+              content: message.content.map((block) => ({ ...block })),
+            })),
+            usage: { inputTokens: 0, outputTokens: 0 },
+            compactions: [],
+            memoryRefs: [],
+            approvalRefs: [],
+            backgroundJobRefs: [],
+          },
+          messages: ctx.messages.map((message) => ({
+            role: message.role,
+            content: message.content.map((block) => ({ ...block })),
+          })),
+          systemPrompt: ctx.systemPrompt,
+          toolDefinitions: ctx.allToolDefs.map((definition) => ({ ...definition })),
+          signal: ctx.signal,
+        },
       });
       if (ok) {
         ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
@@ -4321,8 +4658,29 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         });
       }
 
+      const scopedArtifact = ok && ctx.executionScope?.kind === 'artifact_workspace_generation'
+        ? parseArtifactWorkspaceToolAck(result)
+        : null;
+      let artifactEventEmitted = false;
+      if (scopedArtifact) {
+        artifactEventEmitted = true;
+        ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath: scopedArtifact.artifactPath, event: 'add' });
+        ctx.emitRuntimeEvent({
+          type: 'artifact_recorded',
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          intentId: ctx.intentId,
+          stageId: ctx.stepId,
+          artifactId: scopedArtifact.artifactId,
+          label: scopedArtifact.title,
+          kind: scopedArtifact.kind,
+          path: scopedArtifact.artifactPath,
+          creator: scopedArtifact.creator,
+          mimeType: scopedArtifact.mimeType,
+        });
+      }
       const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
-      if (ok && writeArtifactPath) {
+      if (ok && !artifactEventEmitted && writeArtifactPath) {
         const filePath = writeArtifactPath;
         ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
         const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
@@ -4348,7 +4706,7 @@ async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           });
         }
       }
-      if (ok && !isToolName(toolCall.name, 'write') && !isToolName(toolCall.name, 'render_ui')) {
+      if (ok && !artifactEventEmitted && !isToolName(toolCall.name, 'write') && !isToolName(toolCall.name, 'render_ui')) {
         const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
         if (filePath) {
           ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
@@ -5244,38 +5602,40 @@ export function createKSwarmRepairProjectTaskTool(_kswarmService: KSwarmService)
     },
   };
 }
-function createDesktopModelRunnerWithRegistry(
+export function createDesktopModelRunnerWithRegistry(
   registry: ToolRegistry,
   tools: Tool[],
   dataRoot: string,
   kswarmService: KSwarmService,
   materialRegistry: MaterialRegistry,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
+  runnerOptions: { restrictedArtifactGeneration?: boolean } = {},
 ): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let skillsLoaded = false;
 
-  // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
-  registerKSwarmTools(registry, kswarmService, createProjectToolOptions);
-  registry.registerTool(createReportArtifactTool());
+  if (!runnerOptions.restrictedArtifactGeneration) {
+    // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
+    registerKSwarmTools(registry, kswarmService, createProjectToolOptions);
+    registry.registerTool(createReportArtifactTool());
+    registry.registerTool(createReportProgressTool());
 
-  registry.registerTool(createReportProgressTool());
-
-  // Register notebook (memory) tools — shared LayeredMemoryStore
-  for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
-    registry.registerTool(tool);
+    // Register notebook (memory) tools — shared LayeredMemoryStore
+    for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
+      registry.registerTool(tool);
+    }
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, maxToolLoopIterations }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, maxToolLoopIterations, executionScope }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
     const taskStartTime = Date.now();
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-    if (!skillsLoaded) {
+    if (!runnerOptions.restrictedArtifactGeneration && !skillsLoaded) {
       try {
         const skills = await skillCatalog.reload();
         if (skills.length > 0) {
@@ -5288,7 +5648,7 @@ function createDesktopModelRunnerWithRegistry(
         skillsLoaded = true;
       }
     }
-    const currentSkills = skillCatalog.list();
+    const currentSkills = runnerOptions.restrictedArtifactGeneration ? [] : skillCatalog.list();
     const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
     const slashMatch = parseSlashCommand(prompt);
     let effectivePrompt = prompt;
@@ -5314,8 +5674,10 @@ function createDesktopModelRunnerWithRegistry(
     }
 
     // Register skill_bundle_refs tool for skill executions
-    const bundleTool = createSkillBundleRefsTool(skillCatalog);
-    registry.registerTool(bundleTool);
+    if (!runnerOptions.restrictedArtifactGeneration) {
+      const bundleTool = createSkillBundleRefsTool(skillCatalog);
+      registry.registerTool(bundleTool);
+    }
 
     const materialsContext = materials && materials.length > 0
       ? buildMaterialManifestForPrompt(materials)
@@ -5374,6 +5736,7 @@ function createDesktopModelRunnerWithRegistry(
       intentId,
       stepId,
       taskId,
+      executionScope,
       materials,
       materialRegistry,
       emitRuntimeEvent,

@@ -807,4 +807,120 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.queryByText(/The API Key appears/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Failed:/)).not.toBeInTheDocument();
   });
+
+  it('replays persisted quota failures and restores failed status', async () => {
+    const failureReason = '429 您已达到每周/每月使用上限，您的限额将在 2026-07-15 14:18:50 重置。';
+    mockGetThread.mockResolvedValue({
+      id: 'thread-quota-failed',
+      title: '找 YC 合伙人的分享内容',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1784078843232,
+      updatedAt: 1784078866125,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: 'task-quota-failed',
+      taskIds: ['task-quota-failed'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-quota-failed',
+        sessionId: 'sess-quota-failed',
+        status: 'failed',
+        prompt: '找YC合伙人diana hu最新的视频的关键内容，how to build an ai native company，详细的内容',
+        materials: [],
+        events: [
+          { type: 'task_started', taskId: 'task-quota-failed' },
+          { type: 'assistant_delta', delta: '已找到视频，正在整理。' },
+          { type: 'progress', message: '正在整理视频摘要，这条尾部进度不应保留。', stage: 'working', eventId: 'event-trailing-progress' },
+          { type: 'error', message: failureReason },
+          { type: 'task_terminal', status: 'failed' },
+        ],
+        createdAt: 1784078843232,
+        updatedAt: 1784078866125,
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-quota-failed']}>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-status')).toHaveTextContent('failed');
+      expect(screen.getByTestId('chat-messages')).toHaveTextContent('额度已达上限');
+    });
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('已找到视频，正在整理。');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('2026-07-15 14:18:50');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('切换');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('正在整理视频摘要，这条尾部进度不应保留。');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('429');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('每周/每月');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('Error: 429');
+    expect(mockSubscribeTask).not.toHaveBeenCalled();
+  });
+
+  it('shows localized live failures and preserves partial assistant output', async () => {
+    let subscribedHandler: ((event: { type: string; delta?: string; message?: string; eventId?: string }) => void) | null = null;
+    mockGetThread.mockResolvedValue({
+      id: 'thread-live-failed',
+      title: 'Live failure',
+      status: 'idle',
+      mode: 'work',
+      createdAt: 1,
+      updatedAt: 1,
+      starred: false,
+      gtdBucket: 'inbox',
+      pinnedAt: null,
+      currentTaskId: null,
+      taskIds: [],
+    });
+    mockCreateTask.mockResolvedValue({ taskId: 'task-live-failed' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubscribeTask.mockImplementation((_taskId, handler) => {
+      subscribedHandler = handler as typeof subscribedHandler;
+      return () => {};
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-live-failed']}>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/t/:taskId" element={<ChatShell />} />
+          </Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await waitFor(() => expect(mockSubscribeTask).toHaveBeenCalledWith('task-live-failed', expect.any(Function)));
+
+    const failureReason = '429 您已达到每周/每月使用上限，您的限额将在 2026-07-15 14:18:50 重置。';
+    act(() => {
+      subscribedHandler?.({
+        type: 'progress',
+        message: '正在整理视频摘要，这条 live 进度不应保留。',
+        eventId: 'event-live-trailing-progress',
+      });
+      subscribedHandler?.({ type: 'assistant_delta', delta: '已找到视频，正在整理。' });
+      subscribedHandler?.({ type: 'error', message: failureReason });
+      subscribedHandler?.({ type: 'error', message: failureReason });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('failed'));
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('已找到视频，正在整理。');
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('额度已达上限');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('正在整理视频摘要，这条 live 进度不应保留。');
+    expect(screen.getByTestId('chat-messages').textContent?.match(/任务执行失败/g) ?? []).toHaveLength(1);
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('429');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('每周/每月');
+    expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('Error: 429');
+  });
 });

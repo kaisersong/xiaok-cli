@@ -57,6 +57,35 @@ describe('InProcessTaskRuntimeHost', () => {
     await waitFor(async () => (await host.getActiveTask()) === null);
   });
 
+  it('prepares an execution-scoped task without starting it, then starts it exactly once', async () => {
+    const runner = vi.fn<TaskRunner>(async () => undefined);
+    const host = createHost(runner);
+    const scope = {
+      kind: 'artifact_workspace_generation' as const,
+      generationRequestId: 'generation-1',
+      leaseId: 'lease-1',
+    };
+
+    const prepared = await host.prepareTask({
+      prompt: '生成一份 HTML revision',
+      materials: [],
+      executionScope: scope,
+    });
+
+    expect(runner).not.toHaveBeenCalled();
+    expect((await host.recoverTask(prepared.taskId)).snapshot.executionScope).toEqual(scope);
+
+    await host.startTask(prepared.taskId);
+    await waitFor(() => runner.mock.calls.length === 1);
+    expect(runner.mock.calls[0]?.[0]).toMatchObject({
+      taskId: prepared.taskId,
+      executionScope: scope,
+    });
+
+    await expect(host.startTask(prepared.taskId)).rejects.toThrow(/already started|terminal/i);
+    expect(runner).toHaveBeenCalledTimes(1);
+  });
+
   it('marks a persisted running task as failed when no execution exists after restart', async () => {
     await snapshotStore.save({
       ...makeSnapshot({ taskId: 'task_stale', status: 'running', createdAt: 100, updatedAt: 200 }),
