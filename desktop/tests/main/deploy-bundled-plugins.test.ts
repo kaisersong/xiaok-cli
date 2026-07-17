@@ -32,6 +32,7 @@ describe('deploy-bundled-plugins', () => {
   const originalHome = process.env.HOME;
   const originalUserProfile = process.env.USERPROFILE;
   const originalPath = process.env.PATH;
+  const originalConfigDir = process.env.XIAOK_CONFIG_DIR;
   const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
   beforeEach(() => {
@@ -47,6 +48,8 @@ describe('deploy-bundled-plugins', () => {
     process.env.HOME = originalHome;
     process.env.USERPROFILE = originalUserProfile;
     process.env.PATH = originalPath;
+    if (originalConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR;
+    else process.env.XIAOK_CONFIG_DIR = originalConfigDir;
     (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
     mockIsPackaged.mockReturnValue(false);
     mockResourcesPath.mockReturnValue('');
@@ -550,6 +553,89 @@ describe('deploy-bundled-plugins', () => {
       expect(existsSync(join(installedPluginDir, 'bundled-wheels', 'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl'))).toBe(true);
       const backups = readdirSync(join(rootDir, '.xiaok', '.symlink-backups'));
       expect(backups.some(name => name.startsWith('kai-slide-creator-'))).toBe(true);
+    });
+
+    it('upgrades a bundled-managed slide plugin from 3.2.0 to packaged 3.2.1 resources', async () => {
+      const isolatedConfigDir = join(rootDir, 'isolated-config');
+      process.env.XIAOK_CONFIG_DIR = isolatedConfigDir;
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      const bundledPluginDir = join(bundledDir, 'kai-slide-creator');
+      createPluginWithFiles(bundledPluginDir, {
+        name: 'kai-slide-creator',
+        version: '3.2.1',
+      }, {
+        'themes/kingdee/reference.md': '# Kingdee packaged reference',
+        'themes/kingdee/starter.html': '<html>Kingdee starter</html>',
+        'demos/data-story-en.html': '<html>Data Story demo</html>',
+        'vendor-manifest.json': '{"version":1,"files":{}}',
+        'mcp-servers/slide-renderer/server.py': '# packaged slide renderer',
+      });
+
+      const installedPluginDir = join(isolatedConfigDir, 'plugins', 'kai-slide-creator');
+      createPluginWithFiles(installedPluginDir, {
+        name: 'kai-slide-creator',
+        version: '3.2.0',
+        source: 'bundled',
+      }, {
+        'mcp-servers/slide-renderer/server.py': '# stale slide renderer',
+      });
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).toContain('kai-slide-creator');
+      const installedManifest = JSON.parse(readFileSync(join(installedPluginDir, 'plugin.json'), 'utf8'));
+      expect(installedManifest).toMatchObject({ version: '3.2.1', source: 'bundled' });
+      expect(readFileSync(join(installedPluginDir, 'themes', 'kingdee', 'reference.md'), 'utf8'))
+        .toBe('# Kingdee packaged reference');
+      expect(readFileSync(join(installedPluginDir, 'themes', 'kingdee', 'starter.html'), 'utf8'))
+        .toBe('<html>Kingdee starter</html>');
+      expect(readFileSync(join(installedPluginDir, 'demos', 'data-story-en.html'), 'utf8'))
+        .toBe('<html>Data Story demo</html>');
+      expect(existsSync(join(installedPluginDir, 'vendor-manifest.json'))).toBe(true);
+      expect(readFileSync(join(installedPluginDir, 'mcp-servers', 'slide-renderer', 'server.py'), 'utf8'))
+        .toBe('# packaged slide renderer');
+    });
+
+    it('preserves a same-version user-installed slide plugin and its files', async () => {
+      const isolatedConfigDir = join(rootDir, 'isolated-config');
+      process.env.XIAOK_CONFIG_DIR = isolatedConfigDir;
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      createPluginWithFiles(join(bundledDir, 'kai-slide-creator'), {
+        name: 'kai-slide-creator',
+        version: '3.2.1',
+      }, {
+        'themes/kingdee/reference.md': '# Bundled content must not be copied',
+        'vendor-manifest.json': '{"version":1,"files":{}}',
+      });
+
+      const installedPluginDir = join(isolatedConfigDir, 'plugins', 'kai-slide-creator');
+      createPluginWithFiles(installedPluginDir, {
+        name: 'kai-slide-creator',
+        version: '3.2.1',
+        source: 'registry',
+      }, {
+        'user-sentinel.txt': 'keep user content',
+      });
+
+      const result = await deployBundledPlugins();
+
+      expect(result.deployed).not.toContain('kai-slide-creator');
+      expect(readFileSync(join(installedPluginDir, 'user-sentinel.txt'), 'utf8')).toBe('keep user content');
+      expect(existsSync(join(installedPluginDir, 'themes', 'kingdee', 'reference.md'))).toBe(false);
+      const installedManifest = JSON.parse(readFileSync(join(installedPluginDir, 'plugin.json'), 'utf8'));
+      expect(installedManifest).toMatchObject({ version: '3.2.1', source: 'registry' });
     });
 
     it('deploys the bundled CUA computer-use plugin from packaged resources', async () => {

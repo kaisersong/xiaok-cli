@@ -109,6 +109,9 @@
         "skills/**/*",
         "references/**/*",
         "schemas/**/*",
+        "themes/**/*",
+        "demos/**/*",
+        "vendor-manifest.json",
         "mcp-servers/slide-renderer/**/*.py",
         "bundled-wheels/**/*"
       ]

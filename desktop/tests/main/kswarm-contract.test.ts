@@ -121,6 +121,9 @@ describe('desktop service path contract', () => {
       (entry) => entry.from === '../../kai-xiaok-plugins/plugins/kai-slide-creator',
     );
     expect(slidePluginEntry?.filter).toContain('skills/**/*');
+    expect(slidePluginEntry?.filter).toContain('themes/**/*');
+    expect(slidePluginEntry?.filter).toContain('demos/**/*');
+    expect(slidePluginEntry?.filter).toContain('vendor-manifest.json');
     expect(slidePluginEntry?.filter).not.toContain('SKILL.md');
 
     const reportPluginEntry = builderConfig.extraResources.find(
