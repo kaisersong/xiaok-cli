@@ -36,6 +36,7 @@ export interface ModelConfigEntry {
   model: string;
   label: string;
   capabilities?: string[];
+  runtimeOptions?: ModelRuntimeOptions;
 }
 
 export interface ProviderModelVariant {
@@ -43,6 +44,8 @@ export interface ProviderModelVariant {
   model: string;
   label: string;
   capabilities?: string[];
+  runtimeOptions?: ModelRuntimeOptions;
+  runtimeConstraints?: ModelRuntimeConstraints;
 }
 
 export interface ProviderProfile {

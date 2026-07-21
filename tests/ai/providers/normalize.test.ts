@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeConfig } from '../../../src/ai/providers/normalize.js';
+import { getProviderProfile } from '../../../src/ai/providers/registry.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../../src/types.js';
 
 describe('normalizeConfig', () => {
@@ -56,6 +57,97 @@ describe('normalizeConfig', () => {
     expect(normalized.models['kimi-default']).toMatchObject({
       provider: 'kimi',
       model: 'kimi-for-coding',
+    });
+  });
+
+  it('pins a schema-v1 Kimi config without a model to the previous K2.7 default', () => {
+    const normalized = normalizeConfig({
+      schemaVersion: 1,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://api.kimi.com/coding/v1',
+          apiKey: 'sk-kimi',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    });
+
+    expect(normalized.schemaVersion).toBe(2);
+    expect(normalized.defaultModelId).toBe('kimi-default');
+    expect(normalized.models['kimi-default']).toMatchObject({
+      provider: 'kimi',
+      model: 'kimi-k2.7',
+      label: 'Kimi K2.7',
+    });
+    expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
+  });
+
+  it('copies catalog runtime options for an explicit schema-v1 K3 model', () => {
+    const profile = getProviderProfile('kimi');
+    const normalized = normalizeConfig({
+      schemaVersion: 1,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://api.kimi.com/coding/v1',
+          apiKey: 'sk-kimi',
+          model: 'k3',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    });
+    const entry = normalized.models['kimi-default'];
+
+    expect(entry).toMatchObject({
+      provider: 'kimi',
+      model: 'k3',
+      label: 'Kimi K3',
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+    });
+    expect(entry.runtimeOptions).not.toBe(profile?.defaultModel.runtimeOptions);
+
+    entry.runtimeOptions!.contextLimit = 1_048_576;
+    expect(profile?.defaultModel.runtimeOptions?.contextLimit).toBe(262_144);
+  });
+
+  it('preserves an existing schema-v2 kimi-default K2.7 entry without K3 options', () => {
+    const input = {
+      schemaVersion: 2 as const,
+      defaultProvider: 'kimi',
+      defaultModelId: 'kimi-default',
+      providers: {
+        kimi: {
+          type: 'first_party' as const,
+          protocol: 'openai_legacy' as const,
+          baseUrl: 'https://api.kimi.com/coding/v1',
+        },
+      },
+      models: {
+        'kimi-default': {
+          provider: 'kimi',
+          model: 'kimi-k2.7',
+          label: 'Kimi K2.7',
+        },
+      },
+      defaultMode: 'interactive' as const,
+      intentBoundary: DEFAULT_INTENT_BOUNDARY_CONFIG,
+      channels: {},
+    };
+
+    const normalized = normalizeConfig(input);
+
+    expect(normalized.schemaVersion).toBe(2);
+    expect(normalized.defaultModelId).toBe('kimi-default');
+    expect(normalized.models['kimi-default']).toEqual({
+      provider: 'kimi',
+      model: 'kimi-k2.7',
+      label: 'Kimi K2.7',
     });
   });
 

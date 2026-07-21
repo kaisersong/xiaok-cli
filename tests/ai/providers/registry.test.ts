@@ -16,6 +16,54 @@ describe('getProviderProfile', () => {
     expect(getProviderProfile('unknown')).toBeUndefined();
     expect(getProviderProfile('')).toBeUndefined();
   });
+
+  it('registers Kimi K3 as the stable default with runtime policy metadata', () => {
+    const profile = getProviderProfile('kimi');
+
+    expect(profile?.defaultModel).toMatchObject({
+      modelId: 'kimi-default',
+      model: 'k3',
+      label: 'Kimi K3',
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+
+    const k3 = profile?.availableModels?.find((variant) => variant.modelId === 'kimi-k3');
+    expect(k3).toMatchObject({
+      model: 'k3',
+      label: 'Kimi K3',
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+    expect(k3?.runtimeOptions).not.toBe(profile?.defaultModel.runtimeOptions);
+    expect(k3?.runtimeConstraints).not.toBe(profile?.defaultModel.runtimeConstraints);
+    expect(k3?.runtimeConstraints?.reasoningEfforts).not.toBe(
+      profile?.defaultModel.runtimeConstraints?.reasoningEfforts,
+    );
+  });
+
+  it('keeps K2.7, K2.6, and K2.5 without K3 runtime options', () => {
+    const variants = getProviderProfile('kimi')?.availableModels ?? [];
+
+    for (const modelId of ['kimi-k2.7', 'kimi-k2.6', 'kimi-k2.5']) {
+      const variant = variants.find((candidate) => candidate.modelId === modelId);
+      expect(variant, modelId).toBeDefined();
+      expect(variant?.runtimeOptions, modelId).toBeUndefined();
+      expect(variant?.runtimeConstraints, modelId).toBeUndefined();
+    }
+  });
 });
 
 describe('listProviderProfiles', () => {

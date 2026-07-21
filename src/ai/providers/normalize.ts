@@ -1,7 +1,7 @@
 import type { Config, LegacyConfig } from '../../types.js';
 import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
-import { getProviderProfile } from './registry.js';
+import { getProviderModelVariant, getProviderProfile } from './registry.js';
 
 function cloneDefaultConfig(): Config {
   return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as Config;
@@ -42,6 +42,13 @@ function buildFirstPartyConfig(
     throw new Error(`未知 provider profile: ${providerId}`);
   }
 
+  const wireModel = modelOverride?.model ?? profile.defaultModel.model;
+  const catalogVariant = getProviderModelVariant(providerId, wireModel);
+  const capabilities = modelOverride?.capabilities
+    ?? catalogVariant?.capabilities
+    ?? profile.defaultModel.capabilities;
+  const runtimeOptions = modelOverride?.runtimeOptions ?? catalogVariant?.runtimeOptions;
+
   return {
     schemaVersion: 2,
     defaultProvider: providerId,
@@ -58,9 +65,10 @@ function buildFirstPartyConfig(
     models: {
       [profile.defaultModel.modelId]: {
         provider: providerId,
-        model: modelOverride?.model ?? profile.defaultModel.model,
-        label: modelOverride?.label ?? profile.defaultModel.label,
-        capabilities: modelOverride?.capabilities ?? profile.defaultModel.capabilities,
+        model: wireModel,
+        label: modelOverride?.label ?? catalogVariant?.label ?? profile.defaultModel.label,
+        capabilities: capabilities ? [...capabilities] : undefined,
+        ...(runtimeOptions ? { runtimeOptions: { ...runtimeOptions } } : {}),
       },
     },
     defaultMode: 'interactive',
@@ -100,11 +108,13 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
   const customBaseUrl = config.models.custom?.baseUrl;
   const detectedProvider = detectKnownProvider(customBaseUrl);
   if (detectedProvider) {
+    const legacyModel = config.models.custom?.model
+      ?? (detectedProvider === 'kimi' ? 'kimi-k2.7' : undefined);
     const known = buildFirstPartyConfig(detectedProvider, {
       apiKey: config.models.custom?.apiKey,
       baseUrl: customBaseUrl,
     }, {
-      model: config.models.custom?.model,
+      model: legacyModel,
     });
     return {
       ...known,

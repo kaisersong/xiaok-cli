@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { Command } from 'commander';
 import { loadConfig } from '../../src/utils/config.js';
 import { registerConfigCommands } from '../../src/commands/config.js';
+import { getProviderProfile } from '../../src/ai/providers/registry.js';
 
 function seedConfig(testDir: string, config: Record<string, unknown>): void {
   writeFileSync(join(testDir, 'config.json'), JSON.stringify(config, null, 2));
@@ -120,6 +121,70 @@ describe('config commands', () => {
         protocol: 'openai_legacy',
         baseUrl: 'https://api.deepseek.com/v1',
       });
+    });
+
+    it('creates a cloned K3 default entry from the bare Kimi provider name', async () => {
+      const profile = getProviderProfile('kimi');
+
+      await freshProgram().parseAsync(['node', 'xiaok', 'config', 'set', 'model', 'kimi']);
+
+      const updated = await loadConfig();
+      const entry = updated.models['kimi-default'];
+      expect(updated.schemaVersion).toBe(2);
+      expect(updated.defaultProvider).toBe('kimi');
+      expect(updated.defaultModelId).toBe('kimi-default');
+      expect(entry).toMatchObject({
+        provider: 'kimi',
+        model: 'k3',
+        label: 'Kimi K3',
+        runtimeOptions: {
+          contextLimit: 262_144,
+          reasoningEffort: 'high',
+        },
+      });
+      expect(entry.runtimeOptions).not.toBe(profile?.defaultModel.runtimeOptions);
+
+      entry.runtimeOptions!.reasoningEffort = 'low';
+      expect(profile?.defaultModel.runtimeOptions?.reasoningEffort).toBe('high');
+    });
+
+    it('copies exact catalog values for an explicit kimi/k3 model', async () => {
+      const profile = getProviderProfile('kimi');
+      const variant = profile?.availableModels?.find((candidate) => candidate.model === 'k3');
+
+      await freshProgram().parseAsync(['node', 'xiaok', 'config', 'set', 'model', 'kimi/k3']);
+
+      const updated = await loadConfig();
+      const entry = updated.models['kimi-k3'];
+      expect(updated.defaultModelId).toBe('kimi-k3');
+      expect(entry).toMatchObject({
+        provider: 'kimi',
+        model: 'k3',
+        label: 'Kimi K3',
+        capabilities: ['tools', 'thinking'],
+        runtimeOptions: {
+          contextLimit: 262_144,
+          reasoningEffort: 'high',
+        },
+      });
+      expect(entry.capabilities).not.toBe(variant?.capabilities);
+      expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
+    });
+
+    it('does not copy K3 runtime options to an explicit K2.7 model', async () => {
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'model', 'kimi/kimi-k2.7',
+      ]);
+
+      const updated = await loadConfig();
+      const entry = updated.models[updated.defaultModelId];
+      expect(entry).toMatchObject({
+        provider: 'kimi',
+        model: 'kimi-k2.7',
+        label: 'Kimi K2.7',
+        capabilities: ['tools', 'thinking'],
+      });
+      expect(entry.runtimeOptions).toBeUndefined();
     });
 
     it('creates model from provider/model syntax', async () => {
