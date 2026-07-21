@@ -32,6 +32,30 @@ describe('normalizeConfig', () => {
     });
   });
 
+  it('preserves provider default metadata for a legacy non-Kimi explicit model', () => {
+    const normalized = normalizeConfig({
+      schemaVersion: 1,
+      defaultModel: 'openai',
+      models: {
+        openai: {
+          model: 'o3',
+          apiKey: 'sk-openai',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    });
+    const entry = normalized.models['openai-default'];
+
+    expect(entry).toMatchObject({
+      provider: 'openai',
+      model: 'o3',
+      label: 'GPT-4o',
+      capabilities: ['tools'],
+    });
+    expect(entry).not.toHaveProperty('runtimeOptions');
+  });
+
   it('promotes known kimi coding custom config into the kimi provider profile', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,

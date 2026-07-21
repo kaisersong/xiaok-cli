@@ -43,7 +43,9 @@ function buildFirstPartyConfig(
   }
 
   const wireModel = modelOverride?.model ?? profile.defaultModel.model;
-  const catalogVariant = getProviderModelVariant(providerId, wireModel);
+  const catalogVariant = providerId === 'kimi'
+    ? getProviderModelVariant(providerId, wireModel)
+    : undefined;
   const capabilities = modelOverride?.capabilities
     ?? catalogVariant?.capabilities
     ?? profile.defaultModel.capabilities;
