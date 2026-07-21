@@ -17,6 +17,7 @@ describe('isOfficialKimiK3OpenAIEndpoint', () => {
 
     for (const endpoint of [
       'http://api.kimi.com/coding/v1',
+      'https://api.kimi.com:443/coding/v1',
       'https://api.kimi.com.evil.test/coding/v1',
       'https://api.kimi.com/coding-proxy/v1',
       'https://proxy.example.com/v1',
@@ -108,6 +109,36 @@ describe('resolveModelRuntimeOptions', () => {
         reasoningEffort: 'medium',
       } as unknown as ModelRuntimeOptions,
     })).toThrow(/reasoningEffort/);
+  });
+
+  it('does not let catalog constraints raise the official K3 context limit', () => {
+    expect(() => resolveModelRuntimeOptions({
+      protocol: 'openai_legacy',
+      baseUrl: KIMI_K3_OPENAI_ENDPOINT,
+      wireModel: 'k3',
+      catalogConstraints: {
+        maxContextLimit: 2_000_000,
+      },
+      configuredOptions: {
+        contextLimit: 1_500_000,
+      },
+    })).toThrow('contextLimit must not exceed 1048576');
+  });
+
+  it('intersects catalog reasoning efforts with the official K3 efforts', () => {
+    const result = resolveModelRuntimeOptions({
+      protocol: 'openai_legacy',
+      baseUrl: KIMI_K3_OPENAI_ENDPOINT,
+      wireModel: 'k3',
+      catalogConstraints: {
+        reasoningEfforts: ['low', 'medium'],
+      } as unknown as ModelRuntimeConstraints,
+      configuredOptions: {
+        reasoningEffort: 'low',
+      },
+    });
+
+    expect(result.runtimeConstraints?.reasoningEfforts).toEqual(['low']);
   });
 
   it.each([

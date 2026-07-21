@@ -43,6 +43,30 @@ function cloneConstraints(constraints: ModelRuntimeConstraints): ModelRuntimeCon
   };
 }
 
+function mergeConstraints(
+  fallback?: ModelRuntimeConstraints,
+  catalog?: ModelRuntimeConstraints,
+): ModelRuntimeConstraints | undefined {
+  if (!fallback) return catalog ? cloneConstraints(catalog) : undefined;
+  if (!catalog) return cloneConstraints(fallback);
+
+  const maxContextLimit = fallback.maxContextLimit === undefined
+    ? catalog.maxContextLimit
+    : catalog.maxContextLimit === undefined
+      ? fallback.maxContextLimit
+      : Math.min(fallback.maxContextLimit, catalog.maxContextLimit);
+  const reasoningEfforts = fallback.reasoningEfforts === undefined
+    ? catalog.reasoningEfforts
+    : catalog.reasoningEfforts === undefined
+      ? fallback.reasoningEfforts
+      : fallback.reasoningEfforts.filter((effort) => catalog.reasoningEfforts?.includes(effort));
+
+  return {
+    ...(maxContextLimit !== undefined ? { maxContextLimit } : {}),
+    ...(reasoningEfforts ? { reasoningEfforts: [...reasoningEfforts] } : {}),
+  };
+}
+
 function validateRuntimeOptions(
   options: ModelRuntimeOptions,
   constraints?: ModelRuntimeConstraints,
@@ -89,15 +113,7 @@ export function resolveModelRuntimeOptions(
       }
     : undefined;
 
-  const mergedConstraints = fallbackConstraints || input.catalogConstraints
-    ? {
-        ...fallbackConstraints,
-        ...input.catalogConstraints,
-      }
-    : undefined;
-  const runtimeConstraints = mergedConstraints
-    ? cloneConstraints(mergedConstraints)
-    : undefined;
+  const runtimeConstraints = mergeConstraints(fallbackConstraints, input.catalogConstraints);
 
   if (runtimeOptions) {
     validateRuntimeOptions(runtimeOptions, runtimeConstraints);
