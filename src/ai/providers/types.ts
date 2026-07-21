@@ -1,5 +1,17 @@
 export type ProtocolId = 'anthropic' | 'openai_legacy' | 'openai_responses';
 
+export type ModelReasoningEffort = 'low' | 'high' | 'max';
+
+export interface ModelRuntimeOptions {
+  contextLimit?: number;
+  reasoningEffort?: ModelReasoningEffort;
+}
+
+export interface ModelRuntimeConstraints {
+  maxContextLimit?: number;
+  reasoningEfforts?: ModelReasoningEffort[];
+}
+
 export type FirstPartyProviderId =
   | 'openai'
   | 'anthropic'
