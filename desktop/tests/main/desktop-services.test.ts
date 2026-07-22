@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveAppAsarSha256, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
+import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
@@ -19,6 +20,21 @@ function mockKSwarmService(): KSwarmService {
     getDesktopMutationToken: () => 'desktop-token',
     request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
   };
+}
+
+async function withoutBrowserGlobals<T>(action: () => Promise<T>): Promise<T> {
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: undefined });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: undefined });
+  try {
+    return await action();
+  } finally {
+    if (windowDescriptor) Object.defineProperty(globalThis, 'window', windowDescriptor);
+    else Reflect.deleteProperty(globalThis, 'window');
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+  }
 }
 
 describe('desktop services', () => {
@@ -1888,6 +1904,317 @@ describe('desktop services', () => {
       label: 'kimi-k2-thinking',
       isDefault: true,
     });
+  });
+
+  it('exposes auth-free Kimi K3 defaults and constraints without persisting view-only constraints', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    await services.saveModelConfig({ providerId: 'kimi' });
+    const snapshot = await services.getModelConfig();
+    const kimiProvider = snapshot.providers.find(provider => provider.id === 'kimi');
+    const kimiDefault = snapshot.models.find(model => model.id === 'kimi-default');
+    const kimiProfile = snapshot.providerProfiles.find(profile => profile.id === 'kimi');
+    const catalogK3 = kimiProfile?.availableModels?.find(model => model.modelId === 'kimi-k3');
+
+    expect(kimiProvider).toMatchObject({ apiKeyConfigured: false });
+    expect(kimiDefault).toMatchObject({
+      provider: 'kimi',
+      model: 'k3',
+      runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+    expect(catalogK3).toMatchObject({
+      runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+
+    const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf-8'));
+    expect(persisted.models['kimi-default'].runtimeOptions).toEqual({
+      contextLimit: 262_144,
+      reasoningEffort: 'high',
+    });
+    expect(persisted.models['kimi-default'].runtimeConstraints).toBeUndefined();
+  });
+
+  it('copies runtime metadata only for an exact Kimi K3 catalog wire model', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    let snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'k3' });
+    expect(snapshot.models.find(model => model.id === 'kimi-k3')).toMatchObject({
+      model: 'k3',
+      runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+
+    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    const stable = snapshot.models.find(model => model.id === 'kimi-kimi-k2.7');
+    expect(stable).toMatchObject({ model: 'kimi-k2.7' });
+    expect(stable).not.toHaveProperty('runtimeOptions');
+    expect(stable).not.toHaveProperty('runtimeConstraints');
+
+    const available = await services.listAvailableModelsForProvider('kimi');
+    expect(available.find(model => model.modelId === 'kimi-k3')).toMatchObject({
+      runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+    expect(available.find(model => model.modelId === 'kimi-k2.7')).not.toHaveProperty('runtimeOptions');
+  });
+
+  it('does not half-migrate an existing kimi-default binding from K2.7 when updating credentials', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-old' });
+
+    const configPath = join(rootDir, 'config', 'config.json');
+    const seeded = JSON.parse(readFileSync(configPath, 'utf-8'));
+    seeded.models['kimi-default'] = {
+      ...seeded.models['kimi-default'],
+      model: 'kimi-k2.7',
+      label: 'Kimi K2.7',
+    };
+    delete seeded.models['kimi-default'].runtimeOptions;
+    writeFileSync(configPath, JSON.stringify(seeded, null, 2));
+
+    const before = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const snapshot = await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-new' });
+    const after = JSON.parse(readFileSync(configPath, 'utf-8'));
+
+    expect(snapshot.defaultModelId).toBe('kimi-default');
+    expect(snapshot.models.find(model => model.id === 'kimi-default')).toMatchObject({
+      model: 'kimi-k2.7',
+      isDefault: true,
+    });
+    expect(snapshot.models.find(model => model.id === 'kimi-default')).not.toHaveProperty('runtimeOptions');
+    expect(after.models['kimi-default']).toEqual(before.models['kimi-default']);
+    expect(before.providers.kimi.apiKey).toBe('sk-old');
+    expect(after.providers.kimi.apiKey).toBe('sk-new');
+    expect(after.providers.kimi.protocol).toBe(before.providers.kimi.protocol);
+    expect(after.providers.kimi.baseUrl).toBe(before.providers.kimi.baseUrl);
+  });
+
+  it('updates only an existing Kimi K3 runtime policy and preserves it across reload', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+
+    const configPath = join(rootDir, 'config', 'config.json');
+    const before = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const snapshot = await services.updateModelRuntimeOptions({
+      modelId: 'kimi-default',
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    });
+    const after = JSON.parse(readFileSync(configPath, 'utf-8'));
+
+    expect(snapshot.defaultModelId).toBe(before.defaultModelId);
+    expect(Object.keys(after.models)).toEqual(Object.keys(before.models));
+    expect(after.models['kimi-default']).toEqual({
+      ...before.models['kimi-default'],
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    });
+    expect(after.models['kimi-default'].provider).toBe(before.models['kimi-default'].provider);
+    expect(after.models['kimi-default'].model).toBe(before.models['kimi-default'].model);
+    expect(after.providers).toEqual(before.providers);
+    expect(after.defaultProvider).toBe(before.defaultProvider);
+    expect(after.defaultModelId).toBe(before.defaultModelId);
+    expect(after.models['kimi-default'].runtimeConstraints).toBeUndefined();
+
+    const reloadedServices = createDesktopServices({
+      dataRoot: join(rootDir, 'data-reloaded'),
+      kswarmService: mockKSwarmService(),
+      now: () => 301,
+    });
+    const reloaded = await reloadedServices.getModelConfig();
+    expect(reloaded.models.find(model => model.id === 'kimi-default')).toMatchObject({
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+  });
+
+  it('rejects invalid or out-of-scope runtime policy updates without mutating config', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({
+      providerId: 'custom-k3',
+      modelName: 'k3',
+      baseUrl: 'https://example.com/v1',
+      protocol: 'openai_legacy',
+    });
+
+    const configPath = join(rootDir, 'config', 'config.json');
+    const cases = [
+      {
+        input: { modelId: 'missing-model', runtimeOptions: { reasoningEffort: 'high' as const } },
+        error: /model.*not found|不存在/i,
+      },
+      {
+        input: { modelId: 'kimi-kimi-k2.7', runtimeOptions: { reasoningEffort: 'high' as const } },
+        error: /Kimi K3/,
+      },
+      {
+        input: { modelId: 'custom-k3-k3', runtimeOptions: { reasoningEffort: 'high' as const } },
+        error: /Kimi K3/,
+      },
+      {
+        input: { modelId: 'kimi-default', runtimeOptions: { reasoningEffort: 'medium' as never } },
+        error: /reasoningEffort/,
+      },
+      {
+        input: { modelId: 'kimi-default', runtimeOptions: { contextLimit: 1_048_577 } },
+        error: /contextLimit/,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const before = readFileSync(configPath, 'utf-8');
+      await expect(services.updateModelRuntimeOptions(testCase.input)).rejects.toThrow(testCase.error);
+      expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    }
+  });
+
+  it.each([
+    ['an array', []],
+    ['a non-plain object', new Date(0)],
+    ['a primitive', 'invalid'],
+    ['unknown keys', { contextLimit: 262_144, unexpected: true }],
+  ])('rejects runtimeOptions with %s without mutating config', async (_label, runtimeOptions) => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi' });
+    const configPath = join(rootDir, 'config', 'config.json');
+    const before = readFileSync(configPath, 'utf-8');
+
+    await expect(services.updateModelRuntimeOptions({
+      modelId: 'kimi-default',
+      runtimeOptions: runtimeOptions as never,
+    })).rejects.toThrow(/runtimeOptions|unsupported/i);
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
+
+  it('tests the requested model binding instead of the current default model', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+
+    const observed: Array<{ model: string; contextLimit?: number }> = [];
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      observed.push({
+        model: this.getModelName(),
+        contextLimit: this.getCapabilities().contextLimit,
+      });
+      yield { type: 'text_delta', text: 'ok' } as never;
+    });
+
+    try {
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({
+        providerId: 'kimi',
+        modelId: 'kimi-default',
+      }));
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({ success: true });
+      expect(observed).toEqual([{ model: 'k3', contextLimit: 262_144 }]);
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
+  it('tests a provider-owned configured model when modelId is omitted without changing the global default', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'anthropic', apiKey: 'sk-anthropic' });
+    const before = await services.getModelConfig();
+    expect(before.defaultProvider).toBe('anthropic');
+
+    const observed: Array<{ model: string; contextLimit?: number }> = [];
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      observed.push({
+        model: this.getModelName(),
+        contextLimit: this.getCapabilities().contextLimit,
+      });
+      yield { type: 'text_delta', text: 'ok' } as never;
+    });
+
+    try {
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({ success: true });
+      expect(observed).toEqual([{ model: 'k3', contextLimit: 262_144 }]);
+      expect((await services.getModelConfig()).defaultModelId).toBe(before.defaultModelId);
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
+  it('prefers the configured provider catalog default when modelId is omitted', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    const before = await services.getModelConfig();
+    expect(before.defaultModelId).toBe('kimi-kimi-k2.7');
+
+    const observed: string[] = [];
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      observed.push(this.getModelName());
+      yield { type: 'text_delta', text: 'ok' } as never;
+    });
+
+    try {
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      expect(result).toMatchObject({ success: true });
+      expect(observed).toEqual(['k3']);
+      expect((await services.getModelConfig()).defaultModelId).toBe(before.defaultModelId);
+    } finally {
+      streamSpy.mockRestore();
+    }
   });
 
   it('creates managed xiaok agents from desktop config without asking renderer for provider details', async () => {

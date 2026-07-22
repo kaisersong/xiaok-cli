@@ -50,6 +50,7 @@ describe('preload API contract', () => {
     expect(PRELOAD_API_KEYS).toEqual([
       'getModelConfig',
       'saveModelConfig',
+      'updateModelRuntimeOptions',
       'createManagedXiaokAgent',
       'testProviderConnection',
       'listAvailableModelsForProvider',
@@ -516,6 +517,13 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:listAvailableModelsForProvider', 'anthropic');
   });
 
+  it('keeps runtime metadata in the renderer available-model bridge contract', () => {
+    const bridgeSource = readFileSync(resolve(process.cwd(), 'renderer', 'src', 'api', 'bridge.ts'), 'utf8');
+    expect(bridgeSource).toContain(
+      'async listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]>',
+    );
+  });
+
   it('routes provider deletion through semantic IPC channel', async () => {
     const ipcRenderer = {
       invoke: vi.fn().mockResolvedValue(undefined),
@@ -577,6 +585,23 @@ describe('preload API contract', () => {
     await expect(api.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' })).resolves.toBe(snapshot);
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:getModelConfig');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:saveModelConfig', { providerId: 'kimi', apiKey: 'sk-kimi' });
+  });
+
+  it('routes K3 runtime policy updates through the dedicated semantic IPC channel', async () => {
+    const snapshot = { defaultModelId: 'kimi-default', providers: [], models: [] };
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue(snapshot),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+    const input = {
+      modelId: 'kimi-default',
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' as const },
+    };
+
+    await expect(api.updateModelRuntimeOptions(input)).resolves.toBe(snapshot);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:updateModelRuntimeOptions', input);
   });
 
   it('routes managed xiaok agent creation through semantic IPC channel', async () => {
@@ -714,8 +739,19 @@ describe('preload API contract', () => {
   });
 
   it('runtime preload.cjs exposes keys matching FULL_PRELOAD_KEYS', () => {
-    const api = loadRuntimePreloadApi();
+    const { api } = loadRuntimePreloadApi();
     expect(Object.keys(api).sort()).toEqual([...FULL_PRELOAD_KEYS].sort());
+  });
+
+  it('runtime preload.cjs forwards K3 runtime policy updates unchanged', async () => {
+    const { api, ipcRenderer } = loadRuntimePreloadApi();
+    const input = {
+      modelId: 'kimi-default',
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    };
+
+    await (api.updateModelRuntimeOptions as (value: typeof input) => Promise<unknown>)(input);
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:updateModelRuntimeOptions', input);
   });
 
   it('routes kswarm proxy methods through semantic IPC channels', async () => {
@@ -845,7 +881,10 @@ describe('IPC handler ↔ preload key parity', () => {
   });
 });
 
-function loadRuntimePreloadApi(): Record<string, unknown> {
+function loadRuntimePreloadApi(): {
+  api: Record<string, unknown>;
+  ipcRenderer: { invoke: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn>; off: ReturnType<typeof vi.fn> };
+} {
   const require = createRequire(import.meta.url);
   const preloadPath = resolve(process.cwd(), 'electron', 'preload.cjs');
   const originalLoad = (Module as unknown as { _load: NodeJS.Require })._load;
@@ -884,5 +923,5 @@ function loadRuntimePreloadApi(): Record<string, unknown> {
   if (!exposedApi) {
     throw new Error('preload.cjs did not expose xiaokDesktop');
   }
-  return exposedApi;
+  return { api: exposedApi, ipcRenderer };
 }

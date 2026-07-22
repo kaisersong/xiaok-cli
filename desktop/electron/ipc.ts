@@ -781,6 +781,12 @@ export async function registerDesktopIpc(
     log('info', 'saveModelConfig ok');
     return r;
   });
+  ipcMain.handle('desktop:updateModelRuntimeOptions', async (_event, input) => {
+    log('info', 'updateModelRuntimeOptions', { modelId: input?.modelId });
+    const r = await services.updateModelRuntimeOptions(input);
+    log('info', 'updateModelRuntimeOptions ok', { modelId: input?.modelId });
+    return r;
+  });
   ipcMain.handle('desktop:createManagedXiaokAgent', async (_event, input) => {
     log('info', 'createManagedXiaokAgent', { name: input?.name, roles: input?.roles });
     const r = await services.createManagedXiaokAgent(input);

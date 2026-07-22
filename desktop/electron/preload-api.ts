@@ -8,7 +8,11 @@ import type {
   TaskUnderstanding,
   UserAnswer,
 } from '../../src/runtime/task-host/types.js';
-import type { ProtocolId } from '../../src/ai/providers/types.js';
+import type {
+  ModelRuntimeConstraints,
+  ModelRuntimeOptions,
+  ProtocolId,
+} from '../../src/ai/providers/types.js';
 import type {
   ConnectorsConfig,
   ProviderRuntime,
@@ -35,6 +39,8 @@ export type {
   TaskSnapshot,
   TaskUnderstanding,
   UserAnswer,
+  ModelRuntimeConstraints,
+  ModelRuntimeOptions,
   ProtocolId,
   ConnectorsConfig,
   ProviderRuntime,
@@ -45,6 +51,7 @@ export type {
 export const PRELOAD_API_KEYS = [
   'getModelConfig',
   'saveModelConfig',
+  'updateModelRuntimeOptions',
   'createManagedXiaokAgent',
   'testProviderConnection',
   'listAvailableModelsForProvider',
@@ -318,6 +325,7 @@ export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
 export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getModelConfig: 'desktop:getModelConfig',
   saveModelConfig: 'desktop:saveModelConfig',
+  updateModelRuntimeOptions: 'desktop:updateModelRuntimeOptions',
   createManagedXiaokAgent: 'desktop:createManagedXiaokAgent',
   testProviderConnection: 'desktop:testProviderConnection',
   listAvailableModelsForProvider: 'desktop:listAvailableModelsForProvider',
@@ -550,6 +558,8 @@ export interface DesktopModelEntryView {
   model: string;
   label: string;
   capabilities?: string[];
+  runtimeOptions?: ModelRuntimeOptions;
+  runtimeConstraints?: ModelRuntimeConstraints;
   isDefault: boolean;
 }
 
@@ -562,7 +572,7 @@ export interface DesktopProviderProfileView {
   defaultModel: string;
   defaultModelLabel: string;
   capabilities?: string[];
-  availableModels?: { modelId: string; model: string; label: string; capabilities?: string[] }[];
+  availableModels?: AvailableModelView[];
 }
 
 export interface DesktopModelConfigSnapshot {
@@ -584,11 +594,18 @@ export interface DesktopSaveModelConfigInput {
   protocol?: ProtocolId;
 }
 
+export interface DesktopUpdateModelRuntimeOptionsInput {
+  modelId: string;
+  runtimeOptions: ModelRuntimeOptions;
+}
+
 export interface AvailableModelView {
   modelId: string;
   model: string;
   label: string;
   capabilities?: string[];
+  runtimeOptions?: ModelRuntimeOptions;
+  runtimeConstraints?: ModelRuntimeConstraints;
 }
 
 export interface TestProviderConnectionResult {
@@ -927,6 +944,7 @@ export function sanitizeArtifactWorkspaceInput<T>(input: T): T {
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
+  updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
   createManagedXiaokAgent(input: {
     name: string;
     description?: string;
@@ -1270,6 +1288,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
   return {
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
+    updateModelRuntimeOptions: (input) => ipcRenderer.invoke('desktop:updateModelRuntimeOptions', input) as ReturnType<DesktopApi['updateModelRuntimeOptions']>,
     createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input) as ReturnType<DesktopApi['createManagedXiaokAgent']>,
     testProviderConnection: (input) => ipcRenderer.invoke('desktop:testProviderConnection', input) as ReturnType<DesktopApi['testProviderConnection']>,
     listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId) as ReturnType<DesktopApi['listAvailableModelsForProvider']>,

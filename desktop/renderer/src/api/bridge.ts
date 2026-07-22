@@ -1,11 +1,13 @@
 import { createLogger } from '../lib/logger';
 import type {
+  AvailableModelView,
   FullDesktopApi,
   DesktopRelatedServiceId,
   DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
   DesktopMobilePairingInfo,
   DesktopSaveModelConfigInput,
+  DesktopUpdateModelRuntimeOptionsInput,
   MaterialView,
   MaterialRole,
   TaskCreateContext,
@@ -487,6 +489,13 @@ export const api = {
     return r;
   },
 
+  async updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot> {
+    log.info('updateModelRuntimeOptions', JSON.stringify({ modelId: input.modelId }));
+    const r = await window.xiaokDesktop.updateModelRuntimeOptions(input);
+    log.info('updateModelRuntimeOptions ok', JSON.stringify({ modelId: input.modelId }));
+    return r;
+  },
+
   async createManagedXiaokAgent(input: {
     name: string;
     description?: string;
@@ -508,7 +517,7 @@ export const api = {
     return r;
   },
 
-  async listAvailableModelsForProvider(providerId: string): Promise<Array<{ modelId: string; model: string; label: string; capabilities?: string[] }>> {
+  async listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]> {
     log.debug('listAvailableModelsForProvider', providerId);
     const r = await window.xiaokDesktop.listAvailableModelsForProvider(providerId);
     log.debug('listAvailableModelsForProvider ok', JSON.stringify({ count: r?.length }));

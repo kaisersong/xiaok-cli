@@ -4,9 +4,20 @@ import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createAdapter } from '../../src/ai/models.js';
+import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js';
+import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
-import type { ProtocolId } from '../../src/ai/providers/types.js';
+import {
+  isOfficialKimiK3OpenAIEndpoint,
+  resolveModelRuntimeOptions,
+} from '../../src/ai/providers/model-runtime-options.js';
+import type {
+  ModelConfigEntry,
+  ModelRuntimeConstraints,
+  ModelRuntimeOptions,
+  ProtocolId,
+  ProviderModelVariant,
+} from '../../src/ai/providers/types.js';
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
@@ -584,6 +595,8 @@ export interface DesktopModelEntryView {
   model: string;
   label: string;
   capabilities?: string[];
+  runtimeOptions?: ModelRuntimeOptions;
+  runtimeConstraints?: ModelRuntimeConstraints;
   isDefault: boolean;
 }
 
@@ -596,7 +609,16 @@ export interface DesktopProviderProfileView {
   defaultModel: string;
   defaultModelLabel: string;
   capabilities?: string[];
-  availableModels?: { modelId: string; model: string; label: string; capabilities?: string[] }[];
+  availableModels?: DesktopAvailableModelView[];
+}
+
+export interface DesktopAvailableModelView {
+  modelId: string;
+  model: string;
+  label: string;
+  capabilities?: string[];
+  runtimeOptions?: ModelRuntimeOptions;
+  runtimeConstraints?: ModelRuntimeConstraints;
 }
 
 export interface DesktopModelConfigSnapshot {
@@ -616,6 +638,11 @@ export interface DesktopSaveModelConfigInput {
   apiKey?: string;
   baseUrl?: string;
   protocol?: ProtocolId;
+}
+
+export interface DesktopUpdateModelRuntimeOptionsInput {
+  modelId: string;
+  runtimeOptions: ModelRuntimeOptions;
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
@@ -1950,11 +1977,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       } else if (input.modelName?.trim()) {
         const modelName = input.modelName.trim();
         const modelId = `${providerId}-${sanitizeModelIdPart(modelName)}`;
+        const catalogModel = findApplicableCatalogModel(config, providerId, modelId, modelName);
         config.models[modelId] = {
           provider: providerId,
           model: modelName,
           label: input.label?.trim() || modelName,
-          capabilities: getProviderProfile(providerId)?.defaultModel.capabilities,
+          capabilities: cloneStrings(
+            catalogModel?.capabilities ?? getProviderProfile(providerId)?.defaultModel.capabilities,
+          ),
+          ...(catalogModel?.runtimeOptions
+            ? { runtimeOptions: cloneRuntimeOptions(catalogModel.runtimeOptions) }
+            : {}),
         };
         config.defaultProvider = providerId;
         config.defaultModelId = modelId;
@@ -1964,6 +1997,47 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         config.defaultModelId = modelId;
       }
 
+      await saveConfig(config);
+      return createModelConfigSnapshot(config);
+    },
+    async updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput) {
+      const config = await loadConfig();
+      const model = config.models[input.modelId];
+      if (!model) {
+        throw new Error(`Model not found: ${input.modelId}`);
+      }
+
+      const provider = config.providers[model.provider];
+      if (
+        model.provider !== 'kimi'
+        || model.model !== 'k3'
+        || provider?.protocol !== 'openai_legacy'
+        || !isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
+      ) {
+        throw new Error('Runtime options can only be updated for Kimi K3 on the official endpoint.');
+      }
+      if (!input.runtimeOptions || typeof input.runtimeOptions !== 'object') {
+        throw new Error('runtimeOptions are required.');
+      }
+
+      const runtimeOptions = sanitizeDesktopModelRuntimeOptions(input.runtimeOptions);
+
+      const catalogModel = findApplicableCatalogModel(
+        config,
+        model.provider,
+        input.modelId,
+        model.model,
+      );
+      resolveModelRuntimeOptions({
+        protocol: provider.protocol,
+        baseUrl: provider.baseUrl,
+        wireModel: model.model,
+        catalogOptions: catalogModel?.runtimeOptions,
+        catalogConstraints: catalogModel?.runtimeConstraints,
+        configuredOptions: runtimeOptions,
+      });
+
+      model.runtimeOptions = runtimeOptions;
       await saveConfig(config);
       return createModelConfigSnapshot(config);
     },
@@ -2019,12 +2093,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     async testProviderConnection(input: { providerId: string; modelId?: string }): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
       const config = await loadConfig();
-      const provider = config.providers[input.providerId];
+      const providerId = normalizeProviderId(input.providerId);
+      const provider = config.providers[providerId];
       if (!provider?.apiKey) {
         return { success: false, error: 'API key not configured' };
       }
       try {
-        const adapter = createAdapter(config);
+        const modelId = resolveProviderConnectionModelId(config, providerId, input.modelId);
+        if (!modelId) {
+          throw new Error(`No configured model found for provider ${providerId}`);
+        }
+        const binding = resolveRuntimeModelBinding(config, modelId);
+        if (binding.providerId !== providerId) {
+          throw new Error(`Model ${binding.modelId} does not belong to provider ${providerId}`);
+        }
+        const adapter = createAdapterFromBinding(binding);
         const start = Date.now();
         // Simple test: create a minimal request to verify connection
         const testMessages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }];
@@ -2047,7 +2130,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           modelId: m.modelId,
           model: m.model,
           label: m.label,
-          capabilities: m.capabilities,
+          capabilities: cloneStrings(m.capabilities),
+          ...(m.runtimeOptions ? { runtimeOptions: cloneRuntimeOptions(m.runtimeOptions) } : {}),
+          ...(m.runtimeConstraints
+            ? { runtimeConstraints: cloneRuntimeConstraints(m.runtimeConstraints) }
+            : {}),
         }));
       }
       return [];
@@ -3413,6 +3500,25 @@ function sanitizeModelIdPart(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'model';
 }
 
+function resolveProviderConnectionModelId(
+  config: Config,
+  providerId: string,
+  requestedModelId?: string,
+): string | undefined {
+  if (requestedModelId) return requestedModelId;
+
+  const providerDefaultModelId = getProviderProfile(providerId)?.defaultModel.modelId;
+  if (
+    providerDefaultModelId
+    && config.models[providerDefaultModelId]?.provider === providerId
+  ) {
+    return providerDefaultModelId;
+  }
+
+  return Object.entries(config.models)
+    .find(([, model]) => model.provider === providerId)?.[0];
+}
+
 function ensureProvider(config: Config, providerId: string, input: DesktopSaveModelConfigInput): void {
   const profile = getProviderProfile(providerId);
   const existing = config.providers[providerId];
@@ -3447,11 +3553,20 @@ function ensureDefaultModel(config: Config, providerId: string): string {
   const profile = getProviderProfile(providerId);
   if (profile) {
     const modelId = profile.defaultModel.modelId;
+    const catalogModel = findApplicableCatalogModel(
+      config,
+      providerId,
+      modelId,
+      profile.defaultModel.model,
+    );
     config.models[modelId] = config.models[modelId] ?? {
       provider: providerId,
       model: profile.defaultModel.model,
       label: profile.defaultModel.label,
-      capabilities: profile.defaultModel.capabilities,
+      capabilities: cloneStrings(profile.defaultModel.capabilities),
+      ...(catalogModel?.runtimeOptions
+        ? { runtimeOptions: cloneRuntimeOptions(catalogModel.runtimeOptions) }
+        : {}),
     };
     return modelId;
   }
@@ -3483,14 +3598,23 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
       baseUrl: provider.baseUrl,
       apiKeyConfigured: Boolean(provider.apiKey),
     })),
-    models: Object.entries(config.models).map(([id, model]) => ({
-      id,
-      provider: model.provider,
-      model: model.model,
-      label: model.label,
-      capabilities: model.capabilities,
-      isDefault: id === config.defaultModelId,
-    })),
+    models: Object.entries(config.models).map(([id, model]) => {
+      const runtimeMetadata = resolveDesktopModelRuntimeMetadata(config, id, model);
+      return {
+        id,
+        provider: model.provider,
+        model: model.model,
+        label: model.label,
+        capabilities: cloneStrings(model.capabilities),
+        ...(runtimeMetadata.runtimeOptions
+          ? { runtimeOptions: cloneRuntimeOptions(runtimeMetadata.runtimeOptions) }
+          : {}),
+        ...(runtimeMetadata.runtimeConstraints
+          ? { runtimeConstraints: cloneRuntimeConstraints(runtimeMetadata.runtimeConstraints) }
+          : {}),
+        isDefault: id === config.defaultModelId,
+      };
+    }),
     providerProfiles: listProviderProfiles().map((profile) => ({
       id: profile.id,
       label: profile.label,
@@ -3499,12 +3623,118 @@ function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
       defaultModelId: profile.defaultModel.modelId,
       defaultModel: profile.defaultModel.model,
       defaultModelLabel: profile.defaultModel.label,
-      capabilities: profile.defaultModel.capabilities,
+      capabilities: cloneStrings(profile.defaultModel.capabilities),
       availableModels: profile.availableModels?.map(m => ({
-        modelId: m.modelId, model: m.model, label: m.label, capabilities: m.capabilities,
+        modelId: m.modelId,
+        model: m.model,
+        label: m.label,
+        capabilities: cloneStrings(m.capabilities),
+        ...(m.runtimeOptions ? { runtimeOptions: cloneRuntimeOptions(m.runtimeOptions) } : {}),
+        ...(m.runtimeConstraints
+          ? { runtimeConstraints: cloneRuntimeConstraints(m.runtimeConstraints) }
+          : {}),
       })),
     })),
   };
+}
+
+function cloneStrings(values?: string[]): string[] | undefined {
+  return values ? [...values] : undefined;
+}
+
+function cloneRuntimeOptions(options: ModelRuntimeOptions): ModelRuntimeOptions {
+  return { ...options };
+}
+
+function sanitizeDesktopModelRuntimeOptions(input: unknown): ModelRuntimeOptions {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('runtimeOptions must be an object.');
+  }
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('runtimeOptions must be a plain object.');
+  }
+
+  const raw = input as Record<string, unknown>;
+  const supportedKeys = new Set(['contextLimit', 'reasoningEffort']);
+  const unsupportedKeys = Object.keys(raw).filter(key => !supportedKeys.has(key));
+  if (unsupportedKeys.length > 0) {
+    throw new Error(`Unsupported runtimeOptions fields: ${unsupportedKeys.join(', ')}`);
+  }
+
+  return {
+    ...(raw.contextLimit !== undefined
+      ? { contextLimit: raw.contextLimit as number }
+      : {}),
+    ...(raw.reasoningEffort !== undefined
+      ? { reasoningEffort: raw.reasoningEffort as ModelRuntimeOptions['reasoningEffort'] }
+      : {}),
+  };
+}
+
+function cloneRuntimeConstraints(constraints: ModelRuntimeConstraints): ModelRuntimeConstraints {
+  return {
+    ...constraints,
+    ...(constraints.reasoningEfforts
+      ? { reasoningEfforts: [...constraints.reasoningEfforts] }
+      : {}),
+  };
+}
+
+function findExactCatalogModel(
+  providerId: string,
+  modelId: string,
+  wireModel: string,
+): ProviderModelVariant | undefined {
+  const profile = getProviderProfile(providerId);
+  return [profile?.defaultModel, ...(profile?.availableModels ?? [])]
+    .find((model): model is ProviderModelVariant => (
+      model?.modelId === modelId && model.model === wireModel
+    ));
+}
+
+function findApplicableCatalogModel(
+  config: Config,
+  providerId: string,
+  modelId: string,
+  wireModel: string,
+): ProviderModelVariant | undefined {
+  const catalogModel = findExactCatalogModel(providerId, modelId, wireModel);
+  if (!catalogModel) return undefined;
+
+  if (providerId === 'kimi' && catalogModel.model === 'k3') {
+    const provider = config.providers[providerId];
+    if (
+      provider?.protocol !== 'openai_legacy'
+      || !isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
+    ) {
+      return undefined;
+    }
+  }
+  return catalogModel;
+}
+
+function resolveDesktopModelRuntimeMetadata(
+  config: Config,
+  modelId: string,
+  model: ModelConfigEntry,
+): { runtimeOptions?: ModelRuntimeOptions; runtimeConstraints?: ModelRuntimeConstraints } {
+  const provider = config.providers[model.provider];
+  if (!provider) {
+    return model.runtimeOptions
+      ? { runtimeOptions: cloneRuntimeOptions(model.runtimeOptions) }
+      : {};
+  }
+
+  const catalogModel = findApplicableCatalogModel(config, model.provider, modelId, model.model);
+  return resolveModelRuntimeOptions({
+    protocol: provider.protocol,
+    baseUrl: provider.baseUrl,
+    wireModel: model.model,
+    catalogOptions: catalogModel?.runtimeOptions,
+    catalogConstraints: catalogModel?.runtimeConstraints,
+    configuredOptions: model.runtimeOptions,
+  });
 }
 
 // Simplified in-memory intent ledger store for Desktop
