@@ -4,6 +4,7 @@ import {
   buildPromptCacheSegments,
   resolveModelCapabilities,
 } from '../../../src/ai/runtime/model-capabilities.js';
+import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 
 describe('model capabilities', () => {
   it('uses extended context and prompt caching for Claude Opus models', () => {
@@ -46,6 +47,22 @@ describe('model capabilities', () => {
     expect(capabilities.contextLimit).toBe(4096);
     expect(capabilities.compactThreshold).toBe(0.5);
     expect(capabilities.supportsPromptCaching).toBe(false);
+  });
+
+  it('exposes effective K3 context through adapter capabilities while preserving capability flags', () => {
+    const adapter = new OpenAIAdapter(
+      'sk-kimi',
+      'k3',
+      'https://api.kimi.com/coding/v1',
+      undefined,
+      { supportsImageInput: true },
+      { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    );
+
+    expect(resolveModelCapabilities(adapter)).toMatchObject({
+      contextLimit: 1_048_576,
+      supportsImageInput: true,
+    });
   });
 });
 

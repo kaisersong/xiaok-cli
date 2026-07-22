@@ -3,6 +3,13 @@ import { describe, it, expect, vi } from 'vitest';
 
 const openAIConstructorCalls: unknown[] = [];
 
+type KimiReasoningEffort = 'low' | 'high' | 'max';
+
+interface CapturedChatCompletionRequest {
+  model: string;
+  reasoning_effort?: KimiReasoningEffort;
+}
+
 vi.mock('openai', () => {
   return {
     default: class OpenAI {
@@ -18,6 +25,33 @@ vi.mock('openai', () => {
     },
   };
 });
+
+async function captureChatCompletionRequest(adapter: unknown): Promise<CapturedChatCompletionRequest> {
+  let capturedRequest: CapturedChatCompletionRequest | undefined;
+  const mockStream = {
+    async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+    },
+  };
+
+  const OpenAI = (await import('openai')).default;
+  const instance = new OpenAI({ apiKey: 'test' });
+  vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+    capturedRequest = params as CapturedChatCompletionRequest;
+    return mockStream as never;
+  });
+
+  (adapter as { client: typeof instance }).client = instance;
+  const streamAdapter = adapter as {
+    stream(messages: never[], tools: never[], systemPrompt: string): AsyncIterable<unknown>;
+  };
+  for await (const _ of streamAdapter.stream([], [], 'system')) { /* consume */ }
+
+  if (!capturedRequest) {
+    throw new Error('OpenAI request was not captured');
+  }
+  return capturedRequest;
+}
 
 describe('OpenAIAdapter', () => {
   it('spoofs a supported coding-agent user agent for kimi coding endpoints', async () => {
@@ -60,6 +94,101 @@ describe('OpenAIAdapter', () => {
         'User-Agent': 'claude-cli/1.0.0 (external, cli)',
       },
     });
+  });
+
+  it.each(['low', 'high', 'max'] as const)(
+    'sends K3 reasoning_effort=%s to the strict official endpoint',
+    async (reasoningEffort) => {
+      const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+      const adapter = new OpenAIAdapter(
+        'test-key',
+        'k3',
+        'https://api.kimi.com/coding/v1',
+        undefined,
+        undefined,
+        { contextLimit: 262_144, reasoningEffort },
+      );
+
+      const request = await captureChatCompletionRequest(adapter);
+
+      expect(request).toMatchObject({
+        model: 'k3',
+        reasoning_effort: reasoningEffort,
+      });
+    },
+  );
+
+  it.each([
+    ['Kimi K2.7', 'kimi-k2.7', 'https://api.kimi.com/coding/v1'],
+    ['K3 on a non-official endpoint', 'k3', 'https://proxy.example.com/coding/v1'],
+  ] as const)('omits reasoning_effort for %s', async (_label, model, baseUrl) => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+    const adapter = new OpenAIAdapter(
+      'test-key',
+      model,
+      baseUrl,
+      undefined,
+      undefined,
+      { contextLimit: 262_144, reasoningEffort: 'high' },
+    );
+
+    const request = await captureChatCompletionRequest(adapter);
+
+    expect(request).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('preserves K3 runtime overrides when cloning to the same wire model', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+    const adapter = new OpenAIAdapter(
+      'test-key',
+      'k3',
+      'https://api.kimi.com/coding/v1',
+      undefined,
+      undefined,
+      { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    );
+
+    const clone = adapter.cloneWithModel('k3');
+    const request = await captureChatCompletionRequest(clone);
+
+    expect(clone.getCapabilities()).toMatchObject({ contextLimit: 1_048_576 });
+    expect(request.reasoning_effort).toBe('max');
+  });
+
+  it.each([
+    ['Kimi K2.7', 'kimi-k2.7'],
+    ['GPT-4o', 'gpt-4o'],
+  ] as const)('drops K3 runtime policy when cloning to %s', async (_label, model) => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+    const adapter = new OpenAIAdapter(
+      'test-key',
+      'k3',
+      'https://api.kimi.com/coding/v1',
+      undefined,
+      undefined,
+      { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    );
+
+    const clone = adapter.cloneWithModel(model);
+    const request = await captureChatCompletionRequest(clone);
+
+    expect(clone.getCapabilities()).not.toHaveProperty('contextLimit');
+    expect(request).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('resolves safe defaults when cloning K2.7 to official K3', async () => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+    const adapter = new OpenAIAdapter(
+      'test-key',
+      'kimi-k2.7',
+      'https://api.kimi.com/coding/v1',
+    );
+
+    const clone = adapter.cloneWithModel('k3');
+    const request = await captureChatCompletionRequest(clone);
+
+    expect(clone.getCapabilities()).toMatchObject({ contextLimit: 262_144 });
+    expect(request.reasoning_effort).toBe('high');
   });
 
   it('emits text chunks from streaming response', async () => {

@@ -7,6 +7,43 @@ import { resolveModelCapabilities } from '../../../src/ai/runtime/model-capabili
 describe('resolveRuntimeModelBinding', () => {
   const OLD_ENV = process.env;
 
+  function createOpenAICompatibleConfig(input: {
+    providerId: string;
+    modelId: string;
+    wireModel: string;
+    baseUrl: string;
+    providerType?: 'first_party' | 'custom';
+    protocol?: 'anthropic' | 'openai_legacy' | 'openai_responses';
+    runtimeOptions?: {
+      contextLimit?: number;
+      reasoningEffort?: 'low' | 'high' | 'max';
+    };
+  }): Config {
+    return {
+      schemaVersion: 2,
+      defaultProvider: input.providerId,
+      defaultModelId: input.modelId,
+      providers: {
+        [input.providerId]: {
+          type: input.providerType ?? 'custom',
+          protocol: input.protocol ?? 'openai_legacy',
+          apiKey: 'sk-kimi',
+          baseUrl: input.baseUrl,
+        },
+      },
+      models: {
+        [input.modelId]: {
+          provider: input.providerId,
+          model: input.wireModel,
+          label: input.modelId,
+          ...(input.runtimeOptions ? { runtimeOptions: input.runtimeOptions } : {}),
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    };
+  }
+
   beforeEach(() => {
     process.env = { ...OLD_ENV };
   });
@@ -125,6 +162,78 @@ describe('resolveRuntimeModelBinding', () => {
       protocol: 'openai_legacy',
       capabilities: ['tools', 'image_in'],
     });
+  });
+
+  it('does not let an old kimi-default to kimi-k2.7 mapping inherit K3 runtime policy', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-default',
+      wireModel: 'kimi-k2.7',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+    });
+
+    expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
+  });
+
+  it('applies safe K3 defaults to a manual official binding without a catalog model id', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'manual-kimi',
+      modelId: 'manual-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions).toEqual({
+      contextLimit: 262_144,
+      reasoningEffort: 'high',
+    });
+  });
+
+  it('preserves configured K3 1M context and max reasoning in the resolved binding', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'manual-kimi',
+      modelId: 'manual-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      runtimeOptions: {
+        contextLimit: 1_048_576,
+        reasoningEffort: 'max',
+      },
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions).toEqual({
+      contextLimit: 1_048_576,
+      reasoningEffort: 'max',
+    });
+  });
+
+  it.each(['openai_responses', 'anthropic'] as const)(
+    'does not apply matching Kimi K3 catalog metadata through %s protocol',
+    (protocol) => {
+      const config = createOpenAICompatibleConfig({
+        providerId: 'kimi',
+        providerType: 'first_party',
+        modelId: 'kimi-k3',
+        wireModel: 'k3',
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        protocol,
+      });
+
+      expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
+    },
+  );
+
+  it('does not apply Kimi catalog policy to K3 on a custom endpoint', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'kimi',
+      providerType: 'custom',
+      modelId: 'kimi-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://proxy.example.com/coding/v1',
+    });
+
+    expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
   });
 });
 

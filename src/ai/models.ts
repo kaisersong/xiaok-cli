@@ -20,6 +20,7 @@ export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAd
       binding.baseUrl,
       binding.headers,
       capabilityOverrides,
+      binding.runtimeOptions,
     );
   }
 

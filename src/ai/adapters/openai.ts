@@ -5,6 +5,8 @@ import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../t
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
+import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
+import type { ModelReasoningEffort, ModelRuntimeOptions } from '../providers/types.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
@@ -33,6 +35,10 @@ const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 type OpenAIHttpAgent = HttpAgent | HttpsAgent;
+
+interface KimiReasoningEffortRequestExtension {
+  reasoning_effort: ModelReasoningEffort;
+}
 
 function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
   const protocol = new URL(baseUrl ?? DEFAULT_OPENAI_BASE_URL).protocol;
@@ -188,6 +194,7 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly baseUrl?: string;
   private readonly defaultHeaders?: Record<string, string>;
   private readonly capabilityOverrides?: Partial<ModelCapabilities>;
+  private readonly runtimeOptions?: ModelRuntimeOptions;
   private readonly httpAgent: OpenAIHttpAgent;
   private model: string;
 
@@ -197,11 +204,13 @@ export class OpenAIAdapter implements ModelAdapter {
     baseUrl?: string,
     defaultHeaders?: Record<string, string>,
     capabilityOverrides?: Partial<ModelCapabilities>,
+    runtimeOptions?: ModelRuntimeOptions,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.defaultHeaders = defaultHeaders;
     this.capabilityOverrides = capabilityOverrides;
+    this.runtimeOptions = runtimeOptions ? { ...runtimeOptions } : undefined;
     this.httpAgent = createOpenAIHttpAgent(baseUrl);
     this.client = new OpenAI({
       apiKey,
@@ -233,7 +242,12 @@ export class OpenAIAdapter implements ModelAdapter {
   }
 
   getCapabilities(): Partial<ModelCapabilities> {
-    return this.capabilityOverrides ?? {};
+    return {
+      ...(this.capabilityOverrides ?? {}),
+      ...(this.runtimeOptions?.contextLimit !== undefined
+        ? { contextLimit: this.runtimeOptions.contextLimit }
+        : {}),
+    };
   }
 
   dispose(): void {
@@ -241,7 +255,22 @@ export class OpenAIAdapter implements ModelAdapter {
   }
 
   cloneWithModel(model: string): OpenAIAdapter {
-    return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
+    const runtimeOptions = model === this.model
+      ? this.runtimeOptions
+      : resolveModelRuntimeOptions({
+          protocol: 'openai_legacy',
+          baseUrl: this.baseUrl,
+          wireModel: model,
+        }).runtimeOptions;
+
+    return new OpenAIAdapter(
+      this.apiKey,
+      model,
+      this.baseUrl,
+      this.defaultHeaders,
+      this.capabilityOverrides,
+      runtimeOptions,
+    );
   }
 
   async *stream(
@@ -368,13 +397,25 @@ export class OpenAIAdapter implements ModelAdapter {
       },
     }));
 
-    const stream = await this.client.chat.completions.create({
+    const request: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: this.model,
       messages: openaiMessages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
       stream_options: { include_usage: true },
-    }, { signal });
+    };
+
+    if (
+      this.model === 'k3'
+      && isOfficialKimiK3OpenAIEndpoint(this.baseUrl)
+      && this.runtimeOptions?.reasoningEffort
+    ) {
+      Object.assign(request, {
+        reasoning_effort: this.runtimeOptions.reasoningEffort,
+      } satisfies KimiReasoningEffortRequestExtension);
+    }
+
+    const stream = await this.client.chat.completions.create(request, { signal });
 
     const toolBuffers = new Map<number, { id: string; name: string; argsBuffer: string }>();
     const rawThinkParser: RawThinkParserState = {
