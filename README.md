@@ -566,11 +566,15 @@ Use the source install path only if you are developing on `xiaok-cli` itself or 
       "label": "Anthropic Default",
       "capabilities": ["tools"]
     },
-    "kimi-k2-thinking": {
+    "kimi-default": {
       "provider": "kimi",
-      "model": "kimi-k2-thinking",
-      "label": "Kimi K2 Thinking",
-      "capabilities": ["tools", "thinking"]
+      "model": "k3",
+      "label": "Kimi K3",
+      "capabilities": ["tools", "thinking"],
+      "runtimeOptions": {
+        "contextLimit": 262144,
+        "reasoningEffort": "high"
+      }
     }
   },
   "channels": {
@@ -586,11 +590,17 @@ Version 1 configs are auto-migrated on load. You can also manage the catalog fro
 
 ```bash
 xiaok config set model anthropic
-xiaok config set model kimi/kimi-k2-thinking
+xiaok config set model kimi/k3
 xiaok config set api-key <key> --provider kimi
 xiaok config get providers
 xiaok config get models
 ```
+
+#### Kimi K3
+
+New Kimi configurations use the official wire model ID `k3`. Existing Kimi configurations keep their current model and are not migrated automatically. K3 defaults to a 262,144-token context window and `high` reasoning effort; Allegretto and higher plans can explicitly select the 1,048,576-token window. Reasoning effort supports `low`, `high`, and `max`—there is no `none` option because disabling reasoning routes to a different model.
+
+Desktop model settings expose the 262K/1M context and Low/High/Max effort controls for the active K3 model. Changing the model or reasoning effort invalidates Kimi's prompt cache, so starting a new session is recommended after a switch. See the [official Kimi Code model documentation](https://www.kimi.com/code/docs/kimi-code/models) for current plan limits and model behavior.
 
 **Project Settings:** `<repo>/.xiaok/settings.json`
 

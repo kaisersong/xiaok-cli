@@ -566,11 +566,15 @@ npm run build
       "label": "Anthropic Default",
       "capabilities": ["tools"]
     },
-    "kimi-k2-thinking": {
+    "kimi-default": {
       "provider": "kimi",
-      "model": "kimi-k2-thinking",
-      "label": "Kimi K2 Thinking",
-      "capabilities": ["tools", "thinking"]
+      "model": "k3",
+      "label": "Kimi K3",
+      "capabilities": ["tools", "thinking"],
+      "runtimeOptions": {
+        "contextLimit": 262144,
+        "reasoningEffort": "high"
+      }
     }
   },
   "channels": {
@@ -586,11 +590,17 @@ npm run build
 
 ```bash
 xiaok config set model anthropic
-xiaok config set model kimi/kimi-k2-thinking
+xiaok config set model kimi/k3
 xiaok config set api-key <key> --provider kimi
 xiaok config get providers
 xiaok config get models
 ```
+
+#### Kimi K3
+
+新建 Kimi 配置会使用官方 wire model ID `k3`；已有 Kimi 配置继续保留当前模型，不会被自动迁移。K3 默认使用 262,144 tokens 上下文和 `high` 推理强度；Allegretto 及以上计划可显式选择 1,048,576 tokens。推理强度支持 `low`、`high`、`max`，不提供 `none`，因为关闭推理会路由到其他模型。
+
+Desktop 模型设置会为当前 K3 模型显示 262K/1M 上下文和 Low/High/Max 推理强度选项。切换模型或推理强度会让 Kimi prompt cache 失效，因此切换后建议新建会话。当前计划限制与模型行为以 [Kimi Code 官方模型文档](https://www.kimi.com/code/docs/kimi-code/models) 为准。
 
 **项目配置：** `<repo>/.xiaok/settings.json`
 
