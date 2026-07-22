@@ -1,6 +1,6 @@
 import React from 'react'
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 // Use real LocaleProvider instead of mocking useLocale
@@ -43,6 +43,16 @@ vi.mock('../../renderer/src/components/LocalMemoryStats', () => ({
 }))
 
 // Build a fake model config snapshot
+const KIMI_K3_RUNTIME_OPTIONS = {
+  contextLimit: 262_144,
+  reasoningEffort: 'high',
+} as const
+
+const KIMI_K3_RUNTIME_CONSTRAINTS = {
+  maxContextLimit: 1_048_576,
+  reasoningEfforts: ['low', 'high', 'max'],
+} as const
+
 const MOCK_SNAPSHOT = {
   configPath: '/tmp/config.json',
   defaultProvider: 'anthropic',
@@ -57,11 +67,59 @@ const MOCK_SNAPSHOT = {
   providerProfiles: [
     { id: 'openai', label: 'OpenAI', protocol: 'openai_legacy', baseUrl: 'https://api.openai.com/v1', defaultModelId: 'openai-default', defaultModel: 'gpt-4o', defaultModelLabel: 'GPT-4o', capabilities: ['tools'], availableModels: [{ modelId: 'openai-gpt-4o', model: 'gpt-4o', label: 'GPT-4o', capabilities: ['tools'] }, { modelId: 'openai-gpt-4.1', model: 'gpt-4.1', label: 'GPT-4.1', capabilities: ['tools'] }] },
     { id: 'anthropic', label: 'Anthropic', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com', defaultModelId: 'anthropic-default', defaultModel: 'claude-opus-4-6', defaultModelLabel: 'Claude Opus 4.6', capabilities: ['tools'], availableModels: [{ modelId: 'anthropic-claude-opus-4-6', model: 'claude-opus-4-6', label: 'Claude Opus 4.6', capabilities: ['tools'] }] },
-    { id: 'kimi', label: 'Kimi', protocol: 'openai_legacy', baseUrl: 'https://api.kimi.com/coding/v1', defaultModelId: 'kimi-default', defaultModel: 'kimi-for-coding', defaultModelLabel: 'Kimi for Coding', capabilities: ['tools', 'thinking'], availableModels: [{ modelId: 'kimi-for-coding', model: 'kimi-for-coding', label: 'Kimi for Coding', capabilities: ['tools', 'thinking'] }, { modelId: 'kimi-k2', model: 'k2-0507-preview', label: 'Kimi K2', capabilities: ['tools', 'thinking'] }] },
+    { id: 'kimi', label: 'Kimi', protocol: 'openai_legacy', baseUrl: 'https://api.kimi.com/coding/v1', defaultModelId: 'kimi-default', defaultModel: 'k3', defaultModelLabel: 'Kimi K3', capabilities: ['tools', 'thinking'], availableModels: [{ modelId: 'kimi-k3', model: 'k3', label: 'Kimi K3', capabilities: ['tools', 'thinking'], runtimeOptions: KIMI_K3_RUNTIME_OPTIONS, runtimeConstraints: KIMI_K3_RUNTIME_CONSTRAINTS }, { modelId: 'kimi-k2.7', model: 'kimi-k2.7', label: 'Kimi K2.7', capabilities: ['tools', 'thinking'] }] },
     { id: 'deepseek', label: 'DeepSeek', protocol: 'openai_legacy', baseUrl: 'https://api.deepseek.com/v1', defaultModelId: 'deepseek-default', defaultModel: 'deepseek-v4-pro', defaultModelLabel: 'DeepSeek V4 Pro', capabilities: ['tools'], availableModels: [{ modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools'] }] },
     { id: 'glm', label: 'GLM', protocol: 'openai_legacy', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModelId: 'glm-default', defaultModel: 'glm-4.5', defaultModelLabel: 'GLM 4.5', capabilities: ['tools'], availableModels: [{ modelId: 'glm-4.5', model: 'glm-4.5', label: 'GLM 4.5', capabilities: ['tools'] }] },
     { id: 'minimax', label: 'MiniMax', protocol: 'openai_legacy', baseUrl: 'https://api.minimax.chat/v1', defaultModelId: 'minimax-default', defaultModel: 'MiniMax-Text-01', defaultModelLabel: 'MiniMax Text 01', capabilities: ['tools'], availableModels: [{ modelId: 'minimax-text-01', model: 'MiniMax-Text-01', label: 'MiniMax Text 01', capabilities: ['tools'] }] },
     { id: 'gemini', label: 'Gemini', protocol: 'openai_responses', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModelId: 'gemini-default', defaultModel: 'gemini-2.5-pro', defaultModelLabel: 'Gemini 2.5 Pro', capabilities: ['tools', 'thinking', 'image_in'], availableModels: [{ modelId: 'gemini-2.5-pro', model: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', capabilities: ['tools', 'thinking', 'image_in'] }] },
+  ],
+}
+
+const SNAPSHOT_WITH_KIMI_MODEL = {
+  ...MOCK_SNAPSHOT,
+  providers: [
+    ...MOCK_SNAPSHOT.providers,
+    { id: 'kimi', label: 'Kimi', type: 'first_party', protocol: 'openai_legacy', baseUrl: 'https://api.kimi.com/coding/v1', apiKeyConfigured: true },
+  ],
+  models: [
+    ...MOCK_SNAPSHOT.models,
+    {
+      id: 'kimi-default',
+      provider: 'kimi',
+      model: 'k3',
+      label: 'Kimi K3',
+      capabilities: ['tools', 'thinking'],
+      runtimeOptions: KIMI_K3_RUNTIME_OPTIONS,
+      runtimeConstraints: KIMI_K3_RUNTIME_CONSTRAINTS,
+      isDefault: false,
+    },
+  ],
+}
+
+const KIMI_K3_SNAPSHOT = {
+  ...SNAPSHOT_WITH_KIMI_MODEL,
+  defaultProvider: 'kimi',
+  defaultModelId: 'kimi-default',
+  models: SNAPSHOT_WITH_KIMI_MODEL.models.map(model => ({
+    ...model,
+    isDefault: model.id === 'kimi-default',
+  })),
+}
+
+const KIMI_K27_SNAPSHOT = {
+  ...SNAPSHOT_WITH_KIMI_MODEL,
+  defaultProvider: 'kimi',
+  defaultModelId: 'kimi-k2.7',
+  models: [
+    ...MOCK_SNAPSHOT.models.map(model => ({ ...model, isDefault: false })),
+    {
+      id: 'kimi-k2.7',
+      provider: 'kimi',
+      model: 'kimi-k2.7',
+      label: 'Kimi K2.7',
+      capabilities: ['tools', 'thinking'],
+      isDefault: true,
+    },
   ],
 }
 
@@ -94,6 +152,7 @@ function renderSettings() {
 beforeEach(() => {
   vi.mocked(api.getModelConfig).mockResolvedValue(MOCK_SNAPSHOT as any)
   vi.mocked(api.saveModelConfig).mockResolvedValue(MOCK_SNAPSHOT as any)
+  vi.mocked(api.updateModelRuntimeOptions).mockResolvedValue(MOCK_SNAPSHOT as any)
   vi.mocked(api.testProviderConnection).mockResolvedValue({ success: true, latencyMs: 100 })
   vi.mocked(api.listAvailableModelsForProvider).mockResolvedValue([])
   vi.mocked(api.deleteProvider).mockResolvedValue(undefined)
@@ -142,6 +201,144 @@ describe('Model Settings — Add Provider', () => {
         modelId: 'anthropic-sonnet',
       })
     })
+    expect(screen.getByText('当前模型已切换为 Claude Sonnet 4.6')).toBeInTheDocument()
+    expect(screen.queryByText(/Kimi 缓存将失效/)).not.toBeInTheDocument()
+  })
+
+  it('appends the new-session guidance when switching the current model to Kimi K3', async () => {
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(SNAPSHOT_WITH_KIMI_MODEL as any)
+    vi.mocked(api.saveModelConfig).mockResolvedValueOnce(KIMI_K3_SNAPSHOT as any)
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const kimiRow = (await screen.findByText('Kimi K3')).closest('span')!
+    fireEvent.click(within(kimiRow).getByRole('button', { name: '设为默认' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/当前模型已切换为 Kimi K3.*Kimi 缓存将失效.*新建会话/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows constraint-driven Kimi K3 runtime controls with no off option', async () => {
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(KIMI_K3_SNAPSHOT as any)
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const contextSelect = await screen.findByRole('combobox', { name: '上下文窗口' })
+    const effortSelect = screen.getByRole('combobox', { name: '推理强度' })
+
+    expect(contextSelect).toHaveValue('262144')
+    expect(effortSelect).toHaveValue('high')
+    expect(within(contextSelect).getAllByRole('option').map(option => option.textContent)).toEqual(['262K', '1M'])
+    expect(within(effortSelect).getAllByRole('option').map(option => option.textContent)).toEqual(['Low', 'High', 'Max'])
+    expect(`${contextSelect.textContent} ${effortSelect.textContent}`).not.toMatch(/none|off|关闭|无/i)
+    expect(screen.getByText(/Allegretto.*更高计划/)).toBeInTheDocument()
+  })
+
+  it('saves 1M and Max for the exact model and refreshes from the returned snapshot', async () => {
+    const updatedSnapshot = {
+      ...KIMI_K3_SNAPSHOT,
+      models: KIMI_K3_SNAPSHOT.models.map(model => model.id === 'kimi-default'
+        ? {
+            ...model,
+            runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'low' as const },
+          }
+        : model),
+    }
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(KIMI_K3_SNAPSHOT as any)
+    vi.mocked(api.updateModelRuntimeOptions).mockResolvedValueOnce(updatedSnapshot as any)
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const contextSelect = await screen.findByRole('combobox', { name: '上下文窗口' })
+    const effortSelect = screen.getByRole('combobox', { name: '推理强度' })
+    fireEvent.change(contextSelect, { target: { value: '1048576' } })
+    fireEvent.change(effortSelect, { target: { value: 'max' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存运行参数' }))
+
+    await waitFor(() => {
+      expect(api.updateModelRuntimeOptions).toHaveBeenCalledWith({
+        modelId: 'kimi-default',
+        runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '上下文窗口' })).toHaveValue('262144')
+      expect(screen.getByRole('combobox', { name: '推理强度' })).toHaveValue('low')
+      expect(screen.getByText(/Kimi K3 运行参数已保存.*Kimi 缓存将失效.*新建会话/)).toBeInTheDocument()
+    })
+    expect(api.getModelConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks another model mutation while runtime options are being saved', async () => {
+    let resolveUpdate!: (snapshot: typeof KIMI_K3_SNAPSHOT) => void
+    const updatePromise = new Promise<typeof KIMI_K3_SNAPSHOT>(resolve => {
+      resolveUpdate = resolve
+    })
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(KIMI_K3_SNAPSHOT as any)
+    vi.mocked(api.updateModelRuntimeOptions).mockReturnValueOnce(updatePromise as any)
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const runtimeSave = await screen.findByRole('button', { name: '保存运行参数' })
+    fireEvent.click(runtimeSave)
+
+    await waitFor(() => expect(runtimeSave).toBeDisabled())
+    const sonnetRow = screen.getByText('Claude Sonnet 4.6').closest('span')!
+    const switchButton = within(sonnetRow).getByRole('button', { name: '设为默认' })
+    expect(switchButton).toBeDisabled()
+    fireEvent.click(switchButton)
+    expect(api.saveModelConfig).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpdate(KIMI_K3_SNAPSHOT)
+      await updatePromise
+    })
+    await waitFor(() => expect(runtimeSave).toBeEnabled())
+  })
+
+  it('restores the runtime editor after a save error without showing success', async () => {
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(KIMI_K3_SNAPSHOT as any)
+    vi.mocked(api.updateModelRuntimeOptions).mockRejectedValueOnce(new Error('runtime save failed'))
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const runtimeSave = await screen.findByRole('button', { name: '保存运行参数' })
+    fireEvent.click(runtimeSave)
+
+    expect(await screen.findByText('runtime save failed')).toBeInTheDocument()
+    expect(screen.queryByText(/Kimi K3 运行参数已保存/)).not.toBeInTheDocument()
+    expect(runtimeSave).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: '上下文窗口' })).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: '推理强度' })).toBeEnabled()
+  })
+
+  it.each([
+    ['Anthropic', MOCK_SNAPSHOT],
+    ['Kimi K2.7', KIMI_K27_SNAPSHOT],
+    ['Kimi K3 without complete constraints', {
+      ...KIMI_K3_SNAPSHOT,
+      models: KIMI_K3_SNAPSHOT.models.map(model => model.id === 'kimi-default'
+        ? {
+            ...model,
+            runtimeConstraints: { maxContextLimit: 1_048_576, reasoningEfforts: ['low', 'high'] },
+          }
+        : model),
+    }],
+  ])('does not show Kimi K3 runtime controls for %s', async (_label, snapshot) => {
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(snapshot as any)
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    await screen.findByText('当前使用模型')
+    expect(screen.queryByRole('combobox', { name: '上下文窗口' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '推理强度' })).not.toBeInTheDocument()
   })
 
   it('shows provider selection dropdown with unconfigured providers', async () => {
@@ -220,11 +417,11 @@ describe('Model Settings — Add Provider', () => {
     })
 
     // Should show available models
-    expect(screen.getByText('Kimi for Coding')).toBeInTheDocument()
-    expect(screen.getByText('Kimi K2')).toBeInTheDocument()
+    expect(screen.getByText('Kimi K3')).toBeInTheDocument()
+    expect(screen.getByText('Kimi K2.7')).toBeInTheDocument()
 
     // Should show default model hint
-    expect(screen.getByText(/添加后默认模型: Kimi for Coding/)).toBeInTheDocument()
+    expect(screen.getByText(/添加后默认模型: Kimi K3/)).toBeInTheDocument()
 
     // Should show protocol info
     expect(screen.getByText(/openai_legacy/)).toBeInTheDocument()

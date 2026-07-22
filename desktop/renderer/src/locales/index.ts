@@ -1559,6 +1559,18 @@ export interface LocaleStrings {
     modelAdded: (label: string) => string;
     customModelAdded: (name: string) => string;
     modelSwitched: (label: string) => string;
+    kimiK3RuntimeTitle: string;
+    kimiK3ContextLabel: string;
+    kimiK3Context262k: string;
+    kimiK3Context1m: string;
+    kimiK3EffortLabel: string;
+    kimiK3EffortLow: string;
+    kimiK3EffortHigh: string;
+    kimiK3EffortMax: string;
+    kimiK3AllegrettoHint: string;
+    kimiK3SaveRuntimeOptions: string;
+    kimiK3RuntimeOptionsSaved: string;
+    kimiK3NewSessionHint: string;
     confirmDeleteModel: string;
     modelDeleted: string;
     confirmDeleteProvider: string;

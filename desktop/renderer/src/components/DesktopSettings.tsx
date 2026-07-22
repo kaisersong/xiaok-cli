@@ -931,6 +931,24 @@ function MobileInfoRow({ label, value, tone = 'default' }: { label: string; valu
 
 // ---- Model Settings ----
 
+const KIMI_K3_CONTEXT_262K = 262_144;
+const KIMI_K3_CONTEXT_1M = 1_048_576;
+const KIMI_K3_REASONING_EFFORTS = ['low', 'high', 'max'] as const;
+
+type KimiK3ContextLimit = typeof KIMI_K3_CONTEXT_262K | typeof KIMI_K3_CONTEXT_1M;
+type KimiK3ReasoningEffort = typeof KIMI_K3_REASONING_EFFORTS[number];
+type DesktopModelEntry = DesktopModelConfigSnapshot['models'][number];
+
+function supportsKimiK3RuntimeOptions(model: DesktopModelEntry | undefined): boolean {
+  const constraints = model?.runtimeConstraints;
+  return Boolean(
+    model?.runtimeOptions
+    && constraints?.maxContextLimit !== undefined
+    && constraints.maxContextLimit >= KIMI_K3_CONTEXT_1M
+    && KIMI_K3_REASONING_EFFORTS.every(effort => constraints.reasoningEfforts?.includes(effort)),
+  );
+}
+
 interface SkillItem {
   name: string;
   aliases: string[];
@@ -953,6 +971,17 @@ function ModelPane() {
   const [testResults, setTestResults] = useState<Record<string, TestProviderConnectionResult>>({});
   const [showAddModel, setShowAddModel] = useState<string>('');
   const [customModelInput, setCustomModelInput] = useState('');
+  const [runtimeContextLimit, setRuntimeContextLimit] = useState<KimiK3ContextLimit>(KIMI_K3_CONTEXT_262K);
+  const [runtimeReasoningEffort, setRuntimeReasoningEffort] = useState<KimiK3ReasoningEffort>('high');
+  const [savingRuntimeOptions, setSavingRuntimeOptions] = useState(false);
+
+  const currentModel = config?.models.find(model => model.id === config.defaultModelId)
+    ?? config?.models.find(model => model.isDefault);
+  const currentProvider = currentModel
+    ? config?.providers.find(provider => provider.id === currentModel.provider)
+    : undefined;
+  const showKimiK3RuntimeOptions = supportsKimiK3RuntimeOptions(currentModel);
+  const modelMutationPending = saving || savingRuntimeOptions;
 
   useEffect(() => {
     api.getModelConfig()
@@ -963,8 +992,22 @@ function ModelPane() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    setRuntimeContextLimit(
+      currentModel?.runtimeOptions?.contextLimit === KIMI_K3_CONTEXT_1M
+        ? KIMI_K3_CONTEXT_1M
+        : KIMI_K3_CONTEXT_262K,
+    );
+    const nextEffort = currentModel?.runtimeOptions?.reasoningEffort;
+    setRuntimeReasoningEffort(
+      nextEffort && KIMI_K3_REASONING_EFFORTS.includes(nextEffort)
+        ? nextEffort
+        : 'high',
+    );
+  }, [currentModel?.id, currentModel?.runtimeOptions?.contextLimit, currentModel?.runtimeOptions?.reasoningEffort]);
+
   const handleSave = async () => {
-    if (!selectedProvider || !apiKey.trim()) return;
+    if (!selectedProvider || !apiKey.trim() || modelMutationPending) return;
     setSaving(true);
     setError('');
     setSuccess('');
@@ -1004,7 +1047,7 @@ function ModelPane() {
   };
 
   const handleAddModel = async (modelId: string) => {
-    if (!config) return;
+    if (!config || modelMutationPending) return;
     // Find the model across all provider profiles
     let foundModel: { modelId: string; model: string; label: string } | undefined;
     let foundProviderId = '';
@@ -1033,7 +1076,7 @@ function ModelPane() {
   };
 
   const handleAddCustomModel = async (providerId: string, modelName: string) => {
-    if (!config || !modelName.trim()) return;
+    if (!config || !modelName.trim() || modelMutationPending) return;
     setSaving(true);
     setError('');
     try {
@@ -1054,7 +1097,7 @@ function ModelPane() {
   };
 
   const handleSetDefaultModel = async (modelId: string) => {
-    if (!config || config.defaultModelId === modelId) return;
+    if (!config || config.defaultModelId === modelId || modelMutationPending) return;
     const model = config.models.find(m => m.id === modelId);
     if (!model) return;
     setSaving(true);
@@ -1066,7 +1109,12 @@ function ModelPane() {
         modelId,
       });
       setConfig(updated);
-      setSuccess(t.desktopSettings.modelSwitched(model.label));
+      const updatedCurrentModel = updated.models.find(candidate => candidate.id === updated.defaultModelId)
+        ?? updated.models.find(candidate => candidate.isDefault);
+      const newSessionHint = supportsKimiK3RuntimeOptions(updatedCurrentModel)
+        ? ` ${t.desktopSettings.kimiK3NewSessionHint}`
+        : '';
+      setSuccess(`${t.desktopSettings.modelSwitched(updatedCurrentModel?.label ?? model.label)}${newSessionHint}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1074,8 +1122,32 @@ function ModelPane() {
     }
   };
 
+  const handleSaveRuntimeOptions = async () => {
+    if (!currentModel || !showKimiK3RuntimeOptions || modelMutationPending) return;
+    setSavingRuntimeOptions(true);
+    setError('');
+    setSuccess('');
+    try {
+      const updated = await api.updateModelRuntimeOptions({
+        modelId: currentModel.id,
+        runtimeOptions: {
+          contextLimit: runtimeContextLimit,
+          reasoningEffort: runtimeReasoningEffort,
+        },
+      });
+      setConfig(updated);
+      setSuccess(`${t.desktopSettings.kimiK3RuntimeOptionsSaved} ${t.desktopSettings.kimiK3NewSessionHint}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSavingRuntimeOptions(false);
+    }
+  };
+
   const handleDeleteModel = async (modelId: string) => {
+    if (modelMutationPending) return;
     if (!confirm(t.desktopSettings.confirmDeleteModel)) return;
+    setSaving(true);
     try {
       await api.deleteModel(modelId);
       const updated = await api.getModelConfig();
@@ -1083,11 +1155,15 @@ function ModelPane() {
       setSuccess(t.desktopSettings.modelDeleted);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleDeleteProvider = async (providerId: string) => {
+    if (modelMutationPending) return;
     if (!confirm(t.desktopSettings.confirmDeleteProvider)) return;
+    setSaving(true);
     try {
       await api.deleteProvider(providerId);
       const updated = await api.getModelConfig();
@@ -1098,6 +1174,8 @@ function ModelPane() {
       setSuccess(t.desktopSettings.providerDeleted);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1113,35 +1191,77 @@ function ModelPane() {
     <>
       <Section>
         <SectionHeader icon={Cpu}>{t.desktopSettings.modelProviders}</SectionHeader>
-        {(() => {
-          const currentModel = config?.models.find(m => m.id === config.defaultModelId) ?? config?.models.find(m => m.isDefault);
-          const currentProvider = currentModel ? config?.providers.find(p => p.id === currentModel.provider) : null;
-          if (!currentModel) return null;
-          return (
-            <Card className="mb-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.currentModel}</div>
-                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-[var(--c-text-primary)]">{currentModel.label}</span>
-                    <span className="rounded-md bg-[var(--c-bg-deep)] px-2 py-0.5 text-xs text-[var(--c-text-secondary)]">
-                      {currentProvider?.label ?? currentModel.provider}
-                    </span>
-                  </div>
-                  {currentModel.capabilities && currentModel.capabilities.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {currentModel.capabilities.map(capability => (
-                        <span key={capability} className="rounded px-1.5 py-0.5 text-[10px] text-[var(--c-text-tertiary)] bg-[var(--c-bg-deep)]">
-                          {capability}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+        {currentModel && (
+          <Card className="mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.currentModel}</div>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-semibold text-[var(--c-text-primary)]">{currentModel.label}</span>
+                  <span className="rounded-md bg-[var(--c-bg-deep)] px-2 py-0.5 text-xs text-[var(--c-text-secondary)]">
+                    {currentProvider?.label ?? currentModel.provider}
+                  </span>
                 </div>
+                {currentModel.capabilities && currentModel.capabilities.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {currentModel.capabilities.map(capability => (
+                      <span key={capability} className="rounded px-1.5 py-0.5 text-[10px] text-[var(--c-text-tertiary)] bg-[var(--c-bg-deep)]">
+                        {capability}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            </Card>
-          );
-        })()}
+            </div>
+            {showKimiK3RuntimeOptions && (
+              <div className="mt-4 border-t border-[var(--c-border-subtle)] pt-3">
+                <div className="text-xs font-medium text-[var(--c-text-primary)]">{t.desktopSettings.kimiK3RuntimeTitle}</div>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="desktop-kimi-k3-context-limit" className="mb-1.5 block text-xs text-[var(--c-text-secondary)]">
+                      {t.desktopSettings.kimiK3ContextLabel}
+                    </label>
+                    <select
+                      id="desktop-kimi-k3-context-limit"
+                      value={runtimeContextLimit}
+                      onChange={event => setRuntimeContextLimit(Number(event.target.value) as KimiK3ContextLimit)}
+                      disabled={modelMutationPending}
+                      className={inputCls}
+                    >
+                      <option value={KIMI_K3_CONTEXT_262K}>{t.desktopSettings.kimiK3Context262k}</option>
+                      <option value={KIMI_K3_CONTEXT_1M}>{t.desktopSettings.kimiK3Context1m}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="desktop-kimi-k3-reasoning-effort" className="mb-1.5 block text-xs text-[var(--c-text-secondary)]">
+                      {t.desktopSettings.kimiK3EffortLabel}
+                    </label>
+                    <select
+                      id="desktop-kimi-k3-reasoning-effort"
+                      value={runtimeReasoningEffort}
+                      onChange={event => setRuntimeReasoningEffort(event.target.value as KimiK3ReasoningEffort)}
+                      disabled={modelMutationPending}
+                      className={inputCls}
+                    >
+                      <option value="low">{t.desktopSettings.kimiK3EffortLow}</option>
+                      <option value="high">{t.desktopSettings.kimiK3EffortHigh}</option>
+                      <option value="max">{t.desktopSettings.kimiK3EffortMax}</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-[var(--c-text-tertiary)]">{t.desktopSettings.kimiK3AllegrettoHint}</p>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveRuntimeOptions()}
+                  disabled={modelMutationPending}
+                  className="mt-3 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {savingRuntimeOptions ? `${t.desktopSettings.kimiK3SaveRuntimeOptions}…` : t.desktopSettings.kimiK3SaveRuntimeOptions}
+                </button>
+              </div>
+            )}
+          </Card>
+        )}
         <div className="flex flex-col gap-3">
           {config?.providers.map(provider => {
             const testResult = testResults[provider.id];
@@ -1190,6 +1310,7 @@ function ModelPane() {
                       {provider.type === 'custom' && (
                         <button type="button"
                           onClick={() => handleDeleteProvider(provider.id)}
+                          disabled={modelMutationPending}
                           className="inline-flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 transition-colors"
                         >
                           <Trash2 size={12} /> {t.desktopSettings.deleteLabel}
@@ -1217,7 +1338,7 @@ function ModelPane() {
                         </div>
                         <button type="button"
                           onClick={handleSave}
-                          disabled={saving || !apiKey.trim()}
+                          disabled={modelMutationPending || !apiKey.trim()}
                           className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
                         >
                           {saving ? '...' : t.desktopSettings.saveLabel}
@@ -1247,7 +1368,7 @@ function ModelPane() {
                             {config.defaultModelId !== m.id && (
                               <button type="button"
                                 onClick={() => void handleSetDefaultModel(m.id)}
-                                disabled={saving}
+                                disabled={modelMutationPending}
                                 className="ml-1 rounded px-1 text-[10px] text-[var(--c-accent)] hover:bg-[var(--c-accent)]/10 disabled:opacity-50"
                               >
                                 {t.desktopSettings.setAsDefault}
@@ -1255,7 +1376,8 @@ function ModelPane() {
                             )}
                             <button type="button"
                               onClick={() => handleDeleteModel(m.id)}
-                              className="ml-1 hover:text-red-500"
+                              disabled={modelMutationPending}
+                              className="ml-1 hover:text-red-500 disabled:opacity-50"
                               title={t.desktopSettings.deleteModel}
                             >
                               <X size={10} />
@@ -1285,7 +1407,7 @@ function ModelPane() {
                                     <button type="button"
                                       key={m.modelId}
                                       onClick={() => handleAddModel(m.modelId)}
-                                      disabled={saving}
+                                      disabled={modelMutationPending}
                                       className="rounded-md px-2 py-1 text-xs bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] hover:bg-[var(--c-accent)]/10 hover:text-[var(--c-accent)] transition-colors disabled:opacity-50"
                                     >
                                       {m.label}
@@ -1305,7 +1427,7 @@ function ModelPane() {
                                 />
                                 <button type="button"
                                   onClick={() => { void handleAddCustomModel(provider.id, customModelInput); setCustomModelInput(''); }}
-                                  disabled={saving || !customModelInput.trim()}
+                                  disabled={modelMutationPending || !customModelInput.trim()}
                                   className="shrink-0 rounded-md bg-[var(--c-accent)] px-3 py-1 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-40"
                                 >
                                   {t.desktopSettings.addLabel}
@@ -1344,6 +1466,8 @@ function ModelPane() {
         <SectionHeader icon={Plus}>{t.desktopSettings.addModelProvider}</SectionHeader>
         <AddProviderCard
           config={config}
+          mutationPending={modelMutationPending}
+          onMutationPendingChange={setSaving}
           onAdded={(updated) => {
             setConfig(updated);
             setSuccess(t.desktopSettings.providerAdded);
@@ -1361,10 +1485,14 @@ function ModelPane() {
 
 function AddProviderCard({
   config,
+  mutationPending,
+  onMutationPendingChange,
   onAdded,
   onError,
 }: {
   config: DesktopModelConfigSnapshot | null;
+  mutationPending: boolean;
+  onMutationPendingChange: (pending: boolean) => void;
   onAdded: (updated: DesktopModelConfigSnapshot) => void;
   onError: (msg: string) => void;
 }) {
@@ -1394,7 +1522,7 @@ function AddProviderCard({
   };
 
   const handleAdd = async () => {
-    if (!selectedProfileId) return;
+    if (!selectedProfileId || mutationPending) return;
     if (isCustom && !customName.trim()) {
       onError(t.desktopSettings.customNameRequired);
       return;
@@ -1404,6 +1532,7 @@ function AddProviderCard({
       return;
     }
     setSaving(true);
+    onMutationPendingChange(true);
     try {
       const providerId = isCustom ? customName.trim().toLowerCase().replace(/\s+/g, '-') : selectedProfileId;
       const updated = await api.saveModelConfig({
@@ -1420,6 +1549,7 @@ function AddProviderCard({
       onError((e as Error).message);
     } finally {
       setSaving(false);
+      onMutationPendingChange(false);
     }
   };
 
@@ -1517,7 +1647,7 @@ function AddProviderCard({
             <div className="flex gap-2 pt-1">
               <button type="button"
                 onClick={handleAdd}
-                disabled={saving}
+                disabled={saving || mutationPending}
                 className={btnPrimary}
               >
                 {saving ? t.desktopSettings.addingProvider : t.desktopSettings.addProvider}
