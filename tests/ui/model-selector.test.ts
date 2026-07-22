@@ -59,6 +59,7 @@ describe('buildModelOptions', () => {
     expect(options.map((option) => option.id)).toEqual([
       'kimi-coding',
       'kimi-k2-thinking',
+      'kimi-k3',
       'kimi-k2.7',
       'kimi-k2.6',
       'kimi-k2.5',
@@ -67,6 +68,7 @@ describe('buildModelOptions', () => {
     expect(options.map((option) => option.label)).toEqual([
       'Kimi Coding',
       'Kimi K2 Thinking',
+      'Kimi K3',
       'Kimi K2.7',
       'Kimi K2.6',
       'Kimi K2.5',
