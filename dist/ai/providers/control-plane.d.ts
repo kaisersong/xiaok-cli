@@ -1,5 +1,5 @@
 import type { Config, LegacyConfig } from '../../types.js';
-import type { ProtocolId } from './types.js';
+import type { ModelRuntimeOptions, ProtocolId } from './types.js';
 export interface ResolvedModelBinding {
     providerId: string;
     modelId: string;
@@ -9,5 +9,6 @@ export interface ResolvedModelBinding {
     baseUrl?: string;
     headers: Record<string, string>;
     capabilities: string[];
+    runtimeOptions?: ModelRuntimeOptions;
 }
 export declare function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, requestedModelId?: string): ResolvedModelBinding;

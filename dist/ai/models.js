@@ -9,7 +9,7 @@ export function createAdapterFromBinding(binding) {
         return new ClaudeAdapter(binding.apiKey, binding.wireModel, binding.baseUrl, capabilityOverrides);
     }
     if (binding.protocol === 'openai_legacy') {
-        return new OpenAIAdapter(binding.apiKey, binding.wireModel, binding.baseUrl, binding.headers, capabilityOverrides);
+        return new OpenAIAdapter(binding.apiKey, binding.wireModel, binding.baseUrl, binding.headers, capabilityOverrides, binding.runtimeOptions);
     }
     if (binding.protocol === 'openai_responses') {
         return new OpenAIResponsesAdapter(binding.apiKey, binding.wireModel, binding.baseUrl, binding.headers, capabilityOverrides);

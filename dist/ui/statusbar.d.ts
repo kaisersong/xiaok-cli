@@ -34,7 +34,7 @@ export declare class StatusBar {
     constructor();
     init(model: string, sessionId: string, cwd: string, mode?: string, options?: StatusBarOptions): void;
     update(usage: UsageStats): void;
-    updateModel(model: string): void;
+    updateModel(model: string, resolvedContextLimit?: number): void;
     updateMode(mode: string): void;
     updateBranch(branch: string): void;
     setFields(fields: StatusBarField[]): void;

@@ -3,6 +3,7 @@ import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { estimateTokens } from '../runtime/usage.js';
+import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
@@ -153,13 +154,22 @@ export class OpenAIAdapter {
     baseUrl;
     defaultHeaders;
     capabilityOverrides;
+    runtimeOptions;
     httpAgent;
     model;
-    constructor(apiKey, model = 'gpt-4o', baseUrl, defaultHeaders, capabilityOverrides) {
+    constructor(apiKey, model = 'gpt-4o', baseUrl, defaultHeaders, capabilityOverrides, runtimeOptions) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.defaultHeaders = defaultHeaders;
-        this.capabilityOverrides = capabilityOverrides;
+        this.capabilityOverrides = {
+            ...(typeof capabilityOverrides?.supportsPromptCaching === 'boolean'
+                ? { supportsPromptCaching: capabilityOverrides.supportsPromptCaching }
+                : {}),
+            ...(typeof capabilityOverrides?.supportsImageInput === 'boolean'
+                ? { supportsImageInput: capabilityOverrides.supportsImageInput }
+                : {}),
+        };
+        this.runtimeOptions = runtimeOptions ? { ...runtimeOptions } : undefined;
         this.httpAgent = createOpenAIHttpAgent(baseUrl);
         this.client = new OpenAI({
             apiKey,
@@ -189,13 +199,25 @@ export class OpenAIAdapter {
         return this.model;
     }
     getCapabilities() {
-        return this.capabilityOverrides ?? {};
+        return {
+            ...(this.capabilityOverrides ?? {}),
+            ...(this.runtimeOptions?.contextLimit !== undefined
+                ? { contextLimit: this.runtimeOptions.contextLimit }
+                : {}),
+        };
     }
     dispose() {
         this.httpAgent.destroy();
     }
     cloneWithModel(model) {
-        return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
+        const runtimeOptions = model === this.model
+            ? this.runtimeOptions
+            : resolveModelRuntimeOptions({
+                protocol: 'openai_legacy',
+                baseUrl: this.baseUrl,
+                wireModel: model,
+            }).runtimeOptions;
+        return new OpenAIAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides, runtimeOptions);
     }
     async *stream(messages, tools, systemPrompt, options) {
         let attempt = 0;
@@ -302,13 +324,21 @@ export class OpenAIAdapter {
                 parameters: t.inputSchema,
             },
         }));
-        const stream = await this.client.chat.completions.create({
+        const request = {
             model: this.model,
             messages: openaiMessages,
             tools: openaiTools.length > 0 ? openaiTools : undefined,
             stream: true,
             stream_options: { include_usage: true },
-        }, { signal });
+        };
+        if (this.model === 'k3'
+            && isOfficialKimiK3OpenAIEndpoint(this.baseUrl)
+            && this.runtimeOptions?.reasoningEffort) {
+            Object.assign(request, {
+                reasoning_effort: this.runtimeOptions.reasoningEffort,
+            });
+        }
+        const stream = await this.client.chat.completions.create(request, { signal });
         const toolBuffers = new Map();
         const rawThinkParser = {
             active: true,

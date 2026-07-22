@@ -1,4 +1,13 @@
 export type ProtocolId = 'anthropic' | 'openai_legacy' | 'openai_responses';
+export type ModelReasoningEffort = 'low' | 'high' | 'max';
+export interface ModelRuntimeOptions {
+    contextLimit?: number;
+    reasoningEffort?: ModelReasoningEffort;
+}
+export interface ModelRuntimeConstraints {
+    maxContextLimit?: number;
+    reasoningEfforts?: ModelReasoningEffort[];
+}
 export type FirstPartyProviderId = 'openai' | 'anthropic' | 'kimi' | 'deepseek' | 'glm' | 'minimax' | 'gemini';
 export type ProviderId = FirstPartyProviderId | string;
 export interface ProviderConfig {
@@ -13,12 +22,15 @@ export interface ModelConfigEntry {
     model: string;
     label: string;
     capabilities?: string[];
+    runtimeOptions?: ModelRuntimeOptions;
 }
 export interface ProviderModelVariant {
     modelId: string;
     model: string;
     label: string;
     capabilities?: string[];
+    runtimeOptions?: ModelRuntimeOptions;
+    runtimeConstraints?: ModelRuntimeConstraints;
 }
 export interface ProviderProfile {
     id: FirstPartyProviderId;

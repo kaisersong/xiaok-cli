@@ -1,3 +1,19 @@
+function createKimiK3Variant(modelId) {
+    return {
+        modelId,
+        model: 'k3',
+        label: 'Kimi K3',
+        capabilities: ['tools', 'thinking'],
+        runtimeOptions: {
+            contextLimit: 262_144,
+            reasoningEffort: 'high',
+        },
+        runtimeConstraints: {
+            maxContextLimit: 1_048_576,
+            reasoningEfforts: ['low', 'high', 'max'],
+        },
+    };
+}
 const PROVIDER_REGISTRY = {
     openai: {
         id: 'openai',
@@ -46,13 +62,9 @@ const PROVIDER_REGISTRY = {
         protocol: 'openai_legacy',
         baseUrl: 'https://api.kimi.com/coding/v1',
         envPrefixes: ['KIMI'],
-        defaultModel: {
-            modelId: 'kimi-default',
-            model: 'kimi-k2.7',
-            label: 'Kimi K2.7',
-            capabilities: ['tools', 'thinking'],
-        },
+        defaultModel: createKimiK3Variant('kimi-default'),
         availableModels: [
+            createKimiK3Variant('kimi-k3'),
             { modelId: 'kimi-k2.7', model: 'kimi-k2.7', label: 'Kimi K2.7', capabilities: ['tools', 'thinking'] },
             { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'] },
             { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'] },
@@ -135,6 +147,11 @@ const PROVIDER_REGISTRY = {
 };
 export function getProviderProfile(providerId) {
     return PROVIDER_REGISTRY[providerId];
+}
+export function getProviderModelVariant(providerId, wireModel) {
+    const profile = getProviderProfile(providerId);
+    return profile?.availableModels?.find((variant) => variant.model === wireModel)
+        ?? (profile?.defaultModel.model === wireModel ? profile.defaultModel : undefined);
 }
 export function listProviderProfiles() {
     return Object.values(PROVIDER_REGISTRY);

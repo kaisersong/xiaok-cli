@@ -43,10 +43,10 @@ export class StatusBar {
     update(usage) {
         this.usage = usage;
     }
-    updateModel(model) {
+    updateModel(model, resolvedContextLimit) {
         this.model = model;
-        // 更新模型时同时更新 context limit
-        this.contextLimit = inferContextLimitFromModel(model);
+        // 优先使用 adapter 已解析的策略；旧调用方未传入时保留模型名推断。
+        this.contextLimit = resolvedContextLimit ?? inferContextLimitFromModel(model);
     }
     updateMode(mode) {
         this.mode = mode;

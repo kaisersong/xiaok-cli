@@ -1,5 +1,5 @@
 import { loadConfig, saveConfig } from '../utils/config.js';
-import { getProviderProfile } from '../ai/providers/registry.js';
+import { getProviderModelVariant, getProviderProfile } from '../ai/providers/registry.js';
 function normalizeProviderId(value) {
     if (value === 'claude')
         return 'anthropic';
@@ -16,6 +16,15 @@ function normalizeProviderId(value) {
 }
 function sanitizeModelIdPart(value) {
     return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+function copyCatalogModelEntry(providerId, variant) {
+    return {
+        provider: providerId,
+        model: variant.model,
+        label: variant.label,
+        capabilities: variant.capabilities ? [...variant.capabilities] : undefined,
+        ...(variant.runtimeOptions ? { runtimeOptions: { ...variant.runtimeOptions } } : {}),
+    };
 }
 function ensureProviderConfig(cfg, providerId) {
     if (cfg.providers[providerId]) {
@@ -57,12 +66,7 @@ function ensureDefaultModelForProvider(cfg, providerId) {
     if (!profile) {
         throw new Error(`未知 provider: ${providerId}`);
     }
-    cfg.models[profile.defaultModel.modelId] = {
-        provider: providerId,
-        model: profile.defaultModel.model,
-        label: profile.defaultModel.label,
-        capabilities: profile.defaultModel.capabilities,
-    };
+    cfg.models[profile.defaultModel.modelId] = copyCatalogModelEntry(providerId, profile.defaultModel);
     return profile.defaultModel.modelId;
 }
 export function registerConfigCommands(program) {
@@ -114,11 +118,16 @@ export function registerConfigCommands(program) {
                 cfg.providers[providerId].apiKey = opts.apiKey;
             }
             const modelId = `${providerId}-${sanitizeModelIdPart(modelName)}`;
-            cfg.models[modelId] = {
-                provider: providerId,
-                model: modelName,
-                label: modelName,
-            };
+            const catalogVariant = providerId === 'kimi'
+                ? getProviderModelVariant(providerId, modelName)
+                : undefined;
+            cfg.models[modelId] = catalogVariant
+                ? copyCatalogModelEntry(providerId, catalogVariant)
+                : {
+                    provider: providerId,
+                    model: modelName,
+                    label: modelName,
+                };
             cfg.defaultProvider = providerId;
             cfg.defaultModelId = modelId;
             await saveConfig(cfg);
