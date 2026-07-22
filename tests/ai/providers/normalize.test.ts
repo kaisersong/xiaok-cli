@@ -108,6 +108,30 @@ describe('normalizeConfig', () => {
     expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
   });
 
+  it('recognizes an explicit default HTTPS port in a schema-v1 Kimi endpoint', () => {
+    const normalized = normalizeConfig({
+      schemaVersion: 1,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://api.kimi.com:443/coding/v1',
+          apiKey: 'sk-kimi',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    });
+
+    expect(normalized.defaultProvider).toBe('kimi');
+    expect(normalized.defaultModelId).toBe('kimi-default');
+    expect(normalized.models['kimi-default']).toMatchObject({
+      provider: 'kimi',
+      model: 'kimi-k2.7',
+      label: 'Kimi K2.7',
+    });
+    expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
+  });
+
   it('copies catalog runtime options for an explicit schema-v1 K3 model', () => {
     const profile = getProviderProfile('kimi');
     const normalized = normalizeConfig({
@@ -138,6 +162,30 @@ describe('normalizeConfig', () => {
 
     entry.runtimeOptions!.contextLimit = 1_048_576;
     expect(profile?.defaultModel.runtimeOptions?.contextLimit).toBe(262_144);
+  });
+
+  it('does not copy K3 runtime options for a schema-v1 Kimi proxy endpoint', () => {
+    const normalized = normalizeConfig({
+      schemaVersion: 1,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://api.kimi.com/coding-proxy/v1',
+          apiKey: 'sk-kimi',
+          model: 'k3',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    });
+
+    expect(normalized.defaultProvider).toBe('kimi');
+    expect(normalized.models['kimi-default']).toMatchObject({
+      provider: 'kimi',
+      model: 'k3',
+      label: 'Kimi K3',
+    });
+    expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
   });
 
   it('preserves an existing schema-v2 kimi-default K2.7 entry without K3 options', () => {

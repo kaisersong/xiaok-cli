@@ -231,6 +231,45 @@ describe('resolveRuntimeModelBinding', () => {
       modelId: 'kimi-k3',
       wireModel: 'k3',
       baseUrl: 'https://proxy.example.com/coding/v1',
+      runtimeOptions: {
+        contextLimit: 1_048_576,
+        reasoningEffort: 'max',
+      },
+    });
+
+    expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
+  });
+
+  it('preserves provider-neutral runtime options for a custom provider model named K3', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'acme',
+      providerType: 'custom',
+      modelId: 'acme-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://api.acme.example/v1',
+      runtimeOptions: {
+        contextLimit: 128_000,
+        reasoningEffort: 'low',
+      },
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions).toEqual({
+      contextLimit: 128_000,
+      reasoningEffort: 'low',
+    });
+  });
+
+  it('drops stale K3 runtime options from an official Kimi K2.7 binding', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-k2.7',
+      wireModel: 'kimi-k2.7',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      runtimeOptions: {
+        contextLimit: 1_048_576,
+        reasoningEffort: 'max',
+      },
     });
 
     expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');

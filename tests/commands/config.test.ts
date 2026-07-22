@@ -171,6 +171,22 @@ describe('config commands', () => {
       expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
     });
 
+    it.each(['kimi', 'kimi/k3'])(
+      'does not persist K3 runtime policy for %s on a custom endpoint',
+      async (modelValue) => {
+        await freshProgram().parseAsync([
+          'node', 'xiaok', 'config', 'set', 'model', modelValue,
+          '--base-url', 'https://proxy.example.com/v1',
+        ]);
+
+        const updated = await loadConfig();
+        const entry = updated.models[updated.defaultModelId];
+        expect(updated.providers.kimi.baseUrl).toBe('https://proxy.example.com/v1');
+        expect(entry.model).toBe('k3');
+        expect(entry.runtimeOptions).toBeUndefined();
+      },
+    );
+
     it('does not copy K3 runtime options to an explicit K2.7 model', async () => {
       await freshProgram().parseAsync([
         'node', 'xiaok', 'config', 'set', 'model', 'kimi/kimi-k2.7',

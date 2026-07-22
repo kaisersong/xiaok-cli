@@ -3721,19 +3721,28 @@ function resolveDesktopModelRuntimeMetadata(
 ): { runtimeOptions?: ModelRuntimeOptions; runtimeConstraints?: ModelRuntimeConstraints } {
   const provider = config.providers[model.provider];
   if (!provider) {
+    if (model.provider === 'kimi') return {};
     return model.runtimeOptions
       ? { runtimeOptions: cloneRuntimeOptions(model.runtimeOptions) }
       : {};
   }
 
   const catalogModel = findApplicableCatalogModel(config, model.provider, modelId, model.model);
+  const acceptsConfiguredRuntimeOptions = model.provider !== 'kimi' || (
+    model.model === 'k3'
+    && provider.protocol === 'openai_legacy'
+    && isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
+  );
+  const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
+    ? model.runtimeOptions
+    : undefined;
   return resolveModelRuntimeOptions({
     protocol: provider.protocol,
     baseUrl: provider.baseUrl,
     wireModel: model.model,
     catalogOptions: catalogModel?.runtimeOptions,
     catalogConstraints: catalogModel?.runtimeConstraints,
-    configuredOptions: model.runtimeOptions,
+    configuredOptions: configuredRuntimeOptions,
   });
 }
 

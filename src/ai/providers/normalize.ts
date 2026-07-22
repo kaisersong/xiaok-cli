@@ -1,6 +1,10 @@
 import type { Config, LegacyConfig } from '../../types.js';
 import type { ModelConfigEntry, ProtocolId, ProviderConfig, ProviderId } from './types.js';
 import { DEFAULT_CONFIG, DEFAULT_INTENT_BOUNDARY_CONFIG } from '../../types.js';
+import {
+  isOfficialKimiK3OpenAIEndpoint,
+  resolveModelRuntimeOptions,
+} from './model-runtime-options.js';
 import { getProviderModelVariant, getProviderProfile } from './registry.js';
 
 function cloneDefaultConfig(): Config {
@@ -24,7 +28,21 @@ function isClaudeCompatibleCustomEndpoint(baseUrl?: string, model?: string): boo
 
 function detectKnownProvider(baseUrl?: string): ProviderId | null {
   const normalizedBaseUrl = (baseUrl ?? '').toLowerCase();
-  if (normalizedBaseUrl.startsWith('https://api.kimi.com/coding')) return 'kimi';
+  try {
+    const endpoint = new URL(baseUrl ?? '');
+    if (
+      endpoint.protocol === 'https:'
+      && endpoint.hostname === 'api.kimi.com'
+      && endpoint.port === ''
+      && endpoint.username === ''
+      && endpoint.password === ''
+      && endpoint.pathname.startsWith('/coding')
+    ) {
+      return 'kimi';
+    }
+  } catch {
+    // Continue with the remaining legacy string classifiers.
+  }
   if (normalizedBaseUrl.startsWith('https://api.deepseek.com')) return 'deepseek';
   if (normalizedBaseUrl.startsWith('https://open.bigmodel.cn')) return 'glm';
   if (normalizedBaseUrl.startsWith('https://api.minimax.chat')) return 'minimax';
@@ -49,7 +67,25 @@ function buildFirstPartyConfig(
   const capabilities = modelOverride?.capabilities
     ?? catalogVariant?.capabilities
     ?? profile.defaultModel.capabilities;
-  const runtimeOptions = modelOverride?.runtimeOptions ?? catalogVariant?.runtimeOptions;
+  const protocol = overrides.protocol ?? profile.protocol;
+  const baseUrl = overrides.baseUrl ?? profile.baseUrl;
+  const kimiK3RuntimeEligible = providerId === 'kimi'
+    && wireModel === 'k3'
+    && protocol === 'openai_legacy'
+    && isOfficialKimiK3OpenAIEndpoint(baseUrl);
+  const catalogRuntimeEligible = providerId !== 'kimi'
+    || catalogVariant?.model !== 'k3'
+    || kimiK3RuntimeEligible;
+  const { runtimeOptions } = resolveModelRuntimeOptions({
+    protocol,
+    baseUrl,
+    wireModel,
+    catalogOptions: catalogRuntimeEligible ? catalogVariant?.runtimeOptions : undefined,
+    catalogConstraints: catalogRuntimeEligible ? catalogVariant?.runtimeConstraints : undefined,
+    configuredOptions: providerId !== 'kimi' || kimiK3RuntimeEligible
+      ? modelOverride?.runtimeOptions
+      : undefined,
+  });
 
   return {
     schemaVersion: 2,
@@ -58,9 +94,9 @@ function buildFirstPartyConfig(
     providers: {
       [providerId]: {
         type: 'first_party',
-        protocol: overrides.protocol ?? profile.protocol,
+        protocol,
         apiKey: overrides.apiKey,
-        baseUrl: overrides.baseUrl ?? profile.baseUrl,
+        baseUrl,
         headers: overrides.headers,
       },
     },

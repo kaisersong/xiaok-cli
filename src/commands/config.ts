@@ -1,7 +1,8 @@
 import type { Command } from 'commander';
-import type { ModelConfigEntry, ProviderModelVariant } from '../ai/providers/types.js';
+import type { ModelConfigEntry, ProviderConfig, ProviderModelVariant } from '../ai/providers/types.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
 import { getProviderModelVariant, getProviderProfile } from '../ai/providers/registry.js';
+import { isOfficialKimiK3OpenAIEndpoint } from '../ai/providers/model-runtime-options.js';
 
 function normalizeProviderId(value: string): string | null {
   if (value === 'claude') return 'anthropic';
@@ -21,13 +22,22 @@ function sanitizeModelIdPart(value: string): string {
 function copyCatalogModelEntry(
   providerId: string,
   variant: ProviderModelVariant,
+  providerConfig: ProviderConfig,
 ): ModelConfigEntry {
+  const copyRuntimeOptions = variant.runtimeOptions && (
+    providerId !== 'kimi'
+    || variant.model !== 'k3'
+    || (
+      providerConfig.protocol === 'openai_legacy'
+      && isOfficialKimiK3OpenAIEndpoint(providerConfig.baseUrl)
+    )
+  );
   return {
     provider: providerId,
     model: variant.model,
     label: variant.label,
     capabilities: variant.capabilities ? [...variant.capabilities] : undefined,
-    ...(variant.runtimeOptions ? { runtimeOptions: { ...variant.runtimeOptions } } : {}),
+    ...(copyRuntimeOptions ? { runtimeOptions: { ...variant.runtimeOptions } } : {}),
   };
 }
 
@@ -84,7 +94,11 @@ function ensureDefaultModelForProvider(
     throw new Error(`未知 provider: ${providerId}`);
   }
 
-  cfg.models[profile.defaultModel.modelId] = copyCatalogModelEntry(providerId, profile.defaultModel);
+  cfg.models[profile.defaultModel.modelId] = copyCatalogModelEntry(
+    providerId,
+    profile.defaultModel,
+    cfg.providers[providerId],
+  );
   return profile.defaultModel.modelId;
 }
 
@@ -146,7 +160,7 @@ export function registerConfigCommands(program: Command): void {
           ? getProviderModelVariant(providerId, modelName)
           : undefined;
         cfg.models[modelId] = catalogVariant
-          ? copyCatalogModelEntry(providerId, catalogVariant)
+          ? copyCatalogModelEntry(providerId, catalogVariant, cfg.providers[providerId])
           : {
               provider: providerId,
               model: modelName,

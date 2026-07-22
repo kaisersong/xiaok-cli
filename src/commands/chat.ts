@@ -117,6 +117,10 @@ import { selectYZJChannel } from '../ui/channel-selector.js';
 import { resolveYZJConfig } from '../channels/yzj.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { InMemoryApprovalStore } from '../channels/approval-store.js';
+import {
+  isOfficialKimiK3OpenAIEndpoint,
+  resolveModelRuntimeOptions,
+} from '../ai/providers/model-runtime-options.js';
 import { getProviderProfile } from '../ai/providers/registry.js';
 import { FileSkillAdherenceStore } from '../runtime/skills/adherence-store.js';
 import { checkForUpdate } from '../update/version-check.js';
@@ -2991,6 +2995,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
         const providerProfile = getProviderProfile(selected.provider);
         const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
+        const selectedProvider = config.providers[selected.provider];
+        const catalogRuntimeEligible = selected.provider !== 'kimi'
+          || variant?.model !== 'k3'
+          || (
+            selectedProvider?.protocol === 'openai_legacy'
+            && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl)
+          );
+        const variantRuntimeOptions = variant && selectedProvider && catalogRuntimeEligible
+          ? resolveModelRuntimeOptions({
+              protocol: selectedProvider.protocol,
+              baseUrl: selectedProvider.baseUrl,
+              wireModel: variant.model,
+              catalogOptions: variant.runtimeOptions,
+              catalogConstraints: variant.runtimeConstraints,
+            }).runtimeOptions
+          : undefined;
         const nextModels = config.models[selected.modelId]
           ? config.models
           : {
@@ -3000,7 +3020,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 model: variant?.model ?? selected.model,
                 label: variant?.label ?? selected.label,
                 capabilities: variant?.capabilities,
-                runtimeOptions: variant?.runtimeOptions ? { ...variant.runtimeOptions } : undefined,
+                runtimeOptions: variantRuntimeOptions ? { ...variantRuntimeOptions } : undefined,
               },
             };
         const newConfig = {

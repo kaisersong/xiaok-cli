@@ -62,13 +62,21 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
     )
     ? undefined
     : catalogModel;
+  const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || (
+    wireModel === 'k3'
+    && providerConfig.protocol === 'openai_legacy'
+    && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
+  );
+  const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
+    ? modelEntry.runtimeOptions
+    : undefined;
   const { runtimeOptions } = resolveModelRuntimeOptions({
     protocol: providerConfig.protocol,
     baseUrl: transport.baseUrl,
     wireModel,
     catalogOptions: catalogRuntimeModel?.runtimeOptions,
     catalogConstraints: catalogRuntimeModel?.runtimeConstraints,
-    configuredOptions: modelEntry.runtimeOptions,
+    configuredOptions: configuredRuntimeOptions,
   });
 
   return {

@@ -3084,6 +3084,107 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it('does not persist official K3 runtime options when /models registers K3 for a custom Kimi endpoint', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-custom-kimi-k3-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const configPath = join(configDir, 'config.json');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'kimi',
+      defaultModelId: 'kimi-k2.7',
+      providers: {
+        kimi: {
+          type: 'first_party',
+          protocol: 'openai_legacy',
+          apiKey: 'sk-kimi',
+          baseUrl: 'https://proxy.example.com/v1',
+        },
+      },
+      models: {
+        'kimi-k2.7': {
+          provider: 'kimi',
+          model: 'kimi-k2.7',
+          label: 'Kimi K2.7',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    mockSelectModel.mockResolvedValue({
+      modelId: 'kimi-k3',
+      provider: 'kimi',
+      model: 'k3',
+      label: 'Kimi K3',
+    });
+    const { createAdapter } = await import('../../src/ai/models.js');
+    vi.mocked(createAdapter).mockImplementation((nextConfig) => {
+      const entry = nextConfig.models[nextConfig.defaultModelId]!;
+      return createFakeAdapter(
+        entry.model,
+        entry.runtimeOptions?.contextLimit ?? 200_000,
+      );
+    });
+
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+
+      await waitForInputTurnReady(harness);
+      harness.send('/models');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K3 (k3)');
+      }, { timeoutMs: 3_000 });
+
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+
+      const persistedConfig = JSON.parse(readFileSync(configPath, 'utf8')) as {
+        defaultModelId: string;
+        models: Record<string, {
+          provider: string;
+          model: string;
+          label?: string;
+          runtimeOptions?: { contextLimit?: number; reasoningEffort?: string };
+        }>;
+      };
+      expect(persistedConfig.defaultModelId).toBe('kimi-k3');
+      expect(persistedConfig.models['kimi-k3']).toMatchObject({
+        provider: 'kimi',
+        model: 'k3',
+        label: 'Kimi K3',
+      });
+      expect(persistedConfig.models['kimi-k3'].runtimeOptions).toBeUndefined();
+    } finally {
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 10_000);
+
   it('refreshes the resolved model policy atomically across /models switches', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-model-policy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');

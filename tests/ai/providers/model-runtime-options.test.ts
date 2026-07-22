@@ -11,17 +11,26 @@ import type {
 const KIMI_K3_OPENAI_ENDPOINT = 'https://api.kimi.com/coding/v1';
 
 describe('isOfficialKimiK3OpenAIEndpoint', () => {
-  it('accepts only the official HTTPS endpoint with an optional trailing slash', () => {
-    expect(isOfficialKimiK3OpenAIEndpoint(KIMI_K3_OPENAI_ENDPOINT)).toBe(true);
-    expect(isOfficialKimiK3OpenAIEndpoint(`${KIMI_K3_OPENAI_ENDPOINT}/`)).toBe(true);
+  it('accepts parsed equivalents of the official HTTPS endpoint', () => {
+    for (const endpoint of [
+      KIMI_K3_OPENAI_ENDPOINT,
+      `${KIMI_K3_OPENAI_ENDPOINT}/`,
+      'https://api.kimi.com:443/coding/v1',
+      'https://API.KIMI.COM/coding/v1/',
+    ]) {
+      expect(isOfficialKimiK3OpenAIEndpoint(endpoint), endpoint).toBe(true);
+    }
 
     for (const endpoint of [
       'http://api.kimi.com/coding/v1',
-      'https://api.kimi.com:443/coding/v1',
+      'https://api.kimi.com:444/coding/v1',
       'https://api.kimi.com.evil.test/coding/v1',
       'https://api.kimi.com/coding-proxy/v1',
       'https://proxy.example.com/v1',
       'https://api.kimi.com/coding/v1?mode=proxy',
+      'https://api.kimi.com/coding/v1#fragment',
+      'https://user@api.kimi.com/coding/v1',
+      'not a URL',
     ]) {
       expect(isOfficialKimiK3OpenAIEndpoint(endpoint), endpoint).toBe(false);
     }
@@ -155,6 +164,23 @@ describe('resolveModelRuntimeOptions', () => {
       baseUrl,
       wireModel,
     })).toEqual({});
+  });
+
+  it('preserves provider-neutral configured options for a same-named K3 model', () => {
+    expect(resolveModelRuntimeOptions({
+      protocol: 'openai_legacy',
+      baseUrl: 'https://proxy.example.com/v1',
+      wireModel: 'k3',
+      configuredOptions: {
+        contextLimit: 128_000,
+        reasoningEffort: 'low',
+      },
+    })).toEqual({
+      runtimeOptions: {
+        contextLimit: 128_000,
+        reasoningEffort: 'low',
+      },
+    });
   });
 
   it('does not mutate nested inputs and clones returned options and constraints', () => {

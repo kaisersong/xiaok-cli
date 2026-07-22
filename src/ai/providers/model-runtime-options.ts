@@ -31,7 +31,18 @@ interface ResolvedModelRuntimeOptions {
 }
 
 export function isOfficialKimiK3OpenAIEndpoint(baseUrl?: string): boolean {
-  return baseUrl === KIMI_K3_OPENAI_ENDPOINT || baseUrl === `${KIMI_K3_OPENAI_ENDPOINT}/`;
+  if (!baseUrl || baseUrl.includes('?') || baseUrl.includes('#')) return false;
+  try {
+    const endpoint = new URL(baseUrl);
+    return endpoint.protocol === 'https:'
+      && endpoint.hostname === 'api.kimi.com'
+      && endpoint.port === ''
+      && endpoint.username === ''
+      && endpoint.password === ''
+      && (endpoint.pathname === '/coding/v1' || endpoint.pathname === '/coding/v1/');
+  } catch {
+    return false;
+  }
 }
 
 function cloneConstraints(constraints: ModelRuntimeConstraints): ModelRuntimeConstraints {

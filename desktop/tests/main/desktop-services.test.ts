@@ -1980,6 +1980,67 @@ describe('desktop services', () => {
     expect(available.find(model => model.modelId === 'kimi-k2.7')).not.toHaveProperty('runtimeOptions');
   });
 
+  it('does not expose stale K3 runtime options on a Kimi K2.7 snapshot', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    const configPath = join(rootDir, 'config', 'config.json');
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    persisted.models['kimi-kimi-k2.7'].runtimeOptions = {
+      contextLimit: 1_048_576,
+      reasoningEffort: 'max',
+    };
+    writeFileSync(configPath, JSON.stringify(persisted, null, 2));
+
+    const snapshot = await services.getModelConfig();
+    expect(snapshot.models.find(model => model.id === 'kimi-kimi-k2.7'))
+      .not.toHaveProperty('runtimeOptions');
+  });
+
+  it('filters custom-endpoint Kimi K3 options without suppressing another provider named K3', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    await services.saveModelConfig({
+      providerId: 'kimi',
+      modelName: 'k3',
+      baseUrl: 'https://proxy.example.com/v1',
+    });
+    await services.saveModelConfig({
+      providerId: 'acme',
+      modelName: 'k3',
+      baseUrl: 'https://api.acme.example/v1',
+      protocol: 'openai_legacy',
+    });
+
+    const configPath = join(rootDir, 'config', 'config.json');
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
+    persisted.models['kimi-k3'].runtimeOptions = {
+      contextLimit: 1_048_576,
+      reasoningEffort: 'max',
+    };
+    persisted.models['acme-k3'].runtimeOptions = {
+      contextLimit: 128_000,
+      reasoningEffort: 'low',
+    };
+    writeFileSync(configPath, JSON.stringify(persisted, null, 2));
+
+    const snapshot = await services.getModelConfig();
+    expect(snapshot.models.find(model => model.id === 'kimi-k3'))
+      .not.toHaveProperty('runtimeOptions');
+    expect(snapshot.models.find(model => model.id === 'acme-k3')?.runtimeOptions).toEqual({
+      contextLimit: 128_000,
+      reasoningEffort: 'low',
+    });
+  });
+
   it('does not half-migrate an existing kimi-default binding from K2.7 when updating credentials', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
