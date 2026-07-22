@@ -35,6 +35,10 @@ const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 type OpenAIHttpAgent = HttpAgent | HttpsAgent;
+type OpenAICapabilityOverrides = Partial<Pick<
+  ModelCapabilities,
+  'supportsPromptCaching' | 'supportsImageInput'
+>>;
 
 interface KimiReasoningEffortRequestExtension {
   reasoning_effort: ModelReasoningEffort;
@@ -193,7 +197,7 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly apiKey: string;
   private readonly baseUrl?: string;
   private readonly defaultHeaders?: Record<string, string>;
-  private readonly capabilityOverrides?: Partial<ModelCapabilities>;
+  private readonly capabilityOverrides: OpenAICapabilityOverrides;
   private readonly runtimeOptions?: ModelRuntimeOptions;
   private readonly httpAgent: OpenAIHttpAgent;
   private model: string;
@@ -203,13 +207,20 @@ export class OpenAIAdapter implements ModelAdapter {
     model = 'gpt-4o',
     baseUrl?: string,
     defaultHeaders?: Record<string, string>,
-    capabilityOverrides?: Partial<ModelCapabilities>,
+    capabilityOverrides?: OpenAICapabilityOverrides,
     runtimeOptions?: ModelRuntimeOptions,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.defaultHeaders = defaultHeaders;
-    this.capabilityOverrides = capabilityOverrides;
+    this.capabilityOverrides = {
+      ...(typeof capabilityOverrides?.supportsPromptCaching === 'boolean'
+        ? { supportsPromptCaching: capabilityOverrides.supportsPromptCaching }
+        : {}),
+      ...(typeof capabilityOverrides?.supportsImageInput === 'boolean'
+        ? { supportsImageInput: capabilityOverrides.supportsImageInput }
+        : {}),
+    };
     this.runtimeOptions = runtimeOptions ? { ...runtimeOptions } : undefined;
     this.httpAgent = createOpenAIHttpAgent(baseUrl);
     this.client = new OpenAI({

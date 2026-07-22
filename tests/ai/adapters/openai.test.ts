@@ -176,6 +176,34 @@ describe('OpenAIAdapter', () => {
     expect(request).not.toHaveProperty('reasoning_effort');
   });
 
+  it.each([
+    ['Kimi K2.7', 'kimi-k2.7'],
+    ['GPT-4o', 'gpt-4o'],
+  ] as const)('filters legacy context capability overrides when cloning K3 to %s', async (_label, model) => {
+    const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+    const legacyCapabilityOverrides = {
+      contextLimit: 1_048_576,
+      supportsPromptCaching: true,
+      supportsImageInput: true,
+    } as unknown as ConstructorParameters<typeof OpenAIAdapter>[4];
+    const adapter = new OpenAIAdapter(
+      'test-key',
+      'k3',
+      'https://api.kimi.com/coding/v1',
+      undefined,
+      legacyCapabilityOverrides,
+      { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    );
+
+    const clone = adapter.cloneWithModel(model);
+
+    expect(clone.getCapabilities()).not.toHaveProperty('contextLimit');
+    expect(clone.getCapabilities()).toMatchObject({
+      supportsPromptCaching: true,
+      supportsImageInput: true,
+    });
+  });
+
   it('resolves safe defaults when cloning K2.7 to official K3', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
     const adapter = new OpenAIAdapter(
