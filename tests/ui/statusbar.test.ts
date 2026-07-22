@@ -134,6 +134,29 @@ describe('StatusBar', () => {
       expect(stdoutOutput).toContain('gpt-4o');
       expect(stdoutOutput).not.toContain('claude-sonnet-4');
     });
+
+    it.each([
+      ['K3 default context', 262_144, 26_214],
+      ['K3 explicit 1M context', 1_048_576, 104_858],
+    ])('prefers the resolved %s limit over model-name inference', (_label, contextLimit, inputTokens) => {
+      statusBar.updateModel('k3', contextLimit);
+      statusBar.update({ inputTokens, outputTokens: 0 });
+      stdoutOutput = '';
+
+      statusBar.render();
+
+      expect(stdoutOutput).toContain('10%');
+    });
+
+    it('keeps model-name inference as the updateModel fallback', () => {
+      statusBar.updateModel('gpt-4o');
+      statusBar.update({ inputTokens: 12_800, outputTokens: 0 });
+      stdoutOutput = '';
+
+      statusBar.render();
+
+      expect(stdoutOutput).toContain('10%');
+    });
   });
 
   describe('destroy', () => {

@@ -430,7 +430,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // Resolve model capabilities early (needed for getPromptInput)
-  const modelCapabilities = resolveModelCapabilities(adapter);
+  let modelCapabilities = resolveModelCapabilities(adapter);
 
   const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
     enterpriseId: creds?.enterpriseId ?? null,
@@ -2989,31 +2989,37 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       const selected = await selectModel(config, { renderer: replRenderer });
       if (selected) {
         // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
-        if (!config.models[selected.modelId]) {
-          const providerConfig = config.providers[selected.provider];
-          const providerProfile = getProviderProfile(selected.provider);
-          const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
-          config.models[selected.modelId] = {
-            provider: selected.provider,
-            model: variant?.model ?? selected.model,
-            label: variant?.label ?? selected.label,
-            capabilities: variant?.capabilities,
-          };
-        }
+        const providerProfile = getProviderProfile(selected.provider);
+        const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
+        const nextModels = config.models[selected.modelId]
+          ? config.models
+          : {
+              ...config.models,
+              [selected.modelId]: {
+                provider: selected.provider,
+                model: variant?.model ?? selected.model,
+                label: variant?.label ?? selected.label,
+                capabilities: variant?.capabilities,
+                runtimeOptions: variant?.runtimeOptions ? { ...variant.runtimeOptions } : undefined,
+              },
+            };
         const newConfig = {
           ...config,
+          models: nextModels,
           defaultProvider: selected.provider,
           defaultModelId: selected.modelId,
         };
         try {
           const nextAdapter = createAdapter(newConfig);
+          const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
           await saveConfig(newConfig);
           adapter = nextAdapter;
+          modelCapabilities = nextModelCapabilities;
           config = newConfig;
           intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
           agent.setAdapter(adapter);
           memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
-          statusBar.updateModel(selected.model);
+          statusBar.updateModel(adapter.getModelName(), modelCapabilities.contextLimit);
           writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
         } catch (e) {
           writeCommandOutput(trimmed, `切换失败：${String(e)}\n\n`);

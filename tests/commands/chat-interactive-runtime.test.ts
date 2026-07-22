@@ -94,10 +94,19 @@ function extractLastToolResult(messages: Message[]): string {
     .join('\n');
 }
 
-function createFakeAdapter(model = 'test-model'): ModelAdapter & { cloneWithModel(nextModel: string): ModelAdapter } {
+function createFakeAdapter(
+  model = 'test-model',
+  contextLimit?: number,
+): ModelAdapter & {
+  cloneWithModel(nextModel: string): ModelAdapter;
+  getCapabilities(): { contextLimit?: number };
+} {
   return {
     getModelName() {
       return model;
+    },
+    getCapabilities() {
+      return contextLimit === undefined ? {} : { contextLimit };
     },
     cloneWithModel(nextModel: string) {
       clonedModels.push(nextModel);
@@ -3074,6 +3083,200 @@ describe('chat interactive runtime', () => {
       }
     }
   }, 10_000);
+
+  it('refreshes the resolved model policy atomically across /models switches', async () => {
+    const rootDir = join(tmpdir(), `xiaok-chat-interactive-model-policy-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    const skillsDir = join(projectDir, '.xiaok', 'skills');
+    const configPath = join(configDir, 'config.json');
+    tempDirs.push(rootDir);
+
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(skillsDir, { recursive: true });
+    writeFileSync(join(skillsDir, 'context-probe.md'), [
+      '---',
+      'name: context-probe',
+      'description: Probe the current context budget',
+      '---',
+      'Probe the current context budget.',
+    ].join('\n'));
+    writeFileSync(configPath, JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'kimi',
+      defaultModelId: 'kimi-k2.7',
+      providers: {
+        kimi: {
+          type: 'first_party',
+          protocol: 'openai_legacy',
+          apiKey: 'sk-kimi',
+          baseUrl: 'https://api.kimi.com/coding/v1',
+        },
+      },
+      models: {
+        'kimi-k2.7': {
+          provider: 'kimi',
+          model: 'kimi-k2.7',
+          label: 'Kimi K2.7',
+        },
+        'kimi-k3-one-million': {
+          provider: 'kimi',
+          model: 'k3',
+          label: 'Kimi K3 1M',
+          runtimeOptions: {
+            contextLimit: 1_048_576,
+            reasoningEffort: 'max',
+          },
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    }, null, 2));
+
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+
+    const defaultK3 = {
+      modelId: 'kimi-k3',
+      provider: 'kimi',
+      model: 'k3',
+      label: 'Kimi K3',
+    };
+    mockSelectModel
+      .mockResolvedValueOnce(defaultK3)
+      .mockResolvedValueOnce(defaultK3)
+      .mockResolvedValueOnce({
+        modelId: 'kimi-k3-one-million',
+        provider: 'kimi',
+        model: 'k3',
+        label: 'Kimi K3 1M',
+      })
+      .mockResolvedValueOnce({
+        modelId: 'kimi-k2.7',
+        provider: 'kimi',
+        model: 'kimi-k2.7',
+        label: 'Kimi K2.7',
+      });
+
+    let failNextAdapter = false;
+    const { createAdapter } = await import('../../src/ai/models.js');
+    vi.mocked(createAdapter).mockImplementation((nextConfig) => {
+      if (failNextAdapter) {
+        failNextAdapter = false;
+        throw new Error('adapter failed');
+      }
+      const entry = nextConfig.models[nextConfig.defaultModelId]!;
+      return createFakeAdapter(
+        entry.model,
+        entry.runtimeOptions?.contextLimit ?? 200_000,
+      );
+    });
+
+    const { PromptBuilder } = await import('../../src/ai/prompts/builder.js');
+    const promptBuildSpy = vi.spyOn(PromptBuilder.prototype, 'build');
+    const { StatusBar } = await import('../../src/ui/statusbar.js');
+    const statusBarUpdateSpy = vi.spyOn(StatusBar.prototype, 'updateModel');
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(120, 30);
+    const sigintListeners = process.listeners('SIGINT');
+    const stdoutResizeListeners = process.stdout.listeners('resize');
+
+    const readPersistedConfig = () => JSON.parse(readFileSync(configPath, 'utf8')) as {
+      defaultModelId: string;
+      models: Record<string, {
+        runtimeOptions?: { contextLimit?: number; reasoningEffort?: string };
+      }>;
+    };
+
+    const runProbe = async (expectedModel: string, expectedContextLimit: number): Promise<void> => {
+      const adapterCallCount = adapterCalls.length;
+      const outputStart = harness.output.normalized.length;
+      promptBuildSpy.mockClear();
+
+      await waitForInputTurnReady(harness);
+      harness.send('context probe');
+      harness.send('\r');
+
+      await waitFor(() => {
+        expect(adapterCalls.length).toBeGreaterThan(adapterCallCount);
+      }, { timeoutMs: 3_000 });
+      await waitForInputTurnReady(harness);
+
+      expect.soft(adapterCalls.at(-1)?.model).toBe(expectedModel);
+      expect.soft(
+        promptBuildSpy.mock.calls.some(([input]) => input.budget === expectedContextLimit),
+      ).toBe(true);
+      expect.soft(harness.output.normalized.slice(outputStart)).toContain(`${expectedContextLimit} available`);
+    };
+
+    try {
+      const program = new Command();
+      registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--skill-debug']);
+
+      await waitForInputTurnReady(harness);
+
+      // Adapter construction failure must leave every live and persisted policy on K2.7.
+      failNextAdapter = true;
+      harness.send('/models');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('切换失败：Error: adapter failed');
+      }, { timeoutMs: 3_000 });
+      expect.soft(statusBarUpdateSpy).not.toHaveBeenCalled();
+      expect.soft(readPersistedConfig().defaultModelId).toBe('kimi-k2.7');
+      await runProbe('kimi-k2.7', 200_000);
+
+      // Catalog registration must carry K3's default runtime policy into config and live state.
+      harness.send('/models');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K3 (k3)');
+      }, { timeoutMs: 3_000 });
+      expect.soft(statusBarUpdateSpy.mock.calls.at(-1)).toEqual(['k3', 262_144]);
+      expect.soft(readPersistedConfig().models['kimi-k3']?.runtimeOptions).toEqual({
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      });
+      await runProbe('k3', 262_144);
+
+      // An explicit K3 1M override must replace the default K3 policy everywhere.
+      harness.send('/models');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K3 1M (k3)');
+      }, { timeoutMs: 3_000 });
+      expect.soft(statusBarUpdateSpy.mock.calls.at(-1)).toEqual(['k3', 1_048_576]);
+      await runProbe('k3', 1_048_576);
+
+      // Leaving K3 must clear its limit and use the target model's resolved capability.
+      harness.send('/models');
+      harness.send('\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K2.7 (kimi-k2.7)');
+      }, { timeoutMs: 3_000 });
+      expect.soft(statusBarUpdateSpy.mock.calls.at(-1)).toEqual(['kimi-k2.7', 200_000]);
+      await runProbe('kimi-k2.7', 200_000);
+
+      harness.send('/exit');
+      harness.send('\r');
+      await pending;
+    } finally {
+      promptBuildSpy.mockRestore();
+      statusBarUpdateSpy.mockRestore();
+      for (const listener of process.listeners('SIGINT')) {
+        if (!sigintListeners.includes(listener)) {
+          process.removeListener('SIGINT', listener);
+        }
+      }
+      for (const listener of process.stdout.listeners('resize')) {
+        if (!stdoutResizeListeners.includes(listener)) {
+          process.stdout.removeListener('resize', listener);
+        }
+      }
+      harness.restore();
+    }
+  }, 20_000);
 
   it('redirects removed slash commands to the top-level CLI instead of treating them as skills', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-${Date.now()}-${Math.random().toString(36).slice(2)}`);
