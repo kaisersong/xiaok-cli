@@ -1556,6 +1556,7 @@ export interface LocaleStrings {
     apiKeyUpdated: (name: string) => string;
     connectionSuccessLatency: (ms: number) => string;
     connectionFailed: string;
+    kimiK3ConnectionErrorAdvice: string;
     modelAdded: (label: string) => string;
     customModelAdded: (name: string) => string;
     modelSwitched: (label: string) => string;

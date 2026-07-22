@@ -237,6 +237,40 @@ describe('Model Settings — Add Provider', () => {
     expect(screen.getByText(/Allegretto.*更高计划/)).toBeInTheDocument()
   })
 
+  it('preserves a Kimi K3 connection diagnostic and appends localized permission guidance', async () => {
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(KIMI_K3_SNAPSHOT as any)
+    vi.mocked(api.testProviderConnection).mockResolvedValueOnce({
+      success: false,
+      error: 'HTTP 401: model access denied',
+    })
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const testButtons = await screen.findAllByRole('button', { name: '测试连接' })
+    fireEvent.click(testButtons[1])
+
+    expect(await screen.findByText(/HTTP 401: model access denied.*Kimi Code API Key.*1M.*262K.*Allegretto/)).toBeInTheDocument()
+    expect(api.testProviderConnection).toHaveBeenCalledWith({ providerId: 'kimi' })
+  })
+
+  it('does not append Kimi K3 permission guidance to a non-K3 connection failure', async () => {
+    vi.mocked(api.getModelConfig).mockResolvedValueOnce(KIMI_K27_SNAPSHOT as any)
+    vi.mocked(api.testProviderConnection).mockResolvedValueOnce({
+      success: false,
+      error: 'HTTP 401: legacy model denied',
+    })
+
+    renderSettings()
+    fireEvent.click(screen.getByText('模型设置'))
+
+    const testButtons = await screen.findAllByRole('button', { name: '测试连接' })
+    fireEvent.click(testButtons[1])
+
+    expect((await screen.findAllByText('HTTP 401: legacy model denied')).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Kimi Code API Key.*K3 权限/)).not.toBeInTheDocument()
+  })
+
   it('saves 1M and Max for the exact model and refreshes from the returned snapshot', async () => {
     const updatedSnapshot = {
       ...KIMI_K3_SNAPSHOT,

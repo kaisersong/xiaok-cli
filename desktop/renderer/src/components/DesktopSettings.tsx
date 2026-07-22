@@ -1029,6 +1029,10 @@ function ModelPane() {
 
   const handleTest = async (providerId: string) => {
     if (!providerId) return;
+    const providerDefaultModelId = config?.providerProfiles.find(profile => profile.id === providerId)?.defaultModelId;
+    const testedModel = config?.models.find(model => (
+      model.provider === providerId && model.id === providerDefaultModelId
+    )) ?? config?.models.find(model => model.provider === providerId);
     setTesting(prev => ({ ...prev, [providerId]: true }));
     setError('');
     try {
@@ -1037,7 +1041,11 @@ function ModelPane() {
       if (result.success) {
         setSuccess(t.desktopSettings.connectionSuccessLatency(result.latencyMs ?? 0));
       } else {
-        setError(result.error || t.desktopSettings.connectionFailed);
+        const diagnostic = result.error || t.desktopSettings.connectionFailed;
+        const guidance = supportsKimiK3RuntimeOptions(testedModel)
+          ? ` ${t.desktopSettings.kimiK3ConnectionErrorAdvice}`
+          : '';
+        setError(`${diagnostic}${guidance}`);
       }
     } catch (e) {
       setError((e as Error).message);

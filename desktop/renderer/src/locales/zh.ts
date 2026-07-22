@@ -1616,6 +1616,7 @@ export const zh: LocaleStrings = {
     apiKeyUpdated: (name: string) => `已更新 ${name} 的 API Key`,
     connectionSuccessLatency: (ms: number) => `连接成功，延迟 ${ms}ms`,
     connectionFailed: "连接失败",
+    kimiK3ConnectionErrorAdvice: "请确认 Kimi Code API Key 具有 K3 权限。如果仅在 1M 设置下失败，请切换回 262K，或升级到 Allegretto 或更高计划。",
     modelAdded: (label: string) => `已添加模型 ${label}`,
     customModelAdded: (name: string) => `已添加自定义模型 ${name}`,
     modelSwitched: (label: string) => `当前模型已切换为 ${label}`,

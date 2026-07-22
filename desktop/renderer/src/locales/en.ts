@@ -1632,6 +1632,7 @@ export const en: LocaleStrings = {
     apiKeyUpdated: (name: string) => `Updated API Key for ${name}`,
     connectionSuccessLatency: (ms: number) => `Connection successful, latency ${ms}ms`,
     connectionFailed: "Connection failed",
+    kimiK3ConnectionErrorAdvice: "Confirm that your Kimi Code API key has K3 access. If only the 1M setting fails, switch back to 262K or upgrade to Allegretto or higher.",
     modelAdded: (label: string) => `Model ${label} added`,
     customModelAdded: (name: string) => `Custom model ${name} added`,
     modelSwitched: (label: string) => `Current model switched to ${label}`,
