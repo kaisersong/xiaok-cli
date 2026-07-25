@@ -421,6 +421,16 @@ await agent('x')`,
           gateDecision: { status: 'pending' },
         },
       }),
+      jsonResponse({
+        project: {
+          id: 'proj-1',
+          workFolder: '/tmp/custom-project-workspace',
+        },
+        workspace: {
+          path: '/tmp/custom-project-workspace',
+          custom: true,
+        },
+      }),
     ]);
     const tool = createKSwarmGetDynamicWorkflowStatusTool(service);
 
@@ -435,6 +445,7 @@ await agent('x')`,
       workflowRunId: 'run-1',
       status: 'running',
       workflowId: 'report_final_review',
+      projectWorkspacePath: '/tmp/custom-project-workspace',
       summary: {
         nodes: { running: 2, completed: 1 },
         parallelGroups: { waiting_for_children: 1 },
@@ -457,6 +468,42 @@ await agent('x')`,
     });
     expect(requests.map((request) => [request.method, request.path])).toEqual([
       ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1'],
+    ]);
+  });
+
+  it('keeps workflow status available when the authoritative project workspace cannot be loaded', async () => {
+    const { service, requests } = createMockService([
+      jsonResponse({
+        workflowRun: {
+          id: 'run-1',
+          workflowId: 'report_final_review',
+          status: 'completed',
+          scriptResult: {
+            workspacePath: '/tmp/untrusted-workspace',
+            artifacts: [{ path: 'artifacts/report.html', kind: 'html' }],
+          },
+        },
+      }),
+      jsonResponse({ error: 'project_not_found' }, 404),
+    ]);
+    const tool = createKSwarmGetDynamicWorkflowStatusTool(service);
+
+    const output = JSON.parse(await tool.execute({
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+    })) as Record<string, unknown>;
+
+    expect(output).toMatchObject({
+      ok: true,
+      projectId: 'proj-1',
+      workflowRunId: 'run-1',
+      status: 'completed',
+    });
+    expect(output).not.toHaveProperty('projectWorkspacePath');
+    expect(requests.map((request) => [request.method, request.path])).toEqual([
+      ['GET', '/projects/proj-1/workflows/run-1'],
+      ['GET', '/projects/proj-1'],
     ]);
   });
 

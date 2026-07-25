@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -256,6 +256,226 @@ describe('desktop services', () => {
       expect.objectContaining({ type: 'result', result: expect.objectContaining({ summary: '模型回复内容' }) }),
       expect.objectContaining({ type: 'result' }),
     ]));
+  });
+
+  it('recovers clickable workflow artifacts for a completed historical task with a truncated status response', async () => {
+    const dataRoot = join(rootDir, 'historical-workflow-data');
+    const taskId = 'task-historical-workflow-status';
+    const projectId = 'proj-1';
+    const workflowRunId = 'workflow-run-1';
+    const projectWorkspace = join(rootDir, 'kswarm-project');
+    const artifactsDir = join(projectWorkspace, 'artifacts');
+    const htmlPath = join(artifactsDir, 'report.html');
+    const markdownPath = join(artifactsDir, 'report.md');
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(htmlPath, '<!doctype html><title>Recovered</title>');
+    writeFileSync(markdownPath, '# Recovered');
+
+    const truncatedResponse = JSON.stringify({
+      ok: true,
+      diagnostics: 'x'.repeat(12_000),
+      scriptResult: { artifacts: [{ path: 'artifacts/report.html' }] },
+    }).slice(0, 10_000);
+    expect(truncatedResponse).toHaveLength(10_000);
+    expect(() => JSON.parse(truncatedResponse)).toThrow();
+
+    const historicalSnapshot = {
+      taskId,
+      sessionId: 'session-historical',
+      status: 'completed',
+      prompt: 'inspect workflow status',
+      materials: [],
+      events: [
+        {
+          type: 'canvas_tool_call',
+          toolName: 'get_dynamic_workflow_status',
+          input: { projectId, workflowRunId },
+          toolUseId: 'status-call-1',
+          eventId: 'turn-historical:canvas:status-call-1:call',
+        },
+        {
+          type: 'canvas_tool_result',
+          toolName: 'get_dynamic_workflow_status',
+          toolUseId: 'status-call-1',
+          ok: true,
+          response: truncatedResponse,
+          eventId: 'turn-historical:canvas:status-call-1:result',
+        },
+        {
+          type: 'result',
+          result: { summary: 'workflow completed', artifacts: [] },
+        },
+        { type: 'task_terminal', status: 'completed' },
+      ],
+      result: { summary: 'workflow completed', artifacts: [] },
+      createdAt: 100,
+      updatedAt: 200,
+    };
+    const snapshotDir = join(dataRoot, 'tasks', 'snapshots');
+    const snapshotPath = join(snapshotDir, `${taskId}.json`);
+    mkdirSync(snapshotDir, { recursive: true });
+    writeFileSync(snapshotPath, JSON.stringify(historicalSnapshot, null, 2));
+
+    const requests: string[] = [];
+    const kswarmService = {
+      ...mockKSwarmService(),
+      async request(path: string): Promise<Response> {
+        requests.push(path);
+        if (path === `/projects/${projectId}/workflows/${workflowRunId}`) {
+          return new Response(JSON.stringify({
+            workflowRun: {
+              id: workflowRunId,
+              projectId,
+              status: 'completed',
+              scriptResult: {
+                workspacePath: projectWorkspace,
+                workFolder: projectWorkspace,
+                producerAgent: 'xiaok-worker',
+                artifacts: [
+                  { path: 'artifacts/report.html', kind: 'html', label: 'report.html' },
+                  { path: 'artifacts/report.md', kind: 'markdown', label: 'report.md' },
+                ],
+              },
+            },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (path === `/projects/${projectId}`) {
+          return new Response(JSON.stringify({
+            project: { id: projectId, workFolder: projectWorkspace },
+            workspace: { path: projectWorkspace, custom: true },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response('{"error":"not_found"}', { status: 404 });
+      },
+    } as KSwarmService;
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService,
+      now: () => 300,
+      runner: async () => {},
+    });
+
+    const [first, second] = await Promise.all([
+      services.recoverTask(taskId),
+      services.recoverTask(taskId),
+    ]);
+    const artifactEvents = first.snapshot.events.filter(event => event.type === 'artifact_recorded');
+    const resultIndex = first.snapshot.events.findIndex(event => event.type === 'result');
+
+    expect(requests).toEqual([
+      `/projects/${projectId}/workflows/${workflowRunId}`,
+      `/projects/${projectId}`,
+    ]);
+    expect(artifactEvents).toEqual([
+      expect.objectContaining({
+        artifactId: expect.stringMatching(/^artifact_[a-f0-9]{20}$/),
+        kind: 'html',
+        label: 'report.html',
+        filePath: realpathSync(htmlPath),
+        creator: 'xiaok-worker',
+      }),
+      expect.objectContaining({
+        artifactId: expect.stringMatching(/^artifact_[a-f0-9]{20}$/),
+        kind: 'text',
+        label: 'report.md',
+        filePath: realpathSync(markdownPath),
+        creator: 'xiaok-worker',
+      }),
+    ]);
+    expect(first.snapshot.events.findIndex(event => event === artifactEvents[0])).toBeLessThan(resultIndex);
+    expect(second.snapshot.events.filter(event => event.type === 'artifact_recorded')).toEqual(artifactEvents);
+    expect(first.snapshot.result?.artifacts).toEqual([
+      expect.objectContaining({ title: 'report.html', filePath: realpathSync(htmlPath) }),
+      expect.objectContaining({ title: 'report.md', filePath: realpathSync(markdownPath) }),
+    ]);
+    expect(first.snapshot.updatedAt).toBe(200);
+
+    const persisted = JSON.parse(readFileSync(snapshotPath, 'utf8')) as typeof historicalSnapshot;
+    expect(persisted.events.some(event => event.type === 'artifact_recorded')).toBe(false);
+    expect(persisted.result.artifacts).toEqual([]);
+  });
+
+  it('fails open without querying ineligible historical workflow snapshots', async () => {
+    const dataRoot = join(rootDir, 'historical-workflow-negative-data');
+    const snapshotDir = join(dataRoot, 'tasks', 'snapshots');
+    mkdirSync(snapshotDir, { recursive: true });
+    const requests: string[] = [];
+    const services = createDesktopServices({
+      dataRoot,
+      kswarmService: {
+        ...mockKSwarmService(),
+        async request(path: string): Promise<Response> {
+          requests.push(path);
+          return new Response('{"error":"kswarm_unavailable"}', { status: 503 });
+        },
+      } as KSwarmService,
+      runner: async () => {},
+    });
+    const statusCall = {
+      type: 'canvas_tool_call',
+      toolName: 'get_dynamic_workflow_status',
+      input: { projectId: 'proj-1', workflowRunId: 'run-1' },
+      toolUseId: 'status-call-1',
+      eventId: 'turn-1:canvas:status-call-1:call',
+    };
+    const successfulStatusResult = {
+      type: 'canvas_tool_result',
+      toolName: 'get_dynamic_workflow_status',
+      toolUseId: 'status-call-1',
+      ok: true,
+      response: '{"ok":true',
+      eventId: 'turn-1:canvas:status-call-1:result',
+    };
+    const resultEvent = {
+      type: 'result',
+      result: { summary: 'done', artifacts: [] },
+    };
+    const writeSnapshot = (taskId: string, status: string, events: unknown[]) => {
+      writeFileSync(join(snapshotDir, `${taskId}.json`), JSON.stringify({
+        taskId,
+        sessionId: `session-${taskId}`,
+        status,
+        prompt: 'inspect',
+        materials: [],
+        events,
+        result: { summary: 'done', artifacts: [] },
+        createdAt: 100,
+        updatedAt: 200,
+      }));
+    };
+
+    writeSnapshot('task-running', 'running', [statusCall, successfulStatusResult, resultEvent]);
+    writeSnapshot('task-failed-result', 'completed', [
+      statusCall,
+      { ...successfulStatusResult, ok: false },
+      resultEvent,
+    ]);
+    writeSnapshot('task-existing-artifact', 'completed', [
+      statusCall,
+      successfulStatusResult,
+      {
+        type: 'artifact_recorded',
+        artifactId: 'artifact-existing',
+        kind: 'html',
+        label: 'existing.html',
+        filePath: '/tmp/existing.html',
+        previewAvailable: true,
+        turnId: 'turn-1',
+      },
+      resultEvent,
+    ]);
+
+    for (const taskId of ['task-running', 'task-failed-result', 'task-existing-artifact']) {
+      const recovered = await services.recoverTask(taskId);
+      expect(recovered.snapshot.taskId).toBe(taskId);
+    }
+    expect(requests).toEqual([]);
+
+    writeSnapshot('task-kswarm-down', 'completed', [statusCall, successfulStatusResult, resultEvent]);
+    const unavailable = await services.recoverTask('task-kswarm-down');
+    expect(unavailable.snapshot.events.some(event => event.type === 'artifact_recorded')).toBe(false);
+    expect(unavailable.snapshot.updatedAt).toBe(200);
+    expect(requests).toEqual(['/projects/proj-1/workflows/run-1']);
   });
 
   it('completes operational tasks without artifact evidence', async () => {
