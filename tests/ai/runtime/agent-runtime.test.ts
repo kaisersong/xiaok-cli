@@ -767,6 +767,48 @@ describe('AgentRuntime', () => {
     expect(events).not.toContain('run_completed');
   });
 
+  it('applies final usage before a consumer-triggered timeout and never reports completion', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('consumer timeout after usage', 'TimeoutError');
+    const usage = {
+      inputTokens: 23,
+      outputTokens: 7,
+      cacheReadInputTokens: 5,
+    };
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* (_messages, _tools, _systemPrompt, options) {
+        yield { type: 'text', delta: 'answer' };
+        yield { type: 'usage', usage };
+        if (options?.signal?.aborted) {
+          throw options.signal.reason;
+        }
+        yield { type: 'done' };
+      },
+    };
+    const session = new AgentSessionState();
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const events: string[] = [];
+
+    await expect(runtime.run('hi', (event) => {
+      events.push(event.type);
+      if (event.type === 'usage_updated') {
+        controller.abort(sentinel);
+      }
+    }, controller.signal)).rejects.toBe(sentinel);
+
+    expect(session.getUsage()).toEqual(usage);
+    expect(events.filter((type) => type === 'usage_updated')).toHaveLength(1);
+    expect(events).toContain('assistant_text');
+    expect(events).not.toContain('run_completed');
+  });
+
   it('checks abort after clean stream exhaustion before reporting completion', async () => {
     const controller = new AbortController();
     const sentinel = new DOMException('aborted at clean exhaustion', 'AbortError');

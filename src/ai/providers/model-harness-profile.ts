@@ -36,6 +36,29 @@ export interface AdapterBindingIdentity {
   readonly capabilities: readonly string[];
 }
 
+export type KimiUsageDiagnostic =
+  | {
+      readonly type: 'usage_source';
+      readonly harnessProfileId: 'kimi-k3-coding-openai';
+      readonly usageSource: 'provider' | 'estimate' | 'missing_on_error';
+    }
+  | {
+      readonly type: 'invalid_usage';
+      readonly harnessProfileId: 'kimi-k3-coding-openai';
+      readonly location: 'top_level' | 'choices_0';
+      readonly field:
+        | 'totals'
+        | 'cached_tokens'
+        | 'prompt_tokens_details.cached_tokens';
+      readonly reason:
+        | 'incomplete_or_invalid'
+        | 'invalid_or_exceeds_prompt_tokens';
+    };
+
+export type KimiUsageDiagnosticSink = (
+  diagnostic: KimiUsageDiagnostic,
+) => void;
+
 export interface ModelHarnessProfile {
   readonly id: 'generic-openai' | 'kimi-k3-coding-openai';
   normalizeToolSchema?: (
@@ -47,7 +70,10 @@ export interface ModelHarnessProfile {
     preservedThinkingEnabled: boolean,
   ) => { field: ReasoningKeyName; value: string } | undefined;
   encodeCacheKey?: (cacheKey: string) => { prompt_cache_key: string };
-  extractUsage?: (chunk: Record<string, unknown>) => UsageStats | undefined;
+  extractUsage?: (
+    chunk: Record<string, unknown>,
+    onDiagnostic?: KimiUsageDiagnosticSink,
+  ) => UsageStats | undefined;
   shouldOmitAssistantContent?: (input: {
     hasToolCalls: boolean;
     text: string;
@@ -67,6 +93,7 @@ export interface OpenAIAdapterInit {
   readonly apiKey: string;
   readonly resolvedHeaders?: Readonly<Record<string, string | null>>;
   readonly kimiCodingHeadersApplied: boolean;
+  readonly onUsageDiagnostic?: KimiUsageDiagnosticSink;
   readonly harnessContext: OpenAIHarnessContext;
 }
 
@@ -107,8 +134,23 @@ function isNonnegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
-function normalizeKimiUsageSnapshot(value: unknown): UsageStats | undefined {
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function normalizeKimiUsageSnapshot(
+  value: unknown,
+  location: Extract<KimiUsageDiagnostic, { type: 'invalid_usage' }>['location'],
+  onDiagnostic?: KimiUsageDiagnosticSink,
+): UsageStats | undefined {
   if (!isRecord(value)) {
+    onDiagnostic?.({
+      type: 'invalid_usage',
+      harnessProfileId: 'kimi-k3-coding-openai',
+      location,
+      field: 'totals',
+      reason: 'incomplete_or_invalid',
+    });
     return undefined;
   }
 
@@ -118,25 +160,53 @@ function normalizeKimiUsageSnapshot(value: unknown): UsageStats | undefined {
     !isNonnegativeSafeInteger(promptTokens)
     || !isNonnegativeSafeInteger(completionTokens)
   ) {
+    onDiagnostic?.({
+      type: 'invalid_usage',
+      harnessProfileId: 'kimi-k3-coding-openai',
+      location,
+      field: 'totals',
+      reason: 'incomplete_or_invalid',
+    });
     return undefined;
   }
 
-  const details = isRecord(value.prompt_tokens_details)
-    ? value.prompt_tokens_details
-    : undefined;
   const directCachedTokens = value.cached_tokens;
-  const detailsCachedTokens = details?.cached_tokens;
-  const cacheReadInputTokens = (
+  let cacheReadInputTokens: number | undefined;
+  if (
     isNonnegativeSafeInteger(directCachedTokens)
     && directCachedTokens <= promptTokens
-  )
-    ? directCachedTokens
-    : (
-        isNonnegativeSafeInteger(detailsCachedTokens)
-        && detailsCachedTokens <= promptTokens
-          ? detailsCachedTokens
-          : undefined
-      );
+  ) {
+    cacheReadInputTokens = directCachedTokens;
+  } else {
+    if (hasOwn(value, 'cached_tokens')) {
+      onDiagnostic?.({
+        type: 'invalid_usage',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        location,
+        field: 'cached_tokens',
+        reason: 'invalid_or_exceeds_prompt_tokens',
+      });
+    }
+
+    const details = isRecord(value.prompt_tokens_details)
+      ? value.prompt_tokens_details
+      : undefined;
+    const detailsCachedTokens = details?.cached_tokens;
+    if (
+      isNonnegativeSafeInteger(detailsCachedTokens)
+      && detailsCachedTokens <= promptTokens
+    ) {
+      cacheReadInputTokens = detailsCachedTokens;
+    } else if (details && hasOwn(details, 'cached_tokens')) {
+      onDiagnostic?.({
+        type: 'invalid_usage',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        location,
+        field: 'prompt_tokens_details.cached_tokens',
+        reason: 'invalid_or_exceeds_prompt_tokens',
+      });
+    }
+  }
 
   return {
     inputTokens: promptTokens,
@@ -147,17 +217,33 @@ function normalizeKimiUsageSnapshot(value: unknown): UsageStats | undefined {
   };
 }
 
-function extractKimiUsage(chunk: Record<string, unknown>): UsageStats | undefined {
-  const topLevel = normalizeKimiUsageSnapshot(chunk.usage);
-  if (topLevel) {
-    return topLevel;
+function extractKimiUsage(
+  chunk: Record<string, unknown>,
+  onDiagnostic?: KimiUsageDiagnosticSink,
+): UsageStats | undefined {
+  if (hasOwn(chunk, 'usage') && chunk.usage != null) {
+    const topLevel = normalizeKimiUsageSnapshot(
+      chunk.usage,
+      'top_level',
+      onDiagnostic,
+    );
+    if (topLevel) {
+      return topLevel;
+    }
   }
 
   const choices = chunk.choices;
   if (!Array.isArray(choices) || !isRecord(choices[0])) {
     return undefined;
   }
-  return normalizeKimiUsageSnapshot(choices[0].usage);
+  if (!hasOwn(choices[0], 'usage') || choices[0].usage == null) {
+    return undefined;
+  }
+  return normalizeKimiUsageSnapshot(
+    choices[0].usage,
+    'choices_0',
+    onDiagnostic,
+  );
 }
 
 export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze({

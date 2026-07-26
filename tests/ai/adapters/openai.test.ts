@@ -6,6 +6,7 @@ import {
   buildOpenAIHarnessContext,
   KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
   resolveKimiHarnessFeatureFlags,
+  type KimiUsageDiagnostic,
   type OpenAIAdapterInit,
   type ReasoningDialectState,
 } from '../../../src/ai/providers/model-harness-profile.js';
@@ -34,6 +35,8 @@ interface CapturedChatCompletionRequest {
     };
   }>;
 }
+
+type UsageDiagnostic = KimiUsageDiagnostic;
 
 vi.mock('openai', () => {
   return {
@@ -172,6 +175,7 @@ function createTestAdapter(input: {
   flags?: ReturnType<typeof resolveKimiHarnessFeatureFlags>;
   resolvedHeaders?: Record<string, string | null>;
   kimiCodingHeadersApplied?: boolean;
+  onUsageDiagnostic?: (diagnostic: UsageDiagnostic) => void;
 }): OpenAIAdapter {
   const identity = {
     providerId: input.providerId ?? 'test',
@@ -185,6 +189,7 @@ function createTestAdapter(input: {
     apiKey: 'test-key',
     resolvedHeaders: input.resolvedHeaders,
     kimiCodingHeadersApplied: input.kimiCodingHeadersApplied ?? false,
+    onUsageDiagnostic: input.onUsageDiagnostic ?? (() => {}),
     harnessContext: buildOpenAIHarnessContext({
       identity,
       flags: input.flags ?? resolveKimiHarnessFeatureFlags({}),
@@ -209,13 +214,16 @@ function createStrictKimiAdapter(
   });
 }
 
-function parseKimiUsage(chunk: Record<string, unknown>): UsageStats | undefined {
+function parseKimiUsage(
+  chunk: Record<string, unknown>,
+  onDiagnostic?: (diagnostic: UsageDiagnostic) => void,
+): UsageStats | undefined {
   const parser = KIMI_K3_CODING_OPENAI_HARNESS_PROFILE.extractUsage;
   expect(parser).toBeTypeOf('function');
   if (!parser) {
     throw new Error('Kimi usage parser is missing');
   }
-  return parser(chunk);
+  return parser(chunk, onDiagnostic);
 }
 
 async function collectAdapterChunks(
@@ -664,9 +672,100 @@ describe('OpenAIAdapter', () => {
         outputTokens: 2,
       });
     });
+
+    it('reports invalid totals and cached fields without exposing token values', () => {
+      const invalidTotalsDiagnostics: UsageDiagnostic[] = [];
+      expect(parseKimiUsage({
+        usage: {
+          prompt_tokens: 91,
+        },
+        choices: [{
+          usage: {
+            prompt_tokens: 8,
+            completion_tokens: 2,
+          },
+        }],
+      }, (diagnostic) => invalidTotalsDiagnostics.push(diagnostic))).toEqual({
+        inputTokens: 8,
+        outputTokens: 2,
+      });
+      expect(invalidTotalsDiagnostics).toEqual([{
+        type: 'invalid_usage',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        location: 'top_level',
+        field: 'totals',
+        reason: 'incomplete_or_invalid',
+      }]);
+
+      const invalidCachedDiagnostics: UsageDiagnostic[] = [];
+      expect(parseKimiUsage({
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 2,
+          cached_tokens: 99,
+          prompt_tokens_details: { cached_tokens: 4 },
+        },
+      }, (diagnostic) => invalidCachedDiagnostics.push(diagnostic))).toEqual({
+        inputTokens: 12,
+        outputTokens: 2,
+        cacheReadInputTokens: 4,
+      });
+      expect(invalidCachedDiagnostics).toEqual([{
+        type: 'invalid_usage',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        location: 'top_level',
+        field: 'cached_tokens',
+        reason: 'invalid_or_exceeds_prompt_tokens',
+      }]);
+
+      const invalidDetailsDiagnostics: UsageDiagnostic[] = [];
+      expect(parseKimiUsage({
+        choices: [{
+          usage: {
+            prompt_tokens: 7,
+            completion_tokens: 1,
+            prompt_tokens_details: { cached_tokens: 8 },
+          },
+        }],
+      }, (diagnostic) => invalidDetailsDiagnostics.push(diagnostic))).toEqual({
+        inputTokens: 7,
+        outputTokens: 1,
+      });
+      expect(invalidDetailsDiagnostics).toEqual([{
+        type: 'invalid_usage',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        location: 'choices_0',
+        field: 'prompt_tokens_details.cached_tokens',
+        reason: 'invalid_or_exceeds_prompt_tokens',
+      }]);
+      expect(JSON.stringify([
+        ...invalidTotalsDiagnostics,
+        ...invalidCachedDiagnostics,
+        ...invalidDetailsDiagnostics,
+      ])).not.toMatch(/91|99/);
+    });
+
+    it('treats null usage placeholders as absent rather than invalid', () => {
+      const diagnostics: UsageDiagnostic[] = [];
+
+      expect(parseKimiUsage({
+        usage: null,
+        choices: [{
+          usage: {
+            prompt_tokens: 6,
+            completion_tokens: 2,
+          },
+        }],
+      }, (diagnostic) => diagnostics.push(diagnostic))).toEqual({
+        inputTokens: 6,
+        outputTokens: 2,
+      });
+      expect(diagnostics).toEqual([]);
+    });
   });
 
   it('drains strict Kimi after finish and emits only the trailing provider usage before done', async () => {
+    const diagnostics: UsageDiagnostic[] = [];
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
     vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
@@ -687,7 +786,9 @@ describe('OpenAIAdapter', () => {
         };
       },
     } as never);
-    const adapter = createStrictKimiAdapter();
+    const adapter = createStrictKimiAdapter({
+      onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     await expect(collectAdapterChunks(adapter)).resolves.toEqual([
@@ -702,6 +803,61 @@ describe('OpenAIAdapter', () => {
       },
       { type: 'done' },
     ]);
+    expect(diagnostics).toEqual([{
+      type: 'usage_source',
+      harnessProfileId: 'kimi-k3-coding-openai',
+      usageSource: 'provider',
+    }]);
+  });
+
+  it('rethrows the exact caller abort after final Kimi usage without yielding done', async () => {
+    const sentinel = new DOMException('caller timeout after final usage', 'TimeoutError');
+    const controller = new AbortController();
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: { content: 'visible' },
+            finish_reason: 'stop',
+          }],
+        };
+        yield {
+          choices: [],
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 4,
+          },
+        };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    const iterator = adapter.stream([], [], 'system', {
+      signal: controller.signal,
+    })[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { type: 'text', delta: 'visible' },
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        type: 'usage',
+        usage: {
+          inputTokens: 20,
+          outputTokens: 4,
+        },
+      },
+    });
+    controller.abort(sentinel);
+    await expect(iterator.next()).rejects.toBe(sentinel);
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
+    });
   });
 
   it('keeps the latest complete Kimi snapshot without merging partial or cached fields', async () => {
@@ -751,6 +907,7 @@ describe('OpenAIAdapter', () => {
   });
 
   it('estimates usage exactly once only after a clean strict Kimi completion', async () => {
+    const diagnostics: UsageDiagnostic[] = [];
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
     vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
@@ -758,7 +915,9 @@ describe('OpenAIAdapter', () => {
         yield { choices: [{ delta: { content: 'abcde' }, finish_reason: 'stop' }] };
       },
     } as never);
-    const adapter = createStrictKimiAdapter();
+    const adapter = createStrictKimiAdapter({
+      onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     const chunks = await collectAdapterChunks(adapter);
@@ -768,37 +927,62 @@ describe('OpenAIAdapter', () => {
       type: 'usage',
       usage: expect.objectContaining({ outputTokens: 2 }),
     }]);
+    expect(diagnostics).toEqual([{
+      type: 'usage_source',
+      harnessProfileId: 'kimi-k3-coding-openai',
+      usageSource: 'estimate',
+    }]);
   });
 
   it('preserves generic finish early-return and trailing-usage estimate parity', async () => {
+    let capturedRequest: unknown;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
-      async *[Symbol.asyncIterator]() {
-        yield { choices: [{ delta: { content: 'generic' }, finish_reason: 'stop' }] };
-        yield {
-          choices: [],
-          usage: {
-            prompt_tokens: 500,
-            completion_tokens: 400,
-          },
-        };
-      },
-    } as never);
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (request: unknown) => {
+      capturedRequest = request;
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { choices: [{ delta: { content: 'generic' }, finish_reason: 'stop' }] };
+          yield {
+            choices: [],
+            usage: {
+              prompt_tokens: 500,
+              completion_tokens: 400,
+            },
+          };
+        },
+      } as never;
+    });
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     const chunks = await collectAdapterChunks(adapter);
 
-    expect(chunks.map((chunk) => chunk.type)).toEqual(['text', 'usage', 'done']);
-    expect(chunks.find((chunk) => chunk.type === 'usage')).not.toEqual({
+    expect(chunks).toEqual([
+      { type: 'text', delta: 'generic' },
+      {
+        type: 'usage',
+        usage: {
+          inputTokens: 2,
+          outputTokens: 2,
+        },
+      },
+      { type: 'done' },
+    ]);
+    expect(capturedRequest).toEqual({
+      model: 'gpt-4o',
+      messages: [{ role: 'system', content: 'system' }],
+      tools: undefined,
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    expect(chunks).not.toContainEqual({
       type: 'usage',
       usage: {
         inputTokens: 500,
         outputTokens: 400,
       },
     });
-    expect(chunks.at(-1)).toEqual({ type: 'done' });
   });
 
   it('uses generic usage semantics when normalizeUsage is false without disabling schema or content traits', async () => {
@@ -841,17 +1025,46 @@ describe('OpenAIAdapter', () => {
       chunks.push(chunk);
     }
 
-    expect(chunks.map((chunk) => chunk.type)).toEqual(['text', 'usage', 'done']);
-    expect(chunks.find((chunk) => chunk.type === 'usage')).not.toEqual({
-      type: 'usage',
-      usage: {
-        inputTokens: 500,
-        outputTokens: 400,
+    expect(chunks).toEqual([
+      { type: 'text', delta: 'flag off' },
+      {
+        type: 'usage',
+        usage: {
+          inputTokens: 3,
+          outputTokens: 2,
+        },
       },
-    });
-    expect(capturedRequest?.tools?.[0]?.function.parameters).toEqual({
-      type: 'object',
-      properties: { value: { type: 'string' } },
+      { type: 'done' },
+    ]);
+    expect(capturedRequest).toEqual({
+      model: 'k3',
+      messages: [
+        { role: 'system', content: 'system' },
+        {
+          role: 'assistant',
+          tool_calls: [{
+            id: 'tu_1',
+            type: 'function',
+            function: {
+              name: 'lookup',
+              arguments: '{}',
+            },
+          }],
+        },
+      ],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'lookup',
+          description: 'lookup description',
+          parameters: {
+            type: 'object',
+            properties: { value: { type: 'string' } },
+          },
+        },
+      }],
+      stream: true,
+      stream_options: { include_usage: true },
     });
     const assistant = capturedRequest?.messages.find((message) => message.role === 'assistant');
     expect(assistant).toBeDefined();
@@ -860,6 +1073,66 @@ describe('OpenAIAdapter', () => {
       normalizeUsage: false,
       normalizeToolSchema: true,
       omitEmptyAssistantContent: true,
+    });
+  });
+
+  it.each([
+    {
+      label: 'generic profile',
+      createAdapter: () => createTestAdapter({ wireModel: 'gpt-4o' }),
+    },
+    {
+      label: 'strict Kimi with normalizeUsage disabled',
+      createAdapter: () => createStrictKimiAdapter({
+        flags: {
+          ...resolveKimiHarnessFeatureFlags({}),
+          normalizeUsage: false,
+        },
+      }),
+    },
+  ])('rethrows the exact caller abort after inline usage for $label', async ({ createAdapter }) => {
+    const sentinel = new DOMException('caller timeout after inline usage', 'TimeoutError');
+    const controller = new AbortController();
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [],
+          usage: {
+            prompt_tokens: 9,
+            completion_tokens: 2,
+          },
+        };
+        yield {
+          choices: [{
+            delta: { content: 'late text' },
+            finish_reason: 'stop',
+          }],
+        };
+      },
+    } as never);
+    const adapter = createAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    const iterator = adapter.stream([], [], 'system', {
+      signal: controller.signal,
+    })[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        type: 'usage',
+        usage: {
+          inputTokens: 9,
+          outputTokens: 2,
+        },
+      },
+    });
+    controller.abort(sentinel);
+    await expect(iterator.next()).rejects.toBe(sentinel);
+    await expect(iterator.next()).resolves.toEqual({
+      done: true,
+      value: undefined,
     });
   });
 
@@ -2499,6 +2772,7 @@ describe('OpenAIAdapter', () => {
   });
 
   it('does not estimate usage when a strict Kimi stream errors without provider usage', async () => {
+    const diagnostics: UsageDiagnostic[] = [];
     const sentinel = new Error('terminal without usage');
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
@@ -2507,7 +2781,9 @@ describe('OpenAIAdapter', () => {
         throw sentinel;
       },
     } as never);
-    const adapter = createStrictKimiAdapter();
+    const adapter = createStrictKimiAdapter({
+      onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
     (adapter as unknown as { client: typeof instance }).client = instance;
     const chunks: StreamChunk[] = [];
     let caught: unknown;
@@ -2522,6 +2798,11 @@ describe('OpenAIAdapter', () => {
 
     expect(chunks).toEqual([]);
     expect(caught).toBe(sentinel);
+    expect(diagnostics).toEqual([{
+      type: 'usage_source',
+      harnessProfileId: 'kimi-k3-coding-openai',
+      usageSource: 'missing_on_error',
+    }]);
   });
 
   it('does not issue an SDK request when the caller signal is already aborted', async () => {
@@ -2617,7 +2898,7 @@ describe('OpenAIAdapter', () => {
     await expect(iterator.next()).rejects.toBe(sentinel);
   });
 
-  it('interrupts retry backoff without starting another request', async () => {
+  it('emits buffered usage before the exact caller abort that interrupts retry backoff', async () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     try {
@@ -2628,16 +2909,34 @@ describe('OpenAIAdapter', () => {
       const instance = new OpenAI({ apiKey: 'test' });
       vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
         calls += 1;
-        throw Object.assign(new Error('retry me'), { status: 503 });
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              choices: [],
+              usage: {
+                prompt_tokens: 21,
+                completion_tokens: 3,
+              },
+            };
+            throw Object.assign(new Error('retry me'), { status: 503 });
+          },
+        } as never;
       });
       const adapter = createStrictKimiAdapter();
       (adapter as unknown as { client: typeof instance }).client = instance;
+      const chunks: StreamChunk[] = [];
       let caught: unknown;
-      const result = collectAdapterChunks(adapter, {
-        signal: controller.signal,
-      }).catch((error: unknown) => {
-        caught = error;
-      });
+      const result = (async () => {
+        try {
+          for await (const chunk of adapter.stream([], [], 'system', {
+            signal: controller.signal,
+          })) {
+            chunks.push(chunk);
+          }
+        } catch (error) {
+          caught = error;
+        }
+      })();
 
       for (let index = 0; index < 20; index += 1) {
         await Promise.resolve();
@@ -2652,6 +2951,13 @@ describe('OpenAIAdapter', () => {
 
       expect(caught).toBe(sentinel);
       expect(calls).toBe(1);
+      expect(chunks).toEqual([{
+        type: 'usage',
+        usage: {
+          inputTokens: 21,
+          outputTokens: 3,
+        },
+      }]);
     } finally {
       setTimeoutSpy.mockRestore();
       vi.useRealTimers();
@@ -2715,6 +3021,7 @@ describe('OpenAIAdapter', () => {
   });
 
   it('keeps buffered usage state isolated across concurrent streams on one adapter', async () => {
+    const diagnostics: UsageDiagnostic[] = [];
     let calls = 0;
     let firstUsageSeen!: () => void;
     let releaseFirst!: () => void;
@@ -2765,7 +3072,9 @@ describe('OpenAIAdapter', () => {
         },
       } as never;
     });
-    const adapter = createStrictKimiAdapter();
+    const adapter = createStrictKimiAdapter({
+      onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     const first = collectAdapterChunks(adapter);
@@ -2794,6 +3103,18 @@ describe('OpenAIAdapter', () => {
         },
       },
       { type: 'done' },
+    ]);
+    expect(diagnostics).toEqual([
+      {
+        type: 'usage_source',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        usageSource: 'provider',
+      },
+      {
+        type: 'usage_source',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        usageSource: 'provider',
+      },
     ]);
   });
 
