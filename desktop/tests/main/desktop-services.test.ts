@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveAppAsarSha256, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import { createPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-affinity.js';
+import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
+import type { Message, StreamChunk, ToolDefinition } from '../../../src/types.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
@@ -272,6 +275,85 @@ describe('desktop services', () => {
       expect.objectContaining({ type: 'result', result: expect.objectContaining({ summary: '模型回复内容' }) }),
       expect.objectContaining({ type: 'result' }),
     ]));
+  });
+
+  it('creates a real desktop task with one RFC 4122 UUID session id', async () => {
+    const observedSessionIds: string[] = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        observedSessionIds.push(sessionId);
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn-1',
+          intentId: 'intent-1',
+          stepId: 'step-1',
+          note: 'done',
+        });
+      },
+    });
+
+    const created = await services.createTask({
+      prompt: '验证 desktop session identity',
+      materials: [],
+    });
+    await waitFor(async () => (await services.recoverTask(created.taskId)).snapshot.status === 'completed');
+
+    expect(observedSessionIds).toHaveLength(1);
+    expect(observedSessionIds[0]).toMatch(
+      /^sess_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+  });
+
+  it('derives one provider-neutral cache affinity for a real default desktop task runner session', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    const observedOptions: Array<StreamOptions | undefined> = [];
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (
+      _messages,
+      _tools,
+      _systemPrompt,
+      options,
+    ) {
+      observedOptions.push(options);
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
+    });
+
+    try {
+      let taskId = '';
+      await withoutBrowserGlobals(async () => {
+        const created = await services.createTask({
+          prompt: '直接回复 ok',
+          materials: [],
+        });
+        taskId = created.taskId;
+        await waitFor(async () => {
+          const status = (await services.recoverTask(taskId)).snapshot.status;
+          return status === 'completed' || status === 'failed';
+        });
+      });
+
+      const recovered = await services.recoverTask(taskId);
+      const sessionId = recovered.snapshot.sessionId;
+      expect(sessionId).toMatch(
+        /^sess_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      expect(observedOptions).toHaveLength(1);
+      expect(observedOptions[0]).toEqual({
+        cacheKey: createPromptCacheAffinity(sessionId),
+        signal: expect.any(AbortSignal),
+      });
+    } finally {
+      streamSpy.mockRestore();
+    }
   });
 
   it('completes operational tasks without artifact evidence', async () => {
@@ -2204,7 +2286,8 @@ describe('desktop services', () => {
         model: this.getModelName(),
         contextLimit: this.getCapabilities().contextLimit,
       });
-      yield { type: 'text_delta', text: 'ok' } as never;
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
     });
 
     try {
@@ -2237,7 +2320,8 @@ describe('desktop services', () => {
         model: this.getModelName(),
         contextLimit: this.getCapabilities().contextLimit,
       });
-      yield { type: 'text_delta', text: 'ok' } as never;
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
     });
 
     try {
@@ -2265,7 +2349,8 @@ describe('desktop services', () => {
     const observed: string[] = [];
     const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       observed.push(this.getModelName());
-      yield { type: 'text_delta', text: 'ok' } as never;
+      yield { type: 'text', delta: 'ok' };
+      yield { type: 'done' };
     });
 
     try {
@@ -2275,6 +2360,180 @@ describe('desktop services', () => {
       expect((await services.getModelConfig()).defaultModelId).toBe(before.defaultModelId);
     } finally {
       streamSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    {
+      name: 'usage then pending error',
+      chunks: [{ type: 'usage' as const, usage: { inputTokens: 7, outputTokens: 2 } }],
+      pendingError: new Error('usage pending failure'),
+      expectedSuccess: false,
+    },
+    {
+      name: 'text then pending error',
+      chunks: [{ type: 'text' as const, delta: 'partial' }],
+      pendingError: new Error('text pending failure'),
+      expectedSuccess: false,
+    },
+    {
+      name: 'empty clean exhaustion',
+      chunks: [],
+      expectedSuccess: false,
+    },
+    {
+      name: 'usage-only clean exhaustion',
+      chunks: [{ type: 'usage' as const, usage: { inputTokens: 7, outputTokens: 0 } }],
+      expectedSuccess: false,
+    },
+    {
+      name: 'usage then done clean exhaustion',
+      chunks: [
+        { type: 'usage' as const, usage: { inputTokens: 7, outputTokens: 0 } },
+        { type: 'done' as const },
+      ],
+      expectedSuccess: true,
+    },
+    {
+      name: 'text and done clean exhaustion',
+      chunks: [
+        { type: 'text' as const, delta: 'ok' },
+        { type: 'done' as const },
+      ],
+      expectedSuccess: true,
+    },
+  ])('drains provider connection protocol: $name', async ({
+    chunks,
+    pendingError,
+    expectedSuccess,
+  }: {
+    chunks: StreamChunk[];
+    pendingError?: Error;
+    expectedSuccess: boolean;
+  }) => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    const calls: Array<{
+      messages: Message[];
+      tools: ToolDefinition[];
+      options?: StreamOptions;
+      cleanExhaustion: boolean;
+    }> = [];
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (
+      messages,
+      tools,
+      _systemPrompt,
+      options,
+    ) {
+      const call = { messages, tools, options, cleanExhaustion: false };
+      calls.push(call);
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+      if (pendingError) {
+        throw pendingError;
+      }
+      call.cleanExhaustion = true;
+    });
+
+    try {
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+
+      expect(result.success).toBe(expectedSuccess);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].tools).toEqual([]);
+      expect(calls[0].options).toEqual({ signal: expect.any(AbortSignal) });
+      expect(calls[0].options).not.toHaveProperty('cacheKey');
+      if (pendingError) {
+        expect(result.error).toBe(pendingError.message);
+        expect(calls[0].cleanExhaustion).toBe(false);
+      } else {
+        expect(calls[0].cleanExhaustion).toBe(true);
+      }
+    } finally {
+      streamSpy.mockRestore();
+    }
+  });
+
+  it('reports provider connection latency at clean completion rather than first chunk', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    vi.useFakeTimers();
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      yield { type: 'text' as const, delta: 'first' };
+      await new Promise(resolve => setTimeout(resolve, 125));
+      yield { type: 'done' as const };
+    });
+
+    try {
+      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      await vi.advanceTimersByTimeAsync(125);
+      await expect(pending).resolves.toMatchObject({ success: true, latencyMs: 125 });
+    } finally {
+      streamSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses one real OpenAI outer stream attempt and no retry after the independent 30 second timeout', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    vi.useFakeTimers();
+    let attempts = 0;
+    let timeoutReason: unknown;
+    let releaseAttempt: ((reason: unknown) => void) | undefined;
+    type StreamOnce = (...args: unknown[]) => AsyncIterable<StreamChunk>;
+    const attemptSpy = vi.spyOn(
+      OpenAIAdapter.prototype as unknown as { streamOnce: StreamOnce },
+      'streamOnce',
+    ).mockImplementation(async function* (...args: unknown[]) {
+      attempts += 1;
+      const signal = args[4] as AbortSignal;
+      await new Promise<void>((_resolve, reject) => {
+        releaseAttempt = reject;
+        signal.addEventListener('abort', () => {
+          timeoutReason = signal.reason;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    });
+
+    try {
+      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      for (let index = 0; index < 10 && attempts === 0; index += 1) {
+        await Promise.resolve();
+      }
+      expect(attempts).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await Promise.resolve();
+      if (timeoutReason === undefined) {
+        releaseAttempt?.(Object.assign(
+          new Error('test released missing external abort'),
+          { status: 400 },
+        ));
+      }
+      const result = await pending;
+
+      expect(result).toEqual({ success: false, error: 'provider connection timeout' });
+      expect(attempts).toBe(1);
+      expect(timeoutReason).toMatchObject({ name: 'TimeoutError', message: 'provider connection timeout' });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      attemptSpy.mockRestore();
+      vi.useRealTimers();
     }
   });
 

@@ -13,6 +13,7 @@ import {
 } from '../../electron/artifact-workspace-tools.js';
 import type { Tool, ToolExecutionContext } from '../../../src/types.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
+import type { ModelInvocationOptions, StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import { createDesktopModelRunnerWithRegistry, runDesktopToolLoop } from '../../electron/desktop-services.js';
 
 describe('artifact workspace runtime contract', () => {
@@ -163,6 +164,211 @@ describe('artifact workspace runtime contract', () => {
     expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'cancelled' });
     expect((await host.recoverTask(created.taskId)).snapshot.events.at(-1))
       .toEqual({ type: 'task_terminal', status: 'cancelled' });
+  });
+});
+
+describe('desktop tool loop invocation and consumer ordering', () => {
+  let rootDir: string;
+  let registry: ToolRegistry;
+
+  beforeEach(() => {
+    rootDir = join(tmpdir(), `xiaok-desktop-tool-loop-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rootDir, { recursive: true });
+    registry = new ToolRegistry({ autoMode: true }, [{
+      permission: 'read',
+      definition: {
+        name: 'noop',
+        description: 'Return a deterministic tool result',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      async execute() {
+        return JSON.stringify({ ok: true });
+      },
+    }]);
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  function baseContext() {
+    return {
+      systemPrompt: 'system',
+      messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'run' }] }],
+      allToolDefs: registry.getToolDefinitions(),
+      registry,
+      signal: new AbortController().signal,
+      taskDeadline: Date.now() + 30_000,
+      sessionId: 'sess_123e4567-e89b-42d3-a456-426614174000',
+      turnId: 'turn-1',
+      intentId: 'intent-1',
+      stepId: 'step-1',
+      taskId: 'task-1',
+      materials: [],
+      emitRuntimeEvent: vi.fn(),
+      skillInvocation: null,
+      skillCatalog: {} as never,
+      dataRoot: rootDir,
+      taskStartTime: Date.now(),
+      strategies: {
+        compact: {
+          enabled: false,
+          shouldCompact: () => false,
+          doCompact: async (_messages: unknown, _options?: StreamOptions) => {},
+        },
+        buildApiView: (messages: Parameters<typeof runDesktopToolLoop>[0]['messages']) => messages,
+        processToolResult: (result: string) => result,
+        trackAutoProgress: false,
+        trackReferenceReads: false,
+        emitSkillArtifactTrace: false,
+      },
+    };
+  }
+
+  it('reuses one current-signal StreamOptions object for compact, main, and finalization', async () => {
+    const currentController = new AbortController();
+    const staleController = new AbortController();
+    const cacheKey = `pc1_${'a'.repeat(64)}`;
+    const streamOptions: Array<StreamOptions | undefined> = [];
+    const streamTools: string[][] = [];
+    const compactOptions: Array<StreamOptions | undefined> = [];
+    let streamCall = 0;
+    const context = baseContext();
+
+    const result = await runDesktopToolLoop({
+      ...context,
+      signal: currentController.signal,
+      invocationOptions: {
+        cacheKey,
+        signal: staleController.signal,
+      } as ModelInvocationOptions,
+      maxIterations: 2,
+      adapter: {
+        async *stream(_messages, tools, _systemPrompt, options) {
+          streamCall += 1;
+          streamOptions.push(options);
+          streamTools.push(tools.map(tool => tool.name));
+          if (streamCall === 1) {
+            yield { type: 'usage' as const, usage: { inputTokens: 10, outputTokens: 1 } };
+            yield { type: 'tool_use' as const, id: 'call-1', name: 'noop', input: {} };
+            return;
+          }
+          if (streamCall === 2) {
+            yield { type: 'tool_use' as const, id: 'call-2', name: 'noop', input: {} };
+            return;
+          }
+          yield { type: 'text' as const, delta: 'final' };
+          yield { type: 'done' as const };
+        },
+      },
+      strategies: {
+        ...context.strategies,
+        compact: {
+          enabled: true,
+          shouldCompact: inputTokens => inputTokens === 10,
+          doCompact: async (_messages, options) => {
+            compactOptions.push(options);
+          },
+        },
+      },
+    });
+
+    expect(result.reply).toBe('final');
+    expect(streamOptions).toHaveLength(3);
+    expect(streamOptions[0]).toBe(streamOptions[1]);
+    expect(streamOptions[1]).toBe(streamOptions[2]);
+    expect(compactOptions).toEqual([streamOptions[0]]);
+    expect(streamOptions[0]).toEqual({
+      cacheKey,
+      signal: currentController.signal,
+    });
+    expect(streamOptions[0]?.signal).not.toBe(staleController.signal);
+    const expectedMainTools = context.allToolDefs.map(tool => tool.name);
+    expect(streamTools).toEqual([expectedMainTools, expectedMainTools, []]);
+  });
+
+  it('accounts main-stream usage once before propagating the same pending AbortError', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('main aborted', 'AbortError');
+    const usage = vi.fn();
+    const context = baseContext();
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      signal: controller.signal,
+      adapter: {
+        async *stream() {
+          controller.abort(sentinel);
+          yield { type: 'usage' as const, usage: { inputTokens: 12, outputTokens: 3 } };
+          throw sentinel;
+        },
+      },
+      onUsage: usage,
+    });
+
+    await expect(execution).rejects.toBe(sentinel);
+    expect(usage).toHaveBeenCalledTimes(1);
+    expect(usage).toHaveBeenCalledWith(12, 3);
+    expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'assistant_delta' }),
+    );
+    expect(context.messages).toHaveLength(1);
+  });
+
+  it('accounts finalization usage once before propagating the same pending AbortError', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('finalization aborted', 'AbortError');
+    const usage = vi.fn();
+    const context = baseContext();
+    let streamCall = 0;
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      signal: controller.signal,
+      maxIterations: 1,
+      adapter: {
+        async *stream() {
+          streamCall += 1;
+          if (streamCall === 1) {
+            yield { type: 'tool_use' as const, id: 'call-1', name: 'noop', input: {} };
+            return;
+          }
+          controller.abort(sentinel);
+          yield { type: 'usage' as const, usage: { inputTokens: 21, outputTokens: 5 } };
+          throw sentinel;
+        },
+      },
+      onUsage: usage,
+    });
+
+    await expect(execution).rejects.toBe(sentinel);
+    expect(usage).toHaveBeenCalledTimes(1);
+    expect(usage).toHaveBeenCalledWith(21, 5);
+    expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'assistant_delta' }),
+    );
+  });
+
+  it('checks abort after usage-only clean exhaustion before committing an assistant turn', async () => {
+    const controller = new AbortController();
+    const usage = vi.fn();
+    const context = baseContext();
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      signal: controller.signal,
+      adapter: {
+        async *stream() {
+          yield { type: 'usage' as const, usage: { inputTokens: 8, outputTokens: 0 } };
+          controller.abort('user_cancelled');
+        },
+      },
+      onUsage: usage,
+    });
+
+    await expect(execution).rejects.toThrow('task cancelled');
+    expect(usage).toHaveBeenCalledTimes(1);
+    expect(context.messages).toHaveLength(1);
   });
 });
 
