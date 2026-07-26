@@ -179,7 +179,9 @@ function limitError(limitKind: KimiSchemaLimitKind): KimiToolSchemaError {
 }
 
 function invalidJsonError(candidate: boolean): KimiToolSchemaError {
-  const code = 'KIMI_SCHEMA_INVALID_JSON_VALUE';
+  const code = candidate
+    ? 'KIMI_SCHEMA_TYPE_INFERENCE_FAILED'
+    : 'KIMI_SCHEMA_INVALID_JSON_VALUE';
   return new KimiToolSchemaError(code, {
     message: candidate
       ? 'Kimi tool schema type candidate is not a JSON value'
