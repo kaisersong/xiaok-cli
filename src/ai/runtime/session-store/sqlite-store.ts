@@ -6,6 +6,7 @@ import type { Message } from '../../../types.js';
 import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 import { applySessionStoreSchema } from './schema.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
+import { rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
 
 interface SessionRow {
   session_id: string;
@@ -237,9 +238,10 @@ export class SQLiteSessionStore implements SessionStore {
     const lineage = sourceLineage.at(-1) === source.sessionId
       ? [...sourceLineage]
       : [...sourceLineage, source.sessionId];
+    const nextSessionId = this.createSessionId();
     const forked: PersistedSessionSnapshot = {
       ...source,
-      sessionId: this.createSessionId(),
+      sessionId: nextSessionId,
       createdAt: now,
       updatedAt: now,
       forkedFromSessionId: source.sessionId,
@@ -250,6 +252,9 @@ export class SQLiteSessionStore implements SessionStore {
       memoryRefs: [...(source.memoryRefs ?? [])],
       approvalRefs: [...(source.approvalRefs ?? [])],
       backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
+      intentDelegation: source.intentDelegation
+        ? rekeySessionIntentLedger(source.intentDelegation, nextSessionId)
+        : undefined,
       skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
     };
     await this.save(forked);
