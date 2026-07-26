@@ -7,6 +7,7 @@ import { FileSessionStore, SQLiteSessionStore } from '../../../src/ai/runtime/se
 import { createFileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import type { SessionStore } from '../../../src/ai/runtime/session-store/store.js';
 import { AgentSessionState } from '../../../src/ai/runtime/session.js';
+import { createPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-affinity.js';
 import { createEmptySessionIntentLedger } from '../../../src/runtime/intent-delegation/store.js';
 import { createEmptySessionSkillEvalState } from '../../../src/runtime/intent-delegation/skill-eval.js';
 import { createEmptySessionSkillExecutionState } from '../../../src/ai/skills/execution-state.js';
@@ -152,6 +153,7 @@ describe('FileSessionStore', () => {
   it('creates, lists, loads, resumes, and forks full UUID session IDs', async () => {
     const store = new FileSessionStore(rootDir);
     const sessionId = store.createSessionId();
+    const secondNewSessionId = store.createSessionId();
 
     expect(sessionId).toMatch(
       /^sess_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -187,6 +189,12 @@ describe('FileSessionStore', () => {
       sessionId: forked.sessionId,
       forkedFromSessionId: sessionId,
     });
+    expect(createPromptCacheAffinity(secondNewSessionId))
+      .not.toBe(createPromptCacheAffinity(sessionId));
+    expect(createPromptCacheAffinity(forked.sessionId))
+      .not.toBe(createPromptCacheAffinity(sessionId));
+    expect(createPromptCacheAffinity(forked.sessionId))
+      .not.toBe(createPromptCacheAffinity(secondNewSessionId));
   });
 
   it('keeps legacy session IDs loadable without rewriting them', async () => {

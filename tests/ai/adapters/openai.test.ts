@@ -768,6 +768,99 @@ describe('OpenAIAdapter', () => {
     });
   });
 
+  it('keeps cache, session, cwd, prompt, headers, and reasoning bodies out of diagnostics and logs', async () => {
+    const sensitive = {
+      cacheKey: `pc1_${'9'.repeat(64)}`,
+      sessionId: 'sess_99999999-9999-4999-8999-999999999999',
+      cwd: '/private/customer/project',
+      prompt: 'private customer prompt body',
+      header: 'Bearer private-header-value',
+      reasoning: 'private chain of thought body',
+    };
+    const diagnostics: UsageDiagnostic[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: { reasoning_content: sensitive.reasoning },
+            finish_reason: null,
+          }],
+          usage: {
+            prompt_tokens: 4,
+            completion_tokens: 1,
+            cached_tokens: 5,
+          },
+        };
+        yield {
+          choices: [{
+            delta: { reasoning: sensitive.reasoning },
+            finish_reason: null,
+          }],
+        };
+        yield {
+          choices: [{
+            delta: {},
+            finish_reason: 'stop',
+          }],
+        };
+      },
+    } as never);
+    const flags = {
+      ...resolveKimiHarnessFeatureFlags({}),
+      promptCacheKey: true,
+      preservedThinking: true,
+    };
+    const adapter = createStrictKimiAdapter({
+      flags,
+      resolvedHeaders: { Authorization: sensitive.header },
+      onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    try {
+      const messages: Message[] = [{
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: `${sensitive.sessionId}\n${sensitive.cwd}\n${sensitive.prompt}`,
+        }],
+      }, {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: sensitive.reasoning }],
+      }];
+      for await (const _ of adapter.stream(
+        messages,
+        [],
+        sensitive.prompt,
+        { cacheKey: sensitive.cacheKey },
+      )) { /* drain */ }
+
+      const capturedObservability = JSON.stringify({
+        diagnostics,
+        warnings: warn.mock.calls,
+      });
+      for (const value of Object.values(sensitive)) {
+        expect(capturedObservability).not.toContain(value);
+      }
+      expect(diagnostics).toContainEqual({
+        type: 'invalid_usage',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        location: 'top_level',
+        field: 'cached_tokens',
+        reason: 'invalid_or_exceeds_prompt_tokens',
+      });
+      expect(warn).toHaveBeenCalledWith('reasoningDialectConflict', {
+        previous: 'reasoning_content',
+        candidate: 'reasoning',
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('drains strict Kimi after finish and emits only the trailing provider usage before done', async () => {
     const diagnostics: UsageDiagnostic[] = [];
     const OpenAI = (await import('openai')).default;

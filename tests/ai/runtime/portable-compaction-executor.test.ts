@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Message } from '../../../src/types.js';
 import type {
   CompactionApplyOutcome,
@@ -72,6 +74,25 @@ function makePorts(
 const THRESHOLD_TRIGGER = { kind: 'threshold' } as const;
 
 describe('executePortableCompaction', () => {
+  it('keeps the portable executor ownership boundary free of adapter, affinity, globals, and key derivation', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/ai/runtime/portable-compaction-executor.ts'),
+      'utf8',
+    );
+    const imports = [...source.matchAll(/from ['"]([^'"]+)['"]/g)]
+      .map((match) => match[1]);
+
+    expect(imports).toEqual([
+      '../../types.js',
+      './session.js',
+    ]);
+    expect(source).not.toMatch(
+      /\b(?:ModelAdapter|StreamOptions|cacheKey|promptCache|createPromptCacheAffinity|randomUUID|createHash|globalThis)\b/,
+    );
+    expect(source).not.toMatch(/process\.env|\.stream\s*\(/);
+    expect(source).not.toMatch(/^(?:export\s+)?(?:let|var)\s+/m);
+  });
+
   it('throws the existing abort reason before summary or apply', async () => {
     const controller = new AbortController();
     const reason = new DOMException('user stopped', 'AbortError');

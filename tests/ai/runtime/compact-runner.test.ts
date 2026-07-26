@@ -75,4 +75,23 @@ describe('CompactRunner', () => {
 
     expect(capturedOptions).toBe(streamOptions);
   });
+
+  it('drains usage and rethrows the same pending adapter error', async () => {
+    const sentinel = new Error('compact pending error');
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* () {
+        yield {
+          type: 'usage',
+          usage: { inputTokens: 9, outputTokens: 2 },
+        };
+        throw sentinel;
+      },
+    };
+    const runner = new CompactRunner(adapter);
+
+    await expect(runner.run([
+      { role: 'user', content: [{ type: 'text', text: 'summarize me' }] },
+    ])).rejects.toBe(sentinel);
+  });
 });
