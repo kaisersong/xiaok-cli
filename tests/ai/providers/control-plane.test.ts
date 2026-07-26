@@ -332,6 +332,39 @@ describe('resolveRuntimeModelBinding', () => {
     });
     expect(adapter.harnessContext.profile.id).toBe('kimi-k3-coding-openai');
   });
+
+  it('canonicalizes a schema-v2 official endpoint before strict adapter fingerprinting', () => {
+    const uppercaseConfig = createOpenAICompatibleConfig({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://API.KIMI.COM/coding/v1',
+    });
+    const canonicalConfig = createOpenAICompatibleConfig({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+    });
+
+    const uppercaseBinding = resolveRuntimeModelBinding(uppercaseConfig);
+    const canonicalBinding = resolveRuntimeModelBinding(canonicalConfig);
+    const uppercaseAdapter = createAdapterFromBinding(uppercaseBinding) as OpenAIAdapter;
+    const canonicalAdapter = createAdapterFromBinding(canonicalBinding) as OpenAIAdapter;
+
+    expect(uppercaseBinding.runtimeOptions).toEqual({
+      contextLimit: 262_144,
+      reasoningEffort: 'high',
+    });
+    expect(uppercaseAdapter.harnessContext.identity.canonicalBaseUrl)
+      .toBe('https://api.kimi.com/coding/v1');
+    expect(uppercaseAdapter.harnessContext.profile.id)
+      .toBe('kimi-k3-coding-openai');
+    expect(uppercaseAdapter.harnessContext.identityFingerprint)
+      .toBe(canonicalAdapter.harnessContext.identityFingerprint);
+  });
 });
 
 describe('createAdapterFromBinding', () => {

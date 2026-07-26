@@ -20,11 +20,20 @@ describe('resolveModelHarnessProfile', () => {
     capabilities: ['tools', 'thinking'],
   };
 
-  it('selects the strict Kimi K3 coding profile for the exact first-party binding', () => {
-    expect(resolveModelHarnessProfile(identity).id).toBe('kimi-k3-coding-openai');
-    expect(resolveModelHarnessProfile({ ...identity, providerType: 'custom' }).id)
-      .toBe('generic-openai');
-  });
+  it.each([
+    ['canonical endpoint', 'https://api.kimi.com/coding/v1'],
+    ['trailing slash', 'https://api.kimi.com/coding/v1/'],
+    ['uppercase host', 'https://API.KIMI.COM/coding/v1'],
+    ['explicit default port', 'https://api.kimi.com:443/coding/v1'],
+  ])(
+    'selects the strict Kimi K3 coding profile for the parsed-equivalent %s',
+    (_label, canonicalBaseUrl) => {
+      expect(resolveModelHarnessProfile({
+        ...identity,
+        canonicalBaseUrl,
+      }).id).toBe('kimi-k3-coding-openai');
+    },
+  );
 
   it.each([
     ['wrong provider id', { providerId: 'moonshot' }],
@@ -32,7 +41,7 @@ describe('resolveModelHarnessProfile', () => {
     ['Kimi K2.7 model', { wireModel: 'kimi-k2.7' }],
     ['wrong protocol', { protocol: 'openai_responses' }],
     ['lookalike host', { canonicalBaseUrl: 'https://api.kimi.com.evil.example/coding/v1' }],
-    ['explicit port', { canonicalBaseUrl: 'https://api.kimi.com:443/coding/v1' }],
+    ['non-default port', { canonicalBaseUrl: 'https://api.kimi.com:444/coding/v1' }],
     ['query string', { canonicalBaseUrl: 'https://api.kimi.com/coding/v1?mode=test' }],
     ['fragment', { canonicalBaseUrl: 'https://api.kimi.com/coding/v1#test' }],
     ['userinfo', { canonicalBaseUrl: 'https://user@api.kimi.com/coding/v1' }],
@@ -63,23 +72,54 @@ describe('resolveModelHarnessProfile', () => {
 
     expect(profileId).toBe('kimi-k3-coding-openai');
   });
+
+  it.each([
+    ['uppercase host', 'https://API.KIMI.COM/coding/v1'],
+    ['trailing slash', 'https://api.kimi.com/coding/v1/'],
+    ['explicit default port', 'https://api.kimi.com:443/coding/v1'],
+  ])(
+    'canonicalizes the parsed-equivalent %s before profile selection and fingerprinting',
+    (_label, baseUrl) => {
+      const flags = resolveKimiHarnessFeatureFlags({});
+      const equivalent = buildOpenAIHarnessContext({
+        identity: {
+          ...identity,
+          canonicalBaseUrl: baseUrl,
+        },
+        flags,
+      });
+      const canonical = buildOpenAIHarnessContext({
+        identity,
+        flags,
+      });
+
+      expect(equivalent.identity.canonicalBaseUrl)
+        .toBe('https://api.kimi.com/coding/v1');
+      expect(equivalent.profile.id).toBe('kimi-k3-coding-openai');
+      expect(equivalent.identityFingerprint).toBe(canonical.identityFingerprint);
+    },
+  );
 });
 
 describe('model harness profile ownership', () => {
   it('does not duplicate binding identity or runtime fields on the selected profile', () => {
-    expect(Object.keys(KIMI_K3_CODING_OPENAI_HARNESS_PROFILE)).not.toEqual(
-      expect.arrayContaining([
-        'providerId',
-        'providerType',
-        'protocol',
-        'canonicalBaseUrl',
-        'wireModel',
-        'capabilities',
-        'model',
-        'baseURL',
-        'runtimeOptions',
-      ]),
-    );
+    const forbiddenKeys: readonly string[] = [
+      'identity',
+      'providerId',
+      'providerType',
+      'protocol',
+      'endpoint',
+      'baseUrl',
+      'baseURL',
+      'canonicalBaseUrl',
+      'wireModel',
+      'model',
+      'capabilities',
+      'runtimeOptions',
+    ];
+    const profileKeys = Object.keys(KIMI_K3_CODING_OPENAI_HARNESS_PROFILE);
+
+    expect(profileKeys.filter((key) => forbiddenKeys.includes(key))).toEqual([]);
   });
 
   it('keeps OpenAIAdapterInit compile-time ownership on one required harness context', () => {
