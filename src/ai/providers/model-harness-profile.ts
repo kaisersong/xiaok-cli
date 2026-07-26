@@ -250,9 +250,11 @@ export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object
   id: 'kimi-k3-coding-openai',
   normalizeToolSchema: normalizeKimiToolSchema,
   serializeReasoning: serializeKimiReasoning,
-  encodeCacheKey: (cacheKey) => ({ prompt_cache_key: cacheKey }),
+  encodeCacheKey: (cacheKey: string) => ({ prompt_cache_key: cacheKey }),
   extractUsage: extractKimiUsage,
-  shouldOmitAssistantContent: ({ hasToolCalls, text }) => (
+  shouldOmitAssistantContent: (
+    { hasToolCalls, text }: { hasToolCalls: boolean; text: string },
+  ) => (
     hasToolCalls && text.trim().length === 0
   ),
 });
