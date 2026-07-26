@@ -234,13 +234,13 @@ describe('normalizeKimiToolSchema type completion', () => {
     { enum: ['ok', undefined] },
     { const: Number.NaN },
     { const: 1n },
-  ])('classifies non-JSON enum or const candidates as invalid JSON', (candidate) => {
+  ])('classifies non-JSON enum or const candidates as type inference failures', (candidate) => {
     expectKimiError(
       () => normalizeKimiToolSchema({
         type: 'object',
         properties: { value: candidate },
       }),
-      'KIMI_SCHEMA_INVALID_JSON_VALUE',
+      'KIMI_SCHEMA_TYPE_INFERENCE_FAILED',
     );
   });
 

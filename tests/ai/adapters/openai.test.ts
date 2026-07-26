@@ -325,7 +325,7 @@ describe('OpenAIAdapter Kimi tool schema serialization gate', () => {
     },
   );
 
-  it('rejects a non-JSON enum candidate as INVALID_JSON before SDK create', async () => {
+  it('rejects a non-JSON enum candidate as TYPE_INFERENCE before SDK create', async () => {
     const adapter = createStrictKimiAdapter();
     const createSpy = await attachRequestSpy(adapter);
 
@@ -342,7 +342,7 @@ describe('OpenAIAdapter Kimi tool schema serialization gate', () => {
 
     expect(error).toBeInstanceOf(KimiToolSchemaError);
     expect(error).toMatchObject({
-      code: 'KIMI_SCHEMA_INVALID_JSON_VALUE',
+      code: 'KIMI_SCHEMA_TYPE_INFERENCE_FAILED',
       toolName: 'non-json-enum',
     });
     expect(createSpy).not.toHaveBeenCalled();
