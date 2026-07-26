@@ -8,9 +8,11 @@ import {
   normalizeKimiToolSchema,
   type NormalizedKimiSchema,
 } from './kimi-tool-schema.js';
+import {
+  canonicalizeOfficialKimiK3OpenAIEndpoint,
+  isOfficialKimiK3OpenAIEndpoint,
+} from './model-runtime-options.js';
 import type { ModelRuntimeOptions, ProtocolId } from './types.js';
-
-const KIMI_K3_CODING_OPENAI_BASE_URL = 'https://api.kimi.com/coding/v1';
 
 export type ReasoningKeyName = 'reasoning_content' | 'reasoning';
 
@@ -334,10 +336,7 @@ export function isKimiK3CodingHarnessBinding(identity: AdapterBindingIdentity): 
     && identity.providerType === 'first_party'
     && identity.protocol === 'openai_legacy'
     && identity.wireModel === 'k3'
-    && (
-      identity.canonicalBaseUrl === KIMI_K3_CODING_OPENAI_BASE_URL
-      || identity.canonicalBaseUrl === `${KIMI_K3_CODING_OPENAI_BASE_URL}/`
-    );
+    && isOfficialKimiK3OpenAIEndpoint(identity.canonicalBaseUrl);
 }
 
 export function resolveModelHarnessProfile(
@@ -353,6 +352,9 @@ export function buildOpenAIHarnessContext(
 ): OpenAIHarnessContext {
   const identity = Object.freeze({
     ...input.identity,
+    canonicalBaseUrl: canonicalizeOfficialKimiK3OpenAIEndpoint(
+      input.identity.canonicalBaseUrl,
+    ),
     capabilities: Object.freeze([...input.identity.capabilities]),
   });
   const runtimeOptions = input.runtimeOptions

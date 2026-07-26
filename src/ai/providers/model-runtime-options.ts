@@ -45,6 +45,14 @@ export function isOfficialKimiK3OpenAIEndpoint(baseUrl?: string): boolean {
   }
 }
 
+export function canonicalizeOfficialKimiK3OpenAIEndpoint(
+  baseUrl?: string,
+): string | undefined {
+  return isOfficialKimiK3OpenAIEndpoint(baseUrl)
+    ? KIMI_K3_OPENAI_ENDPOINT
+    : baseUrl;
+}
+
 function cloneConstraints(constraints: ModelRuntimeConstraints): ModelRuntimeConstraints {
   return {
     ...constraints,
