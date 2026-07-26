@@ -147,11 +147,22 @@ const NUMBER_HINTS = [
   'multipleOf',
 ] as const;
 
-const COMBINATOR_SLOTS = ['allOf', 'anyOf', 'oneOf'] as const;
+const APPLICATOR_SLOTS = [
+  '$ref',
+  'allOf',
+  'anyOf',
+  'oneOf',
+  'if',
+  'then',
+  'else',
+  'not',
+] as const;
 
 interface NormalizeState {
   readonly root: Record<string, unknown>;
   refExpansions: number;
+  outputNodes: number;
+  outputBytes: number;
 }
 
 function hasOwn(value: object, key: PropertyKey): boolean {
@@ -184,17 +195,111 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function defineOwn(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+): void {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
+}
+
+function reserveOutputNode(state: NormalizeState): void {
+  if (state.outputNodes >= KIMI_SCHEMA_LIMITS.maxOutputNodes) {
+    throw limitError('output_nodes');
+  }
+  state.outputNodes += 1;
+}
+
+function reserveOutputBytes(state: NormalizeState, bytes: number): void {
+  if (bytes > KIMI_SCHEMA_LIMITS.maxOutputBytes - state.outputBytes) {
+    throw limitError('output_bytes');
+  }
+  state.outputBytes += bytes;
+}
+
+function reserveJsonStringBytes(
+  value: string,
+  state: NormalizeState,
+): void {
+  reserveOutputBytes(state, 2);
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x22 || code === 0x5c) {
+      reserveOutputBytes(state, 2);
+      continue;
+    }
+    if (code <= 0x1f) {
+      reserveOutputBytes(
+        state,
+        code === 0x08
+          || code === 0x09
+          || code === 0x0a
+          || code === 0x0c
+          || code === 0x0d
+          ? 2
+          : 6,
+      );
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        reserveOutputBytes(state, 4);
+        index += 1;
+      } else {
+        reserveOutputBytes(state, 6);
+      }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      reserveOutputBytes(state, 6);
+    } else if (code <= 0x7f) {
+      reserveOutputBytes(state, 1);
+    } else if (code <= 0x7ff) {
+      reserveOutputBytes(state, 2);
+    } else {
+      reserveOutputBytes(state, 3);
+    }
+  }
+}
+
+function beginOutputObject(state: NormalizeState): Record<string, unknown> {
+  reserveOutputNode(state);
+  reserveOutputBytes(state, 2);
+  return {};
+}
+
+function beginOutputArray(state: NormalizeState): unknown[] {
+  reserveOutputNode(state);
+  reserveOutputBytes(state, 2);
+  return [];
+}
+
+function reserveObjectEntry(
+  state: NormalizeState,
+  key: string,
+  index: number,
+): void {
+  if (index > 0) reserveOutputBytes(state, 1);
+  reserveJsonStringBytes(key, state);
+  reserveOutputBytes(state, 1);
+}
+
+function reserveArrayEntry(state: NormalizeState, index: number): void {
+  if (index > 0) reserveOutputBytes(state, 1);
+}
+
 function preflightJsonValue(
   value: unknown,
-  depth: number,
   active: Set<object>,
   candidate: boolean,
   counter: { nodes: number },
 ): void {
-  if (depth > KIMI_SCHEMA_LIMITS.maxDepth) {
-    throw limitError('depth');
-  }
-
   counter.nodes += 1;
   if (counter.nodes > KIMI_SCHEMA_LIMITS.maxInputNodes) {
     throw limitError('input_nodes');
@@ -223,13 +328,12 @@ function preflightJsonValue(
   active.add(value);
   if (Array.isArray(value)) {
     for (const item of value) {
-      preflightJsonValue(item, depth + 1, active, candidate, counter);
+      preflightJsonValue(item, active, candidate, counter);
     }
   } else {
     for (const [key, child] of Object.entries(value)) {
       preflightJsonValue(
         child,
-        depth + 1,
         active,
         candidate || key === 'enum' || key === 'const',
         counter,
@@ -239,16 +343,34 @@ function preflightJsonValue(
   active.delete(value);
 }
 
-function cloneJsonValue(value: unknown): unknown {
+function cloneJsonValue(value: unknown, state: NormalizeState): unknown {
   if (Array.isArray(value)) {
-    return value.map(cloneJsonValue);
-  }
-  if (isJsonRecord(value)) {
-    const cloned: Record<string, unknown> = {};
-    for (const [key, child] of Object.entries(value)) {
-      cloned[key] = cloneJsonValue(child);
+    const cloned = beginOutputArray(state);
+    for (let index = 0; index < value.length; index += 1) {
+      reserveArrayEntry(state, index);
+      cloned.push(cloneJsonValue(value[index], state));
     }
     return cloned;
+  }
+  if (isJsonRecord(value)) {
+    const cloned = beginOutputObject(state);
+    const entries = Object.entries(value);
+    for (let index = 0; index < entries.length; index += 1) {
+      const [key, child] = entries[index];
+      reserveObjectEntry(state, key, index);
+      defineOwn(cloned, key, cloneJsonValue(child, state));
+    }
+    return cloned;
+  }
+  reserveOutputNode(state);
+  if (typeof value === 'string') {
+    reserveJsonStringBytes(value, state);
+  } else if (typeof value === 'number') {
+    reserveOutputBytes(state, String(Object.is(value, -0) ? 0 : value).length);
+  } else if (typeof value === 'boolean') {
+    reserveOutputBytes(state, value ? 4 : 5);
+  } else {
+    reserveOutputBytes(state, 4);
   }
   return value;
 }
@@ -338,8 +460,8 @@ function hasAnyHint(
   return hints.some((key) => hasOwn(schema, key));
 }
 
-function hasCombinator(schema: Record<string, unknown>): boolean {
-  return COMBINATOR_SLOTS.some((key) => hasOwn(schema, key));
+function hasApplicator(schema: Record<string, unknown>): boolean {
+  return APPLICATOR_SLOTS.some((key) => hasOwn(schema, key));
 }
 
 function completeType(
@@ -362,7 +484,7 @@ function completeType(
   if (Array.isArray(declaredType)) {
     return undefined;
   }
-  if (isRoot || hasCombinator(schema)) {
+  if (isRoot || hasApplicator(schema)) {
     return undefined;
   }
 
@@ -432,19 +554,34 @@ function resolveLocalPointer(
 function normalizeSchemaMap(
   value: unknown,
   state: NormalizeState,
-  depth: number,
+  structuralDepth: number,
   activeSchemas: Set<object>,
   refStack: Set<string>,
 ): unknown {
   if (!isJsonRecord(value)) {
-    return cloneJsonValue(value);
+    return cloneJsonValue(value, state);
   }
 
-  const normalized: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
-    normalized[key] = isJsonRecord(child)
-      ? normalizeSchemaNode(child, state, depth + 1, false, activeSchemas, refStack)
-      : cloneJsonValue(child);
+  const normalized = beginOutputObject(state);
+  const entries = Object.entries(value);
+  for (let index = 0; index < entries.length; index += 1) {
+    const [key, child] = entries[index];
+    reserveObjectEntry(state, key, index);
+    defineOwn(
+      normalized,
+      key,
+      isJsonRecord(child)
+        ? normalizeSchemaNode(
+            child,
+            state,
+            structuralDepth + 1,
+            0,
+            false,
+            activeSchemas,
+            refStack,
+          )
+        : cloneJsonValue(child, state),
+    );
   }
   return normalized;
 }
@@ -452,70 +589,123 @@ function normalizeSchemaMap(
 function normalizeSchemaArray(
   value: unknown,
   state: NormalizeState,
-  depth: number,
+  structuralDepth: number,
   activeSchemas: Set<object>,
   refStack: Set<string>,
 ): unknown {
   if (!Array.isArray(value)) {
-    return cloneJsonValue(value);
+    return cloneJsonValue(value, state);
   }
-  return value.map((child) => isJsonRecord(child)
-    ? normalizeSchemaNode(child, state, depth + 1, false, activeSchemas, refStack)
-    : cloneJsonValue(child));
+
+  const normalized = beginOutputArray(state);
+  for (let index = 0; index < value.length; index += 1) {
+    reserveArrayEntry(state, index);
+    const child = value[index];
+    normalized.push(
+      isJsonRecord(child)
+        ? normalizeSchemaNode(
+            child,
+            state,
+            structuralDepth + 1,
+            0,
+            false,
+            activeSchemas,
+            refStack,
+          )
+        : cloneJsonValue(child, state),
+    );
+  }
+  return normalized;
 }
 
 function normalizeChildSlot(
   key: string,
   value: unknown,
   state: NormalizeState,
-  depth: number,
+  structuralDepth: number,
   activeSchemas: Set<object>,
   refStack: Set<string>,
 ): unknown {
   if (SCHEMA_MAP_SLOTS.has(key)) {
-    return normalizeSchemaMap(value, state, depth, activeSchemas, refStack);
+    return normalizeSchemaMap(
+      value,
+      state,
+      structuralDepth,
+      activeSchemas,
+      refStack,
+    );
   }
   if (SCHEMA_ARRAY_SLOTS.has(key)) {
-    return normalizeSchemaArray(value, state, depth, activeSchemas, refStack);
+    return normalizeSchemaArray(
+      value,
+      state,
+      structuralDepth,
+      activeSchemas,
+      refStack,
+    );
   }
   if (key === 'items' && Array.isArray(value)) {
-    return normalizeSchemaArray(value, state, depth, activeSchemas, refStack);
+    return normalizeSchemaArray(
+      value,
+      state,
+      structuralDepth,
+      activeSchemas,
+      refStack,
+    );
   }
   return isJsonRecord(value)
-    ? normalizeSchemaNode(value, state, depth + 1, false, activeSchemas, refStack)
-    : cloneJsonValue(value);
+    ? normalizeSchemaNode(
+        value,
+        state,
+        structuralDepth + 1,
+        0,
+        false,
+        activeSchemas,
+        refStack,
+      )
+    : cloneJsonValue(value, state);
 }
 
 function normalizeSchemaBody(
   input: Record<string, unknown>,
   state: NormalizeState,
-  depth: number,
+  structuralDepth: number,
   isRoot: boolean,
   activeSchemas: Set<object>,
   refStack: Set<string>,
   shouldCompleteType: boolean,
 ): Record<string, unknown> {
-  const normalized: Record<string, unknown> = {};
+  const draft: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
-    normalized[key] = CHILD_SCHEMA_SLOTS.has(key)
-      ? value
-      : cloneJsonValue(value);
+    defineOwn(draft, key, value);
   }
 
+  let effectiveType: JsonTypeName | undefined;
   if (shouldCompleteType) {
-    const completedType = completeType(normalized, isRoot);
-    removeIncompatibleKeys(normalized, completedType);
+    effectiveType = completeType(draft, isRoot);
+  } else if (typeof draft.type === 'string' && draft.type.length > 0) {
+    effectiveType = draft.type as JsonTypeName;
   }
+  removeIncompatibleKeys(draft, effectiveType);
 
-  for (const key of CHILD_SCHEMA_SLOTS) {
-    if (!hasOwn(normalized, key)) continue;
-    normalized[key] = normalizeChildSlot(
+  const normalized = beginOutputObject(state);
+  const entries = Object.entries(draft);
+  for (let index = 0; index < entries.length; index += 1) {
+    const [key, value] = entries[index];
+    reserveObjectEntry(state, key, index);
+    defineOwn(
+      normalized,
       key,
-      normalized[key],
-      state,
-      depth,
-      activeSchemas,
-      refStack,
+      CHILD_SCHEMA_SLOTS.has(key)
+        ? normalizeChildSlot(
+            key,
+            value,
+            state,
+            structuralDepth,
+            activeSchemas,
+            refStack,
+          )
+        : cloneJsonValue(value, state),
     );
   }
   return normalized;
@@ -524,28 +714,42 @@ function normalizeSchemaBody(
 function normalizeSchemaNode(
   input: Record<string, unknown>,
   state: NormalizeState,
-  depth: number,
+  structuralDepth: number,
+  refDepth: number,
   isRoot: boolean,
   activeSchemas: Set<object>,
   refStack: Set<string>,
+  skipTypeCompletion = false,
 ): Record<string, unknown> {
-  if (depth > KIMI_SCHEMA_LIMITS.maxDepth) {
+  if (
+    structuralDepth > KIMI_SCHEMA_LIMITS.maxDepth
+    || refDepth > KIMI_SCHEMA_LIMITS.maxDepth
+  ) {
     throw limitError('depth');
   }
 
+  const shouldSkipType = skipTypeCompletion || hasApplicator(input);
   const activeForChildren = new Set(activeSchemas);
   activeForChildren.add(input);
   const ref = input.$ref;
   if (typeof ref === 'string') {
     const target = resolveLocalPointer(state.root, ref);
     if (!isJsonRecord(target)) {
-      return cloneJsonValue(input) as Record<string, unknown>;
+      return normalizeSchemaBody(
+        input,
+        state,
+        structuralDepth,
+        isRoot,
+        activeForChildren,
+        refStack,
+        false,
+      );
     }
     if (activeForChildren.has(target) || refStack.has(ref)) {
       return normalizeSchemaBody(
         input,
         state,
-        depth,
+        structuralDepth,
         isRoot,
         activeForChildren,
         refStack,
@@ -561,10 +765,16 @@ function normalizeSchemaNode(
     const siblings: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input)) {
       if (key !== '$ref') {
-        siblings[key] = value;
+        defineOwn(siblings, key, value);
       }
     }
-    const merged = { ...target, ...siblings };
+    const merged: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(target)) {
+      defineOwn(merged, key, value);
+    }
+    for (const [key, value] of Object.entries(siblings)) {
+      defineOwn(merged, key, value);
+    }
     const nextActive = new Set(activeForChildren);
     nextActive.add(target);
     const nextRefStack = new Set(refStack);
@@ -572,70 +782,52 @@ function normalizeSchemaNode(
     return normalizeSchemaNode(
       merged,
       state,
-      depth + 1,
+      structuralDepth,
+      refDepth + 1,
       isRoot,
       nextActive,
       nextRefStack,
+      true,
     );
   }
 
   return normalizeSchemaBody(
     input,
     state,
-    depth,
+    structuralDepth,
     isRoot,
     activeForChildren,
     refStack,
-    true,
+    !shouldSkipType,
   );
-}
-
-function countOutputNodes(value: unknown): number {
-  let nodes = 0;
-  const visit = (current: unknown): void => {
-    nodes += 1;
-    if (nodes > KIMI_SCHEMA_LIMITS.maxOutputNodes) {
-      throw limitError('output_nodes');
-    }
-    if (Array.isArray(current)) {
-      for (const child of current) visit(child);
-    } else if (isJsonRecord(current)) {
-      for (const child of Object.values(current)) visit(child);
-    }
-  };
-  visit(value);
-  return nodes;
 }
 
 export function normalizeKimiToolSchema(
   schema: Record<string, unknown>,
 ): NormalizedKimiSchema {
   const inputCounter = { nodes: 0 };
-  preflightJsonValue(schema, 0, new Set(), false, inputCounter);
+  preflightJsonValue(schema, new Set(), false, inputCounter);
 
   const state: NormalizeState = {
     root: schema,
     refExpansions: 0,
+    outputNodes: 0,
+    outputBytes: 0,
   };
   const normalized = normalizeSchemaNode(
     schema,
     state,
     0,
+    0,
     true,
     new Set(),
     new Set(),
   );
-  const outputNodes = countOutputNodes(normalized);
-  const serialized = JSON.stringify(normalized);
-  const outputBytes = Buffer.byteLength(serialized, 'utf8');
-  if (outputBytes > KIMI_SCHEMA_LIMITS.maxOutputBytes) {
-    throw limitError('output_bytes');
-  }
 
   return {
     schema: normalized,
     inputNodes: inputCounter.nodes,
-    outputNodes,
-    outputBytes,
+    outputNodes: state.outputNodes,
+    outputBytes: state.outputBytes,
   };
 }

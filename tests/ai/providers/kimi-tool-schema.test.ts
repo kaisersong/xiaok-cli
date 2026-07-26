@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   KIMI_SCHEMA_LIMITS,
   KimiToolSchemaError,
@@ -34,18 +34,30 @@ function schemaWithInputNodes(target: number): Record<string, unknown> {
   };
 }
 
-function schemaWithObservedDepth(target: number): Record<string, unknown> {
-  let value: unknown = null;
-  for (let depth = 1; depth < target; depth += 1) {
-    value = [value];
-  }
-  return { 'x-depth': value };
-}
-
 function schemaWithOutputBytes(target: number): Record<string, unknown> {
   return {
     x: 'a'.repeat(target - 8),
   };
+}
+
+function schemaWithEscapedUtf8OutputBytes(target: number): Record<string, unknown> {
+  const escapedUtf8Prefix = '中😀"\n';
+  const prefixBytes = Buffer.byteLength(JSON.stringify(escapedUtf8Prefix), 'utf8') - 2;
+  return {
+    x: escapedUtf8Prefix + 'a'.repeat(target - 8 - prefixBytes),
+  };
+}
+
+function structuralSchemaAtDepth(depth: number): Record<string, unknown> {
+  let schema: Record<string, unknown> = {};
+  for (let index = 0; index < depth; index += 1) {
+    schema = {
+      properties: {
+        child: schema,
+      },
+    };
+  }
+  return schema;
 }
 
 function wideSharedRefSchema(extraRootNodes = 0): Record<string, unknown> {
@@ -306,31 +318,70 @@ describe('normalizeKimiToolSchema type completion', () => {
     });
   });
 
-  it('does not add a type to combinator nodes but normalizes every branch', () => {
-    const result = normalizeKimiToolSchema({
-      type: 'object',
-      properties: {
-        choice: {
-          oneOf: [
-            { const: 'text' },
-            { items: {} },
-          ],
+  it.each(['allOf', 'anyOf', 'oneOf'] as const)(
+    'does not add a type to %s nodes but normalizes every branch',
+    (applicator) => {
+      const result = normalizeKimiToolSchema({
+        type: 'object',
+        properties: {
+          choice: {
+            [applicator]: [
+              { const: 'text' },
+              { items: {} },
+            ],
+          },
         },
-      },
-    });
+      });
 
-    expect(result.schema).toEqual({
-      type: 'object',
-      properties: {
-        choice: {
-          oneOf: [
-            { const: 'text', type: 'string' },
-            { type: 'array', items: { type: 'string' } },
-          ],
+      expect(result.schema).toEqual({
+        type: 'object',
+        properties: {
+          choice: {
+            [applicator]: [
+              { const: 'text', type: 'string' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+          },
         },
-      },
-    });
-  });
+      });
+    },
+  );
+
+  it.each(['if', 'then', 'else', 'not'] as const)(
+    'does not fill or repair type on a node with %s but normalizes its branch',
+    (applicator) => {
+      const result = normalizeKimiToolSchema({
+        type: 'object',
+        properties: {
+          guarded: {
+            type: 'string',
+            enum: [1, 2],
+            [applicator]: {
+              properties: {
+                label: {},
+              },
+            },
+          },
+        },
+      });
+
+      expect(result.schema).toEqual({
+        type: 'object',
+        properties: {
+          guarded: {
+            type: 'string',
+            enum: [1, 2],
+            [applicator]: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+              },
+            },
+          },
+        },
+      });
+    },
+  );
 });
 
 describe('normalizeKimiToolSchema local references', () => {
@@ -358,8 +409,8 @@ describe('normalizeKimiToolSchema local references', () => {
         legacy: { enum: [1, 2], type: 'integer' },
       },
       properties: {
-        current: { const: 'current', type: 'string' },
-        legacy: { enum: [1, 2], type: 'integer' },
+        current: { const: 'current' },
+        legacy: { enum: [1, 2] },
       },
     });
   });
@@ -377,7 +428,7 @@ describe('normalizeKimiToolSchema local references', () => {
 
     expect(result.schema).toMatchObject({
       properties: {
-        escaped: { const: true, type: 'boolean' },
+        escaped: { const: true },
       },
     });
   });
@@ -415,6 +466,27 @@ describe('normalizeKimiToolSchema local references', () => {
     });
     expect((result.schema.properties as Record<string, unknown>).value)
       .not.toHaveProperty('properties');
+  });
+
+  it('does not fill type on a successfully resolved ref node', () => {
+    const result = normalizeKimiToolSchema({
+      type: 'object',
+      $defs: {
+        value: { const: 'resolved' },
+      },
+      properties: {
+        value: { $ref: '#/$defs/value' },
+      },
+    });
+
+    expect(result.schema).toMatchObject({
+      $defs: {
+        value: { const: 'resolved', type: 'string' },
+      },
+      properties: {
+        value: { const: 'resolved' },
+      },
+    });
   });
 
   it('preserves circular refs and the definition bucket they need', () => {
@@ -507,6 +579,35 @@ describe('normalizeKimiToolSchema local references', () => {
       },
     });
   });
+
+  it.each([
+    ['unresolved local', '#/$defs/missing'],
+    ['remote', 'https://example.com/schema.json#/$defs/value'],
+  ])('preserves an %s ref while normalizing sibling child slots', (_label, ref) => {
+    const result = normalizeKimiToolSchema({
+      type: 'object',
+      properties: {
+        value: {
+          $ref: ref,
+          properties: {
+            label: {},
+          },
+        },
+      },
+    });
+
+    expect(result.schema).toEqual({
+      type: 'object',
+      properties: {
+        value: {
+          $ref: ref,
+          properties: {
+            label: { type: 'string' },
+          },
+        },
+      },
+    });
+  });
 });
 
 describe('normalizeKimiToolSchema immutability', () => {
@@ -536,16 +637,37 @@ describe('normalizeKimiToolSchema immutability', () => {
       },
     });
   });
+
+  it('preserves a JSON own __proto__ schema key without changing output prototypes', () => {
+    const input = JSON.parse(
+      '{"type":"object","properties":{"__proto__":{}}}',
+    ) as Record<string, unknown>;
+
+    const result = normalizeKimiToolSchema(input);
+    const properties = result.schema.properties as Record<string, unknown>;
+    const expected = JSON.parse(
+      '{"type":"object","properties":{"__proto__":{"type":"string"}}}',
+    ) as Record<string, unknown>;
+
+    expect(result.schema).toEqual(expected);
+    expect(Object.getPrototypeOf(properties)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(properties, '__proto__')).toBe(true);
+    expect(properties.__proto__).toEqual({ type: 'string' });
+    expect(result.outputNodes).toBe(5);
+    expect(result.outputBytes).toBe(
+      Buffer.byteLength(JSON.stringify(expected), 'utf8'),
+    );
+  });
 });
 
 describe('normalizeKimiToolSchema resource limits', () => {
-  it('accepts depth limit - 1 and rejects depth limit + 1 before recursing', () => {
+  it('accepts structural depth 64 inclusive and rejects depth 65', () => {
     expect(() => normalizeKimiToolSchema(
-      schemaWithObservedDepth(KIMI_SCHEMA_LIMITS.maxDepth - 1),
+      structuralSchemaAtDepth(KIMI_SCHEMA_LIMITS.maxDepth),
     )).not.toThrow();
     expectLimit(
       () => normalizeKimiToolSchema(
-        schemaWithObservedDepth(KIMI_SCHEMA_LIMITS.maxDepth + 1),
+        structuralSchemaAtDepth(KIMI_SCHEMA_LIMITS.maxDepth + 1),
       ),
       'depth',
     );
@@ -602,6 +724,76 @@ describe('normalizeKimiToolSchema resource limits', () => {
     );
   });
 
+  it('counts multibyte, surrogate, quote, and control escaping at exact byte boundaries', () => {
+    const acceptedSchema = schemaWithEscapedUtf8OutputBytes(
+      KIMI_SCHEMA_LIMITS.maxOutputBytes - 1,
+    );
+    const accepted = normalizeKimiToolSchema(acceptedSchema);
+    expect(accepted.outputBytes).toBe(KIMI_SCHEMA_LIMITS.maxOutputBytes - 1);
+    expect(accepted.outputBytes).toBe(
+      Buffer.byteLength(JSON.stringify(accepted.schema), 'utf8'),
+    );
+
+    expectLimit(
+      () => normalizeKimiToolSchema(
+        schemaWithEscapedUtf8OutputBytes(KIMI_SCHEMA_LIMITS.maxOutputBytes + 1),
+      ),
+      'output_bytes',
+    );
+  });
+
+  it('rejects a single oversized string without creating a full JSON string copy', () => {
+    const stringifySpy = vi.spyOn(JSON, 'stringify');
+    let caught: unknown;
+    try {
+      normalizeKimiToolSchema(
+        schemaWithOutputBytes(KIMI_SCHEMA_LIMITS.maxOutputBytes + 1),
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(stringifySpy).not.toHaveBeenCalled();
+    stringifySpy.mockRestore();
+    expect(caught).toBeInstanceOf(KimiToolSchemaError);
+    expect(caught).toMatchObject({
+      code: 'KIMI_SCHEMA_LIMIT_EXCEEDED',
+      limitKind: 'output_bytes',
+    });
+  });
+
+  it('stops a shared-ref output bomb before materializing every expanded node', () => {
+    let paddingReads = 0;
+    const payload: Record<string, unknown> = {
+      type: 'object',
+    };
+    Object.defineProperty(payload, 'x-padding', {
+      enumerable: true,
+      get() {
+        paddingReads += 1;
+        if (paddingReads >= 100) {
+          throw new Error('shared-ref bomb was materialized too far');
+        }
+        return Array.from({ length: 997 }, () => null);
+      },
+    });
+    const schema = {
+      $defs: { payload },
+      properties: Object.fromEntries(
+        Array.from({ length: 200 }, (_, index) => [
+          `value${index}`,
+          { $ref: '#/$defs/payload' },
+        ]),
+      ),
+    };
+
+    expectLimit(
+      () => normalizeKimiToolSchema(schema),
+      'output_nodes',
+    );
+    expect(paddingReads).toBeLessThan(100);
+  });
+
   it('rejects object identity cycles without relying on JSON.stringify', () => {
     const cycle: Record<string, unknown> = {};
     cycle.self = cycle;
@@ -612,10 +804,13 @@ describe('normalizeKimiToolSchema resource limits', () => {
     );
   });
 
-  it('bounds deep local ref chains by recursion depth', () => {
+  it('accepts exactly 64 local ref hops and rejects 65', () => {
+    expect(() => normalizeKimiToolSchema(
+      deepRefChainSchema(KIMI_SCHEMA_LIMITS.maxDepth),
+    )).not.toThrow();
     expectLimit(
       () => normalizeKimiToolSchema(
-        deepRefChainSchema(KIMI_SCHEMA_LIMITS.maxDepth + 2),
+        deepRefChainSchema(KIMI_SCHEMA_LIMITS.maxDepth + 1),
       ),
       'depth',
     );
