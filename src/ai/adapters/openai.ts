@@ -6,12 +6,17 @@ import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
-import type { ModelReasoningEffort, ModelRuntimeOptions } from '../providers/types.js';
+import {
+  buildOpenAIHarnessContext,
+  type OpenAIAdapterInit,
+  type ReasoningKeyName,
+} from '../providers/model-harness-profile.js';
+import { getProviderProfile, resolveProviderModelVariant } from '../providers/registry.js';
+import type { ModelReasoningEffort } from '../providers/types.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
-const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
 
 function isRetryableError(error: unknown): boolean {
   if (isAbortError(error)) return false;
@@ -35,10 +40,6 @@ const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 type OpenAIHttpAgent = HttpAgent | HttpsAgent;
-type OpenAICapabilityOverrides = Partial<Pick<
-  ModelCapabilities,
-  'supportsPromptCaching' | 'supportsImageInput'
->>;
 
 interface KimiReasoningEffortRequestExtension {
   reasoning_effort: ModelReasoningEffort;
@@ -49,17 +50,6 @@ function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
   return protocol === 'http:'
     ? new HttpAgent({ keepAlive: true })
     : new HttpsAgent({ keepAlive: true });
-}
-
-function isKimiCodingEndpoint(baseUrl?: string): boolean {
-  if (!baseUrl) return false;
-
-  try {
-    const url = new URL(baseUrl);
-    return url.hostname === 'api.kimi.com' && url.pathname.startsWith('/coding');
-  } catch {
-    return false;
-  }
 }
 
 function collectReasoningText(blocks: Message['content']): string | undefined {
@@ -195,93 +185,84 @@ function drainLeadingRawThinkSegments(
 export class OpenAIAdapter implements ModelAdapter {
   client: OpenAI;
   private readonly apiKey: string;
-  private readonly baseUrl?: string;
-  private readonly defaultHeaders?: Record<string, string>;
-  private readonly capabilityOverrides: OpenAICapabilityOverrides;
-  private readonly runtimeOptions?: ModelRuntimeOptions;
+  private readonly resolvedHeaders?: Readonly<Record<string, string | null>>;
+  private readonly kimiCodingHeadersApplied: boolean;
   private readonly httpAgent: OpenAIHttpAgent;
-  private model: string;
+  readonly harnessContext: OpenAIAdapterInit['harnessContext'];
+  private reasoningDialectState: { key: ReasoningKeyName } = {
+    key: 'reasoning_content',
+  };
 
-  constructor(
-    apiKey: string,
-    model = 'gpt-4o',
-    baseUrl?: string,
-    defaultHeaders?: Record<string, string>,
-    capabilityOverrides?: OpenAICapabilityOverrides,
-    runtimeOptions?: ModelRuntimeOptions,
-  ) {
-    this.apiKey = apiKey;
-    this.baseUrl = baseUrl;
-    this.defaultHeaders = defaultHeaders;
-    this.capabilityOverrides = {
-      ...(typeof capabilityOverrides?.supportsPromptCaching === 'boolean'
-        ? { supportsPromptCaching: capabilityOverrides.supportsPromptCaching }
-        : {}),
-      ...(typeof capabilityOverrides?.supportsImageInput === 'boolean'
-        ? { supportsImageInput: capabilityOverrides.supportsImageInput }
-        : {}),
-    };
-    this.runtimeOptions = runtimeOptions ? { ...runtimeOptions } : undefined;
-    this.httpAgent = createOpenAIHttpAgent(baseUrl);
+  constructor(init: OpenAIAdapterInit) {
+    this.apiKey = init.apiKey;
+    this.resolvedHeaders = init.resolvedHeaders;
+    this.kimiCodingHeadersApplied = init.kimiCodingHeadersApplied;
+    this.harnessContext = init.harnessContext;
+    this.httpAgent = createOpenAIHttpAgent(init.harnessContext.identity.canonicalBaseUrl);
     this.client = new OpenAI({
-      apiKey,
-      baseURL: baseUrl,
+      apiKey: init.apiKey,
+      baseURL: init.harnessContext.identity.canonicalBaseUrl,
       maxRetries: MAX_RETRIES,
       httpAgent: this.httpAgent,
-      defaultHeaders: {
-        ...(defaultHeaders ?? {}),
-        ...(isKimiCodingEndpoint(baseUrl)
-          ? {
-              'User-Agent': KIMI_CODING_COMPAT_USER_AGENT,
-              'X-Stainless-Lang': null,
-              'X-Stainless-Package-Version': null,
-              'X-Stainless-OS': null,
-              'X-Stainless-Arch': null,
-              'X-Stainless-Runtime': null,
-              'X-Stainless-Runtime-Version': null,
-              'X-Stainless-Retry-Count': null,
-              'X-Stainless-Timeout': null,
-            }
-          : {}),
-      },
+      defaultHeaders: init.resolvedHeaders,
     });
-    this.model = model;
   }
 
   getModelName(): string {
-    return this.model;
+    return this.harnessContext.identity.wireModel;
   }
 
-  getCapabilities(): Partial<ModelCapabilities> {
-    return {
-      ...(this.capabilityOverrides ?? {}),
-      ...(this.runtimeOptions?.contextLimit !== undefined
-        ? { contextLimit: this.runtimeOptions.contextLimit }
-        : {}),
-    };
+  getCapabilities(): Readonly<ModelCapabilities> {
+    return this.harnessContext.runtimeCapabilities;
   }
 
   dispose(): void {
     this.httpAgent.destroy();
   }
 
-  cloneWithModel(model: string): OpenAIAdapter {
-    const runtimeOptions = model === this.model
-      ? this.runtimeOptions
+  cloneWithModel(newWireModel: string): OpenAIAdapter {
+    const currentIdentity = this.harnessContext.identity;
+    const providerProfile = currentIdentity.providerType === 'first_party'
+      ? getProviderProfile(currentIdentity.providerId)
+      : undefined;
+    const catalogVariant = providerProfile
+      ? resolveProviderModelVariant(providerProfile, newWireModel)
+      : undefined;
+    const runtimeOptions = newWireModel === currentIdentity.wireModel
+      ? this.harnessContext.runtimeOptions
       : resolveModelRuntimeOptions({
-          protocol: 'openai_legacy',
-          baseUrl: this.baseUrl,
-          wireModel: model,
+          protocol: currentIdentity.protocol,
+          baseUrl: currentIdentity.canonicalBaseUrl,
+          wireModel: newWireModel,
+          catalogOptions: catalogVariant?.runtimeOptions,
+          catalogConstraints: catalogVariant?.runtimeConstraints,
         }).runtimeOptions;
-
-    return new OpenAIAdapter(
-      this.apiKey,
-      model,
-      this.baseUrl,
-      this.defaultHeaders,
-      this.capabilityOverrides,
-      runtimeOptions,
-    );
+    const nextIdentity = {
+      ...currentIdentity,
+      wireModel: newWireModel,
+      capabilities: catalogVariant?.capabilities
+        ? [...catalogVariant.capabilities]
+        : [...currentIdentity.capabilities],
+    };
+    const capabilityOverrides = catalogVariant
+      ? undefined
+      : {
+          supportsPromptCaching: this.harnessContext.runtimeCapabilities.supportsPromptCaching,
+          supportsImageInput: this.harnessContext.runtimeCapabilities.supportsImageInput,
+        };
+    const clone = new OpenAIAdapter({
+      apiKey: this.apiKey,
+      resolvedHeaders: this.resolvedHeaders,
+      kimiCodingHeadersApplied: this.kimiCodingHeadersApplied,
+      harnessContext: buildOpenAIHarnessContext({
+        identity: nextIdentity,
+        flags: this.harnessContext.flags,
+        runtimeOptions,
+        capabilityOverrides,
+      }),
+    });
+    clone.reasoningDialectState = { ...this.reasoningDialectState };
+    return clone;
   }
 
   async *stream(
@@ -409,7 +390,7 @@ export class OpenAIAdapter implements ModelAdapter {
     }));
 
     const request: OpenAI.ChatCompletionCreateParamsStreaming = {
-      model: this.model,
+      model: this.harnessContext.identity.wireModel,
       messages: openaiMessages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
@@ -417,12 +398,12 @@ export class OpenAIAdapter implements ModelAdapter {
     };
 
     if (
-      this.model === 'k3'
-      && isOfficialKimiK3OpenAIEndpoint(this.baseUrl)
-      && this.runtimeOptions?.reasoningEffort
+      this.harnessContext.identity.wireModel === 'k3'
+      && isOfficialKimiK3OpenAIEndpoint(this.harnessContext.identity.canonicalBaseUrl)
+      && this.harnessContext.runtimeOptions?.reasoningEffort
     ) {
       Object.assign(request, {
-        reasoning_effort: this.runtimeOptions.reasoningEffort,
+        reasoning_effort: this.harnessContext.runtimeOptions.reasoningEffort,
       } satisfies KimiReasoningEffortRequestExtension);
     }
 

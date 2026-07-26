@@ -84,6 +84,7 @@ describe('resolveRuntimeModelBinding', () => {
 
     expect(resolveRuntimeModelBinding(config)).toEqual({
       providerId: 'openai',
+      providerType: 'first_party',
       modelId: 'openai-project',
       wireModel: 'gpt-4.1',
       protocol: 'openai_legacy',
@@ -208,6 +209,18 @@ describe('resolveRuntimeModelBinding', () => {
     });
   });
 
+  it('copies custom provider type into the resolved binding identity', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'manual-kimi',
+      providerType: 'custom',
+      modelId: 'manual-k3',
+      wireModel: 'k3',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+    });
+
+    expect(resolveRuntimeModelBinding(config).providerType).toBe('custom');
+  });
+
   it.each(['openai_responses', 'anthropic'] as const)(
     'does not apply matching Kimi K3 catalog metadata through %s protocol',
     (protocol) => {
@@ -280,6 +293,7 @@ describe('createAdapterFromBinding', () => {
   it('creates adapters from the resolved runtime binding instead of raw config branches', () => {
     const adapter = createAdapterFromBinding({
       providerId: 'gemini',
+      providerType: 'first_party',
       modelId: 'gemini-thinking',
       wireModel: 'gemini-2.5-pro',
       protocol: 'openai_responses',
@@ -297,6 +311,7 @@ describe('createAdapterFromBinding', () => {
   it('propagates explicit image input capability from OpenAI-compatible bindings', () => {
     const adapter = createAdapterFromBinding({
       providerId: 'deepseek',
+      providerType: 'first_party',
       modelId: 'deepseek-v4-pro',
       wireModel: 'deepseek-v4-pro',
       protocol: 'openai_legacy',

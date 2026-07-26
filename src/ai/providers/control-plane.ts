@@ -11,6 +11,7 @@ import {
 
 export interface ResolvedModelBinding {
   providerId: string;
+  providerType: 'first_party' | 'custom';
   modelId: string;
   wireModel: string;
   protocol: ProtocolId;
@@ -81,6 +82,7 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
 
   return {
     providerId,
+    providerType: providerConfig.type,
     modelId,
     wireModel,
     protocol: providerConfig.protocol,

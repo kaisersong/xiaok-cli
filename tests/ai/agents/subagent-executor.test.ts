@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { executeNamedSubAgent } from '../../../src/ai/agents/subagent-executor.js';
 import type { ModelAdapter } from '../../../src/types.js';
 import type { ToolRegistry } from '../../../src/ai/tools/index.js';
+import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import { createAdapterFromBinding } from '../../../src/ai/models.js';
 
 // Mock the Agent class
 vi.mock('../../../src/ai/agent.js', () => ({
@@ -234,6 +236,48 @@ describe('subagent-executor model capability routing', () => {
     expect(baseAdapter.cloneWithModel).toHaveBeenCalledWith('gpt-5.4-deep');
     expect(Agent).toHaveBeenCalled();
     expect((Agent as any).mock.calls[0][0]).toBe(clonedAdapter);
+  });
+
+  it('routes a real OpenAI adapter override through the shared wire-model clone seam', async () => {
+    const baseAdapter = createAdapterFromBinding({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-k2.7',
+      wireModel: 'kimi-k2.7',
+      protocol: 'openai_legacy',
+      apiKey: 'sk-kimi',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      headers: {},
+      capabilities: ['tools', 'thinking'],
+    }) as OpenAIAdapter;
+
+    await executeNamedSubAgent({
+      agentDef: {
+        name: 'reviewer',
+        systemPrompt: '',
+        source: 'builtin',
+        modelCapability: 'kimi-coding',
+      } as any,
+      prompt: 'test',
+      sessionId: 'session-1',
+      adapter: () => baseAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        settingsStore: {
+          getSettings: () => ({
+            modelCapabilities: {
+              'kimi-coding': 'k3',
+            },
+          }),
+        },
+      } as any,
+    });
+
+    const dispatchedAdapter = (Agent as any).mock.calls[0][0] as OpenAIAdapter;
+    expect(dispatchedAdapter).not.toBe(baseAdapter);
+    expect(dispatchedAdapter.getModelName()).toBe('k3');
+    expect(dispatchedAdapter.harnessContext.profile.id).toBe('kimi-k3-coding-openai');
   });
 
   it('rejects unknown modelCapability before constructing the subagent', async () => {
