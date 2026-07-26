@@ -25,6 +25,7 @@ export interface SessionGraphSnapshot {
 
 export class AgentSessionGraph {
   private snapshot: SessionGraphSnapshot;
+  private revision = 0;
 
   constructor(
     snapshot: Partial<SessionGraphSnapshot> & Pick<SessionGraphSnapshot, 'sessionId' | 'cwd' | 'createdAt' | 'updatedAt' | 'lineage'>,
@@ -41,7 +42,7 @@ export class AgentSessionGraph {
   }
 
   getMessages(): Message[] {
-    return this.snapshot.messages;
+    return structuredClone(this.snapshot.messages);
   }
 
   getUsage(): UsageStats {
@@ -50,6 +51,10 @@ export class AgentSessionGraph {
 
   getCompactions(): CompactionRecord[] {
     return this.snapshot.compactions;
+  }
+
+  getRevision(): number {
+    return this.revision;
   }
 
   updateUsage(next: UsageStats): UsageStats {
@@ -143,9 +148,11 @@ export class AgentSessionGraph {
       approvalRefs: snapshot.approvalRefs ?? [],
       backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
     };
+    this.revision += 1;
   }
 
   private touch(): void {
     this.snapshot.updatedAt = Date.now();
+    this.revision += 1;
   }
 }

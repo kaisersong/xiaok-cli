@@ -1,9 +1,20 @@
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
-import { compactMessages, estimateTokens, mergeUsage } from './usage.js';
+import {
+  applyCompactionPlan,
+  estimateTokens,
+  mergeUsage,
+  planCompaction as buildCompactionPlan,
+  type CompactionPlan,
+} from './usage.js';
 import { AgentSessionGraph, type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
 
 export type { CompactionRecord } from './session-graph.js';
+export type { CompactionPlan } from './usage.js';
 export interface AgentSessionSnapshot extends SessionGraphSnapshot {}
+
+export type CompactionApplyOutcome =
+  | { status: 'compacted'; record: CompactionRecord }
+  | { status: 'stale_plan' | 'invalid_plan' | 'no_gain'; record: null };
 
 let nextCompactionId = 0;
 
@@ -88,13 +99,32 @@ export class AgentSessionState {
     this.graph.recordBackgroundJob(jobId);
   }
 
-  forceCompact(placeholder = '[context compacted]'): CompactionRecord | null {
-    const compacted = compactMessages(this.graph.getMessages(), placeholder);
-    this.graph.replaceMessages(compacted.messages);
+  planCompaction(keepRecent = 2): CompactionPlan {
+    return buildCompactionPlan(
+      this.graph.getMessages(),
+      this.graph.getRevision(),
+      keepRecent,
+    );
+  }
 
-    if (compacted.summary.replacedMessages <= 0) {
-      return null;
+  applyCompaction(plan: CompactionPlan, summaryText?: string): CompactionApplyOutcome {
+    if (
+      this.graph.getRevision() !== plan.sourceRevision ||
+      this.graph.getMessages().length !== plan.sourceMessageCount
+    ) {
+      return { status: 'stale_plan', record: null };
     }
+
+    if (plan.invalidReason) {
+      return { status: 'invalid_plan', record: null };
+    }
+
+    const compacted = applyCompactionPlan(plan, summaryText);
+    if (compacted.status !== 'compacted') {
+      return { status: 'no_gain', record: null };
+    }
+
+    this.graph.replaceMessages(compacted.messages);
 
     // Compact 后更新 usage.inputTokens 为估算值
     const estimatedInput = estimateTokens(this.graph.getMessages());
@@ -113,7 +143,11 @@ export class AgentSessionState {
       replacedMessages: compacted.summary.replacedMessages,
     };
     this.graph.recordCompaction(record);
-    return record;
+    return { status: 'compacted', record };
+  }
+
+  forceCompact(summaryText?: string): CompactionRecord | null {
+    return this.applyCompaction(this.planCompaction(), summaryText).record;
   }
 
   exportSnapshot(): AgentSessionSnapshot {

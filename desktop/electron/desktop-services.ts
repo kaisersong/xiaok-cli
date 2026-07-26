@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
-import { join, extname, basename, dirname, resolve, relative, isAbsolute } from 'node:path';
+import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
+import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
@@ -4667,6 +4667,90 @@ interface ArtifactWorkspaceToolAck {
   creator: string;
 }
 
+interface KSwarmWorkflowStatusArtifact {
+  artifactId: string;
+  filePath: string;
+  label: string;
+  kind: string;
+  creator: string;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relativePath = relative(rootPath, candidatePath);
+  return Boolean(relativePath)
+    && relativePath !== '..'
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath);
+}
+
+function resolveKSwarmWorkflowStatusArtifacts(
+  toolName: string,
+  result: string,
+): KSwarmWorkflowStatusArtifact[] {
+  if (!isToolName(toolName, 'get_dynamic_workflow_status')) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed) || parsed.ok !== true) return [];
+
+  const workflowRunId = readString(parsed.workflowRunId);
+  const scriptResult = isRecord(parsed.scriptResult) ? parsed.scriptResult : null;
+  if (!workflowRunId || !scriptResult || !Array.isArray(scriptResult.artifacts)) return [];
+
+  const workspaceValue = readString(scriptResult.workspacePath) || readString(scriptResult.workFolder);
+  if (!workspaceValue || !isAbsolute(workspaceValue)) return [];
+
+  let workspacePath: string;
+  let artifactsPath: string;
+  try {
+    workspacePath = realpathSync(resolve(workspaceValue));
+    artifactsPath = realpathSync(join(workspacePath, 'artifacts'));
+    if (!statSync(artifactsPath).isDirectory() || !isPathInside(workspacePath, artifactsPath)) return [];
+  } catch {
+    return [];
+  }
+
+  const creator = readString(scriptResult.producerAgent) || 'kswarm';
+  const seen = new Set<string>();
+  const artifacts: KSwarmWorkflowStatusArtifact[] = [];
+
+  for (const rawArtifact of scriptResult.artifacts) {
+    if (!isRecord(rawArtifact)) continue;
+    const rawPath = readString(rawArtifact.path) || readString(rawArtifact.relativePath);
+    if (!rawPath || rawPath.includes('\0')) continue;
+
+    try {
+      const candidatePath = isAbsolute(rawPath)
+        ? resolve(rawPath)
+        : resolve(workspacePath, rawPath);
+      const filePath = realpathSync(candidatePath);
+      if (!isPathInside(artifactsPath, filePath) || !statSync(filePath).isFile()) continue;
+      accessSync(filePath, fsConstants.R_OK);
+      if (seen.has(filePath)) continue;
+      seen.add(filePath);
+
+      const label = readString(rawArtifact.label) || basename(filePath);
+      const kind = inferKSwarmArtifactKind(
+        readString(rawArtifact.kind) || kindFromFilename(label),
+        label,
+      );
+      const artifactId = `artifact_${createHash('sha256')
+        .update(`${workflowRunId}:${filePath}`)
+        .digest('hex')
+        .slice(0, 20)}`;
+      artifacts.push({ artifactId, filePath, label, kind, creator });
+    } catch {
+      // Each artifact is independently default-denied.
+    }
+  }
+
+  return artifacts;
+}
+
 function parseArtifactWorkspaceToolAck(result: string): ArtifactWorkspaceToolAck | null {
   let parsed: unknown;
   try {
@@ -4945,7 +5029,33 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           });
         }
       }
-      if (ok && !artifactEventEmitted && !isToolName(toolCall.name, 'write') && !isToolName(toolCall.name, 'render_ui')) {
+      const workflowStatusArtifacts = ok && !artifactEventEmitted
+        ? resolveKSwarmWorkflowStatusArtifacts(toolCall.name, result)
+        : [];
+      if (workflowStatusArtifacts.length > 0) {
+        artifactEventEmitted = true;
+        for (const artifact of workflowStatusArtifacts) {
+          ctx.emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId: ctx.sessionId,
+            turnId: ctx.turnId,
+            intentId: ctx.intentId,
+            stageId: ctx.stepId,
+            artifactId: artifact.artifactId,
+            label: artifact.label,
+            kind: artifact.kind,
+            path: artifact.filePath,
+            creator: artifact.creator,
+          });
+        }
+      }
+      if (
+        ok
+        && !artifactEventEmitted
+        && !isToolName(toolCall.name, 'write')
+        && !isToolName(toolCall.name, 'render_ui')
+        && !isToolName(toolCall.name, 'get_dynamic_workflow_status')
+      ) {
         const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
         if (filePath) {
           ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });

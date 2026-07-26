@@ -6,6 +6,9 @@ import { AgentRunController } from './controller.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('agent-runtime');
+const MAX_COMPACT_MEMORY_REMINDER_CHARS = 8_000;
+const COMPACT_MEMORY_REMINDER_PREFIX = '<system-reminder>\n[Memory restored after compact]\n';
+const COMPACT_MEMORY_REMINDER_SUFFIX = '\n</system-reminder>';
 import type { AgentRuntimeEvent } from './events.js';
 import { isAbortError } from './abort-utils.js';
 import {
@@ -17,6 +20,7 @@ import {
 import { AgentSessionState } from './session.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
+import { executePortableCompaction } from './portable-compaction-executor.js';
 import type { MemoryStore } from '../memory/store.js';
 import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
 import type { TraceBundleV1, TraceToolCall } from '../../runtime/trace/schema.js';
@@ -50,7 +54,6 @@ export class AgentRuntime {
   private readonly compactThresholdOverride?: number;
   private contextLimit: number;
   private compactThreshold: number;
-  private readonly compactPlaceholder: string;
   private supportsPromptCaching: boolean;
   private promptSnapshot?: PromptSnapshot;
   private compactRunner: CompactRunner;
@@ -73,7 +76,6 @@ export class AgentRuntime {
     this.compactThresholdOverride = options.compactThreshold;
     this.contextLimit = 200_000;
     this.compactThreshold = 0.85;
-    this.compactPlaceholder = options.compactPlaceholder ?? '[context compacted]';
     this.supportsPromptCaching = false;
     this.refreshModelPolicy();
     this.compactRunner = new CompactRunner(this.adapter);
@@ -138,6 +140,8 @@ export class AgentRuntime {
       let emptyRetries = 0;
       const verificationToolCalls: TraceToolCall[] = [];
       let codeMutatingToolSeen = false;
+      let autoCompactionBlocked = false;
+      let noReplacementRevision: number | undefined;
       while (true) {
         this.throwIfAborted(mergedSignal, onEvent, run.runId);
         currentAssistantBlocks = [];
@@ -157,30 +161,60 @@ export class AgentRuntime {
           return;
         }
 
-        if (shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
-          const messages = this.session.getMessages();
-          let summaryText: string;
-          try {
-            summaryText = await this.compactRunner.run(messages, mergedSignal);
-          } catch (compactError) {
-            if (isAbortError(compactError)) {
-              throw compactError;
+        if (
+          !autoCompactionBlocked
+          && shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)
+        ) {
+          const plan = this.session.planCompaction();
+          if (plan.sourceRevision === noReplacementRevision) {
+            // The same frozen history still has no replaceable prefix.
+          } else {
+            const outcome = await executePortableCompaction(
+              {
+                plan,
+                signal: mergedSignal,
+                trigger: { kind: 'threshold' },
+              },
+              {
+                summarizePrefix: (messages, signal) =>
+                  this.compactRunner.run([...messages], signal),
+                applyPlan: (frozenPlan, summaryText) =>
+                  this.session.applyCompaction(frozenPlan, summaryText),
+              },
+            );
+
+            if (
+              outcome.summaryModelFailed
+              && outcome.summaryFailureCode === 'portable_summary_failed'
+            ) {
+              onEvent({
+                type: 'compact_failed',
+                runId: run.runId,
+                error: 'portable compaction summary failed',
+              });
             }
-            onEvent({
-              type: 'compact_failed',
-              runId: run.runId,
-              error: compactError instanceof Error ? compactError.message : String(compactError),
-            });
-            summaryText = '';
+
+            if (outcome.status === 'no_replacement') {
+              noReplacementRevision = plan.sourceRevision;
+            } else if (outcome.status === 'compacted') {
+              autoCompactionBlocked = true;
+              onEvent({
+                type: 'compact_triggered',
+                runId: run.runId,
+                summary: outcome.record.summary,
+                compactionId: outcome.record.id,
+              });
+              try {
+                await this.injectMemoryAfterCompact();
+              } catch (memoryError) {
+                logger.warn('injectMemoryAfterCompact failed', {
+                  error: memoryError instanceof Error ? memoryError.message : String(memoryError),
+                });
+              }
+            } else {
+              autoCompactionBlocked = true;
+            }
           }
-          const compaction = this.session.forceCompact(summaryText || this.compactPlaceholder);
-          onEvent({
-            type: 'compact_triggered',
-            runId: run.runId,
-            summary: compaction?.summary ?? this.compactPlaceholder,
-            compactionId: compaction?.id,
-          });
-          await this.injectMemoryAfterCompact();
         }
 
         for await (const chunk of (this.adapter as CapabilityAwareAdapter).stream(
@@ -478,8 +512,22 @@ export class AgentRuntime {
     if (relevant.length === 0) return;
 
     const memText = relevant.map((m) => `- ${m.title}: ${m.summary}`).join('\n');
+    const thresholdTokens = Math.floor(this.contextLimit * this.compactThreshold);
+    const currentTokens = estimateTokens(this.session.getMessages());
+    const headroomChars = Math.max(0, thresholdTokens - currentTokens) * 4;
+    const reminderChars = Math.min(MAX_COMPACT_MEMORY_REMINDER_CHARS, headroomChars);
+    const contentChars = reminderChars
+      - COMPACT_MEMORY_REMINDER_PREFIX.length
+      - COMPACT_MEMORY_REMINDER_SUFFIX.length;
+    if (contentChars <= 0) return;
+
+    const boundedMemory = memText.length > contentChars
+      ? `${memText.slice(0, Math.max(0, contentChars - 1))}…`
+      : memText;
+    if (!boundedMemory) return;
+
     this.session.appendUserText(
-      `<system-reminder>\n[Memory restored after compact]\n${memText}\n</system-reminder>`,
+      `${COMPACT_MEMORY_REMINDER_PREFIX}${boundedMemory}${COMPACT_MEMORY_REMINDER_SUFFIX}`,
     );
   }
 }

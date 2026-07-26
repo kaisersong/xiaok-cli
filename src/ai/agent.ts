@@ -70,7 +70,7 @@ export class Agent {
   }
 
   forceCompact(): CompactionRecord | null {
-    return this.session.forceCompact('[context compacted]');
+    return this.session.forceCompact();
   }
 
   getUsage(): UsageStats {
