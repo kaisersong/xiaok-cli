@@ -872,6 +872,26 @@ describe('OpenAIAdapter', () => {
     });
   });
 
+  it('resets dialect state when delimiter-like capabilities would collide in a flat fingerprint', () => {
+    const adapter = createStrictKimiAdapter({
+      capabilities: ['thinking,tools'],
+    });
+    Object.assign(getReasoningDialectState(adapter), {
+      current: 'reasoning',
+      learned: true,
+    } satisfies ReasoningDialectState);
+
+    const clone = adapter.cloneWithModel('k3');
+
+    expect(clone.harnessContext.identity.capabilities).toEqual(['tools', 'thinking']);
+    expect(clone.harnessContext.identityFingerprint)
+      .not.toBe(adapter.harnessContext.identityFingerprint);
+    expect(getReasoningDialectState(clone)).toEqual({
+      current: 'reasoning_content',
+      learned: false,
+    });
+  });
+
   it('emits text chunks from streaming response', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 

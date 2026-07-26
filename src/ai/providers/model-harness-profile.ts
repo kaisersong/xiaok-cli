@@ -155,15 +155,15 @@ function buildIdentityFingerprint(
   identity: AdapterBindingIdentity,
   profile: ModelHarnessProfile,
 ): string {
-  return [
+  return JSON.stringify([
     identity.providerId,
     identity.providerType,
     identity.protocol,
     identity.canonicalBaseUrl ?? '',
     identity.wireModel,
-    [...identity.capabilities].sort().join(','),
+    [...identity.capabilities].sort(),
     profile.id,
-  ].join('|');
+  ]);
 }
 
 export function resolveKimiHarnessFeatureFlags(

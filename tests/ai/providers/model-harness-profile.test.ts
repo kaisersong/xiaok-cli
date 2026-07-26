@@ -241,7 +241,15 @@ describe('model harness identity fingerprint', () => {
     });
 
     expect(context.identityFingerprint).toBe(
-      'kimi|first_party|openai_legacy|https://api.kimi.com/coding/v1|k3|thinking,tools|kimi-k3-coding-openai',
+      JSON.stringify([
+        'kimi',
+        'first_party',
+        'openai_legacy',
+        'https://api.kimi.com/coding/v1',
+        'k3',
+        ['thinking', 'tools'],
+        'kimi-k3-coding-openai',
+      ]),
     );
     expect(capabilities).toEqual(['tools', 'thinking']);
   });
@@ -257,5 +265,24 @@ describe('model harness identity fingerprint', () => {
     });
 
     expect(changed.identityFingerprint).not.toBe(baseline.identityFingerprint);
+  });
+
+  it('does not collide when one capability contains the list delimiter', () => {
+    const combined = buildOpenAIHarnessContext({
+      identity: {
+        ...identity,
+        capabilities: ['thinking,tools'],
+      },
+      flags,
+    });
+    const separate = buildOpenAIHarnessContext({
+      identity: {
+        ...identity,
+        capabilities: ['thinking', 'tools'],
+      },
+      flags,
+    });
+
+    expect(combined.identityFingerprint).not.toBe(separate.identityFingerprint);
   });
 });
