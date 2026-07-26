@@ -99,10 +99,72 @@ function serializeKimiReasoning(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonnegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function normalizeKimiUsageSnapshot(value: unknown): UsageStats | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const promptTokens = value.prompt_tokens;
+  const completionTokens = value.completion_tokens;
+  if (
+    !isNonnegativeSafeInteger(promptTokens)
+    || !isNonnegativeSafeInteger(completionTokens)
+  ) {
+    return undefined;
+  }
+
+  const details = isRecord(value.prompt_tokens_details)
+    ? value.prompt_tokens_details
+    : undefined;
+  const directCachedTokens = value.cached_tokens;
+  const detailsCachedTokens = details?.cached_tokens;
+  const cacheReadInputTokens = (
+    isNonnegativeSafeInteger(directCachedTokens)
+    && directCachedTokens <= promptTokens
+  )
+    ? directCachedTokens
+    : (
+        isNonnegativeSafeInteger(detailsCachedTokens)
+        && detailsCachedTokens <= promptTokens
+          ? detailsCachedTokens
+          : undefined
+      );
+
+  return {
+    inputTokens: promptTokens,
+    outputTokens: completionTokens,
+    ...(cacheReadInputTokens !== undefined
+      ? { cacheReadInputTokens }
+      : {}),
+  };
+}
+
+function extractKimiUsage(chunk: Record<string, unknown>): UsageStats | undefined {
+  const topLevel = normalizeKimiUsageSnapshot(chunk.usage);
+  if (topLevel) {
+    return topLevel;
+  }
+
+  const choices = chunk.choices;
+  if (!Array.isArray(choices) || !isRecord(choices[0])) {
+    return undefined;
+  }
+  return normalizeKimiUsageSnapshot(choices[0].usage);
+}
+
 export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze({
   id: 'kimi-k3-coding-openai',
   normalizeToolSchema: normalizeKimiToolSchema,
   serializeReasoning: serializeKimiReasoning,
+  extractUsage: extractKimiUsage,
   shouldOmitAssistantContent: ({ hasToolCalls, text }) => (
     hasToolCalls && text.trim().length === 0
   ),

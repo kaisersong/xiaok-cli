@@ -732,6 +732,69 @@ describe('AgentRuntime', () => {
     expect(startRun).not.toHaveBeenCalled();
   });
 
+  it('applies usage before pulling and rethrowing the same abort error without completion', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('adapter aborted after usage', 'AbortError');
+    const usage = {
+      inputTokens: 17,
+      outputTokens: 6,
+      cacheReadInputTokens: 4,
+    };
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* () {
+        controller.abort(sentinel);
+        yield { type: 'usage', usage };
+        throw sentinel;
+      },
+    };
+    const session = new AgentSessionState();
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const events: string[] = [];
+
+    await expect(runtime.run('hi', (event) => {
+      events.push(event.type);
+    }, controller.signal)).rejects.toBe(sentinel);
+
+    expect(session.getUsage()).toEqual(usage);
+    expect(events.filter((type) => type === 'usage_updated')).toHaveLength(1);
+    expect(events).not.toContain('run_completed');
+  });
+
+  it('checks abort after clean stream exhaustion before reporting completion', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('aborted at clean exhaustion', 'AbortError');
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* () {
+        yield { type: 'text', delta: 'visible before exhaustion' };
+        controller.abort(sentinel);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const events: string[] = [];
+
+    await expect(runtime.run('hi', (event) => {
+      events.push(event.type);
+    }, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(events).not.toContain('run_completed');
+  });
+
   it('persists partial assistant text with sentinel and emits partialText when aborted mid-stream', async () => {
     const controller = new AbortController();
     const session = new AgentSessionState();

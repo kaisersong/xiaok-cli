@@ -1,7 +1,13 @@
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
-import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
+import type {
+  ModelAdapter,
+  Message,
+  ToolDefinition,
+  StreamChunk,
+  UsageStats,
+} from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
@@ -38,8 +44,33 @@ function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+}
+
+function throwIfCallerAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw abortReason(signal);
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(abortReason(signal));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(signal ? abortReason(signal) : new DOMException('The operation was aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
@@ -49,6 +80,11 @@ type OpenAIHttpAgent = HttpAgent | HttpsAgent;
 
 interface KimiReasoningEffortRequestExtension {
   reasoning_effort: ModelReasoningEffort;
+}
+
+interface StreamAttemptState {
+  latestProviderUsage?: UsageStats;
+  outputChars: number;
 }
 
 function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
@@ -66,6 +102,30 @@ function collectReasoningText(blocks: Message['content']): string | undefined {
     .join('\n\n');
 
   return reasoning || undefined;
+}
+
+function estimateStreamUsage(
+  messages: Message[],
+  systemPrompt: string,
+  outputChars: number,
+): UsageStats {
+  const allInputMessages = [
+    { role: 'user' as const, content: [{ type: 'text' as const, text: systemPrompt }] },
+    ...messages.map(m => ({
+      role: m.role,
+      content: m.content.map(b => {
+        if (b.type === 'text') return { type: 'text' as const, text: b.text };
+        if (b.type === 'tool_use') return { type: 'text' as const, text: JSON.stringify(b.input) };
+        if (b.type === 'tool_result') return { type: 'text' as const, text: b.content };
+        if (b.type === 'image') return { type: 'text' as const, text: '[image]' };
+        return { type: 'text' as const, text: '' };
+      }),
+    })),
+  ];
+  return {
+    inputTokens: estimateTokens(allInputMessages as unknown as Message[]),
+    outputTokens: Math.ceil(outputChars / 4),
+  };
 }
 
 function hasHarnessCapability(
@@ -314,28 +374,66 @@ export class OpenAIAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const bufferedUsage = (
+      this.harnessContext.flags.normalizeUsage
+      && this.harnessContext.profile.extractUsage !== undefined
+    );
     let attempt = 0;
     while (true) {
+      throwIfCallerAborted(options?.signal);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
       const signal = options?.signal
         ? AbortSignal.any([controller.signal, options.signal])
         : controller.signal;
       let emittedAny = false;
+      const attemptState: StreamAttemptState = { outputChars: 0 };
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
+        for await (const chunk of this.streamOnce(
+          messages,
+          tools,
+          systemPrompt,
+          options,
+          signal,
+          bufferedUsage ? attemptState : undefined,
+        )) {
           emittedAny = true;
           yield chunk;
+        }
+        if (options?.signal?.aborted) {
+          throw abortReason(options.signal);
+        }
+        if (bufferedUsage) {
+          yield {
+            type: 'usage',
+            usage: attemptState.latestProviderUsage
+              ?? estimateStreamUsage(messages, systemPrompt, attemptState.outputChars),
+          };
+          yield { type: 'done' };
         }
         return;
       } catch (error) {
         clearTimeout(timer);
+        const terminalError = options?.signal?.aborted
+          ? (options.signal.reason ?? error)
+          : error;
         // 已产出 chunk 后重试会重复输出，必须放弃重试
-        if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
-          throw error;
+        if (
+          options?.signal?.aborted
+          || emittedAny
+          || !isRetryableError(error)
+          || attempt >= MAX_RETRIES
+        ) {
+          if (bufferedUsage && attemptState.latestProviderUsage) {
+            yield {
+              type: 'usage',
+              usage: attemptState.latestProviderUsage,
+            };
+          }
+          throw terminalError;
         }
         const delayMs = Math.min(1000 * 2 ** attempt, 16000);
-        await sleep(delayMs);
+        await sleep(delayMs, options?.signal);
         attempt += 1;
       } finally {
         clearTimeout(timer);
@@ -349,6 +447,7 @@ export class OpenAIAdapter implements ModelAdapter {
     systemPrompt: string,
     _options?: StreamOptions,
     signal?: AbortSignal,
+    attemptState?: StreamAttemptState,
   ): AsyncIterable<StreamChunk> {
     const normalizeToolSchema = this.harnessContext.profile.normalizeToolSchema;
     const shouldNormalizeToolSchemas = (
@@ -554,10 +653,20 @@ export class OpenAIAdapter implements ModelAdapter {
     let emittedDone = false;
     let outputChars = 0;
     let usageReceived = false;
+    const extractBufferedUsage = attemptState
+      ? this.harnessContext.profile.extractUsage
+      : undefined;
 
     for await (const chunk of stream) {
-      // Extract usage from chunk (include_usage: true)
-      if (chunk.usage) {
+      if (extractBufferedUsage && attemptState) {
+        const usage = extractBufferedUsage(
+          chunk as unknown as Record<string, unknown>,
+        );
+        if (usage) {
+          attemptState.latestProviderUsage = usage;
+        }
+      } else if (chunk.usage) {
+        // Generic baseline keeps inline usage emission.
         usageReceived = true;
         yield {
           type: 'usage',
@@ -566,6 +675,10 @@ export class OpenAIAdapter implements ModelAdapter {
             outputTokens: chunk.usage.completion_tokens ?? 0,
           },
         };
+      }
+
+      if (attemptState && emittedDone) {
+        continue;
       }
 
       const choice = chunk.choices[0];
@@ -594,6 +707,9 @@ export class OpenAIAdapter implements ModelAdapter {
             continue;
           }
           outputChars += segment.delta.length;
+          if (attemptState) {
+            attemptState.outputChars = outputChars;
+          }
           yield segment;
         }
       }
@@ -615,6 +731,9 @@ export class OpenAIAdapter implements ModelAdapter {
             continue;
           }
           outputChars += segment.delta.length;
+          if (attemptState) {
+            attemptState.outputChars = outputChars;
+          }
           yield segment;
         }
 
@@ -629,28 +748,16 @@ export class OpenAIAdapter implements ModelAdapter {
         }
         toolBuffers.clear();
 
+        if (attemptState) {
+          emittedDone = true;
+          continue;
+        }
+
         // If the API didn't return usage, estimate locally
         if (!usageReceived) {
-          const allInputMessages = [
-            { role: 'user' as const, content: [{ type: 'text' as const, text: systemPrompt }] },
-            ...messages.map(m => ({
-              role: m.role,
-              content: m.content.map(b => {
-                if (b.type === 'text') return { type: 'text' as const, text: b.text };
-                if (b.type === 'tool_use') return { type: 'text' as const, text: JSON.stringify(b.input) };
-                if (b.type === 'tool_result') return { type: 'text' as const, text: b.content };
-                if (b.type === 'image') return { type: 'text' as const, text: '[image]' };
-                return { type: 'text' as const, text: '' };
-              }),
-            })),
-          ];
-          const inputTokens = estimateTokens(allInputMessages as unknown as Message[]);
           yield {
             type: 'usage',
-            usage: {
-              inputTokens,
-              outputTokens: Math.ceil(outputChars / 4),
-            },
+            usage: estimateStreamUsage(messages, systemPrompt, outputChars),
           };
         }
 
@@ -667,6 +774,9 @@ export class OpenAIAdapter implements ModelAdapter {
           continue;
         }
         outputChars += segment.delta.length;
+        if (attemptState) {
+          attemptState.outputChars = outputChars;
+        }
         yield segment;
       }
 
@@ -680,27 +790,14 @@ export class OpenAIAdapter implements ModelAdapter {
         yield { type: 'tool_use', id: buf.id, name: buf.name, input };
       }
 
+      if (attemptState) {
+        return;
+      }
+
       if (!usageReceived) {
-        const allInputMessages = [
-          { role: 'user' as const, content: [{ type: 'text' as const, text: systemPrompt }] },
-          ...messages.map(m => ({
-            role: m.role,
-            content: m.content.map(b => {
-              if (b.type === 'text') return { type: 'text' as const, text: b.text };
-              if (b.type === 'tool_use') return { type: 'text' as const, text: JSON.stringify(b.input) };
-              if (b.type === 'tool_result') return { type: 'text' as const, text: b.content };
-              if (b.type === 'image') return { type: 'text' as const, text: '[image]' };
-              return { type: 'text' as const, text: '' };
-            }),
-          })),
-        ];
-        const inputTokens = estimateTokens(allInputMessages as unknown as Message[]);
         yield {
           type: 'usage',
-          usage: {
-            inputTokens,
-            outputTokens: Math.ceil(outputChars / 4),
-          },
+          usage: estimateStreamUsage(messages, systemPrompt, outputChars),
         };
       }
 

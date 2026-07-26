@@ -223,8 +223,13 @@ export class AgentRuntime {
           this.systemPrompt,
           this.buildInvocationOptions(mergedSignal),
         )) {
-          this.throwIfAborted(mergedSignal, onEvent, run.runId);
+          if (chunk.type === 'usage') {
+            const usage = this.session.updateUsage(chunk.usage);
+            onEvent({ type: 'usage_updated', runId: run.runId, usage });
+            continue;
+          }
 
+          this.throwIfAborted(mergedSignal, onEvent, run.runId);
           if (chunk.type === 'text') {
             // Merge consecutive text blocks to avoid fragmented storage
             const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
@@ -252,16 +257,11 @@ export class AgentRuntime {
             continue;
           }
 
-          if (chunk.type === 'usage') {
-            const usage = this.session.updateUsage(chunk.usage);
-            onEvent({ type: 'usage_updated', runId: run.runId, usage });
-            continue;
-          }
-
           if (chunk.type === 'done') {
             break;
           }
         }
+        this.throwIfAborted(mergedSignal, onEvent, run.runId);
 
         const hasVisibleOutput = currentAssistantBlocks.some(
           (block) => block.type === 'text' || block.type === 'tool_use',
