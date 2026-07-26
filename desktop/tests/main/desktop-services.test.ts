@@ -389,11 +389,13 @@ describe('desktop services', () => {
   it('runs a kswarm handoff through desktop runtime and returns artifact provenance', async () => {
     const artifactPath = join(rootDir, 'report.md');
     let receivedPrompt = '';
+    let receivedSessionId = '';
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
       kswarmService: mockKSwarmService(),
       now: () => 300,
       runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedSessionId = sessionId;
         receivedPrompt = prompt;
         writeFileSync(artifactPath, '# Report');
         emitRuntimeEvent({
@@ -438,6 +440,9 @@ describe('desktop services', () => {
     expect(receivedPrompt).toContain('不要用 make-pdf');
     expect(receivedPrompt).toContain('必须产出：markdown, report_html, json');
     expect(receivedPrompt).not.toContain('[object Object]');
+    expect(receivedSessionId).toMatch(
+      /^sess_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(result).toMatchObject({
       summary: '报告已生成。',
       artifacts: [{ path: artifactPath, kind: 'markdown', label: 'report.md' }],
