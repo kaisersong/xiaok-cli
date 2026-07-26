@@ -101,7 +101,7 @@ function createTestAdapter(input: {
 }
 
 describe('OpenAIAdapter', () => {
-  it.each(['/coding/v1', '/coding/v2'])(
+  it.each(['/coding', '/coding/v1', '/coding/v2', '/coding/v3', '/coding/preview'])(
     'factory owns compatibility headers for a custom Kimi %s endpoint',
     async (path) => {
       openAIConstructorCalls.length = 0;

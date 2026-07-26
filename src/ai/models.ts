@@ -29,17 +29,8 @@ function isKimiCodingCompatibilityEndpoint(baseUrl?: string): boolean {
 
   try {
     const url = new URL(baseUrl);
-    return url.protocol === 'https:'
-      && url.hostname === 'api.kimi.com'
-      && url.port === ''
-      && url.username === ''
-      && url.password === ''
-      && (
-        url.pathname === '/coding/v1'
-        || url.pathname === '/coding/v1/'
-        || url.pathname === '/coding/v2'
-        || url.pathname === '/coding/v2/'
-      );
+    return url.hostname === 'api.kimi.com'
+      && url.pathname.startsWith('/coding');
   } catch {
     return false;
   }
