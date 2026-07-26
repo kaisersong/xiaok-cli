@@ -3,10 +3,8 @@ import type { ToolDefinition } from '../../types.js';
 export interface McpToolSchema {
   name: string;
   description?: string;
-  inputSchema: {
+  inputSchema: Record<string, unknown> & {
     type: 'object';
-    properties?: Record<string, unknown>;
-    required?: string[];
   };
 }
 
@@ -18,10 +16,6 @@ export function normalizeMcpToolSchema(server: string, schema: McpToolSchema): T
   return {
     name: prefixMcpToolName(server, schema.name),
     description: schema.description ?? '',
-    inputSchema: {
-      type: 'object',
-      properties: schema.inputSchema.properties ?? {},
-      required: schema.inputSchema.required ?? [],
-    },
+    inputSchema: { ...schema.inputSchema },
   };
 }

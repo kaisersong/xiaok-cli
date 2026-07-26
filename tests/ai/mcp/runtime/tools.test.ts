@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildMcpRuntimeTools, createMcpRuntimeTools } from '../../../../src/ai/mcp/runtime/tools.js';
+import type { McpToolSchema } from '../../../../src/ai/mcp/client.js';
 
 describe('createMcpRuntimeTools', () => {
   it('exposes MCP declarations as executable runtime tools', async () => {
@@ -42,6 +43,46 @@ describe('createMcpRuntimeTools', () => {
 
     expect(tools.map((tool) => tool.definition.name)).toEqual(['mcp__docs__search']);
     await expect(tools[0]?.execute({ q: 'cache' })).resolves.toBe('docs:cache');
+  });
+
+  it('keeps the complete MCP schema intact through runtime tool construction', () => {
+    const inputSchema: McpToolSchema['inputSchema'] & Record<string, unknown> = {
+      type: 'object',
+      $defs: {
+        query: {
+          oneOf: [
+            { type: 'string', const: 'latest' },
+            { type: 'string', enum: ['all', 'recent'] },
+          ],
+        },
+      },
+      properties: {
+        q: { $ref: '#/$defs/query' },
+      },
+      required: ['q'],
+      'x-runtime-extension': {
+        preserve: true,
+      },
+    };
+
+    const tools = buildMcpRuntimeTools(
+      { name: 'docs', command: 'node ./fake-docs-server.js' },
+      {
+        listTools: async () => [],
+        callTool: async () => 'ok',
+        dispose: () => undefined,
+      },
+      [
+        {
+          name: 'search',
+          description: 'search docs',
+          inputSchema,
+        },
+      ],
+    );
+
+    expect(tools[0]?.definition.inputSchema).toEqual(inputSchema);
+    expect(tools[0]?.definition.inputSchema).not.toBe(inputSchema);
   });
 
   it('keeps ordinary MCP tools safe by default but treats CUA action tools as write-permission', () => {

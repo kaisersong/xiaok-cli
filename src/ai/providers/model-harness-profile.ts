@@ -4,6 +4,10 @@ import {
   resolveModelCapabilities,
   type ModelCapabilities,
 } from '../runtime/model-capabilities.js';
+import {
+  normalizeKimiToolSchema,
+  type NormalizedKimiSchema,
+} from './kimi-tool-schema.js';
 import type { ModelRuntimeOptions, ProtocolId } from './types.js';
 
 const KIMI_K3_CODING_OPENAI_BASE_URL = 'https://api.kimi.com/coding/v1';
@@ -29,7 +33,9 @@ export interface AdapterBindingIdentity {
 
 export interface ModelHarnessProfile {
   readonly id: 'generic-openai' | 'kimi-k3-coding-openai';
-  normalizeToolSchema?: (schema: Record<string, unknown>) => Record<string, unknown>;
+  normalizeToolSchema?: (
+    schema: Record<string, unknown>,
+  ) => NormalizedKimiSchema;
   serializeReasoning?: (
     blocks: MessageBlock[],
     dialect: ReasoningKeyName,
@@ -71,6 +77,7 @@ export const GENERIC_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze
 
 export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze({
   id: 'kimi-k3-coding-openai',
+  normalizeToolSchema: normalizeKimiToolSchema,
 });
 
 export function resolveKimiHarnessFeatureFlags(

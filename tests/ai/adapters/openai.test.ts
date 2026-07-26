@@ -8,7 +8,12 @@ import {
   type OpenAIAdapterInit,
   type ReasoningKeyName,
 } from '../../../src/ai/providers/model-harness-profile.js';
+import {
+  KIMI_SCHEMA_LIMITS,
+  KimiToolSchemaError,
+} from '../../../src/ai/providers/kimi-tool-schema.js';
 import type { ModelRuntimeOptions } from '../../../src/ai/providers/types.js';
+import type { ToolDefinition } from '../../../src/types.js';
 
 const openAIConstructorCalls: unknown[] = [];
 
@@ -17,6 +22,14 @@ type KimiReasoningEffort = 'low' | 'high' | 'max';
 interface CapturedChatCompletionRequest {
   model: string;
   reasoning_effort?: KimiReasoningEffort;
+  tools?: Array<{
+    type: 'function';
+    function: {
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    };
+  }>;
 }
 
 vi.mock('openai', () => {
@@ -35,7 +48,10 @@ vi.mock('openai', () => {
   };
 });
 
-async function captureChatCompletionRequest(adapter: unknown): Promise<CapturedChatCompletionRequest> {
+async function captureChatCompletionRequest(
+  adapter: unknown,
+  tools: ToolDefinition[] = [],
+): Promise<CapturedChatCompletionRequest> {
   let capturedRequest: CapturedChatCompletionRequest | undefined;
   const mockStream = {
     async *[Symbol.asyncIterator]() {
@@ -52,14 +68,84 @@ async function captureChatCompletionRequest(adapter: unknown): Promise<CapturedC
 
   (adapter as { client: typeof instance }).client = instance;
   const streamAdapter = adapter as {
-    stream(messages: never[], tools: never[], systemPrompt: string): AsyncIterable<unknown>;
+    stream(
+      messages: never[],
+      tools: ToolDefinition[],
+      systemPrompt: string,
+    ): AsyncIterable<unknown>;
   };
-  for await (const _ of streamAdapter.stream([], [], 'system')) { /* consume */ }
+  for await (const _ of streamAdapter.stream([], tools, 'system')) { /* consume */ }
 
   if (!capturedRequest) {
     throw new Error('OpenAI request was not captured');
   }
   return capturedRequest;
+}
+
+async function attachRequestSpy(adapter: OpenAIAdapter) {
+  const mockStream = {
+    async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+    },
+  };
+  const OpenAI = (await import('openai')).default;
+  const instance = new OpenAI({ apiKey: 'test' });
+  const createSpy = vi.spyOn(instance.chat.completions, 'create')
+    .mockResolvedValue(mockStream as never);
+  (adapter as unknown as { client: typeof instance }).client = instance;
+  return createSpy;
+}
+
+async function captureStreamError(
+  adapter: OpenAIAdapter,
+  tools: ToolDefinition[],
+): Promise<unknown> {
+  try {
+    for await (const _ of adapter.stream([], tools, 'system')) { /* consume */ }
+  } catch (error) {
+    return error;
+  }
+  throw new Error('Expected stream to reject before SDK create');
+}
+
+function tool(
+  name: string,
+  inputSchema: Record<string, unknown>,
+): ToolDefinition {
+  return {
+    name,
+    description: `${name} description`,
+    inputSchema,
+  };
+}
+
+function schemaWithInputNodes(target: number): Record<string, unknown> {
+  return {
+    'x-padding': Array.from({ length: target - 2 }, () => null),
+  };
+}
+
+function schemaWithOutputBytes(target: number): Record<string, unknown> {
+  return {
+    x: 'a'.repeat(target - 8),
+  };
+}
+
+function wideSharedRefSchema(): Record<string, unknown> {
+  return {
+    $defs: {
+      payload: {
+        type: 'object',
+        'x-padding': Array.from({ length: 113 }, () => null),
+      },
+    },
+    properties: Object.fromEntries(
+      Array.from({ length: 430 }, (_, index) => [
+        `tool${index}`,
+        { $ref: '#/$defs/payload' },
+      ]),
+    ),
+  };
 }
 
 function createTestAdapter(input: {
@@ -99,6 +185,283 @@ function createTestAdapter(input: {
 
   return new OpenAIAdapter(init);
 }
+
+function createStrictKimiAdapter(
+  overrides: Partial<Parameters<typeof createTestAdapter>[0]> = {},
+): OpenAIAdapter {
+  return createTestAdapter({
+    wireModel: 'k3',
+    providerId: 'kimi',
+    providerType: 'first_party',
+    baseUrl: 'https://api.kimi.com/coding/v1',
+    capabilities: ['tools', 'thinking'],
+    ...overrides,
+  });
+}
+
+describe('OpenAIAdapter Kimi tool schema serialization gate', () => {
+  it('normalizes schemas only for the strict Kimi profile with tools capability and flag enabled', async () => {
+    const inputSchema = {
+      type: 'object',
+      properties: {
+        value: {},
+      },
+    };
+    const snapshot = structuredClone(inputSchema);
+    const adapter = createStrictKimiAdapter();
+
+    const request = await captureChatCompletionRequest(adapter, [
+      tool('strict-kimi', inputSchema),
+    ]);
+
+    expect(request.tools?.[0]?.function.parameters).toEqual({
+      type: 'object',
+      properties: {
+        value: { type: 'string' },
+      },
+    });
+    expect(request.tools?.[0]?.function.parameters).not.toBe(inputSchema);
+    expect(inputSchema).toEqual(snapshot);
+  });
+
+  it.each([
+    {
+      label: 'generic provider',
+      input: {
+        wireModel: 'gpt-4o',
+        providerId: 'openai',
+        providerType: 'first_party' as const,
+        baseUrl: 'https://api.openai.com/v1',
+        capabilities: ['tools'],
+      },
+    },
+    {
+      label: 'custom Kimi binding',
+      input: {
+        wireModel: 'k3',
+        providerId: 'kimi',
+        providerType: 'custom' as const,
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        capabilities: ['tools'],
+      },
+    },
+    {
+      label: 'Kimi K2 model',
+      input: {
+        wireModel: 'kimi-k2.7',
+        providerId: 'kimi',
+        providerType: 'first_party' as const,
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        capabilities: ['tools'],
+      },
+    },
+    {
+      label: 'strict profile without tools capability',
+      input: {
+        wireModel: 'k3',
+        providerId: 'kimi',
+        providerType: 'first_party' as const,
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        capabilities: ['thinking'],
+      },
+    },
+    {
+      label: 'strict profile with normalization flag disabled',
+      input: {
+        wireModel: 'k3',
+        providerId: 'kimi',
+        providerType: 'first_party' as const,
+        baseUrl: 'https://api.kimi.com/coding/v1',
+        capabilities: ['tools'],
+        flags: {
+          ...resolveKimiHarnessFeatureFlags({}),
+          normalizeToolSchema: false,
+        },
+      },
+    },
+  ])('keeps baseline wire schema identity for $label', async ({ input }) => {
+    const inputSchema = {
+      type: 'object',
+      properties: {
+        value: {},
+      },
+    };
+    const adapter = createTestAdapter(input);
+
+    const request = await captureChatCompletionRequest(adapter, [
+      tool('baseline', inputSchema),
+    ]);
+
+    expect(request.tools?.[0]?.function.parameters).toBe(inputSchema);
+    expect(request.tools?.[0]?.function.parameters).toEqual({
+      type: 'object',
+      properties: {
+        value: {},
+      },
+    });
+  });
+});
+
+describe('OpenAIAdapter Kimi request schema budgets', () => {
+  it('accepts request tool count limit - 1 and rejects limit + 1 before reading schemas', async () => {
+    const acceptedAdapter = createStrictKimiAdapter();
+    const acceptedRequest = await captureChatCompletionRequest(
+      acceptedAdapter,
+      Array.from(
+        { length: KIMI_SCHEMA_LIMITS.maxRequestToolCount - 1 },
+        (_, index) => tool(`accepted-${index}`, {}),
+      ),
+    );
+    expect(acceptedRequest.tools).toHaveLength(
+      KIMI_SCHEMA_LIMITS.maxRequestToolCount - 1,
+    );
+
+    let schemaReads = 0;
+    const rejectedTools = Array.from(
+      { length: KIMI_SCHEMA_LIMITS.maxRequestToolCount + 1 },
+      (_, index) => {
+        const definition = {
+          name: `rejected-${index}`,
+          description: 'count preflight',
+        } as ToolDefinition;
+        Object.defineProperty(definition, 'inputSchema', {
+          enumerable: true,
+          get() {
+            schemaReads += 1;
+            return {};
+          },
+        });
+        return definition;
+      },
+    );
+    const rejectedAdapter = createStrictKimiAdapter();
+    const createSpy = await attachRequestSpy(rejectedAdapter);
+    const error = await captureStreamError(rejectedAdapter, rejectedTools);
+
+    expect(error).toBeInstanceOf(KimiToolSchemaError);
+    expect(error).toMatchObject({
+      code: 'KIMI_SCHEMA_LIMIT_EXCEEDED',
+      limitKind: 'request_tool_count',
+    });
+    expect(schemaReads).toBe(0);
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts request input nodes limit - 1', async () => {
+    const schemas = [
+      ...Array.from(
+        { length: 5 },
+        () => schemaWithInputNodes(KIMI_SCHEMA_LIMITS.maxInputNodes - 1),
+      ),
+      schemaWithInputNodes(4),
+    ];
+    const request = await captureChatCompletionRequest(
+      createStrictKimiAdapter(),
+      schemas.map((schema, index) => tool(`input-${index}`, schema)),
+    );
+
+    expect(request.tools).toHaveLength(6);
+  });
+
+  it('rejects request input nodes limit + 1 and never touches tool N + 1', async () => {
+    let nextSchemaReads = 0;
+    const nextTool = {
+      name: 'input-6',
+      description: 'must remain untouched',
+    } as ToolDefinition;
+    Object.defineProperty(nextTool, 'inputSchema', {
+      enumerable: true,
+      get() {
+        nextSchemaReads += 1;
+        return {};
+      },
+    });
+    const tools = [
+      ...Array.from(
+        { length: 5 },
+        (_, index) => tool(
+          `input-${index}`,
+          schemaWithInputNodes(KIMI_SCHEMA_LIMITS.maxInputNodes - 1),
+        ),
+      ),
+      tool('input-5', schemaWithInputNodes(6)),
+      nextTool,
+    ];
+    const adapter = createStrictKimiAdapter();
+    const createSpy = await attachRequestSpy(adapter);
+
+    const error = await captureStreamError(adapter, tools);
+
+    expect(error).toBeInstanceOf(KimiToolSchemaError);
+    expect(error).toMatchObject({
+      code: 'KIMI_SCHEMA_LIMIT_EXCEEDED',
+      limitKind: 'request_input_nodes',
+      toolName: 'input-5',
+    });
+    expect(nextSchemaReads).toBe(0);
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts request output nodes limit - 1 and rejects limit + 1', async () => {
+    const wideSchemas = Array.from({ length: 4 }, () => wideSharedRefSchema());
+    const acceptedRequest = await captureChatCompletionRequest(
+      createStrictKimiAdapter(),
+      [
+        ...wideSchemas.map((schema, index) => tool(`output-${index}`, schema)),
+        tool('output-4', { x: null, y: null }),
+      ],
+    );
+    expect(acceptedRequest.tools).toHaveLength(5);
+
+    const rejectedAdapter = createStrictKimiAdapter();
+    const createSpy = await attachRequestSpy(rejectedAdapter);
+    const error = await captureStreamError(rejectedAdapter, [
+      ...wideSchemas.map((schema, index) => tool(`output-${index}`, schema)),
+      tool('output-4', { x: null, y: null, z: null, w: null }),
+    ]);
+
+    expect(error).toBeInstanceOf(KimiToolSchemaError);
+    expect(error).toMatchObject({
+      code: 'KIMI_SCHEMA_LIMIT_EXCEEDED',
+      limitKind: 'request_output_nodes',
+      toolName: 'output-4',
+    });
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it('accepts request tool bytes limit - 1 and rejects limit + 1', async () => {
+    const prefixSchemas = [
+      ...Array.from(
+        { length: 3 },
+        () => schemaWithOutputBytes(KIMI_SCHEMA_LIMITS.maxOutputBytes - 1),
+      ),
+      schemaWithOutputBytes(KIMI_SCHEMA_LIMITS.maxOutputBytes - 6),
+    ];
+    const acceptedRequest = await captureChatCompletionRequest(
+      createStrictKimiAdapter(),
+      [
+        ...prefixSchemas.map((schema, index) => tool(`bytes-${index}`, schema)),
+        tool('bytes-4', { x: '' }),
+      ],
+    );
+    expect(acceptedRequest.tools).toHaveLength(5);
+
+    const rejectedAdapter = createStrictKimiAdapter();
+    const createSpy = await attachRequestSpy(rejectedAdapter);
+    const error = await captureStreamError(rejectedAdapter, [
+      ...prefixSchemas.map((schema, index) => tool(`bytes-${index}`, schema)),
+      tool('bytes-4', { x: 'aa' }),
+    ]);
+
+    expect(error).toBeInstanceOf(KimiToolSchemaError);
+    expect(error).toMatchObject({
+      code: 'KIMI_SCHEMA_LIMIT_EXCEEDED',
+      limitKind: 'request_tool_bytes',
+      toolName: 'bytes-4',
+    });
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+});
 
 describe('OpenAIAdapter', () => {
   it.each(['/coding', '/coding/v1', '/coding/v2', '/coding/v3', '/coding/preview'])(

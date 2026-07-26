@@ -11,6 +11,11 @@ import {
   type OpenAIAdapterInit,
   type ReasoningKeyName,
 } from '../providers/model-harness-profile.js';
+import {
+  KIMI_SCHEMA_LIMITS,
+  KimiToolSchemaError,
+  type KimiSchemaLimitKind,
+} from '../providers/kimi-tool-schema.js';
 import { getProviderProfile, resolveProviderModelVariant } from '../providers/registry.js';
 import type { ModelReasoningEffort } from '../providers/types.js';
 
@@ -88,6 +93,28 @@ function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signatu
   }
 
   return chunks;
+}
+
+function wrapKimiSchemaError(
+  error: KimiToolSchemaError,
+  toolName: string,
+): KimiToolSchemaError {
+  return new KimiToolSchemaError(error.code, {
+    limitKind: error.limitKind,
+    toolName,
+    message: error.message,
+  });
+}
+
+function requestLimitError(
+  limitKind: KimiSchemaLimitKind,
+  toolName?: string,
+): KimiToolSchemaError {
+  return new KimiToolSchemaError('KIMI_SCHEMA_LIMIT_EXCEEDED', {
+    limitKind,
+    toolName,
+    message: `Kimi tool request exceeded ${limitKind}`,
+  });
 }
 
 type RawThinkParserState = {
@@ -307,6 +334,69 @@ export class OpenAIAdapter implements ModelAdapter {
     _options?: StreamOptions,
     signal?: AbortSignal,
   ): AsyncIterable<StreamChunk> {
+    const normalizeToolSchema = this.harnessContext.profile.normalizeToolSchema;
+    const shouldNormalizeToolSchemas = (
+      this.harnessContext.flags.normalizeToolSchema
+      && normalizeToolSchema !== undefined
+      && this.harnessContext.identity.capabilities.some(
+        (capability) => capability.toLowerCase() === 'tools',
+      )
+    );
+    let openaiTools: OpenAI.ChatCompletionTool[];
+
+    if (!shouldNormalizeToolSchemas) {
+      openaiTools = tools.map((tool) => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema as Record<string, unknown>,
+        },
+      }));
+    } else {
+      if (tools.length > KIMI_SCHEMA_LIMITS.maxRequestToolCount) {
+        throw requestLimitError('request_tool_count');
+      }
+
+      openaiTools = [];
+      let requestInputNodes = 0;
+      let requestOutputNodes = 0;
+      let requestToolBytes = 0;
+      for (const tool of tools) {
+        let normalized;
+        try {
+          normalized = normalizeToolSchema(tool.inputSchema);
+        } catch (error) {
+          if (error instanceof KimiToolSchemaError) {
+            throw wrapKimiSchemaError(error, tool.name);
+          }
+          throw error;
+        }
+
+        requestInputNodes += normalized.inputNodes;
+        if (requestInputNodes > KIMI_SCHEMA_LIMITS.maxRequestInputNodes) {
+          throw requestLimitError('request_input_nodes', tool.name);
+        }
+        requestOutputNodes += normalized.outputNodes;
+        if (requestOutputNodes > KIMI_SCHEMA_LIMITS.maxRequestOutputNodes) {
+          throw requestLimitError('request_output_nodes', tool.name);
+        }
+        requestToolBytes += normalized.outputBytes;
+        if (requestToolBytes > KIMI_SCHEMA_LIMITS.maxRequestToolBytes) {
+          throw requestLimitError('request_tool_bytes', tool.name);
+        }
+
+        openaiTools.push({
+          type: 'function' as const,
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: normalized.schema,
+          },
+        });
+      }
+    }
+
     const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
     ];
@@ -379,15 +469,6 @@ export class OpenAIAdapter implements ModelAdapter {
         });
       }
     }
-
-    const openaiTools: OpenAI.ChatCompletionTool[] = tools.map(t => ({
-      type: 'function' as const,
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.inputSchema as Record<string, unknown>,
-      },
-    }));
 
     const request: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: this.harnessContext.identity.wireModel,
