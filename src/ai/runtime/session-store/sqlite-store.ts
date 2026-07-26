@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Message } from '../../../types.js';
@@ -53,7 +54,7 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   createSessionId(): string {
-    return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    return `sess_${randomUUID()}`;
   }
 
   async save(snapshot: PersistedSessionSnapshot): Promise<void> {

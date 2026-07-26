@@ -15,6 +15,7 @@ import {
   buildPromptCacheSegments,
   resolveModelCapabilities,
   type CapabilityAwareAdapter,
+  type RunInvocationContext,
   type StreamOptions,
 } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
@@ -102,6 +103,7 @@ export class AgentRuntime {
     input: string | MessageBlock[],
     onEvent: (event: AgentRuntimeEvent) => void,
     externalSignal?: AbortSignal,
+    invocationContext?: RunInvocationContext,
   ): Promise<void> {
     if (externalSignal?.aborted) {
       throw new DOMException('agent aborted', 'AbortError');
@@ -177,7 +179,10 @@ export class AgentRuntime {
               },
               {
                 summarizePrefix: (messages, signal) =>
-                  this.compactRunner.run([...messages], signal),
+                  this.compactRunner.run(
+                    [...messages],
+                    this.buildInvocationOptions(signal, invocationContext),
+                  ),
                 applyPlan: (frozenPlan, summaryText) =>
                   this.session.applyCompaction(frozenPlan, summaryText),
               },
@@ -221,7 +226,7 @@ export class AgentRuntime {
           this.session.getMessages(),
           this.registry.getToolDefinitions(),
           this.systemPrompt,
-          this.buildInvocationOptions(mergedSignal),
+          this.buildInvocationOptions(mergedSignal, invocationContext),
         )) {
           if (chunk.type === 'usage') {
             const usage = this.session.updateUsage(chunk.usage);
@@ -417,9 +422,19 @@ export class AgentRuntime {
     this.supportsPromptCaching = capabilities.supportsPromptCaching;
   }
 
-  private buildInvocationOptions(signal?: AbortSignal): StreamOptions | undefined {
+  private buildInvocationOptions(
+    signal?: AbortSignal,
+    invocationContext?: RunInvocationContext,
+  ): StreamOptions | undefined {
+    const options: StreamOptions = {
+      ...(signal ? { signal } : {}),
+      ...(invocationContext?.cacheKey
+        ? { cacheKey: invocationContext.cacheKey }
+        : {}),
+    };
+
     if (!this.supportsPromptCaching) {
-      return signal ? { signal } : undefined;
+      return Object.keys(options).length > 0 ? options : undefined;
     }
 
     const toolDefinitions = this.registry.getToolDefinitions()
@@ -438,12 +453,12 @@ export class AgentRuntime {
       : this.systemPrompt;
 
     return {
+      ...options,
       promptCache: buildPromptCacheSegments(
         systemPromptInput,
         toolDefinitions,
         this.session.getMessages(),
       ),
-      signal,
     };
   }
 

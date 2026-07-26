@@ -1,7 +1,103 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RuntimeFacade } from '../../../src/ai/runtime/runtime-facade.js';
+import { createPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-affinity.js';
 
 describe('RuntimeFacade', () => {
+  it('derives cache affinity only from the RuntimeTurnRequest session ID', async () => {
+    const promptBuilder = {
+      build: vi.fn().mockResolvedValue({
+        id: 'prompt_1',
+        rendered: 'system',
+        memoryRefs: [],
+        segments: [],
+        createdAt: 1,
+        cwd: '/repo',
+        channel: 'chat',
+      }),
+    };
+    const agent = {
+      getSessionState: vi.fn(() => ({ attachPromptSnapshot: vi.fn() })),
+      setPromptSnapshot: vi.fn(),
+      setSystemPrompt: vi.fn(),
+      runTurn: vi.fn().mockResolvedValue(undefined),
+    };
+    const facade = new RuntimeFacade({
+      promptBuilder,
+      getPromptInput: async () => ({
+        enterpriseId: null,
+        devApp: null,
+        budget: 2000,
+        skills: [],
+        deferredTools: [],
+        agents: [],
+        pluginCommands: [],
+        lspDiagnostics: '',
+      }),
+      agent,
+    });
+    const sessionId = 'sess_ffffffff-ffff-4fff-8fff-ffffffffffff';
+
+    await facade.runTurn({
+      sessionId,
+      cwd: '/repo',
+      source: 'chat',
+      input: 'hello',
+    }, () => {});
+
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      'hello',
+      expect.any(Function),
+      undefined,
+      { cacheKey: createPromptCacheAffinity(sessionId) },
+    );
+  });
+
+  it('does not invent cache affinity for a legacy session ID', async () => {
+    const agent = {
+      getSessionState: vi.fn(() => ({ attachPromptSnapshot: vi.fn() })),
+      setPromptSnapshot: vi.fn(),
+      setSystemPrompt: vi.fn(),
+      runTurn: vi.fn().mockResolvedValue(undefined),
+    };
+    const facade = new RuntimeFacade({
+      promptBuilder: {
+        build: vi.fn().mockResolvedValue({
+          id: 'prompt_1',
+          rendered: 'system',
+          memoryRefs: [],
+          segments: [],
+          createdAt: 1,
+          cwd: '/repo',
+          channel: 'chat',
+        }),
+      },
+      getPromptInput: async () => ({
+        enterpriseId: null,
+        devApp: null,
+        budget: 2000,
+        skills: [],
+        deferredTools: [],
+        agents: [],
+        pluginCommands: [],
+        lspDiagnostics: '',
+      }),
+      agent,
+    });
+
+    await facade.runTurn({
+      sessionId: 'sess_1',
+      cwd: '/repo',
+      source: 'chat',
+      input: 'legacy',
+    }, () => {});
+
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      'legacy',
+      expect.any(Function),
+      undefined,
+    );
+  });
+
   it('builds a prompt snapshot once and attaches it to the session before running the turn', async () => {
     const promptBuilder = {
       build: vi.fn().mockResolvedValue({

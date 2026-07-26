@@ -149,6 +149,68 @@ describe('FileSessionStore', () => {
     });
   });
 
+  it('creates, lists, loads, resumes, and forks full UUID session IDs', async () => {
+    const store = new FileSessionStore(rootDir);
+    const sessionId = store.createSessionId();
+
+    expect(sessionId).toMatch(
+      /^sess_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+
+    await store.save({
+      sessionId,
+      cwd: '/uuid-round-trip',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: [sessionId],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'uuid preview' }] }],
+      usage: { inputTokens: 1, outputTokens: 2 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    });
+
+    await expect(store.load(sessionId)).resolves.toMatchObject({ sessionId });
+    await expect(store.loadLast()).resolves.toMatchObject({ sessionId });
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({ sessionId, preview: 'uuid preview' }),
+    ]);
+
+    const forked = await store.fork(sessionId);
+    expect(forked.sessionId).toMatch(
+      /^sess_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(forked.sessionId).not.toBe(sessionId);
+    expect(forked.forkedFromSessionId).toBe(sessionId);
+    await expect(store.load(forked.sessionId)).resolves.toMatchObject({
+      sessionId: forked.sessionId,
+      forkedFromSessionId: sessionId,
+    });
+  });
+
+  it('keeps legacy session IDs loadable without rewriting them', async () => {
+    const store = new FileSessionStore(rootDir);
+    await store.save({
+      sessionId: 'sess_1',
+      cwd: '/legacy',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: ['sess_1'],
+      messages: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    });
+
+    await expect(store.load('sess_1')).resolves.toMatchObject({
+      sessionId: 'sess_1',
+      lineage: ['sess_1'],
+    });
+  });
+
   it('round-trips a real applied compaction through save, load, and restore', async () => {
     const store = new FileSessionStore(rootDir);
     const state = new AgentSessionState();
@@ -221,13 +283,15 @@ describe('FileSessionStore', () => {
 
   it('lists saved sessions ordered by most recent update', async () => {
     const store = new FileSessionStore(rootDir);
+    const lexicallyLaterButOlder = 'sess_ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const lexicallyEarlierButNewer = 'sess_00000000-0000-4000-8000-000000000000';
 
     await store.save({
-      sessionId: 'sess_old',
+      sessionId: lexicallyLaterButOlder,
       cwd: 'D:/projects/old',
       createdAt: 100,
       updatedAt: 110,
-      lineage: ['sess_old'],
+      lineage: [lexicallyLaterButOlder],
       messages: [],
       usage: { inputTokens: 0, outputTokens: 0 },
       compactions: [],
@@ -236,11 +300,11 @@ describe('FileSessionStore', () => {
       backgroundJobRefs: [],
     });
     await store.save({
-      sessionId: 'sess_new',
+      sessionId: lexicallyEarlierButNewer,
       cwd: 'D:/projects/new',
       createdAt: 120,
       updatedAt: 220,
-      lineage: ['sess_new'],
+      lineage: [lexicallyEarlierButNewer],
       messages: [{ role: 'user', content: [{ type: 'text', text: 'latest' }] }],
       usage: { inputTokens: 3, outputTokens: 1 },
       compactions: [],
@@ -251,13 +315,13 @@ describe('FileSessionStore', () => {
 
     await expect(store.list()).resolves.toEqual([
       {
-        sessionId: 'sess_new',
+        sessionId: lexicallyEarlierButNewer,
         cwd: 'D:/projects/new',
         updatedAt: 220,
         preview: 'latest',
       },
       {
-        sessionId: 'sess_old',
+        sessionId: lexicallyLaterButOlder,
         cwd: 'D:/projects/old',
         updatedAt: 110,
         preview: '',

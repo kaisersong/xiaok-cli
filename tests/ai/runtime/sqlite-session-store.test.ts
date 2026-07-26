@@ -92,6 +92,104 @@ async function serializeResumedKimiMessages(
 }
 
 describe('SQLiteSessionStore', () => {
+  it('creates, lists, loads, resumes, and forks full UUID session IDs by time order', async () => {
+    const root = join(tmpdir(), `xiaok-sqlite-uuid-session-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const dbPath = join(root, 'sessions.sqlite');
+    let store: SQLiteSessionStore | undefined;
+
+    try {
+      store = new SQLiteSessionStore(dbPath);
+      const createdSessionId = store.createSessionId();
+      const lexicallyLaterButOlder = 'sess_ffffffff-ffff-4fff-8fff-ffffffffffff';
+      const lexicallyEarlierButNewer = 'sess_00000000-0000-4000-8000-000000000000';
+
+      expect(createdSessionId).toMatch(
+        /^sess_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+
+      await store.save({
+        sessionId: lexicallyLaterButOlder,
+        cwd: '/sqlite/older',
+        createdAt: 100,
+        updatedAt: 110,
+        lineage: [lexicallyLaterButOlder],
+        messages: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+      await store.save({
+        sessionId: lexicallyEarlierButNewer,
+        cwd: '/sqlite/newer',
+        createdAt: 120,
+        updatedAt: 220,
+        lineage: [lexicallyEarlierButNewer],
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'newer' }] }],
+        usage: { inputTokens: 1, outputTokens: 2 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      await expect(store.load(lexicallyEarlierButNewer)).resolves.toMatchObject({
+        sessionId: lexicallyEarlierButNewer,
+      });
+      await expect(store.loadLast()).resolves.toMatchObject({
+        sessionId: lexicallyEarlierButNewer,
+      });
+      await expect(store.list()).resolves.toEqual([
+        expect.objectContaining({ sessionId: lexicallyEarlierButNewer }),
+        expect.objectContaining({ sessionId: lexicallyLaterButOlder }),
+      ]);
+
+      const forked = await store.fork(lexicallyEarlierButNewer);
+      expect(forked.sessionId).toMatch(
+        /^sess_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(forked.sessionId).not.toBe(lexicallyEarlierButNewer);
+      expect(forked.forkedFromSessionId).toBe(lexicallyEarlierButNewer);
+    } finally {
+      store?.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('loads legacy session IDs without rewriting them', async () => {
+    const root = join(tmpdir(), `xiaok-sqlite-legacy-session-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const dbPath = join(root, 'sessions.sqlite');
+    let store: SQLiteSessionStore | undefined;
+
+    try {
+      store = new SQLiteSessionStore(dbPath);
+      await store.save({
+        sessionId: 'sess_1',
+        cwd: '/sqlite/legacy',
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: ['sess_1'],
+        messages: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      await expect(store.load('sess_1')).resolves.toMatchObject({
+        sessionId: 'sess_1',
+        lineage: ['sess_1'],
+      });
+    } finally {
+      store?.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('persists normalized session metadata across store instances', async () => {
     const root = join(tmpdir(), `xiaok-sqlite-session-store-${Date.now()}`);
     mkdirSync(root, { recursive: true });

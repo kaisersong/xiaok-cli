@@ -4,11 +4,18 @@ import { AgentRunController } from '../../../src/ai/runtime/controller.js';
 import { AgentRuntime } from '../../../src/ai/runtime/agent-runtime.js';
 import { AgentSessionState } from '../../../src/ai/runtime/session.js';
 import { estimateTokens } from '../../../src/ai/runtime/usage.js';
+import type {
+  StreamOptions,
+} from '../../../src/ai/runtime/model-capabilities.js';
 
 async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
   for (const chunk of chunks) {
     yield chunk;
   }
+}
+
+interface RunInvocationContext {
+  cacheKey?: string;
 }
 
 function createRegistryMock(overrides?: {
@@ -674,6 +681,153 @@ describe('AgentRuntime', () => {
     });
     const promptCache = (captured[0] as { promptCache: { systemPrompt: Array<Record<string, unknown>> } }).promptCache;
     expect(promptCache.systemPrompt[0]).not.toHaveProperty('cache_control');
+  });
+
+  it('preserves cache affinity when adapter prompt caching capability is false', async () => {
+    let capturedOptions: StreamOptions | undefined;
+    const adapter: ModelAdapter & {
+      getCapabilities: () => { supportsPromptCaching: boolean };
+    } = {
+      getModelName: () => 'k3',
+      getCapabilities: () => ({ supportsPromptCaching: false }),
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        capturedOptions = options;
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const context: RunInvocationContext = {
+      cacheKey: `pc1_${'b'.repeat(64)}`,
+    };
+    const run = runtime.run.bind(runtime) as (
+      input: string,
+      onEvent: Parameters<AgentRuntime['run']>[1],
+      signal?: AbortSignal,
+      invocationContext?: RunInvocationContext,
+    ) => Promise<void>;
+
+    await run('hi', () => {}, undefined, context);
+
+    expect(capturedOptions).toMatchObject({ cacheKey: context.cacheKey });
+    expect(capturedOptions).not.toHaveProperty('promptCache');
+  });
+
+  it('combines cache affinity with prompt cache segments for capable adapters', async () => {
+    let capturedOptions: StreamOptions | undefined;
+    const adapter: ModelAdapter & {
+      getCapabilities: () => { supportsPromptCaching: boolean };
+    } = {
+      getModelName: () => 'claude-opus-4-6',
+      getCapabilities: () => ({ supportsPromptCaching: true }),
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        capturedOptions = options;
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const context: RunInvocationContext = {
+      cacheKey: `pc1_${'c'.repeat(64)}`,
+    };
+    const run = runtime.run.bind(runtime) as (
+      input: string,
+      onEvent: Parameters<AgentRuntime['run']>[1],
+      signal?: AbortSignal,
+      invocationContext?: RunInvocationContext,
+    ) => Promise<void>;
+
+    await run('hi', () => {}, undefined, context);
+
+    expect(capturedOptions).toMatchObject({
+      cacheKey: context.cacheKey,
+      promptCache: expect.any(Object),
+    });
+  });
+
+  it('keeps direct runtime side calls without invocation context cache-key free', async () => {
+    let capturedOptions: StreamOptions | undefined;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        capturedOptions = options;
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('classifier-style call', () => {});
+
+    expect(capturedOptions).not.toHaveProperty('cacheKey');
+  });
+
+  it('uses one cache affinity and effective signal for threshold compaction and main stream', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{
+      type: 'text',
+      text: `retained answer ${'b'.repeat(10_000)}`,
+    }]);
+    const captured: Array<{
+      compact: boolean;
+      options?: StreamOptions;
+    }> = [];
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt, options) => {
+        const compact = systemPrompt.includes('TEXT ONLY');
+        captured.push({ compact, options });
+        return compact
+          ? mockStream([
+              { type: 'text', delta: 'portable summary' },
+              { type: 'done' },
+            ])
+          : mockStream([{ type: 'text', delta: 'final answer' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const controller = new AbortController();
+    const context: RunInvocationContext = {
+      cacheKey: `pc1_${'d'.repeat(64)}`,
+    };
+    const run = runtime.run.bind(runtime) as (
+      input: string,
+      onEvent: Parameters<AgentRuntime['run']>[1],
+      signal?: AbortSignal,
+      invocationContext?: RunInvocationContext,
+    ) => Promise<void>;
+
+    await run('current user prompt', () => {}, controller.signal, context);
+
+    const compactCall = captured.find((call) => call.compact);
+    const mainCall = captured.find((call) => !call.compact);
+    expect(compactCall?.options?.cacheKey).toBe(context.cacheKey);
+    expect(mainCall?.options?.cacheKey).toBe(context.cacheKey);
+    expect(compactCall?.options?.signal).toBe(mainCall?.options?.signal);
+    expect(compactCall?.options?.signal?.aborted).toBe(false);
   });
 
   it('passes external abort signal into model invocation options', async () => {

@@ -688,6 +688,19 @@ export class OpenAIAdapter implements ModelAdapter {
       stream_options: { include_usage: true },
     };
 
+    const cacheKey = options?.cacheKey;
+    if (
+      this.harnessContext.flags.promptCacheKey
+      && this.harnessContext.profile.encodeCacheKey
+      && typeof cacheKey === 'string'
+      && /^pc1_[0-9a-f]{64}$/.test(cacheKey)
+    ) {
+      Object.assign(
+        request,
+        this.harnessContext.profile.encodeCacheKey(cacheKey),
+      );
+    }
+
     if (
       this.harnessContext.identity.wireModel === 'k3'
       && isOfficialKimiK3OpenAIEndpoint(this.harnessContext.identity.canonicalBaseUrl)

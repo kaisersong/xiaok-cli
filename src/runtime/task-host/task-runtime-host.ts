@@ -1,4 +1,5 @@
 import type { RuntimeEvent } from '../events.js';
+import { randomUUID } from 'node:crypto';
 import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
 import type { CompletionEvidenceRecord, CompletionExpectation } from '../guards/completion-evidence.js';
 import { runDeliverableGate, type DeliverableGateFunction } from './deliverable-gate.js';
@@ -195,7 +196,6 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly executionPromises = new Map<string, Promise<void>>();
   private readonly taskWatchdogs = new Map<string, number>();
   private taskOrdinal = 0;
-  private sessionOrdinal = 0;
   private readonly permissionModes = new Map<string, TaskPermissionMode>();
   private readonly maxToolLoopIterations = new Map<string, number>();
 
@@ -771,8 +771,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     if (this.options.createSessionId) {
       return this.options.createSessionId();
     }
-    this.sessionOrdinal += 1;
-    return `sess_${this.sessionOrdinal}`;
+    return `sess_${randomUUID()}`;
   }
 
   private now(): number {

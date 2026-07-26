@@ -1,9 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Message, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
+import type { StreamOptions } from '../../src/ai/runtime/model-capabilities.js';
 import { ToolRegistry } from '../../src/ai/tools/index.js';
 
 async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
   for (const c of chunks) yield c;
+}
+
+interface RunInvocationContext {
+  cacheKey?: string;
 }
 
 function createRegistryMock(overrides?: {
@@ -17,6 +22,58 @@ function createRegistryMock(overrides?: {
 }
 
 describe('Agent', () => {
+  it('forwards an immutable per-run invocation context to the adapter', async () => {
+    const captured: Array<StreamOptions | undefined> = [];
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        captured.push(options);
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const registry = createRegistryMock();
+    const agent = new (await import('../../src/ai/agent.js')).Agent(
+      adapter,
+      registry as never,
+      'system',
+    );
+    const invocationContext = Object.freeze({
+      cacheKey: `pc1_${'a'.repeat(64)}`,
+    }) satisfies RunInvocationContext;
+    const runTurn = agent.runTurn.bind(agent) as (
+      input: string,
+      onChunk: (chunk: StreamChunk) => void,
+      signal?: AbortSignal,
+      context?: RunInvocationContext,
+    ) => Promise<void>;
+
+    await runTurn('hi', () => {}, undefined, invocationContext);
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ cacheKey: invocationContext.cacheKey });
+  });
+
+  it('keeps direct Agent calls without invocation context cache-key free', async () => {
+    const captured: Array<StreamOptions | undefined> = [];
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, _systemPrompt, options) => {
+        captured.push(options);
+        return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
+      },
+    };
+    const agent = new (await import('../../src/ai/agent.js')).Agent(
+      adapter,
+      createRegistryMock() as never,
+      'system',
+    );
+
+    await agent.runTurn('classifier-style call', () => {});
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).not.toHaveProperty('cacheKey');
+  });
+
   it('returns text response without tool calls', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const adapter: ModelAdapter = {

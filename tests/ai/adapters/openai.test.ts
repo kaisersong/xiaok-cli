@@ -17,6 +17,7 @@ import {
 import { normalizeMcpToolSchema } from '../../../src/ai/mcp/client.js';
 import type { ModelRuntimeOptions } from '../../../src/ai/providers/types.js';
 import type { Message, StreamChunk, ToolDefinition, UsageStats } from '../../../src/types.js';
+import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 
 const openAIConstructorCalls: unknown[] = [];
 
@@ -25,6 +26,7 @@ type KimiReasoningEffort = 'low' | 'high' | 'max';
 interface CapturedChatCompletionRequest {
   model: string;
   reasoning_effort?: KimiReasoningEffort;
+  prompt_cache_key?: string;
   messages: Array<Record<string, unknown>>;
   tools?: Array<{
     type: 'function';
@@ -58,6 +60,7 @@ async function captureChatCompletionRequest(
   adapter: unknown,
   tools: ToolDefinition[] = [],
   messages: Message[] = [],
+  options?: StreamOptions,
 ): Promise<CapturedChatCompletionRequest> {
   let capturedRequest: CapturedChatCompletionRequest | undefined;
   const mockStream = {
@@ -79,9 +82,10 @@ async function captureChatCompletionRequest(
       messages: never[],
       tools: ToolDefinition[],
       systemPrompt: string,
+      options?: StreamOptions,
     ): AsyncIterable<unknown>;
   };
-  for await (const _ of streamAdapter.stream(messages as never[], tools, 'system')) { /* consume */ }
+  for await (const _ of streamAdapter.stream(messages as never[], tools, 'system', options)) { /* consume */ }
 
   if (!capturedRequest) {
     throw new Error('OpenAI request was not captured');
@@ -228,7 +232,7 @@ function parseKimiUsage(
 
 async function collectAdapterChunks(
   adapter: OpenAIAdapter,
-  options?: { signal?: AbortSignal },
+  options?: StreamOptions,
 ): Promise<StreamChunk[]> {
   const chunks: StreamChunk[] = [];
   for await (const chunk of adapter.stream([], [], 'system', options)) {
@@ -2529,6 +2533,137 @@ describe('OpenAIAdapter', () => {
     });
     expect(JSON.stringify(capturedParams)).not.toContain('cache_control');
     expect(JSON.stringify(capturedParams)).not.toContain('cached system');
+  });
+
+  it('encodes cache affinity only for strict flagged Kimi requests with a valid key', async () => {
+    const validCacheKey = `pc1_${'a'.repeat(64)}`;
+    const enabledFlags = resolveKimiHarnessFeatureFlags({
+      XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE: '1',
+    });
+    const cases: Array<{
+      name: string;
+      adapter: OpenAIAdapter;
+      cacheKey: string;
+      expected?: string;
+    }> = [
+      {
+        name: 'strict Kimi',
+        adapter: createStrictKimiAdapter({ flags: enabledFlags }),
+        cacheKey: validCacheKey,
+        expected: validCacheKey,
+      },
+      {
+        name: 'flag off',
+        adapter: createStrictKimiAdapter(),
+        cacheKey: validCacheKey,
+      },
+      {
+        name: 'generic provider',
+        adapter: createTestAdapter({ wireModel: 'gpt-4o', flags: enabledFlags }),
+        cacheKey: validCacheKey,
+      },
+      {
+        name: 'custom Kimi',
+        adapter: createStrictKimiAdapter({
+          providerType: 'custom',
+          flags: enabledFlags,
+        }),
+        cacheKey: validCacheKey,
+      },
+      {
+        name: 'wrong model',
+        adapter: createStrictKimiAdapter({
+          wireModel: 'kimi-k2.7',
+          flags: enabledFlags,
+        }),
+        cacheKey: validCacheKey,
+      },
+      {
+        name: 'wrong endpoint',
+        adapter: createStrictKimiAdapter({
+          baseUrl: 'https://api.kimi.com/coding/v2',
+          flags: enabledFlags,
+        }),
+        cacheKey: validCacheKey,
+      },
+      {
+        name: 'invalid key',
+        adapter: createStrictKimiAdapter({ flags: enabledFlags }),
+        cacheKey: 'pc1_not-valid',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const request = await captureChatCompletionRequest(
+        testCase.adapter,
+        [],
+        [],
+        { cacheKey: testCase.cacheKey },
+      );
+      if (testCase.expected) {
+        expect(request.prompt_cache_key, testCase.name).toBe(testCase.expected);
+      } else {
+        expect(request, testCase.name).not.toHaveProperty('prompt_cache_key');
+      }
+    }
+  });
+
+  it('keeps the complete generic request body identical when cache affinity is present', async () => {
+    const baseline = await captureChatCompletionRequest(
+      createTestAdapter({ wireModel: 'gpt-4o' }),
+      [tool('read', { type: 'object', properties: {} })],
+      [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+    );
+    const withAffinity = await captureChatCompletionRequest(
+      createTestAdapter({ wireModel: 'gpt-4o' }),
+      [tool('read', { type: 'object', properties: {} })],
+      [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+      { cacheKey: `pc1_${'b'.repeat(64)}` },
+    );
+
+    expect(withAffinity).toEqual(baseline);
+  });
+
+  it('keeps the same cache affinity across retry attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      const requests: CapturedChatCompletionRequest[] = [];
+      const OpenAI = (await import('openai')).default;
+      const instance = new OpenAI({ apiKey: 'test' });
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (request: unknown) => {
+        requests.push(request as CapturedChatCompletionRequest);
+        if (requests.length === 1) {
+          throw Object.assign(new Error('retry cache request'), { status: 503 });
+        }
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+          },
+        } as never;
+      });
+      const adapter = createStrictKimiAdapter({
+        flags: resolveKimiHarnessFeatureFlags({
+          XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE: '1',
+        }),
+      });
+      (adapter as unknown as { client: typeof instance }).client = instance;
+      const cacheKey = `pc1_${'c'.repeat(64)}`;
+      const consume = collectAdapterChunks(adapter, { cacheKey } as StreamOptions);
+
+      for (let index = 0; index < 20 && requests.length < 1; index += 1) {
+        await Promise.resolve();
+      }
+      await vi.advanceTimersByTimeAsync(1000);
+      await consume;
+
+      expect(requests).toHaveLength(2);
+      expect(requests.map((request) => request.prompt_cache_key)).toEqual([
+        cacheKey,
+        cacheKey,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('propagates external abort signal to OpenAI requests', async () => {
