@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOpenAIHarnessContext,
+  KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
   observeReasoningDialect,
   resolveKimiHarnessFeatureFlags,
   resolveModelHarnessProfile,
   type AdapterBindingIdentity,
+  type OpenAIAdapterInit,
   type ReasoningDialectState,
 } from '../../../src/ai/providers/model-harness-profile.js';
 
@@ -25,6 +27,7 @@ describe('resolveModelHarnessProfile', () => {
   });
 
   it.each([
+    ['wrong provider id', { providerId: 'moonshot' }],
     ['custom Kimi provider', { providerType: 'custom' }],
     ['Kimi K2.7 model', { wireModel: 'kimi-k2.7' }],
     ['wrong protocol', { protocol: 'openai_responses' }],
@@ -38,6 +41,100 @@ describe('resolveModelHarnessProfile', () => {
   ] as const)('uses the generic profile for %s', (_label, override) => {
     expect(resolveModelHarnessProfile({ ...identity, ...override } as AdapterBindingIdentity).id)
       .toBe('generic-openai');
+  });
+
+  it('resolves a profile without reading process.env', () => {
+    const originalEnv = process.env;
+    let profileId: string | undefined;
+
+    try {
+      process.env = new Proxy(
+        { ...originalEnv },
+        {
+          get() {
+            throw new Error('resolveModelHarnessProfile must not read process.env');
+          },
+        },
+      );
+      profileId = resolveModelHarnessProfile(identity).id;
+    } finally {
+      process.env = originalEnv;
+    }
+
+    expect(profileId).toBe('kimi-k3-coding-openai');
+  });
+});
+
+describe('model harness profile ownership', () => {
+  it('does not duplicate binding identity or runtime fields on the selected profile', () => {
+    expect(Object.keys(KIMI_K3_CODING_OPENAI_HARNESS_PROFILE)).not.toEqual(
+      expect.arrayContaining([
+        'providerId',
+        'providerType',
+        'protocol',
+        'canonicalBaseUrl',
+        'wireModel',
+        'capabilities',
+        'model',
+        'baseURL',
+        'runtimeOptions',
+      ]),
+    );
+  });
+
+  it('keeps OpenAIAdapterInit compile-time ownership on one required harness context', () => {
+    const harnessContext = buildOpenAIHarnessContext({
+      identity: {
+        providerId: 'kimi',
+        providerType: 'first_party',
+        protocol: 'openai_legacy',
+        canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+        wireModel: 'k3',
+        capabilities: ['tools', 'thinking'],
+      },
+      flags: resolveKimiHarnessFeatureFlags({}),
+    });
+    const valid: OpenAIAdapterInit = {
+      apiKey: 'sk-kimi',
+      kimiCodingHeadersApplied: true,
+      harnessContext,
+    };
+
+    // @ts-expect-error harnessContext is the required adapter identity contract.
+    const missingHarness: OpenAIAdapterInit = {
+      apiKey: 'sk-kimi',
+      kimiCodingHeadersApplied: true,
+    };
+    const duplicateModel: OpenAIAdapterInit = {
+      ...valid,
+      // @ts-expect-error wire model belongs only to harnessContext.identity.
+      model: 'k3',
+    };
+    const duplicateBaseUrl: OpenAIAdapterInit = {
+      ...valid,
+      // @ts-expect-error base URL belongs only to harnessContext.identity.
+      baseURL: 'https://api.kimi.com/coding/v1',
+    };
+    const duplicateCapabilities: OpenAIAdapterInit = {
+      ...valid,
+      // @ts-expect-error capabilities belong only to harnessContext.identity.
+      capabilities: ['tools', 'thinking'],
+    };
+    const duplicateRuntime: OpenAIAdapterInit = {
+      ...valid,
+      // @ts-expect-error runtime options belong only to harnessContext.
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+    };
+
+    expect(valid.harnessContext).toBe(harnessContext);
+    void missingHarness;
+    void duplicateModel;
+    void duplicateBaseUrl;
+    void duplicateCapabilities;
+    void duplicateRuntime;
   });
 });
 

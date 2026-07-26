@@ -1,7 +1,10 @@
 // tests/ai/adapters/openai.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
-import { createAdapterFromBinding } from '../../../src/ai/models.js';
+import {
+  buildOpenAIAdapterInit,
+  createAdapterFromBinding,
+} from '../../../src/ai/models.js';
 import {
   buildOpenAIHarnessContext,
   KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
@@ -321,6 +324,29 @@ describe('OpenAIAdapter Kimi tool schema serialization gate', () => {
       expect(createSpy).not.toHaveBeenCalled();
     },
   );
+
+  it('rejects a non-JSON enum candidate as INVALID_JSON before SDK create', async () => {
+    const adapter = createStrictKimiAdapter();
+    const createSpy = await attachRequestSpy(adapter);
+
+    const error = await captureStreamError(adapter, [
+      tool('non-json-enum', {
+        type: 'object',
+        properties: {
+          value: {
+            enum: ['ok', 1n],
+          },
+        },
+      }),
+    ]);
+
+    expect(error).toBeInstanceOf(KimiToolSchemaError);
+    expect(error).toMatchObject({
+      code: 'KIMI_SCHEMA_INVALID_JSON_VALUE',
+      toolName: 'non-json-enum',
+    });
+    expect(createSpy).not.toHaveBeenCalled();
+  });
 
   it.each([
     {
@@ -1272,6 +1298,26 @@ describe('OpenAIAdapter', () => {
     },
   );
 
+  it.each(['/coding/v1', '/coding/v2'])(
+    'marks kimiCodingHeadersApplied for broad %s compatibility without selecting the strict profile',
+    (path) => {
+      const init = buildOpenAIAdapterInit({
+        providerId: 'custom-kimi',
+        providerType: 'custom',
+        modelId: 'custom-kimi-model',
+        wireModel: 'kimi-for-coding',
+        protocol: 'openai_legacy',
+        apiKey: 'test-key',
+        baseUrl: `https://api.kimi.com${path}`,
+        headers: {},
+        capabilities: ['tools', 'thinking'],
+      }, {});
+
+      expect(init.kimiCodingHeadersApplied).toBe(true);
+      expect(init.harnessContext.profile.id).toBe('generic-openai');
+    },
+  );
+
   it('keeps the default openai sdk user agent for non-kimi endpoints', async () => {
     openAIConstructorCalls.length = 0;
     createAdapterFromBinding({
@@ -1447,6 +1493,8 @@ describe('OpenAIAdapter', () => {
     const clone = adapter.cloneWithModel('k3');
     const request = await captureChatCompletionRequest(clone);
 
+    expect(request.model).toBe('k3');
+    expect(clone.harnessContext.identity.capabilities).toEqual(['tools', 'thinking']);
     expect(clone.getCapabilities()).toMatchObject({ contextLimit: 262_144 });
     expect(request.reasoning_effort).toBe('high');
   });
@@ -1470,7 +1518,7 @@ describe('OpenAIAdapter', () => {
     expect(k3Again.harnessContext.profile.id).toBe('kimi-k3-coding-openai');
   });
 
-  it('treats cloneWithModel input as a wire model instead of a logical model id', () => {
+  it('keeps a logical kimi-k3 clone value on the wire and outside the strict profile', async () => {
     const adapter = createTestAdapter({
       providerId: 'kimi',
       providerType: 'first_party',
@@ -1481,10 +1529,13 @@ describe('OpenAIAdapter', () => {
 
     const wireClone = adapter.cloneWithModel('k3');
     const logicalLookingClone = adapter.cloneWithModel('kimi-k3');
+    const logicalRequest = await captureChatCompletionRequest(logicalLookingClone);
 
     expect(wireClone.getModelName()).toBe('k3');
     expect(wireClone.harnessContext.profile.id).toBe('kimi-k3-coding-openai');
     expect(logicalLookingClone.getModelName()).toBe('kimi-k3');
+    expect(logicalRequest.model).toBe('kimi-k3');
+    expect(logicalRequest).not.toHaveProperty('reasoning_effort');
     expect(logicalLookingClone.harnessContext.profile.id).toBe('generic-openai');
     expect(logicalLookingClone.getCapabilities().contextLimit).not.toBe(262_144);
   });
@@ -1501,7 +1552,7 @@ describe('OpenAIAdapter', () => {
     expect(adapter.cloneWithModel('k3').harnessContext.profile.id).toBe('generic-openai');
   });
 
-  it('reuses the resolved flag snapshot when cloning', () => {
+  it('reuses the resolved flag snapshot when cloning without rereading process.env', () => {
     const flags = resolveKimiHarnessFeatureFlags({
       XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE: '1',
       XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
@@ -1514,10 +1565,24 @@ describe('OpenAIAdapter', () => {
       flags,
     });
 
-    const clone = adapter.cloneWithModel('k3');
+    const originalEnv = process.env;
+    let clone: OpenAIAdapter | undefined;
+    try {
+      process.env = new Proxy(
+        { ...originalEnv },
+        {
+          get() {
+            throw new Error('cloneWithModel must not read process.env');
+          },
+        },
+      );
+      clone = adapter.cloneWithModel('k3');
+    } finally {
+      process.env = originalEnv;
+    }
 
-    expect(clone.harnessContext.flags).toEqual(flags);
-    expect(clone.harnessContext.flags).toBe(flags);
+    expect(clone?.harnessContext.flags).toEqual(flags);
+    expect(clone?.harnessContext.flags).toBe(flags);
   });
 
   it('copies the full dialect snapshot only for the same fingerprint without sharing state', () => {
@@ -1594,6 +1659,39 @@ describe('OpenAIAdapter', () => {
       current: 'reasoning_content',
       learned: false,
     });
+  });
+
+  it('isolates learned dialect across endpoint, provider, and new-adapter restart boundaries', () => {
+    const learned = createStrictKimiAdapter();
+    Object.assign(getReasoningDialectState(learned), {
+      current: 'reasoning',
+      learned: true,
+    } satisfies ReasoningDialectState);
+
+    const wrongEndpoint = createStrictKimiAdapter({
+      baseUrl: 'https://api.kimi.com/coding/v2',
+    });
+    const wrongProvider = createStrictKimiAdapter({
+      providerId: 'moonshot',
+    });
+    const restarted = createStrictKimiAdapter();
+
+    expect(getReasoningDialectState(learned)).toEqual({
+      current: 'reasoning',
+      learned: true,
+    });
+    for (const isolated of [wrongEndpoint, wrongProvider, restarted]) {
+      expect(getReasoningDialectState(isolated)).toEqual({
+        current: 'reasoning_content',
+        learned: false,
+      });
+    }
+    expect(wrongEndpoint.harnessContext.identityFingerprint)
+      .not.toBe(learned.harnessContext.identityFingerprint);
+    expect(wrongProvider.harnessContext.identityFingerprint)
+      .not.toBe(learned.harnessContext.identityFingerprint);
+    expect(restarted.harnessContext.identityFingerprint)
+      .toBe(learned.harnessContext.identityFingerprint);
   });
 
   it('emits text chunks from streaming response', async () => {

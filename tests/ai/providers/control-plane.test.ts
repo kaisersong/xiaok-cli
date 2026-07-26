@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Config } from '../../../src/types.js';
+import type { Config, LegacyConfig } from '../../../src/types.js';
+import type { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
 import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
 import { resolveModelCapabilities } from '../../../src/ai/runtime/model-capabilities.js';
@@ -286,6 +287,50 @@ describe('resolveRuntimeModelBinding', () => {
     });
 
     expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
+  });
+
+  it('promotes a legacy Kimi config through one binding into the strict K3 harness', () => {
+    const legacyConfig: LegacyConfig = {
+      schemaVersion: 1,
+      defaultModel: 'custom',
+      models: {
+        custom: {
+          baseUrl: 'https://api.kimi.com/coding/v1',
+          apiKey: 'sk-kimi',
+          model: 'k3',
+        },
+      },
+      defaultMode: 'interactive',
+      channels: {},
+    };
+
+    const binding = resolveRuntimeModelBinding(legacyConfig);
+    const adapter = createAdapterFromBinding(binding) as OpenAIAdapter;
+
+    expect(binding).toEqual({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-default',
+      wireModel: 'k3',
+      protocol: 'openai_legacy',
+      apiKey: 'sk-kimi',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      headers: {},
+      capabilities: ['tools', 'thinking'],
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+    });
+    expect(adapter.harnessContext.identity).toEqual({
+      providerId: binding.providerId,
+      providerType: binding.providerType,
+      protocol: binding.protocol,
+      canonicalBaseUrl: binding.baseUrl,
+      wireModel: binding.wireModel,
+      capabilities: binding.capabilities,
+    });
+    expect(adapter.harnessContext.profile.id).toBe('kimi-k3-coding-openai');
   });
 });
 

@@ -5,6 +5,31 @@ import {
   normalizeKimiToolSchema,
 } from '../../../src/ai/providers/kimi-tool-schema.js';
 
+const CHILD_SCHEMA_SLOT_CASES = [
+  { slot: '$defs', kind: 'map' },
+  { slot: 'definitions', kind: 'map' },
+  { slot: 'dependencies', kind: 'map' },
+  { slot: 'dependentSchemas', kind: 'map' },
+  { slot: 'patternProperties', kind: 'map' },
+  { slot: 'properties', kind: 'map' },
+  { slot: 'additionalItems', kind: 'single' },
+  { slot: 'additionalProperties', kind: 'single' },
+  { slot: 'contains', kind: 'single' },
+  { slot: 'contentSchema', kind: 'single' },
+  { slot: 'else', kind: 'single' },
+  { slot: 'if', kind: 'single' },
+  { slot: 'not', kind: 'single' },
+  { slot: 'propertyNames', kind: 'single' },
+  { slot: 'then', kind: 'single' },
+  { slot: 'unevaluatedItems', kind: 'single' },
+  { slot: 'unevaluatedProperties', kind: 'single' },
+  { slot: 'allOf', kind: 'array' },
+  { slot: 'anyOf', kind: 'array' },
+  { slot: 'oneOf', kind: 'array' },
+  { slot: 'prefixItems', kind: 'array' },
+  { slot: 'items', kind: 'single' },
+] as const;
+
 function expectKimiError(
   action: () => unknown,
   code: KimiToolSchemaError['code'],
@@ -156,6 +181,26 @@ describe('normalizeKimiToolSchema type completion', () => {
     );
   });
 
+  it('keeps compatible enum and const candidates while inferring one type', () => {
+    expect(normalizeKimiToolSchema({
+      type: 'object',
+      properties: {
+        value: {
+          enum: ['left', 'right'],
+          const: 'left',
+        },
+      },
+    }).schema).toMatchObject({
+      properties: {
+        value: {
+          type: 'string',
+          enum: ['left', 'right'],
+          const: 'left',
+        },
+      },
+    });
+  });
+
   it('rejects mixed candidates only when a missing type requires inference', () => {
     expectKimiError(
       () => normalizeKimiToolSchema({
@@ -189,14 +234,44 @@ describe('normalizeKimiToolSchema type completion', () => {
     { enum: ['ok', undefined] },
     { const: Number.NaN },
     { const: 1n },
-  ])('rejects non-JSON enum or const candidates locally', (candidate) => {
+  ])('classifies non-JSON enum or const candidates as invalid JSON', (candidate) => {
     expectKimiError(
       () => normalizeKimiToolSchema({
         type: 'object',
         properties: { value: candidate },
       }),
-      'KIMI_SCHEMA_TYPE_INFERENCE_FAILED',
+      'KIMI_SCHEMA_INVALID_JSON_VALUE',
     );
+  });
+
+  it('ignores an empty enum and uses structure or string fallback deterministically', () => {
+    expect(normalizeKimiToolSchema({
+      type: 'object',
+      properties: {
+        unconstrained: { enum: [] },
+        structured: {
+          enum: [],
+          properties: {
+            nested: {},
+          },
+        },
+      },
+    }).schema).toEqual({
+      type: 'object',
+      properties: {
+        unconstrained: {
+          enum: [],
+          type: 'string',
+        },
+        structured: {
+          enum: [],
+          type: 'object',
+          properties: {
+            nested: { type: 'string' },
+          },
+        },
+      },
+    });
   });
 
   it('keeps an empty root and fills an unconstrained nested schema as string', () => {
@@ -388,6 +463,27 @@ describe('normalizeKimiToolSchema type completion', () => {
           },
         },
       });
+    },
+  );
+
+  it.each(CHILD_SCHEMA_SLOT_CASES)(
+    'normalizes every declared child schema slot: $slot',
+    ({ slot, kind }) => {
+      const child = {};
+      const value = kind === 'map'
+        ? { child }
+        : kind === 'array'
+          ? [child]
+          : child;
+      const schema = normalizeKimiToolSchema({ [slot]: value }).schema;
+      const normalizedValue = schema[slot];
+      const normalizedChild = kind === 'map'
+        ? (normalizedValue as Record<string, unknown>).child
+        : kind === 'array'
+          ? (normalizedValue as unknown[])[0]
+          : normalizedValue;
+
+      expect(normalizedChild).toEqual({ type: 'string' });
     },
   );
 });
@@ -738,6 +834,47 @@ describe('normalizeKimiToolSchema vetted input snapshot', () => {
 });
 
 describe('normalizeKimiToolSchema resource limits', () => {
+  it.each([
+    {
+      label: 'depth',
+      limitKind: 'depth' as const,
+      createInput: () => structuralSchemaAtDepth(KIMI_SCHEMA_LIMITS.maxDepth + 1),
+    },
+    {
+      label: 'input nodes',
+      limitKind: 'input_nodes' as const,
+      createInput: () => schemaWithInputNodes(KIMI_SCHEMA_LIMITS.maxInputNodes + 1),
+    },
+    {
+      label: 'ref expansions',
+      limitKind: 'ref_expansions' as const,
+      createInput: () => schemaWithRefExpansions(KIMI_SCHEMA_LIMITS.maxRefExpansions + 1),
+    },
+    {
+      label: 'output nodes',
+      limitKind: 'output_nodes' as const,
+      createInput: () => wideSharedRefSchema(2),
+    },
+    {
+      label: 'output bytes',
+      limitKind: 'output_bytes' as const,
+      createInput: () => schemaWithOutputBytes(KIMI_SCHEMA_LIMITS.maxOutputBytes + 1),
+    },
+  ])(
+    'does not mutate input when the $label limit fails',
+    ({ limitKind, createInput }) => {
+      const input = createInput();
+      const snapshot = structuredClone(input);
+
+      expectLimit(
+        () => normalizeKimiToolSchema(input),
+        limitKind,
+      );
+
+      expect(input).toEqual(snapshot);
+    },
+  );
+
   it('accepts arbitrary input JSON depth 64 inclusive and rejects depth 65', () => {
     expect(() => normalizeKimiToolSchema(
       arbitraryJsonAtDepth(KIMI_SCHEMA_LIMITS.maxDepth),

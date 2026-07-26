@@ -1,18 +1,62 @@
 // tests/ai/adapters/claude.test.ts
 import { describe, it, expect, vi } from 'vitest';
 
+const anthropicConstructorCalls: unknown[] = [];
+
 // Mock @anthropic-ai/sdk
 vi.mock('@anthropic-ai/sdk', () => {
   return {
     default: class Anthropic {
       messages = {
-        stream: vi.fn(),
+        stream: vi.fn(() => ({
+          async *[Symbol.asyncIterator]() {
+            yield { type: 'message_stop' };
+          },
+        })),
       };
+
+      constructor(options?: unknown) {
+        anthropicConstructorCalls.push(options);
+      }
     },
   };
 });
 
 describe('ClaudeAdapter', () => {
+  it.each(['/coding/v1', '/coding/v2'])(
+    'lazily applies Kimi compatibility headers for %s',
+    async (path) => {
+      const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+      anthropicConstructorCalls.length = 0;
+      const adapter = new ClaudeAdapter(
+        'test-key',
+        'claude-opus-4-6',
+        `https://api.kimi.com${path}`,
+      );
+
+      expect(anthropicConstructorCalls).toHaveLength(0);
+
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+
+      expect(anthropicConstructorCalls).toEqual([{
+        apiKey: 'test-key',
+        baseURL: `https://api.kimi.com${path}`,
+        maxRetries: 3,
+        defaultHeaders: {
+          'User-Agent': 'claude-cli/1.0.0 (external, cli)',
+          'X-Stainless-Lang': null,
+          'X-Stainless-Package-Version': null,
+          'X-Stainless-OS': null,
+          'X-Stainless-Arch': null,
+          'X-Stainless-Runtime': null,
+          'X-Stainless-Runtime-Version': null,
+          'X-Stainless-Retry-Count': null,
+          'X-Stainless-Timeout': null,
+        },
+      }]);
+    },
+  );
+
   it('emits text chunks from streaming response', async () => {
     const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
 
