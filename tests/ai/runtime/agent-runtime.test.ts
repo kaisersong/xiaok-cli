@@ -3,6 +3,7 @@ import type { ModelAdapter, StreamChunk, ToolDefinition } from '../../../src/typ
 import { AgentRunController } from '../../../src/ai/runtime/controller.js';
 import { AgentRuntime } from '../../../src/ai/runtime/agent-runtime.js';
 import { AgentSessionState } from '../../../src/ai/runtime/session.js';
+import { estimateTokens } from '../../../src/ai/runtime/usage.js';
 
 async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
   for (const chunk of chunks) {
@@ -238,6 +239,360 @@ describe('AgentRuntime', () => {
     expect(events).toContain('usage_updated');
   });
 
+  it('summarizes only the frozen prefix and applies the exact LLM summary once', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{ type: 'text', text: `retained answer ${'b'.repeat(10_000)}` }]);
+
+    const compactInputs: string[][] = [];
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          compactInputs.push(messages.map((message) =>
+            message.content
+              .filter((block) => block.type === 'text')
+              .map((block) => (block as { text: string }).text)
+          ).flat());
+          return mockStream([
+            { type: 'text', delta: 'LLM summary: retain /tmp/report.html' },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'final answer' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const compactEvents: Array<{ summary: string }> = [];
+
+    await runtime.run('current user prompt', (event) => {
+      if (event.type === 'compact_triggered') compactEvents.push({ summary: event.summary });
+    });
+
+    expect(compactInputs).toHaveLength(1);
+    expect(compactInputs[0]!.join('\n')).toContain('old prefix');
+    expect(compactInputs[0]!.join('\n')).not.toContain('retained answer');
+    expect(compactInputs[0]!.join('\n')).not.toContain('current user prompt');
+    expect(session.getCompactions().at(-1)?.summary)
+      .toBe('LLM summary: retain /tmp/report.html');
+    expect(compactEvents).toEqual([{ summary: 'LLM summary: retain /tmp/report.html' }]);
+    expect((session.getMessages()[0]!.content[0] as { text: string }).text)
+      .toBe('LLM summary: retain /tmp/report.html');
+    expect(JSON.stringify(session.getMessages()).match(/current user prompt/g)).toHaveLength(1);
+  });
+
+  it('does not call the compact adapter or emit compact_triggered without a replaceable prefix', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText('a'.repeat(10_000));
+    let compactCalls = 0;
+    let mainCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) compactCalls += 1;
+        else mainCalls += 1;
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const events: string[] = [];
+
+    await runtime.run('current', (event) => events.push(event.type));
+
+    expect(compactCalls).toBe(0);
+    expect(mainCalls).toBe(1);
+    expect(events).not.toContain('compact_triggered');
+    expect(session.getCompactions()).toHaveLength(0);
+  });
+
+  it('replans compaction after tool history grows beyond a no-prefix revision', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText('a'.repeat(10_000));
+    let compactCalls = 0;
+    let mainCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          compactCalls += 1;
+          return mockStream([
+            { type: 'text', delta: 'summary after tool history growth' },
+            { type: 'done' },
+          ]);
+        }
+        mainCalls += 1;
+        if (mainCalls === 1) {
+          return mockStream([
+            { type: 'tool_use', id: 'tu_grow', name: 'read', input: { path: 'a.ts' } },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const events: string[] = [];
+
+    await runtime.run('current', (event) => events.push(event.type));
+
+    expect(mainCalls).toBe(2);
+    expect(compactCalls).toBe(1);
+    expect(events.filter((event) => event === 'compact_triggered')).toHaveLength(1);
+    expect(session.getCompactions()).toHaveLength(1);
+  });
+
+  it('rejects a stale compaction plan and does not retry it within the same run', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{ type: 'text', text: `retained answer ${'b'.repeat(10_000)}` }]);
+    let compactCalls = 0;
+    let mainCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          compactCalls += 1;
+          session.appendUserText('concurrent session mutation');
+          return mockStream([{ type: 'text', delta: 'stale summary' }, { type: 'done' }]);
+        }
+        mainCalls += 1;
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const events: string[] = [];
+
+    await runtime.run('current', (event) => events.push(event.type));
+
+    expect(compactCalls).toBe(1);
+    expect(mainCalls).toBe(1);
+    expect(events).not.toContain('compact_triggered');
+    expect(session.getCompactions()).toHaveLength(0);
+    expect(JSON.stringify(session.getMessages())).toContain('concurrent session mutation');
+  });
+
+  it('emits compact_failed before compact_triggered when deterministic fallback succeeds', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{ type: 'text', text: `retained answer ${'b'.repeat(10_000)}` }]);
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          return (async function* failingCompactStream(): AsyncIterable<StreamChunk> {
+            throw new Error('compact model unavailable');
+          })();
+        }
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const events: string[] = [];
+
+    await runtime.run('current', (event) => events.push(event.type));
+
+    expect(events.filter((event) =>
+      event === 'compact_failed' || event === 'compact_triggered'
+    )).toEqual(['compact_failed', 'compact_triggered']);
+    expect(session.getCompactions()).toHaveLength(1);
+    expect(session.getCompactions()[0]!.summary).toContain('[context compacted summary]');
+    expect(JSON.stringify(session.getMessages())).not.toContain('[Previous context compacted]');
+  });
+
+  it('does not expose compact summary error details in runtime events', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{
+      type: 'text',
+      text: `retained answer ${'b'.repeat(10_000)}`,
+    }]);
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          return (async function* failingCompactStream(): AsyncIterable<StreamChunk> {
+            throw new Error(
+              '500 Authorization: Bearer sk-secret RAW_RESPONSE_BODY',
+            );
+          })();
+        }
+        return mockStream([
+          { type: 'text', delta: 'final' },
+          { type: 'done' },
+        ]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    const compactEvents: Array<{ type: string; error?: string }> = [];
+
+    await runtime.run('current', (event) => {
+      if (
+        event.type === 'compact_failed'
+        || event.type === 'compact_triggered'
+      ) {
+        compactEvents.push(event);
+      }
+    });
+
+    expect(compactEvents.map((event) => event.type)).toEqual([
+      'compact_failed',
+      'compact_triggered',
+    ]);
+    expect(compactEvents[0]).toEqual({
+      type: 'compact_failed',
+      runId: expect.any(String),
+      error: 'portable compaction summary failed',
+    });
+    expect(JSON.stringify(compactEvents)).not.toContain('sk-secret');
+    expect(JSON.stringify(compactEvents)).not.toContain('RAW_RESPONSE_BODY');
+    expect(session.getCompactions()).toHaveLength(1);
+  });
+
+  it('uses the replacement adapter for compaction after setAdapter', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{
+      type: 'text',
+      text: `retained answer ${'b'.repeat(10_000)}`,
+    }]);
+    let oldCompactCalls = 0;
+    let newCompactCalls = 0;
+    const oldAdapter: ModelAdapter = {
+      getModelName: () => 'old',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) oldCompactCalls += 1;
+        return mockStream([
+          { type: 'text', delta: 'old result' },
+          { type: 'done' },
+        ]);
+      },
+    };
+    const newAdapter: ModelAdapter = {
+      getModelName: () => 'new',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          newCompactCalls += 1;
+          return mockStream([
+            { type: 'text', delta: 'summary from replacement adapter' },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([
+          { type: 'text', delta: 'new result' },
+          { type: 'done' },
+        ]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter: oldAdapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 100,
+    });
+    runtime.setAdapter(newAdapter);
+
+    await runtime.run('current', () => {});
+
+    expect(oldCompactCalls).toBe(0);
+    expect(newCompactCalls).toBe(1);
+    expect(session.getCompactions().at(-1)?.summary)
+      .toBe('summary from replacement adapter');
+  });
+
+  it('does not emit success or inject memory when compaction has no net gain', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText('a');
+    session.appendAssistantBlocks([{ type: 'text', text: 'b' }]);
+    session.attachPromptSnapshot('snap_1', ['mem_1'], '/repo');
+    const listRelevant = vi.fn(async () => [{
+      id: 'mem_1',
+      scope: 'global' as const,
+      title: 'Rule',
+      summary: 'Must not be injected on a no-op.',
+      tags: [],
+      updatedAt: 1,
+    }]);
+    let compactCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          compactCalls += 1;
+          return mockStream([
+            { type: 'text', delta: 'an expansion rather than a summary' },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 1,
+      memoryStore: {
+        save: async () => {},
+        listRelevant,
+      },
+    });
+    const events: string[] = [];
+
+    await runtime.run('c', (event) => events.push(event.type));
+
+    expect(compactCalls).toBe(1);
+    expect(events).not.toContain('compact_triggered');
+    expect(session.getCompactions()).toHaveLength(0);
+    expect(listRelevant).not.toHaveBeenCalled();
+    expect(JSON.stringify(session.getMessages())).not.toContain('Must not be injected on a no-op.');
+  });
+
   it('derives compact policy from model capabilities when explicit overrides are absent', async () => {
     const adapter: ModelAdapter & {
       getCapabilities: () => { contextLimit: number; compactThreshold: number; supportsPromptCaching: boolean };
@@ -251,7 +606,8 @@ describe('AgentRuntime', () => {
       stream: () => mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]),
     };
     const session = new AgentSessionState();
-    session.appendUserText('12345678901234567890');
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{ type: 'text', text: 'retained answer' }]);
 
     const runtime = new AgentRuntime({
       adapter,
@@ -678,7 +1034,7 @@ describe('AgentRuntime compact memory injection', () => {
       session,
       controller: new AgentRunController(),
       systemPrompt: 'system',
-      contextLimit: 100,
+      contextLimit: 1_000,
       memoryStore: store,
     });
 
@@ -691,5 +1047,133 @@ describe('AgentRuntime compact memory injection', () => {
       m.content.some((b) => b.type === 'text' && (b as { type: 'text'; text: string }).text.includes('Always write tests first.'))
     );
     expect(memMsg).toBeDefined();
+  });
+
+  it('compacts and restores memory at most once during a multi-tool run', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
+    session.appendAssistantBlocks([{ type: 'text', text: `retained answer ${'b'.repeat(10_000)}` }]);
+    session.attachPromptSnapshot('snap_1', ['mem_1'], '/repo');
+
+    const listRelevant = vi.fn(async () => [{
+      id: 'mem_1',
+      scope: 'global' as const,
+      title: 'Large Rule',
+      summary: 'm'.repeat(12_000),
+      tags: [],
+      updatedAt: 1,
+    }]);
+    let compactCalls = 0;
+    let mainCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          compactCalls += 1;
+          return mockStream([{ type: 'text', delta: 'compact summary' }, { type: 'done' }]);
+        }
+        mainCalls += 1;
+        if (mainCalls <= 3) {
+          return mockStream([
+            {
+              type: 'tool_use',
+              id: `tu_${mainCalls}`,
+              name: 'read',
+              input: { path: `${mainCalls}.ts` },
+            },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit: 5_000,
+      memoryStore: {
+        save: async () => {},
+        listRelevant,
+      },
+    });
+    const events: string[] = [];
+
+    await runtime.run('current', (event) => events.push(event.type));
+
+    expect(mainCalls).toBe(4);
+    expect(compactCalls).toBe(1);
+    expect(listRelevant).toHaveBeenCalledTimes(1);
+    expect(events.filter((event) => event === 'compact_triggered')).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: 'remaining threshold headroom',
+      contextLimit: 1_000,
+      oldChars: 10_000,
+      retainedChars: 1_000,
+    },
+    {
+      name: 'the global 8000 character cap',
+      contextLimit: 10_000,
+      oldChars: 40_000,
+      retainedChars: 100,
+    },
+  ])('bounds restored memory by $name', async ({
+    contextLimit,
+    oldChars,
+    retainedChars,
+  }) => {
+    const session = new AgentSessionState();
+    session.appendUserText(`old prefix ${'a'.repeat(oldChars)}`);
+    session.appendAssistantBlocks([{ type: 'text', text: `retained ${'b'.repeat(retainedChars)}` }]);
+    session.attachPromptSnapshot('snap_1', ['mem_1'], '/repo');
+
+    let mainMessages = session.getMessages();
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (messages, _tools, systemPrompt) => {
+        if (systemPrompt.includes('TEXT ONLY')) {
+          return mockStream([{ type: 'text', delta: 'compact summary' }, { type: 'done' }]);
+        }
+        mainMessages = messages;
+        return mockStream([{ type: 'text', delta: 'final' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+      contextLimit,
+      compactThreshold: 0.85,
+      memoryStore: {
+        save: async () => {},
+        listRelevant: async () => [{
+          id: 'mem_1',
+          scope: 'global',
+          title: 'Large Rule',
+          summary: 'm'.repeat(20_000),
+          tags: [],
+          updatedAt: 1,
+        }],
+      },
+    });
+
+    await runtime.run('current', () => {});
+
+    const reminder = mainMessages
+      .flatMap((message) => message.content)
+      .find((block) =>
+        block.type === 'text' && block.text.includes('[Memory restored after compact]')
+      );
+    expect(reminder?.type).toBe('text');
+    if (reminder?.type !== 'text') throw new Error('memory reminder missing');
+    expect(reminder.text.length).toBeLessThanOrEqual(8_000);
+    expect(estimateTokens(mainMessages)).toBeLessThanOrEqual(Math.floor(contextLimit * 0.85));
   });
 });

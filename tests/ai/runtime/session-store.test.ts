@@ -6,6 +6,7 @@ import type { Message, UsageStats } from '../../../src/types.js';
 import { FileSessionStore, SQLiteSessionStore } from '../../../src/ai/runtime/session-store.js';
 import { createFileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import type { SessionStore } from '../../../src/ai/runtime/session-store/store.js';
+import { AgentSessionState } from '../../../src/ai/runtime/session.js';
 import { createEmptySessionIntentLedger } from '../../../src/runtime/intent-delegation/store.js';
 import { createEmptySessionSkillEvalState } from '../../../src/runtime/intent-delegation/skill-eval.js';
 import { createEmptySessionSkillExecutionState } from '../../../src/ai/skills/execution-state.js';
@@ -61,6 +62,40 @@ describe('FileSessionStore', () => {
       backgroundJobRefs: [],
       skillExecution: createEmptySessionSkillExecutionState(200),
     });
+  });
+
+  it('round-trips a real applied compaction through save, load, and restore', async () => {
+    const store = new FileSessionStore(rootDir);
+    const state = new AgentSessionState();
+    state.appendUserText(`old request ${'a'.repeat(10_000)}`);
+    state.appendAssistantBlocks([{ type: 'text', text: `old answer ${'b'.repeat(10_000)}` }]);
+    state.appendUserText('recent request');
+    state.appendAssistantBlocks([{ type: 'text', text: 'recent answer' }]);
+    const outcome = state.applyCompaction(
+      state.planCompaction(),
+      'LLM summary: preserve /tmp/report.html',
+    );
+    expect(outcome.status).toBe('compacted');
+
+    await store.save({
+      ...state.exportSnapshot(),
+      sessionId: 'sess_compacted',
+      cwd: 'D:/projects/workspace/xiaok-cli',
+      model: 'mock',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: ['sess_compacted'],
+    });
+    const loaded = await store.load('sess_compacted');
+    expect(loaded).not.toBeNull();
+
+    const resumed = new AgentSessionState();
+    resumed.restoreSnapshot(loaded!);
+
+    expect((resumed.getMessages()[0]!.content[0] as { type: 'text'; text: string }).text)
+      .toBe('LLM summary: preserve /tmp/report.html');
+    expect(resumed.getCompactions()).toEqual([outcome.record]);
+    expect(resumed.planCompaction().invalidReason).toBeUndefined();
   });
 
   it('lists saved sessions ordered by most recent update', async () => {

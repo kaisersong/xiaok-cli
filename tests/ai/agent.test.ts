@@ -181,26 +181,33 @@ describe('Agent', () => {
     const { Agent } = await import('../../src/ai/agent.js');
     const seenMessages: Message[][] = [];
     const adapter: ModelAdapter = {
-      stream: (messages) => {
+      stream: (messages, _tools, systemPrompt) => {
         seenMessages.push(messages.map((message) => ({
           role: message.role,
           content: message.content.map((block) => ({ ...block })),
         })));
 
+        if (systemPrompt.includes('TEXT ONLY')) {
+          return mockStream([
+            { type: 'text', delta: 'LLM summary: preserve the first request' },
+            { type: 'done' },
+          ]);
+        }
         return mockStream([{ type: 'text', delta: 'ok' }, { type: 'done' }]);
       },
     };
     const registry = createRegistryMock();
     const agent = new Agent(adapter, registry as never, 'system', { contextLimit: 8 });
 
-    await agent.runTurn('12345678901234567890', () => {});
+    await agent.runTurn(`first request ${'a'.repeat(10_000)}`, () => {});
     await agent.runTurn('abcdefghijklmnopqrstuvwxyz', () => {});
 
     // CompactRunner makes an extra stream call for AI summarization.
     // Find any turn that received a compacted history.
     const turnWithCompaction = seenMessages.find((msgs) =>
       msgs.some((m) => m.content.some((b) =>
-        b.type === 'text' && (b as { type: 'text'; text: string }).text.includes('[context compacted summary]')
+        b.type === 'text'
+        && (b as { type: 'text'; text: string }).text === 'LLM summary: preserve the first request'
       ))
     );
     expect(turnWithCompaction).toBeDefined();
