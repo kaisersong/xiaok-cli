@@ -491,36 +491,68 @@ describe('FileSessionStore', () => {
               createdAt: 100,
               updatedAt: 200,
             },
-            intents: [{
-              intentId: 'intent_nested',
-              instanceId: 'inst_nested',
-              sessionId: 'sess_nested',
-              rawIntent: 'Write summary',
-              normalizedIntent: 'write summary',
-              intentType: 'generate',
-              deliverable: 'summary',
-              explicitConstraints: [],
-              delegationBoundary: [],
-              riskTier: 'medium',
-              templateId: 'tpl_generate',
-              steps: [
-                {
-                  stepId: 'intent_nested:step:collect',
-                  key: 'collect',
-                  order: 0,
-                  role: 'collect',
-                  skillName: null,
-                  dependsOn: [],
-                  status: 'planned',
-                  riskTier: 'medium',
-                },
-              ],
-              activeStepId: 'intent_nested:step:collect',
-              overallStatus: 'drafting_plan',
-              attemptCount: 1,
-              createdAt: 100,
-              updatedAt: 200,
-            }],
+            intents: [
+              {
+                intentId: 'intent_nested',
+                instanceId: 'inst_nested',
+                sessionId: 'sess_nested',
+                rawIntent: 'Write summary',
+                normalizedIntent: 'write summary',
+                intentType: 'generate',
+                deliverable: 'summary',
+                explicitConstraints: [],
+                delegationBoundary: [],
+                riskTier: 'medium',
+                templateId: 'tpl_generate',
+                steps: [
+                  {
+                    stepId: 'intent_nested:step:collect',
+                    key: 'collect',
+                    order: 0,
+                    role: 'collect',
+                    skillName: null,
+                    dependsOn: [],
+                    status: 'planned',
+                    riskTier: 'medium',
+                  },
+                ],
+                activeStepId: 'intent_nested:step:collect',
+                overallStatus: 'drafting_plan',
+                attemptCount: 1,
+                createdAt: 100,
+                updatedAt: 200,
+              },
+              {
+                intentId: 'intent_secondary',
+                instanceId: 'inst_secondary',
+                sessionId: 'sess_nested',
+                rawIntent: 'Review summary',
+                normalizedIntent: 'review summary',
+                intentType: 'review',
+                deliverable: 'review',
+                explicitConstraints: [],
+                delegationBoundary: [],
+                riskTier: 'low',
+                templateId: 'tpl_review',
+                steps: [
+                  {
+                    stepId: 'intent_secondary:step:review',
+                    key: 'review',
+                    order: 0,
+                    role: 'review',
+                    skillName: null,
+                    dependsOn: [],
+                    status: 'planned',
+                    riskTier: 'low',
+                  },
+                ],
+                activeStepId: 'intent_secondary:step:review',
+                overallStatus: 'drafting_plan',
+                attemptCount: 1,
+                createdAt: 120,
+                updatedAt: 200,
+              },
+            ],
             breadcrumbs: [],
             receipt: null,
             salvage: null,
@@ -550,13 +582,27 @@ describe('FileSessionStore', () => {
           },
         });
         expect(forked.intentDelegation?.latestPlan?.sessionId).toBe(forked.sessionId);
+        expect(forked.intentDelegation?.latestPlan?.instanceId).toBe('inst_nested');
         expect(forked.intentDelegation?.intents.map((intent) => intent.sessionId))
-          .toEqual([forked.sessionId]);
+          .toEqual([forked.sessionId, forked.sessionId]);
+        expect(forked.intentDelegation?.intents.map((intent) => intent.instanceId))
+          .toEqual(['inst_nested', 'inst_secondary']);
         expect(persistedFork?.intentDelegation?.sessionId).toBe(forked.sessionId);
+        expect(persistedFork?.intentDelegation?.latestPlan?.sessionId)
+          .toBe(forked.sessionId);
+        expect(persistedFork?.intentDelegation?.latestPlan?.instanceId)
+          .toBe('inst_nested');
+        expect(persistedFork?.intentDelegation?.intents.map((intent) => intent.sessionId))
+          .toEqual([forked.sessionId, forked.sessionId]);
+        expect(persistedFork?.intentDelegation?.intents.map((intent) => intent.instanceId))
+          .toEqual(['inst_nested', 'inst_secondary']);
         expect(source?.intentDelegation?.sessionId).toBe('sess_nested');
         expect(source?.intentDelegation?.latestPlan?.sessionId).toBe('sess_nested');
+        expect(source?.intentDelegation?.latestPlan?.instanceId).toBe('inst_nested');
         expect(source?.intentDelegation?.intents.map((intent) => intent.sessionId))
-          .toEqual(['sess_nested']);
+          .toEqual(['sess_nested', 'sess_nested']);
+        expect(source?.intentDelegation?.intents.map((intent) => intent.instanceId))
+          .toEqual(['inst_nested', 'inst_secondary']);
         expect(source?.intentDelegation).toMatchObject({
           instanceId: 'inst_nested',
           ownership: {
