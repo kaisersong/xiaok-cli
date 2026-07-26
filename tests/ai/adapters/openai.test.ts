@@ -12,6 +12,7 @@ import {
   KIMI_SCHEMA_LIMITS,
   KimiToolSchemaError,
 } from '../../../src/ai/providers/kimi-tool-schema.js';
+import { normalizeMcpToolSchema } from '../../../src/ai/mcp/client.js';
 import type { ModelRuntimeOptions } from '../../../src/ai/providers/types.js';
 import type { ToolDefinition } from '../../../src/types.js';
 
@@ -223,6 +224,62 @@ describe('OpenAIAdapter Kimi tool schema serialization gate', () => {
     expect(request.tools?.[0]?.function.parameters).not.toBe(inputSchema);
     expect(inputSchema).toEqual(snapshot);
   });
+
+  it.each([
+    {
+      label: 'changing bigint',
+      getValue(reads: number): unknown {
+        return reads === 1 ? null : 1n;
+      },
+    },
+    {
+      label: 'changing cycle',
+      getValue(reads: number): unknown {
+        if (reads === 1) return null;
+        const cycle: Record<string, unknown> = {};
+        cycle.self = cycle;
+        return cycle;
+      },
+    },
+    {
+      label: 'throwing',
+      getValue(): unknown {
+        throw new Error('getter must never run');
+      },
+    },
+  ])(
+    'rejects an MCP $label accessor locally before strict Kimi SDK create',
+    async ({ getValue }) => {
+      let getterReads = 0;
+      const nested: Record<string, unknown> = {};
+      Object.defineProperty(nested, 'value', {
+        enumerable: true,
+        get() {
+          getterReads += 1;
+          return getValue(getterReads);
+        },
+      });
+      const definition = normalizeMcpToolSchema('unsafe', {
+        name: 'accessor',
+        inputSchema: {
+          type: 'object',
+          'x-nested': nested,
+        },
+      });
+      const adapter = createStrictKimiAdapter();
+      const createSpy = await attachRequestSpy(adapter);
+
+      const error = await captureStreamError(adapter, [definition]);
+
+      expect(error).toBeInstanceOf(KimiToolSchemaError);
+      expect(error).toMatchObject({
+        code: 'KIMI_SCHEMA_INVALID_JSON_VALUE',
+        toolName: 'mcp__unsafe__accessor',
+      });
+      expect(getterReads).toBe(0);
+      expect(createSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     {

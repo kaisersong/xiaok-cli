@@ -1,3 +1,5 @@
+import { types as nodeUtilTypes } from 'node:util';
+
 export const KIMI_SCHEMA_LIMITS = Object.freeze({
   maxDepth: 64,
   maxInputNodes: 20_000,
@@ -294,22 +296,30 @@ function reserveArrayEntry(state: NormalizeState, index: number): void {
   if (index > 0) reserveOutputBytes(state, 1);
 }
 
-function preflightJsonValue(
-  value: unknown,
+function reserveInputNode(
   inputDepth: number,
-  active: Set<object>,
-  candidate: boolean,
   counter: { nodes: number },
 ): void {
   if (inputDepth > KIMI_SCHEMA_LIMITS.maxDepth) {
     throw limitError('depth');
   }
-
-  counter.nodes += 1;
-  if (counter.nodes > KIMI_SCHEMA_LIMITS.maxInputNodes) {
+  if (counter.nodes >= KIMI_SCHEMA_LIMITS.maxInputNodes) {
     throw limitError('input_nodes');
   }
+  counter.nodes += 1;
+}
 
+function isAccessorDescriptor(descriptor: PropertyDescriptor): boolean {
+  return hasOwn(descriptor, 'get') || hasOwn(descriptor, 'set');
+}
+
+function snapshotReservedJsonValue(
+  value: unknown,
+  inputDepth: number,
+  active: Set<object>,
+  candidate: boolean,
+  counter: { nodes: number },
+): unknown {
   if (
     value === undefined
     || typeof value === 'bigint'
@@ -321,7 +331,10 @@ function preflightJsonValue(
   }
 
   if (value === null || typeof value !== 'object') {
-    return;
+    return value;
+  }
+  if (nodeUtilTypes.isProxy(value)) {
+    throw invalidJsonError(false);
   }
   if (!Array.isArray(value) && !isJsonRecord(value)) {
     throw invalidJsonError(candidate);
@@ -331,22 +344,76 @@ function preflightJsonValue(
   }
 
   active.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      preflightJsonValue(item, inputDepth + 1, active, candidate, counter);
+  try {
+    if (Array.isArray(value)) {
+      const snapshot: unknown[] = [];
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length');
+      const length = lengthDescriptor?.value;
+      if (!Number.isSafeInteger(length) || length < 0) {
+        throw invalidJsonError(candidate);
+      }
+
+      for (let index = 0; index < length; index += 1) {
+        reserveInputNode(inputDepth + 1, counter);
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor) {
+          throw invalidJsonError(candidate);
+        }
+        if (isAccessorDescriptor(descriptor)) {
+          throw invalidJsonError(false);
+        }
+        snapshot.push(snapshotReservedJsonValue(
+          descriptor.value,
+          inputDepth + 1,
+          active,
+          candidate,
+          counter,
+        ));
+      }
+      return snapshot;
     }
-  } else {
-    for (const [key, child] of Object.entries(value)) {
-      preflightJsonValue(
-        child,
-        inputDepth + 1,
-        active,
-        candidate || key === 'enum' || key === 'const',
-        counter,
+
+    const snapshot: Record<string, unknown> = {};
+    for (const key in value) {
+      if (!hasOwn(value, key)) continue;
+      reserveInputNode(inputDepth + 1, counter);
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || isAccessorDescriptor(descriptor)) {
+        throw invalidJsonError(false);
+      }
+      defineOwn(
+        snapshot,
+        key,
+        snapshotReservedJsonValue(
+          descriptor.value,
+          inputDepth + 1,
+          active,
+          candidate || key === 'enum' || key === 'const',
+          counter,
+        ),
       );
     }
+    return snapshot;
+  } finally {
+    active.delete(value);
   }
-  active.delete(value);
+}
+
+function snapshotJsonValue(
+  value: unknown,
+  inputDepth: number,
+  active: Set<object>,
+  candidate: boolean,
+  counter: { nodes: number },
+): unknown {
+  reserveInputNode(inputDepth, counter);
+  return snapshotReservedJsonValue(
+    value,
+    inputDepth,
+    active,
+    candidate,
+    counter,
+  );
 }
 
 function cloneJsonValue(value: unknown, state: NormalizeState): unknown {
@@ -470,10 +537,15 @@ function hasApplicator(schema: Record<string, unknown>): boolean {
   return APPLICATOR_SLOTS.some((key) => hasOwn(schema, key));
 }
 
+interface TypeCompletion {
+  type: JsonTypeName | undefined;
+  changed: boolean;
+}
+
 function completeType(
   schema: Record<string, unknown>,
   isRoot: boolean,
-): JsonTypeName | undefined {
+): TypeCompletion {
   const declaredType = schema.type;
   if (typeof declaredType === 'string' && declaredType.length > 0) {
     const candidate = candidateTypeFor(schema, true);
@@ -482,22 +554,22 @@ function completeType(
       && !typesAreCompatible(declaredType as JsonTypeName, candidate)
     ) {
       schema.type = candidate;
-      return candidate;
+      return { type: candidate, changed: true };
     }
-    return declaredType as JsonTypeName;
+    return { type: declaredType as JsonTypeName, changed: false };
   }
 
   if (Array.isArray(declaredType)) {
-    return undefined;
+    return { type: undefined, changed: false };
   }
   if (isRoot || hasApplicator(schema)) {
-    return undefined;
+    return { type: undefined, changed: false };
   }
 
   const candidate = candidateTypeFor(schema, false);
   if (candidate) {
     schema.type = candidate;
-    return candidate;
+    return { type: candidate, changed: true };
   }
 
   let inferred: JsonTypeName;
@@ -513,7 +585,7 @@ function completeType(
     inferred = 'string';
   }
   schema.type = inferred;
-  return inferred;
+  return { type: inferred, changed: true };
 }
 
 function removeIncompatibleKeys(
@@ -686,13 +758,16 @@ function normalizeSchemaBody(
     defineOwn(draft, key, value);
   }
 
-  let effectiveType: JsonTypeName | undefined;
+  let completion: TypeCompletion = {
+    type: undefined,
+    changed: false,
+  };
   if (shouldCompleteType) {
-    effectiveType = completeType(draft, isRoot);
-  } else if (typeof draft.type === 'string' && draft.type.length > 0) {
-    effectiveType = draft.type as JsonTypeName;
+    completion = completeType(draft, isRoot);
   }
-  removeIncompatibleKeys(draft, effectiveType);
+  if (completion.changed) {
+    removeIncompatibleKeys(draft, completion.type);
+  }
 
   const normalized = beginOutputObject(state);
   const entries = Object.entries(draft);
@@ -812,16 +887,25 @@ export function normalizeKimiToolSchema(
   schema: Record<string, unknown>,
 ): NormalizedKimiSchema {
   const inputCounter = { nodes: 0 };
-  preflightJsonValue(schema, 0, new Set(), false, inputCounter);
+  const snapshot = snapshotJsonValue(
+    schema,
+    0,
+    new Set(),
+    false,
+    inputCounter,
+  );
+  if (!isJsonRecord(snapshot)) {
+    throw invalidJsonError(false);
+  }
 
   const state: NormalizeState = {
-    root: schema,
+    root: snapshot,
     refExpansions: 0,
     outputNodes: 0,
     outputBytes: 0,
   };
   const normalized = normalizeSchemaNode(
-    schema,
+    snapshot,
     state,
     0,
     0,

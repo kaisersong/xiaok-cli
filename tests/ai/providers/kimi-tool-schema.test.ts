@@ -285,7 +285,7 @@ describe('normalizeKimiToolSchema type completion', () => {
         },
         structureDoesNotRepair: {
           type: 'string',
-          properties: { removed: {} },
+          properties: { preserved: {} },
           items: {},
         },
         unionIsUntouched: {
@@ -310,6 +310,10 @@ describe('normalizeKimiToolSchema type completion', () => {
         },
         structureDoesNotRepair: {
           type: 'string',
+          properties: {
+            preserved: { type: 'string' },
+          },
+          items: { type: 'string' },
         },
         unionIsUntouched: {
           type: ['string', 'object'],
@@ -463,13 +467,14 @@ describe('normalizeKimiToolSchema local references', () => {
       properties: {
         value: {
           type: 'array',
+          properties: {
+            fromTarget: { const: 'target', type: 'string' },
+          },
           items: { const: 'sibling', type: 'string' },
           description: 'sibling description',
         },
       },
     });
-    expect((result.schema.properties as Record<string, unknown>).value)
-      .not.toHaveProperty('properties');
   });
 
   it('does not fill type on a successfully resolved ref node', () => {
@@ -664,6 +669,74 @@ describe('normalizeKimiToolSchema immutability', () => {
   });
 });
 
+describe('normalizeKimiToolSchema vetted input snapshot', () => {
+  it.each([
+    {
+      label: 'changing bigint',
+      getValue(reads: number): unknown {
+        return reads === 1 ? null : 1n;
+      },
+    },
+    {
+      label: 'changing cycle',
+      getValue(reads: number): unknown {
+        if (reads === 1) return null;
+        const cycle: Record<string, unknown> = {};
+        cycle.self = cycle;
+        return cycle;
+      },
+    },
+    {
+      label: 'throwing',
+      getValue(): unknown {
+        throw new Error('getter must never run');
+      },
+    },
+  ])('rejects a $label accessor without invoking it', ({ getValue }) => {
+    let getterReads = 0;
+    const nested: Record<string, unknown> = {};
+    Object.defineProperty(nested, 'value', {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return getValue(getterReads);
+      },
+    });
+
+    expectKimiError(
+      () => normalizeKimiToolSchema({
+        type: 'object',
+        'x-nested': nested,
+      }),
+      'KIMI_SCHEMA_INVALID_JSON_VALUE',
+    );
+    expect(getterReads).toBe(0);
+  });
+
+  it('rejects a Proxy without entering its reflection traps', () => {
+    let trapCalls = 0;
+    const input = new Proxy<Record<string, unknown>>(
+      { type: 'object' },
+      {
+        getPrototypeOf(target) {
+          trapCalls += 1;
+          return Reflect.getPrototypeOf(target);
+        },
+        ownKeys(target) {
+          trapCalls += 1;
+          return Reflect.ownKeys(target);
+        },
+      },
+    );
+
+    expectKimiError(
+      () => normalizeKimiToolSchema(input),
+      'KIMI_SCHEMA_INVALID_JSON_VALUE',
+    );
+    expect(trapCalls).toBe(0);
+  });
+});
+
 describe('normalizeKimiToolSchema resource limits', () => {
   it('accepts arbitrary input JSON depth 64 inclusive and rejects depth 65', () => {
     expect(() => normalizeKimiToolSchema(
@@ -701,6 +774,43 @@ describe('normalizeKimiToolSchema resource limits', () => {
       ),
       'input_nodes',
     );
+  });
+
+  it('rejects the first over-limit input child before invoking its accessor', () => {
+    let getterReads = 0;
+    const input: Record<string, unknown> = {};
+    for (
+      let index = 0;
+      index < KIMI_SCHEMA_LIMITS.maxInputNodes - 1;
+      index += 1
+    ) {
+      input[`value${index}`] = null;
+    }
+    Object.defineProperty(input, 'firstOverLimit', {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        throw new Error('over-limit getter must never run');
+      },
+    });
+
+    const ownKeysSpy = vi.spyOn(Reflect, 'ownKeys');
+    let caught: unknown;
+    try {
+      normalizeKimiToolSchema(input);
+    } catch (error) {
+      caught = error;
+    }
+    const ownKeysCalls = ownKeysSpy.mock.calls.length;
+    ownKeysSpy.mockRestore();
+
+    expect(caught).toBeInstanceOf(KimiToolSchemaError);
+    expect(caught).toMatchObject({
+      code: 'KIMI_SCHEMA_LIMIT_EXCEEDED',
+      limitKind: 'input_nodes',
+    });
+    expect(ownKeysCalls).toBe(0);
+    expect(getterReads).toBe(0);
   });
 
   it('accepts ref expansion limit - 1 and rejects ref expansion limit + 1', () => {
@@ -778,7 +888,7 @@ describe('normalizeKimiToolSchema resource limits', () => {
     });
   });
 
-  it('stops a shared-ref output bomb before materializing every expanded node', () => {
+  it('rejects accessor instrumentation before materializing shared-ref output', () => {
     let paddingReads = 0;
     const payload: Record<string, unknown> = {
       type: 'object',
@@ -803,11 +913,11 @@ describe('normalizeKimiToolSchema resource limits', () => {
       ),
     };
 
-    expectLimit(
+    expectKimiError(
       () => normalizeKimiToolSchema(schema),
-      'output_nodes',
+      'KIMI_SCHEMA_INVALID_JSON_VALUE',
     );
-    expect(paddingReads).toBeLessThan(100);
+    expect(paddingReads).toBe(0);
   });
 
   it('rejects object identity cycles without relying on JSON.stringify', () => {
