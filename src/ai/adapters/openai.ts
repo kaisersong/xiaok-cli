@@ -8,8 +8,9 @@ import { estimateTokens } from '../runtime/usage.js';
 import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import {
   buildOpenAIHarnessContext,
+  observeReasoningDialect,
   type OpenAIAdapterInit,
-  type ReasoningKeyName,
+  type ReasoningDialectState,
 } from '../providers/model-harness-profile.js';
 import {
   KIMI_SCHEMA_LIMITS,
@@ -65,6 +66,15 @@ function collectReasoningText(blocks: Message['content']): string | undefined {
     .join('\n\n');
 
   return reasoning || undefined;
+}
+
+function hasHarnessCapability(
+  capabilities: readonly string[],
+  expected: string,
+): boolean {
+  return capabilities.some(
+    (capability) => capability.toLowerCase() === expected,
+  );
 }
 
 function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signature: string; text: string }> {
@@ -216,8 +226,9 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly kimiCodingHeadersApplied: boolean;
   private readonly httpAgent: OpenAIHttpAgent;
   readonly harnessContext: OpenAIAdapterInit['harnessContext'];
-  private reasoningDialectState: { key: ReasoningKeyName } = {
-    key: 'reasoning_content',
+  private reasoningDialectState: ReasoningDialectState = {
+    current: 'reasoning_content',
+    learned: false,
   };
 
   constructor(init: OpenAIAdapterInit) {
@@ -288,7 +299,12 @@ export class OpenAIAdapter implements ModelAdapter {
         capabilityOverrides,
       }),
     });
-    clone.reasoningDialectState = { ...this.reasoningDialectState };
+    if (
+      clone.harnessContext.identityFingerprint
+      === this.harnessContext.identityFingerprint
+    ) {
+      clone.reasoningDialectState = { ...this.reasoningDialectState };
+    }
     return clone;
   }
 
@@ -405,14 +421,31 @@ export class OpenAIAdapter implements ModelAdapter {
       if (m.role === 'assistant') {
         const textBlocks = m.content.filter((block) => block.type === 'text');
         const toolUseBlocks = m.content.filter((block) => block.type === 'tool_use');
-        const reasoningContent = collectReasoningText(m.content);
+        const text = textBlocks.map((block) => block.text).join('');
+        const shouldOmitContent = (
+          this.harnessContext.flags.omitEmptyAssistantContent
+          && this.harnessContext.profile.shouldOmitAssistantContent !== undefined
+          && hasHarnessCapability(
+            this.harnessContext.identity.capabilities,
+            'tools',
+          )
+          && this.harnessContext.profile.shouldOmitAssistantContent({
+            hasToolCalls: toolUseBlocks.length > 0,
+            text,
+          })
+        );
 
-        const msg: OpenAI.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
+        const msg: OpenAI.ChatCompletionAssistantMessageParam & {
+          reasoning_content?: string;
+          reasoning?: string;
+        } = {
           role: 'assistant',
-          content: textBlocks.length > 0
-            ? textBlocks.map((block) => block.text).join('')
-            : (toolUseBlocks.length > 0 ? null : ''),
         };
+        if (!shouldOmitContent) {
+          msg.content = textBlocks.length > 0
+            ? text
+            : (toolUseBlocks.length > 0 ? null : '');
+        }
 
         if (toolUseBlocks.length > 0) {
           msg.tool_calls = toolUseBlocks.map((block) => ({
@@ -425,8 +458,30 @@ export class OpenAIAdapter implements ModelAdapter {
           }));
         }
 
-        if (reasoningContent) {
-          msg.reasoning_content = reasoningContent;
+        const serializeReasoning = this.harnessContext.profile.serializeReasoning;
+        if (serializeReasoning) {
+          const preservedThinkingEnabled = (
+            this.harnessContext.flags.preservedThinking
+            && hasHarnessCapability(
+              this.harnessContext.identity.capabilities,
+              'thinking',
+            )
+          );
+          if (preservedThinkingEnabled) {
+            const serialized = serializeReasoning(
+              m.content,
+              this.reasoningDialectState.current,
+              true,
+            );
+            if (serialized) {
+              msg[serialized.field] = serialized.value;
+            }
+          }
+        } else {
+          const reasoningContent = collectReasoningText(m.content);
+          if (reasoningContent) {
+            msg.reasoning_content = reasoningContent;
+          }
         }
 
         openaiMessages.push(msg);
@@ -517,6 +572,16 @@ export class OpenAIAdapter implements ModelAdapter {
       if (!choice) continue;
       const delta = choice.delta;
       if (!delta) continue;
+
+      if (this.harnessContext.profile.serializeReasoning) {
+        const observation = observeReasoningDialect(
+          this.reasoningDialectState,
+          delta as Record<string, unknown>,
+        );
+        if (observation.conflict) {
+          console.warn('reasoningDialectConflict', observation.conflict);
+        }
+      }
 
       for (const reasoning of extractReasoningDeltas(delta as Record<string, unknown>)) {
         yield { type: 'thinking', delta: reasoning.text, signature: reasoning.signature };

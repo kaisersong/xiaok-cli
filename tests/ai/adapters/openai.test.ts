@@ -6,7 +6,7 @@ import {
   buildOpenAIHarnessContext,
   resolveKimiHarnessFeatureFlags,
   type OpenAIAdapterInit,
-  type ReasoningKeyName,
+  type ReasoningDialectState,
 } from '../../../src/ai/providers/model-harness-profile.js';
 import {
   KIMI_SCHEMA_LIMITS,
@@ -14,7 +14,7 @@ import {
 } from '../../../src/ai/providers/kimi-tool-schema.js';
 import { normalizeMcpToolSchema } from '../../../src/ai/mcp/client.js';
 import type { ModelRuntimeOptions } from '../../../src/ai/providers/types.js';
-import type { ToolDefinition } from '../../../src/types.js';
+import type { Message, ToolDefinition } from '../../../src/types.js';
 
 const openAIConstructorCalls: unknown[] = [];
 
@@ -23,6 +23,7 @@ type KimiReasoningEffort = 'low' | 'high' | 'max';
 interface CapturedChatCompletionRequest {
   model: string;
   reasoning_effort?: KimiReasoningEffort;
+  messages: Array<Record<string, unknown>>;
   tools?: Array<{
     type: 'function';
     function: {
@@ -52,6 +53,7 @@ vi.mock('openai', () => {
 async function captureChatCompletionRequest(
   adapter: unknown,
   tools: ToolDefinition[] = [],
+  messages: Message[] = [],
 ): Promise<CapturedChatCompletionRequest> {
   let capturedRequest: CapturedChatCompletionRequest | undefined;
   const mockStream = {
@@ -75,12 +77,18 @@ async function captureChatCompletionRequest(
       systemPrompt: string,
     ): AsyncIterable<unknown>;
   };
-  for await (const _ of streamAdapter.stream([], tools, 'system')) { /* consume */ }
+  for await (const _ of streamAdapter.stream(messages as never[], tools, 'system')) { /* consume */ }
 
   if (!capturedRequest) {
     throw new Error('OpenAI request was not captured');
   }
   return capturedRequest;
+}
+
+function getReasoningDialectState(adapter: OpenAIAdapter): ReasoningDialectState {
+  return (adapter as unknown as {
+    reasoningDialectState: ReasoningDialectState;
+  }).reasoningDialectState;
 }
 
 async function attachRequestSpy(adapter: OpenAIAdapter) {
@@ -808,22 +816,60 @@ describe('OpenAIAdapter', () => {
     expect(clone.harnessContext.flags).toBe(flags);
   });
 
-  it('copies the reasoning dialect snapshot without sharing mutable clone state', () => {
-    const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
-    const originalState = (adapter as unknown as {
-      reasoningDialectState: { key: ReasoningKeyName };
-    }).reasoningDialectState;
-    originalState.key = 'reasoning';
+  it('copies the full dialect snapshot only for the same fingerprint without sharing state', () => {
+    const adapter = createStrictKimiAdapter();
+    const originalState = getReasoningDialectState(adapter);
+    originalState.current = 'reasoning';
+    originalState.learned = true;
 
-    const clone = adapter.cloneWithModel('gpt-4.1');
-    const cloneState = (clone as unknown as {
-      reasoningDialectState: { key: ReasoningKeyName };
-    }).reasoningDialectState;
+    const clone = adapter.cloneWithModel('k3');
+    const cloneState = getReasoningDialectState(clone);
 
-    expect(cloneState).toEqual({ key: 'reasoning' });
+    expect(clone.harnessContext.identityFingerprint)
+      .toBe(adapter.harnessContext.identityFingerprint);
+    expect(cloneState).toEqual({ current: 'reasoning', learned: true });
     expect(cloneState).not.toBe(originalState);
-    cloneState.key = 'reasoning_content';
-    expect(originalState.key).toBe('reasoning');
+    cloneState.current = 'reasoning_content';
+    cloneState.learned = false;
+    expect(originalState).toEqual({ current: 'reasoning', learned: true });
+  });
+
+  it('resets dialect state when a different model changes the fingerprint', () => {
+    const adapter = createStrictKimiAdapter();
+    Object.assign(getReasoningDialectState(adapter), {
+      current: 'reasoning',
+      learned: true,
+    } satisfies ReasoningDialectState);
+
+    const clone = adapter.cloneWithModel('kimi-k2.7');
+
+    expect(clone.harnessContext.identityFingerprint)
+      .not.toBe(adapter.harnessContext.identityFingerprint);
+    expect(getReasoningDialectState(clone)).toEqual({
+      current: 'reasoning_content',
+      learned: false,
+    });
+  });
+
+  it('resets dialect state when the same wire model resolves different capabilities', () => {
+    const adapter = createStrictKimiAdapter({
+      capabilities: ['tools', 'thinking', 'vision'],
+    });
+    Object.assign(getReasoningDialectState(adapter), {
+      current: 'reasoning',
+      learned: true,
+    } satisfies ReasoningDialectState);
+
+    const clone = adapter.cloneWithModel('k3');
+
+    expect(clone.harnessContext.identity.wireModel).toBe('k3');
+    expect(clone.harnessContext.identity.capabilities).toEqual(['tools', 'thinking']);
+    expect(clone.harnessContext.identityFingerprint)
+      .not.toBe(adapter.harnessContext.identityFingerprint);
+    expect(getReasoningDialectState(clone)).toEqual({
+      current: 'reasoning_content',
+      learned: false,
+    });
   });
 
   it('emits text chunks from streaming response', async () => {
@@ -1029,6 +1075,97 @@ describe('OpenAIAdapter', () => {
     expect(chunks).toContainEqual({ type: 'text', delta: 'answer' });
   });
 
+  it('observes an own empty reasoning_content before the UI extractor falls back to reasoning', async () => {
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: {
+              reasoning_content: '',
+              reasoning: 'visible fallback',
+            },
+            finish_reason: null,
+          }],
+        };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toContainEqual({
+      type: 'thinking',
+      delta: 'visible fallback',
+      signature: 'reasoning',
+    });
+    expect(getReasoningDialectState(adapter)).toEqual({
+      current: 'reasoning_content',
+      learned: true,
+    });
+  });
+
+  it('keeps the first raw dialect observation across retry attempts', async () => {
+    let createCalls = 0;
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      createCalls += 1;
+      if (createCalls === 1) {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              choices: [{
+                delta: { reasoning_content: '' },
+                finish_reason: null,
+              }],
+            };
+            throw Object.assign(new Error('retry me'), { status: 500 });
+          },
+        } as never;
+      }
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            choices: [{
+              delta: { reasoning: 'second attempt' },
+              finish_reason: null,
+            }],
+          };
+          yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+        },
+      } as never;
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    try {
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+      expect(createCalls).toBe(2);
+      expect(getReasoningDialectState(adapter)).toEqual({
+        current: 'reasoning_content',
+        learned: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        'reasoningDialectConflict',
+        {
+          previous: 'reasoning_content',
+          candidate: 'reasoning',
+        },
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('emits thinking chunks from reasoning_details streaming deltas', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 
@@ -1176,6 +1313,519 @@ describe('OpenAIAdapter', () => {
     expect(assistantMessage?.content).toBe('working...');
     expect(assistantMessage?.reasoning_content).toBe('first reasoned step\n\nsecond reasoned step');
     expect(assistantMessage?.tool_calls).toHaveLength(1);
+  });
+
+  it('does not inject Kimi preserved thinking when the flag is off', async () => {
+    const adapter = createStrictKimiAdapter();
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'private' }],
+    }]);
+    const assistant = request.messages[1]!;
+
+    expect(assistant).not.toHaveProperty('reasoning_content');
+    expect(assistant).not.toHaveProperty('reasoning');
+  });
+
+  it('does not inject Kimi preserved thinking without thinking capability', async () => {
+    const adapter = createStrictKimiAdapter({
+      capabilities: ['tools'],
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'private' }],
+    }]);
+    const assistant = request.messages[1]!;
+
+    expect(assistant).not.toHaveProperty('reasoning_content');
+    expect(assistant).not.toHaveProperty('reasoning');
+  });
+
+  it.each([
+    {
+      label: 'flag off',
+      capabilities: ['tools', 'thinking'],
+      flags: resolveKimiHarnessFeatureFlags({}),
+    },
+    {
+      label: 'thinking capability missing',
+      capabilities: ['tools'],
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    },
+  ])('does not run the Kimi serializer when $label', async ({ capabilities, flags }) => {
+    const baseContext = buildOpenAIHarnessContext({
+      identity: {
+        providerId: 'kimi',
+        providerType: 'first_party',
+        protocol: 'openai_legacy',
+        canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+        wireModel: 'k3',
+        capabilities,
+      },
+      flags,
+    });
+    const serializeReasoning = vi.fn(baseContext.profile.serializeReasoning!);
+    const adapter = new OpenAIAdapter({
+      apiKey: 'test-key',
+      kimiCodingHeadersApplied: true,
+      harnessContext: {
+        ...baseContext,
+        profile: {
+          ...baseContext.profile,
+          serializeReasoning,
+        },
+      },
+    });
+
+    await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'private' }],
+    }]);
+
+    expect(serializeReasoning).not.toHaveBeenCalled();
+  });
+
+  it('preserves Kimi whitespace and directly concatenates thinking blocks', async () => {
+    const adapter = createStrictKimiAdapter({
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: '  first  \n' },
+        { type: 'thinking', thinking: '\tsecond  ' },
+        { type: 'text', text: 'answer' },
+      ],
+    }]);
+
+    expect(request.messages[1]).toMatchObject({
+      role: 'assistant',
+      reasoning_content: '  first  \n\tsecond  ',
+    });
+  });
+
+  it('backfills an empty Kimi reasoning field when an assistant history has no thinking block', async () => {
+    const adapter = createStrictKimiAdapter({
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [{ type: 'text', text: 'answer' }],
+    }]);
+
+    expect(request.messages[1]).toHaveProperty('reasoning_content', '');
+  });
+
+  it('replays preserved Kimi thinking with the first observed reasoning dialect', async () => {
+    const flags = resolveKimiHarnessFeatureFlags({
+      XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+    });
+    const adapter = createStrictKimiAdapter({ flags });
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: { reasoning_content: null, reasoning: '' },
+            finish_reason: null,
+          }],
+        };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'private' }],
+    }]);
+
+    expect(request.messages[1]).not.toHaveProperty('reasoning_content');
+    expect(request.messages[1]).toHaveProperty('reasoning', 'private');
+  });
+
+  it('keeps the generic reasoning collector trim/filter/double-newline behavior', async () => {
+    const adapter = createTestAdapter({
+      wireModel: 'gpt-4o',
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: '  first  ' },
+        { type: 'thinking', thinking: ' \n\t ' },
+        { type: 'thinking', thinking: '\nsecond\n' },
+      ],
+    }]);
+
+    expect(request.messages[1]).toHaveProperty(
+      'reasoning_content',
+      'first\n\nsecond',
+    );
+  });
+
+  it('keeps the complete generic request body unchanged when Kimi flags are enabled', async () => {
+    const adapter = createTestAdapter({
+      wireModel: 'gpt-4o',
+      providerId: 'openai',
+      providerType: 'first_party',
+      baseUrl: 'https://api.openai.com/v1',
+      capabilities: ['tools', 'thinking'],
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'plain answer' }],
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '  first  ' },
+          { type: 'thinking', thinking: '\nsecond\n' },
+          { type: 'text', text: 'working' },
+          {
+            type: 'tool_use',
+            id: 'tu_generic',
+            name: 'search',
+            input: { q: 'parity' },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'tu_generic',
+          content: 'generic result',
+        }],
+      },
+      {
+        role: 'assistant',
+        content: [{
+          type: 'tool_use',
+          id: 'tu_generic_empty',
+          name: 'lookup',
+          input: {},
+        }],
+      },
+    ]);
+
+    expect(JSON.stringify(request)).toBe(JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'system' },
+        { role: 'assistant', content: 'plain answer' },
+        {
+          role: 'assistant',
+          content: 'working',
+          tool_calls: [{
+            id: 'tu_generic',
+            type: 'function',
+            function: {
+              name: 'search',
+              arguments: '{"q":"parity"}',
+            },
+          }],
+          reasoning_content: 'first\n\nsecond',
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'tu_generic',
+          content: 'generic result',
+        },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{
+            id: 'tu_generic_empty',
+            type: 'function',
+            function: {
+              name: 'lookup',
+              arguments: '{}',
+            },
+          }],
+        },
+      ],
+      stream: true,
+      stream_options: { include_usage: true },
+    }));
+    expect(Object.hasOwn(request.messages.at(-1)!, 'content')).toBe(true);
+  });
+
+  it('does not add Kimi reasoning fields to system, user, or tool messages or send thinking.keep', async () => {
+    const adapter = createStrictKimiAdapter({
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'user',
+      content: [
+        { type: 'thinking', thinking: 'ignore user thinking' },
+        { type: 'text', text: 'question' },
+        { type: 'tool_result', tool_use_id: 'tu_1', content: 'tool result' },
+      ],
+    }]);
+
+    for (const message of request.messages) {
+      expect(message).not.toHaveProperty('reasoning_content');
+      expect(message).not.toHaveProperty('reasoning');
+    }
+    expect(request).not.toHaveProperty('thinking');
+  });
+
+  it('keeps per-call tool and raw-thinking buffers isolated across concurrent streams', async () => {
+    let createCalls = 0;
+    let firstDeltaReady!: () => void;
+    let releaseFirst!: () => void;
+    const firstDelta = new Promise<void>((resolve) => {
+      firstDeltaReady = resolve;
+    });
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      createCalls += 1;
+      if (createCalls === 1) {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              choices: [{
+                delta: {
+                  content: '<think>first',
+                  tool_calls: [{
+                    index: 0,
+                    id: 'tu_first',
+                    function: {
+                      name: 'first_tool',
+                      arguments: '{"value":"',
+                    },
+                  }],
+                },
+                finish_reason: null,
+              }],
+            };
+            firstDeltaReady();
+            await firstRelease;
+            yield {
+              choices: [{
+                delta: {
+                  content: '</think>first visible output',
+                  tool_calls: [{
+                    index: 0,
+                    function: { arguments: 'one"}' },
+                  }],
+                },
+                finish_reason: 'tool_calls',
+              }],
+            };
+          },
+        } as never;
+      }
+      return {
+        async *[Symbol.asyncIterator]() {
+          releaseFirst();
+          yield {
+            choices: [{
+              delta: {
+                content: '<think>second</think>x',
+                tool_calls: [{
+                  index: 0,
+                  id: 'tu_second',
+                  function: {
+                    name: 'second_tool',
+                    arguments: '{"value":"two"}',
+                  },
+                }],
+              },
+              finish_reason: 'tool_calls',
+            }],
+          };
+        },
+      } as never;
+    });
+    const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const consume = async () => {
+      const chunks = [];
+      for await (const chunk of adapter.stream([], [], 'system')) {
+        chunks.push(chunk);
+      }
+      return chunks;
+    };
+    const first = consume();
+    await firstDelta;
+    const second = consume();
+    const [firstChunks, secondChunks] = await Promise.all([first, second]);
+
+    expect(firstChunks).toContainEqual({
+      type: 'thinking',
+      delta: 'first',
+      signature: 'raw_think_tag',
+    });
+    expect(firstChunks).toContainEqual({
+      type: 'text',
+      delta: 'first visible output',
+    });
+    expect(firstChunks).toContainEqual({
+      type: 'tool_use',
+      id: 'tu_first',
+      name: 'first_tool',
+      input: { value: 'one' },
+    });
+    expect(secondChunks).toContainEqual({
+      type: 'thinking',
+      delta: 'second',
+      signature: 'raw_think_tag',
+    });
+    expect(secondChunks).toContainEqual({ type: 'text', delta: 'x' });
+    expect(secondChunks).toContainEqual({
+      type: 'tool_use',
+      id: 'tu_second',
+      name: 'second_tool',
+      input: { value: 'two' },
+    });
+    expect(firstChunks.filter((chunk) => chunk.type === 'usage')).toEqual([
+      {
+        type: 'usage',
+        usage: expect.objectContaining({ outputTokens: 5 }),
+      },
+    ]);
+    expect(secondChunks.filter((chunk) => chunk.type === 'usage')).toEqual([
+      {
+        type: 'usage',
+        usage: expect.objectContaining({ outputTokens: 1 }),
+      },
+    ]);
+    expect(firstChunks.filter((chunk) => chunk.type === 'done')).toHaveLength(1);
+    expect(secondChunks.filter((chunk) => chunk.type === 'done')).toHaveLength(1);
+  });
+
+  it('omits the content own property for strict Kimi tool calls with whitespace-only text', async () => {
+    const adapter = createStrictKimiAdapter();
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'text', text: ' ' },
+        { type: 'text', text: '\n\t ' },
+        { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
+      ],
+    }]);
+
+    expect(Object.hasOwn(request.messages[1]!, 'content')).toBe(false);
+  });
+
+  it('preserves untrimmed non-empty text beside strict Kimi tool calls', async () => {
+    const adapter = createStrictKimiAdapter();
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'text', text: '  keep' },
+        { type: 'text', text: ' me  ' },
+        { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
+      ],
+    }]);
+
+    expect(request.messages[1]).toHaveProperty('content', '  keep me  ');
+  });
+
+  it('keeps generic tool-call-only assistant content null', async () => {
+    const adapter = createTestAdapter({
+      wireModel: 'gpt-4o',
+      capabilities: ['tools'],
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
+      ],
+    }]);
+
+    expect(request.messages[1]).toHaveProperty('content', null);
+  });
+
+  it('keeps generic assistant content when the Kimi omission flag is disabled', async () => {
+    const adapter = createStrictKimiAdapter({
+      flags: {
+        ...resolveKimiHarnessFeatureFlags({}),
+        omitEmptyAssistantContent: false,
+      },
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
+      ],
+    }]);
+
+    expect(request.messages[1]).toHaveProperty('content', null);
+  });
+
+  it('does not omit assistant content without tools capability or actual tool calls', async () => {
+    const withoutCapability = createStrictKimiAdapter({
+      capabilities: ['thinking'],
+    });
+    const withNoCalls = createStrictKimiAdapter();
+
+    const withoutCapabilityRequest = await captureChatCompletionRequest(
+      withoutCapability,
+      [],
+      [{
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
+        ],
+      }],
+    );
+    const withNoCallsRequest = await captureChatCompletionRequest(
+      withNoCalls,
+      [],
+      [{
+        role: 'assistant',
+        content: [{ type: 'text', text: ' \n\t ' }],
+      }],
+    );
+
+    expect(withoutCapabilityRequest.messages[1]).toHaveProperty('content', null);
+    expect(withNoCallsRequest.messages[1]).toHaveProperty('content', ' \n\t ');
+  });
+
+  it('keeps preserved empty reasoning when strict Kimi tool-call content is omitted', async () => {
+    const adapter = createStrictKimiAdapter({
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'assistant',
+      content: [
+        { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
+      ],
+    }]);
+    const assistant = request.messages[1]!;
+
+    expect(Object.hasOwn(assistant, 'content')).toBe(false);
+    expect(assistant).toHaveProperty('reasoning_content', '');
   });
 
   it('ignores prompt cache metadata for OpenAI-compatible payloads', async () => {

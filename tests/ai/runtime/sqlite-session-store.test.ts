@@ -3,6 +3,93 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SQLiteSessionStore } from '../../../src/ai/runtime/session-store/sqlite-store.js';
+import type { Message } from '../../../src/types.js';
+import { AgentSessionState } from '../../../src/ai/runtime/session.js';
+import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import {
+  buildOpenAIHarnessContext,
+  resolveKimiHarnessFeatureFlags,
+} from '../../../src/ai/providers/model-harness-profile.js';
+
+function preservedThinkingRoundTripMessages(): Message[] {
+  return [
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'non-empty reasoning' },
+        { type: 'text', text: 'first answer' },
+      ],
+    },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: ' \n\t ' },
+        { type: 'text', text: 'second answer' },
+      ],
+    },
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'empty backfill answer' }],
+    },
+    {
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        id: 'tu_round_trip',
+        name: 'search',
+        input: { q: 'round trip' },
+      }],
+    },
+  ];
+}
+
+async function serializeResumedKimiMessages(
+  messages: Message[],
+): Promise<Array<Record<string, unknown>>> {
+  const adapter = new OpenAIAdapter({
+    apiKey: 'test-key',
+    kimiCodingHeadersApplied: true,
+    harnessContext: buildOpenAIHarnessContext({
+      identity: {
+        providerId: 'kimi',
+        providerType: 'first_party',
+        protocol: 'openai_legacy',
+        canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+        wireModel: 'k3',
+        capabilities: ['tools', 'thinking'],
+      },
+      flags: resolveKimiHarnessFeatureFlags({
+        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      }),
+    }),
+  });
+  let captured: { messages: Array<Record<string, unknown>> } | undefined;
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: { messages: Array<Record<string, unknown>> }) => {
+          captured = request;
+          return {
+            async *[Symbol.asyncIterator]() {
+              yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+            },
+          };
+        },
+      },
+    },
+  };
+  (adapter as unknown as { client: typeof client }).client = client;
+
+  try {
+    for await (const _ of adapter.stream(messages, [], 'system')) { /* consume */ }
+  } finally {
+    adapter.dispose();
+  }
+  if (!captured) {
+    throw new Error('Kimi request was not captured');
+  }
+  return captured.messages;
+}
 
 describe('SQLiteSessionStore', () => {
   it('persists normalized session metadata across store instances', async () => {
@@ -73,6 +160,54 @@ describe('SQLiteSessionStore', () => {
       await expect(reloaded.loadLast()).resolves.toMatchObject({
         sessionId: 'sess_sqlite',
       });
+    } finally {
+      reloaded?.dispose();
+      store?.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('round-trips preserved Kimi reasoning through SQLite save, restore, and serialization', async () => {
+    const root = join(tmpdir(), `xiaok-sqlite-kimi-round-trip-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const dbPath = join(root, 'sessions.sqlite');
+    let store: SQLiteSessionStore | undefined;
+    let reloaded: SQLiteSessionStore | undefined;
+
+    try {
+      store = new SQLiteSessionStore(dbPath);
+      await store.save({
+        sessionId: 'sess_kimi_sqlite_round_trip',
+        cwd: '/workspace/sqlite',
+        model: 'k3',
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: ['sess_kimi_sqlite_round_trip'],
+        messages: preservedThinkingRoundTripMessages(),
+        usage: { inputTokens: 10, outputTokens: 5 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      reloaded = new SQLiteSessionStore(dbPath);
+      const loaded = await reloaded.load('sess_kimi_sqlite_round_trip');
+      expect(loaded).not.toBeNull();
+      const resumed = new AgentSessionState();
+      resumed.restoreSnapshot(loaded!);
+      const wireMessages = await serializeResumedKimiMessages(resumed.getMessages());
+      const assistants = wireMessages.filter((message) => message.role === 'assistant');
+
+      expect(assistants.map((message) => message.reasoning_content)).toEqual([
+        'non-empty reasoning',
+        ' \n\t ',
+        '',
+        '',
+      ]);
+      expect(assistants[2]).toHaveProperty('content', 'empty backfill answer');
+      expect(assistants[3]?.tool_calls).toHaveLength(1);
+      expect(Object.hasOwn(assistants[3]!, 'content')).toBe(false);
     } finally {
       reloaded?.dispose();
       store?.dispose();

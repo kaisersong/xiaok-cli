@@ -14,6 +14,11 @@ const KIMI_K3_CODING_OPENAI_BASE_URL = 'https://api.kimi.com/coding/v1';
 
 export type ReasoningKeyName = 'reasoning_content' | 'reasoning';
 
+export interface ReasoningDialectState {
+  current: ReasoningKeyName;
+  learned: boolean;
+}
+
 export interface KimiHarnessFeatureFlags {
   readonly normalizeToolSchema: boolean;
   readonly normalizeUsage: boolean;
@@ -52,6 +57,7 @@ export interface ModelHarnessProfile {
 export interface OpenAIHarnessContext {
   readonly identity: AdapterBindingIdentity;
   readonly profile: ModelHarnessProfile;
+  readonly identityFingerprint: string;
   readonly flags: Readonly<KimiHarnessFeatureFlags>;
   readonly runtimeOptions?: Readonly<ModelRuntimeOptions>;
   readonly runtimeCapabilities: Readonly<ModelCapabilities>;
@@ -75,10 +81,90 @@ export const GENERIC_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze
   id: 'generic-openai',
 });
 
+function serializeKimiReasoning(
+  blocks: MessageBlock[],
+  dialect: ReasoningKeyName,
+  preservedThinkingEnabled: boolean,
+): { field: ReasoningKeyName; value: string } | undefined {
+  if (!preservedThinkingEnabled) {
+    return undefined;
+  }
+
+  return {
+    field: dialect,
+    value: blocks
+      .filter((block) => block.type === 'thinking')
+      .map((block) => block.thinking)
+      .join(''),
+  };
+}
+
 export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze({
   id: 'kimi-k3-coding-openai',
   normalizeToolSchema: normalizeKimiToolSchema,
+  serializeReasoning: serializeKimiReasoning,
+  shouldOmitAssistantContent: ({ hasToolCalls, text }) => (
+    hasToolCalls && text.trim().length === 0
+  ),
 });
+
+export function observeReasoningDialect(
+  state: ReasoningDialectState,
+  delta: Record<string, unknown>,
+): { conflict?: { previous: ReasoningKeyName; candidate: ReasoningKeyName } } {
+  const hasReasoningContent = Object.prototype.hasOwnProperty.call(
+    delta,
+    'reasoning_content',
+  );
+  const hasReasoning = Object.prototype.hasOwnProperty.call(delta, 'reasoning');
+  const reasoningContent = hasReasoningContent
+    ? delta.reasoning_content
+    : undefined;
+  let candidate: ReasoningKeyName | undefined;
+
+  if (hasReasoningContent && typeof reasoningContent === 'string') {
+    candidate = 'reasoning_content';
+  } else if (
+    (!hasReasoningContent || reasoningContent === null)
+    && hasReasoning
+    && typeof delta.reasoning === 'string'
+  ) {
+    candidate = 'reasoning';
+  }
+
+  if (!candidate) {
+    return {};
+  }
+  if (!state.learned) {
+    state.current = candidate;
+    state.learned = true;
+    return {};
+  }
+  if (state.current === candidate) {
+    return {};
+  }
+  return {
+    conflict: {
+      previous: state.current,
+      candidate,
+    },
+  };
+}
+
+function buildIdentityFingerprint(
+  identity: AdapterBindingIdentity,
+  profile: ModelHarnessProfile,
+): string {
+  return [
+    identity.providerId,
+    identity.providerType,
+    identity.protocol,
+    identity.canonicalBaseUrl ?? '',
+    identity.wireModel,
+    [...identity.capabilities].sort().join(','),
+    profile.id,
+  ].join('|');
+}
 
 export function resolveKimiHarnessFeatureFlags(
   env: Readonly<Record<string, string | undefined>>,
@@ -129,10 +215,12 @@ export function buildOpenAIHarnessContext(
       ? { contextLimit: runtimeOptions.contextLimit }
       : {}),
   });
+  const profile = resolveModelHarnessProfile(identity);
 
   return Object.freeze({
     identity,
-    profile: resolveModelHarnessProfile(identity),
+    profile,
+    identityFingerprint: buildIdentityFingerprint(identity, profile),
     flags: input.flags,
     ...(runtimeOptions ? { runtimeOptions } : {}),
     runtimeCapabilities,

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildOpenAIHarnessContext,
+  observeReasoningDialect,
   resolveKimiHarnessFeatureFlags,
   resolveModelHarnessProfile,
   type AdapterBindingIdentity,
+  type ReasoningDialectState,
 } from '../../../src/ai/providers/model-harness-profile.js';
 
 describe('resolveModelHarnessProfile', () => {
@@ -68,5 +71,191 @@ describe('resolveKimiHarnessFeatureFlags', () => {
       promptCacheKey: false,
       preservedThinking: false,
     });
+  });
+});
+
+describe('reasoning dialect observation', () => {
+  function state(): ReasoningDialectState {
+    return { current: 'reasoning_content', learned: false };
+  }
+
+  it('learns an own empty reasoning_content field before display filtering', () => {
+    const dialect = state();
+
+    expect(observeReasoningDialect(dialect, {
+      reasoning_content: '',
+      reasoning: 'visible fallback',
+    })).toEqual({});
+    expect(dialect).toEqual({
+      current: 'reasoning_content',
+      learned: true,
+    });
+  });
+
+  it('falls back from null reasoning_content to an own string reasoning field', () => {
+    const dialect = state();
+
+    expect(observeReasoningDialect(dialect, {
+      reasoning_content: null,
+      reasoning: '',
+    })).toEqual({});
+    expect(dialect).toEqual({
+      current: 'reasoning',
+      learned: true,
+    });
+  });
+
+  it('prefers reasoning_content when both own fields are strings', () => {
+    const dialect = state();
+
+    observeReasoningDialect(dialect, {
+      reasoning_content: 'primary',
+      reasoning: 'secondary',
+    });
+
+    expect(dialect).toEqual({
+      current: 'reasoning_content',
+      learned: true,
+    });
+  });
+
+  it('keeps the first observation and reports only conflicting field names', () => {
+    const dialect = state();
+    observeReasoningDialect(dialect, { reasoning: 'first private text' });
+
+    expect(observeReasoningDialect(dialect, {
+      reasoning_content: 'second private text',
+    })).toEqual({
+      conflict: {
+        previous: 'reasoning',
+        candidate: 'reasoning_content',
+      },
+    });
+    expect(dialect).toEqual({
+      current: 'reasoning',
+      learned: true,
+    });
+  });
+
+  it('keeps a learned dialect when a later delta has no reasoning field', () => {
+    const dialect: ReasoningDialectState = {
+      current: 'reasoning',
+      learned: true,
+    };
+
+    expect(observeReasoningDialect(dialect, { content: 'answer' })).toEqual({});
+    expect(dialect).toEqual({
+      current: 'reasoning',
+      learned: true,
+    });
+  });
+
+  it('ignores absent fields, inherited properties, generic formats, and non-string values', () => {
+    const cases: Record<string, unknown>[] = [
+      {},
+      Object.create({ reasoning_content: 'inherited' }) as Record<string, unknown>,
+      { reasoning_details: [{ type: 'reasoning.text', text: 'generic' }] },
+      { thinking: 'generic' },
+      { reasoning_content: 0, reasoning: 'must not fall through' },
+      { reasoning_content: undefined, reasoning: 'must not fall through' },
+    ];
+
+    for (const delta of cases) {
+      const dialect = state();
+      expect(observeReasoningDialect(dialect, delta)).toEqual({});
+      expect(dialect).toEqual({
+        current: 'reasoning_content',
+        learned: false,
+      });
+    }
+  });
+
+  it('does not read inherited reasoning accessors', () => {
+    const inheritedReads = {
+      reasoning_content: 0,
+      reasoning: 0,
+    };
+    const prototype = Object.defineProperties({}, {
+      reasoning_content: {
+        get() {
+          inheritedReads.reasoning_content += 1;
+          return 'inherited';
+        },
+      },
+      reasoning: {
+        get() {
+          inheritedReads.reasoning += 1;
+          return 'inherited';
+        },
+      },
+    });
+    const dialect = state();
+
+    observeReasoningDialect(
+      dialect,
+      Object.create(prototype) as Record<string, unknown>,
+    );
+
+    expect(inheritedReads).toEqual({
+      reasoning_content: 0,
+      reasoning: 0,
+    });
+    expect(dialect).toEqual({
+      current: 'reasoning_content',
+      learned: false,
+    });
+  });
+
+  it('uses an own reasoning field when reasoning_content exists only on the prototype', () => {
+    const dialect = state();
+    const delta = Object.assign(
+      Object.create({ reasoning_content: 'inherited' }) as Record<string, unknown>,
+      { reasoning: '' },
+    );
+
+    observeReasoningDialect(dialect, delta);
+
+    expect(dialect).toEqual({
+      current: 'reasoning',
+      learned: true,
+    });
+  });
+});
+
+describe('model harness identity fingerprint', () => {
+  const identity: AdapterBindingIdentity = {
+    providerId: 'kimi',
+    providerType: 'first_party',
+    protocol: 'openai_legacy',
+    canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+    wireModel: 'k3',
+    capabilities: ['thinking', 'tools'],
+  };
+  const flags = resolveKimiHarnessFeatureFlags({});
+
+  it('contains exactly the immutable identity tuple with sorted capabilities and profile id', () => {
+    const capabilities = ['tools', 'thinking'];
+    const context = buildOpenAIHarnessContext({
+      identity: { ...identity, capabilities },
+      flags,
+    });
+
+    expect(context.identityFingerprint).toBe(
+      'kimi|first_party|openai_legacy|https://api.kimi.com/coding/v1|k3|thinking,tools|kimi-k3-coding-openai',
+    );
+    expect(capabilities).toEqual(['tools', 'thinking']);
+  });
+
+  it('changes for the same wire model when capabilities differ', () => {
+    const baseline = buildOpenAIHarnessContext({ identity, flags });
+    const changed = buildOpenAIHarnessContext({
+      identity: {
+        ...identity,
+        capabilities: ['thinking', 'tools', 'vision'],
+      },
+      flags,
+    });
+
+    expect(changed.identityFingerprint).not.toBe(baseline.identityFingerprint);
   });
 });
