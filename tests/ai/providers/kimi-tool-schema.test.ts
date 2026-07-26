@@ -51,13 +51,17 @@ function schemaWithEscapedUtf8OutputBytes(target: number): Record<string, unknow
 function structuralSchemaAtDepth(depth: number): Record<string, unknown> {
   let schema: Record<string, unknown> = {};
   for (let index = 0; index < depth; index += 1) {
-    schema = {
-      properties: {
-        child: schema,
-      },
-    };
+    schema = { not: schema };
   }
   return schema;
+}
+
+function arbitraryJsonAtDepth(depth: number): Record<string, unknown> {
+  let value: unknown = null;
+  for (let index = 1; index < depth; index += 1) {
+    value = [value];
+  }
+  return { 'x-arbitrary-json': value };
 }
 
 function wideSharedRefSchema(extraRootNodes = 0): Record<string, unknown> {
@@ -661,6 +665,18 @@ describe('normalizeKimiToolSchema immutability', () => {
 });
 
 describe('normalizeKimiToolSchema resource limits', () => {
+  it('accepts arbitrary input JSON depth 64 inclusive and rejects depth 65', () => {
+    expect(() => normalizeKimiToolSchema(
+      arbitraryJsonAtDepth(KIMI_SCHEMA_LIMITS.maxDepth),
+    )).not.toThrow();
+    expectLimit(
+      () => normalizeKimiToolSchema(
+        arbitraryJsonAtDepth(KIMI_SCHEMA_LIMITS.maxDepth + 1),
+      ),
+      'depth',
+    );
+  });
+
   it('accepts structural depth 64 inclusive and rejects depth 65', () => {
     expect(() => normalizeKimiToolSchema(
       structuralSchemaAtDepth(KIMI_SCHEMA_LIMITS.maxDepth),

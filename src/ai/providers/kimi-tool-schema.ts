@@ -296,10 +296,15 @@ function reserveArrayEntry(state: NormalizeState, index: number): void {
 
 function preflightJsonValue(
   value: unknown,
+  inputDepth: number,
   active: Set<object>,
   candidate: boolean,
   counter: { nodes: number },
 ): void {
+  if (inputDepth > KIMI_SCHEMA_LIMITS.maxDepth) {
+    throw limitError('depth');
+  }
+
   counter.nodes += 1;
   if (counter.nodes > KIMI_SCHEMA_LIMITS.maxInputNodes) {
     throw limitError('input_nodes');
@@ -328,12 +333,13 @@ function preflightJsonValue(
   active.add(value);
   if (Array.isArray(value)) {
     for (const item of value) {
-      preflightJsonValue(item, active, candidate, counter);
+      preflightJsonValue(item, inputDepth + 1, active, candidate, counter);
     }
   } else {
     for (const [key, child] of Object.entries(value)) {
       preflightJsonValue(
         child,
+        inputDepth + 1,
         active,
         candidate || key === 'enum' || key === 'const',
         counter,
@@ -806,7 +812,7 @@ export function normalizeKimiToolSchema(
   schema: Record<string, unknown>,
 ): NormalizedKimiSchema {
   const inputCounter = { nodes: 0 };
-  preflightJsonValue(schema, new Set(), false, inputCounter);
+  preflightJsonValue(schema, 0, new Set(), false, inputCounter);
 
   const state: NormalizeState = {
     root: schema,
