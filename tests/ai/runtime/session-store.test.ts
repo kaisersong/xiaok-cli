@@ -97,6 +97,34 @@ async function serializeResumedKimiMessages(
   return captured.messages;
 }
 
+const FORK_INTENT_LEDGER_STORES: Array<{
+  label: string;
+  create(rootDir: string): {
+    store: SessionStore;
+    dispose(): void;
+  };
+}> = [
+  {
+    label: 'FileSessionStore',
+    create(rootDir) {
+      return {
+        store: new FileSessionStore(rootDir),
+        dispose() {},
+      };
+    },
+  },
+  {
+    label: 'SQLiteSessionStore',
+    create(rootDir) {
+      const store = new SQLiteSessionStore(join(rootDir, 'fork-parity.db'));
+      return {
+        store,
+        dispose: () => store.dispose(),
+      };
+    },
+  },
+];
+
 describe('FileSessionStore', () => {
   let rootDir: string;
 
@@ -412,104 +440,136 @@ describe('FileSessionStore', () => {
     expect(forked.skillExecution?.invocations[0]?.skillName).toBe('release-checklist');
   });
 
-  it('rekeys nested intent delegation session identities when forking', async () => {
-    const store = new FileSessionStore(rootDir);
-
-    await store.save({
-      sessionId: 'sess_nested',
-      cwd: '/nested',
-      createdAt: 100,
-      updatedAt: 200,
-      lineage: ['sess_nested'],
-      messages: [],
-      usage: { inputTokens: 0, outputTokens: 0 },
-      compactions: [],
-      memoryRefs: [],
-      approvalRefs: [],
-      backgroundJobRefs: [],
-      intentDelegation: {
-        instanceId: 'inst_nested',
-        sessionId: 'sess_nested',
-        activeIntentId: 'intent_nested',
-        latestPlan: {
-          intentId: 'intent_nested',
-          instanceId: 'inst_nested',
+  it.each(FORK_INTENT_LEDGER_STORES)(
+    'rekeys nested intent delegation session identities when forking with $label',
+    async ({ create }) => {
+      const { store, dispose } = create(rootDir);
+      try {
+        await store.save({
           sessionId: 'sess_nested',
-          rawIntent: 'Write summary',
-          normalizedIntent: 'write summary',
-          intentType: 'generate',
-          deliverable: 'summary',
-          explicitConstraints: [],
-          delegationBoundary: [],
-          riskTier: 'medium',
-          templateId: 'tpl_generate',
-          steps: [
-            {
-              stepId: 'intent_nested:step:collect',
-              key: 'collect',
-              order: 0,
-              role: 'collect',
-              skillName: null,
-              dependsOn: [],
-              status: 'planned',
-              riskTier: 'medium',
-            },
-          ],
-          activeStepId: 'intent_nested:step:collect',
-          overallStatus: 'drafting_plan',
-          attemptCount: 1,
+          cwd: '/nested',
           createdAt: 100,
           updatedAt: 200,
-        },
-        intents: [{
-          intentId: 'intent_nested',
-          instanceId: 'inst_nested',
-          sessionId: 'sess_nested',
-          rawIntent: 'Write summary',
-          normalizedIntent: 'write summary',
-          intentType: 'generate',
-          deliverable: 'summary',
-          explicitConstraints: [],
-          delegationBoundary: [],
-          riskTier: 'medium',
-          templateId: 'tpl_generate',
-          steps: [
-            {
-              stepId: 'intent_nested:step:collect',
-              key: 'collect',
-              order: 0,
-              role: 'collect',
-              skillName: null,
-              dependsOn: [],
-              status: 'planned',
+          lineage: ['sess_nested'],
+          messages: [],
+          usage: { inputTokens: 0, outputTokens: 0 },
+          compactions: [],
+          memoryRefs: [],
+          approvalRefs: [],
+          backgroundJobRefs: [],
+          intentDelegation: {
+            instanceId: 'inst_nested',
+            sessionId: 'sess_nested',
+            activeIntentId: 'intent_nested',
+            latestPlan: {
+              intentId: 'intent_nested',
+              instanceId: 'inst_nested',
+              sessionId: 'sess_nested',
+              rawIntent: 'Write summary',
+              normalizedIntent: 'write summary',
+              intentType: 'generate',
+              deliverable: 'summary',
+              explicitConstraints: [],
+              delegationBoundary: [],
               riskTier: 'medium',
+              templateId: 'tpl_generate',
+              steps: [
+                {
+                  stepId: 'intent_nested:step:collect',
+                  key: 'collect',
+                  order: 0,
+                  role: 'collect',
+                  skillName: null,
+                  dependsOn: [],
+                  status: 'planned',
+                  riskTier: 'medium',
+                },
+              ],
+              activeStepId: 'intent_nested:step:collect',
+              overallStatus: 'drafting_plan',
+              attemptCount: 1,
+              createdAt: 100,
+              updatedAt: 200,
             },
-          ],
-          activeStepId: 'intent_nested:step:collect',
-          overallStatus: 'drafting_plan',
-          attemptCount: 1,
-          createdAt: 100,
-          updatedAt: 200,
-        }],
-        breadcrumbs: [],
-        receipt: null,
-        salvage: null,
-        ownership: {
-          state: 'released',
-          previousOwnerInstanceId: 'inst_nested',
-          updatedAt: 200,
-        },
-        updatedAt: 200,
-      },
-    });
+            intents: [{
+              intentId: 'intent_nested',
+              instanceId: 'inst_nested',
+              sessionId: 'sess_nested',
+              rawIntent: 'Write summary',
+              normalizedIntent: 'write summary',
+              intentType: 'generate',
+              deliverable: 'summary',
+              explicitConstraints: [],
+              delegationBoundary: [],
+              riskTier: 'medium',
+              templateId: 'tpl_generate',
+              steps: [
+                {
+                  stepId: 'intent_nested:step:collect',
+                  key: 'collect',
+                  order: 0,
+                  role: 'collect',
+                  skillName: null,
+                  dependsOn: [],
+                  status: 'planned',
+                  riskTier: 'medium',
+                },
+              ],
+              activeStepId: 'intent_nested:step:collect',
+              overallStatus: 'drafting_plan',
+              attemptCount: 1,
+              createdAt: 100,
+              updatedAt: 200,
+            }],
+            breadcrumbs: [],
+            receipt: null,
+            salvage: null,
+            ownership: {
+              state: 'released',
+              previousOwnerInstanceId: 'inst_nested',
+              updatedAt: 200,
+            },
+            updatedAt: 200,
+          },
+        });
 
-    const forked = await store.fork('sess_nested');
+        const forked = await store.fork('sess_nested');
+        const source = await store.load('sess_nested');
+        const persistedFork = await store.load(forked.sessionId);
 
-    expect(forked.sessionId).not.toBe('sess_nested');
-    expect(forked.intentDelegation?.sessionId).toBe(forked.sessionId);
-    expect(forked.intentDelegation?.latestPlan?.sessionId).toBe(forked.sessionId);
-    expect(forked.intentDelegation?.intents.map((intent) => intent.sessionId)).toEqual([forked.sessionId]);
-  });
+        expect(forked.sessionId).not.toBe('sess_nested');
+        expect(forked.forkedFromSessionId).toBe('sess_nested');
+        expect(forked.lineage).toEqual(['sess_nested']);
+        expect(forked.intentDelegation).toMatchObject({
+          sessionId: forked.sessionId,
+          instanceId: 'inst_nested',
+          ownership: {
+            state: 'released',
+            previousOwnerInstanceId: 'inst_nested',
+            updatedAt: 200,
+          },
+        });
+        expect(forked.intentDelegation?.latestPlan?.sessionId).toBe(forked.sessionId);
+        expect(forked.intentDelegation?.intents.map((intent) => intent.sessionId))
+          .toEqual([forked.sessionId]);
+        expect(persistedFork?.intentDelegation?.sessionId).toBe(forked.sessionId);
+        expect(source?.intentDelegation?.sessionId).toBe('sess_nested');
+        expect(source?.intentDelegation?.latestPlan?.sessionId).toBe('sess_nested');
+        expect(source?.intentDelegation?.intents.map((intent) => intent.sessionId))
+          .toEqual(['sess_nested']);
+        expect(source?.intentDelegation).toMatchObject({
+          instanceId: 'inst_nested',
+          ownership: {
+            state: 'released',
+            previousOwnerInstanceId: 'inst_nested',
+            updatedAt: 200,
+          },
+        });
+      } finally {
+        dispose();
+      }
+    },
+  );
 
   it('keeps save/load/loadLast/list/fork working through the shared SessionStore contract', async () => {
     const store: SessionStore = createFileSessionStore(rootDir);
