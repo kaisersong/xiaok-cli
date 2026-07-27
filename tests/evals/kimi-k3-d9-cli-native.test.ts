@@ -152,4 +152,46 @@ describe('Kimi K3 D9 native dependency graph', () => {
       inspectMachO: async () => ({ dependencies: ['/opt/evil/libescape.dylib'], rpaths: [] }),
     })).rejects.toThrow('KIMI_D9_NATIVE_DEPENDENCY_ESCAPE');
   });
+
+  it('expands an exact @loader_path LC_RPATH relative to the owning addon', async () => {
+    const { buildNativeDependencyGraph } = await loadModule();
+    const root = mkdtempSync(join(tmpdir(), 'kimi-d9-native-loader-rpath-'));
+    roots.push(root);
+    mkdirSync(join(root, 'runtime/node/bin'), { recursive: true });
+    mkdirSync(join(root, 'node_modules/native'), { recursive: true });
+    writeMachO(join(root, 'runtime/node/bin/node'));
+    writeMachO(join(root, 'node_modules/native/addon.node'));
+    writeMachO(join(root, 'node_modules/native/libinside.dylib'));
+
+    const graph = await buildNativeDependencyGraph({
+      closureRoot: root,
+      nodeExecutable: 'runtime/node/bin/node',
+      reachableNativeRoots: ['node_modules/native/addon.node'],
+      allNativeArtifacts: ['node_modules/native/addon.node'],
+      expectedArch: 'arm64',
+      inspectMachO: async (path: string) => {
+        if (path.endsWith('/addon.node')) {
+          return {
+            dependencies: [
+              '@rpath/addon.node',
+              '@rpath/libinside.dylib',
+            ],
+            rpaths: ['@loader_path'],
+          };
+        }
+        return { dependencies: [], rpaths: [] };
+      },
+    });
+
+    expect(graph.dependencies).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        installName: '@rpath/addon.node',
+        resolvedRelativePath: 'node_modules/native/addon.node',
+      }),
+      expect.objectContaining({
+        installName: '@rpath/libinside.dylib',
+        resolvedRelativePath: 'node_modules/native/libinside.dylib',
+      }),
+    ]));
+  });
 });

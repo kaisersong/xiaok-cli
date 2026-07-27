@@ -102,8 +102,14 @@ async function resolveDependency({
   } else if (installName.startsWith('@rpath/')) {
     const suffix = installName.slice('@rpath/'.length);
     candidates = rpaths.map((rpath) => {
+      if (rpath === '@loader_path') {
+        return resolve(dirname(owner), suffix);
+      }
       if (rpath.startsWith('@loader_path/')) {
         return resolve(dirname(owner), rpath.slice('@loader_path/'.length), suffix);
+      }
+      if (rpath === '@executable_path') {
+        return resolve(dirname(executable), suffix);
       }
       if (rpath.startsWith('@executable_path/')) {
         return resolve(dirname(executable), rpath.slice('@executable_path/'.length), suffix);
