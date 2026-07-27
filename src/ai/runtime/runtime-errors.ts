@@ -1,7 +1,12 @@
 import { isAbortError } from './abort-utils.js';
 
 export interface RuntimeErrorShape {
-  code: 'model_failed' | 'tool_failed' | 'permission_denied' | 'runtime_aborted';
+  code:
+    | 'model_failed'
+    | 'tool_failed'
+    | 'permission_denied'
+    | 'runtime_aborted'
+    | 'kimi_k3_durable_resume_unsupported';
   message: string;
   retryable: boolean;
 }
@@ -13,6 +18,13 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
   }
 
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('KIMI_K3_DURABLE_RESUME_UNSUPPORTED')) {
+    return {
+      code: 'kimi_k3_durable_resume_unsupported',
+      message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
+      retryable: false,
+    };
+  }
   if (/502|503|timeout|ECONNRESET|Bad gateway/i.test(message)) {
     return { code: 'model_failed', message, retryable: true };
   }

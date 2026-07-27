@@ -3,9 +3,11 @@ import type { ToolRegistry } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
+import { type RunInvocationContext } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { ArtifactWorkspaceExecutionScope } from '../../runtime/task-host/types.js';
+import { type ProviderConversationSurfaceKind } from './provider-conversation-authorization.js';
 export interface AgentRuntimeOptions {
     adapter: ModelAdapter;
     registry: ToolRegistry;
@@ -20,6 +22,7 @@ export interface AgentRuntimeOptions {
     memoryStore?: MemoryStore;
     taskId?: string;
     executionScope?: ArtifactWorkspaceExecutionScope;
+    providerSurfaceKind?: Extract<ProviderConversationSurfaceKind, 'cli-chat-task' | 'cli-subagent'>;
 }
 export declare class AgentRuntime {
     private adapter;
@@ -32,21 +35,22 @@ export declare class AgentRuntime {
     private readonly compactThresholdOverride?;
     private contextLimit;
     private compactThreshold;
-    private readonly compactPlaceholder;
     private supportsPromptCaching;
     private promptSnapshot?;
     private compactRunner;
     private readonly memoryStore?;
     private readonly taskId?;
     private readonly executionScope?;
+    private readonly providerSurfaceKind;
     private static readonly MAX_EMPTY_RETRIES;
     constructor(options: AgentRuntimeOptions);
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;
     setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void;
-    run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal): Promise<void>;
+    run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal, invocationContext?: RunInvocationContext): Promise<void>;
     private throwIfAborted;
     private refreshModelPolicy;
+    private isStrictK3Adapter;
     private buildInvocationOptions;
     private buildToolExecutionContext;
     private emitVerificationGuardIfNeeded;

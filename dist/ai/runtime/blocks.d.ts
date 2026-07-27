@@ -29,9 +29,17 @@ export type ToolResultBlock = {
     is_error?: boolean;
     cache_control?: CacheControl;
 };
+export type ReasoningSource = 'reasoning_content' | 'reasoning' | 'reasoning_details' | 'reasoning_text' | 'thinking' | 'thought' | 'raw_think_tag' | 'synthetic';
+export type ReasoningBlockProvenance = {
+    captureVersion: 1;
+    source: ReasoningSource;
+    fieldPresence: 'present';
+};
 export type ThinkingBlock = {
     type: 'thinking';
     thinking: string;
+    reasoningSource?: ReasoningSource;
+    reasoningProvenance?: ReasoningBlockProvenance;
     cache_control?: CacheControl;
 };
 export type MessageBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;

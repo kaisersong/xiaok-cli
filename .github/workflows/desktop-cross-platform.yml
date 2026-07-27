@@ -58,3 +58,111 @@ jobs:
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer
+
+  windows-kimi-packaged-smoke:
+    name: Windows packaged Kimi K3 smoke
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install desktop dependencies
+        run: cd desktop && npm ci --ignore-scripts
+
+      - name: Clone desktop sidecar repositories
+        run: |
+          git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
+
+      - name: Install sidecar dependencies
+        run: |
+          cd ../kswarm && npm ci --omit=dev
+          cd ../intent-broker && npm ci --omit=dev
+
+      - name: Build report-renderer bundle
+        run: |
+          cd ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+          npm ci
+          npm run build
+          npm run build:bundle
+
+      - name: Download Python wheels (Windows)
+        shell: pwsh
+        run: |
+          $wheelDir = Join-Path (Resolve-Path ..\kai-xiaok-plugins\plugins\kai-slide-creator).Path 'bundled-wheels'
+          Remove-Item -LiteralPath $wheelDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $wheelDir | Out-Null
+          foreach ($py in @('311', '312', '313', '314')) {
+            python -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 `
+              -d $wheelDir `
+              --only-binary=:all: `
+              --platform win_amd64 `
+              --implementation cp `
+              --python-version $py `
+              --abi "cp$py" `
+              --abi abi3 `
+              --abi none
+          }
+
+      - name: Build desktop
+        run: cd desktop && npm run build
+        env:
+          KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
+
+      - name: Package Windows Kimi smoke app
+        run: cd desktop && npx electron-builder --config electron-builder.json --win dir --publish never -c.win.signAndEditExecutable=false
+
+      - name: Run packaged Windows Kimi K3 smoke
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'xiaok-kimi-packaged-smoke'
+          $resultPath = Join-Path $smokeRoot 'result.json'
+          $appData = Join-Path $smokeRoot 'appdata'
+          $localAppData = Join-Path $smokeRoot 'localappdata'
+          $tempDir = Join-Path $smokeRoot 'temp'
+          New-Item -ItemType Directory -Force -Path $appData, $localAppData, $tempDir | Out-Null
+
+          $env:XIAOK_KIMI_PACKAGED_SMOKE_RESULT = $resultPath
+          $env:XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE = '1'
+          $env:APPDATA = $appData
+          $env:LOCALAPPDATA = $localAppData
+          $env:TEMP = $tempDir
+          $env:TMP = $tempDir
+
+          $executable = Resolve-Path 'desktop/release/win-unpacked/xiaok.exe'
+          $process = Start-Process -FilePath $executable -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged Kimi smoke exited with code $($process.ExitCode)"
+          }
+          if (-not (Test-Path -LiteralPath $resultPath)) {
+            throw 'Packaged Kimi smoke did not write its result'
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 2) {
+            throw 'Packaged Kimi smoke result is incomplete'
+          }
+          foreach ($model in @('k3', 'k3-256k')) {
+            $entry = $result.modelResults | Where-Object { $_.model -eq $model }
+            if (-not $entry -or $entry.requests -ne 2 -or -not $entry.secondTurnReplayedReasoning) {
+              throw "Packaged Kimi multi-turn smoke failed for $model"
+            }
+          }
+          if ($result.authorizationDenyNetworkRequests -ne 0 -or $result.rollbackDenyNetworkRequests -ne 0) {
+            throw 'Packaged Kimi deny smoke observed a network request'
+          }
+          $canaryHit = Get-ChildItem -LiteralPath $smokeRoot -Recurse -File |
+            Where-Object { $_.FullName -ne $resultPath } |
+            Select-String -SimpleMatch 'PACKAGED_SMOKE_RUNTIME_ONLY' -List
+          if ($canaryHit) {
+            throw "Provider-private reasoning canary persisted at $($canaryHit.Path)"
+          }

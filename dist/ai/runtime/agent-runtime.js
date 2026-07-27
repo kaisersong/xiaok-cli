@@ -1,12 +1,18 @@
 import { join } from 'node:path';
 import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('agent-runtime');
+const MAX_COMPACT_MEMORY_REMINDER_CHARS = 8_000;
+const COMPACT_MEMORY_REMINDER_PREFIX = '<system-reminder>\n[Memory restored after compact]\n';
+const COMPACT_MEMORY_REMINDER_SUFFIX = '\n</system-reminder>';
 import { isAbortError } from './abort-utils.js';
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
 import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
+import { executePortableCompaction } from './portable-compaction-executor.js';
 import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
 import { MODEL_OUTPUT_CAP, MODEL_OUTPUT_TRUNCATION_MARKER } from '../../shared/stream-safety/redact.js';
+import { isStrictKimiK3Adapter, projectStrictToolExecutionContext, } from './provider-private-projection.js';
+import { streamCliChatTaskProviderConversation, streamCliSubagentProviderConversation, } from './provider-conversation-authorization.js';
 export class AgentRuntime {
     adapter;
     registry;
@@ -18,13 +24,13 @@ export class AgentRuntime {
     compactThresholdOverride;
     contextLimit;
     compactThreshold;
-    compactPlaceholder;
     supportsPromptCaching;
     promptSnapshot;
     compactRunner;
     memoryStore;
     taskId;
     executionScope;
+    providerSurfaceKind;
     // 空响应自动重试配置
     static MAX_EMPTY_RETRIES = 2;
     constructor(options) {
@@ -39,15 +45,18 @@ export class AgentRuntime {
         this.compactThresholdOverride = options.compactThreshold;
         this.contextLimit = 200_000;
         this.compactThreshold = 0.85;
-        this.compactPlaceholder = options.compactPlaceholder ?? '[context compacted]';
         this.supportsPromptCaching = false;
         this.refreshModelPolicy();
         this.compactRunner = new CompactRunner(this.adapter);
         this.memoryStore = options.memoryStore;
         this.taskId = options.taskId;
         this.executionScope = options.executionScope;
+        this.providerSurfaceKind = options.providerSurfaceKind ?? 'cli-chat-task';
     }
     setAdapter(adapter) {
+        if (this.controller.hasActiveRun()) {
+            throw new Error('cannot replace adapter while a run is active');
+        }
         this.adapter = adapter;
         this.refreshModelPolicy();
         this.compactRunner = new CompactRunner(adapter);
@@ -58,11 +67,12 @@ export class AgentRuntime {
     setPromptSnapshot(promptSnapshot) {
         this.promptSnapshot = promptSnapshot;
     }
-    async run(input, onEvent, externalSignal) {
+    async run(input, onEvent, externalSignal, invocationContext) {
         if (externalSignal?.aborted) {
             throw new DOMException('agent aborted', 'AbortError');
         }
         const run = this.controller.startRun();
+        const strictK3Run = this.isStrictK3Adapter(this.adapter);
         onEvent({ type: 'run_started', runId: run.runId });
         const mergedSignal = externalSignal
             ? AbortSignal.any([run.signal, externalSignal])
@@ -92,6 +102,8 @@ export class AgentRuntime {
             let emptyRetries = 0;
             const verificationToolCalls = [];
             let codeMutatingToolSeen = false;
+            let autoCompactionBlocked = false;
+            let noReplacementRevision;
             while (true) {
                 this.throwIfAborted(mergedSignal, onEvent, run.runId);
                 currentAssistantBlocks = [];
@@ -109,33 +121,71 @@ export class AgentRuntime {
                     onEvent({ type: 'run_completed', runId: run.runId });
                     return;
                 }
-                if (shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
-                    const messages = this.session.getMessages();
-                    let summaryText;
-                    try {
-                        summaryText = await this.compactRunner.run(messages, mergedSignal);
+                if (!autoCompactionBlocked
+                    && shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
+                    const plan = this.session.planCompaction();
+                    if (plan.sourceRevision === noReplacementRevision) {
+                        // The same frozen history still has no replaceable prefix.
                     }
-                    catch (compactError) {
-                        if (isAbortError(compactError)) {
-                            throw compactError;
-                        }
-                        onEvent({
-                            type: 'compact_failed',
-                            runId: run.runId,
-                            error: compactError instanceof Error ? compactError.message : String(compactError),
+                    else {
+                        const outcome = await executePortableCompaction({
+                            plan,
+                            signal: mergedSignal,
+                            trigger: { kind: 'threshold' },
+                        }, {
+                            summarizePrefix: (messages, signal) => this.compactRunner.run([...messages], this.buildInvocationOptions(signal, invocationContext)),
+                            applyPlan: (frozenPlan, summaryText) => this.session.applyCompaction(frozenPlan, summaryText),
                         });
-                        summaryText = '';
+                        if (outcome.summaryModelFailed
+                            && outcome.summaryFailureCode === 'portable_summary_failed') {
+                            onEvent({
+                                type: 'compact_failed',
+                                runId: run.runId,
+                                error: 'portable compaction summary failed',
+                            });
+                        }
+                        if (outcome.status === 'no_replacement') {
+                            noReplacementRevision = plan.sourceRevision;
+                        }
+                        else if (outcome.status === 'compacted') {
+                            autoCompactionBlocked = true;
+                            onEvent({
+                                type: 'compact_triggered',
+                                runId: run.runId,
+                                summary: outcome.record.summary,
+                                compactionId: outcome.record.id,
+                            });
+                            try {
+                                await this.injectMemoryAfterCompact();
+                            }
+                            catch (memoryError) {
+                                logger.warn('injectMemoryAfterCompact failed', {
+                                    error: memoryError instanceof Error ? memoryError.message : String(memoryError),
+                                });
+                            }
+                        }
+                        else {
+                            autoCompactionBlocked = true;
+                        }
                     }
-                    const compaction = this.session.forceCompact(summaryText || this.compactPlaceholder);
-                    onEvent({
-                        type: 'compact_triggered',
-                        runId: run.runId,
-                        summary: compaction?.summary ?? this.compactPlaceholder,
-                        compactionId: compaction?.id,
-                    });
-                    await this.injectMemoryAfterCompact();
                 }
-                for await (const chunk of this.adapter.stream(this.session.getMessages(), this.registry.getToolDefinitions(), this.systemPrompt, this.buildInvocationOptions(mergedSignal))) {
+                const providerMessages = this.session.getMessages();
+                const streamProviderConversation = this.providerSurfaceKind === 'cli-subagent'
+                    ? streamCliSubagentProviderConversation
+                    : streamCliChatTaskProviderConversation;
+                for await (const chunk of streamProviderConversation({
+                    adapter: this.adapter,
+                    messages: providerMessages,
+                    tools: this.registry.getToolDefinitions(),
+                    systemPrompt: this.systemPrompt,
+                    options: this.buildInvocationOptions(mergedSignal, invocationContext),
+                    invocationId: `${run.runId}:${iteration}`,
+                })) {
+                    if (chunk.type === 'usage') {
+                        const usage = this.session.updateUsage(chunk.usage);
+                        onEvent({ type: 'usage_updated', runId: run.runId, usage });
+                        continue;
+                    }
                     this.throwIfAborted(mergedSignal, onEvent, run.runId);
                     if (chunk.type === 'text') {
                         // Merge consecutive text blocks to avoid fragmented storage
@@ -151,11 +201,22 @@ export class AgentRuntime {
                     }
                     if (chunk.type === 'thinking') {
                         const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
-                        if (lastBlock?.type === 'thinking') {
+                        const reasoningSource = chunk.reasoningProvenance?.source ?? chunk.signature;
+                        if (lastBlock?.type === 'thinking'
+                            && lastBlock.reasoningSource === reasoningSource
+                            && JSON.stringify(lastBlock.reasoningProvenance)
+                                === JSON.stringify(chunk.reasoningProvenance)) {
                             lastBlock.thinking += chunk.delta;
                         }
                         else {
-                            currentAssistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+                            currentAssistantBlocks.push({
+                                type: 'thinking',
+                                thinking: chunk.delta,
+                                ...(reasoningSource ? { reasoningSource } : {}),
+                                ...(chunk.reasoningProvenance
+                                    ? { reasoningProvenance: chunk.reasoningProvenance }
+                                    : {}),
+                            });
                         }
                         continue;
                     }
@@ -163,15 +224,11 @@ export class AgentRuntime {
                         currentAssistantBlocks.push(chunk);
                         continue;
                     }
-                    if (chunk.type === 'usage') {
-                        const usage = this.session.updateUsage(chunk.usage);
-                        onEvent({ type: 'usage_updated', runId: run.runId, usage });
-                        continue;
-                    }
                     if (chunk.type === 'done') {
                         break;
                     }
                 }
+                this.throwIfAborted(mergedSignal, onEvent, run.runId);
                 const hasVisibleOutput = currentAssistantBlocks.some((block) => block.type === 'text' || block.type === 'tool_use');
                 if (!hasVisibleOutput) {
                     // 模型只返回了 thinking（无 text/tool_use），视为空响应自动重试
@@ -243,7 +300,7 @@ export class AgentRuntime {
             if (isAbortError(error)) {
                 const partialSentinel = '\n\n[partial - interrupted by user]';
                 const blocks = currentAssistantBlocks.map((block) => ({ ...block }));
-                if (!assistantBlocksCommitted && blocks.length > 0) {
+                if (!strictK3Run && !assistantBlocksCommitted && blocks.length > 0) {
                     const lastTextIndex = blocks.map((block) => block.type).lastIndexOf('text');
                     if (lastTextIndex >= 0) {
                         const textBlock = blocks[lastTextIndex];
@@ -260,7 +317,7 @@ export class AgentRuntime {
                 const seenToolResultIds = new Set(toolResults
                     .filter((block) => block.type === 'tool_result')
                     .map((block) => block.tool_use_id));
-                const syntheticToolResults = blocks
+                const syntheticToolResults = (strictK3Run && !assistantBlocksCommitted ? [] : blocks)
                     .filter((block) => block.type === 'tool_use')
                     .filter((toolCall) => !executedToolIds.has(toolCall.id) && !seenToolResultIds.has(toolCall.id))
                     .map((toolCall) => {
@@ -272,7 +329,9 @@ export class AgentRuntime {
                         is_error: true,
                     };
                 });
-                const mergedToolResults = [...toolResults, ...syntheticToolResults];
+                const mergedToolResults = strictK3Run && !assistantBlocksCommitted
+                    ? []
+                    : [...toolResults, ...syntheticToolResults];
                 if (mergedToolResults.length > 0) {
                     this.session.appendUserToolResults(mergedToolResults);
                     toolResults = [];
@@ -305,9 +364,18 @@ export class AgentRuntime {
         this.compactThreshold = this.compactThresholdOverride ?? capabilities.compactThreshold;
         this.supportsPromptCaching = capabilities.supportsPromptCaching;
     }
-    buildInvocationOptions(signal) {
+    isStrictK3Adapter(adapter) {
+        return isStrictKimiK3Adapter(adapter);
+    }
+    buildInvocationOptions(signal, invocationContext) {
+        const options = {
+            ...(signal ? { signal } : {}),
+            ...(invocationContext?.cacheKey
+                ? { cacheKey: invocationContext.cacheKey }
+                : {}),
+        };
         if (!this.supportsPromptCaching) {
-            return signal ? { signal } : undefined;
+            return Object.keys(options).length > 0 ? options : undefined;
         }
         const toolDefinitions = this.registry.getToolDefinitions()
             .slice()
@@ -322,31 +390,43 @@ export class AgentRuntime {
             ? systemSegments
             : this.systemPrompt;
         return {
+            ...options,
             promptCache: buildPromptCacheSegments(systemPromptInput, toolDefinitions, this.session.getMessages()),
-            signal,
         };
     }
     buildToolExecutionContext(signal) {
         const toolDefinitions = this.registry.getToolDefinitions()
             .slice()
             .sort((left, right) => left.name.localeCompare(right.name));
+        const strictK3 = this.isStrictK3Adapter(this.adapter);
+        const messages = this.session.getMessages().map((message) => ({
+            role: message.role,
+            content: message.content
+                .filter((block) => !strictK3 || block.type !== 'thinking')
+                .map((block) => ({ ...block })),
+        }));
         const session = this.session.exportSnapshot();
-        return {
+        if (strictK3) {
+            session.messages = structuredClone(messages);
+        }
+        const context = {
             taskId: this.taskId ?? session.sessionId,
             executionScope: this.executionScope,
             session,
-            messages: this.session.getMessages().map((message) => ({
-                role: message.role,
-                content: message.content.map((block) => ({ ...block })),
-            })),
+            messages,
             systemPrompt: this.systemPrompt,
             toolDefinitions,
             promptSnapshot: this.promptSnapshot,
-            promptCache: this.supportsPromptCaching
-                ? buildPromptCacheSegments(this.systemPrompt, toolDefinitions, this.session.getMessages())
-                : undefined,
+            ...(!strictK3 && this.supportsPromptCaching
+                ? {
+                    promptCache: buildPromptCacheSegments(this.systemPrompt, toolDefinitions, messages),
+                }
+                : {}),
             signal,
         };
+        return strictK3
+            ? projectStrictToolExecutionContext(context)
+            : context;
     }
     emitVerificationGuardIfNeeded(input, toolCalls, codeMutatingToolSeen, runId, onEvent) {
         if (!codeMutatingToolSeen || !looksLikeCodeRequest(input)) {
@@ -382,7 +462,21 @@ export class AgentRuntime {
         if (relevant.length === 0)
             return;
         const memText = relevant.map((m) => `- ${m.title}: ${m.summary}`).join('\n');
-        this.session.appendUserText(`<system-reminder>\n[Memory restored after compact]\n${memText}\n</system-reminder>`);
+        const thresholdTokens = Math.floor(this.contextLimit * this.compactThreshold);
+        const currentTokens = estimateTokens(this.session.getMessages());
+        const headroomChars = Math.max(0, thresholdTokens - currentTokens) * 4;
+        const reminderChars = Math.min(MAX_COMPACT_MEMORY_REMINDER_CHARS, headroomChars);
+        const contentChars = reminderChars
+            - COMPACT_MEMORY_REMINDER_PREFIX.length
+            - COMPACT_MEMORY_REMINDER_SUFFIX.length;
+        if (contentChars <= 0)
+            return;
+        const boundedMemory = memText.length > contentChars
+            ? `${memText.slice(0, Math.max(0, contentChars - 1))}…`
+            : memText;
+        if (!boundedMemory)
+            return;
+        this.session.appendUserText(`${COMPACT_MEMORY_REMINDER_PREFIX}${boundedMemory}${COMPACT_MEMORY_REMINDER_SUFFIX}`);
     }
 }
 function looksLikeCodeRequest(input) {

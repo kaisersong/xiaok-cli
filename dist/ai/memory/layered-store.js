@@ -11,6 +11,7 @@ import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('memory:layered-store');
 import { segmentChinese } from './segment.js';
 import { MODEL_REGISTRY } from './model-registry.js';
+import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
 export function resolveLayeredConfig(config) {
     const c = (config ?? {});
     const provider = c.embedding?.provider ?? 'local';
@@ -42,7 +43,13 @@ export function createLLMFromAdapter(adapter) {
             { role: 'user', content: [{ type: 'text', text: prompt }] },
         ];
         const chunks = [];
-        for await (const chunk of adapter.stream(messages, [], '只输出JSON结果，不要其他内容。不要调用任何工具。')) {
+        for await (const chunk of streamStatelessSideCallProviderConversation({
+            adapter,
+            messages,
+            tools: [],
+            systemPrompt: '只输出JSON结果，不要其他内容。不要调用任何工具。',
+            invocationId: `inv_${crypto.randomUUID()}`,
+        })) {
             if (chunk.type === 'text')
                 chunks.push(chunk.delta);
         }

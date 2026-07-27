@@ -268,6 +268,51 @@ jobs:
       - name: Package Windows installer
         run: cd desktop && npx electron-builder --config electron-builder.json --win nsis --publish never
 
+      - name: Run packaged Windows Kimi K3 smoke
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'xiaok-kimi-packaged-smoke'
+          $resultPath = Join-Path $smokeRoot 'result.json'
+          $appData = Join-Path $smokeRoot 'appdata'
+          $localAppData = Join-Path $smokeRoot 'localappdata'
+          $tempDir = Join-Path $smokeRoot 'temp'
+          New-Item -ItemType Directory -Force -Path $appData, $localAppData, $tempDir | Out-Null
+
+          $env:XIAOK_KIMI_PACKAGED_SMOKE_RESULT = $resultPath
+          $env:XIAOK_DESKTOP_DISABLE_SINGLE_INSTANCE = '1'
+          $env:APPDATA = $appData
+          $env:LOCALAPPDATA = $localAppData
+          $env:TEMP = $tempDir
+          $env:TMP = $tempDir
+
+          $executable = Resolve-Path 'desktop/release/win-unpacked/xiaok.exe'
+          $process = Start-Process -FilePath $executable -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged Kimi smoke exited with code $($process.ExitCode)"
+          }
+          if (-not (Test-Path -LiteralPath $resultPath)) {
+            throw 'Packaged Kimi smoke did not write its result'
+          }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+          if ($result.status -ne 'pass' -or $result.modelResults.Count -ne 2) {
+            throw 'Packaged Kimi smoke result is incomplete'
+          }
+          foreach ($model in @('k3', 'k3-256k')) {
+            $entry = $result.modelResults | Where-Object { $_.model -eq $model }
+            if (-not $entry -or $entry.requests -ne 2 -or -not $entry.secondTurnReplayedReasoning) {
+              throw "Packaged Kimi multi-turn smoke failed for $model"
+            }
+          }
+          if ($result.authorizationDenyNetworkRequests -ne 0 -or $result.rollbackDenyNetworkRequests -ne 0) {
+            throw 'Packaged Kimi deny smoke observed a network request'
+          }
+          $canaryHit = Get-ChildItem -LiteralPath $smokeRoot -Recurse -File |
+            Where-Object { $_.FullName -ne $resultPath } |
+            Select-String -SimpleMatch 'PACKAGED_SMOKE_RUNTIME_ONLY' -List
+          if ($canaryHit) {
+            throw "Provider-private reasoning canary persisted at $($canaryHit.Path)"
+          }
+
       - name: Upload to GitHub Release
         run: gh release upload "${{ env.RELEASE_TAG }}" desktop/release/*.exe desktop/release/latest.yml --clobber
         env:

@@ -3,6 +3,47 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 describe('chat terminal layout', () => {
+  it('returns the stable K3 durable-resume error without writing a crash report', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const actionCatch = source.lastIndexOf('} catch (error) {');
+    const expectedGuard = source.indexOf(
+      'error instanceof KimiK3DurableResumeUnsupportedError',
+      actionCatch,
+    );
+    const stableOutput = source.indexOf(
+      'writeError(error.code);',
+      expectedGuard,
+    );
+    const crashReport = source.indexOf(
+      "await import('../utils/crash-reporter.js')",
+      actionCatch,
+    );
+
+    expect(source).toContain('KimiK3DurableResumeUnsupportedError');
+    expect(actionCatch).toBeGreaterThan(-1);
+    expect(expectedGuard).toBeGreaterThan(actionCatch);
+    expect(stableOutput).toBeGreaterThan(expectedGuard);
+    expect(crashReport).toBeGreaterThan(stableOutput);
+  });
+
+  it('preflights strict K3 fork before mutation and blocks cross-profile model switching', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const forkLoad = source.indexOf('const forkSource = await sessionStore.load(opts.forkSession);');
+    const forkGuard = source.indexOf('assertKimiK3TargetResumeSupported(', forkLoad);
+    const forkMutation = source.indexOf('persistedSession = await sessionStore.fork(opts.forkSession);', forkLoad);
+
+    expect(forkLoad).toBeGreaterThan(-1);
+    expect(forkGuard).toBeGreaterThan(forkLoad);
+    expect(forkMutation).toBeGreaterThan(forkGuard);
+    expect(source).toContain('assertKimiK3SessionModelSwitchSupported(');
+
+    const identitySource = readFileSync(
+      join(process.cwd(), 'src', 'ai', 'runtime', 'model-harness-identity.ts'),
+      'utf8',
+    );
+    expect(identitySource).toContain('KIMI_K3_SESSION_MODEL_SWITCH_UNSUPPORTED');
+    expect(identitySource).toContain('currentProfile !== nextProfile');
+  });
   it('should not use bottom-fixed input cursor positioning sequences', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
@@ -159,6 +200,26 @@ describe('chat terminal layout', () => {
     expect(source).toContain(".option('--takeover <id>'");
     expect(source).toContain("ownershipMode === 'takeover'");
     expect(source).toContain('takeoverSessionOwnership');
+  });
+
+  it('loads durable sessions before Agent construction without strict writer coordination', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
+    const continueLoad = source.indexOf('persistedSession = await sessionStore.loadLast();');
+    const resumeLoad = source.indexOf('persistedSession = await sessionStore.load(opts.resume);');
+    const forkLoad = source.indexOf('persistedSession = await sessionStore.fork(opts.forkSession);');
+    const agentConstruction = source.indexOf('agent = new Agent(');
+
+    expect(source).toContain('const sessionStore = createFileSessionStore();');
+    expect(continueLoad).toBeGreaterThan(-1);
+    expect(resumeLoad).toBeGreaterThan(-1);
+    expect(forkLoad).toBeGreaterThan(-1);
+    expect(agentConstruction).toBeGreaterThan(forkLoad);
+    expect(source).not.toContain('createFileSessionStoreForAdapter');
+    expect(source).not.toContain('StrictK3DurableUnsupportedError');
+    expect(source).not.toContain('.prepareWriter(');
+    expect(source).not.toContain('.releaseWriter(');
+    expect(source).not.toContain('providerConversationAuthorizationIssuer');
+    expect(source).not.toContain('onProviderTranscriptCommit');
   });
 
   it('should reroute terminal output to the surviving tty stream when one ui stream errors', () => {
@@ -398,7 +459,7 @@ describe('chat terminal layout', () => {
     const progressEnd = source.indexOf('const maybeWriteThinkingOnlyToolNotice = (): void => {', progressStart);
     const progressSource = source.slice(progressStart, progressEnd);
     const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): void => {');
-    const orchestrationEnd = source.indexOf('const persistSession = async', orchestrationStart);
+    const orchestrationEnd = source.indexOf('persistSession = async', orchestrationStart);
     const orchestrationSource = source.slice(orchestrationStart, orchestrationEnd);
 
     expect(source).not.toContain("from './chat/terminal-surface.js';");

@@ -1,8 +1,8 @@
-function createKimiK3Variant(modelId) {
+function createKimiK3Variant(modelId, model = 'k3', label = 'Kimi K3') {
     return {
         modelId,
-        model: 'k3',
-        label: 'Kimi K3',
+        model,
+        label,
         capabilities: ['tools', 'thinking'],
         runtimeOptions: {
             contextLimit: 262_144,
@@ -65,6 +65,7 @@ const PROVIDER_REGISTRY = {
         defaultModel: createKimiK3Variant('kimi-default'),
         availableModels: [
             createKimiK3Variant('kimi-k3'),
+            createKimiK3Variant('kimi-k3-256k', 'k3-256k', 'Kimi K3 256K'),
             { modelId: 'kimi-k2.7', model: 'kimi-k2.7', label: 'Kimi K2.7', capabilities: ['tools', 'thinking'] },
             { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'] },
             { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'] },
@@ -148,10 +149,35 @@ const PROVIDER_REGISTRY = {
 export function getProviderProfile(providerId) {
     return PROVIDER_REGISTRY[providerId];
 }
+function variantMetadataKey(variant) {
+    return JSON.stringify({
+        capabilities: [...(variant.capabilities ?? [])].sort(),
+        runtimeOptions: {
+            contextLimit: variant.runtimeOptions?.contextLimit ?? null,
+            reasoningEffort: variant.runtimeOptions?.reasoningEffort ?? null,
+        },
+        runtimeConstraints: {
+            maxContextLimit: variant.runtimeConstraints?.maxContextLimit ?? null,
+            reasoningEfforts: [...(variant.runtimeConstraints?.reasoningEfforts ?? [])].sort(),
+        },
+    });
+}
+export function resolveProviderModelVariant(profile, wireModel) {
+    const matches = [profile.defaultModel, ...(profile.availableModels ?? [])]
+        .filter((variant) => variant.model === wireModel)
+        .sort((left, right) => (left.modelId.localeCompare(right.modelId)
+        || left.label.localeCompare(right.label)));
+    if (matches.length <= 1)
+        return matches[0];
+    const metadataKeys = new Set(matches.map(variantMetadataKey));
+    if (metadataKeys.size > 1) {
+        throw Object.assign(new Error(`Ambiguous model variants for ${profile.id}/${wireModel}`), { code: 'MODEL_VARIANT_AMBIGUOUS' });
+    }
+    return matches[0];
+}
 export function getProviderModelVariant(providerId, wireModel) {
     const profile = getProviderProfile(providerId);
-    return profile?.availableModels?.find((variant) => variant.model === wireModel)
-        ?? (profile?.defaultModel.model === wireModel ? profile.defaultModel : undefined);
+    return profile ? resolveProviderModelVariant(profile, wireModel) : undefined;
 }
 export function listProviderProfiles() {
     return Object.values(PROVIDER_REGISTRY);

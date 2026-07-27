@@ -20,7 +20,7 @@ export class Agent {
         this.options = options;
         this.runtime = this.createRuntime();
     }
-    async runTurn(userInput, onChunk, signal) {
+    async runTurn(userInput, onChunk, signal, invocationContext) {
         if (signal?.aborted) {
             throw new DOMException('agent aborted', 'AbortError');
         }
@@ -31,14 +31,14 @@ export class Agent {
             if (chunk) {
                 onChunk(chunk);
             }
-        }, signal);
+        }, signal, invocationContext);
     }
     clearHistory() {
         this.session = new AgentSessionState();
         this.runtime = this.createRuntime();
     }
     forceCompact() {
-        return this.session.forceCompact('[context compacted]');
+        return this.session.forceCompact();
     }
     getUsage() {
         return this.session.getUsage();
@@ -75,6 +75,7 @@ export class Agent {
             compactThreshold: this.options.compactThreshold,
             compactPlaceholder: this.options.compactPlaceholder,
             memoryStore: this.options.memoryStore,
+            providerSurfaceKind: this.options.providerSurfaceKind,
         });
     }
     emitLegacyHook(event, turnId) {

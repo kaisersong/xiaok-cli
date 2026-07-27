@@ -36,18 +36,8 @@ function findAdapterStreamConsumers(): string[] {
 }
 
 describe('production ModelAdapter.stream consumer contract', () => {
-  it('inventories every production async stream consumer', () => {
-    expect(findAdapterStreamConsumers()).toEqual([
-      'desktop/electron/context-manager.ts#1',
-      'desktop/electron/desktop-services.ts#1',
-      'desktop/electron/desktop-services.ts#2',
-      'desktop/electron/desktop-services.ts#3',
-      'desktop/electron/loop-llm-port-impl.ts#1',
-      'src/ai/intent-delegation/llm-boundary-classifier.ts#1',
-      'src/ai/memory/layered-store.ts#1',
-      'src/ai/runtime/agent-runtime.ts#1',
-      'src/ai/runtime/compact-runner.ts#1',
-    ]);
+  it('keeps every production async stream consumer behind the authorization owner', () => {
+    expect(findAdapterStreamConsumers()).toEqual([]);
   });
 
   it('preserves the loop LLM consumer intentional clean-done and local-limit exits', () => {

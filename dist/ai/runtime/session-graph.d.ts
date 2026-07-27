@@ -22,10 +22,12 @@ export interface SessionGraphSnapshot {
 }
 export declare class AgentSessionGraph {
     private snapshot;
+    private revision;
     constructor(snapshot: Partial<SessionGraphSnapshot> & Pick<SessionGraphSnapshot, 'sessionId' | 'cwd' | 'createdAt' | 'updatedAt' | 'lineage'>);
     getMessages(): Message[];
     getUsage(): UsageStats;
     getCompactions(): CompactionRecord[];
+    getRevision(): number;
     updateUsage(next: UsageStats): UsageStats;
     appendUserText(text: string): void;
     appendUserBlocks(blocks: MessageBlock[]): void;

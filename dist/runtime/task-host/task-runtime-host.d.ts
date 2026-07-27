@@ -67,7 +67,6 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly executionPromises;
     private readonly taskWatchdogs;
     private taskOrdinal;
-    private sessionOrdinal;
     private readonly permissionModes;
     private readonly maxToolLoopIterations;
     constructor(options: InProcessTaskRuntimeHostOptions);

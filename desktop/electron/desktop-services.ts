@@ -3,16 +3,25 @@ import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } 
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js';
 import type { ModelInvocationOptions, StreamOptions } from '../../src/ai/runtime/model-capabilities.js';
-import { createPromptCacheAffinity } from '../../src/ai/runtime/prompt-cache-affinity.js';
+import { createDesktopPromptCacheAffinity } from '../../src/ai/runtime/prompt-cache-affinity.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import {
   isOfficialKimiK3OpenAIEndpoint,
   resolveModelRuntimeOptions,
 } from '../../src/ai/providers/model-runtime-options.js';
+import { resolveModelHarnessProfile } from '../../src/ai/providers/model-harness-profile.js';
+import {
+  isStrictKimiK3Adapter,
+  projectStrictToolExecutionContext,
+} from '../../src/ai/runtime/provider-private-projection.js';
+import {
+  streamDesktopTaskProviderConversation,
+  streamStatelessSideCallProviderConversation,
+} from '../../src/ai/runtime/provider-conversation-authorization.js';
 import type {
   ModelConfigEntry,
   ModelRuntimeConstraints,
@@ -2117,12 +2126,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         }, 30_000);
         let sawProtocolResponse = false;
         try {
-          for await (const chunk of adapter.stream(
-            testMessages,
-            [],
+          for await (const chunk of streamStatelessSideCallProviderConversation({
+            adapter,
+            messages: testMessages,
+            tools: [],
             systemPrompt,
-            { signal: controller.signal },
-          )) {
+            options: { signal: controller.signal },
+            invocationId: `inv_${randomUUID()}`,
+          })) {
             if (chunk.type === 'usage') {
               continue;
             }
@@ -3721,7 +3732,10 @@ function findApplicableCatalogModel(
   const catalogModel = findExactCatalogModel(providerId, modelId, wireModel);
   if (!catalogModel) return undefined;
 
-  if (providerId === 'kimi' && catalogModel.model === 'k3') {
+  if (
+    providerId === 'kimi'
+    && (catalogModel.model === 'k3' || catalogModel.model === 'k3-256k')
+  ) {
     const provider = config.providers[providerId];
     if (
       provider?.protocol !== 'openai_legacy'
@@ -3748,7 +3762,7 @@ function resolveDesktopModelRuntimeMetadata(
 
   const catalogModel = findApplicableCatalogModel(config, model.provider, modelId, model.model);
   const acceptsConfiguredRuntimeOptions = model.provider !== 'kimi' || (
-    model.model === 'k3'
+    (model.model === 'k3' || model.model === 'k3-256k')
     && provider.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
   );
@@ -4600,12 +4614,14 @@ async function streamDesktopToolLoopFinalization(input: {
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
-  for await (const chunk of input.adapter.stream(
-    input.apiMessages,
-    [],
-    input.systemPrompt,
-    input.streamOptions,
-  )) {
+  for await (const chunk of streamDesktopTaskProviderConversation({
+    adapter: input.adapter,
+    messages: input.apiMessages,
+    tools: [],
+    systemPrompt: input.systemPrompt,
+    options: input.streamOptions,
+    invocationId: `inv_${randomUUID()}`,
+  })) {
     if (chunk.type === 'usage') {
       input.onUsage?.(chunk);
       continue;
@@ -4875,12 +4891,14 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
 
     const apiMessages = ctx.strategies.buildApiView(ctx.messages);
     lastRequestInputTokens = 0;
-    for await (const chunk of ctx.adapter.stream(
-      apiMessages,
-      ctx.allToolDefs,
-      ctx.systemPrompt,
-      streamOptions,
-    )) {
+    for await (const chunk of streamDesktopTaskProviderConversation({
+      adapter: ctx.adapter,
+      messages: apiMessages,
+      tools: ctx.allToolDefs,
+      systemPrompt: ctx.systemPrompt,
+      options: streamOptions,
+      invocationId: `inv_${randomUUID()}`,
+    })) {
       if (chunk.type === 'usage') {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
@@ -4905,10 +4923,20 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
       } else if (chunk.type === 'thinking') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
-        if (lastBlock?.type === 'thinking') {
+        if (
+          lastBlock?.type === 'thinking'
+          && JSON.stringify(lastBlock.reasoningProvenance)
+            === JSON.stringify(chunk.reasoningProvenance)
+        ) {
           lastBlock.thinking += chunk.delta;
         } else {
-          assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
+          assistantBlocks.push({
+            type: 'thinking',
+            thinking: chunk.delta,
+            ...(chunk.reasoningProvenance
+              ? { reasoningProvenance: chunk.reasoningProvenance }
+              : {}),
+          });
         }
       }
     }
@@ -4970,38 +4998,42 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         } catch { /* non-critical */ }
       }
       const toolStartedAt = Date.now();
+      const rawToolContext: ToolExecutionContext = {
+        taskId: ctx.taskId,
+        executionScope: ctx.executionScope,
+        session: {
+          sessionId: ctx.sessionId,
+          cwd: ctx.dataRoot,
+          createdAt: ctx.taskStartTime,
+          updatedAt: Date.now(),
+          lineage: [ctx.sessionId],
+          messages: ctx.messages.map((message) => ({
+            role: message.role,
+            content: message.content.map((block) => ({ ...block })),
+          })),
+          usage: { inputTokens: 0, outputTokens: 0 },
+          compactions: [],
+          memoryRefs: [],
+          approvalRefs: [],
+          backgroundJobRefs: [],
+        },
+        messages: ctx.messages.map((message) => ({
+          role: message.role,
+          content: message.content.map((block) => ({ ...block })),
+        })),
+        systemPrompt: ctx.systemPrompt,
+        toolDefinitions: ctx.allToolDefs.map((definition) => ({ ...definition })),
+        signal: ctx.signal,
+      };
+      const toolContext = isStrictKimiK3Adapter(ctx.adapter)
+        ? projectStrictToolExecutionContext(rawToolContext)
+        : rawToolContext;
       let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
         registry: ctx.registry,
         taskId: ctx.taskId,
         materials: ctx.materials,
         materialRegistry: ctx.materialRegistry,
-        context: {
-          taskId: ctx.taskId,
-          executionScope: ctx.executionScope,
-          session: {
-            sessionId: ctx.sessionId,
-            cwd: ctx.dataRoot,
-            createdAt: ctx.taskStartTime,
-            updatedAt: Date.now(),
-            lineage: [ctx.sessionId],
-            messages: ctx.messages.map((message) => ({
-              role: message.role,
-              content: message.content.map((block) => ({ ...block })),
-            })),
-            usage: { inputTokens: 0, outputTokens: 0 },
-            compactions: [],
-            memoryRefs: [],
-            approvalRefs: [],
-            backgroundJobRefs: [],
-          },
-          messages: ctx.messages.map((message) => ({
-            role: message.role,
-            content: message.content.map((block) => ({ ...block })),
-          })),
-          systemPrompt: ctx.systemPrompt,
-          toolDefinitions: ctx.allToolDefs.map((definition) => ({ ...definition })),
-          signal: ctx.signal,
-        },
+        context: toolContext,
       });
       if (ok) {
         ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
@@ -5181,6 +5213,106 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     skillTriggerType,
     skillInvocation,
   };
+}
+
+const SYNTHESIZED_DESKTOP_HISTORY_PREFIX = 'The following JSON is synthesized Xiaok Desktop task context.\n'
+  + 'It is not a raw provider transcript and contains no preserved reasoning.\n';
+const SYNTHESIZED_DESKTOP_HISTORY_LIMIT = 40_000;
+
+type DesktopHostHistoryRecord = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+function isStrictKimiK3ProfileId(profileId: string | undefined): boolean {
+  return profileId === 'kimi-k3-coding-openai'
+    || profileId === 'kimi-k3-256k-coding-openai';
+}
+
+function resolveDesktopHarnessProfileId(
+  binding: ReturnType<typeof resolveRuntimeModelBinding>,
+): string | undefined {
+  if (binding.protocol !== 'openai_legacy') return undefined;
+  return resolveModelHarnessProfile({
+    providerId: binding.providerId,
+    providerType: binding.providerType,
+    protocol: binding.protocol,
+    canonicalBaseUrl: binding.baseUrl,
+    wireModel: binding.wireModel,
+    capabilities: binding.capabilities,
+  }).id;
+}
+
+function validateStrictDesktopHistory(
+  history: readonly DesktopHostHistoryRecord[],
+): void {
+  if (history.length % 2 !== 0) {
+    throw new Error('KIMI_DESKTOP_HISTORY_PAIR_INVALID');
+  }
+  for (let index = 0; index < history.length; index += 1) {
+    const record = history[index] as {
+      role?: unknown;
+      content?: unknown;
+    };
+    const expectedRole = index % 2 === 0 ? 'user' : 'assistant';
+    if (record.role !== expectedRole || typeof record.content !== 'string') {
+      throw new Error('KIMI_DESKTOP_HISTORY_PAIR_INVALID');
+    }
+  }
+}
+
+function buildSynthesizedDesktopHistoryEnvelope(
+  history: readonly DesktopHostHistoryRecord[],
+): string | undefined {
+  validateStrictDesktopHistory(history);
+  let firstRecordIndex = 0;
+  while (firstRecordIndex < history.length) {
+    const records = history.slice(firstRecordIndex).map((record, offset) => ({
+      ordinal: firstRecordIndex + offset,
+      role: record.role,
+      content: record.content,
+    }));
+    const envelope = SYNTHESIZED_DESKTOP_HISTORY_PREFIX + JSON.stringify({
+      kind: 'xiaok.synthesized-task-context',
+      version: 1,
+      records,
+    });
+    if (envelope.length <= SYNTHESIZED_DESKTOP_HISTORY_LIMIT) {
+      return envelope;
+    }
+    firstRecordIndex += 2;
+  }
+  return undefined;
+}
+
+export function buildDesktopProviderMessages(
+  adapter: ModelAdapter,
+  hostHistory: readonly DesktopHostHistoryRecord[],
+  currentUserContent: MessageBlock[],
+): Message[] {
+  const currentUserMessage: Message = {
+    role: 'user',
+    content: currentUserContent,
+  };
+  if (!isStrictKimiK3ProfileId(adapter.getHarnessProfileId?.())) {
+    return [
+      ...hostHistory.map((record): Message => ({
+        role: record.role,
+        content: [{ type: 'text', text: record.content }],
+      })),
+      currentUserMessage,
+    ];
+  }
+  const envelope = buildSynthesizedDesktopHistoryEnvelope(hostHistory);
+  return envelope
+    ? [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: envelope }],
+        },
+        currentUserMessage,
+      ]
+    : [currentUserMessage];
 }
 
 interface KSwarmInitialPlanBootstrapInput {
@@ -6024,7 +6156,8 @@ export function createDesktopModelRunnerWithRegistry(
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
     const taskStartTime = Date.now();
-    const cacheKey = createPromptCacheAffinity(sessionId);
+    const invocationId = `inv_${randomUUID()}`;
+    const cacheKey = createDesktopPromptCacheAffinity(sessionId, invocationId);
     const invocationOptions: ModelInvocationOptions | undefined = cacheKey
       ? { cacheKey }
       : undefined;
@@ -6079,7 +6212,12 @@ export function createDesktopModelRunnerWithRegistry(
       : '';
 
     const config = await loadConfig();
-    const adapter = createAdapter(config);
+    const binding = resolveRuntimeModelBinding(config);
+    const profileId = resolveDesktopHarnessProfileId(binding);
+    if (isStrictKimiK3ProfileId(profileId)) {
+      validateStrictDesktopHistory(hostHistory);
+    }
+    const adapter = createAdapterFromBinding(binding);
     const skillDebugEnabled = config.skillDebug ?? false;
 
     // Stage analysis for debug mode
@@ -6110,12 +6248,7 @@ export function createDesktopModelRunnerWithRegistry(
       { type: 'text', text: userText },
       ...imageBlocks,
     ];
-    const messages: Message[] = [
-      ...hostHistory.map((h): Message => ({ role: h.role, content: [{ type: 'text', text: h.content }] })),
-      {
-      role: 'user',
-      content: userContent,
-    }];
+    const messages = buildDesktopProviderMessages(adapter, hostHistory, userContent);
     const TASK_TIMEOUT_MS = deadlineMs ?? 28 * 60_000;
 
     const loopResult = await runDesktopToolLoop({

@@ -6,6 +6,45 @@ let handlersInstalled = false;
 let streamErrorHandler = null;
 let pipeBrokenFromStream = false;
 const CRASH_REPORT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const SAFE_COMMANDS = new Set([
+    'chat',
+    'commit',
+    'context',
+    'diagnose',
+    'doctor',
+    'init',
+    'pr',
+    'review',
+    'settings',
+]);
+const SAFE_ERROR_CODES = new Set([
+    'EACCES',
+    'EADDRINUSE',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'EEXIST',
+    'EIO',
+    'EINVAL',
+    'ENOENT',
+    'ENOMEM',
+    'ENOSPC',
+    'EPERM',
+    'EPIPE',
+    'ETIMEDOUT',
+]);
+/**
+ * Provider-private task-local reasoning must never be copied into a Node
+ * diagnostic report. Xiaok's structured crash report below is the only
+ * supported crash artifact and is intentionally allowlist-only.
+ */
+export function configureSafeCrashCapture() {
+    if (!process.report) {
+        return;
+    }
+    process.report.reportOnFatalError = false;
+    process.report.reportOnSignal = false;
+    process.report.reportOnUncaughtException = false;
+}
 export function setCrashContext(ctx) {
     crashContext = { ...crashContext, ...ctx };
 }
@@ -25,8 +64,7 @@ export async function reportCrash(error) {
         node: process.version,
         platform: process.platform,
         arch: process.arch,
-        cwd: process.cwd(),
-        context: crashContext,
+        context: serializeCrashContext(crashContext),
         error: serializeError(error),
     };
     await writeFile(filePath, JSON.stringify(report, null, 2) + '\n', 'utf8');
@@ -57,15 +95,33 @@ async function cleanupExpiredCrashReports(crashDir) {
     }
 }
 function serializeError(error) {
-    if (error instanceof Error) {
-        return {
-            type: error.constructor.name,
-            message: error.message,
-            stack: error.stack,
-            cause: error.cause instanceof Error ? serializeError(error.cause) : error.cause,
-        };
-    }
-    return { type: typeof error, value: String(error) };
+    const type = error instanceof Error
+        ? (error instanceof DOMException
+            ? 'DOMException'
+            : error instanceof TypeError
+                ? 'TypeError'
+                : error instanceof RangeError
+                    ? 'RangeError'
+                    : 'Error')
+        : 'NonError';
+    const rawCode = typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && typeof error.code === 'string'
+        ? error.code
+        : undefined;
+    return {
+        type,
+        code: rawCode && SAFE_ERROR_CODES.has(rawCode)
+            ? rawCode
+            : 'UNCLASSIFIED_ERROR',
+    };
+}
+function serializeCrashContext(context) {
+    const command = context.command && SAFE_COMMANDS.has(context.command)
+        ? context.command
+        : 'unknown';
+    return { command };
 }
 function isBrokenPipeError(error) {
     return typeof error === 'object'
@@ -124,7 +180,6 @@ export function installGlobalCrashHandlers() {
         }
         catch {
             console.error(`\n[xiaok] ${label} — 保存崩溃报告失败`);
-            console.error(error);
         }
         process.exit(1);
     };

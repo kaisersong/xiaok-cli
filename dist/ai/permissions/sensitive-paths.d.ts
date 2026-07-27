@@ -6,5 +6,5 @@ export declare function isSensitiveToolInvocation(toolName: string, input: Recor
 export declare function isScreenAutomationFallbackInvocation(toolName: string, input: Record<string, unknown>): boolean;
 export declare function describeSensitiveTarget(input: Record<string, unknown>): string;
 export declare const __TEST_ONLY__: {
-    sep: "\\" | "/";
+    sep: "/" | "\\";
 };

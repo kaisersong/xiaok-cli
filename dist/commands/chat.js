@@ -29,7 +29,8 @@ import { buildSkillExecutionPlan } from '../ai/skills/planner.js';
 import { activateSkillInvocation, cloneSessionSkillExecutionState, createEmptySessionSkillExecutionState, findLatestRunningInvocation, recordSkillEvidence, } from '../ai/skills/execution-state.js';
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
-import { FileSessionStore } from '../ai/runtime/session-store.js';
+import { assertKimiK3TargetResumeSupported, createFileSessionStore, KimiK3DurableResumeUnsupportedError, } from '../ai/runtime/session-store.js';
+import { assertKimiK3SessionModelSwitchSupported, resolveRegisteredStrictKimiK3Profile, } from '../ai/runtime/model-harness-identity.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
 import { runInteractiveRuntimeTurn, } from './chat/runtime-turn-runner.js';
@@ -186,7 +187,7 @@ async function runChat(initialInput, opts) {
     const pluginRuntime = platform.pluginRuntime;
     let skillDebugEnabled = opts.skillDebug ?? false;
     const customAgents = platform.customAgents;
-    const sessionStore = new FileSessionStore();
+    const sessionStore = createFileSessionStore();
     const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
     const skillEvalStore = new SessionSkillEvalStore(sessionStore);
     const skillScoreStore = new FileSkillScoreStore();
@@ -213,7 +214,16 @@ async function runChat(initialInput, opts) {
         }
     }
     else if (opts.forkSession) {
+        const forkSource = await sessionStore.load(opts.forkSession);
+        if (!forkSource) {
+            writeError(`找不到会话: ${opts.forkSession}`);
+            process.exit(1);
+        }
+        assertKimiK3TargetResumeSupported(resolveRegisteredStrictKimiK3Profile(adapter) !== undefined, forkSource);
         persistedSession = await sessionStore.fork(opts.forkSession);
+    }
+    if (persistedSession) {
+        assertKimiK3TargetResumeSupported(resolveRegisteredStrictKimiK3Profile(adapter) !== undefined, persistedSession);
     }
     const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
     const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
@@ -2620,6 +2630,9 @@ async function runChat(initialInput, opts) {
                     };
                     try {
                         const nextAdapter = createAdapter(newConfig);
+                        const currentProfile = resolveRegisteredStrictKimiK3Profile(adapter);
+                        const nextProfile = resolveRegisteredStrictKimiK3Profile(nextAdapter);
+                        assertKimiK3SessionModelSwitchSupported(currentProfile, nextProfile, agent.exportSession().messages.length);
                         const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
                         await saveConfig(newConfig);
                         adapter = nextAdapter;
@@ -3091,6 +3104,10 @@ export function registerChatCommands(program) {
             await runChat(input, opts);
         }
         catch (error) {
+            if (error instanceof KimiK3DurableResumeUnsupportedError) {
+                writeError(error.code);
+                process.exit(1);
+            }
             const { reportCrash } = await import('../utils/crash-reporter.js');
             const path = await reportCrash(error);
             writeError(`运行中断，崩溃报告已保存: ${path}`);

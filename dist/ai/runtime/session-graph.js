@@ -1,5 +1,6 @@
 export class AgentSessionGraph {
     snapshot;
+    revision = 0;
     constructor(snapshot) {
         this.snapshot = {
             ...snapshot,
@@ -12,13 +13,16 @@ export class AgentSessionGraph {
         };
     }
     getMessages() {
-        return this.snapshot.messages;
+        return structuredClone(this.snapshot.messages);
     }
     getUsage() {
         return this.snapshot.usage;
     }
     getCompactions() {
         return this.snapshot.compactions;
+    }
+    getRevision() {
+        return this.revision;
     }
     updateUsage(next) {
         this.snapshot.usage = next;
@@ -98,8 +102,10 @@ export class AgentSessionGraph {
             approvalRefs: snapshot.approvalRefs ?? [],
             backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
         };
+        this.revision += 1;
     }
     touch() {
         this.snapshot.updatedAt = Date.now();
+        this.revision += 1;
     }
 }

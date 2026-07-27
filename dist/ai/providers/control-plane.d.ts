@@ -2,6 +2,7 @@ import type { Config, LegacyConfig } from '../../types.js';
 import type { ModelRuntimeOptions, ProtocolId } from './types.js';
 export interface ResolvedModelBinding {
     providerId: string;
+    providerType: 'first_party' | 'custom';
     modelId: string;
     wireModel: string;
     protocol: ProtocolId;

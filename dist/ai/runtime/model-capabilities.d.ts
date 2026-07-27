@@ -1,4 +1,5 @@
 import type { Message, ModelAdapter, ToolDefinition } from '../../types.js';
+import type { ProviderConversationAuthorization } from './provider-conversation-authorization.js';
 export interface CacheControl {
     type: 'ephemeral';
 }
@@ -17,9 +18,14 @@ export interface PromptCacheSegments {
 }
 export interface ModelInvocationOptions {
     promptCache?: PromptCacheSegments;
+    cacheKey?: string;
+    providerConversationAuthorization?: ProviderConversationAuthorization;
 }
 export interface StreamOptions extends ModelInvocationOptions {
     signal?: AbortSignal;
+}
+export interface RunInvocationContext {
+    cacheKey?: string;
 }
 export interface ModelCapabilities {
     contextLimit: number;

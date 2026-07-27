@@ -598,9 +598,13 @@ xiaok config get models
 
 #### Kimi K3
 
-New Kimi configurations use the official wire model ID `k3`. Existing Kimi configurations keep their current model and are not migrated automatically. K3 defaults to a 262,144-token context window and `high` reasoning effort; Allegretto and higher plans can explicitly select the 1,048,576-token window. Reasoning effort supports `low`, `high`, and `max`—there is no `none` option because disabling reasoning routes to a different model.
+New Kimi configurations use the official wire model ID `k3`; `k3-256k` is also available as an exact K3 profile. Existing Kimi configurations keep their current model and are not migrated automatically. K3 defaults to a 262,144-token context window and `high` reasoning effort; Allegretto and higher plans can explicitly select the 1,048,576-token window. Reasoning effort supports `low`, `high`, and `max`—there is no `none` option because disabling reasoning routes to a different model.
 
-Desktop model settings expose the 262K/1M context and Low/High/Max effort controls for the active K3 model. Changing the model or reasoning effort invalidates Kimi's prompt cache, so starting a new session is recommended after a switch. See the [official Kimi Code model documentation](https://www.kimi.com/code/docs/kimi-code/models) for current plan limits and model behavior.
+CLI and Desktop preserve Kimi's official `reasoning_content` by default, but only in task-local memory for the current provider conversation and tool chain. Raw reasoning and its provenance are stripped before durable session/task persistence and never enter terminal output, Desktop events, Canvas, ordinary logs, or tool-facing context. K3 resume, continue, and fork requests whose durable history already contains an assistant turn fail before any provider request or state mutation with `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`; a pre-bound session with no assistant turn is treated as a fresh conversation.
+
+Accordingly, `preservedThinking` is default-on for exact `k3` and `k3-256k` profiles on both surfaces. Explicit `prompt_cache_key` emission remains default-off because no valid product-level paired evaluation has demonstrated the required benefit; Xiaok makes no explicit-key performance claim. The diagnostic opt-in remains `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`.
+
+Desktop model settings expose the 262K/1M context and Low/High/Max effort controls for the active K3 model. Changing the model or reasoning effort invalidates Kimi's provider conversation state, so starting a new session is recommended after a switch. See the [official Kimi Code model documentation](https://www.kimi.com/code/docs/kimi-code/models) for current plan limits and model behavior.
 
 **Project Settings:** `<repo>/.xiaok/settings.json`
 

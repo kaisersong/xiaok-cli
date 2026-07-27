@@ -62,7 +62,10 @@ export type KimiUsageDiagnosticSink = (
 ) => void;
 
 export interface ModelHarnessProfile {
-  readonly id: 'generic-openai' | 'kimi-k3-coding-openai';
+  readonly id:
+    | 'generic-openai'
+    | 'kimi-k3-coding-openai'
+    | 'kimi-k3-256k-coding-openai';
   normalizeToolSchema?: (
     schema: Record<string, unknown>,
   ) => NormalizedKimiSchema;
@@ -110,21 +113,38 @@ export const GENERIC_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze
   id: 'generic-openai',
 });
 
+const ownedStrictHarnessContexts = new WeakSet<object>();
+
+export function isOwnedStrictOpenAIHarnessContext(
+  context: OpenAIHarnessContext,
+): boolean {
+  return ownedStrictHarnessContexts.has(context);
+}
+
 function serializeKimiReasoning(
   blocks: MessageBlock[],
-  dialect: ReasoningKeyName,
-  preservedThinkingEnabled: boolean,
+  _dialect: ReasoningKeyName,
+  _preservedThinkingEnabled: boolean,
 ): { field: ReasoningKeyName; value: string } | undefined {
-  if (!preservedThinkingEnabled) {
+  const thinkingBlocks = blocks.filter((block) => block.type === 'thinking');
+  if (thinkingBlocks.length === 0) {
     return undefined;
   }
 
+  for (const block of thinkingBlocks) {
+    const provenance = block.reasoningProvenance;
+    if (
+      provenance?.captureVersion !== 1
+      || provenance.source !== 'reasoning_content'
+      || provenance.fieldPresence !== 'present'
+    ) {
+      throw new Error('KIMI_REASONING_SOURCE_INVARIANT');
+    }
+  }
+
   return {
-    field: dialect,
-    value: blocks
-      .filter((block) => block.type === 'thinking')
-      .map((block) => block.thinking)
-      .join(''),
+    field: 'reasoning_content',
+    value: thinkingBlocks.map((block) => block.thinking).join(''),
   };
 }
 
@@ -261,6 +281,11 @@ export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object
   ),
 });
 
+export const KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile = Object.freeze({
+  ...KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
+  id: 'kimi-k3-256k-coding-openai',
+});
+
 export function observeReasoningDialect(
   state: ReasoningDialectState,
   delta: Record<string, unknown>,
@@ -327,7 +352,7 @@ export function resolveKimiHarnessFeatureFlags(
     normalizeUsage: true,
     omitEmptyAssistantContent: true,
     promptCacheKey: env.XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE === '1',
-    preservedThinking: env.XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING === '1',
+    preservedThinking: true,
   });
 }
 
@@ -335,16 +360,19 @@ export function isKimiK3CodingHarnessBinding(identity: AdapterBindingIdentity): 
   return identity.providerId === 'kimi'
     && identity.providerType === 'first_party'
     && identity.protocol === 'openai_legacy'
-    && identity.wireModel === 'k3'
+    && (identity.wireModel === 'k3' || identity.wireModel === 'k3-256k')
     && isOfficialKimiK3OpenAIEndpoint(identity.canonicalBaseUrl);
 }
 
 export function resolveModelHarnessProfile(
   identity: AdapterBindingIdentity,
 ): ModelHarnessProfile {
-  return isKimiK3CodingHarnessBinding(identity)
-    ? KIMI_K3_CODING_OPENAI_HARNESS_PROFILE
-    : GENERIC_OPENAI_HARNESS_PROFILE;
+  if (!isKimiK3CodingHarnessBinding(identity)) {
+    return GENERIC_OPENAI_HARNESS_PROFILE;
+  }
+  return identity.wireModel === 'k3-256k'
+    ? KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE
+    : KIMI_K3_CODING_OPENAI_HARNESS_PROFILE;
 }
 
 export function buildOpenAIHarnessContext(
@@ -370,7 +398,7 @@ export function buildOpenAIHarnessContext(
   });
   const profile = resolveModelHarnessProfile(identity);
 
-  return Object.freeze({
+  const context = Object.freeze({
     identity,
     profile,
     identityFingerprint: buildIdentityFingerprint(identity, profile),
@@ -378,4 +406,8 @@ export function buildOpenAIHarnessContext(
     ...(runtimeOptions ? { runtimeOptions } : {}),
     runtimeCapabilities,
   });
+  if (profile.id !== 'generic-openai') {
+    ownedStrictHarnessContexts.add(context);
+  }
+  return context;
 }

@@ -26,6 +26,7 @@ export interface AgentOptions {
   compactPlaceholder?: string;
   hooks?: RuntimeHookSink;
   memoryStore?: MemoryStore;
+  providerSurfaceKind?: 'cli-chat-task' | 'cli-subagent';
 }
 
 export class Agent {
@@ -122,6 +123,7 @@ export class Agent {
       compactThreshold: this.options.compactThreshold,
       compactPlaceholder: this.options.compactPlaceholder,
       memoryStore: this.options.memoryStore,
+      providerSurfaceKind: this.options.providerSurfaceKind,
     });
   }
 

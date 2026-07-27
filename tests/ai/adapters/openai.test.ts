@@ -21,8 +21,12 @@ import { normalizeMcpToolSchema } from '../../../src/ai/mcp/client.js';
 import type { ModelRuntimeOptions } from '../../../src/ai/providers/types.js';
 import type { Message, StreamChunk, ToolDefinition, UsageStats } from '../../../src/types.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
+import { streamDesktopTaskProviderConversation } from '../../../src/ai/runtime/provider-conversation-authorization.js';
+import { resolveRegisteredStrictKimiK3Profile } from '../../../src/ai/runtime/model-harness-identity.js';
 
 const openAIConstructorCalls: unknown[] = [];
+let nextTestAuthorizationId = 0;
+const automaticallyAuthorizedAdapters = new WeakSet<OpenAIAdapter>();
 
 type KimiReasoningEffort = 'low' | 'high' | 'max';
 
@@ -68,7 +72,12 @@ async function captureChatCompletionRequest(
   let capturedRequest: CapturedChatCompletionRequest | undefined;
   const mockStream = {
     async *[Symbol.asyncIterator]() {
-      yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      yield {
+        choices: [{
+          delta: { reasoning_content: '' },
+          finish_reason: 'stop',
+        }],
+      };
     },
   };
 
@@ -80,15 +89,13 @@ async function captureChatCompletionRequest(
   });
 
   (adapter as { client: typeof instance }).client = instance;
-  const streamAdapter = adapter as {
-    stream(
-      messages: never[],
-      tools: ToolDefinition[],
-      systemPrompt: string,
-      options?: StreamOptions,
-    ): AsyncIterable<unknown>;
-  };
-  for await (const _ of streamAdapter.stream(messages as never[], tools, 'system', options)) { /* consume */ }
+  for await (const _ of streamTestAdapter(
+    adapter as OpenAIAdapter,
+    messages,
+    tools,
+    'system',
+    options,
+  )) { /* consume */ }
 
   if (!capturedRequest) {
     throw new Error('OpenAI request was not captured');
@@ -102,10 +109,40 @@ function getReasoningDialectState(adapter: OpenAIAdapter): ReasoningDialectState
   }).reasoningDialectState;
 }
 
+function officialK3Thinking(thinking: string) {
+  return {
+    type: 'thinking' as const,
+    thinking,
+    reasoningProvenance: {
+      captureVersion: 1 as const,
+      source: 'reasoning_content' as const,
+      fieldPresence: 'present' as const,
+    },
+  };
+}
+
+function officialEmptyK3Chunk(): StreamChunk {
+  return {
+    type: 'thinking',
+    delta: '',
+    signature: 'reasoning_content',
+    reasoningProvenance: {
+      captureVersion: 1,
+      source: 'reasoning_content',
+      fieldPresence: 'present',
+    },
+  };
+}
+
 async function attachRequestSpy(adapter: OpenAIAdapter) {
   const mockStream = {
     async *[Symbol.asyncIterator]() {
-      yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      yield {
+        choices: [{
+          delta: { reasoning_content: '' },
+          finish_reason: 'stop',
+        }],
+      };
     },
   };
   const OpenAI = (await import('openai')).default;
@@ -205,7 +242,61 @@ function createTestAdapter(input: {
     }),
   };
 
-  return new OpenAIAdapter(init);
+  return installAutomaticTestAuthorization(new OpenAIAdapter(init));
+}
+
+function installAutomaticTestAuthorization(adapter: OpenAIAdapter): OpenAIAdapter {
+  if (!resolveRegisteredStrictKimiK3Profile(adapter)) return adapter;
+  automaticallyAuthorizedAdapters.add(adapter);
+  const originalStream = adapter.stream.bind(adapter);
+  const originalCloneWithModel = adapter.cloneWithModel.bind(adapter);
+  const ownedStream: OpenAIAdapter['stream'] = async function* (
+    messages,
+    tools,
+    systemPrompt,
+    options,
+  ) {
+    adapter.stream = originalStream;
+    try {
+      yield* streamDesktopTaskProviderConversation({
+        adapter,
+        messages,
+        tools,
+        systemPrompt,
+        options,
+        invocationId: `test-${nextTestAuthorizationId += 1}`,
+      });
+    } finally {
+      adapter.stream = ownedStream;
+    }
+  };
+  adapter.stream = ownedStream;
+  adapter.cloneWithModel = (model) =>
+    installAutomaticTestAuthorization(originalCloneWithModel(model));
+  return adapter;
+}
+
+function streamTestAdapter(
+  adapter: OpenAIAdapter,
+  messages: Message[],
+  tools: ToolDefinition[],
+  systemPrompt: string,
+  options?: StreamOptions,
+): AsyncIterable<StreamChunk> {
+  if (
+    !resolveRegisteredStrictKimiK3Profile(adapter)
+    || automaticallyAuthorizedAdapters.has(adapter)
+  ) {
+    return adapter.stream(messages, tools, systemPrompt, options);
+  }
+  return streamDesktopTaskProviderConversation({
+    adapter,
+    messages,
+    tools,
+    systemPrompt,
+    options,
+    invocationId: `test-${nextTestAuthorizationId += 1}`,
+  });
 }
 
 function createStrictKimiAdapter(
@@ -238,7 +329,13 @@ async function collectAdapterChunks(
   options?: StreamOptions,
 ): Promise<StreamChunk[]> {
   const chunks: StreamChunk[] = [];
-  for await (const chunk of adapter.stream([], [], 'system', options)) {
+  for await (const chunk of streamTestAdapter(
+    adapter,
+    [],
+    [],
+    'system',
+    options,
+  )) {
     chunks.push(chunk);
   }
   return chunks;
@@ -855,7 +952,7 @@ describe('OpenAIAdapter', () => {
         }],
       }, {
         role: 'assistant',
-        content: [{ type: 'thinking', thinking: sensitive.reasoning }],
+        content: [officialK3Thinking(sensitive.reasoning)],
       }];
       for await (const _ of adapter.stream(
         messages,
@@ -895,7 +992,7 @@ describe('OpenAIAdapter', () => {
       async *[Symbol.asyncIterator]() {
         yield {
           choices: [{
-            delta: { content: 'visible' },
+            delta: { reasoning_content: '', content: 'visible' },
             finish_reason: 'stop',
           }],
         };
@@ -909,12 +1006,26 @@ describe('OpenAIAdapter', () => {
         };
       },
     } as never);
-    const adapter = createStrictKimiAdapter({
+    const adapter = new OpenAIAdapter({
+      apiKey: 'test',
+      kimiCodingHeadersApplied: true,
       onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      harnessContext: buildOpenAIHarnessContext({
+        identity: {
+          providerId: 'kimi',
+          providerType: 'first_party',
+          protocol: 'openai_legacy',
+          canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+          wireModel: 'k3',
+          capabilities: ['tools', 'thinking'],
+        },
+        flags: resolveKimiHarnessFeatureFlags({}),
+      }),
     });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     await expect(collectAdapterChunks(adapter)).resolves.toEqual([
+      officialEmptyK3Chunk(),
       { type: 'text', delta: 'visible' },
       {
         type: 'usage',
@@ -942,7 +1053,7 @@ describe('OpenAIAdapter', () => {
       async *[Symbol.asyncIterator]() {
         yield {
           choices: [{
-            delta: { content: 'visible' },
+            delta: { reasoning_content: '', content: 'visible' },
             finish_reason: 'stop',
           }],
         };
@@ -961,6 +1072,10 @@ describe('OpenAIAdapter', () => {
       signal: controller.signal,
     })[Symbol.asyncIterator]();
 
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: officialEmptyK3Chunk(),
+    });
     await expect(iterator.next()).resolves.toEqual({
       done: false,
       value: { type: 'text', delta: 'visible' },
@@ -1003,7 +1118,10 @@ describe('OpenAIAdapter', () => {
           },
         };
         yield {
-          choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }],
+          choices: [{
+            delta: { reasoning_content: '', content: 'ok' },
+            finish_reason: 'stop',
+          }],
         };
         yield {
           choices: [],
@@ -1035,17 +1153,36 @@ describe('OpenAIAdapter', () => {
     const instance = new OpenAI({ apiKey: 'test' });
     vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
       async *[Symbol.asyncIterator]() {
-        yield { choices: [{ delta: { content: 'abcde' }, finish_reason: 'stop' }] };
+        yield {
+          choices: [{
+            delta: { reasoning_content: '', content: 'abcde' },
+            finish_reason: 'stop',
+          }],
+        };
       },
     } as never);
-    const adapter = createStrictKimiAdapter({
+    const adapter = new OpenAIAdapter({
+      apiKey: 'test',
+      kimiCodingHeadersApplied: true,
       onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      harnessContext: buildOpenAIHarnessContext({
+        identity: {
+          providerId: 'kimi',
+          providerType: 'first_party',
+          protocol: 'openai_legacy',
+          canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+          wireModel: 'k3',
+          capabilities: ['tools', 'thinking'],
+        },
+        flags: resolveKimiHarnessFeatureFlags({}),
+      }),
     });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     const chunks = await collectAdapterChunks(adapter);
 
-    expect(chunks.map((chunk) => chunk.type)).toEqual(['text', 'usage', 'done']);
+    expect(chunks.map((chunk) => chunk.type))
+      .toEqual(['thinking', 'text', 'usage', 'done']);
     expect(chunks.filter((chunk) => chunk.type === 'usage')).toEqual([{
       type: 'usage',
       usage: expect.objectContaining({ outputTokens: 2 }),
@@ -1116,7 +1253,12 @@ describe('OpenAIAdapter', () => {
       capturedRequest = request as CapturedChatCompletionRequest;
       return {
         async *[Symbol.asyncIterator]() {
-          yield { choices: [{ delta: { content: 'flag off' }, finish_reason: 'stop' }] };
+          yield {
+            choices: [{
+              delta: { reasoning_content: '', content: 'flag off' },
+              finish_reason: 'stop',
+            }],
+          };
           yield {
             choices: [],
             usage: {
@@ -1138,6 +1280,7 @@ describe('OpenAIAdapter', () => {
     for await (const chunk of adapter.stream([{
       role: 'assistant',
       content: [
+        officialK3Thinking(''),
         { type: 'text', text: '  ' },
         { type: 'tool_use', id: 'tu_1', name: 'lookup', input: {} },
       ],
@@ -1149,6 +1292,7 @@ describe('OpenAIAdapter', () => {
     }
 
     expect(chunks).toEqual([
+      officialEmptyK3Chunk(),
       { type: 'text', delta: 'flag off' },
       {
         type: 'usage',
@@ -1165,6 +1309,7 @@ describe('OpenAIAdapter', () => {
         { role: 'system', content: 'system' },
         {
           role: 'assistant',
+          reasoning_content: '',
           tool_calls: [{
             id: 'tu_1',
             type: 'function',
@@ -1336,7 +1481,9 @@ describe('OpenAIAdapter', () => {
     expect(openAIConstructorCalls[0]).toMatchObject({
       apiKey: 'test-key',
       baseURL: 'https://api.openai.com/v1',
+      maxRetries: 3,
     });
+    expect(openAIConstructorCalls[0]).not.toHaveProperty('fetch');
     expect(openAIConstructorCalls[0]).not.toMatchObject({
       defaultHeaders: {
         'User-Agent': 'claude-cli/1.0.0 (external, cli)',
@@ -1378,6 +1525,40 @@ describe('OpenAIAdapter', () => {
       capabilities: ['tools', 'thinking'],
     });
     expect(adapter.harnessContext.profile.id).toBe('kimi-k3-coding-openai');
+  });
+
+  it('configures strict K3 transport to stop at the first redirect without SDK retries', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn(async () => (
+      { status: 302 } as Response
+    ));
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: fetchSpy,
+    });
+    openAIConstructorCalls.length = 0;
+    try {
+      createStrictKimiAdapter();
+      const options = openAIConstructorCalls.at(-1) as {
+        fetch?: typeof fetch;
+        maxRetries?: number;
+      };
+
+      expect(options.maxRetries).toBe(0);
+      expect(options.fetch).toBeTypeOf('function');
+      await expect(options.fetch?.('https://api.kimi.com/coding/v1', {
+        redirect: 'follow',
+      })).rejects.toThrow('KIMI_K3_REDIRECT_FORBIDDEN');
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0]?.[1]).toMatchObject({
+        redirect: 'manual',
+      });
+    } finally {
+      Object.defineProperty(globalThis, 'fetch', {
+        configurable: true,
+        value: originalFetch,
+      });
+    }
   });
 
   it.each(['low', 'high', 'max'] as const)(
@@ -1897,7 +2078,64 @@ describe('OpenAIAdapter', () => {
     expect(chunks).toContainEqual({ type: 'text', delta: 'answer' });
   });
 
-  it('observes an own empty reasoning_content before the UI extractor falls back to reasoning', async () => {
+  it('preserves strict K3 explicit-empty official reasoning and ignores alternate fallback', async () => {
+    const mockStream = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: {
+              reasoning_content: '',
+              reasoning: 'must not enter strict history',
+            },
+            finish_reason: null,
+          }],
+        };
+        yield { choices: [{ delta: { content: 'answer' }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    };
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue(mockStream as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.filter((chunk) => chunk.type === 'thinking')).toEqual([{
+      type: 'thinking',
+      delta: '',
+      signature: 'reasoning_content',
+      reasoningProvenance: {
+        captureVersion: 1,
+        source: 'reasoning_content',
+        fieldPresence: 'present',
+      },
+    }]);
+  });
+
+  it('rejects a completed strict K3 response without official reasoning_content presence', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning: 'alternate' }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: 'answer' }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    await expect((async () => {
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+    })()).rejects.toThrow('KIMI_REASONING_ADMISSION_REQUIRED');
+  });
+
+  it('keeps an own empty reasoning_content and does not fall back to alternate reasoning', async () => {
     const mockStream = {
       async *[Symbol.asyncIterator]() {
         yield {
@@ -1925,8 +2163,13 @@ describe('OpenAIAdapter', () => {
 
     expect(chunks).toContainEqual({
       type: 'thinking',
-      delta: 'visible fallback',
-      signature: 'reasoning',
+      delta: '',
+      signature: 'reasoning_content',
+      reasoningProvenance: {
+        captureVersion: 1,
+        source: 'reasoning_content',
+        fieldPresence: 'present',
+      },
     });
     expect(getReasoningDialectState(adapter)).toEqual({
       current: 'reasoning_content',
@@ -1934,7 +2177,7 @@ describe('OpenAIAdapter', () => {
     });
   });
 
-  it('keeps the first raw dialect observation across retry attempts', async () => {
+  it('does not retry a failed strict stream after official reasoning was observed', async () => {
     let createCalls = 0;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
@@ -1970,22 +2213,40 @@ describe('OpenAIAdapter', () => {
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     try {
-      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
-      expect(createCalls).toBe(2);
+      await expect((async () => {
+        for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+      })()).rejects.toThrow('KIMI_K3_PROVIDER_REQUEST_FAILED');
+      expect(createCalls).toBe(1);
       expect(getReasoningDialectState(adapter)).toEqual({
         current: 'reasoning_content',
         learned: true,
       });
-      expect(warn).toHaveBeenCalledWith(
-        'reasoningDialectConflict',
-        {
-          previous: 'reasoning_content',
-          candidate: 'reasoning',
-        },
-      );
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('redacts strict K3 provider exception text before it can reach product error sinks', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockRejectedValue(
+      new Error('PRIVATE_REASONING_CANARY'),
+    );
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    let caught: unknown;
+    try {
+      await collectAdapterChunks(adapter);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe('KIMI_K3_PROVIDER_REQUEST_FAILED');
+    expect(String(caught)).not.toContain('PRIVATE_REASONING_CANARY');
+    expect((caught as Error).cause).toBeUndefined();
   });
 
   it('emits thinking chunks from reasoning_details streaming deltas', async () => {
@@ -2058,6 +2319,33 @@ describe('OpenAIAdapter', () => {
     expect(chunks.filter((chunk) => chunk.type === 'text')).toEqual([
       { type: 'text', delta: '正式回答' },
     ]);
+  });
+
+  it('drops strict K3 raw think-tag content instead of persisting it as reasoning', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: {
+              reasoning_content: '',
+              content: '<think>raw private</think>answer',
+            },
+            finish_reason: 'stop',
+          }],
+        };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = await collectAdapterChunks(adapter);
+
+    expect(chunks.filter((chunk) => chunk.type === 'thinking'))
+      .toEqual([officialEmptyK3Chunk()]);
+    expect(chunks).toContainEqual({ type: 'text', delta: 'answer' });
+    expect(JSON.stringify(chunks)).not.toContain('raw private');
   });
 
   it('keeps literal <think> text once visible assistant prose has already started', async () => {
@@ -2137,19 +2425,19 @@ describe('OpenAIAdapter', () => {
     expect(assistantMessage?.tool_calls).toHaveLength(1);
   });
 
-  it('does not inject Kimi preserved thinking when the flag is off', async () => {
+  it('keeps strict Kimi replay mandatory without the old experimental flag', async () => {
     const adapter = createStrictKimiAdapter();
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
-      content: [{ type: 'thinking', thinking: 'private' }],
+      content: [officialK3Thinking('private')],
     }]);
     const assistant = request.messages[1]!;
 
-    expect(assistant).not.toHaveProperty('reasoning_content');
+    expect(assistant).toHaveProperty('reasoning_content', 'private');
     expect(assistant).not.toHaveProperty('reasoning');
   });
 
-  it('does not inject Kimi preserved thinking without thinking capability', async () => {
+  it('keeps strict Kimi replay mandatory without a mutable capability flag', async () => {
     const adapter = createStrictKimiAdapter({
       capabilities: ['tools'],
       flags: resolveKimiHarnessFeatureFlags({
@@ -2158,11 +2446,11 @@ describe('OpenAIAdapter', () => {
     });
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
-      content: [{ type: 'thinking', thinking: 'private' }],
+      content: [officialK3Thinking('private')],
     }]);
     const assistant = request.messages[1]!;
 
-    expect(assistant).not.toHaveProperty('reasoning_content');
+    expect(assistant).toHaveProperty('reasoning_content', 'private');
     expect(assistant).not.toHaveProperty('reasoning');
   });
 
@@ -2179,37 +2467,24 @@ describe('OpenAIAdapter', () => {
         XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
       }),
     },
-  ])('does not run the Kimi serializer when $label', async ({ capabilities, flags }) => {
-    const baseContext = buildOpenAIHarnessContext({
-      identity: {
-        providerId: 'kimi',
-        providerType: 'first_party',
-        protocol: 'openai_legacy',
-        canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
-        wireModel: 'k3',
-        capabilities,
-      },
+  ])('always runs the strict Kimi serializer when $label', async ({ capabilities, flags }) => {
+    const adapter = createTestAdapter({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      wireModel: 'k3',
+      capabilities,
       flags,
     });
-    const serializeReasoning = vi.fn(baseContext.profile.serializeReasoning!);
-    const adapter = new OpenAIAdapter({
-      apiKey: 'test-key',
-      kimiCodingHeadersApplied: true,
-      harnessContext: {
-        ...baseContext,
-        profile: {
-          ...baseContext.profile,
-          serializeReasoning,
-        },
-      },
-    });
-
-    await captureChatCompletionRequest(adapter, [], [{
+    const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
-      content: [{ type: 'thinking', thinking: 'private' }],
+      content: [officialK3Thinking('private')],
     }]);
 
-    expect(serializeReasoning).not.toHaveBeenCalled();
+    expect(request.messages[1]).toMatchObject({
+      role: 'assistant',
+      reasoning_content: 'private',
+    });
   });
 
   it('preserves Kimi whitespace and directly concatenates thinking blocks', async () => {
@@ -2221,8 +2496,8 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [
-        { type: 'thinking', thinking: '  first  \n' },
-        { type: 'thinking', thinking: '\tsecond  ' },
+        officialK3Thinking('  first  \n'),
+        officialK3Thinking('\tsecond  '),
         { type: 'text', text: 'answer' },
       ],
     }]);
@@ -2233,21 +2508,19 @@ describe('OpenAIAdapter', () => {
     });
   });
 
-  it('backfills an empty Kimi reasoning field when an assistant history has no thinking block', async () => {
+  it('rejects assistant history with a missing Kimi reasoning field', async () => {
     const adapter = createStrictKimiAdapter({
       flags: resolveKimiHarnessFeatureFlags({
         XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
       }),
     });
-    const request = await captureChatCompletionRequest(adapter, [], [{
+    await expect(captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [{ type: 'text', text: 'answer' }],
-    }]);
-
-    expect(request.messages[1]).toHaveProperty('reasoning_content', '');
+    }])).rejects.toThrow('KIMI_K3_DURABLE_RESUME_UNSUPPORTED');
   });
 
-  it('replays preserved Kimi thinking with the first observed reasoning dialect', async () => {
+  it('keeps the strict outbound dialect fixed after alternate-field observations', async () => {
     const flags = resolveKimiHarnessFeatureFlags({
       XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
     });
@@ -2256,7 +2529,7 @@ describe('OpenAIAdapter', () => {
       async *[Symbol.asyncIterator]() {
         yield {
           choices: [{
-            delta: { reasoning_content: null, reasoning: '' },
+            delta: { reasoning_content: '', reasoning: '' },
             finish_reason: null,
           }],
         };
@@ -2271,11 +2544,11 @@ describe('OpenAIAdapter', () => {
 
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
-      content: [{ type: 'thinking', thinking: 'private' }],
+      content: [officialK3Thinking('private')],
     }]);
 
-    expect(request.messages[1]).not.toHaveProperty('reasoning_content');
-    expect(request.messages[1]).toHaveProperty('reasoning', 'private');
+    expect(request.messages[1]).toHaveProperty('reasoning_content', 'private');
+    expect(request.messages[1]).not.toHaveProperty('reasoning');
   });
 
   it('keeps the generic reasoning collector trim/filter/double-newline behavior', async () => {
@@ -2400,7 +2673,6 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'user',
       content: [
-        { type: 'thinking', thinking: 'ignore user thinking' },
         { type: 'text', text: 'question' },
         { type: 'tool_result', tool_use_id: 'tu_1', content: 'tool result' },
       ],
@@ -2548,6 +2820,7 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [
+        officialK3Thinking(''),
         { type: 'text', text: ' ' },
         { type: 'text', text: '\n\t ' },
         { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
@@ -2562,6 +2835,7 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [
+        officialK3Thinking(''),
         { type: 'text', text: '  keep' },
         { type: 'text', text: ' me  ' },
         { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
@@ -2579,6 +2853,7 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [
+        officialK3Thinking(''),
         { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
       ],
     }]);
@@ -2596,6 +2871,7 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [
+        officialK3Thinking(''),
         { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
       ],
     }]);
@@ -2615,6 +2891,7 @@ describe('OpenAIAdapter', () => {
       [{
         role: 'assistant',
         content: [
+          officialK3Thinking(''),
           { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
         ],
       }],
@@ -2624,7 +2901,10 @@ describe('OpenAIAdapter', () => {
       [],
       [{
         role: 'assistant',
-        content: [{ type: 'text', text: ' \n\t ' }],
+        content: [
+          officialK3Thinking(''),
+          { type: 'text', text: ' \n\t ' },
+        ],
       }],
     );
 
@@ -2632,7 +2912,7 @@ describe('OpenAIAdapter', () => {
     expect(withNoCallsRequest.messages[1]).toHaveProperty('content', ' \n\t ');
   });
 
-  it('keeps preserved empty reasoning when strict Kimi tool-call content is omitted', async () => {
+  it('preserves official empty reasoning when strict Kimi tool-call content is omitted', async () => {
     const adapter = createStrictKimiAdapter({
       flags: resolveKimiHarnessFeatureFlags({
         XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
@@ -2641,6 +2921,7 @@ describe('OpenAIAdapter', () => {
     const request = await captureChatCompletionRequest(adapter, [], [{
       role: 'assistant',
       content: [
+        officialK3Thinking(''),
         { type: 'tool_use', id: 'tu_1', name: 'search', input: {} },
       ],
     }]);
@@ -2828,7 +3109,12 @@ describe('OpenAIAdapter', () => {
         }
         return {
           async *[Symbol.asyncIterator]() {
-            yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+            yield {
+              choices: [{
+                delta: { reasoning_content: '' },
+                finish_reason: 'stop',
+              }],
+            };
           },
         } as never;
       });
@@ -2971,7 +3257,12 @@ describe('OpenAIAdapter', () => {
                 completion_tokens: 2,
               },
             };
-            yield { choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] };
+            yield {
+              choices: [{
+                delta: { reasoning_content: '', content: 'ok' },
+                finish_reason: 'stop',
+              }],
+            };
           },
         } as never;
       });
@@ -2994,6 +3285,7 @@ describe('OpenAIAdapter', () => {
       expect(calls).toBe(2);
       expect(caught).toBeUndefined();
       expect(chunks).toEqual([
+        officialEmptyK3Chunk(),
         { type: 'text', delta: 'ok' },
         {
           type: 'usage',
@@ -3039,7 +3331,10 @@ describe('OpenAIAdapter', () => {
         },
       },
     });
-    await expect(iterator.next()).rejects.toBe(sentinel);
+    await expect(iterator.next()).rejects.toMatchObject({
+      message: 'KIMI_K3_PROVIDER_REQUEST_FAILED',
+      retryable: false,
+    });
   });
 
   it('emits only the final attempt usage before the same retry-exhausted error', async () => {
@@ -3091,7 +3386,11 @@ describe('OpenAIAdapter', () => {
           outputTokens: 4,
         },
       }]);
-      expect(caught).toBe(sentinels[3]);
+      expect(caught).toMatchObject({
+        message: 'KIMI_K3_PROVIDER_REQUEST_FAILED',
+        retryable: true,
+      });
+      expect(String(caught)).not.toContain('retry failure');
     } finally {
       vi.useRealTimers();
     }
@@ -3123,7 +3422,10 @@ describe('OpenAIAdapter', () => {
     }
 
     expect(chunks).toEqual([]);
-    expect(caught).toBe(sentinel);
+    expect(caught).toMatchObject({
+      message: 'KIMI_K3_PROVIDER_REQUEST_FAILED',
+      retryable: false,
+    });
     expect(diagnostics).toEqual([{
       type: 'usage_source',
       harnessProfileId: 'kimi-k3-coding-openai',
@@ -3306,7 +3608,7 @@ describe('OpenAIAdapter', () => {
           async *[Symbol.asyncIterator]() {
             yield {
               choices: [{
-                delta: { content: 'finished text' },
+                delta: { reasoning_content: '', content: 'finished text' },
                 finish_reason: 'stop',
               }],
             };
@@ -3339,8 +3641,14 @@ describe('OpenAIAdapter', () => {
       await consume;
 
       expect(calls).toBe(1);
-      expect(chunks).toEqual([{ type: 'text', delta: 'finished text' }]);
-      expect(caught).toMatchObject({ name: 'AbortError' });
+      expect(chunks).toEqual([
+        officialEmptyK3Chunk(),
+        { type: 'text', delta: 'finished text' },
+      ]);
+      expect(caught).toMatchObject({
+        message: 'KIMI_K3_PROVIDER_REQUEST_FAILED',
+        retryable: false,
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -3373,7 +3681,12 @@ describe('OpenAIAdapter', () => {
             };
             firstUsageSeen();
             await firstRelease;
-            yield { choices: [{ delta: { content: 'first' }, finish_reason: 'stop' }] };
+            yield {
+              choices: [{
+                delta: { reasoning_content: '', content: 'first' },
+                finish_reason: 'stop',
+              }],
+            };
             yield {
               choices: [],
               usage: {
@@ -3387,7 +3700,12 @@ describe('OpenAIAdapter', () => {
       return {
         async *[Symbol.asyncIterator]() {
           releaseFirst();
-          yield { choices: [{ delta: { content: 'second' }, finish_reason: 'stop' }] };
+          yield {
+            choices: [{
+              delta: { reasoning_content: '', content: 'second' },
+              finish_reason: 'stop',
+            }],
+          };
           yield {
             choices: [],
             usage: {
@@ -3398,8 +3716,21 @@ describe('OpenAIAdapter', () => {
         },
       } as never;
     });
-    const adapter = createStrictKimiAdapter({
+    const adapter = new OpenAIAdapter({
+      apiKey: 'test',
+      kimiCodingHeadersApplied: true,
       onUsageDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      harnessContext: buildOpenAIHarnessContext({
+        identity: {
+          providerId: 'kimi',
+          providerType: 'first_party',
+          protocol: 'openai_legacy',
+          canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
+          wireModel: 'k3',
+          capabilities: ['tools', 'thinking'],
+        },
+        flags: resolveKimiHarnessFeatureFlags({}),
+      }),
     });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
@@ -3409,6 +3740,7 @@ describe('OpenAIAdapter', () => {
     const [firstChunks, secondChunks] = await Promise.all([first, second]);
 
     expect(firstChunks).toEqual([
+      officialEmptyK3Chunk(),
       { type: 'text', delta: 'first' },
       {
         type: 'usage',
@@ -3420,6 +3752,7 @@ describe('OpenAIAdapter', () => {
       { type: 'done' },
     ]);
     expect(secondChunks).toEqual([
+      officialEmptyK3Chunk(),
       { type: 'text', delta: 'second' },
       {
         type: 'usage',

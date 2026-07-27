@@ -1,6 +1,7 @@
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
+import type { Fetch as OpenAIFetch } from 'openai/core';
 import type {
   ModelAdapter,
   Message,
@@ -15,6 +16,7 @@ import { estimateTokens } from '../runtime/usage.js';
 import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import {
   buildOpenAIHarnessContext,
+  isOwnedStrictOpenAIHarnessContext,
   observeReasoningDialect,
   type KimiUsageDiagnostic,
   type KimiUsageDiagnosticSink,
@@ -28,11 +30,22 @@ import {
 } from '../providers/kimi-tool-schema.js';
 import { getProviderProfile, resolveProviderModelVariant } from '../providers/registry.js';
 import type { ModelReasoningEffort } from '../providers/types.js';
+import {
+  consumeProviderConversationAuthorization,
+  reserveProviderConversationAuthorization,
+  verifyConsumedProviderConversationAuthorizationForRetry,
+  type ProviderConversationAuthorizationReservation,
+} from '../runtime/provider-conversation-authorization.js';
+import { assertKimiTransportAllowed } from '../runtime/kimi-rollback-policy.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const usageLogger = createLogger('ai:openai-adapter:usage');
+const ownedHarnessProfiles = new WeakMap<
+  object,
+  OpenAIAdapterInit['harnessContext']['profile']['id']
+>();
 
 function recordUsageDiagnostic(diagnostic: KimiUsageDiagnostic): void {
   usageLogger.info('kimiUsageDiagnostic', diagnostic);
@@ -43,6 +56,7 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     if (error.name === 'TimeoutError') return true;
     const record = error as unknown as Record<string, unknown>;
+    if (record.retryable === true) return true;
     const status = record.status;
     if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
     const code = typeof record.code === 'string' ? record.code : '';
@@ -102,6 +116,24 @@ function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
     : new HttpsAgent({ keepAlive: true });
 }
 
+function createStrictKimiNoRedirectFetch(): OpenAIFetch {
+  const fetchImpl = globalThis.fetch.bind(globalThis);
+  const fetchWithoutRedirect: typeof fetch = async (input, init) => {
+    const response = await fetchImpl(input, {
+      ...init,
+      redirect: 'manual',
+    });
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error('KIMI_K3_REDIRECT_FORBIDDEN');
+    }
+    return response;
+  };
+  // The SDK's Fetch response is typed through its node-fetch compatibility
+  // shim, while Electron provides the WHATWG-compatible global fetch at
+  // runtime. The callable contract used here is the same.
+  return fetchWithoutRedirect as unknown as OpenAIFetch;
+}
+
 function collectReasoningText(blocks: Message['content']): string | undefined {
   const reasoning = blocks
     .filter((block): block is Extract<Message['content'][number], { type: 'thinking' }> => block.type === 'thinking')
@@ -145,8 +177,30 @@ function hasHarnessCapability(
   );
 }
 
-function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signature: string; text: string }> {
-  const chunks: Array<{ signature: string; text: string }> = [];
+function extractReasoningDeltas(
+  delta: Record<string, unknown>,
+  strictKimiK3 = false,
+): StreamChunk[] {
+  if (strictKimiK3) {
+    if (
+      Object.prototype.hasOwnProperty.call(delta, 'reasoning_content')
+      && typeof delta.reasoning_content === 'string'
+    ) {
+      return [{
+        type: 'thinking',
+        delta: delta.reasoning_content,
+        signature: 'reasoning_content',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+        },
+      }];
+    }
+    return [];
+  }
+
+  const chunks: StreamChunk[] = [];
   const reasoningDetails = delta.reasoning_details;
   let usedReasoningDetails = false;
 
@@ -154,7 +208,11 @@ function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signatu
     for (const item of reasoningDetails) {
       const detail = item as { type?: unknown; text?: unknown };
       if (detail.type === 'reasoning.text' && typeof detail.text === 'string' && detail.text.length > 0) {
-        chunks.push({ signature: 'reasoning_details', text: detail.text });
+        chunks.push({
+          type: 'thinking',
+          signature: 'reasoning_details',
+          delta: detail.text,
+        });
         usedReasoningDetails = true;
       }
     }
@@ -164,7 +222,7 @@ function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signatu
     for (const field of ['reasoning_content', 'reasoning', 'reasoning_text', 'thinking', 'thought'] as const) {
       const value = delta[field];
       if (typeof value === 'string' && value.length > 0) {
-        chunks.push({ signature: field, text: value });
+        chunks.push({ type: 'thinking', signature: field, delta: value });
         break;
       }
     }
@@ -193,6 +251,27 @@ function requestLimitError(
     toolName,
     message: `Kimi tool request exceeded ${limitKind}`,
   });
+}
+
+async function runProviderOperation<T>(
+  strictKimiK3: boolean,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!strictKimiK3) {
+      throw error;
+    }
+    const sanitized = new Error('KIMI_K3_PROVIDER_REQUEST_FAILED') as Error & {
+      code: 'KIMI_K3_PROVIDER_REQUEST_FAILED';
+      retryable: boolean;
+    };
+    sanitized.name = 'KimiK3ProviderRequestError';
+    sanitized.code = 'KIMI_K3_PROVIDER_REQUEST_FAILED';
+    sanitized.retryable = isRetryableError(error);
+    throw sanitized;
+  }
 }
 
 type RawThinkParserState = {
@@ -301,23 +380,47 @@ export class OpenAIAdapter implements ModelAdapter {
   };
 
   constructor(init: OpenAIAdapterInit) {
+    assertKimiTransportAllowed(init.harnessContext.identity);
+    const strictKimiK3 = init.harnessContext.profile.id !== 'generic-openai';
+    if (
+      strictKimiK3
+      && !isOwnedStrictOpenAIHarnessContext(init.harnessContext)
+    ) {
+      throw new Error('KIMI_K3_PROFILE_CAPABILITY_REQUIRED');
+    }
     this.apiKey = init.apiKey;
     this.resolvedHeaders = init.resolvedHeaders;
     this.kimiCodingHeadersApplied = init.kimiCodingHeadersApplied;
     this.onUsageDiagnostic = init.onUsageDiagnostic ?? recordUsageDiagnostic;
     this.harnessContext = init.harnessContext;
+    ownedHarnessProfiles.set(this, init.harnessContext.profile.id);
     this.httpAgent = createOpenAIHttpAgent(init.harnessContext.identity.canonicalBaseUrl);
     this.client = new OpenAI({
       apiKey: init.apiKey,
       baseURL: init.harnessContext.identity.canonicalBaseUrl,
-      maxRetries: MAX_RETRIES,
+      maxRetries: strictKimiK3 ? 0 : MAX_RETRIES,
       httpAgent: this.httpAgent,
       defaultHeaders: init.resolvedHeaders,
+      ...(strictKimiK3
+        ? { fetch: createStrictKimiNoRedirectFetch() }
+        : {}),
     });
   }
 
   getModelName(): string {
     return this.harnessContext.identity.wireModel;
+  }
+
+  getHarnessProfileId(): string {
+    return this.harnessContext.profile.id;
+  }
+
+  /**
+   * Read-only identity view. Authorization ownership is established by the
+   * concrete adapter instance, never by a caller-provided string or registrar.
+   */
+  getOwnedHarnessProfileId(): OpenAIAdapterInit['harnessContext']['profile']['id'] | undefined {
+    return ownedHarnessProfiles.get(this);
   }
 
   getCapabilities(): Readonly<ModelCapabilities> {
@@ -385,6 +488,42 @@ export class OpenAIAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    assertKimiTransportAllowed(this.harnessContext.identity);
+    const profileId = this.getOwnedHarnessProfileId();
+    const strictProfile = profileId === 'kimi-k3-coding-openai'
+      || profileId === 'kimi-k3-256k-coding-openai'
+      ? profileId
+      : undefined;
+    if (!strictProfile && options?.providerConversationAuthorization) {
+      throw new Error('KIMI_K3_AUTHORIZATION_PROFILE_MISMATCH');
+    }
+    const authorizationReservation: ProviderConversationAuthorizationReservation | undefined =
+      strictProfile
+        ? reserveProviderConversationAuthorization({
+            authorization: options?.providerConversationAuthorization,
+            adapter: this,
+            messages,
+          })
+        : undefined;
+    let authorizationConsumed = false;
+    const authorizeDispatch = authorizationReservation
+      ? () => {
+          if (!authorizationConsumed) {
+            consumeProviderConversationAuthorization({
+              reservation: authorizationReservation,
+              adapter: this,
+              messages,
+            });
+            authorizationConsumed = true;
+            return;
+          }
+          verifyConsumedProviderConversationAuthorizationForRetry({
+            reservation: authorizationReservation,
+            adapter: this,
+            messages,
+          });
+        }
+      : undefined;
     const bufferedUsage = (
       this.harnessContext.flags.normalizeUsage
       && this.harnessContext.profile.extractUsage !== undefined
@@ -422,6 +561,7 @@ export class OpenAIAdapter implements ModelAdapter {
           options,
           signal,
           bufferedUsage ? attemptState : undefined,
+          authorizeDispatch,
         )) {
           emittedAny = true;
           yield chunk;
@@ -504,6 +644,7 @@ export class OpenAIAdapter implements ModelAdapter {
     options?: StreamOptions,
     signal?: AbortSignal,
     attemptState?: StreamAttemptState,
+    authorizeDispatch?: () => void,
   ): AsyncIterable<StreamChunk> {
     const normalizeToolSchema = this.harnessContext.profile.normalizeToolSchema;
     const shouldNormalizeToolSchemas = (
@@ -616,10 +757,13 @@ export class OpenAIAdapter implements ModelAdapter {
         const serializeReasoning = this.harnessContext.profile.serializeReasoning;
         if (serializeReasoning) {
           const preservedThinkingEnabled = (
-            this.harnessContext.flags.preservedThinking
-            && hasHarnessCapability(
-              this.harnessContext.identity.capabilities,
-              'thinking',
+            this.harnessContext.profile.id !== 'generic-openai'
+            || (
+              this.harnessContext.flags.preservedThinking
+              && hasHarnessCapability(
+                this.harnessContext.identity.capabilities,
+                'thinking',
+              )
             )
           );
           if (preservedThinkingEnabled) {
@@ -702,7 +846,10 @@ export class OpenAIAdapter implements ModelAdapter {
     }
 
     if (
-      this.harnessContext.identity.wireModel === 'k3'
+      (
+        this.harnessContext.identity.wireModel === 'k3'
+        || this.harnessContext.identity.wireModel === 'k3-256k'
+      )
       && isOfficialKimiK3OpenAIEndpoint(this.harnessContext.identity.canonicalBaseUrl)
       && this.harnessContext.runtimeOptions?.reasoningEffort
     ) {
@@ -711,7 +858,12 @@ export class OpenAIAdapter implements ModelAdapter {
       } satisfies KimiReasoningEffortRequestExtension);
     }
 
-    const stream = await this.client.chat.completions.create(request, { signal });
+    const strictKimiK3 = this.harnessContext.profile.id !== 'generic-openai';
+    authorizeDispatch?.();
+    const stream = await runProviderOperation(
+      strictKimiK3,
+      () => this.client.chat.completions.create(request, { signal }),
+    );
 
     const toolBuffers = new Map<number, { id: string; name: string; argsBuffer: string }>();
     const rawThinkParser: RawThinkParserState = {
@@ -722,11 +874,21 @@ export class OpenAIAdapter implements ModelAdapter {
     let emittedDone = false;
     let outputChars = 0;
     let usageReceived = false;
+    let officialReasoningSeen = false;
     const extractBufferedUsage = attemptState
       ? this.harnessContext.profile.extractUsage
       : undefined;
 
-    for await (const chunk of stream) {
+    const streamIterator = stream[Symbol.asyncIterator]();
+    while (true) {
+      const iteration = await runProviderOperation(
+        strictKimiK3,
+        () => streamIterator.next(),
+      );
+      if (iteration.done) {
+        break;
+      }
+      const chunk = iteration.value;
       if (extractBufferedUsage && attemptState) {
         const usage = extractBufferedUsage(
           chunk as unknown as Record<string, unknown>,
@@ -756,6 +918,13 @@ export class OpenAIAdapter implements ModelAdapter {
       if (!choice) continue;
       const delta = choice.delta;
       if (!delta) continue;
+      if (
+        strictKimiK3
+        && Object.prototype.hasOwnProperty.call(delta, 'reasoning_content')
+        && typeof (delta as Record<string, unknown>).reasoning_content === 'string'
+      ) {
+        officialReasoningSeen = true;
+      }
 
       if (this.harnessContext.profile.serializeReasoning) {
         const observation = observeReasoningDialect(
@@ -767,14 +936,19 @@ export class OpenAIAdapter implements ModelAdapter {
         }
       }
 
-      for (const reasoning of extractReasoningDeltas(delta as Record<string, unknown>)) {
-        yield { type: 'thinking', delta: reasoning.text, signature: reasoning.signature };
+      for (const reasoning of extractReasoningDeltas(
+        delta as Record<string, unknown>,
+        strictKimiK3,
+      )) {
+        yield reasoning;
       }
 
       if (delta.content) {
         for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
           if (segment.type === 'thinking') {
-            yield segment;
+            if (!strictKimiK3) {
+              yield segment;
+            }
             continue;
           }
           outputChars += segment.delta.length;
@@ -796,9 +970,14 @@ export class OpenAIAdapter implements ModelAdapter {
       }
 
       if (choice?.finish_reason) {
+        if (strictKimiK3 && !officialReasoningSeen) {
+          throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+        }
         for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
           if (segment.type === 'thinking') {
-            yield segment;
+            if (!strictKimiK3) {
+              yield segment;
+            }
             continue;
           }
           outputChars += segment.delta.length;
@@ -840,6 +1019,9 @@ export class OpenAIAdapter implements ModelAdapter {
     }
 
     if (!emittedDone) {
+      if (strictKimiK3) {
+        throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+      }
       for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
         if (segment.type === 'thinking') {
           yield segment;

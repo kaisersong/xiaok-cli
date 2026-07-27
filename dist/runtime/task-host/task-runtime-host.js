@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
 import { runDeliverableGate } from './deliverable-gate.js';
 import { projectRuntimeEventsToDesktopEvents } from './event-projection.js';
@@ -85,7 +86,6 @@ export class InProcessTaskRuntimeHost {
     executionPromises = new Map();
     taskWatchdogs = new Map();
     taskOrdinal = 0;
-    sessionOrdinal = 0;
     permissionModes = new Map();
     maxToolLoopIterations = new Map();
     constructor(options) {
@@ -621,8 +621,7 @@ export class InProcessTaskRuntimeHost {
         if (this.options.createSessionId) {
             return this.options.createSessionId();
         }
-        this.sessionOrdinal += 1;
-        return `sess_${this.sessionOrdinal}`;
+        return `sess_${randomUUID()}`;
     }
     now() {
         return this.options.now?.() ?? Date.now();

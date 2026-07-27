@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveAppAsarSha256, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
-import { createPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-affinity.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import type { Message, StreamChunk, ToolDefinition } from '../../../src/types.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
@@ -348,9 +347,12 @@ describe('desktop services', () => {
       );
       expect(observedOptions).toHaveLength(1);
       expect(observedOptions[0]).toEqual({
-        cacheKey: createPromptCacheAffinity(sessionId),
+        cacheKey: expect.stringMatching(/^pc1_[0-9a-f]{64}$/),
+        providerConversationAuthorization: expect.any(Object),
         signal: expect.any(AbortSignal),
       });
+      expect(Object.isFrozen(observedOptions[0]?.providerConversationAuthorization)).toBe(true);
+      expect(Reflect.ownKeys(observedOptions[0]?.providerConversationAuthorization ?? {})).toEqual([]);
     } finally {
       streamSpy.mockRestore();
     }
@@ -2451,7 +2453,12 @@ describe('desktop services', () => {
       expect(result.success).toBe(expectedSuccess);
       expect(calls).toHaveLength(1);
       expect(calls[0].tools).toEqual([]);
-      expect(calls[0].options).toEqual({ signal: expect.any(AbortSignal) });
+      expect(calls[0].options).toEqual({
+        providerConversationAuthorization: expect.any(Object),
+        signal: expect.any(AbortSignal),
+      });
+      expect(Object.isFrozen(calls[0].options?.providerConversationAuthorization)).toBe(true);
+      expect(Reflect.ownKeys(calls[0].options?.providerConversationAuthorization ?? {})).toEqual([]);
       expect(calls[0].options).not.toHaveProperty('cacheKey');
       if (pendingError) {
         expect(result.error).toBe(pendingError.message);

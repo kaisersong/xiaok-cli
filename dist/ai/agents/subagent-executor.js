@@ -1,4 +1,5 @@
 import { Agent } from '../agent.js';
+import { buildSynthesizedProviderContext, isStrictKimiK3Adapter, } from '../runtime/provider-private-projection.js';
 export async function executeNamedSubAgent(options) {
     const resolved = await resolveSubAgentCwd(options.worktreeManager, options.agentDef, options.sessionId, options.cwd);
     const cwd = resolved.cwd;
@@ -6,9 +7,11 @@ export async function executeNamedSubAgent(options) {
     const systemPromptBase = await options.buildSystemPrompt(cwd);
     const systemPrompt = [systemPromptBase, options.agentDef.systemPrompt].filter(Boolean).join('\n\n');
     const baseAdapter = options.adapter();
+    const strictK3Parent = isStrictKimiK3Adapter(baseAdapter);
     const adapter = resolveSubAgentAdapter(baseAdapter, options.agentDef.model, options.agentDef.modelCapability, options.forkContext);
     const agent = new Agent(adapter, registry, systemPrompt, {
         maxIterations: options.agentDef.maxIterations,
+        providerSurfaceKind: 'cli-subagent',
     });
     const chunks = [];
     const parentSignal = options.forkContext?.signal;
@@ -16,11 +19,16 @@ export async function executeNamedSubAgent(options) {
     const childSignal = parentSignal
         ? AbortSignal.any([childController.signal, parentSignal])
         : childController.signal;
-    if (options.forkContext?.session) {
+    const strictK3 = isStrictKimiK3Adapter(adapter);
+    if (options.forkContext?.session && !strictK3Parent && !strictK3) {
         agent.restoreSession(options.forkContext.session);
     }
+    const runPrompt = (strictK3Parent || strictK3) && options.forkContext?.messages
+        ? `${buildSynthesizedProviderContext('subagent', options.forkContext.messages)}\n\n`
+            + `Current child task:\n${options.prompt}`
+        : options.prompt;
     try {
-        await agent.runTurn(options.prompt, (chunk) => {
+        await agent.runTurn(runPrompt, (chunk) => {
             if (chunk.type === 'text') {
                 chunks.push(chunk.delta);
             }

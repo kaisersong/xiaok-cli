@@ -70,7 +70,7 @@ function buildFirstPartyConfig(
   const protocol = overrides.protocol ?? profile.protocol;
   const baseUrl = overrides.baseUrl ?? profile.baseUrl;
   const kimiK3RuntimeEligible = providerId === 'kimi'
-    && wireModel === 'k3'
+    && (wireModel === 'k3' || wireModel === 'k3-256k')
     && protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(baseUrl);
   const catalogRuntimeEligible = providerId !== 'kimi'

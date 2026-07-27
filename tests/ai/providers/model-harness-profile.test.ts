@@ -35,6 +35,13 @@ describe('resolveModelHarnessProfile', () => {
     },
   );
 
+  it('selects a distinct strict profile for the official k3-256k model', () => {
+    expect(resolveModelHarnessProfile({
+      ...identity,
+      wireModel: 'k3-256k',
+    }).id).toBe('kimi-k3-256k-coding-openai');
+  });
+
   it.each([
     ['wrong provider id', { providerId: 'moonshot' }],
     ['custom Kimi provider', { providerType: 'custom' }],
@@ -179,7 +186,7 @@ describe('model harness profile ownership', () => {
 });
 
 describe('resolveKimiHarnessFeatureFlags', () => {
-  it('enables stable normalization flags and keeps experimental flags opt-in', () => {
+  it('makes preserved reasoning mandatory while prompt cache remains opt-in', () => {
     const flags = resolveKimiHarnessFeatureFlags({});
 
     expect(flags).toEqual({
@@ -187,15 +194,15 @@ describe('resolveKimiHarnessFeatureFlags', () => {
       normalizeUsage: true,
       omitEmptyAssistantContent: true,
       promptCacheKey: false,
-      preservedThinking: false,
+      preservedThinking: true,
     });
     expect(Object.isFrozen(flags)).toBe(true);
   });
 
-  it('enables experimental flags only for an exact value of 1', () => {
+  it('does not allow an environment override to disable mandatory replay', () => {
     expect(resolveKimiHarnessFeatureFlags({
       XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE: '1',
-      XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
+      XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '0',
     })).toMatchObject({
       promptCacheKey: true,
       preservedThinking: true,
@@ -203,11 +210,65 @@ describe('resolveKimiHarnessFeatureFlags', () => {
 
     expect(resolveKimiHarnessFeatureFlags({
       XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE: 'true',
-      XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: 'yes',
+      XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: 'false',
     })).toMatchObject({
       promptCacheKey: false,
-      preservedThinking: false,
+      preservedThinking: true,
     });
+  });
+});
+
+describe('strict K3 reasoning serializer', () => {
+  it('replays only official reasoning_content blocks and preserves explicit empty', () => {
+    const serialize = KIMI_K3_CODING_OPENAI_HARNESS_PROFILE.serializeReasoning!;
+
+    expect(serialize([
+      {
+        type: 'thinking',
+        thinking: '',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+        },
+      },
+      {
+        type: 'thinking',
+        thinking: ' ',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+        },
+      },
+    ], 'reasoning', false)).toEqual({
+      field: 'reasoning_content',
+      value: ' ',
+    });
+  });
+
+  it('does not synthesize reasoning_content for an assistant without an official block', () => {
+    const serialize = KIMI_K3_CODING_OPENAI_HARNESS_PROFILE.serializeReasoning!;
+
+    expect(serialize([
+      { type: 'text', text: 'answer' },
+    ], 'reasoning_content', true)).toBeUndefined();
+  });
+
+  it('rejects non-official thinking inside a strict assistant history', () => {
+    const serialize = KIMI_K3_CODING_OPENAI_HARNESS_PROFILE.serializeReasoning!;
+
+    expect(() => serialize([
+      {
+        type: 'thinking',
+        thinking: 'alternate',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning',
+          fieldPresence: 'present',
+        },
+      },
+    ], 'reasoning_content', true)).toThrow('KIMI_REASONING_SOURCE_INVARIANT');
   });
 });
 

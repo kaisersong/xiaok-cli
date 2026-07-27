@@ -2,10 +2,8 @@ import type { ToolDefinition } from '../../types.js';
 export interface McpToolSchema {
     name: string;
     description?: string;
-    inputSchema: {
+    inputSchema: Record<string, unknown> & {
         type: 'object';
-        properties?: Record<string, unknown>;
-        required?: string[];
     };
 }
 export declare function prefixMcpToolName(server: string, tool: string): string;

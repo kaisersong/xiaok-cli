@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ModelAdapter, StreamChunk, ToolDefinition } from '../../../src/types.js';
+import type {
+  ModelAdapter,
+  StreamChunk,
+  ToolDefinition,
+  ToolExecutionContext,
+} from '../../../src/types.js';
 import { AgentRunController } from '../../../src/ai/runtime/controller.js';
 import { AgentRuntime } from '../../../src/ai/runtime/agent-runtime.js';
 import { AgentSessionState } from '../../../src/ai/runtime/session.js';
@@ -7,6 +12,9 @@ import { estimateTokens } from '../../../src/ai/runtime/usage.js';
 import type {
   StreamOptions,
 } from '../../../src/ai/runtime/model-capabilities.js';
+import { projectStrictToolExecutionContext } from '../../../src/ai/runtime/provider-private-projection.js';
+import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import { createAdapterFromBinding } from '../../../src/ai/models.js';
 
 async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
   for (const chunk of chunks) {
@@ -16,6 +24,20 @@ async function* mockStream(chunks: StreamChunk[]): AsyncIterable<StreamChunk> {
 
 interface RunInvocationContext {
   cacheKey?: string;
+}
+
+function createStrictK3Adapter(): OpenAIAdapter {
+  return createAdapterFromBinding({
+    providerId: 'kimi',
+    providerType: 'first_party',
+    modelId: 'k3',
+    wireModel: 'k3',
+    protocol: 'openai_legacy',
+    apiKey: 'sk-test',
+    baseUrl: 'https://api.kimi.com/coding/v1',
+    headers: {},
+    capabilities: ['tools', 'thinking'],
+  }) as OpenAIAdapter;
 }
 
 function createRegistryMock(overrides?: {
@@ -29,6 +51,396 @@ function createRegistryMock(overrides?: {
 }
 
 describe('AgentRuntime', () => {
+  function createStrictProjectionContext(): ToolExecutionContext {
+    return {
+      taskId: 'task-1',
+      executionScope: {
+        kind: 'artifact_workspace_generation',
+        generationRequestId: 'generation-1',
+        leaseId: 'lease-1',
+        target: {
+          workspaceId: 'workspace-1',
+          nodeId: 'node-1',
+          placeholderId: 'placeholder-1',
+          sourceArtifactVersionId: 'artifact-version-1',
+          generationRequestId: 'generation-1',
+          leaseId: 'lease-1',
+          expectedStructureRevision: 3,
+          requestedKind: 'html',
+          width: 1280,
+          height: 720,
+          referenceVersionIds: ['reference-version-1'],
+        },
+      },
+      session: {
+        sessionId: 'session-1',
+        cwd: '/workspace',
+        createdAt: 1,
+        updatedAt: 2,
+        lineage: ['session-1'],
+        messages: [{
+          role: 'user',
+          content: [{ type: 'text', text: 'visible' }],
+        }],
+        usage: { inputTokens: 1, outputTokens: 2 },
+        compactions: [{
+          id: 'compact-1',
+          createdAt: 2,
+          summary: 'summary',
+          replacedMessages: 1,
+        }],
+        memoryRefs: ['memory-1'],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      },
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'tool-1',
+          content: 'visible tool result',
+        }],
+      }],
+      systemPrompt: 'system',
+      toolDefinitions: [{
+        name: 'read',
+        description: 'read a file',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string' },
+          },
+        },
+      }],
+      promptSnapshot: {
+        id: 'prompt-1',
+        createdAt: 1,
+        cwd: '/workspace',
+        channel: 'chat',
+        rendered: 'rendered',
+        segments: [{
+          key: 'static_identity',
+          title: 'identity',
+          text: 'text',
+          cacheable: true,
+          kind: 'system_rule',
+        }],
+        memoryRefs: ['memory-1'],
+      },
+    };
+  }
+
+  it('recursively clones and freezes every strict tool-context data field', () => {
+    const input = createStrictProjectionContext();
+    const projected = projectStrictToolExecutionContext(input);
+
+    (
+      input.toolDefinitions[0]!.inputSchema.properties as
+        Record<string, Record<string, string>>
+    ).path!.type = 'number';
+    input.session.messages[0]!.content[0] = {
+      type: 'text',
+      text: 'mutated',
+    };
+
+    expect(projected.toolDefinitions[0]?.inputSchema).toEqual({
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+    });
+    expect(projected.session.messages[0]?.content[0]).toEqual({
+      type: 'tool_result',
+      tool_use_id: 'tool-1',
+      content: 'visible tool result',
+    });
+    expect(Object.isFrozen(projected)).toBe(true);
+    expect(Object.isFrozen(projected.session)).toBe(true);
+    expect(Object.isFrozen(projected.session.messages)).toBe(true);
+    expect(Object.isFrozen(projected.session.messages[0])).toBe(true);
+    expect(Object.isFrozen(projected.session.messages[0]?.content)).toBe(true);
+    expect(Object.isFrozen(projected.session.messages[0]?.content[0])).toBe(true);
+    expect(Object.isFrozen(projected.toolDefinitions)).toBe(true);
+    expect(Object.isFrozen(projected.toolDefinitions[0])).toBe(true);
+    expect(Object.isFrozen(projected.toolDefinitions[0]?.inputSchema)).toBe(true);
+    expect(Object.isFrozen(
+      (projected.toolDefinitions[0]?.inputSchema.properties as Record<string, unknown>).path,
+    )).toBe(true);
+    expect(Object.isFrozen(projected.promptSnapshot)).toBe(true);
+    expect(Object.isFrozen(projected.promptSnapshot?.segments)).toBe(true);
+    expect(Object.isFrozen(projected.promptSnapshot?.segments[0])).toBe(true);
+    expect(Object.isFrozen(projected.executionScope)).toBe(true);
+    expect(Object.isFrozen(projected.executionScope?.target)).toBe(true);
+  });
+
+  it.each([
+    {
+      label: 'extra top-level field',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context, { providerAuthorization: 'forged' });
+      },
+    },
+    {
+      label: 'symbol key',
+      mutate(context: ToolExecutionContext) {
+        Object.defineProperty(
+          context.toolDefinitions[0]!.inputSchema,
+          Symbol('forged'),
+          { enumerable: true, value: 'forged' },
+        );
+      },
+    },
+    {
+      label: 'accessor',
+      mutate(context: ToolExecutionContext) {
+        Object.defineProperty(
+          context.toolDefinitions[0]!.inputSchema,
+          'forged',
+          {
+            enumerable: true,
+            get() {
+              return 'forged';
+            },
+          },
+        );
+      },
+    },
+    {
+      label: 'function',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context.toolDefinitions[0]!.inputSchema, {
+          forged() {
+            return 'forged';
+          },
+        });
+      },
+    },
+    {
+      label: 'thenable',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context.toolDefinitions[0]!.inputSchema, {
+          forged: { then() {} },
+        });
+      },
+    },
+    {
+      label: 'Proxy',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context.toolDefinitions[0]!.inputSchema, {
+          forged: new Proxy({ value: 'forged' }, {}),
+        });
+      },
+    },
+  ])('rejects a strict tool context containing $label', ({ mutate }) => {
+    const context = createStrictProjectionContext();
+    mutate(context);
+
+    expect(() => projectStrictToolExecutionContext(context))
+      .toThrow('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
+  });
+
+  it('rejects a Proxy used as the strict tool-context root', () => {
+    const context = new Proxy(createStrictProjectionContext(), {});
+
+    expect(() => projectStrictToolExecutionContext(context))
+      .toThrow('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
+  });
+
+  it.each([
+    {
+      label: 'unknown discriminant',
+      block: { type: 'future_provider_block' },
+    },
+    {
+      label: 'text extra field',
+      block: { type: 'text', text: 'visible', private: 'forged' },
+    },
+    {
+      label: 'image extra field',
+      block: {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: 'image-data',
+        },
+        private: 'forged',
+      },
+    },
+    {
+      label: 'image source extra field',
+      block: {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: 'image-data',
+          private: 'forged',
+        },
+      },
+    },
+    {
+      label: 'tool_use extra field',
+      block: {
+        type: 'tool_use',
+        id: 'tool-1',
+        name: 'read',
+        input: {},
+        private: 'forged',
+      },
+    },
+    {
+      label: 'tool_result extra field',
+      block: {
+        type: 'tool_result',
+        tool_use_id: 'tool-1',
+        content: 'result',
+        private: 'forged',
+      },
+    },
+    {
+      label: 'thinking extra field',
+      block: {
+        type: 'thinking',
+        thinking: 'provider-private',
+        private: 'forged',
+      },
+    },
+    {
+      label: 'non-string text payload',
+      block: { type: 'text', text: 42 },
+    },
+    {
+      label: 'invalid image media type',
+      block: {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'text/plain',
+          data: 'image-data',
+        },
+      },
+    },
+    {
+      label: 'array tool input',
+      block: {
+        type: 'tool_use',
+        id: 'tool-1',
+        name: 'read',
+        input: [],
+      },
+    },
+    {
+      label: 'non-boolean tool result error flag',
+      block: {
+        type: 'tool_result',
+        tool_use_id: 'tool-1',
+        content: 'result',
+        is_error: 'yes',
+      },
+    },
+    {
+      label: 'invalid thinking provenance schema',
+      block: {
+        type: 'thinking',
+        thinking: 'provider-private',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+          private: 'forged',
+        },
+      },
+    },
+  ])('rejects a strict message block with $label', ({ block }) => {
+    const context = createStrictProjectionContext();
+    context.messages[0]!.content = [block as never];
+
+    expect(() => projectStrictToolExecutionContext(context))
+      .toThrow('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
+  });
+
+  it('validates discarded session message blocks before replacing session history', () => {
+    const context = createStrictProjectionContext();
+    context.session.messages = [{
+      role: 'assistant',
+      content: [{
+        type: 'thinking',
+        thinking: 'provider-private',
+        private: 'forged',
+      } as never],
+    }];
+
+    expect(() => projectStrictToolExecutionContext(context))
+      .toThrow('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
+  });
+
+  it('accepts declared optional execution target fields with undefined values', () => {
+    const context = createStrictProjectionContext();
+    Object.assign(context.executionScope!.target!, {
+      placeholderId: undefined,
+      sourceArtifactVersionId: undefined,
+      width: undefined,
+      height: undefined,
+    });
+
+    expect(() => projectStrictToolExecutionContext(context)).not.toThrow();
+  });
+
+  it.each([
+    {
+      label: 'prompt snapshot root extra field',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context.promptSnapshot!, { private: 'forged' });
+      },
+    },
+    {
+      label: 'prompt segment deep extra field',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(
+          context.promptSnapshot!.segments[0]!,
+          { private: 'forged' },
+        );
+      },
+    },
+    {
+      label: 'invalid prompt snapshot channel',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context.promptSnapshot!, { channel: 'future-channel' });
+      },
+    },
+    {
+      label: 'execution scope root extra field',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(context.executionScope!, { private: 'forged' });
+      },
+    },
+    {
+      label: 'execution target deep extra field',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(
+          context.executionScope!.target!,
+          { private: 'forged' },
+        );
+      },
+    },
+    {
+      label: 'invalid execution target requested kind',
+      mutate(context: ToolExecutionContext) {
+        Object.assign(
+          context.executionScope!.target!,
+          { requestedKind: 'future-kind' },
+        );
+      },
+    },
+  ])('rejects $label before strict tool dispatch', ({ mutate }) => {
+    const context = createStrictProjectionContext();
+    mutate(context);
+
+    expect(() => projectStrictToolExecutionContext(context))
+      .toThrow('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
+  });
+
   it('emits run_started, assistant_text and run_completed for a pure text response', async () => {
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
@@ -550,6 +962,38 @@ describe('AgentRuntime', () => {
       .toBe('summary from replacement adapter');
   });
 
+  it('rejects adapter replacement while a run is active', async () => {
+    let releaseStream!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    const adapter: ModelAdapter = {
+      getModelName: () => 'current',
+      stream: () => (async function* stream(): AsyncIterable<StreamChunk> {
+        await blocked;
+        yield { type: 'text', delta: 'done' };
+        yield { type: 'done' };
+      })(),
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const run = runtime.run('hi', () => {});
+    await Promise.resolve();
+
+    expect(() => runtime.setAdapter({
+      getModelName: () => 'replacement',
+      stream: () => mockStream([{ type: 'done' }]),
+    })).toThrow('cannot replace adapter while a run is active');
+
+    releaseStream();
+    await run;
+  });
+
   it('does not emit success or inject memory when compaction has no net gain', async () => {
     const session = new AgentSessionState();
     session.appendUserText('a');
@@ -1028,6 +1472,44 @@ describe('AgentRuntime', () => {
     expect(JSON.stringify(assistant?.content)).toContain('[partial');
   });
 
+  it('does not commit a partial strict K3 assistant response after abort', async () => {
+    const abortController = new AbortController();
+    const session = new AgentSessionState();
+    const adapter = createStrictK3Adapter();
+    adapter.stream = async function* (): AsyncIterable<StreamChunk> {
+      yield {
+        type: 'thinking',
+        delta: 'official',
+        signature: 'reasoning_content',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+        },
+      };
+      yield { type: 'text', delta: 'partial strict answer' };
+      abortController.abort();
+      yield { type: 'done' };
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await expect(runtime.run(
+      'hi',
+      () => {},
+      abortController.signal,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(session.getMessages().filter((message) => message.role === 'assistant'))
+      .toEqual([]);
+    adapter.dispose();
+  });
+
   it('adds synthetic cancelled tool results for unexecuted tool calls when aborted before tool execution', async () => {
     const controller = new AbortController();
     const session = new AgentSessionState();
@@ -1184,6 +1666,61 @@ describe('AgentRuntime', () => {
     });
   });
 
+  it('executes a strict K3 tool without exposing promptCache in the tool context', async () => {
+    const adapter = createStrictK3Adapter();
+    let streamCalls = 0;
+    adapter.stream = async function* (): AsyncIterable<StreamChunk> {
+      streamCalls += 1;
+      yield {
+        type: 'thinking',
+        delta: 'official',
+        signature: 'reasoning_content',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+        },
+      };
+      if (streamCalls === 1) {
+        yield { type: 'tool_use', id: 'tu_1', name: 'read', input: { file: 'a.ts' } };
+      } else {
+        yield { type: 'text', delta: 'done' };
+      }
+      yield { type: 'done' };
+    };
+    let capturedContext: ToolExecutionContext | undefined;
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({
+        getToolDefinitions: () => [{
+          name: 'read',
+          description: 'read a file',
+          inputSchema: {
+            type: 'object',
+            properties: { file: { type: 'string' } },
+            required: ['file'],
+            additionalProperties: false,
+          },
+        }],
+        executeTool: async (_name, _input, context) => {
+          capturedContext = context;
+          return 'ok';
+        },
+      }) as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('hi', () => {});
+
+    expect(streamCalls).toBe(2);
+    expect(capturedContext).toBeDefined();
+    expect(capturedContext).not.toHaveProperty('promptCache');
+    expect(JSON.stringify(capturedContext)).not.toContain('official');
+    adapter.dispose();
+  });
+
   it('passes abort signal into tool execution context', async () => {
     let capturedContext: { signal?: AbortSignal } | undefined;
     let streamCalls = 0;
@@ -1220,6 +1757,63 @@ describe('AgentRuntime', () => {
     expect(capturedContext?.signal?.aborted).toBe(false);
     controller.abort();
     expect(capturedContext?.signal?.aborted).toBe(true);
+  });
+
+  it('removes strict K3 reasoning from tool execution context projections', () => {
+    const context = createStrictProjectionContext();
+    context.messages = [{
+      role: 'assistant',
+      content: [
+        {
+          type: 'thinking',
+          thinking: 'private',
+          reasoningProvenance: {
+            captureVersion: 1,
+            source: 'reasoning_content',
+            fieldPresence: 'present',
+          },
+        },
+        { type: 'text', text: 'visible' },
+      ],
+    }];
+
+    const projected = projectStrictToolExecutionContext(context);
+
+    expect(JSON.stringify(projected)).not.toContain('private');
+    expect(JSON.stringify(projected)).not.toContain('reasoningProvenance');
+    expect(JSON.stringify(projected)).not.toContain('"type":"thinking"');
+    expect(projected.messages[0]?.content).toEqual([
+      { type: 'text', text: 'visible' },
+    ]);
+  });
+
+  it('keeps adjacent generic reasoning sources in separate thinking blocks', async () => {
+    const session = new AgentSessionState();
+    const adapter: ModelAdapter = {
+      getModelName: () => 'generic',
+      stream: () => mockStream([
+        { type: 'thinking', delta: 'A', signature: 'reasoning' },
+        { type: 'thinking', delta: 'B', signature: 'reasoning_details' },
+        { type: 'text', delta: 'done' },
+        { type: 'done' },
+      ]),
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+
+    await runtime.run('hi', () => {});
+
+    const assistant = session.getMessages().find((message) => message.role === 'assistant');
+    expect(assistant?.content.filter((block) => block.type === 'thinking'))
+      .toEqual([
+        expect.objectContaining({ thinking: 'A' }),
+        expect.objectContaining({ thinking: 'B' }),
+      ]);
   });
 
   it('emits a verification guard warning when a code task finishes after edits without tests', async () => {

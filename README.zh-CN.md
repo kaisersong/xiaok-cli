@@ -598,9 +598,13 @@ xiaok config get models
 
 #### Kimi K3
 
-新建 Kimi 配置会使用官方 wire model ID `k3`；已有 Kimi 配置继续保留当前模型，不会被自动迁移。K3 默认使用 262,144 tokens 上下文和 `high` 推理强度；Allegretto 及以上计划可显式选择 1,048,576 tokens。推理强度支持 `low`、`high`、`max`，不提供 `none`，因为关闭推理会路由到其他模型。
+新建 Kimi 配置会使用官方 wire model ID `k3`，同时提供 exact K3 profile `k3-256k`；已有 Kimi 配置继续保留当前模型，不会被自动迁移。K3 默认使用 262,144 tokens 上下文和 `high` 推理强度；Allegretto 及以上计划可显式选择 1,048,576 tokens。推理强度支持 `low`、`high`、`max`，不提供 `none`，因为关闭推理会路由到其他模型。
 
-Desktop 模型设置会为当前 K3 模型显示 262K/1M 上下文和 Low/High/Max 推理强度选项。切换模型或推理强度会让 Kimi prompt cache 失效，因此切换后建议新建会话。当前计划限制与模型行为以 [Kimi Code 官方模型文档](https://www.kimi.com/code/docs/kimi-code/models) 为准。
+CLI 与 Desktop 默认保留 Kimi 官方 `reasoning_content`，但仅存在于当前 provider conversation 与工具调用链的 task-local 内存中。原始推理及其 provenance 在 durable session/task 持久化前会被剥离，不会进入终端输出、Desktop event、Canvas、普通日志或 tool-facing context。若 K3 的 resume、continue 或 fork 所绑定的 durable history 已包含 assistant turn，会在任何 provider 请求或状态修改前以 `KIMI_K3_DURABLE_RESUME_UNSUPPORTED` 失败；仅预绑定但还没有 assistant turn 的 session 按 fresh conversation 处理。
+
+因此，exact `k3` 与 `k3-256k` profile 在 CLI 和 Desktop 上都默认开启 `preservedThinking`。显式发送 `prompt_cache_key` 仍然默认关闭，因为还没有有效的 product-level paired eval 证明其达到所需收益；Xiaok 不宣称显式 key 带来性能提升。诊断用 opt-in 仍为 `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`。
+
+Desktop 模型设置会为当前 K3 模型显示 262K/1M 上下文和 Low/High/Max 推理强度选项。切换模型或推理强度会让 Kimi provider conversation state 失效，因此切换后建议新建会话。当前计划限制与模型行为以 [Kimi Code 官方模型文档](https://www.kimi.com/code/docs/kimi-code/models) 为准。
 
 **项目配置：** `<repo>/.xiaok/settings.json`
 

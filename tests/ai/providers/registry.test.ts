@@ -63,6 +63,16 @@ describe('getProviderProfile', () => {
     expect(k3?.runtimeConstraints?.reasoningEfforts).not.toBe(
       profile?.defaultModel.runtimeConstraints?.reasoningEfforts,
     );
+
+    expect(profile?.availableModels).toContainEqual(expect.objectContaining({
+      modelId: 'kimi-k3-256k',
+      model: 'k3-256k',
+      label: 'Kimi K3 256K',
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+    }));
   });
 
   it('keeps K2.7, K2.6, and K2.5 without K3 runtime options', () => {

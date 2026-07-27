@@ -1,10 +1,14 @@
 import type { FirstPartyProviderId, ProviderModelVariant, ProviderProfile } from './types.js';
 
-function createKimiK3Variant(modelId: string): ProviderModelVariant {
+function createKimiK3Variant(
+  modelId: string,
+  model = 'k3',
+  label = 'Kimi K3',
+): ProviderModelVariant {
   return {
     modelId,
-    model: 'k3',
-    label: 'Kimi K3',
+    model,
+    label,
     capabilities: ['tools', 'thinking'],
     runtimeOptions: {
       contextLimit: 262_144,
@@ -68,6 +72,7 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     defaultModel: createKimiK3Variant('kimi-default'),
     availableModels: [
       createKimiK3Variant('kimi-k3'),
+      createKimiK3Variant('kimi-k3-256k', 'k3-256k', 'Kimi K3 256K'),
       { modelId: 'kimi-k2.7', model: 'kimi-k2.7', label: 'Kimi K2.7', capabilities: ['tools', 'thinking'] },
       { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'] },
       { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'] },

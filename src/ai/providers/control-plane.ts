@@ -56,7 +56,7 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
   }
 
   const catalogRuntimeModel = providerId === 'kimi'
-    && catalogModel?.model === 'k3'
+    && (catalogModel?.model === 'k3' || catalogModel?.model === 'k3-256k')
     && (
       providerConfig.protocol !== 'openai_legacy'
       || !isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
@@ -64,7 +64,7 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
     ? undefined
     : catalogModel;
   const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || (
-    wireModel === 'k3'
+    (wireModel === 'k3' || wireModel === 'k3-256k')
     && providerConfig.protocol === 'openai_legacy'
     && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );

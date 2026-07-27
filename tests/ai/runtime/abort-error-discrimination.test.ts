@@ -41,4 +41,14 @@ describe('abort error discrimination', () => {
       retryable: true,
     });
   });
+
+  it('classifies K3 durable resume as a terminal non-retryable capability result', () => {
+    expect(normalizeRuntimeError(
+      new Error('KIMI_K3_DURABLE_RESUME_UNSUPPORTED'),
+    )).toEqual({
+      code: 'kimi_k3_durable_resume_unsupported',
+      message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
+      retryable: false,
+    });
+  });
 });
