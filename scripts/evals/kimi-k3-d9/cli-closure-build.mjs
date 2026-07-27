@@ -236,6 +236,7 @@ async function copyRequiredPath(source, destination, code) {
     errorOnExist: true,
     force: false,
     preserveTimestamps: true,
+    verbatimSymlinks: true,
   });
 }
 

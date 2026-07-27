@@ -4,6 +4,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readlinkSync,
   realpathSync,
   readdirSync,
   rmSync,
@@ -239,6 +240,10 @@ describe('Kimi K3 D9 CLI closure construction', () => {
       join(nodeDistributionRoot, 'lib/node_modules/npm/bin/npm-cli.js'),
       'synthetic npm\n',
     );
+    symlinkSync(
+      '../lib/node_modules/npm/bin/npm-cli.js',
+      join(nodeDistributionRoot, 'bin/npm'),
+    );
     writeFileSync(guardSourcePath, 'export {};\n');
     const operations: string[] = [];
     const stepPaths: string[] = [];
@@ -297,6 +302,8 @@ describe('Kimi K3 D9 CLI closure construction', () => {
       ),
     );
     expect(result.closurePath).toContain(result.attestation.closureDigest);
+    expect(readlinkSync(join(result.closurePath, 'runtime/node/bin/npm')))
+      .toBe('../lib/node_modules/npm/bin/npm-cli.js');
     expect(lstatSync(join(result.closurePath, 'dist/index.js')).mode & 0o222).toBe(0);
     const operationCount = operations.length;
     await expect(constructCliRuntimeClosure(input)).rejects
