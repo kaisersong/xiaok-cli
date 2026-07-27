@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises';
@@ -391,7 +392,9 @@ describe('Kimi K3 D9 formal build orchestration', () => {
             await mkdir(task.sourceRoot, { recursive: true });
             buildCalls.push(`source:${task.artifactKey}`);
             return {
-              sourceRoot: task.sourceRoot,
+              // macOS commonly canonicalizes /tmp and /var through /private.
+              // A physical-path alias must not invalidate a correct checkout.
+              sourceRoot: await realpath(task.sourceRoot),
               commit: task.expectedCommit,
               clean: true,
             };
@@ -532,11 +535,14 @@ describe('Kimi K3 D9 formal build orchestration', () => {
       const plan = createFormalBuildPlan(input);
       const ledger = createFormalBuildLedger();
       const operations = {
-        prepareSource: async (task: any) => ({
-          sourceRoot: task.sourceRoot,
-          commit: task.expectedCommit,
-          clean: true,
-        }),
+        prepareSource: async (task: any) => {
+          await mkdir(task.sourceRoot, { recursive: true });
+          return {
+            sourceRoot: task.sourceRoot,
+            commit: task.expectedCommit,
+            clean: true,
+          };
+        },
         constructCli: async () => ({
           artifactPath: join(root, 'missing-cli'),
           constructionCompletionCount: 2,

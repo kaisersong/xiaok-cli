@@ -1045,10 +1045,17 @@ async function defaultConstructDesktop(task) {
   });
 }
 
-function validatePreparedSource(task, prepared) {
+async function validatePreparedSource(task, prepared) {
+  const [expectedSourceRoot, preparedSourceRoot] = await Promise.all([
+    realpath(task.sourceRoot).catch(() => null),
+    typeof prepared?.sourceRoot === 'string'
+      ? realpath(prepared.sourceRoot).catch(() => null)
+      : null,
+  ]);
   if (
     !isPlainObject(prepared)
-    || prepared.sourceRoot !== task.sourceRoot
+    || expectedSourceRoot === null
+    || preparedSourceRoot !== expectedSourceRoot
     || prepared.commit !== task.expectedCommit
     || prepared.clean !== true
   ) {
@@ -1142,7 +1149,7 @@ export async function runFormalArtifactBuilds({
     const task = plan.constructionTasks[artifactKey];
     ledger.reserve(artifactKey);
     const prepared = await prepareSource(task);
-    validatePreparedSource(task, prepared);
+    await validatePreparedSource(task, prepared);
 
     let built;
     if (task.surface === 'cli') {
