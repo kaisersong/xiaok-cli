@@ -302,6 +302,7 @@ describe('Kimi K3 D9 CLI closure construction', () => {
       ),
     );
     expect(result.closurePath).toContain(result.attestation.closureDigest);
+    expect(result.constructionCompletionCount).toBe(1);
     expect(readlinkSync(join(result.closurePath, 'runtime/node/bin/npm')))
       .toBe('../lib/node_modules/npm/bin/npm-cli.js');
     expect(lstatSync(join(result.closurePath, 'dist/index.js')).mode & 0o222).toBe(0);

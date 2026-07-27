@@ -407,6 +407,7 @@ export async function constructCliRuntimeClosure(input) {
     closurePath,
     attestation,
     constructionCount: 1,
+    constructionCompletionCount: 1,
   };
 }
 
