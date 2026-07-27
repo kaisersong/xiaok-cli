@@ -241,8 +241,13 @@ describe('Kimi K3 D9 CLI closure construction', () => {
     );
     writeFileSync(guardSourcePath, 'export {};\n');
     const operations: string[] = [];
-    const runStep = async (step: string, context: { cwd: string }) => {
+    const stepPaths: string[] = [];
+    const runStep = async (
+      step: string,
+      context: { cwd: string; environment: { PATH: string } },
+    ) => {
       operations.push(step);
+      stepPaths.push(context.environment.PATH);
       if (step === 'runtime-install') {
         mkdirSync(join(context.cwd, 'node_modules/pkg'), { recursive: true });
         writeFileSync(join(context.cwd, 'node_modules/pkg/index.js'), 'module.exports=1;\n');
@@ -280,6 +285,17 @@ describe('Kimi K3 D9 CLI closure construction', () => {
       'build-release',
       'runtime-install',
     ]);
+    expect(stepPaths.slice(0, 2)).toEqual([
+      `${realpathSync(nodeDistributionRoot)}/bin:/usr/bin:/bin`,
+      `${realpathSync(nodeDistributionRoot)}/bin:/usr/bin:/bin`,
+    ]);
+    expect(stepPaths[2]).toMatch(
+      new RegExp(
+        `^${constructionParent.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}`
+        + '/\\.staging-[^/]+/runtime/node/bin:/usr/bin:/bin$',
+        'u',
+      ),
+    );
     expect(result.closurePath).toContain(result.attestation.closureDigest);
     expect(lstatSync(join(result.closurePath, 'dist/index.js')).mode & 0o222).toBe(0);
     const operationCount = operations.length;

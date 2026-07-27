@@ -308,7 +308,7 @@ export async function constructCliRuntimeClosure(input) {
 
   const buildEnvironment = Object.freeze({
     HOME: input.buildHome ?? resolve(constructionParent, 'build-home'),
-    PATH: '/usr/bin:/bin',
+    PATH: `${resolve(nodeDistributionRoot, 'bin')}:/usr/bin:/bin`,
     NODE_OPTIONS: '',
     NODE_PATH: '',
     DYLD_LIBRARY_PATH: '',
@@ -381,6 +381,7 @@ export async function constructCliRuntimeClosure(input) {
     environment: {
       ...buildEnvironment,
       HOME: input.runtimeHome ?? resolve(constructionParent, 'runtime-home'),
+      PATH: `${resolve(stagingRoot, 'runtime', 'node', 'bin')}:/usr/bin:/bin`,
     },
   });
 
