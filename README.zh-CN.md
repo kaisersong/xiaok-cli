@@ -46,6 +46,18 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.24 为 Kimi K3 和 K3 256K 模型提供一等支持：专属 harness profile 默认开启 preserved thinking、prompt cache affinity、Kimi 专用 tool schema 标准化和 reasoning 序列化。CLI 和 Desktop 在配置的 provider/endpoint 匹配官方 Kimi Coding API 时自动解析 K3 harness。
+
+**Kimi K3 模型优化：**
+
+- **专属 Harness Profile**：`kimi-k3-coding-openai` 和 `kimi-k3-256k-coding-openai` 在检测到官方 Kimi Coding endpoint 时自动激活，提供 tool schema 标准化、usage 提取、空 assistant content 省略和 reasoning 序列化，无需逐会话配置。
+- **Preserved Thinking**：K3 模型默认 `preservedThinking=true`。运行时转发 Kimi streaming 响应中的 `reasoning_content`，Desktop 和 CLI 无需手动开启即可展示模型思维链。
+- **Prompt Cache Affinity**：通过 `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1` 可开启 prompt cache key 注入。启用后每会话编码稳定 cache key，激活 Kimi 服务端 prompt 缓存（典型会话观测到 29K+ cached input tokens）。
+- **OpenAI Responses Native Adapter**：新增 adapter 路径支持 OpenAI Responses API wire format，集成 native compaction、portable compaction executor 和 session graph。
+- **D9 评测基础设施**：生产级 fail-closed 评测 harness（`scripts/evals/kimi-k3-d9/`）提供确定性 fixture server、canonical JSON attestation、immutable preflight plan、full-tree digest、paired stratified bootstrap 统计和 formal artifact 构建，支持可复现的 A/B 模型对比。
+- **发布验证**：release gate 覆盖 2400+ sandbox 测试、13 个 Kimi harness contract 测试、133 个 Desktop service 测试、D9 canonical/statistics/manifest/preflight/assignment/coordinator/fixtures/scanner 套件（23 测试）、真实 Kimi K3 API smoke（正确响应 + prompt cache 命中）、Desktop 构建和 unsigned macOS 打包安装到 `/Applications`。
+- **发布对齐**：root CLI 元数据、Desktop package 元数据和 package locks 统一为 `1.4.24` / `desktop-v1.4.24`。
+
 Xiaok Desktop v1.4.23 把 Canvas 升级为任务归属明确的 Artifact Workspace，并解决内容预览区与空间画布上下分割、互相挤压的问题。预览和画布现在是两个独立的全高主界面；版本、对比、任务来源和多窗口更新仍与产生产物的任务保持绑定。
 
 **Artifact Workspace、Canvas 与发布完整性更新：**
