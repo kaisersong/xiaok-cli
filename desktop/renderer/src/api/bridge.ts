@@ -1084,6 +1084,9 @@ export const api = {
   onUpdateStatus(handler: (status: { checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; installing?: boolean; progress: number; version?: string; error?: string }) => void) {
     return window.xiaokDesktop.onUpdateStatus(handler);
   },
+  onSkillsChanged(handler: () => void) {
+    return window.xiaokDesktop.onSkillsChanged(handler);
+  },
 
   // ---------------------
   // Reminder API (IPC)

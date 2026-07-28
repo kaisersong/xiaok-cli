@@ -1684,6 +1684,10 @@ function SkillsPane() {
       .then(setSkills)
       .catch(() => {})
       .finally(() => setLoading(false));
+    const unsubscribe = api.onSkillsChanged(() => {
+      api.listSkills().then(setSkills).catch(() => {});
+    });
+    return unsubscribe;
   }, []);
 
   useEffect(() => {

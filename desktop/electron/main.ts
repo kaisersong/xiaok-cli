@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createDesktopServices, resumeOneScriptWorkflow } from './desktop-services.js';
+import { onSkillCatalogChanged } from './skill-catalog-invalidation.js';
 import { registerDesktopIpc } from './ipc.js';
 import {
   buildBrowserWindowOptions,
@@ -1025,6 +1026,10 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Thread meta (GTD / pinned) — persistent via SQLite in main process
   const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
+  onSkillCatalogChanged(() => {
+    if (window.isDestroyed()) return;
+    window.webContents.send('desktop:skillsChanged');
+  });
   const broadcastThreadMeta = () => {
     if (window.isDestroyed()) return;
     window.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());

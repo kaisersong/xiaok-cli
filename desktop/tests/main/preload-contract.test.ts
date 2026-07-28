@@ -106,6 +106,7 @@ describe('preload API contract', () => {
       'checkForUpdates',
       'quitAndInstall',
       'onUpdateStatus',
+      'onSkillsChanged',
       'createReminder',
       'listReminders',
       'cancelReminder',

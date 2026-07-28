@@ -82,6 +82,16 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
       ipcRenderer.off(channel, listener);
     };
   },
+  onSkillsChanged(handler) {
+    const channel = 'desktop:skillsChanged';
+    const listener = () => {
+      handler();
+    };
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.off(channel, listener);
+    };
+  },
   createReminder: (input) => ipcRenderer.invoke('desktop:createReminder', input),
   listReminders: () => ipcRenderer.invoke('desktop:listReminders'),
   cancelReminder: (id) => ipcRenderer.invoke('desktop:cancelReminder', id),

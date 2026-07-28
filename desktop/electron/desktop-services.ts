@@ -4,6 +4,7 @@ import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { bumpSkillCatalogVersion, getSkillCatalogVersion } from './skill-catalog-invalidation.js';
 import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
@@ -1676,6 +1677,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
               return `Error: ${stderr.slice(0, 500)}`;
             }
+            bumpSkillCatalogVersion();
             return JSON.stringify({ success: true, skillName, message: `技能 ${skillName} 已安装` }, null, 2);
           },
         },
@@ -1708,6 +1710,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
               return `Error: ${stderr.slice(0, 500)}`;
             }
+            bumpSkillCatalogVersion();
             return JSON.stringify({ success: true, skillName, message: `技能 ${skillName} 已卸载` }, null, 2);
           },
         },
@@ -1924,6 +1927,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
         return { success: false, message: stderr.slice(0, 500) };
       }
+      bumpSkillCatalogVersion();
       return { success: true, message: `技能 ${skillName} 已安装` };
     },
     async uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }> {
@@ -1939,6 +1943,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
         return { success: false, message: stderr.slice(0, 500) };
       }
+      bumpSkillCatalogVersion();
       return { success: true, message: `技能 ${skillName} 已卸载` };
     },
     async createTaskWithFiles(input: {
@@ -5853,7 +5858,8 @@ export function createDesktopModelRunnerWithRegistry(
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
-  let skillsLoaded = false;
+  let loadedSkillCatalogVersion = -1;
+  let skillToolAdded = false;
 
   if (!runnerOptions.restrictedArtifactGeneration) {
     // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
@@ -5874,17 +5880,19 @@ export function createDesktopModelRunnerWithRegistry(
     const taskStartTime = Date.now();
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-    if (!runnerOptions.restrictedArtifactGeneration && !skillsLoaded) {
+    if (!runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
+      const targetVersion = getSkillCatalogVersion();
       try {
         const skills = await skillCatalog.reload();
-        if (skills.length > 0) {
+        if (skills.length > 0 && !skillToolAdded) {
           const skillTool = createSkillTool(skillCatalog);
           registry.registerTool(skillTool);
           tools.push(skillTool);
+          skillToolAdded = true;
         }
-        skillsLoaded = true;
+        loadedSkillCatalogVersion = targetVersion;
       } catch {
-        skillsLoaded = true;
+        loadedSkillCatalogVersion = targetVersion;
       }
     }
     const currentSkills = runnerOptions.restrictedArtifactGeneration ? [] : skillCatalog.list();

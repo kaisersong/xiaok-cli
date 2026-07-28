@@ -124,6 +124,7 @@ export const PRELOAD_API_KEYS = [
   'checkForUpdates',
   'quitAndInstall',
   'onUpdateStatus',
+  'onSkillsChanged',
   'createReminder',
   'listReminders',
   'cancelReminder',
@@ -292,6 +293,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'subscribeTask',
   'onArtifactWorkspaceChanged',
   'onUpdateStatus',
+  'onSkillsChanged',
   'onReminder',
   'onScheduledTaskDue',
   'onLoopConstraintAdded',
@@ -1032,6 +1034,7 @@ export interface DesktopApi {
   checkForUpdates(): Promise<void>;
   quitAndInstall(): Promise<void>;
   onUpdateStatus(handler: (status: UpdateStatus) => void): () => void;
+  onSkillsChanged(handler: () => void): () => void;
   createReminder(input: { content: string; scheduleAt: number; timezone?: string }): Promise<ReminderRecord>;
   listReminders(): Promise<ReminderRecord[]>;
   cancelReminder(id: string): Promise<boolean>;
@@ -1435,6 +1438,16 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       const channel = 'desktop:updateStatus';
       const listener = (_event: unknown, payload: unknown) => {
         handler(payload as UpdateStatus);
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
+    onSkillsChanged(handler) {
+      const channel = 'desktop:skillsChanged';
+      const listener = () => {
+        handler();
       };
       ipcRenderer.on(channel, listener);
       return () => {
