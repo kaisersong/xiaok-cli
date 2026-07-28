@@ -120,6 +120,7 @@ jobs:
           KSWARM_SOURCE_ROOT: ${{ github.workspace }}/../kswarm
 
       - name: Package Windows Kimi smoke app
+        shell: bash
         run: cd desktop && npx electron-builder --config electron-builder.json --win dir --publish never -c.win.signAndEditExecutable=false
 
       - name: Run packaged Windows Kimi K3 smoke
