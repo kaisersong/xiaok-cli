@@ -3,6 +3,7 @@ import type { ToolRegistry } from './tools/index.js';
 import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
 import type { MemoryStore } from './memory/store.js';
+import type { RunInvocationContext } from './runtime/model-capabilities.js';
 export type OnChunk = (chunk: StreamChunk) => void;
 export interface AgentOptions {
     maxIterations?: number;
@@ -23,7 +24,7 @@ export declare class Agent {
     private turnCount;
     private runtime;
     constructor(adapter: ModelAdapter, registry: ToolRegistry, systemPrompt: string, options?: AgentOptions);
-    runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal): Promise<void>;
+    runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal, invocationContext?: RunInvocationContext): Promise<void>;
     clearHistory(): void;
     forceCompact(): CompactionRecord | null;
     getUsage(): UsageStats;

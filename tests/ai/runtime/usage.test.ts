@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
+  applyCompactionPlan,
+  compactMessages,
   computeCost,
   computeCostWithConfidence,
   estimateTokens,
   mergeUsage,
+  planCompaction,
   shouldCompact,
   truncateToolResult,
 } from '../../../src/ai/runtime/usage.js';
+import type { Message } from '../../../src/types.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -63,6 +67,175 @@ describe('runtime usage helpers', () => {
       outputTokens: 200,
     });
   });
+});
+
+describe('compaction planning', () => {
+  it('freezes only the replaceable prefix and retains the recent suffix', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'old request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+    ];
+
+    const plan = planCompaction(messages, 7, 2);
+
+    expect(plan.sourceRevision).toBe(7);
+    expect(plan.sourceMessageCount).toBe(4);
+    expect(plan.messagesToSummarize).toEqual(messages.slice(0, 2));
+    expect(plan.messagesToRetain).toEqual(messages.slice(2));
+    expect(plan.messagesToSummarize).not.toBe(messages);
+    expect(plan.messagesToRetain).not.toBe(messages);
+
+    messages[0]!.content[0] = { type: 'text', text: 'mutated after planning' };
+    expect((plan.messagesToSummarize[0]!.content[0] as { text: string }).text).toBe('old request');
+  });
+
+  it('retains from the earliest tool call required by multiple recent results', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'old' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call_early', name: 'read', input: { path: 'a' } }],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'between calls' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call_late', name: 'read', input: { path: 'b' } }],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'call_early', content: 'A' },
+          { type: 'tool_result', tool_use_id: 'call_late', content: 'B' },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent' }] },
+    ];
+
+    const plan = planCompaction(messages, 1, 2);
+
+    expect(plan.invalidReason).toBeUndefined();
+    expect(plan.messagesToSummarize).toEqual(messages.slice(0, 1));
+    expect(plan.messagesToRetain).toEqual(messages.slice(1));
+  });
+
+  it.each([
+    {
+      name: 'orphan result',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'old' }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'missing', content: 'x' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'recent' }] },
+      ] satisfies Message[],
+      reason: 'unpaired_tool_result',
+    },
+    {
+      name: 'duplicate call id',
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'dup', name: 'read', input: { path: 'a' } }],
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'dup', name: 'read', input: { path: 'b' } }],
+        },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'dup', content: 'x' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'recent' }] },
+      ] satisfies Message[],
+      reason: 'duplicate_tool_call_id',
+    },
+  ])('marks $name as an invalid plan', ({ messages, reason }) => {
+    const plan = planCompaction(messages, 1, 2);
+
+    expect(plan.invalidReason).toBe(reason);
+    expect(plan.replacedMessages).toBe(0);
+  });
+
+  it('uses an explicit bounded summary when it yields at least five percent reduction', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: `old request ${'a'.repeat(10_000)}` }] },
+      { role: 'assistant', content: [{ type: 'text', text: `old answer ${'b'.repeat(10_000)}` }] },
+      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+    ];
+    const plan = planCompaction(messages, 1, 2);
+
+    const result = applyCompactionPlan(plan, 'LLM summary with exact retained facts');
+
+    expect(result.status).toBe('compacted');
+    expect(result.summary.text).toBe('LLM summary with exact retained facts');
+    expect((result.messages[0]!.content[0] as { text: string }).text)
+      .toBe('LLM summary with exact retained facts');
+  });
+
+  it('keeps the legacy positional compactMessages API while applying the supplied summary', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: `old request ${'a'.repeat(10_000)}` }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+    ];
+
+    const result = compactMessages(messages, 'legacy caller summary', 2);
+
+    expect(result.summary.text).toBe('legacy caller summary');
+    expect((result.messages[0]!.content[0] as { text: string }).text)
+      .toBe('legacy caller summary');
+  });
+
+  it('falls back from whitespace and oversized summaries to a bounded deterministic summary', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: `old request ${'a'.repeat(10_000)}` }] },
+      { role: 'assistant', content: [{ type: 'text', text: `old answer ${'b'.repeat(10_000)}` }] },
+      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+    ];
+
+    for (const summary of ['   ', 'x'.repeat(8_001)]) {
+      const result = applyCompactionPlan(planCompaction(messages, 1, 2), summary);
+      expect(result.status).toBe('compacted');
+      expect(result.summary.text).toContain('[context compacted summary]');
+      expect(result.summary.text.length).toBeLessThanOrEqual(8_000);
+    }
+  });
+
+  it('falls back when a within-limit LLM summary has no net gain', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: `old request ${'a'.repeat(3_500)}` }] },
+      { role: 'assistant', content: [{ type: 'text', text: `old answer ${'b'.repeat(3_500)}` }] },
+      { role: 'user', content: [{ type: 'text', text: 'recent request' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'recent answer' }] },
+    ];
+
+    const result = applyCompactionPlan(planCompaction(messages, 1, 2), 'x'.repeat(7_999));
+
+    expect(result.status).toBe('compacted');
+    expect(result.summary.text).toContain('[context compacted summary]');
+  });
+
+  it('returns no_gain without changing the planned history when even deterministic fallback cannot shrink it', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'a' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
+      { role: 'user', content: [{ type: 'text', text: 'c' }] },
+    ];
+    const plan = planCompaction(messages, 1, 2);
+
+    const result = applyCompactionPlan(plan, 'an expansion rather than a summary');
+
+    expect(result.status).toBe('no_gain');
+    expect(result.messages).toEqual(messages);
+    expect(result.messages).not.toBe(messages);
+    expect(result.summary.replacedMessages).toBe(0);
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid keepRecent value %s',
+    (keepRecent) => {
+      expect(() => planCompaction([], 0, keepRecent)).toThrow(/keepRecent/);
+    },
+  );
 });
 
 describe('truncateToolResult', () => {

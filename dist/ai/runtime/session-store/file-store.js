@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getConfigDir } from '../../../utils/config.js';
 import { cloneSessionIntentLedger, rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
@@ -11,7 +12,7 @@ export class FileSessionStore {
         this.rootDir = rootDir;
     }
     createSessionId() {
-        return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        return `sess_${randomUUID()}`;
     }
     async save(snapshot) {
         mkdirSync(this.rootDir, { recursive: true });

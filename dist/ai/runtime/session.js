@@ -1,4 +1,4 @@
-import { compactMessages, estimateTokens, mergeUsage } from './usage.js';
+import { applyCompactionPlan, estimateTokens, mergeUsage, planCompaction as buildCompactionPlan, } from './usage.js';
 import { AgentSessionGraph } from './session-graph.js';
 let nextCompactionId = 0;
 export class AgentSessionState {
@@ -66,12 +66,22 @@ export class AgentSessionState {
     recordBackgroundJob(jobId) {
         this.graph.recordBackgroundJob(jobId);
     }
-    forceCompact(placeholder = '[context compacted]') {
-        const compacted = compactMessages(this.graph.getMessages(), placeholder);
-        this.graph.replaceMessages(compacted.messages);
-        if (compacted.summary.replacedMessages <= 0) {
-            return null;
+    planCompaction(keepRecent = 2) {
+        return buildCompactionPlan(this.graph.getMessages(), this.graph.getRevision(), keepRecent);
+    }
+    applyCompaction(plan, summaryText) {
+        if (this.graph.getRevision() !== plan.sourceRevision ||
+            this.graph.getMessages().length !== plan.sourceMessageCount) {
+            return { status: 'stale_plan', record: null };
         }
+        if (plan.invalidReason) {
+            return { status: 'invalid_plan', record: null };
+        }
+        const compacted = applyCompactionPlan(plan, summaryText);
+        if (compacted.status !== 'compacted') {
+            return { status: 'no_gain', record: null };
+        }
+        this.graph.replaceMessages(compacted.messages);
         // Compact 后更新 usage.inputTokens 为估算值
         const estimatedInput = estimateTokens(this.graph.getMessages());
         const currentUsage = this.graph.getUsage();
@@ -88,7 +98,10 @@ export class AgentSessionState {
             replacedMessages: compacted.summary.replacedMessages,
         };
         this.graph.recordCompaction(record);
-        return record;
+        return { status: 'compacted', record };
+    }
+    forceCompact(summaryText) {
+        return this.applyCompaction(this.planCompaction(), summaryText).record;
     }
     exportSnapshot() {
         return this.graph.exportSnapshot();

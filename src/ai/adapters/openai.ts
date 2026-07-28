@@ -1,17 +1,42 @@
 import { Agent as HttpAgent } from 'node:http';
 import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
-import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
+import type {
+  ModelAdapter,
+  Message,
+  ToolDefinition,
+  StreamChunk,
+  UsageStats,
+} from '../../types.js';
+import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
-import type { ModelReasoningEffort, ModelRuntimeOptions } from '../providers/types.js';
+import {
+  buildOpenAIHarnessContext,
+  observeReasoningDialect,
+  type KimiUsageDiagnostic,
+  type KimiUsageDiagnosticSink,
+  type OpenAIAdapterInit,
+  type ReasoningDialectState,
+} from '../providers/model-harness-profile.js';
+import {
+  KIMI_SCHEMA_LIMITS,
+  KimiToolSchemaError,
+  type KimiSchemaLimitKind,
+} from '../providers/kimi-tool-schema.js';
+import { getProviderProfile, resolveProviderModelVariant } from '../providers/registry.js';
+import type { ModelReasoningEffort } from '../providers/types.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
-const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
+const usageLogger = createLogger('ai:openai-adapter:usage');
+
+function recordUsageDiagnostic(diagnostic: KimiUsageDiagnostic): void {
+  usageLogger.info('kimiUsageDiagnostic', diagnostic);
+}
 
 function isRetryableError(error: unknown): boolean {
   if (isAbortError(error)) return false;
@@ -27,21 +52,47 @@ function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+}
+
+function throwIfCallerAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw abortReason(signal);
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(abortReason(signal));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(signal ? abortReason(signal) : new DOMException('The operation was aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 type OpenAIHttpAgent = HttpAgent | HttpsAgent;
-type OpenAICapabilityOverrides = Partial<Pick<
-  ModelCapabilities,
-  'supportsPromptCaching' | 'supportsImageInput'
->>;
 
 interface KimiReasoningEffortRequestExtension {
   reasoning_effort: ModelReasoningEffort;
+}
+
+interface StreamAttemptState {
+  latestProviderUsage?: UsageStats;
+  outputChars: number;
 }
 
 function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
@@ -49,17 +100,6 @@ function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
   return protocol === 'http:'
     ? new HttpAgent({ keepAlive: true })
     : new HttpsAgent({ keepAlive: true });
-}
-
-function isKimiCodingEndpoint(baseUrl?: string): boolean {
-  if (!baseUrl) return false;
-
-  try {
-    const url = new URL(baseUrl);
-    return url.hostname === 'api.kimi.com' && url.pathname.startsWith('/coding');
-  } catch {
-    return false;
-  }
 }
 
 function collectReasoningText(blocks: Message['content']): string | undefined {
@@ -70,6 +110,39 @@ function collectReasoningText(blocks: Message['content']): string | undefined {
     .join('\n\n');
 
   return reasoning || undefined;
+}
+
+function estimateStreamUsage(
+  messages: Message[],
+  systemPrompt: string,
+  outputChars: number,
+): UsageStats {
+  const allInputMessages = [
+    { role: 'user' as const, content: [{ type: 'text' as const, text: systemPrompt }] },
+    ...messages.map(m => ({
+      role: m.role,
+      content: m.content.map(b => {
+        if (b.type === 'text') return { type: 'text' as const, text: b.text };
+        if (b.type === 'tool_use') return { type: 'text' as const, text: JSON.stringify(b.input) };
+        if (b.type === 'tool_result') return { type: 'text' as const, text: b.content };
+        if (b.type === 'image') return { type: 'text' as const, text: '[image]' };
+        return { type: 'text' as const, text: '' };
+      }),
+    })),
+  ];
+  return {
+    inputTokens: estimateTokens(allInputMessages as unknown as Message[]),
+    outputTokens: Math.ceil(outputChars / 4),
+  };
+}
+
+function hasHarnessCapability(
+  capabilities: readonly string[],
+  expected: string,
+): boolean {
+  return capabilities.some(
+    (capability) => capability.toLowerCase() === expected,
+  );
 }
 
 function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signature: string; text: string }> {
@@ -98,6 +171,28 @@ function extractReasoningDeltas(delta: Record<string, unknown>): Array<{ signatu
   }
 
   return chunks;
+}
+
+function wrapKimiSchemaError(
+  error: KimiToolSchemaError,
+  toolName: string,
+): KimiToolSchemaError {
+  return new KimiToolSchemaError(error.code, {
+    limitKind: error.limitKind,
+    toolName,
+    message: error.message,
+  });
+}
+
+function requestLimitError(
+  limitKind: KimiSchemaLimitKind,
+  toolName?: string,
+): KimiToolSchemaError {
+  return new KimiToolSchemaError('KIMI_SCHEMA_LIMIT_EXCEEDED', {
+    limitKind,
+    toolName,
+    message: `Kimi tool request exceeded ${limitKind}`,
+  });
 }
 
 type RawThinkParserState = {
@@ -195,93 +290,93 @@ function drainLeadingRawThinkSegments(
 export class OpenAIAdapter implements ModelAdapter {
   client: OpenAI;
   private readonly apiKey: string;
-  private readonly baseUrl?: string;
-  private readonly defaultHeaders?: Record<string, string>;
-  private readonly capabilityOverrides: OpenAICapabilityOverrides;
-  private readonly runtimeOptions?: ModelRuntimeOptions;
+  private readonly resolvedHeaders?: Readonly<Record<string, string | null>>;
+  private readonly kimiCodingHeadersApplied: boolean;
+  private readonly onUsageDiagnostic: KimiUsageDiagnosticSink;
   private readonly httpAgent: OpenAIHttpAgent;
-  private model: string;
+  readonly harnessContext: OpenAIAdapterInit['harnessContext'];
+  private reasoningDialectState: ReasoningDialectState = {
+    current: 'reasoning_content',
+    learned: false,
+  };
 
-  constructor(
-    apiKey: string,
-    model = 'gpt-4o',
-    baseUrl?: string,
-    defaultHeaders?: Record<string, string>,
-    capabilityOverrides?: OpenAICapabilityOverrides,
-    runtimeOptions?: ModelRuntimeOptions,
-  ) {
-    this.apiKey = apiKey;
-    this.baseUrl = baseUrl;
-    this.defaultHeaders = defaultHeaders;
-    this.capabilityOverrides = {
-      ...(typeof capabilityOverrides?.supportsPromptCaching === 'boolean'
-        ? { supportsPromptCaching: capabilityOverrides.supportsPromptCaching }
-        : {}),
-      ...(typeof capabilityOverrides?.supportsImageInput === 'boolean'
-        ? { supportsImageInput: capabilityOverrides.supportsImageInput }
-        : {}),
-    };
-    this.runtimeOptions = runtimeOptions ? { ...runtimeOptions } : undefined;
-    this.httpAgent = createOpenAIHttpAgent(baseUrl);
+  constructor(init: OpenAIAdapterInit) {
+    this.apiKey = init.apiKey;
+    this.resolvedHeaders = init.resolvedHeaders;
+    this.kimiCodingHeadersApplied = init.kimiCodingHeadersApplied;
+    this.onUsageDiagnostic = init.onUsageDiagnostic ?? recordUsageDiagnostic;
+    this.harnessContext = init.harnessContext;
+    this.httpAgent = createOpenAIHttpAgent(init.harnessContext.identity.canonicalBaseUrl);
     this.client = new OpenAI({
-      apiKey,
-      baseURL: baseUrl,
+      apiKey: init.apiKey,
+      baseURL: init.harnessContext.identity.canonicalBaseUrl,
       maxRetries: MAX_RETRIES,
       httpAgent: this.httpAgent,
-      defaultHeaders: {
-        ...(defaultHeaders ?? {}),
-        ...(isKimiCodingEndpoint(baseUrl)
-          ? {
-              'User-Agent': KIMI_CODING_COMPAT_USER_AGENT,
-              'X-Stainless-Lang': null,
-              'X-Stainless-Package-Version': null,
-              'X-Stainless-OS': null,
-              'X-Stainless-Arch': null,
-              'X-Stainless-Runtime': null,
-              'X-Stainless-Runtime-Version': null,
-              'X-Stainless-Retry-Count': null,
-              'X-Stainless-Timeout': null,
-            }
-          : {}),
-      },
+      defaultHeaders: init.resolvedHeaders,
     });
-    this.model = model;
   }
 
   getModelName(): string {
-    return this.model;
+    return this.harnessContext.identity.wireModel;
   }
 
-  getCapabilities(): Partial<ModelCapabilities> {
-    return {
-      ...(this.capabilityOverrides ?? {}),
-      ...(this.runtimeOptions?.contextLimit !== undefined
-        ? { contextLimit: this.runtimeOptions.contextLimit }
-        : {}),
-    };
+  getCapabilities(): Readonly<ModelCapabilities> {
+    return this.harnessContext.runtimeCapabilities;
   }
 
   dispose(): void {
     this.httpAgent.destroy();
   }
 
-  cloneWithModel(model: string): OpenAIAdapter {
-    const runtimeOptions = model === this.model
-      ? this.runtimeOptions
+  cloneWithModel(newWireModel: string): OpenAIAdapter {
+    const currentIdentity = this.harnessContext.identity;
+    const providerProfile = currentIdentity.providerType === 'first_party'
+      ? getProviderProfile(currentIdentity.providerId)
+      : undefined;
+    const catalogVariant = providerProfile
+      ? resolveProviderModelVariant(providerProfile, newWireModel)
+      : undefined;
+    const runtimeOptions = newWireModel === currentIdentity.wireModel
+      ? this.harnessContext.runtimeOptions
       : resolveModelRuntimeOptions({
-          protocol: 'openai_legacy',
-          baseUrl: this.baseUrl,
-          wireModel: model,
+          protocol: currentIdentity.protocol,
+          baseUrl: currentIdentity.canonicalBaseUrl,
+          wireModel: newWireModel,
+          catalogOptions: catalogVariant?.runtimeOptions,
+          catalogConstraints: catalogVariant?.runtimeConstraints,
         }).runtimeOptions;
-
-    return new OpenAIAdapter(
-      this.apiKey,
-      model,
-      this.baseUrl,
-      this.defaultHeaders,
-      this.capabilityOverrides,
-      runtimeOptions,
-    );
+    const nextIdentity = {
+      ...currentIdentity,
+      wireModel: newWireModel,
+      capabilities: catalogVariant?.capabilities
+        ? [...catalogVariant.capabilities]
+        : [...currentIdentity.capabilities],
+    };
+    const capabilityOverrides = catalogVariant
+      ? undefined
+      : {
+          supportsPromptCaching: this.harnessContext.runtimeCapabilities.supportsPromptCaching,
+          supportsImageInput: this.harnessContext.runtimeCapabilities.supportsImageInput,
+        };
+    const clone = new OpenAIAdapter({
+      apiKey: this.apiKey,
+      resolvedHeaders: this.resolvedHeaders,
+      kimiCodingHeadersApplied: this.kimiCodingHeadersApplied,
+      onUsageDiagnostic: this.onUsageDiagnostic,
+      harnessContext: buildOpenAIHarnessContext({
+        identity: nextIdentity,
+        flags: this.harnessContext.flags,
+        runtimeOptions,
+        capabilityOverrides,
+      }),
+    });
+    if (
+      clone.harnessContext.identityFingerprint
+      === this.harnessContext.identityFingerprint
+    ) {
+      clone.reasoningDialectState = { ...this.reasoningDialectState };
+    }
+    return clone;
   }
 
   async *stream(
@@ -290,28 +385,111 @@ export class OpenAIAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const bufferedUsage = (
+      this.harnessContext.flags.normalizeUsage
+      && this.harnessContext.profile.extractUsage !== undefined
+    );
+    let usageSourceEmitted = false;
+    const reportUsageSource = (
+      usageSource: Extract<KimiUsageDiagnostic, { type: 'usage_source' }>['usageSource'],
+    ): void => {
+      if (usageSourceEmitted) {
+        return;
+      }
+      usageSourceEmitted = true;
+      this.onUsageDiagnostic({
+        type: 'usage_source',
+        harnessProfileId: 'kimi-k3-coding-openai',
+        usageSource,
+      });
+    };
     let attempt = 0;
     while (true) {
+      throwIfCallerAborted(options?.signal);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
       const signal = options?.signal
         ? AbortSignal.any([controller.signal, options.signal])
         : controller.signal;
       let emittedAny = false;
+      let emittedBufferedUsage = false;
+      const attemptState: StreamAttemptState = { outputChars: 0 };
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal)) {
+        for await (const chunk of this.streamOnce(
+          messages,
+          tools,
+          systemPrompt,
+          options,
+          signal,
+          bufferedUsage ? attemptState : undefined,
+        )) {
           emittedAny = true;
           yield chunk;
+        }
+        if (options?.signal?.aborted) {
+          throw abortReason(options.signal);
+        }
+        if (bufferedUsage) {
+          const providerUsage = attemptState.latestProviderUsage;
+          reportUsageSource(providerUsage ? 'provider' : 'estimate');
+          emittedBufferedUsage = true;
+          yield {
+            type: 'usage',
+            usage: providerUsage
+              ?? estimateStreamUsage(messages, systemPrompt, attemptState.outputChars),
+          };
+          throwIfCallerAborted(options?.signal);
+          yield { type: 'done' };
         }
         return;
       } catch (error) {
         clearTimeout(timer);
+        const terminalError = options?.signal?.aborted
+          ? (options.signal.reason ?? error)
+          : error;
         // 已产出 chunk 后重试会重复输出，必须放弃重试
-        if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
-          throw error;
+        if (
+          options?.signal?.aborted
+          || emittedAny
+          || !isRetryableError(error)
+          || attempt >= MAX_RETRIES
+        ) {
+          if (bufferedUsage) {
+            if (attemptState.latestProviderUsage && !emittedBufferedUsage) {
+              reportUsageSource('provider');
+              emittedBufferedUsage = true;
+              yield {
+                type: 'usage',
+                usage: attemptState.latestProviderUsage,
+              };
+              throwIfCallerAborted(options?.signal);
+            } else if (!attemptState.latestProviderUsage && !emittedBufferedUsage) {
+              reportUsageSource('missing_on_error');
+            }
+          }
+          throw terminalError;
         }
         const delayMs = Math.min(1000 * 2 ** attempt, 16000);
-        await sleep(delayMs);
+        try {
+          await sleep(delayMs, options?.signal);
+        } catch (backoffError) {
+          const backoffTerminalError = options?.signal?.aborted
+            ? (options.signal.reason ?? backoffError)
+            : backoffError;
+          if (bufferedUsage) {
+            if (attemptState.latestProviderUsage && !emittedBufferedUsage) {
+              reportUsageSource('provider');
+              emittedBufferedUsage = true;
+              yield {
+                type: 'usage',
+                usage: attemptState.latestProviderUsage,
+              };
+            } else if (!attemptState.latestProviderUsage && !emittedBufferedUsage) {
+              reportUsageSource('missing_on_error');
+            }
+          }
+          throw backoffTerminalError;
+        }
         attempt += 1;
       } finally {
         clearTimeout(timer);
@@ -323,9 +501,73 @@ export class OpenAIAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    _options?: StreamOptions,
+    options?: StreamOptions,
     signal?: AbortSignal,
+    attemptState?: StreamAttemptState,
   ): AsyncIterable<StreamChunk> {
+    const normalizeToolSchema = this.harnessContext.profile.normalizeToolSchema;
+    const shouldNormalizeToolSchemas = (
+      this.harnessContext.flags.normalizeToolSchema
+      && normalizeToolSchema !== undefined
+      && this.harnessContext.identity.capabilities.some(
+        (capability) => capability.toLowerCase() === 'tools',
+      )
+    );
+    let openaiTools: OpenAI.ChatCompletionTool[];
+
+    if (!shouldNormalizeToolSchemas) {
+      openaiTools = tools.map((tool) => ({
+        type: 'function' as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.inputSchema as Record<string, unknown>,
+        },
+      }));
+    } else {
+      if (tools.length > KIMI_SCHEMA_LIMITS.maxRequestToolCount) {
+        throw requestLimitError('request_tool_count');
+      }
+
+      openaiTools = [];
+      let requestInputNodes = 0;
+      let requestOutputNodes = 0;
+      let requestToolBytes = 0;
+      for (const tool of tools) {
+        let normalized;
+        try {
+          normalized = normalizeToolSchema(tool.inputSchema);
+        } catch (error) {
+          if (error instanceof KimiToolSchemaError) {
+            throw wrapKimiSchemaError(error, tool.name);
+          }
+          throw error;
+        }
+
+        requestInputNodes += normalized.inputNodes;
+        if (requestInputNodes > KIMI_SCHEMA_LIMITS.maxRequestInputNodes) {
+          throw requestLimitError('request_input_nodes', tool.name);
+        }
+        requestOutputNodes += normalized.outputNodes;
+        if (requestOutputNodes > KIMI_SCHEMA_LIMITS.maxRequestOutputNodes) {
+          throw requestLimitError('request_output_nodes', tool.name);
+        }
+        requestToolBytes += normalized.outputBytes;
+        if (requestToolBytes > KIMI_SCHEMA_LIMITS.maxRequestToolBytes) {
+          throw requestLimitError('request_tool_bytes', tool.name);
+        }
+
+        openaiTools.push({
+          type: 'function' as const,
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: normalized.schema,
+          },
+        });
+      }
+    }
+
     const openaiMessages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
     ];
@@ -334,14 +576,31 @@ export class OpenAIAdapter implements ModelAdapter {
       if (m.role === 'assistant') {
         const textBlocks = m.content.filter((block) => block.type === 'text');
         const toolUseBlocks = m.content.filter((block) => block.type === 'tool_use');
-        const reasoningContent = collectReasoningText(m.content);
+        const text = textBlocks.map((block) => block.text).join('');
+        const shouldOmitContent = (
+          this.harnessContext.flags.omitEmptyAssistantContent
+          && this.harnessContext.profile.shouldOmitAssistantContent !== undefined
+          && hasHarnessCapability(
+            this.harnessContext.identity.capabilities,
+            'tools',
+          )
+          && this.harnessContext.profile.shouldOmitAssistantContent({
+            hasToolCalls: toolUseBlocks.length > 0,
+            text,
+          })
+        );
 
-        const msg: OpenAI.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
+        const msg: OpenAI.ChatCompletionAssistantMessageParam & {
+          reasoning_content?: string;
+          reasoning?: string;
+        } = {
           role: 'assistant',
-          content: textBlocks.length > 0
-            ? textBlocks.map((block) => block.text).join('')
-            : (toolUseBlocks.length > 0 ? null : ''),
         };
+        if (!shouldOmitContent) {
+          msg.content = textBlocks.length > 0
+            ? text
+            : (toolUseBlocks.length > 0 ? null : '');
+        }
 
         if (toolUseBlocks.length > 0) {
           msg.tool_calls = toolUseBlocks.map((block) => ({
@@ -354,8 +613,30 @@ export class OpenAIAdapter implements ModelAdapter {
           }));
         }
 
-        if (reasoningContent) {
-          msg.reasoning_content = reasoningContent;
+        const serializeReasoning = this.harnessContext.profile.serializeReasoning;
+        if (serializeReasoning) {
+          const preservedThinkingEnabled = (
+            this.harnessContext.flags.preservedThinking
+            && hasHarnessCapability(
+              this.harnessContext.identity.capabilities,
+              'thinking',
+            )
+          );
+          if (preservedThinkingEnabled) {
+            const serialized = serializeReasoning(
+              m.content,
+              this.reasoningDialectState.current,
+              true,
+            );
+            if (serialized) {
+              msg[serialized.field] = serialized.value;
+            }
+          }
+        } else {
+          const reasoningContent = collectReasoningText(m.content);
+          if (reasoningContent) {
+            msg.reasoning_content = reasoningContent;
+          }
         }
 
         openaiMessages.push(msg);
@@ -399,30 +680,34 @@ export class OpenAIAdapter implements ModelAdapter {
       }
     }
 
-    const openaiTools: OpenAI.ChatCompletionTool[] = tools.map(t => ({
-      type: 'function' as const,
-      function: {
-        name: t.name,
-        description: t.description,
-        parameters: t.inputSchema as Record<string, unknown>,
-      },
-    }));
-
     const request: OpenAI.ChatCompletionCreateParamsStreaming = {
-      model: this.model,
+      model: this.harnessContext.identity.wireModel,
       messages: openaiMessages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
       stream_options: { include_usage: true },
     };
 
+    const cacheKey = options?.cacheKey;
     if (
-      this.model === 'k3'
-      && isOfficialKimiK3OpenAIEndpoint(this.baseUrl)
-      && this.runtimeOptions?.reasoningEffort
+      this.harnessContext.flags.promptCacheKey
+      && this.harnessContext.profile.encodeCacheKey
+      && typeof cacheKey === 'string'
+      && /^pc1_[0-9a-f]{64}$/.test(cacheKey)
+    ) {
+      Object.assign(
+        request,
+        this.harnessContext.profile.encodeCacheKey(cacheKey),
+      );
+    }
+
+    if (
+      this.harnessContext.identity.wireModel === 'k3'
+      && isOfficialKimiK3OpenAIEndpoint(this.harnessContext.identity.canonicalBaseUrl)
+      && this.harnessContext.runtimeOptions?.reasoningEffort
     ) {
       Object.assign(request, {
-        reasoning_effort: this.runtimeOptions.reasoningEffort,
+        reasoning_effort: this.harnessContext.runtimeOptions.reasoningEffort,
       } satisfies KimiReasoningEffortRequestExtension);
     }
 
@@ -437,10 +722,21 @@ export class OpenAIAdapter implements ModelAdapter {
     let emittedDone = false;
     let outputChars = 0;
     let usageReceived = false;
+    const extractBufferedUsage = attemptState
+      ? this.harnessContext.profile.extractUsage
+      : undefined;
 
     for await (const chunk of stream) {
-      // Extract usage from chunk (include_usage: true)
-      if (chunk.usage) {
+      if (extractBufferedUsage && attemptState) {
+        const usage = extractBufferedUsage(
+          chunk as unknown as Record<string, unknown>,
+          this.onUsageDiagnostic,
+        );
+        if (usage) {
+          attemptState.latestProviderUsage = usage;
+        }
+      } else if (chunk.usage) {
+        // Generic baseline keeps inline usage emission.
         usageReceived = true;
         yield {
           type: 'usage',
@@ -449,12 +745,27 @@ export class OpenAIAdapter implements ModelAdapter {
             outputTokens: chunk.usage.completion_tokens ?? 0,
           },
         };
+        throwIfCallerAborted(options?.signal);
+      }
+
+      if (attemptState && emittedDone) {
+        continue;
       }
 
       const choice = chunk.choices[0];
       if (!choice) continue;
       const delta = choice.delta;
       if (!delta) continue;
+
+      if (this.harnessContext.profile.serializeReasoning) {
+        const observation = observeReasoningDialect(
+          this.reasoningDialectState,
+          delta as Record<string, unknown>,
+        );
+        if (observation.conflict) {
+          console.warn('reasoningDialectConflict', observation.conflict);
+        }
+      }
 
       for (const reasoning of extractReasoningDeltas(delta as Record<string, unknown>)) {
         yield { type: 'thinking', delta: reasoning.text, signature: reasoning.signature };
@@ -467,6 +778,9 @@ export class OpenAIAdapter implements ModelAdapter {
             continue;
           }
           outputChars += segment.delta.length;
+          if (attemptState) {
+            attemptState.outputChars = outputChars;
+          }
           yield segment;
         }
       }
@@ -488,6 +802,9 @@ export class OpenAIAdapter implements ModelAdapter {
             continue;
           }
           outputChars += segment.delta.length;
+          if (attemptState) {
+            attemptState.outputChars = outputChars;
+          }
           yield segment;
         }
 
@@ -502,29 +819,18 @@ export class OpenAIAdapter implements ModelAdapter {
         }
         toolBuffers.clear();
 
+        if (attemptState) {
+          emittedDone = true;
+          continue;
+        }
+
         // If the API didn't return usage, estimate locally
         if (!usageReceived) {
-          const allInputMessages = [
-            { role: 'user' as const, content: [{ type: 'text' as const, text: systemPrompt }] },
-            ...messages.map(m => ({
-              role: m.role,
-              content: m.content.map(b => {
-                if (b.type === 'text') return { type: 'text' as const, text: b.text };
-                if (b.type === 'tool_use') return { type: 'text' as const, text: JSON.stringify(b.input) };
-                if (b.type === 'tool_result') return { type: 'text' as const, text: b.content };
-                if (b.type === 'image') return { type: 'text' as const, text: '[image]' };
-                return { type: 'text' as const, text: '' };
-              }),
-            })),
-          ];
-          const inputTokens = estimateTokens(allInputMessages as unknown as Message[]);
           yield {
             type: 'usage',
-            usage: {
-              inputTokens,
-              outputTokens: Math.ceil(outputChars / 4),
-            },
+            usage: estimateStreamUsage(messages, systemPrompt, outputChars),
           };
+          throwIfCallerAborted(options?.signal);
         }
 
         emittedDone = true;
@@ -540,6 +846,9 @@ export class OpenAIAdapter implements ModelAdapter {
           continue;
         }
         outputChars += segment.delta.length;
+        if (attemptState) {
+          attemptState.outputChars = outputChars;
+        }
         yield segment;
       }
 
@@ -553,28 +862,16 @@ export class OpenAIAdapter implements ModelAdapter {
         yield { type: 'tool_use', id: buf.id, name: buf.name, input };
       }
 
+      if (attemptState) {
+        return;
+      }
+
       if (!usageReceived) {
-        const allInputMessages = [
-          { role: 'user' as const, content: [{ type: 'text' as const, text: systemPrompt }] },
-          ...messages.map(m => ({
-            role: m.role,
-            content: m.content.map(b => {
-              if (b.type === 'text') return { type: 'text' as const, text: b.text };
-              if (b.type === 'tool_use') return { type: 'text' as const, text: JSON.stringify(b.input) };
-              if (b.type === 'tool_result') return { type: 'text' as const, text: b.content };
-              if (b.type === 'image') return { type: 'text' as const, text: '[image]' };
-              return { type: 'text' as const, text: '' };
-            }),
-          })),
-        ];
-        const inputTokens = estimateTokens(allInputMessages as unknown as Message[]);
         yield {
           type: 'usage',
-          usage: {
-            inputTokens,
-            outputTokens: Math.ceil(outputChars / 4),
-          },
+          usage: estimateStreamUsage(messages, systemPrompt, outputChars),
         };
+        throwIfCallerAborted(options?.signal);
       }
 
       yield { type: 'done' };

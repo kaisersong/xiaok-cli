@@ -148,10 +148,35 @@ const PROVIDER_REGISTRY = {
 export function getProviderProfile(providerId) {
     return PROVIDER_REGISTRY[providerId];
 }
+function variantMetadataKey(variant) {
+    return JSON.stringify({
+        capabilities: [...(variant.capabilities ?? [])].sort(),
+        runtimeOptions: {
+            contextLimit: variant.runtimeOptions?.contextLimit ?? null,
+            reasoningEffort: variant.runtimeOptions?.reasoningEffort ?? null,
+        },
+        runtimeConstraints: {
+            maxContextLimit: variant.runtimeConstraints?.maxContextLimit ?? null,
+            reasoningEfforts: [...(variant.runtimeConstraints?.reasoningEfforts ?? [])].sort(),
+        },
+    });
+}
+export function resolveProviderModelVariant(profile, wireModel) {
+    const matches = [profile.defaultModel, ...(profile.availableModels ?? [])]
+        .filter((variant) => variant.model === wireModel)
+        .sort((left, right) => (left.modelId.localeCompare(right.modelId)
+        || left.label.localeCompare(right.label)));
+    if (matches.length <= 1)
+        return matches[0];
+    const metadataKeys = new Set(matches.map(variantMetadataKey));
+    if (metadataKeys.size > 1) {
+        throw Object.assign(new Error(`Ambiguous model variants for ${profile.id}/${wireModel}`), { code: 'MODEL_VARIANT_AMBIGUOUS' });
+    }
+    return matches[0];
+}
 export function getProviderModelVariant(providerId, wireModel) {
     const profile = getProviderProfile(providerId);
-    return profile?.availableModels?.find((variant) => variant.model === wireModel)
-        ?? (profile?.defaultModel.model === wireModel ? profile.defaultModel : undefined);
+    return profile ? resolveProviderModelVariant(profile, wireModel) : undefined;
 }
 export function listProviderProfiles() {
     return Object.values(PROVIDER_REGISTRY);

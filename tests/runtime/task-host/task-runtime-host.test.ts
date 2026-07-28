@@ -57,6 +57,47 @@ describe('InProcessTaskRuntimeHost', () => {
     await waitFor(async () => (await host.getActiveTask()) === null);
   });
 
+  it('uses a full UUID session ID by default while preserving injected fixtures', async () => {
+    const defaultRunner = vi.fn<TaskRunner>(async () => undefined);
+    const defaultHost = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner: defaultRunner,
+      now: () => 200,
+      createTaskId: () => 'task_uuid',
+    });
+
+    const created = await defaultHost.createTask({
+      prompt: '生成 UUID 会话任务',
+      materials: [{ materialId: material.materialId }],
+    });
+    await waitFor(() => defaultRunner.mock.calls.length === 1);
+
+    const recoveredDefault = await defaultHost.recoverTask(created.taskId);
+    const defaultSessionId = recoveredDefault.snapshot.sessionId;
+    expect(defaultSessionId).toMatch(
+      /^sess_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(defaultRunner.mock.calls[0]?.[0].sessionId).toBe(defaultSessionId);
+
+    const injectedRunner = vi.fn<TaskRunner>(async () => undefined);
+    const injectedHost = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner: injectedRunner,
+      now: () => 200,
+      createTaskId: () => 'task_injected',
+      createSessionId: () => 'sess_fixture',
+    });
+    const injected = await injectedHost.createTask({
+      prompt: '保留注入 fixture',
+      materials: [{ materialId: material.materialId }],
+    });
+
+    const recoveredInjected = await injectedHost.recoverTask(injected.taskId);
+    expect(recoveredInjected.snapshot.sessionId).toBe('sess_fixture');
+  });
+
   it('prepares an execution-scoped task without starting it, then starts it exactly once', async () => {
     const runner = vi.fn<TaskRunner>(async () => undefined);
     const host = createHost(runner);

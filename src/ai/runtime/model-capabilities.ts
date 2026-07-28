@@ -22,10 +22,15 @@ export interface PromptCacheSegments {
 
 export interface ModelInvocationOptions {
   promptCache?: PromptCacheSegments;
+  cacheKey?: string;
 }
 
 export interface StreamOptions extends ModelInvocationOptions {
   signal?: AbortSignal;
+}
+
+export interface RunInvocationContext {
+  cacheKey?: string;
 }
 
 export interface ModelCapabilities {

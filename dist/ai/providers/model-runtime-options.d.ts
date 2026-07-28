@@ -12,5 +12,6 @@ interface ResolvedModelRuntimeOptions {
     runtimeConstraints?: ModelRuntimeConstraints;
 }
 export declare function isOfficialKimiK3OpenAIEndpoint(baseUrl?: string): boolean;
+export declare function canonicalizeOfficialKimiK3OpenAIEndpoint(baseUrl?: string): string | undefined;
 export declare function resolveModelRuntimeOptions(input: ResolveModelRuntimeOptionsInput): ResolvedModelRuntimeOptions;
 export {};

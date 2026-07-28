@@ -48,6 +48,7 @@ export function resolveRuntimeModelBinding(rawConfig, requestedModelId) {
     });
     return {
         providerId,
+        providerType: providerConfig.type,
         modelId,
         wireModel,
         protocol: providerConfig.protocol,

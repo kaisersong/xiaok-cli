@@ -1,11 +1,13 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
-import { join, extname, basename, dirname, resolve, relative, isAbsolute } from 'node:path';
+import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
+import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
 import { homedir, platform, arch, type } from 'node:os';
 import { spawnSync, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { bumpSkillCatalogVersion, getSkillCatalogVersion } from './skill-catalog-invalidation.js';
 import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js';
+import type { ModelInvocationOptions, StreamOptions } from '../../src/ai/runtime/model-capabilities.js';
+import { createPromptCacheAffinity } from '../../src/ai/runtime/prompt-cache-affinity.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import {
@@ -1124,9 +1126,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       : defaultDesktopRunner(input)),
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
-    // Use timestamp + random suffix to ensure unique taskId/sessionId across app restarts.
+    // Use timestamp + random suffix to ensure unique taskId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-    createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     onPersistedEvent: async input => {
       if (!artifactWorkspaceService) return;
       try {
@@ -1175,7 +1176,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-      createSessionId: () => `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
   };
 
@@ -2114,14 +2114,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         }
         const adapter = createAdapterFromBinding(binding);
         const start = Date.now();
-        // Simple test: create a minimal request to verify connection
         const testMessages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }];
-        // Use a minimal tools array to reduce overhead
-        const testTools = [{ name: 'ping', description: 'Test tool', inputSchema: { type: 'object' } }];
         const systemPrompt = 'Reply with "ok" to verify connection.';
-        // Stream just one chunk then cancel
-        for await (const _chunk of adapter.stream(testMessages, testTools, systemPrompt)) {
-          break; // Just verify first chunk works
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+          controller.abort(new DOMException('provider connection timeout', 'TimeoutError'));
+        }, 30_000);
+        let sawProtocolResponse = false;
+        try {
+          for await (const chunk of adapter.stream(
+            testMessages,
+            [],
+            systemPrompt,
+            { signal: controller.signal },
+          )) {
+            if (chunk.type === 'usage') {
+              continue;
+            }
+            sawProtocolResponse = true;
+          }
+          if (controller.signal.aborted) {
+            throw controller.signal.reason;
+          }
+          if (!sawProtocolResponse) {
+            throw new Error('provider_connection_empty_stream');
+          }
+        } finally {
+          clearTimeout(timeout);
         }
         return { success: true, latencyMs: Date.now() - start };
       } catch (e) {
@@ -4575,6 +4594,7 @@ async function streamDesktopToolLoopFinalization(input: {
   adapter: Pick<ModelAdapter, 'stream'>;
   apiMessages: Message[];
   systemPrompt: string;
+  streamOptions: StreamOptions;
   signal: AbortSignal;
   sessionId: string;
   turnId: string;
@@ -4585,7 +4605,16 @@ async function streamDesktopToolLoopFinalization(input: {
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
-  for await (const chunk of input.adapter.stream(input.apiMessages, [], input.systemPrompt)) {
+  for await (const chunk of input.adapter.stream(
+    input.apiMessages,
+    [],
+    input.systemPrompt,
+    input.streamOptions,
+  )) {
+    if (chunk.type === 'usage') {
+      input.onUsage?.(chunk);
+      continue;
+    }
     throwIfAborted(input.signal);
     if (chunk.type === 'text') {
       const lastBlock = assistantBlocks[assistantBlocks.length - 1];
@@ -4614,10 +4643,9 @@ async function streamDesktopToolLoopFinalization(input: {
       // Model violated the "no tools" finalization constraint. Ignore the tool
       // call and keep consuming the stream — accumulated text is sufficient.
       continue;
-    } else if (chunk.type === 'usage') {
-      input.onUsage?.(chunk);
     }
   }
+  throwIfAborted(input.signal);
   if (!reply.trim()) {
     throw new Error('desktop_tool_loop_finalization_empty');
   }
@@ -4628,7 +4656,7 @@ interface ToolLoopStrategies {
   compact: {
     enabled: boolean;
     shouldCompact: (inputTokens: number) => boolean;
-    doCompact: (msgs: Message[]) => Promise<void>;
+    doCompact: (msgs: Message[], streamOptions?: StreamOptions) => Promise<void>;
   };
   buildApiView: (msgs: Message[]) => Message[];
   processToolResult: (result: string, toolName: string, toolUseId: string) => string;
@@ -4643,6 +4671,7 @@ interface ToolLoopContext {
   messages: Message[];
   allToolDefs: ToolDefinition[];
   registry: ToolRegistry;
+  invocationOptions?: ModelInvocationOptions;
   signal: AbortSignal;
   taskDeadline: number;
   sessionId: string;
@@ -4670,6 +4699,90 @@ interface ArtifactWorkspaceToolAck {
   kind: string;
   mimeType?: string;
   creator: string;
+}
+
+interface KSwarmWorkflowStatusArtifact {
+  artifactId: string;
+  filePath: string;
+  label: string;
+  kind: string;
+  creator: string;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relativePath = relative(rootPath, candidatePath);
+  return Boolean(relativePath)
+    && relativePath !== '..'
+    && !relativePath.startsWith(`..${sep}`)
+    && !isAbsolute(relativePath);
+}
+
+function resolveKSwarmWorkflowStatusArtifacts(
+  toolName: string,
+  result: string,
+): KSwarmWorkflowStatusArtifact[] {
+  if (!isToolName(toolName, 'get_dynamic_workflow_status')) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result);
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed) || parsed.ok !== true) return [];
+
+  const workflowRunId = readString(parsed.workflowRunId);
+  const scriptResult = isRecord(parsed.scriptResult) ? parsed.scriptResult : null;
+  if (!workflowRunId || !scriptResult || !Array.isArray(scriptResult.artifacts)) return [];
+
+  const workspaceValue = readString(scriptResult.workspacePath) || readString(scriptResult.workFolder);
+  if (!workspaceValue || !isAbsolute(workspaceValue)) return [];
+
+  let workspacePath: string;
+  let artifactsPath: string;
+  try {
+    workspacePath = realpathSync(resolve(workspaceValue));
+    artifactsPath = realpathSync(join(workspacePath, 'artifacts'));
+    if (!statSync(artifactsPath).isDirectory() || !isPathInside(workspacePath, artifactsPath)) return [];
+  } catch {
+    return [];
+  }
+
+  const creator = readString(scriptResult.producerAgent) || 'kswarm';
+  const seen = new Set<string>();
+  const artifacts: KSwarmWorkflowStatusArtifact[] = [];
+
+  for (const rawArtifact of scriptResult.artifacts) {
+    if (!isRecord(rawArtifact)) continue;
+    const rawPath = readString(rawArtifact.path) || readString(rawArtifact.relativePath);
+    if (!rawPath || rawPath.includes('\0')) continue;
+
+    try {
+      const candidatePath = isAbsolute(rawPath)
+        ? resolve(rawPath)
+        : resolve(workspacePath, rawPath);
+      const filePath = realpathSync(candidatePath);
+      if (!isPathInside(artifactsPath, filePath) || !statSync(filePath).isFile()) continue;
+      accessSync(filePath, fsConstants.R_OK);
+      if (seen.has(filePath)) continue;
+      seen.add(filePath);
+
+      const label = readString(rawArtifact.label) || basename(filePath);
+      const kind = inferKSwarmArtifactKind(
+        readString(rawArtifact.kind) || kindFromFilename(label),
+        label,
+      );
+      const artifactId = `artifact_${createHash('sha256')
+        .update(`${workflowRunId}:${filePath}`)
+        .digest('hex')
+        .slice(0, 20)}`;
+      artifacts.push({ artifactId, filePath, label, kind, creator });
+    } catch {
+      // Each artifact is independently default-denied.
+    }
+  }
+
+  return artifacts;
 }
 
 function parseArtifactWorkspaceToolAck(result: string): ArtifactWorkspaceToolAck | null {
@@ -4710,6 +4823,10 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
   skillTriggerType: 'slash_command' | 'tool_call' | 'auto';
   skillInvocation: SkillInvocation | null;
 }> {
+  const streamOptions: StreamOptions = {
+    ...ctx.invocationOptions,
+    signal: ctx.signal,
+  };
   let reply = '';
   let iteration = 0;
   let totalToolCalls = 0;
@@ -4758,12 +4875,27 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     const assistantBlocks: MessageBlock[] = [];
 
     if (ctx.strategies.compact.enabled && iteration > 1 && ctx.strategies.compact.shouldCompact(lastRequestInputTokens)) {
-      await ctx.strategies.compact.doCompact(ctx.messages);
+      await ctx.strategies.compact.doCompact(ctx.messages, streamOptions);
     }
 
     const apiMessages = ctx.strategies.buildApiView(ctx.messages);
     lastRequestInputTokens = 0;
-    for await (const chunk of ctx.adapter.stream(apiMessages, ctx.allToolDefs, ctx.systemPrompt)) {
+    for await (const chunk of ctx.adapter.stream(
+      apiMessages,
+      ctx.allToolDefs,
+      ctx.systemPrompt,
+      streamOptions,
+    )) {
+      if (chunk.type === 'usage') {
+        try {
+          const inputTkns = chunk.usage?.inputTokens ?? 0;
+          lastRequestInputTokens = inputTkns;
+          totalInputTokens += inputTkns;
+          totalOutputTokens += chunk.usage?.outputTokens ?? 0;
+          ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
+        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
+        continue;
+      }
       throwIfAborted(ctx.signal);
       if (chunk.type === 'text') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
@@ -4783,16 +4915,9 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         } else {
           assistantBlocks.push({ type: 'thinking', thinking: chunk.delta });
         }
-      } else if (chunk.type === 'usage') {
-        try {
-          const inputTkns = chunk.usage?.inputTokens ?? 0;
-          lastRequestInputTokens = inputTkns;
-          totalInputTokens += inputTkns;
-          totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
       }
     }
+    throwIfAborted(ctx.signal);
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
     const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
     if (toolCalls.length === 0) {
@@ -4950,7 +5075,33 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           });
         }
       }
-      if (ok && !artifactEventEmitted && !isToolName(toolCall.name, 'write') && !isToolName(toolCall.name, 'render_ui')) {
+      const workflowStatusArtifacts = ok && !artifactEventEmitted
+        ? resolveKSwarmWorkflowStatusArtifacts(toolCall.name, result)
+        : [];
+      if (workflowStatusArtifacts.length > 0) {
+        artifactEventEmitted = true;
+        for (const artifact of workflowStatusArtifacts) {
+          ctx.emitRuntimeEvent({
+            type: 'artifact_recorded',
+            sessionId: ctx.sessionId,
+            turnId: ctx.turnId,
+            intentId: ctx.intentId,
+            stageId: ctx.stepId,
+            artifactId: artifact.artifactId,
+            label: artifact.label,
+            kind: artifact.kind,
+            path: artifact.filePath,
+            creator: artifact.creator,
+          });
+        }
+      }
+      if (
+        ok
+        && !artifactEventEmitted
+        && !isToolName(toolCall.name, 'write')
+        && !isToolName(toolCall.name, 'render_ui')
+        && !isToolName(toolCall.name, 'get_dynamic_workflow_status')
+      ) {
         const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
         if (filePath) {
           ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
@@ -5003,6 +5154,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       adapter: ctx.adapter,
       apiMessages: ctx.strategies.buildApiView(ctx.messages),
       systemPrompt: ctx.systemPrompt,
+      streamOptions,
       signal: ctx.signal,
       sessionId: ctx.sessionId,
       turnId: ctx.turnId,
@@ -5878,6 +6030,10 @@ export function createDesktopModelRunnerWithRegistry(
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
     const taskStartTime = Date.now();
+    const cacheKey = createPromptCacheAffinity(sessionId);
+    const invocationOptions: ModelInvocationOptions | undefined = cacheKey
+      ? { cacheKey }
+      : undefined;
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
     if (!runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
@@ -5976,6 +6132,7 @@ export function createDesktopModelRunnerWithRegistry(
       messages,
       allToolDefs,
       registry,
+      invocationOptions,
       signal,
       taskDeadline: Date.now() + TASK_TIMEOUT_MS,
       sessionId,
@@ -5996,7 +6153,7 @@ export function createDesktopModelRunnerWithRegistry(
         compact: {
           enabled: false,
           shouldCompact: () => false,
-          doCompact: async () => {},
+          doCompact: async (_messages, _streamOptions) => {},
         },
         buildApiView: (msgs) => msgs,
         processToolResult: (result) => result.slice(0, 50000),

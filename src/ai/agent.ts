@@ -13,6 +13,7 @@ import { AgentRuntime } from './runtime/agent-runtime.js';
 import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
 import type { MemoryStore } from './memory/store.js';
+import type { RunInvocationContext } from './runtime/model-capabilities.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
 
@@ -43,7 +44,12 @@ export class Agent {
     this.runtime = this.createRuntime();
   }
 
-  async runTurn(userInput: string | MessageBlock[], onChunk: OnChunk, signal?: AbortSignal): Promise<void> {
+  async runTurn(
+    userInput: string | MessageBlock[],
+    onChunk: OnChunk,
+    signal?: AbortSignal,
+    invocationContext?: RunInvocationContext,
+  ): Promise<void> {
     if (signal?.aborted) {
       throw new DOMException('agent aborted', 'AbortError');
     }
@@ -61,6 +67,7 @@ export class Agent {
         }
       },
       signal,
+      invocationContext,
     );
   }
 
@@ -70,7 +77,7 @@ export class Agent {
   }
 
   forceCompact(): CompactionRecord | null {
-    return this.session.forceCompact('[context compacted]');
+    return this.session.forceCompact();
   }
 
   getUsage(): UsageStats {

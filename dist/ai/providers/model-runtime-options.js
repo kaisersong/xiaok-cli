@@ -24,6 +24,11 @@ export function isOfficialKimiK3OpenAIEndpoint(baseUrl) {
         return false;
     }
 }
+export function canonicalizeOfficialKimiK3OpenAIEndpoint(baseUrl) {
+    return isOfficialKimiK3OpenAIEndpoint(baseUrl)
+        ? KIMI_K3_OPENAI_ENDPOINT
+        : baseUrl;
+}
 function cloneConstraints(constraints) {
     return {
         ...constraints,

@@ -13,3 +13,5 @@ export declare class OpenAIResponsesAdapter implements ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     private streamOnce;
 }
+export declare function isGlobalPublicOpenAIResponsesBaseUrl(baseUrl?: string): boolean;
+export declare function buildResponsesInput(messages: Message[], systemPrompt: string): Array<Record<string, unknown>>;

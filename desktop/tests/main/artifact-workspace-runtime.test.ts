@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner } from '../../../src/runtime/task-host/task-runtime-host.js';
@@ -13,7 +13,78 @@ import {
 } from '../../electron/artifact-workspace-tools.js';
 import type { Tool, ToolExecutionContext } from '../../../src/types.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
+import type { ModelInvocationOptions, StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import { createDesktopModelRunnerWithRegistry, runDesktopToolLoop } from '../../electron/desktop-services.js';
+
+async function runWorkflowStatusProjection(input: {
+  toolName?: string;
+  result: Record<string, unknown>;
+  dataRoot: string;
+}): Promise<Array<Record<string, unknown>>> {
+  const toolName = input.toolName ?? 'get_dynamic_workflow_status';
+  const statusTool: Tool = {
+    permission: 'safe',
+    definition: {
+      name: toolName,
+      description: 'test workflow status',
+      inputSchema: { type: 'object', properties: {} },
+    },
+    async execute() {
+      return JSON.stringify(input.result);
+    },
+  };
+  const registry = new ToolRegistry({ autoMode: true }, [statusTool]);
+  const emitted: Array<Record<string, unknown>> = [];
+  let streamCall = 0;
+
+  await runDesktopToolLoop({
+    adapter: {
+      async *stream() {
+        streamCall += 1;
+        if (streamCall === 1) {
+          yield {
+            type: 'tool_use' as const,
+            id: 'call-workflow-status',
+            name: toolName,
+            input: { projectId: 'project-1', workflowRunId: 'workflow-1' },
+          };
+          return;
+        }
+        yield { type: 'text' as const, delta: 'done' };
+      },
+    },
+    systemPrompt: 'test',
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'inspect workflow' }] }],
+    allToolDefs: registry.getToolDefinitions(),
+    registry,
+    signal: new AbortController().signal,
+    taskDeadline: Date.now() + 30_000,
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    intentId: 'intent-1',
+    stepId: 'step-1',
+    taskId: 'task-1',
+    materials: [],
+    emitRuntimeEvent(event) {
+      emitted.push(event as unknown as Record<string, unknown>);
+    },
+    skillInvocation: null,
+    skillCatalog: {} as never,
+    dataRoot: input.dataRoot,
+    taskStartTime: Date.now(),
+    maxIterations: 2,
+    strategies: {
+      compact: { enabled: false, shouldCompact: () => false, doCompact: async () => {} },
+      buildApiView: messages => messages,
+      processToolResult: result => result,
+      trackAutoProgress: false,
+      trackReferenceReads: false,
+      emitSkillArtifactTrace: false,
+    },
+  });
+
+  return emitted;
+}
 
 describe('artifact workspace runtime contract', () => {
   let rootDir: string;
@@ -163,6 +234,367 @@ describe('artifact workspace runtime contract', () => {
     expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'cancelled' });
     expect((await host.recoverTask(created.taskId)).snapshot.events.at(-1))
       .toEqual({ type: 'task_terminal', status: 'cancelled' });
+  });
+});
+
+describe('KSwarm workflow status artifact projection', () => {
+  let workspaceRoot: string;
+  let artifactsDir: string;
+
+  beforeEach(() => {
+    workspaceRoot = join(tmpdir(), `xiaok-workflow-status-artifacts-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    artifactsDir = join(workspaceRoot, 'artifacts');
+    mkdirSync(artifactsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  });
+
+  it('records every valid workflow artifact without claiming the status task created the files', async () => {
+    const htmlPath = join(artifactsDir, 'report.html');
+    const markdownPath = join(artifactsDir, 'report.md');
+    const outsidePath = join(tmpdir(), `xiaok-workflow-status-direct-escape-${Date.now()}.html`);
+    writeFileSync(htmlPath, '<!doctype html><title>Report</title>');
+    writeFileSync(markdownPath, '# Report');
+    writeFileSync(outsidePath, '<!doctype html><title>Outside</title>');
+    const canonicalHtmlPath = realpathSync(htmlPath);
+    const canonicalMarkdownPath = realpathSync(markdownPath);
+
+    const workflowResult = {
+      ok: true,
+      projectId: 'project-1',
+      workflowRunId: 'workflow-1',
+      status: 'completed',
+      diagnostics: 'x'.repeat(12_000),
+      scriptResult: {
+        workspacePath: workspaceRoot,
+        producerAgent: 'xiaok-worker',
+        artifacts: [
+          { path: 'artifacts/report.html', kind: 'html', label: 'report.html' },
+          { path: 'artifacts/report.md', kind: 'markdown', label: 'report.md' },
+          { path: 'artifacts/report.html', kind: 'html', label: 'duplicate.html' },
+          { path: relative(workspaceRoot, outsidePath), kind: 'html', label: 'relative-outside.html' },
+          { path: outsidePath, kind: 'html', label: 'absolute-outside.html' },
+          { path: 'artifacts/missing.html', kind: 'html', label: 'missing.html' },
+        ],
+      },
+    };
+
+    try {
+      const emitted = await runWorkflowStatusProjection({
+        dataRoot: workspaceRoot,
+        result: workflowResult,
+      });
+      const artifactEvents = emitted.filter(event => event.type === 'artifact_recorded');
+
+      expect(artifactEvents).toEqual([
+        expect.objectContaining({
+          artifactId: expect.stringMatching(/^artifact_[a-f0-9]{20}$/),
+          path: canonicalHtmlPath,
+          kind: 'html',
+          label: 'report.html',
+          creator: 'xiaok-worker',
+        }),
+        expect.objectContaining({
+          artifactId: expect.stringMatching(/^artifact_[a-f0-9]{20}$/),
+          path: canonicalMarkdownPath,
+          kind: 'markdown',
+          label: 'report.md',
+          creator: 'xiaok-worker',
+        }),
+      ]);
+      expect(artifactEvents[0]?.artifactId).not.toBe(artifactEvents[1]?.artifactId);
+      expect(emitted.filter(event => event.type === 'file_changed')).toEqual([]);
+
+      const repeated = await runWorkflowStatusProjection({
+        dataRoot: workspaceRoot,
+        result: workflowResult,
+      });
+      expect(repeated.filter(event => event.type === 'artifact_recorded').map(event => event.artifactId))
+        .toEqual(artifactEvents.map(event => event.artifactId));
+    } finally {
+      rmSync(outsidePath, { force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects an artifacts symlink that resolves outside the workspace', async () => {
+    const validPath = join(artifactsDir, 'valid.html');
+    const outsidePath = join(tmpdir(), `xiaok-workflow-status-outside-${Date.now()}.html`);
+    const escapedPath = join(artifactsDir, 'escaped.html');
+    writeFileSync(validPath, '<!doctype html><title>Valid</title>');
+    writeFileSync(outsidePath, '<!doctype html><title>Outside</title>');
+    symlinkSync(outsidePath, escapedPath);
+    const canonicalValidPath = realpathSync(validPath);
+
+    try {
+      const emitted = await runWorkflowStatusProjection({
+        dataRoot: workspaceRoot,
+        result: {
+          ok: true,
+          workflowRunId: 'workflow-1',
+          scriptResult: {
+            workFolder: workspaceRoot,
+            artifacts: [
+              { path: 'artifacts/valid.html', kind: 'html' },
+              { path: 'artifacts/escaped.html', kind: 'html' },
+            ],
+          },
+        },
+      });
+
+      expect(emitted.filter(event => event.type === 'artifact_recorded')).toEqual([
+        expect.objectContaining({ path: canonicalValidPath, label: 'valid.html' }),
+      ]);
+    } finally {
+      rmSync(outsidePath, { force: true });
+    }
+  });
+
+  it('ignores artifact-shaped output from other tools', async () => {
+    const htmlPath = join(artifactsDir, 'report.html');
+    writeFileSync(htmlPath, '<!doctype html><title>Report</title>');
+
+    const emitted = await runWorkflowStatusProjection({
+      toolName: 'inspect_project',
+      dataRoot: workspaceRoot,
+      result: {
+        ok: true,
+        workflowRunId: 'workflow-1',
+        scriptResult: {
+          workspacePath: workspaceRoot,
+          artifacts: [{ path: 'artifacts/report.html', kind: 'html' }],
+        },
+      },
+    });
+
+    expect(emitted.filter(event => event.type === 'artifact_recorded')).toEqual([]);
+  });
+
+  it('does not let an invalid status artifact escape through the generic output_path fallback', async () => {
+    const fallbackPath = join(workspaceRoot, 'fallback.html');
+    writeFileSync(fallbackPath, '<!doctype html><title>Fallback</title>');
+
+    const emitted = await runWorkflowStatusProjection({
+      dataRoot: workspaceRoot,
+      result: {
+        ok: true,
+        workflowRunId: 'workflow-1',
+        output_path: fallbackPath,
+        scriptResult: {
+          workspacePath: workspaceRoot,
+          artifacts: [{ path: '../outside.html', kind: 'html' }],
+        },
+      },
+    });
+
+    expect(emitted.filter(event => event.type === 'artifact_recorded')).toEqual([]);
+    expect(emitted.filter(event => event.type === 'file_changed')).toEqual([]);
+  });
+});
+
+describe('desktop tool loop invocation and consumer ordering', () => {
+  let rootDir: string;
+  let registry: ToolRegistry;
+
+  beforeEach(() => {
+    rootDir = join(tmpdir(), `xiaok-desktop-tool-loop-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rootDir, { recursive: true });
+    registry = new ToolRegistry({ autoMode: true }, [{
+      permission: 'read',
+      definition: {
+        name: 'noop',
+        description: 'Return a deterministic tool result',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      async execute() {
+        return JSON.stringify({ ok: true });
+      },
+    }]);
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  function baseContext() {
+    return {
+      systemPrompt: 'system',
+      messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'run' }] }],
+      allToolDefs: registry.getToolDefinitions(),
+      registry,
+      signal: new AbortController().signal,
+      taskDeadline: Date.now() + 30_000,
+      sessionId: 'sess_123e4567-e89b-42d3-a456-426614174000',
+      turnId: 'turn-1',
+      intentId: 'intent-1',
+      stepId: 'step-1',
+      taskId: 'task-1',
+      materials: [],
+      emitRuntimeEvent: vi.fn(),
+      skillInvocation: null,
+      skillCatalog: {} as never,
+      dataRoot: rootDir,
+      taskStartTime: Date.now(),
+      strategies: {
+        compact: {
+          enabled: false,
+          shouldCompact: () => false,
+          doCompact: async (_messages: unknown, _options?: StreamOptions) => {},
+        },
+        buildApiView: (messages: Parameters<typeof runDesktopToolLoop>[0]['messages']) => messages,
+        processToolResult: (result: string) => result,
+        trackAutoProgress: false,
+        trackReferenceReads: false,
+        emitSkillArtifactTrace: false,
+      },
+    };
+  }
+
+  it('reuses one current-signal StreamOptions object for compact, main, and finalization', async () => {
+    const currentController = new AbortController();
+    const staleController = new AbortController();
+    const cacheKey = `pc1_${'a'.repeat(64)}`;
+    const streamOptions: Array<StreamOptions | undefined> = [];
+    const streamTools: string[][] = [];
+    const compactOptions: Array<StreamOptions | undefined> = [];
+    let streamCall = 0;
+    const context = baseContext();
+
+    const result = await runDesktopToolLoop({
+      ...context,
+      signal: currentController.signal,
+      invocationOptions: {
+        cacheKey,
+        signal: staleController.signal,
+      } as ModelInvocationOptions,
+      maxIterations: 2,
+      adapter: {
+        async *stream(_messages, tools, _systemPrompt, options) {
+          streamCall += 1;
+          streamOptions.push(options);
+          streamTools.push(tools.map(tool => tool.name));
+          if (streamCall === 1) {
+            yield { type: 'usage' as const, usage: { inputTokens: 10, outputTokens: 1 } };
+            yield { type: 'tool_use' as const, id: 'call-1', name: 'noop', input: {} };
+            return;
+          }
+          if (streamCall === 2) {
+            yield { type: 'tool_use' as const, id: 'call-2', name: 'noop', input: {} };
+            return;
+          }
+          yield { type: 'text' as const, delta: 'final' };
+          yield { type: 'done' as const };
+        },
+      },
+      strategies: {
+        ...context.strategies,
+        compact: {
+          enabled: true,
+          shouldCompact: inputTokens => inputTokens === 10,
+          doCompact: async (_messages, options) => {
+            compactOptions.push(options);
+          },
+        },
+      },
+    });
+
+    expect(result.reply).toBe('final');
+    expect(streamOptions).toHaveLength(3);
+    expect(streamOptions[0]).toBe(streamOptions[1]);
+    expect(streamOptions[1]).toBe(streamOptions[2]);
+    expect(compactOptions).toEqual([streamOptions[0]]);
+    expect(streamOptions[0]).toEqual({
+      cacheKey,
+      signal: currentController.signal,
+    });
+    expect(streamOptions[0]?.signal).not.toBe(staleController.signal);
+    const expectedMainTools = context.allToolDefs.map(tool => tool.name);
+    expect(streamTools).toEqual([expectedMainTools, expectedMainTools, []]);
+  });
+
+  it('accounts main-stream usage once before propagating the same pending AbortError', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('main aborted', 'AbortError');
+    const usage = vi.fn();
+    const context = baseContext();
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      signal: controller.signal,
+      adapter: {
+        async *stream() {
+          controller.abort(sentinel);
+          yield { type: 'usage' as const, usage: { inputTokens: 12, outputTokens: 3 } };
+          throw sentinel;
+        },
+      },
+      onUsage: usage,
+    });
+
+    await expect(execution).rejects.toBe(sentinel);
+    expect(usage).toHaveBeenCalledTimes(1);
+    expect(usage).toHaveBeenCalledWith(12, 3);
+    expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'assistant_delta' }),
+    );
+    expect(context.messages).toHaveLength(1);
+  });
+
+  it('accounts finalization usage once before propagating the same pending AbortError', async () => {
+    const controller = new AbortController();
+    const sentinel = new DOMException('finalization aborted', 'AbortError');
+    const usage = vi.fn();
+    const context = baseContext();
+    let streamCall = 0;
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      signal: controller.signal,
+      maxIterations: 1,
+      adapter: {
+        async *stream() {
+          streamCall += 1;
+          if (streamCall === 1) {
+            yield { type: 'tool_use' as const, id: 'call-1', name: 'noop', input: {} };
+            return;
+          }
+          controller.abort(sentinel);
+          yield { type: 'usage' as const, usage: { inputTokens: 21, outputTokens: 5 } };
+          throw sentinel;
+        },
+      },
+      onUsage: usage,
+    });
+
+    await expect(execution).rejects.toBe(sentinel);
+    expect(usage).toHaveBeenCalledTimes(1);
+    expect(usage).toHaveBeenCalledWith(21, 5);
+    expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'assistant_delta' }),
+    );
+  });
+
+  it('checks abort after usage-only clean exhaustion before committing an assistant turn', async () => {
+    const controller = new AbortController();
+    const usage = vi.fn();
+    const context = baseContext();
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      signal: controller.signal,
+      adapter: {
+        async *stream() {
+          yield { type: 'usage' as const, usage: { inputTokens: 8, outputTokens: 0 } };
+          controller.abort('user_cancelled');
+        },
+      },
+      onUsage: usage,
+    });
+
+    await expect(execution).rejects.toThrow('task cancelled');
+    expect(usage).toHaveBeenCalledTimes(1);
+    expect(context.messages).toHaveLength(1);
   });
 });
 

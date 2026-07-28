@@ -117,6 +117,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
         body: JSON.stringify({
           model: this.model,
           input: buildResponsesInput(messages, systemPrompt),
+          ...(isGlobalPublicOpenAIResponsesBaseUrl(this.baseUrl) ? { store: false } : {}),
           tools: tools.length > 0
             ? tools.map((tool) => ({
                 type: 'function',
@@ -141,18 +142,20 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
 
     const result = await response.json() as ResponsesResult;
 
-    const textChunks: string[] = [];
     for (const item of result.output ?? []) {
       if (item.type === 'message') {
         for (const content of item.content ?? []) {
           if (content.type === 'output_text' && content.text) {
-            textChunks.push(content.text);
+            yield { type: 'text', delta: content.text };
           }
         }
         continue;
       }
 
       if (item.type === 'function_call') {
+        if (!item.call_id || !item.name) {
+          throw new Error('Invalid Responses function_call: missing call_id or name');
+        }
         let input: Record<string, unknown> = {};
         try {
           input = JSON.parse(item.arguments ?? '{}');
@@ -161,15 +164,11 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
         }
         yield {
           type: 'tool_use',
-          id: item.call_id ?? `${item.name ?? 'function'}_call`,
-          name: item.name ?? 'function',
+          id: item.call_id,
+          name: item.name,
           input,
         };
       }
-    }
-
-    if (textChunks.length > 0) {
-      yield { type: 'text', delta: textChunks.join('') };
     }
 
     yield {
@@ -183,6 +182,11 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
   }
 }
 
+export function isGlobalPublicOpenAIResponsesBaseUrl(baseUrl?: string): boolean {
+  return baseUrl === 'https://api.openai.com/v1'
+    || baseUrl === 'https://api.openai.com/v1/';
+}
+
 function ensureTrailingSlash(baseUrl?: string): string {
   if (!baseUrl) {
     throw new Error('openai_responses 协议需要配置 baseUrl');
@@ -191,7 +195,7 @@ function ensureTrailingSlash(baseUrl?: string): string {
   return baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
 }
 
-function buildResponsesInput(messages: Message[], systemPrompt: string): Array<Record<string, unknown>> {
+export function buildResponsesInput(messages: Message[], systemPrompt: string): Array<Record<string, unknown>> {
   const items: Array<Record<string, unknown>> = [
     {
       role: 'system',
@@ -200,26 +204,49 @@ function buildResponsesInput(messages: Message[], systemPrompt: string): Array<R
   ];
 
   for (const message of messages) {
-    const content: Array<Record<string, unknown>> = [];
+    let content: Array<Record<string, unknown>> = [];
+    const flushMessage = (): void => {
+      if (content.length === 0) return;
+      items.push({
+        role: message.role,
+        content,
+      });
+      content = [];
+    };
+
     for (const block of message.content) {
       if (block.type === 'text') {
         content.push({ type: 'input_text', text: block.text });
         continue;
       }
-      if (block.type === 'tool_result') {
+      if (block.type === 'image') {
         content.push({
-          type: 'input_text',
-          text: block.content,
+          type: 'input_image',
+          image_url: `data:${block.source.media_type};base64,${block.source.data}`,
+        });
+        continue;
+      }
+      if (block.type === 'tool_use') {
+        flushMessage();
+        items.push({
+          type: 'function_call',
+          call_id: block.id,
+          name: block.name,
+          arguments: JSON.stringify(block.input),
+        });
+        continue;
+      }
+      if (block.type === 'tool_result') {
+        flushMessage();
+        items.push({
+          type: 'function_call_output',
+          call_id: block.tool_use_id,
+          output: block.content,
         });
       }
     }
 
-    if (content.length > 0) {
-      items.push({
-        role: message.role,
-        content,
-      });
-    }
+    flushMessage();
   }
 
   return items;

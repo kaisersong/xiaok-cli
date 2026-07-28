@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ModelAdapter, Message, StreamChunk } from '../../../src/types.js';
 import { CompactRunner } from '../../../src/ai/runtime/compact-runner.js';
+import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 
 async function* textStream(text: string): AsyncIterable<StreamChunk> {
   yield { type: 'text', delta: text };
@@ -47,20 +48,50 @@ describe('CompactRunner', () => {
     expect(capturedTools).toEqual([]);
   });
 
-  it('passes abort signal through to adapter stream options', async () => {
-    let capturedSignal: AbortSignal | undefined;
+  it('passes the exact stream options object through to adapter', async () => {
+    let capturedOptions: StreamOptions | undefined;
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
       stream: (_messages, _tools, _systemPrompt, options) => {
-        capturedSignal = (options as { signal?: AbortSignal } | undefined)?.signal;
+        capturedOptions = options;
         return textStream('summary');
       },
     };
 
     const controller = new AbortController();
+    const streamOptions: StreamOptions = {
+      signal: controller.signal,
+      cacheKey: `pc1_${'a'.repeat(64)}`,
+    };
     const runner = new CompactRunner(adapter);
-    await runner.run([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], controller.signal);
+    const run = runner.run.bind(runner) as (
+      messages: Message[],
+      options?: StreamOptions,
+    ) => Promise<string>;
+    await run(
+      [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      streamOptions,
+    );
 
-    expect(capturedSignal).toBe(controller.signal);
+    expect(capturedOptions).toBe(streamOptions);
+  });
+
+  it('drains usage and rethrows the same pending adapter error', async () => {
+    const sentinel = new Error('compact pending error');
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: async function* () {
+        yield {
+          type: 'usage',
+          usage: { inputTokens: 9, outputTokens: 2 },
+        };
+        throw sentinel;
+      },
+    };
+    const runner = new CompactRunner(adapter);
+
+    await expect(runner.run([
+      { role: 'user', content: [{ type: 'text', text: 'summarize me' }] },
+    ])).rejects.toBe(sentinel);
   });
 });

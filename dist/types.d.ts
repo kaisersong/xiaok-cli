@@ -2,17 +2,14 @@ import type { MessageBlock } from './ai/runtime/blocks.js';
 import type { UsageStats } from './ai/runtime/usage.js';
 import type { RuntimeEvent } from './runtime/events.js';
 import type { AgentSessionSnapshot } from './ai/runtime/session.js';
-import type { PromptCacheSegments } from './ai/runtime/model-capabilities.js';
+import type { PromptCacheSegments, StreamOptions } from './ai/runtime/model-capabilities.js';
 import type { PromptSnapshot } from './ai/prompts/types.js';
 import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
 import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types.js';
 import type { ArtifactWorkspaceExecutionScope } from './runtime/task-host/types.js';
 export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
-    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: {
-        promptCache?: PromptCacheSegments;
-        signal?: AbortSignal;
-    }): AsyncIterable<StreamChunk>;
+    stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     getModelName(): string;
 }
 export type StreamChunk = {

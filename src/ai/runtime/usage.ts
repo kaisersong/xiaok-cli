@@ -154,11 +154,22 @@ function isModelPricing(value: unknown): value is ModelPricing {
   );
 }
 
+const MAX_COMPACTION_SUMMARY_CHARS = 8_000;
+const MAX_COMPACTION_SUMMARY_ITEM_CHARS = 512;
+const MIN_COMPACTION_REDUCTION_RATIO = 0.05;
+
+function boundSummaryItem(value: string, maxChars = MAX_COMPACTION_SUMMARY_ITEM_CHARS): string {
+  if (value.length <= maxChars) return value;
+  const tailChars = Math.min(128, Math.floor(maxChars / 4));
+  const headChars = maxChars - tailChars - 1;
+  return `${value.slice(0, headChars)}…${value.slice(-tailChars)}`;
+}
+
 function takeUnique(entries: string[], maxItems: number): string[] {
   const seen = new Set<string>();
   const results: string[] = [];
   for (const entry of entries) {
-    const normalized = entry.trim();
+    const normalized = boundSummaryItem(entry.trim());
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     results.push(normalized);
@@ -202,32 +213,74 @@ export function summarizeMessagesForCompaction(messages: Message[]): CompactionS
   }
 
   return {
-    text: lines.join('\n'),
+    text: lines.join('\n').slice(0, MAX_COMPACTION_SUMMARY_CHARS),
     replacedMessages: messages.length,
   };
 }
 
-export function compactMessages(
-  messages: Message[],
-  placeholder = '[context compacted]',
-  keepRecent = 2,
-): { messages: Message[]; summary: CompactionSummary } {
-  if (messages.length <= keepRecent) {
-    return {
-      messages,
-      summary: {
-        text: placeholder,
-        replacedMessages: 0,
-      },
+export type CompactionPlanInvalidReason =
+  | 'unpaired_tool_result'
+  | 'duplicate_tool_call_id';
+
+export interface CompactionPlan {
+  sourceRevision: number;
+  sourceMessageCount: number;
+  messagesToSummarize: Message[];
+  messagesToRetain: Message[];
+  replacedMessages: number;
+  invalidReason?: CompactionPlanInvalidReason;
+}
+
+export type CompactionPlanApplyResult =
+  | {
+      status: 'compacted';
+      messages: Message[];
+      summary: CompactionSummary;
+    }
+  | {
+      status: 'no_gain';
+      messages: Message[];
+      summary: CompactionSummary;
     };
+
+export function planCompaction(
+  messages: Message[],
+  sourceRevision = 0,
+  keepRecent = 2,
+): CompactionPlan {
+  if (!Number.isFinite(keepRecent) || !Number.isInteger(keepRecent) || keepRecent < 0) {
+    throw new RangeError('keepRecent must be a non-negative finite integer');
   }
 
-  // Find tool_use_ids in the recent messages that need corresponding tool_use messages
-  const recentMessages = messages.slice(-keepRecent);
+  const snapshot = structuredClone(messages);
+  const basePlan = {
+    sourceRevision,
+    sourceMessageCount: snapshot.length,
+  };
+
+  const toolCallIndexes = new Map<string, number>();
+  for (let messageIndex = 0; messageIndex < snapshot.length; messageIndex += 1) {
+    const message = snapshot[messageIndex]!;
+    for (const block of message.content) {
+      if (block.type !== 'tool_use') continue;
+      if (toolCallIndexes.has(block.id)) {
+        return {
+          ...basePlan,
+          messagesToSummarize: [],
+          messagesToRetain: snapshot,
+          replacedMessages: 0,
+          invalidReason: 'duplicate_tool_call_id',
+        };
+      }
+      toolCallIndexes.set(block.id, messageIndex);
+    }
+  }
+
+  const initialKeepIndex = Math.max(0, snapshot.length - keepRecent);
+  const recentMessages = snapshot.slice(initialKeepIndex);
   const toolResultIds = new Set<string>();
 
   for (const msg of recentMessages) {
-    // tool_result blocks are inside user messages (not separate 'tool' role messages)
     if (msg.role === 'user') {
       for (const block of msg.content) {
         if (block.type === 'tool_result') {
@@ -237,39 +290,133 @@ export function compactMessages(
     }
   }
 
-  // Find the earliest assistant message containing these tool_use_ids
-  let additionalKeep = 0;
-  if (toolResultIds.size > 0) {
-    // Scan backwards from the cutoff point to find tool_use messages
-    const cutoffIndex = messages.length - keepRecent;
-    for (let i = cutoffIndex - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role === 'assistant') {
-        for (const block of msg.content) {
-          if (block.type === 'tool_use' && toolResultIds.has(block.id)) {
-            // Need to keep from this message onwards
-            additionalKeep = cutoffIndex - i;
-            break;
-          }
-        }
-        if (additionalKeep > 0) break;
-      }
+  let keepFromIndex = initialKeepIndex;
+  for (const toolResultId of toolResultIds) {
+    const callIndex = toolCallIndexes.get(toolResultId);
+    if (callIndex === undefined) {
+      return {
+        ...basePlan,
+        messagesToSummarize: [],
+        messagesToRetain: snapshot,
+        replacedMessages: 0,
+        invalidReason: 'unpaired_tool_result',
+      };
+    }
+    if (callIndex < keepFromIndex) {
+      keepFromIndex = callIndex;
     }
   }
 
-  const actualKeepRecent = keepRecent + additionalKeep;
-  const compactedMessages = messages.slice(0, -actualKeepRecent);
-  const summary = summarizeMessagesForCompaction(compactedMessages);
+  const messagesToSummarize = snapshot.slice(0, keepFromIndex);
+  const messagesToRetain = snapshot.slice(keepFromIndex);
+  return {
+    ...basePlan,
+    messagesToSummarize,
+    messagesToRetain,
+    replacedMessages: messagesToSummarize.length,
+  };
+}
+
+function buildCompactedMessages(summaryText: string, retainedMessages: Message[]): Message[] {
+  return [
+    {
+      role: 'user',
+      content: [{ type: 'text', text: summaryText }],
+    },
+    ...structuredClone(retainedMessages),
+  ];
+}
+
+function yieldsMeaningfulReduction(beforeTokens: number, afterTokens: number): boolean {
+  if (beforeTokens <= 0) return false;
+  return afterTokens <= beforeTokens * (1 - MIN_COMPACTION_REDUCTION_RATIO);
+}
+
+export function applyCompactionPlan(
+  plan: CompactionPlan,
+  summaryText?: string,
+): CompactionPlanApplyResult {
+  const sourceMessages = [
+    ...structuredClone(plan.messagesToSummarize),
+    ...structuredClone(plan.messagesToRetain),
+  ];
+  const deterministic = summarizeMessagesForCompaction(plan.messagesToSummarize);
+
+  if (plan.invalidReason || plan.replacedMessages <= 0) {
+    return {
+      status: 'no_gain',
+      messages: sourceMessages,
+      summary: {
+        text: deterministic.text,
+        replacedMessages: 0,
+      },
+    };
+  }
+
+  const beforeTokens = estimateTokens(sourceMessages);
+  const normalizedSummary = summaryText?.trim() ?? '';
+  const candidates: string[] = [];
+  if (normalizedSummary && normalizedSummary.length <= MAX_COMPACTION_SUMMARY_CHARS) {
+    candidates.push(normalizedSummary);
+  }
+  if (!candidates.includes(deterministic.text)) {
+    candidates.push(deterministic.text);
+  }
+
+  for (const candidate of candidates) {
+    const compactedMessages = buildCompactedMessages(candidate, plan.messagesToRetain);
+    if (yieldsMeaningfulReduction(beforeTokens, estimateTokens(compactedMessages))) {
+      return {
+        status: 'compacted',
+        messages: compactedMessages,
+        summary: {
+          text: candidate,
+          replacedMessages: plan.replacedMessages,
+        },
+      };
+    }
+  }
 
   return {
-    messages: [
-      {
-        role: 'user',
-        content: [{ type: 'text', text: summary.text || placeholder }],
-      },
-      ...messages.slice(-actualKeepRecent),
-    ],
-    summary,
+    status: 'no_gain',
+    messages: sourceMessages,
+    summary: {
+      text: deterministic.text,
+      replacedMessages: 0,
+    },
+  };
+}
+
+export interface CompactMessagesOptions {
+  summaryText?: string;
+  keepRecent?: number;
+}
+
+export function compactMessages(
+  messages: Message[],
+  placeholder?: string,
+  keepRecent?: number,
+): { messages: Message[]; summary: CompactionSummary };
+export function compactMessages(
+  messages: Message[],
+  options?: CompactMessagesOptions,
+): { messages: Message[]; summary: CompactionSummary };
+export function compactMessages(
+  messages: Message[],
+  summaryOrOptions: string | CompactMessagesOptions | undefined = {},
+  legacyKeepRecent = 2,
+): { messages: Message[]; summary: CompactionSummary } {
+  const options = typeof summaryOrOptions === 'string'
+    ? { summaryText: summaryOrOptions, keepRecent: legacyKeepRecent }
+    : {
+        summaryText: summaryOrOptions?.summaryText,
+        keepRecent: summaryOrOptions?.keepRecent ?? legacyKeepRecent,
+      };
+  const plan = planCompaction(messages, 0, options.keepRecent ?? 2);
+  const result = applyCompactionPlan(plan, options.summaryText);
+  return {
+    messages: result.messages,
+    summary: result.summary,
   };
 }
 

@@ -5,12 +5,13 @@ import type { MaterialRecord, TaskUnderstanding } from '../../../src/runtime/tas
 import type { RuntimeEvent } from '../../../src/runtime/events.js';
 
 describe('createRuntimeFacadeTaskRunner', () => {
-  it('runs RuntimeFacade with material context and forwards scoped runtime hook events', async () => {
+  it('preserves an external full UUID through RuntimeFacade request and scoped runtime hook association', async () => {
+    const sessionId = 'sess_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const hooks = createRuntimeHooks();
     const runTurn = vi.fn(async (_request, _onChunk, signal?: AbortSignal) => {
       hooks.emit({
         type: 'breadcrumb_emitted',
-        sessionId: 'sess_1',
+        sessionId,
         turnId: 'turn_1',
         intentId: 'intent_1',
         stepId: 'step_1',
@@ -19,7 +20,7 @@ describe('createRuntimeFacadeTaskRunner', () => {
       });
       hooks.emit({
         type: 'breadcrumb_emitted',
-        sessionId: 'other_session',
+        sessionId: 'sess_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
         turnId: 'turn_1',
         intentId: 'intent_2',
         stepId: 'step_2',
@@ -38,7 +39,7 @@ describe('createRuntimeFacadeTaskRunner', () => {
 
     await runner({
       taskId: 'task_1',
-      sessionId: 'sess_1',
+      sessionId,
       prompt: '生成 A 客户方案 PPT',
       materials: [createMaterial()],
       understanding: createUnderstanding(),
@@ -50,7 +51,7 @@ describe('createRuntimeFacadeTaskRunner', () => {
 
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(runTurn.mock.calls[0]?.[0]).toMatchObject({
-      sessionId: 'sess_1',
+      sessionId,
       cwd: '/workspace/project',
       source: 'chat',
     });
@@ -69,7 +70,7 @@ describe('createRuntimeFacadeTaskRunner', () => {
     ]);
     expect(emitted).toEqual([{
       type: 'breadcrumb_emitted',
-      sessionId: 'sess_1',
+      sessionId,
       turnId: 'turn_1',
       intentId: 'intent_1',
       stepId: 'step_1',

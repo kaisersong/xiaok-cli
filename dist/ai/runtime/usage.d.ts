@@ -26,7 +26,35 @@ export declare function computeCostWithConfidence(usage: UsageStats, model: stri
     confidence: CostConfidence;
 };
 export declare function summarizeMessagesForCompaction(messages: Message[]): CompactionSummary;
+export type CompactionPlanInvalidReason = 'unpaired_tool_result' | 'duplicate_tool_call_id';
+export interface CompactionPlan {
+    sourceRevision: number;
+    sourceMessageCount: number;
+    messagesToSummarize: Message[];
+    messagesToRetain: Message[];
+    replacedMessages: number;
+    invalidReason?: CompactionPlanInvalidReason;
+}
+export type CompactionPlanApplyResult = {
+    status: 'compacted';
+    messages: Message[];
+    summary: CompactionSummary;
+} | {
+    status: 'no_gain';
+    messages: Message[];
+    summary: CompactionSummary;
+};
+export declare function planCompaction(messages: Message[], sourceRevision?: number, keepRecent?: number): CompactionPlan;
+export declare function applyCompactionPlan(plan: CompactionPlan, summaryText?: string): CompactionPlanApplyResult;
+export interface CompactMessagesOptions {
+    summaryText?: string;
+    keepRecent?: number;
+}
 export declare function compactMessages(messages: Message[], placeholder?: string, keepRecent?: number): {
+    messages: Message[];
+    summary: CompactionSummary;
+};
+export declare function compactMessages(messages: Message[], options?: CompactMessagesOptions): {
     messages: Message[];
     summary: CompactionSummary;
 };

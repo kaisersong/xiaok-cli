@@ -3,6 +3,7 @@ import type { ToolRegistry } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import type { AgentRuntimeEvent } from './events.js';
+import { type RunInvocationContext } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { ArtifactWorkspaceExecutionScope } from '../../runtime/task-host/types.js';
@@ -32,7 +33,6 @@ export declare class AgentRuntime {
     private readonly compactThresholdOverride?;
     private contextLimit;
     private compactThreshold;
-    private readonly compactPlaceholder;
     private supportsPromptCaching;
     private promptSnapshot?;
     private compactRunner;
@@ -44,7 +44,7 @@ export declare class AgentRuntime {
     setAdapter(adapter: ModelAdapter): void;
     setSystemPrompt(systemPrompt: string): void;
     setPromptSnapshot(promptSnapshot: PromptSnapshot | undefined): void;
-    run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal): Promise<void>;
+    run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal, invocationContext?: RunInvocationContext): Promise<void>;
     private throwIfAborted;
     private refreshModelPolicy;
     private buildInvocationOptions;

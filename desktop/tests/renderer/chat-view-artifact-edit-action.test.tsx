@@ -78,6 +78,16 @@ describe('ChatView artifact edit action', () => {
     const openButton = screen.getByRole('button', { name: /打开|Open/i });
     expect(openButton).not.toHaveTextContent(/打开|Open/i);
     expect(screen.getByTestId('artifact-actions-artifact-report')).toHaveClass('gap-1');
+
+    onArtifactClick.mockClear();
+    fireEvent.click(screen.getByTestId('generated-file-report.html'));
+    expect(onArtifactClick).toHaveBeenCalledWith({
+      artifactId: 'artifact-report',
+      title: 'report.html',
+      kind: 'html',
+      filePath: '/tmp/report.html',
+      mimeType: 'text/html',
+    });
   });
 
   it('opens Markdown result artifacts directly in text edit mode', () => {

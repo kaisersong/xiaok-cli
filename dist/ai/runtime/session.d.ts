@@ -1,8 +1,17 @@
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
+import { type CompactionPlan } from './usage.js';
 import { type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
 export type { CompactionRecord } from './session-graph.js';
+export type { CompactionPlan } from './usage.js';
 export interface AgentSessionSnapshot extends SessionGraphSnapshot {
 }
+export type CompactionApplyOutcome = {
+    status: 'compacted';
+    record: CompactionRecord;
+} | {
+    status: 'stale_plan' | 'invalid_plan' | 'no_gain';
+    record: null;
+};
 export declare class AgentSessionState {
     private graph;
     private promptSnapshotId?;
@@ -27,7 +36,9 @@ export declare class AgentSessionState {
     } | undefined;
     recordApproval(approvalId: string): void;
     recordBackgroundJob(jobId: string): void;
-    forceCompact(placeholder?: string): CompactionRecord | null;
+    planCompaction(keepRecent?: number): CompactionPlan;
+    applyCompaction(plan: CompactionPlan, summaryText?: string): CompactionApplyOutcome;
+    forceCompact(summaryText?: string): CompactionRecord | null;
     exportSnapshot(): AgentSessionSnapshot;
     restoreSnapshot(snapshot: AgentSessionSnapshot): void;
 }

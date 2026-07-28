@@ -1,8 +1,10 @@
 import { mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { applySessionStoreSchema } from './schema.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
+import { rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
 export class SQLiteSessionStore {
     db;
     constructor(dbPath) {
@@ -13,7 +15,7 @@ export class SQLiteSessionStore {
         applySessionStoreSchema(this.db);
     }
     createSessionId() {
-        return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        return `sess_${randomUUID()}`;
     }
     async save(snapshot) {
         const saveTransaction = this.db.transaction((nextSnapshot) => {
@@ -153,9 +155,10 @@ export class SQLiteSessionStore {
         const lineage = sourceLineage.at(-1) === source.sessionId
             ? [...sourceLineage]
             : [...sourceLineage, source.sessionId];
+        const nextSessionId = this.createSessionId();
         const forked = {
             ...source,
-            sessionId: this.createSessionId(),
+            sessionId: nextSessionId,
             createdAt: now,
             updatedAt: now,
             forkedFromSessionId: source.sessionId,
@@ -166,6 +169,9 @@ export class SQLiteSessionStore {
             memoryRefs: [...(source.memoryRefs ?? [])],
             approvalRefs: [...(source.approvalRefs ?? [])],
             backgroundJobRefs: [...(source.backgroundJobRefs ?? [])],
+            intentDelegation: source.intentDelegation
+                ? rekeySessionIntentLedger(source.intentDelegation, nextSessionId)
+                : undefined,
             skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
         };
         await this.save(forked);

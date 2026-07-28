@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { getProviderProfile, listProviderProfiles } from '../../../src/ai/providers/registry.js';
+import * as registry from '../../../src/ai/providers/registry.js';
+import type { ProviderModelVariant, ProviderProfile } from '../../../src/ai/providers/types.js';
+
+function resolveVariant(profile: ProviderProfile, wireModel: string): ProviderModelVariant | undefined {
+  return (registry as unknown as {
+    resolveProviderModelVariant(
+      inputProfile: ProviderProfile,
+      inputWireModel: string,
+    ): ProviderModelVariant | undefined;
+  }).resolveProviderModelVariant(profile, wireModel);
+}
 
 describe('getProviderProfile', () => {
   it('returns known first-party profiles with explicit protocols', () => {
@@ -63,6 +74,67 @@ describe('getProviderProfile', () => {
       expect(variant?.runtimeOptions, modelId).toBeUndefined();
       expect(variant?.runtimeConstraints, modelId).toBeUndefined();
     }
+  });
+
+  it('treats equivalent duplicate wire variants as deterministic despite label and modelId differences', () => {
+    const profile: ProviderProfile = {
+      id: 'kimi',
+      label: 'Kimi',
+      protocol: 'openai_legacy',
+      envPrefixes: ['KIMI'],
+      defaultModel: {
+        modelId: 'z-default',
+        model: 'same-wire',
+        label: 'Default label',
+        capabilities: ['thinking', 'tools'],
+        runtimeOptions: { reasoningEffort: 'high', contextLimit: 262_144 },
+        runtimeConstraints: {
+          reasoningEfforts: ['max', 'high', 'low'],
+          maxContextLimit: 1_048_576,
+        },
+      },
+      availableModels: [{
+        modelId: 'a-alias',
+        model: 'same-wire',
+        label: 'Alias label',
+        capabilities: ['tools', 'thinking'],
+        runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
+        runtimeConstraints: {
+          maxContextLimit: 1_048_576,
+          reasoningEfforts: ['low', 'high', 'max'],
+        },
+      }],
+    };
+
+    expect(resolveVariant(profile, 'same-wire')).toMatchObject({
+      model: 'same-wire',
+      modelId: 'a-alias',
+    });
+  });
+
+  it('throws a local coded error for ambiguous duplicate wire metadata', () => {
+    const profile: ProviderProfile = {
+      id: 'kimi',
+      label: 'Kimi',
+      protocol: 'openai_legacy',
+      envPrefixes: ['KIMI'],
+      defaultModel: {
+        modelId: 'default',
+        model: 'ambiguous-wire',
+        label: 'Default',
+        capabilities: ['tools'],
+      },
+      availableModels: [{
+        modelId: 'other',
+        model: 'ambiguous-wire',
+        label: 'Other',
+        capabilities: ['tools', 'thinking'],
+      }],
+    };
+
+    expect(() => resolveVariant(profile, 'ambiguous-wire')).toThrowError(
+      expect.objectContaining({ code: 'MODEL_VARIANT_AMBIGUOUS' }),
+    );
   });
 });
 

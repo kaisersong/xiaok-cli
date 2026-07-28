@@ -77,17 +77,26 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
 vi.mock('../../renderer/src/components/CanvasPanel', () => ({
   CanvasPanel: ({
     initialPreviewModeRequest,
+    initialPreviewFile,
+    initialPreviewContent,
+    expanded,
     conversationId,
     sourceTaskId,
     sourceArtifact,
   }: {
     initialPreviewModeRequest?: { id: number; startInEditMode: boolean };
+    initialPreviewFile?: string | null;
+    initialPreviewContent?: string;
+    expanded?: boolean;
     conversationId?: string;
     sourceTaskId?: string;
     sourceArtifact?: { artifactId: string; kind?: string; mimeType?: string; title?: string; sourceTaskId?: string };
   }) => (
     <div data-testid="canvas-panel">
       <span data-testid="canvas-panel-mode">{initialPreviewModeRequest?.startInEditMode ? 'edit' : 'preview'}</span>
+      <span data-testid="canvas-panel-file">{initialPreviewFile}</span>
+      <span data-testid="canvas-panel-content">{initialPreviewContent}</span>
+      <span data-testid="canvas-panel-expanded">{expanded ? 'expanded' : 'collapsed'}</span>
       <span data-testid="canvas-panel-conversation">{conversationId}</span>
       <span data-testid="canvas-panel-task">{sourceTaskId}</span>
       <span data-testid="canvas-panel-artifact">{sourceArtifact?.artifactId}</span>
@@ -226,6 +235,9 @@ describe('ChatShell canvas is scoped per session', () => {
   });
 
   it('keeps each historical artifact bound to the task that produced it', async () => {
+    mockReadFileContent.mockImplementation(async (filePath: string) => ({
+      content: `<html><body>${filePath}</body></html>`,
+    }));
     mockGetThread.mockResolvedValue({
       ...thread('thread-A'),
       currentTaskId: 'task-B',
@@ -266,6 +278,10 @@ describe('ChatShell canvas is scoped per session', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'open-artifact-task-A' }));
     await waitFor(() => expect(screen.getByTestId('canvas-panel-artifact')).toHaveTextContent('artifact-task-A'));
+    expect(mockReadFileContent).toHaveBeenCalledWith('/tmp/task-A.html');
+    expect(screen.getByTestId('canvas-panel-file')).toHaveTextContent('/tmp/task-A.html');
+    expect(screen.getByTestId('canvas-panel-content')).toHaveTextContent('<html><body>/tmp/task-A.html</body></html>');
+    expect(screen.getByTestId('canvas-panel-expanded')).toHaveTextContent('expanded');
     expect(screen.getByTestId('canvas-panel-artifact-task')).toHaveTextContent('task-A');
 
     fireEvent.click(screen.getByRole('button', { name: 'open-artifact-task-B' }));

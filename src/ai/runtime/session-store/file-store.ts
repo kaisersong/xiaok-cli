@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { Message } from '../../../types.js';
 import { getConfigDir } from '../../../utils/config.js';
@@ -17,7 +18,7 @@ export class FileSessionStore implements SessionStore {
   constructor(private readonly rootDir = join(getConfigDir(), 'sessions')) {}
 
   createSessionId(): string {
-    return `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    return `sess_${randomUUID()}`;
   }
 
   async save(snapshot: PersistedSessionSnapshot): Promise<void> {

@@ -1,5 +1,6 @@
 import { isAbortError } from './abort-utils.js';
 import { normalizeRuntimeError } from './runtime-errors.js';
+import { createPromptCacheAffinity } from './prompt-cache-affinity.js';
 export class RuntimeFacade {
     options;
     // Tracks skill names already sent to the agent this session (mirrors CC's o17 Map).
@@ -30,7 +31,13 @@ export class RuntimeFacade {
             throw new Error(`${normalized.code}: ${normalized.message}`);
         }
         try {
-            await this.options.agent.runTurn(input, onChunk, signal);
+            const cacheKey = createPromptCacheAffinity(request.sessionId);
+            if (cacheKey) {
+                await this.options.agent.runTurn(input, onChunk, signal, { cacheKey });
+            }
+            else {
+                await this.options.agent.runTurn(input, onChunk, signal);
+            }
         }
         catch (runError) {
             if (isAbortError(runError)) {

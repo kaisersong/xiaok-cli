@@ -4,7 +4,7 @@ import {
   buildPromptCacheSegments,
   resolveModelCapabilities,
 } from '../../../src/ai/runtime/model-capabilities.js';
-import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import { createAdapterFromBinding } from '../../../src/ai/models.js';
 
 describe('model capabilities', () => {
   it('uses extended context and prompt caching for Claude Opus models', () => {
@@ -50,14 +50,18 @@ describe('model capabilities', () => {
   });
 
   it('exposes effective K3 context through adapter capabilities while preserving capability flags', () => {
-    const adapter = new OpenAIAdapter(
-      'sk-kimi',
-      'k3',
-      'https://api.kimi.com/coding/v1',
-      undefined,
-      { supportsImageInput: true },
-      { contextLimit: 1_048_576, reasoningEffort: 'max' },
-    );
+    const adapter = createAdapterFromBinding({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'kimi-k3',
+      wireModel: 'k3',
+      protocol: 'openai_legacy',
+      apiKey: 'sk-kimi',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      headers: {},
+      capabilities: ['tools', 'thinking', 'image_in'],
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
+    });
 
     expect(resolveModelCapabilities(adapter)).toMatchObject({
       contextLimit: 1_048_576,
