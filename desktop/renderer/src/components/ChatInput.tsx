@@ -40,6 +40,16 @@ function basename(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath;
 }
 
+function appendUniqueFiles(prev: AttachedFile[], next: AttachedFile[]): AttachedFile[] {
+  const seen = new Set(prev.map(f => f.filePath));
+  const added = next.filter(f => {
+    if (seen.has(f.filePath)) return false;
+    seen.add(f.filePath);
+    return true;
+  });
+  return added.length > 0 ? [...prev, ...added] : prev;
+}
+
 export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles }: ChatInputProps) {
   const { t } = useLocale();
   const resolvedPlaceholder = placeholder ?? t.chatInput.replyPlaceholder;
@@ -95,21 +105,31 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       const plainText = e.clipboardData?.getData('text/plain') ?? '';
       const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
       const pathLines = lines.filter(l => /^\/[\w./ -]+$/.test(l) || /^[A-Z]:\\[\w.\\ -]+$/i.test(l));
-      if (pathLines.length > 0 && pathLines.length === lines.length) {
-        if (finderFilesPendingRef.current) {
+      const allLinesArePaths = pathLines.length > 0 && pathLines.length === lines.length;
+      const hasFileItems = clipItems.some(item => item.kind === 'file');
+      const hasImage = clipItems.some(item => item.type.startsWith('image/'));
+
+      // A Cmd+V keydown preflight owns this paste. Consume the flag here — not
+      // when the preflight IPC resolves — so an early-resolving preflight still
+      // blocks this paste from inserting Finder display names (basenames) or
+      // fetching a duplicate batch of attachment chips.
+      if (finderFilesPendingRef.current) {
+        finderFilesPendingRef.current = false;
+        if (hasFileItems || hasImage || allLinesArePaths) {
           e.preventDefault();
           return;
         }
+        // Plain text paste: fall through to default handling.
+      }
+
+      if (allLinesArePaths) {
         pastePathsRef.current = pathLines;
         return;
       }
 
-      // Finder NSFilenamesPboardType / file-item paste without a keydown preflight.
-      // Cmd+V sets finderFilesPendingRef first, so this branch only handles paste
-      // paths that would otherwise be lost, such as context-menu paste events.
-      const hasFileItems = clipItems.some(item => item.kind === 'file');
-      const hasImage = clipItems.some(item => item.type.startsWith('image/'));
-      if (hasFileItems && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
+      // Finder NSFilenamesPboardType / file-item paste without a keydown preflight,
+      // such as context-menu paste events.
+      if (hasFileItems && window.xiaokDesktop?.readClipboardFilePaths) {
         e.preventDefault();
         window.xiaokDesktop.readClipboardFilePaths().then(fp => {
           if (fp.length > 0) {
@@ -118,14 +138,14 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
               const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
               return { filePath: p, name, isImage };
             });
-            setFiles(prev => [...prev, ...newFiles]);
+            setFiles(prev => appendUniqueFiles(prev, newFiles));
             return;
           }
           if (hasImage && window.xiaokDesktop?.readClipboardImage) {
             void window.xiaokDesktop.readClipboardImage().then(imagePath => {
               if (imagePath) {
                 const name = basename(imagePath) || 'clipboard-image.png';
-                setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+                setFiles(prev => appendUniqueFiles(prev, [{ filePath: imagePath, name, isImage: true }]));
               }
             }).catch(() => {});
           }
@@ -134,18 +154,12 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       }
 
       // Image paste (screenshot / raw image data, no file path).
-      // Skip if keydown Cmd+V is handling a Finder file copy — copied image
-      // files put an image/tiff preview on the clipboard alongside the path.
-      if (hasImage && finderFilesPendingRef.current) {
-        e.preventDefault();
-        return;
-      }
-      if (hasImage && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardImage) {
+      if (hasImage && window.xiaokDesktop?.readClipboardImage) {
         e.preventDefault();
         window.xiaokDesktop.readClipboardImage().then(imagePath => {
           if (imagePath) {
             const name = basename(imagePath) || 'clipboard-image.png';
-            setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+            setFiles(prev => appendUniqueFiles(prev, [{ filePath: imagePath, name, isImage: true }]));
           }
         }).catch(() => {});
         return;
@@ -162,6 +176,10 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
   useEffect(() => {
     api.listSkills().then(list => setSkills(list)).catch(() => {});
+    const unsubscribe = api.onSkillsChanged?.(() => {
+      api.listSkills().then(list => setSkills(list)).catch(() => {});
+    });
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -213,7 +231,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
         return { filePath: p, name, isImage };
       });
-      setFiles(prev => [...prev, ...newFiles]);
+      setFiles(prev => appendUniqueFiles(prev, newFiles));
       setInternalValue(stripped);
       onChange?.(stripped);
       // Try NSFilenamesPboardType to get canonical paths
@@ -221,12 +239,13 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         window.xiaokDesktop.readClipboardFilePaths().then(fp => {
           if (fp.length > 0) {
             setFiles(prev => {
-              const base = prev.slice(0, prev.length - paths.length);
-              return [...base, ...fp.map(p => {
+              const pastedPathSet = new Set(paths);
+              const base = prev.filter(f => !pastedPathSet.has(f.filePath));
+              return appendUniqueFiles(base, fp.map(p => {
                 const name = basename(p);
                 const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
                 return { filePath: p, name, isImage };
-              })];
+              }));
             });
           }
         }).catch(() => {});
@@ -240,11 +259,13 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Intercept Cmd+V to catch Finder file copies where clipboard has no text/plain path.
     // readClipboardFilePaths reads NSFilenamesPboardType which Finder always populates.
-    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && !isComposingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
+    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && !e.repeat && !isComposingRef.current && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
       const valueBeforePaste = internalValue;
       finderFilesPendingRef.current = true;
+      // The flag is consumed by the matching paste event. If that event never
+      // arrives, clear it so a later unrelated paste is not swallowed.
+      setTimeout(() => { finderFilesPendingRef.current = false; }, 1500);
       window.xiaokDesktop.readClipboardFilePaths().then(fp => {
-        finderFilesPendingRef.current = false;
         if (fp.length > 0) {
           // Finder file copy: add chips and restore textarea value
           const newFiles = fp.map(p => {
@@ -252,7 +273,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
             const isImage = /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(name);
             return { filePath: p, name, isImage };
           });
-          setFiles(prev => [...prev, ...newFiles]);
+          setFiles(prev => appendUniqueFiles(prev, newFiles));
           setInternalValue(valueBeforePaste);
           onChange?.(valueBeforePaste);
         } else if (window.xiaokDesktop?.readClipboardImage) {
@@ -262,7 +283,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
           window.xiaokDesktop.readClipboardImage().then(imagePath => {
             if (imagePath) {
               const name = basename(imagePath) || 'clipboard-image.png';
-              setFiles(prev => [...prev, { filePath: imagePath, name, isImage: true }]);
+              setFiles(prev => appendUniqueFiles(prev, [{ filePath: imagePath, name, isImage: true }]));
             }
           }).catch(() => {});
         }

@@ -171,4 +171,53 @@ describe('ChatInput clipboard attachments', () => {
     expect(screen.queryByAltText('composing.png')).not.toBeInTheDocument();
     expect(screen.queryByAltText('composing-screenshot.png')).not.toBeInTheDocument();
   });
+
+  it('does not duplicate directory chips when the Cmd+V preflight resolves before the paste event arrives', async () => {
+    const readClipboardFilePaths = vi.fn().mockResolvedValue([
+      '/Users/song/themes/aurora',
+      '/Users/song/themes/dark-editorial',
+    ]);
+    installClipboardApi({ readClipboardFilePaths });
+
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    fireEvent.keyDown(input, { key: 'v', metaKey: true });
+    // Simulate the race: the preflight IPC resolves before the paste event fires.
+    await waitFor(() => expect(screen.queryAllByText('aurora').length).toBe(1));
+
+    // Finder puts the directory display names (basenames) on text/plain.
+    const pasteEvent = pasteClipboard(input, {
+      items: [
+        { kind: 'file', type: '' },
+        { kind: 'file', type: '' },
+      ],
+      text: 'aurora\ndark-editorial',
+    });
+
+    // The late paste must not insert the basenames nor add a second batch of chips.
+    expect(pasteEvent.defaultPrevented).toBe(true);
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryAllByText('aurora')).toHaveLength(1);
+    expect(screen.queryAllByText('dark-editorial')).toHaveLength(1);
+    expect(readClipboardFilePaths).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue('');
+  });
+
+  it('does not duplicate chips when Cmd+V keydown repeats while held down', async () => {
+    const readClipboardFilePaths = vi.fn().mockResolvedValue(['/Users/song/themes/aurora']);
+    installClipboardApi({ readClipboardFilePaths });
+
+    render(<LocaleProvider><ChatInput onSubmit={() => {}} /></LocaleProvider>);
+    const input = screen.getByRole('textbox');
+
+    fireEvent.keyDown(input, { key: 'v', metaKey: true });
+    fireEvent.keyDown(input, { key: 'v', metaKey: true, repeat: true });
+    fireEvent.keyDown(input, { key: 'v', metaKey: true, repeat: true });
+
+    await waitFor(() => expect(screen.queryAllByText('aurora').length).toBeGreaterThan(0));
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryAllByText('aurora')).toHaveLength(1);
+    expect(readClipboardFilePaths).toHaveBeenCalledTimes(1);
+  });
 });

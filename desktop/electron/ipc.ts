@@ -2125,21 +2125,21 @@ function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
 }
 
-async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
-  const files: string[] = [];
+export async function expandSelectedMaterialPaths(paths: string[]): Promise<string[]> {
+  const files = new Set<string>();
   for (const path of paths) {
     try {
       const entry = await stat(path);
       if (entry.isFile()) {
-        files.push(path);
+        files.add(path);
       } else if (entry.isDirectory()) {
-        files.push(...await listFilesInDirectory(path));
+        for (const file of await listFilesInDirectory(path)) files.add(file);
       }
     } catch {
       // Skip non-existent paths (e.g. pasted text that looks like a path)
     }
   }
-  return files.sort();
+  return [...files].sort();
 }
 
 async function listFilesInDirectory(directory: string): Promise<string[]> {

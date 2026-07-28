@@ -22,7 +22,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { registerDesktopIpc } from '../../electron/ipc.js';
+import { expandSelectedMaterialPaths, registerDesktopIpc } from '../../electron/ipc.js';
 
 describe('desktop material selection IPC', () => {
   let rootDir: string;
@@ -64,5 +64,26 @@ describe('desktop material selection IPC', () => {
       properties: ['openFile', 'multiSelections'],
     });
     expect(electronMocks.showOpenDialog.mock.calls[0]?.[1]?.properties).not.toContain('openDirectory');
+  });
+
+  it('expands a directory passed twice into a single set of files', async () => {
+    const dir = join(rootDir, 'themes');
+    mkdirSync(join(dir, 'nested'), { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), '# skill\n', 'utf-8');
+    writeFileSync(join(dir, 'nested', 'tokens.json'), '{}\n', 'utf-8');
+
+    await expect(expandSelectedMaterialPaths([dir, dir])).resolves.toEqual([
+      join(dir, 'SKILL.md'),
+      join(dir, 'nested', 'tokens.json'),
+    ]);
+  });
+
+  it('dedupes a file selected both directly and through its parent directory', async () => {
+    const dir = join(rootDir, 'docs');
+    mkdirSync(dir, { recursive: true });
+    const filePath = join(dir, 'spec.md');
+    writeFileSync(filePath, '# spec\n', 'utf-8');
+
+    await expect(expandSelectedMaterialPaths([filePath, dir])).resolves.toEqual([filePath]);
   });
 });
