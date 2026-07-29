@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
+import { assertKimiK3DurableResumeSupported, toDurableSessionSnapshot, } from './store.js';
 import { applySessionStoreSchema } from './schema.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
 import { rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
@@ -18,6 +19,7 @@ export class SQLiteSessionStore {
         return `sess_${randomUUID()}`;
     }
     async save(snapshot) {
+        const durableSnapshot = toDurableSessionSnapshot(snapshot);
         const saveTransaction = this.db.transaction((nextSnapshot) => {
             this.db.prepare(`
         INSERT INTO sessions (
@@ -66,7 +68,7 @@ export class SQLiteSessionStore {
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `).run(nextSnapshot.sessionId);
         });
-        saveTransaction(snapshot);
+        saveTransaction(durableSnapshot);
     }
     async loadLast() {
         const row = this.db.prepare(`
@@ -98,7 +100,7 @@ export class SQLiteSessionStore {
         const parsedSkillExecution = row.skill_execution_json
             ? (JSON.parse(row.skill_execution_json) ?? undefined)
             : undefined;
-        return {
+        const snapshot = {
             sessionId: row.session_id,
             cwd: row.cwd,
             model: row.model ?? undefined,
@@ -120,6 +122,7 @@ export class SQLiteSessionStore {
             skillEval: row.skill_eval_json ? (JSON.parse(row.skill_eval_json) ?? undefined) : undefined,
             skillExecution: parsedSkillExecution ? cloneSessionSkillExecutionState(parsedSkillExecution) : undefined,
         };
+        return snapshot;
     }
     async list() {
         const rows = this.db.prepare(`
@@ -150,6 +153,7 @@ export class SQLiteSessionStore {
         if (!source) {
             throw new Error(`session not found: ${sessionId}`);
         }
+        assertKimiK3DurableResumeSupported(source);
         const now = Date.now();
         const sourceLineage = source.lineage ?? [source.sessionId];
         const lineage = sourceLineage.at(-1) === source.sessionId
@@ -209,8 +213,5 @@ function extractMessageText(message) {
         .trim();
 }
 function cloneMessages(messages) {
-    return messages.map((message) => ({
-        role: message.role,
-        content: message.content.map((block) => ({ ...block })),
-    }));
+    return structuredClone(messages);
 }

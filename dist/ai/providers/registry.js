@@ -1,8 +1,8 @@
-function createKimiK3Variant(modelId) {
+function createKimiK3Variant(modelId, model = 'k3', label = 'Kimi K3') {
     return {
         modelId,
-        model: 'k3',
-        label: 'Kimi K3',
+        model,
+        label,
         capabilities: ['tools', 'thinking'],
         runtimeOptions: {
             contextLimit: 262_144,
@@ -65,6 +65,7 @@ const PROVIDER_REGISTRY = {
         defaultModel: createKimiK3Variant('kimi-default'),
         availableModels: [
             createKimiK3Variant('kimi-k3'),
+            createKimiK3Variant('kimi-k3-256k', 'k3-256k', 'Kimi K3 256K'),
             { modelId: 'kimi-k2.7', model: 'kimi-k2.7', label: 'Kimi K2.7', capabilities: ['tools', 'thinking'] },
             { modelId: 'kimi-k2.6', model: 'kimi-k2.6', label: 'Kimi K2.6', capabilities: ['tools', 'thinking'] },
             { modelId: 'kimi-k2.5', model: 'kimi-k2.5', label: 'Kimi K2.5', capabilities: ['tools', 'thinking'] },

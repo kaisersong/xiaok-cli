@@ -79,7 +79,7 @@ function validateRuntimeOptions(options, constraints) {
 }
 export function resolveModelRuntimeOptions(input) {
     const useKimiK3Fallback = input.protocol === 'openai_legacy'
-        && input.wireModel === 'k3'
+        && (input.wireModel === 'k3' || input.wireModel === 'k3-256k')
         && isOfficialKimiK3OpenAIEndpoint(input.baseUrl);
     const fallbackOptions = useKimiK3Fallback ? KIMI_K3_RUNTIME_OPTIONS : undefined;
     const fallbackConstraints = useKimiK3Fallback ? KIMI_K3_RUNTIME_CONSTRAINTS : undefined;

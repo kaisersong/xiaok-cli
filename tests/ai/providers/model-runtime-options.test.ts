@@ -55,6 +55,23 @@ describe('resolveModelRuntimeOptions', () => {
     });
   });
 
+  it('applies the same strict runtime policy to k3-256k', () => {
+    expect(resolveModelRuntimeOptions({
+      protocol: 'openai_legacy',
+      baseUrl: KIMI_K3_OPENAI_ENDPOINT,
+      wireModel: 'k3-256k',
+    })).toEqual({
+      runtimeOptions: {
+        contextLimit: 262_144,
+        reasoningEffort: 'high',
+      },
+      runtimeConstraints: {
+        maxContextLimit: 1_048_576,
+        reasoningEfforts: ['low', 'high', 'max'],
+      },
+    });
+  });
+
   it('lets configured options override catalog options and K3 defaults', () => {
     const result = resolveModelRuntimeOptions({
       protocol: 'openai_legacy',

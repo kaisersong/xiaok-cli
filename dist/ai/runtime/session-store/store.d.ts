@@ -28,6 +28,15 @@ export interface SessionListEntry {
     updatedAt: number;
     preview: string;
 }
+export declare const KIMI_K3_DURABLE_RESUME_UNSUPPORTED = "KIMI_K3_DURABLE_RESUME_UNSUPPORTED";
+export declare class KimiK3DurableResumeUnsupportedError extends Error {
+    readonly code = "KIMI_K3_DURABLE_RESUME_UNSUPPORTED";
+    constructor();
+}
+export declare function isKimiK3DurableModel(model: string | undefined): model is 'k3' | 'k3-256k';
+export declare function toDurableSessionSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export declare function assertKimiK3DurableResumeSupported(snapshot: PersistedSessionSnapshot): void;
+export declare function assertKimiK3TargetResumeSupported(strictKimiTarget: boolean, snapshot: PersistedSessionSnapshot): void;
 export interface SessionStore {
     save(snapshot: PersistedSessionSnapshot): Promise<void>;
     load(sessionId: string): Promise<PersistedSessionSnapshot | null>;

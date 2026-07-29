@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.4.23",
+  "version": "1.4.24",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -24,9 +24,14 @@
   "bin": {
     "xiaok": "dist/index.js"
   },
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
   "scripts": {
-    "build": "node -e \"const fs=require('fs');const t=new Date();const s=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');fs.writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = '+JSON.stringify(s)+';\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
-    "build:release": "node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
+    "build": "node scripts/set-build-flavor.mjs normal && node -e \"const fs=require('fs');const t=new Date();const s=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');fs.writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = '+JSON.stringify(s)+';\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
+    "build:release": "node scripts/set-build-flavor.mjs normal && node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
+    "build:rollback": "node scripts/set-build-flavor.mjs rollback && node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
     "dev": "tsx src/index.ts",
     "desktop:pack:dir": "npm run pack:dir --prefix desktop",
     "desktop:pack": "npm run pack:release --prefix desktop",
@@ -58,6 +63,7 @@
     "eval:dynamic-workflow": "node --import tsx scripts/evals/dynamic-workflow-parallel.ts",
     "eval:ahe-lite": "node --import tsx scripts/evals/ahe-lite.ts --scenario all --output .xiaok/evals/ahe-lite/latest.json",
     "eval:ahe-lite:live": "node --import tsx scripts/evals/ahe-lite-live-smoke.ts --output .xiaok/evals/ahe-lite/live-smoke.json",
+    "eval:kimi-k3:d9:test": "npm run test:sandbox:build && npm run test:sandbox:run -- .test-dist/tests/evals/kimi-k3-d9-*.test.js",
     "eval:run": "node benchmark/run.mjs",
     "eval:quick": "node benchmark/run.mjs --runs 1 --tasks aut-rename,eff-simple-qa,eff-math",
     "quality:check-artifacts": "node --import tsx scripts/check-artifacts.ts",

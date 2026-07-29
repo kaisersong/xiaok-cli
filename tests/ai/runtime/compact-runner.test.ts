@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ModelAdapter, Message, StreamChunk } from '../../../src/types.js';
 import { CompactRunner } from '../../../src/ai/runtime/compact-runner.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
+import { buildSynthesizedProviderContext } from '../../../src/ai/runtime/provider-private-projection.js';
 
 async function* textStream(text: string): AsyncIterable<StreamChunk> {
   yield { type: 'text', delta: text };
@@ -93,5 +94,141 @@ describe('CompactRunner', () => {
     await expect(runner.run([
       { role: 'user', content: [{ type: 'text', text: 'summarize me' }] },
     ])).rejects.toBe(sentinel);
+  });
+
+  it('projects strict K3 parent history into one synthesized user envelope', () => {
+    const envelopeText = buildSynthesizedProviderContext('compaction', [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'visible question' },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: 'provider-private-image-data',
+            },
+          },
+        ],
+      },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'provider-private-reasoning',
+            reasoningProvenance: {
+              captureVersion: 1,
+              source: 'reasoning_content',
+              fieldPresence: 'present',
+            },
+          },
+          { type: 'text', text: 'visible answer' },
+          {
+            type: 'tool_use',
+            id: 'tu_1',
+            name: 'read',
+            input: { file: 'provider-private-tool-input.ts' },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'tu_1',
+          content: 'provider-private-tool-result',
+        }],
+      },
+    ]);
+
+    const serialized = envelopeText;
+    expect(serialized).toContain('visible question');
+    expect(serialized).toContain('visible answer');
+    expect(serialized).toContain('xiaok.synthesized-compaction-context');
+    expect(serialized).not.toContain('provider-private-reasoning');
+    expect(serialized).not.toContain('provider-private-image-data');
+    expect(serialized).not.toContain('provider-private-tool-input');
+    expect(serialized).not.toContain('provider-private-tool-result');
+    expect(serialized).not.toContain('tool_call_summary');
+    expect(serialized).not.toContain('tool_result_summary');
+    const envelope = JSON.parse(envelopeText) as {
+      records: Array<{
+        role: string;
+        content: Array<{ type: string; text: string }>;
+      }>;
+    };
+    expect(envelope.records).toEqual([
+      {
+        ordinal: 0,
+        role: 'user',
+        content: [{ type: 'text', text: 'visible question' }],
+      },
+      {
+        ordinal: 1,
+        role: 'assistant',
+        content: [{ type: 'text', text: 'visible answer' }],
+      },
+    ]);
+  });
+
+  it.each([
+    {
+      label: 'unknown discriminant',
+      block: { type: 'future_provider_block' },
+    },
+    {
+      label: 'text extra field',
+      block: { type: 'text', text: 'visible', private: 'forged' },
+    },
+    {
+      label: 'image extra field',
+      block: {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: 'provider-private-image',
+        },
+        private: 'forged',
+      },
+    },
+    {
+      label: 'tool_use extra field',
+      block: {
+        type: 'tool_use',
+        id: 'tool-1',
+        name: 'read',
+        input: {},
+        private: 'forged',
+      },
+    },
+    {
+      label: 'tool_result extra field',
+      block: {
+        type: 'tool_result',
+        tool_use_id: 'tool-1',
+        content: 'provider-private-result',
+        private: 'forged',
+      },
+    },
+    {
+      label: 'thinking extra field',
+      block: {
+        type: 'thinking',
+        thinking: 'provider-private-reasoning',
+        private: 'forged',
+      },
+    },
+    {
+      label: 'non-string text payload',
+      block: { type: 'text', text: 42 },
+    },
+  ])('rejects a synthesized context block with $label before discarding it', ({ block }) => {
+    expect(() => buildSynthesizedProviderContext('compaction', [{
+      role: 'assistant',
+      content: [block as never],
+    }])).toThrow('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
   });
 });

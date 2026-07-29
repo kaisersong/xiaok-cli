@@ -46,6 +46,18 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.24 为 Kimi K3 和 K3 256K 模型提供一等支持：专属 harness profile 默认开启 preserved thinking、prompt cache affinity、Kimi 专用 tool schema 标准化和 reasoning 序列化。CLI 和 Desktop 在配置的 provider/endpoint 匹配官方 Kimi Coding API 时自动解析 K3 harness。
+
+**Kimi K3 模型优化：**
+
+- **专属 Harness Profile**：`kimi-k3-coding-openai` 和 `kimi-k3-256k-coding-openai` 在检测到官方 Kimi Coding endpoint 时自动激活，提供 tool schema 标准化、usage 提取、空 assistant content 省略和 reasoning 序列化，无需逐会话配置。
+- **Preserved Thinking**：K3 模型默认 `preservedThinking=true`。运行时转发 Kimi streaming 响应中的 `reasoning_content`，Desktop 和 CLI 无需手动开启即可展示模型思维链。
+- **Prompt Cache Affinity**：通过 `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1` 可开启 prompt cache key 注入。启用后每会话编码稳定 cache key，激活 Kimi 服务端 prompt 缓存（典型会话观测到 29K+ cached input tokens）。
+- **OpenAI Responses Native Adapter**：新增 adapter 路径支持 OpenAI Responses API wire format，集成 native compaction、portable compaction executor 和 session graph。
+- **D9 评测基础设施**：生产级 fail-closed 评测 harness（`scripts/evals/kimi-k3-d9/`）提供确定性 fixture server、canonical JSON attestation、immutable preflight plan、full-tree digest、paired stratified bootstrap 统计和 formal artifact 构建，支持可复现的 A/B 模型对比。
+- **发布验证**：release gate 覆盖 2400+ sandbox 测试、13 个 Kimi harness contract 测试、133 个 Desktop service 测试、D9 canonical/statistics/manifest/preflight/assignment/coordinator/fixtures/scanner 套件（23 测试）、真实 Kimi K3 API smoke（正确响应 + prompt cache 命中）、Desktop 构建和 unsigned macOS 打包安装到 `/Applications`。
+- **发布对齐**：root CLI 元数据、Desktop package 元数据和 package locks 统一为 `1.4.24` / `desktop-v1.4.24`。
+
 Xiaok Desktop v1.4.23 把 Canvas 升级为任务归属明确的 Artifact Workspace，并解决内容预览区与空间画布上下分割、互相挤压的问题。预览和画布现在是两个独立的全高主界面；版本、对比、任务来源和多窗口更新仍与产生产物的任务保持绑定。
 
 **Artifact Workspace、Canvas 与发布完整性更新：**
@@ -598,9 +610,13 @@ xiaok config get models
 
 #### Kimi K3
 
-新建 Kimi 配置会使用官方 wire model ID `k3`；已有 Kimi 配置继续保留当前模型，不会被自动迁移。K3 默认使用 262,144 tokens 上下文和 `high` 推理强度；Allegretto 及以上计划可显式选择 1,048,576 tokens。推理强度支持 `low`、`high`、`max`，不提供 `none`，因为关闭推理会路由到其他模型。
+新建 Kimi 配置会使用官方 wire model ID `k3`，同时提供 exact K3 profile `k3-256k`；已有 Kimi 配置继续保留当前模型，不会被自动迁移。K3 默认使用 262,144 tokens 上下文和 `high` 推理强度；Allegretto 及以上计划可显式选择 1,048,576 tokens。推理强度支持 `low`、`high`、`max`，不提供 `none`，因为关闭推理会路由到其他模型。
 
-Desktop 模型设置会为当前 K3 模型显示 262K/1M 上下文和 Low/High/Max 推理强度选项。切换模型或推理强度会让 Kimi prompt cache 失效，因此切换后建议新建会话。当前计划限制与模型行为以 [Kimi Code 官方模型文档](https://www.kimi.com/code/docs/kimi-code/models) 为准。
+CLI 与 Desktop 默认保留 Kimi 官方 `reasoning_content`，但仅存在于当前 provider conversation 与工具调用链的 task-local 内存中。原始推理及其 provenance 在 durable session/task 持久化前会被剥离，不会进入终端输出、Desktop event、Canvas、普通日志或 tool-facing context。若 K3 的 resume、continue 或 fork 所绑定的 durable history 已包含 assistant turn，会在任何 provider 请求或状态修改前以 `KIMI_K3_DURABLE_RESUME_UNSUPPORTED` 失败；仅预绑定但还没有 assistant turn 的 session 按 fresh conversation 处理。
+
+因此，exact `k3` 与 `k3-256k` profile 在 CLI 和 Desktop 上都默认开启 `preservedThinking`。显式发送 `prompt_cache_key` 仍然默认关闭，因为还没有有效的 product-level paired eval 证明其达到所需收益；Xiaok 不宣称显式 key 带来性能提升。诊断用 opt-in 仍为 `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`。
+
+Desktop 模型设置会为当前 K3 模型显示 262K/1M 上下文和 Low/High/Max 推理强度选项。切换模型或推理强度会让 Kimi provider conversation state 失效，因此切换后建议新建会话。当前计划限制与模型行为以 [Kimi Code 官方模型文档](https://www.kimi.com/code/docs/kimi-code/models) 为准。
 
 **项目配置：** `<repo>/.xiaok/settings.json`
 

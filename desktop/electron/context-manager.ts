@@ -12,6 +12,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import type { Message, ModelAdapter } from '../../src/types.js';
+import { randomUUID } from 'node:crypto';
+import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 
 // ---- Constants ----
 
@@ -123,7 +125,13 @@ export async function compactConversation(
   const compactSystemPrompt = 'You are a conversation summarizer. Compress the conversation history as requested.';
   let summary = '';
   try {
-    for await (const chunk of adapter.stream(summaryMessages, [], compactSystemPrompt)) {
+    for await (const chunk of streamDesktopTaskProviderConversation({
+      adapter,
+      messages: summaryMessages,
+      tools: [],
+      systemPrompt: compactSystemPrompt,
+      invocationId: `inv_${randomUUID()}`,
+    })) {
       if (chunk.type === 'text') summary += chunk.delta;
     }
   } catch {

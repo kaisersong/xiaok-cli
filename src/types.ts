@@ -20,11 +20,17 @@ export interface ModelAdapter {
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk>;
   getModelName(): string;
+  getHarnessProfileId?(): string;
 }
 
 export type StreamChunk =
   | { type: 'text'; delta: string }
-  | { type: 'thinking'; delta: string; signature?: string }
+  | {
+      type: 'thinking';
+      delta: string;
+      signature?: import('./ai/runtime/blocks.js').ReasoningSource;
+      reasoningProvenance?: import('./ai/runtime/blocks.js').ReasoningBlockProvenance;
+    }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'usage'; usage: UsageStats }
   | { type: 'done' };

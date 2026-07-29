@@ -12,6 +12,7 @@ export interface AgentOptions {
     compactPlaceholder?: string;
     hooks?: RuntimeHookSink;
     memoryStore?: MemoryStore;
+    providerSurfaceKind?: 'cli-chat-task' | 'cli-subagent';
 }
 export declare class Agent {
     private adapter;

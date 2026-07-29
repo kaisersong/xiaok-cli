@@ -130,6 +130,160 @@ describe('subagent-executor system prompt isolation', () => {
     const agentCall = (Agent as any).mock.calls[0];
     expect(agentCall[2]).toContain('isolated prompt');
   });
+
+  it('does not restore strict K3 parent history and passes only synthesized context', async () => {
+    const strictAdapter = createAdapterFromBinding({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'k3',
+      wireModel: 'k3',
+      protocol: 'openai_legacy',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      headers: {},
+      capabilities: ['tools', 'thinking'],
+    }) as OpenAIAdapter;
+
+    await executeNamedSubAgent({
+      agentDef: { name: 'test', systemPrompt: '', source: 'builtin' },
+      prompt: 'child task',
+      sessionId: 'session-1',
+      cwd: '/test/cwd',
+      adapter: () => strictAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        session: {
+          sessionId: 'sess_parent',
+          cwd: '/test/cwd',
+          createdAt: 1,
+          updatedAt: 2,
+          lineage: ['sess_parent'],
+          messages: [{
+            role: 'assistant',
+            content: [{
+              type: 'thinking',
+              thinking: 'provider-private-reasoning',
+              reasoningProvenance: {
+                captureVersion: 1,
+                source: 'reasoning_content',
+                fieldPresence: 'present',
+              },
+            }],
+          }],
+          usage: { inputTokens: 0, outputTokens: 0 },
+          compactions: [],
+          memoryRefs: [],
+          approvalRefs: [],
+          backgroundJobRefs: [],
+        },
+        messages: [{
+          role: 'assistant',
+          content: [{
+            type: 'thinking',
+            thinking: 'provider-private-reasoning',
+            reasoningProvenance: {
+              captureVersion: 1,
+              source: 'reasoning_content',
+              fieldPresence: 'present',
+            },
+          }],
+        }],
+      } as any,
+    });
+
+    const agentInstance = (Agent as any).mock.results[0].value;
+    expect(agentInstance.restoreSession).not.toHaveBeenCalled();
+    const runPrompt = agentInstance.runTurn.mock.calls[0][0];
+    expect(runPrompt).toContain('xiaok.synthesized-subagent-context');
+    expect(runPrompt).toContain('child task');
+    expect(runPrompt).not.toContain('provider-private-reasoning');
+    strictAdapter.dispose();
+  });
+
+  it('does not restore strict K3 parent reasoning when the child overrides to a generic model', async () => {
+    const strictParentAdapter = createAdapterFromBinding({
+      providerId: 'kimi',
+      providerType: 'first_party',
+      modelId: 'k3',
+      wireModel: 'k3',
+      protocol: 'openai_legacy',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.kimi.com/coding/v1',
+      headers: {},
+      capabilities: ['tools', 'thinking'],
+    }) as OpenAIAdapter;
+
+    await executeNamedSubAgent({
+      agentDef: {
+        name: 'generic-child',
+        systemPrompt: '',
+        source: 'builtin',
+        model: 'kimi-k2.5',
+      },
+      prompt: 'child task',
+      sessionId: 'session-1',
+      cwd: '/test/cwd',
+      adapter: () => strictParentAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        session: {
+          sessionId: 'sess_parent',
+          cwd: '/test/cwd',
+          createdAt: 1,
+          updatedAt: 2,
+          lineage: ['sess_parent'],
+          messages: [{
+            role: 'assistant',
+            content: [{
+              type: 'thinking',
+              thinking: 'PRIVATE_REASONING_CANARY',
+              reasoningProvenance: {
+                captureVersion: 1,
+                source: 'reasoning_content',
+                fieldPresence: 'present',
+              },
+            }, {
+              type: 'text',
+              text: 'safe answer',
+            }],
+          }],
+          usage: { inputTokens: 0, outputTokens: 0 },
+          compactions: [],
+          memoryRefs: [],
+          approvalRefs: [],
+          backgroundJobRefs: [],
+        },
+        messages: [{
+          role: 'assistant',
+          content: [{
+            type: 'thinking',
+            thinking: 'PRIVATE_REASONING_CANARY',
+            reasoningProvenance: {
+              captureVersion: 1,
+              source: 'reasoning_content',
+              fieldPresence: 'present',
+            },
+          }, {
+            type: 'text',
+            text: 'safe answer',
+          }],
+        }],
+      } as any,
+    });
+
+    const dispatchedAdapter = (Agent as any).mock.calls[0][0] as OpenAIAdapter;
+    const agentInstance = (Agent as any).mock.results[0].value;
+    const runPrompt = agentInstance.runTurn.mock.calls[0][0];
+    expect(dispatchedAdapter.harnessContext.profile.id).toBe('generic-openai');
+    expect(agentInstance.restoreSession).not.toHaveBeenCalled();
+    expect(runPrompt).toContain('xiaok.synthesized-subagent-context');
+    expect(runPrompt).toContain('safe answer');
+    expect(runPrompt).not.toContain('PRIVATE_REASONING_CANARY');
+    strictParentAdapter.dispose();
+    dispatchedAdapter.dispose();
+  });
 });
 
 describe('subagent-executor registry isolation', () => {

@@ -7,6 +7,7 @@ import { type RunInvocationContext } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
 import type { MemoryStore } from '../memory/store.js';
 import type { ArtifactWorkspaceExecutionScope } from '../../runtime/task-host/types.js';
+import { type ProviderConversationSurfaceKind } from './provider-conversation-authorization.js';
 export interface AgentRuntimeOptions {
     adapter: ModelAdapter;
     registry: ToolRegistry;
@@ -21,6 +22,7 @@ export interface AgentRuntimeOptions {
     memoryStore?: MemoryStore;
     taskId?: string;
     executionScope?: ArtifactWorkspaceExecutionScope;
+    providerSurfaceKind?: Extract<ProviderConversationSurfaceKind, 'cli-chat-task' | 'cli-subagent'>;
 }
 export declare class AgentRuntime {
     private adapter;
@@ -39,6 +41,7 @@ export declare class AgentRuntime {
     private readonly memoryStore?;
     private readonly taskId?;
     private readonly executionScope?;
+    private readonly providerSurfaceKind;
     private static readonly MAX_EMPTY_RETRIES;
     constructor(options: AgentRuntimeOptions);
     setAdapter(adapter: ModelAdapter): void;
@@ -47,6 +50,7 @@ export declare class AgentRuntime {
     run(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void, externalSignal?: AbortSignal, invocationContext?: RunInvocationContext): Promise<void>;
     private throwIfAborted;
     private refreshModelPolicy;
+    private isStrictK3Adapter;
     private buildInvocationOptions;
     private buildToolExecutionContext;
     private emitVerificationGuardIfNeeded;

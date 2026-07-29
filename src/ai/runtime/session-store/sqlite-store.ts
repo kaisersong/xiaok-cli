@@ -3,7 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Message } from '../../../types.js';
-import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
+import type {
+  PersistedSessionSnapshot,
+  SessionListEntry,
+  SessionStore,
+} from './store.js';
+import {
+  assertKimiK3DurableResumeSupported,
+  toDurableSessionSnapshot,
+} from './store.js';
 import { applySessionStoreSchema } from './schema.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
 import { rekeySessionIntentLedger } from '../../../runtime/intent-delegation/types.js';
@@ -59,6 +67,7 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   async save(snapshot: PersistedSessionSnapshot): Promise<void> {
+    const durableSnapshot = toDurableSessionSnapshot(snapshot);
     const saveTransaction = this.db.transaction((nextSnapshot: PersistedSessionSnapshot) => {
       this.db.prepare(`
         INSERT INTO sessions (
@@ -135,7 +144,7 @@ export class SQLiteSessionStore implements SessionStore {
       `).run(nextSnapshot.sessionId);
     });
 
-    saveTransaction(snapshot);
+    saveTransaction(durableSnapshot);
   }
 
   async loadLast(): Promise<PersistedSessionSnapshot | null> {
@@ -172,7 +181,7 @@ export class SQLiteSessionStore implements SessionStore {
       ? (JSON.parse(row.skill_execution_json) ?? undefined)
       : undefined;
 
-    return {
+    const snapshot: PersistedSessionSnapshot = {
       sessionId: row.session_id,
       cwd: row.cwd,
       model: row.model ?? undefined,
@@ -194,6 +203,7 @@ export class SQLiteSessionStore implements SessionStore {
       skillEval: row.skill_eval_json ? (JSON.parse(row.skill_eval_json) ?? undefined) : undefined,
       skillExecution: parsedSkillExecution ? cloneSessionSkillExecutionState(parsedSkillExecution) : undefined,
     };
+    return snapshot;
   }
 
   async list(): Promise<SessionListEntry[]> {
@@ -232,6 +242,7 @@ export class SQLiteSessionStore implements SessionStore {
     if (!source) {
       throw new Error(`session not found: ${sessionId}`);
     }
+    assertKimiK3DurableResumeSupported(source);
 
     const now = Date.now();
     const sourceLineage = source.lineage ?? [source.sessionId];
@@ -302,8 +313,5 @@ function extractMessageText(message: Message): string {
 }
 
 function cloneMessages(messages: Message[]): Message[] {
-  return messages.map((message) => ({
-    role: message.role,
-    content: message.content.map((block) => ({ ...block })),
-  }));
+  return structuredClone(messages);
 }

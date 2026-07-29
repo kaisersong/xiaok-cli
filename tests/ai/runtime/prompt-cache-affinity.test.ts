@@ -4,15 +4,26 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 type CreatePromptCacheAffinity = (sessionId: string) => string | undefined;
+type CreateDesktopPromptCacheAffinity = (
+  sessionId: string,
+  invocationId: string,
+) => string | undefined;
 
 let createPromptCacheAffinity: CreatePromptCacheAffinity | undefined;
+let createDesktopPromptCacheAffinity:
+  | CreateDesktopPromptCacheAffinity
+  | undefined;
 
 beforeAll(async () => {
   const modulePath = '../../../src/ai/runtime/' + 'prompt-cache-affinity.js';
   const module = await import(modulePath).catch(() => undefined) as
-    | { createPromptCacheAffinity?: CreatePromptCacheAffinity }
+    | {
+        createPromptCacheAffinity?: CreatePromptCacheAffinity;
+        createDesktopPromptCacheAffinity?: CreateDesktopPromptCacheAffinity;
+      }
     | undefined;
   createPromptCacheAffinity = module?.createPromptCacheAffinity;
+  createDesktopPromptCacheAffinity = module?.createDesktopPromptCacheAffinity;
 });
 
 describe('createPromptCacheAffinity', () => {
@@ -22,11 +33,11 @@ describe('createPromptCacheAffinity', () => {
 
     const sessionId = 'sess_ffffffff-ffff-4fff-8fff-ffffffffffff';
     const expected = `pc1_${createHash('sha256')
-      .update(`xiaok:kimi-prompt-cache:v1\0${sessionId}`)
+      .update(`xiaok:kimi-prompt-cache:cli:v1\0${sessionId}`)
       .digest('hex')}`;
 
     expect(createPromptCacheAffinity(sessionId)).toBe(expected);
-    expect(createPromptCacheAffinity('sess_123e4567-e89b-12d3-a456-426614174000'))
+    expect(createPromptCacheAffinity('sess_123e4567-e89b-42d3-a456-426614174000'))
       .toMatch(/^pc1_[0-9a-f]{64}$/);
   });
 
@@ -45,6 +56,9 @@ describe('createPromptCacheAffinity', () => {
     'sess_1',
     'transient',
     'sess_lz1234_ab12cd',
+    'sess_k3_123e4567-e89b-42d3-a456-426614174000',
+    'sess_k3_123e4567-e89b-12d3-a456-426614174000',
+    'sess_k3_123E4567-E89B-42D3-A456-426614174000',
     'sess_123e4567-e89b-02d3-a456-426614174000',
     'sess_123e4567-e89b-42d3-7456-426614174000',
     'sess_123e4567-e89b-42d3-a456-42661417400',
@@ -66,6 +80,33 @@ describe('createPromptCacheAffinity', () => {
     expect(affinity).not.toContain(sessionId);
     expect(affinity).not.toContain('/workspace/private');
     expect(affinity).not.toContain('k3');
+  });
+
+  it('derives Desktop affinity from both the product session and one invocation', () => {
+    expect(createDesktopPromptCacheAffinity).toBeTypeOf('function');
+    if (!createDesktopPromptCacheAffinity) return;
+
+    const sessionId = 'sess_11111111-1111-4111-8111-111111111111';
+    const invocationId = 'inv_22222222-2222-4222-8222-222222222222';
+    const expected = `pc1_${createHash('sha256')
+      .update(`xiaok:kimi-prompt-cache:desktop:v1\0${sessionId}\0${invocationId}`)
+      .digest('hex')}`;
+
+    expect(createDesktopPromptCacheAffinity(sessionId, invocationId)).toBe(expected);
+    expect(createDesktopPromptCacheAffinity(
+      sessionId,
+      'inv_33333333-3333-4333-8333-333333333333',
+    )).not.toBe(expected);
+  });
+
+  it.each([
+    ['legacy session', 'session-1', 'inv_22222222-2222-4222-8222-222222222222'],
+    ['uppercase session', 'sess_11111111-1111-4111-8111-11111111111A', 'inv_22222222-2222-4222-8222-222222222222'],
+    ['missing invocation prefix', 'sess_11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'],
+  ])('rejects invalid Desktop affinity identity: %s', (_label, sessionId, invocationId) => {
+    expect(createDesktopPromptCacheAffinity).toBeTypeOf('function');
+    if (!createDesktopPromptCacheAffinity) return;
+    expect(createDesktopPromptCacheAffinity(sessionId, invocationId)).toBeUndefined();
   });
 });
 

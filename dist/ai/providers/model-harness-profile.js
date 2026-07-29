@@ -4,16 +4,26 @@ import { canonicalizeOfficialKimiK3OpenAIEndpoint, isOfficialKimiK3OpenAIEndpoin
 export const GENERIC_OPENAI_HARNESS_PROFILE = Object.freeze({
     id: 'generic-openai',
 });
-function serializeKimiReasoning(blocks, dialect, preservedThinkingEnabled) {
-    if (!preservedThinkingEnabled) {
+const ownedStrictHarnessContexts = new WeakSet();
+export function isOwnedStrictOpenAIHarnessContext(context) {
+    return ownedStrictHarnessContexts.has(context);
+}
+function serializeKimiReasoning(blocks, _dialect, _preservedThinkingEnabled) {
+    const thinkingBlocks = blocks.filter((block) => block.type === 'thinking');
+    if (thinkingBlocks.length === 0) {
         return undefined;
     }
+    for (const block of thinkingBlocks) {
+        const provenance = block.reasoningProvenance;
+        if (provenance?.captureVersion !== 1
+            || provenance.source !== 'reasoning_content'
+            || provenance.fieldPresence !== 'present') {
+            throw new Error('KIMI_REASONING_SOURCE_INVARIANT');
+        }
+    }
     return {
-        field: dialect,
-        value: blocks
-            .filter((block) => block.type === 'thinking')
-            .map((block) => block.thinking)
-            .join(''),
+        field: 'reasoning_content',
+        value: thinkingBlocks.map((block) => block.thinking).join(''),
     };
 }
 function isRecord(value) {
@@ -115,6 +125,10 @@ export const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE = Object.freeze({
     extractUsage: extractKimiUsage,
     shouldOmitAssistantContent: ({ hasToolCalls, text }) => (hasToolCalls && text.trim().length === 0),
 });
+export const KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE = Object.freeze({
+    ...KIMI_K3_CODING_OPENAI_HARNESS_PROFILE,
+    id: 'kimi-k3-256k-coding-openai',
+});
 export function observeReasoningDialect(state, delta) {
     const hasReasoningContent = Object.prototype.hasOwnProperty.call(delta, 'reasoning_content');
     const hasReasoning = Object.prototype.hasOwnProperty.call(delta, 'reasoning');
@@ -165,20 +179,23 @@ export function resolveKimiHarnessFeatureFlags(env) {
         normalizeUsage: true,
         omitEmptyAssistantContent: true,
         promptCacheKey: env.XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE === '1',
-        preservedThinking: env.XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING === '1',
+        preservedThinking: true,
     });
 }
 export function isKimiK3CodingHarnessBinding(identity) {
     return identity.providerId === 'kimi'
         && identity.providerType === 'first_party'
         && identity.protocol === 'openai_legacy'
-        && identity.wireModel === 'k3'
+        && (identity.wireModel === 'k3' || identity.wireModel === 'k3-256k')
         && isOfficialKimiK3OpenAIEndpoint(identity.canonicalBaseUrl);
 }
 export function resolveModelHarnessProfile(identity) {
-    return isKimiK3CodingHarnessBinding(identity)
-        ? KIMI_K3_CODING_OPENAI_HARNESS_PROFILE
-        : GENERIC_OPENAI_HARNESS_PROFILE;
+    if (!isKimiK3CodingHarnessBinding(identity)) {
+        return GENERIC_OPENAI_HARNESS_PROFILE;
+    }
+    return identity.wireModel === 'k3-256k'
+        ? KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE
+        : KIMI_K3_CODING_OPENAI_HARNESS_PROFILE;
 }
 export function buildOpenAIHarnessContext(input) {
     const identity = Object.freeze({
@@ -198,7 +215,7 @@ export function buildOpenAIHarnessContext(input) {
             : {}),
     });
     const profile = resolveModelHarnessProfile(identity);
-    return Object.freeze({
+    const context = Object.freeze({
         identity,
         profile,
         identityFingerprint: buildIdentityFingerprint(identity, profile),
@@ -206,4 +223,8 @@ export function buildOpenAIHarnessContext(input) {
         ...(runtimeOptions ? { runtimeOptions } : {}),
         runtimeCapabilities,
     });
+    if (profile.id !== 'generic-openai') {
+        ownedStrictHarnessContexts.add(context);
+    }
+    return context;
 }

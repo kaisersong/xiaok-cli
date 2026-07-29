@@ -77,6 +77,13 @@ import {
   type MobileProjectArtifactRecord,
 } from './mobile-snapshot.js';
 import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
+import { configureSafeCrashCapture } from '../../src/utils/crash-reporter.js';
+
+// K3 reasoning is task-local heap state. Disable Electron Crashpad before
+// app readiness so it cannot be copied into a minidump.
+app.commandLine.appendSwitch('disable-crash-reporter');
+app.commandLine.appendSwitch('disable-breakpad');
+configureSafeCrashCapture();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -1193,7 +1200,18 @@ function restoreOrCreateWindow(): void {
   void createWindow();
 }
 
-if (!singleInstanceLock) {
+const packagedKimiSmokeResultPath = process.env.XIAOK_KIMI_PACKAGED_SMOKE_RESULT;
+
+if (packagedKimiSmokeResultPath) {
+  app.whenReady().then(async () => {
+    const { runPackagedKimiSmoke } = await import('./kimi-packaged-smoke.js');
+    await runPackagedKimiSmoke(packagedKimiSmokeResultPath);
+    app.exit(0);
+  }).catch((error) => {
+    console.error('[main] packaged Kimi smoke failed:', error);
+    app.exit(1);
+  });
+} else if (!singleInstanceLock) {
   debugMain('single-instance-lock:failed');
   app.quit();
 } else {

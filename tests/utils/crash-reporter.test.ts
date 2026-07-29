@@ -3,7 +3,11 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { reportCrash, setCrashContext } from '../../src/utils/crash-reporter.js';
+import {
+  configureSafeCrashCapture,
+  reportCrash,
+  setCrashContext,
+} from '../../src/utils/crash-reporter.js';
 
 function canSpawnChildProcesses(): boolean {
   const result = spawnSync(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'pipe' });
@@ -17,6 +21,32 @@ describe('crash reporter', () => {
   afterEach(() => {
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('disables Node diagnostic reports that may capture provider-private heap data', () => {
+    const report = process.report;
+    const previous = report
+      ? {
+          reportOnFatalError: report.reportOnFatalError,
+          reportOnSignal: report.reportOnSignal,
+          reportOnUncaughtException: report.reportOnUncaughtException,
+        }
+      : undefined;
+
+    try {
+      configureSafeCrashCapture();
+      if (report) {
+        expect(report.reportOnFatalError).toBe(false);
+        expect(report.reportOnSignal).toBe(false);
+        expect(report.reportOnUncaughtException).toBe(false);
+      }
+    } finally {
+      if (report && previous) {
+        report.reportOnFatalError = previous.reportOnFatalError;
+        report.reportOnSignal = previous.reportOnSignal;
+        report.reportOnUncaughtException = previous.reportOnUncaughtException;
+      }
     }
   });
 
@@ -165,7 +195,7 @@ describe('crash reporter', () => {
     expect(existsSync(crashDir) ? readdirSync(crashDir) : []).toEqual([]);
   }, 10_000);
 
-  itIfCanSpawn('records command context for a failing top-level CLI command', async () => {
+  itIfCanSpawn('records only allowlisted command context for a failing top-level CLI command', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-cli-'));
     tempDirs.push(configDir);
     const missingTracePath = join(configDir, 'missing-trace.json');
@@ -198,11 +228,7 @@ describe('crash reporter', () => {
     const report = JSON.parse(readFileSync(join(crashDir, crashFiles[0]!), 'utf8')) as {
       context?: { command?: string; args?: string[]; cwd?: string };
     };
-    expect(report.context).toMatchObject({
-      command: 'diagnose',
-      args: ['diagnose', '--trace', missingTracePath, '--format', 'json'],
-      cwd: process.cwd(),
-    });
+    expect(report.context).toEqual({ command: 'diagnose' });
   }, 10_000);
 
   it('removes only expired crash report files before writing a new report', async () => {
@@ -234,6 +260,44 @@ describe('crash reporter', () => {
       expect(files).not.toContain('crash-expired.json');
       expect(files).toContain('crash-fresh.json');
       expect(files).toContain('notes.json');
+    } finally {
+      if (previousConfigDir === undefined) {
+        delete process.env.XIAOK_CONFIG_DIR;
+      } else {
+        process.env.XIAOK_CONFIG_DIR = previousConfigDir;
+      }
+    }
+  });
+
+  it('never persists raw error, cause, stack, cwd, args, session IDs, or non-Error values', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-redaction-'));
+    tempDirs.push(configDir);
+    const previousConfigDir = process.env.XIAOK_CONFIG_DIR;
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    const canary = 'PRIVATE_REASONING_CANARY_7f29';
+
+    try {
+      setCrashContext({
+        command: 'chat',
+        args: ['chat', canary],
+        sessionId: `sess_${canary}`,
+        cwd: join(configDir, canary),
+      });
+      const error = new Error(canary, {
+        cause: new Error(`cause-${canary}`),
+      });
+      error.stack = `Error: ${canary}\n at ${canary}:1:1`;
+
+      const filePath = await reportCrash(error);
+      const persisted = readFileSync(filePath, 'utf8');
+      expect(persisted).not.toContain(canary);
+      expect(JSON.parse(persisted)).toMatchObject({
+        context: { command: 'chat' },
+        error: { type: 'Error', code: 'UNCLASSIFIED_ERROR' },
+      });
+
+      const nonErrorPath = await reportCrash({ value: canary });
+      expect(readFileSync(nonErrorPath, 'utf8')).not.toContain(canary);
     } finally {
       if (previousConfigDir === undefined) {
         delete process.env.XIAOK_CONFIG_DIR;

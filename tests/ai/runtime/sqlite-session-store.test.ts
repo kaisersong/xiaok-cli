@@ -2,21 +2,25 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
 import { SQLiteSessionStore } from '../../../src/ai/runtime/session-store/sqlite-store.js';
+import { assertKimiK3TargetResumeSupported } from '../../../src/ai/runtime/session-store/store.js';
 import type { Message } from '../../../src/types.js';
-import { AgentSessionState } from '../../../src/ai/runtime/session.js';
-import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
-import {
-  buildOpenAIHarnessContext,
-  resolveKimiHarnessFeatureFlags,
-} from '../../../src/ai/providers/model-harness-profile.js';
 
 function preservedThinkingRoundTripMessages(): Message[] {
   return [
     {
       role: 'assistant',
       content: [
-        { type: 'thinking', thinking: 'non-empty reasoning' },
+        {
+          type: 'thinking',
+          thinking: 'non-empty reasoning',
+          reasoningProvenance: {
+            captureVersion: 1,
+            source: 'reasoning_content',
+            fieldPresence: 'present',
+          },
+        },
         { type: 'text', text: 'first answer' },
       ],
     },
@@ -41,54 +45,6 @@ function preservedThinkingRoundTripMessages(): Message[] {
       }],
     },
   ];
-}
-
-async function serializeResumedKimiMessages(
-  messages: Message[],
-): Promise<Array<Record<string, unknown>>> {
-  const adapter = new OpenAIAdapter({
-    apiKey: 'test-key',
-    kimiCodingHeadersApplied: true,
-    harnessContext: buildOpenAIHarnessContext({
-      identity: {
-        providerId: 'kimi',
-        providerType: 'first_party',
-        protocol: 'openai_legacy',
-        canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
-        wireModel: 'k3',
-        capabilities: ['tools', 'thinking'],
-      },
-      flags: resolveKimiHarnessFeatureFlags({
-        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
-      }),
-    }),
-  });
-  let captured: { messages: Array<Record<string, unknown>> } | undefined;
-  const client = {
-    chat: {
-      completions: {
-        create: async (request: { messages: Array<Record<string, unknown>> }) => {
-          captured = request;
-          return {
-            async *[Symbol.asyncIterator]() {
-              yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
-            },
-          };
-        },
-      },
-    },
-  };
-  (adapter as unknown as { client: typeof client }).client = client;
-
-  try {
-    for await (const _ of adapter.stream(messages, [], 'system')) { /* consume */ }
-  } finally {
-    adapter.dispose();
-  }
-  if (!captured) {
-    throw new Error('Kimi request was not captured');
-  }
-  return captured.messages;
 }
 
 describe('SQLiteSessionStore', () => {
@@ -265,49 +221,184 @@ describe('SQLiteSessionStore', () => {
     }
   });
 
-  it('round-trips preserved Kimi reasoning through SQLite save, restore, and serialization', async () => {
-    const root = join(tmpdir(), `xiaok-sqlite-kimi-round-trip-${Date.now()}`);
+  it.each(['k3', 'k3-256k'] as const)(
+    'redacts %s durable rows without mutating live messages and rejects bound resume',
+    async (model) => {
+      const root = join(
+        tmpdir(),
+        `xiaok-sqlite-kimi-redaction-${model}-${Date.now()}`,
+      );
+      mkdirSync(root, { recursive: true });
+      const dbPath = join(root, 'sessions.sqlite');
+      const sessionId = `sess_sqlite_${model.replace('-', '_')}_durable`;
+      const messages = preservedThinkingRoundTripMessages();
+      let store: SQLiteSessionStore | undefined;
+      let inspector: Database.Database | undefined;
+
+      try {
+        store = new SQLiteSessionStore(dbPath);
+        await store.save({
+          sessionId,
+          cwd: '/workspace/sqlite',
+          model,
+          createdAt: 100,
+          updatedAt: 200,
+          lineage: [sessionId],
+          messages,
+          usage: { inputTokens: 10, outputTokens: 5 },
+          compactions: [],
+          memoryRefs: [],
+          approvalRefs: [],
+          backgroundJobRefs: [],
+        });
+
+        inspector = new Database(dbPath, { readonly: true });
+        const persisted = inspector.prepare(`
+          SELECT content_json
+          FROM session_messages
+          WHERE session_id = ?
+          ORDER BY message_index ASC
+        `).all(sessionId) as Array<{ content_json: string }>;
+        const serializedMessages = persisted.map((row) => row.content_json).join('\n');
+        expect(serializedMessages).not.toContain('"type":"thinking"');
+        expect(serializedMessages).not.toContain('reasoningProvenance');
+        expect(messages[0]?.content[0]).toMatchObject({
+          type: 'thinking',
+          thinking: 'non-empty reasoning',
+          reasoningProvenance: {
+            source: 'reasoning_content',
+          },
+        });
+        expect(messages[3]?.content[0]).toMatchObject({
+          type: 'tool_use',
+          input: { q: 'round trip' },
+        });
+
+        const loaded = await store.load(sessionId);
+        const loadedLast = await store.loadLast();
+        expect(loaded?.messages.flatMap((message) => message.content.map((block) => block.type)))
+          .not.toContain('thinking');
+        expect(loadedLast?.messages).toEqual(loaded?.messages);
+        expect(() => assertKimiK3TargetResumeSupported(true, loaded!))
+          .toThrow('KIMI_K3_DURABLE_RESUME_UNSUPPORTED');
+
+        const expectedError = {
+          code: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
+          message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
+        };
+        await expect(store.fork(sessionId)).rejects.toMatchObject(expectedError);
+        await expect(store.list()).resolves.toEqual([
+          expect.objectContaining({
+            sessionId,
+            preview: 'empty backfill answer',
+          }),
+        ]);
+      } finally {
+        inspector?.close();
+        store?.dispose();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['k3', 'k3-256k'] as const)(
+    'loads and forks a user-only %s SQLite durable snapshot',
+    async (model) => {
+      const root = join(
+        tmpdir(),
+        `xiaok-sqlite-kimi-fresh-${model}-${Date.now()}`,
+      );
+      mkdirSync(root, { recursive: true });
+      const dbPath = join(root, 'sessions.sqlite');
+      const sessionId = `sess_sqlite_${model.replace('-', '_')}_fresh`;
+      let store: SQLiteSessionStore | undefined;
+
+      try {
+        store = new SQLiteSessionStore(dbPath);
+        await store.save({
+          sessionId,
+          cwd: '/workspace/sqlite',
+          model,
+          createdAt: 100,
+          updatedAt: 200,
+          lineage: [sessionId],
+          messages: [{
+            role: 'user',
+            content: [{ type: 'text', text: 'fresh request' }],
+          }],
+          usage: { inputTokens: 1, outputTokens: 0 },
+          compactions: [],
+          memoryRefs: [],
+          approvalRefs: [],
+          backgroundJobRefs: [],
+        });
+
+        await expect(store.load(sessionId)).resolves.toMatchObject({
+          sessionId,
+          model,
+        });
+        await expect(store.loadLast()).resolves.toMatchObject({ sessionId });
+        const forked = await store.fork(sessionId);
+        await expect(store.load(forked.sessionId)).resolves.toMatchObject({
+          sessionId: forked.sessionId,
+          model,
+          forkedFromSessionId: sessionId,
+        });
+      } finally {
+        store?.dispose();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('lists legacy sess_k3 development residue as an ordinary SQLite session', async () => {
+    const root = join(tmpdir(), `xiaok-sqlite-kimi-residue-${Date.now()}`);
     mkdirSync(root, { recursive: true });
     const dbPath = join(root, 'sessions.sqlite');
+    const visibleSessionId = 'sess_sqlite_kimi_visible';
+    const residueId = 'sess_k3_123e4567-e89b-42d3-a456-426614174000';
     let store: SQLiteSessionStore | undefined;
-    let reloaded: SQLiteSessionStore | undefined;
+    let inspector: Database.Database | undefined;
 
     try {
       store = new SQLiteSessionStore(dbPath);
       await store.save({
-        sessionId: 'sess_kimi_sqlite_round_trip',
+        sessionId: visibleSessionId,
         cwd: '/workspace/sqlite',
         model: 'k3',
         createdAt: 100,
         updatedAt: 200,
-        lineage: ['sess_kimi_sqlite_round_trip'],
+        lineage: [visibleSessionId],
         messages: preservedThinkingRoundTripMessages(),
-        usage: { inputTokens: 10, outputTokens: 5 },
+        usage: { inputTokens: 1, outputTokens: 1 },
         compactions: [],
         memoryRefs: [],
         approvalRefs: [],
         backgroundJobRefs: [],
       });
+      inspector = new Database(dbPath);
+      inspector.prepare(`
+        INSERT INTO sessions (
+          session_id, cwd, model, created_at, updated_at, forked_from_session_id,
+          lineage_json, usage_json, compactions_json, prompt_snapshot_id,
+          memory_refs_json, approval_refs_json, background_job_refs_json,
+          intent_delegation_json, skill_eval_json, skill_execution_json
+        )
+        SELECT
+          ?, cwd, model, created_at, 999, forked_from_session_id,
+          lineage_json, usage_json, compactions_json, prompt_snapshot_id,
+          memory_refs_json, approval_refs_json, background_job_refs_json,
+          intent_delegation_json, skill_eval_json, skill_execution_json
+        FROM sessions
+        WHERE session_id = ?
+      `).run(residueId, visibleSessionId);
 
-      reloaded = new SQLiteSessionStore(dbPath);
-      const loaded = await reloaded.load('sess_kimi_sqlite_round_trip');
-      expect(loaded).not.toBeNull();
-      const resumed = new AgentSessionState();
-      resumed.restoreSnapshot(loaded!);
-      const wireMessages = await serializeResumedKimiMessages(resumed.getMessages());
-      const assistants = wireMessages.filter((message) => message.role === 'assistant');
-
-      expect(assistants.map((message) => message.reasoning_content)).toEqual([
-        'non-empty reasoning',
-        ' \n\t ',
-        '',
-        '',
+      await expect(store.list()).resolves.toEqual([
+        expect.objectContaining({ sessionId: residueId }),
+        expect.objectContaining({ sessionId: visibleSessionId }),
       ]);
-      expect(assistants[2]).toHaveProperty('content', 'empty backfill answer');
-      expect(assistants[3]?.tool_calls).toHaveLength(1);
-      expect(Object.hasOwn(assistants[3]!, 'content')).toBe(false);
     } finally {
-      reloaded?.dispose();
+      inspector?.close();
       store?.dispose();
       rmSync(root, { recursive: true, force: true });
     }
@@ -407,4 +498,5 @@ describe('SQLiteSessionStore', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
 });

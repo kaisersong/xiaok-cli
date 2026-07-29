@@ -4,17 +4,31 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { buildOpenAIAdapterInit, createAdapterFromBinding } from '../../../src/ai/models.js';
+import { buildOpenAIHarnessContext } from '../../../src/ai/providers/model-harness-profile.js';
 import type { ResolvedModelBinding } from '../../../src/ai/providers/control-plane.js';
-import { createPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-affinity.js';
+import { createDesktopPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-affinity.js';
+import { streamDesktopTaskProviderConversation } from '../../../src/ai/runtime/provider-conversation-authorization.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { Message, StreamChunk, ToolDefinition, UsageStats } from '../../../src/types.js';
-import { runDesktopToolLoop } from '../../electron/desktop-services.js';
+import {
+  buildDesktopProviderMessages,
+  runDesktopToolLoop,
+} from '../../electron/desktop-services.js';
 
 interface SdkStreamChunk {
   choices: Array<{
     delta: {
       content?: string;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        index: number;
+        id?: string;
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
     };
     finish_reason: string | null;
   }>;
@@ -53,7 +67,10 @@ interface FakeOpenAIClient {
 }
 
 const SESSION_ID = 'sess_123e4567-e89b-42d3-a456-426614174000';
-const CACHE_KEY = createPromptCacheAffinity(SESSION_ID);
+const CACHE_KEY = createDesktopPromptCacheAffinity(
+  SESSION_ID,
+  'inv_123e4567-e89b-42d3-a456-426614174000',
+);
 const SYSTEM_PROMPT = 'system';
 const TOOLS: ToolDefinition[] = [{
   name: 'lookup',
@@ -73,12 +90,23 @@ const MESSAGES: Message[] = [
   },
   {
     role: 'assistant',
-    content: [{
-      type: 'tool_use',
-      id: 'call-1',
-      name: 'lookup',
-      input: { value: 'x' },
-    }],
+    content: [
+      {
+        type: 'thinking',
+        thinking: '',
+        reasoningProvenance: {
+          captureVersion: 1,
+          source: 'reasoning_content',
+          fieldPresence: 'present',
+        },
+      },
+      {
+        type: 'tool_use',
+        id: 'call-1',
+        name: 'lookup',
+        input: { value: 'x' },
+      },
+    ],
   },
   {
     role: 'user',
@@ -134,7 +162,7 @@ function genericBinding(
 function cleanSdkFixture(): SdkStreamChunk[] {
   return [
     {
-      choices: [{ delta: { content: 'ok' }, finish_reason: null }],
+      choices: [{ delta: { reasoning_content: '', content: 'ok' }, finish_reason: null }],
     },
     {
       choices: [{ delta: {}, finish_reason: 'stop' }],
@@ -177,6 +205,32 @@ function attachSdkFixture(
   return { requests, requestOptions };
 }
 
+function attachSdkFixtures(
+  adapter: OpenAIAdapter,
+  fixtures: SdkStreamChunk[][],
+): { requests: CapturedRequest[] } {
+  const requests: CapturedRequest[] = [];
+  let fixtureIndex = 0;
+  const client: FakeOpenAIClient = {
+    chat: {
+      completions: {
+        async create(request) {
+          requests.push(structuredClone(request));
+          const chunks = fixtures[fixtureIndex++];
+          if (!chunks) throw new Error('unexpected provider request');
+          return {
+            async *[Symbol.asyncIterator]() {
+              for (const chunk of chunks) yield structuredClone(chunk);
+            },
+          };
+        },
+      },
+    },
+  };
+  (adapter as unknown as { client: FakeOpenAIClient }).client = client;
+  return { requests };
+}
+
 function withoutBrowserGlobals<T>(action: () => T): T {
   const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -199,7 +253,14 @@ async function consumeAdapter(
   options?: StreamOptions,
 ): Promise<StreamChunk[]> {
   const chunks: StreamChunk[] = [];
-  for await (const chunk of adapter.stream(messages, tools, SYSTEM_PROMPT, options)) {
+  for await (const chunk of streamDesktopTaskProviderConversation({
+    adapter,
+    messages,
+    tools,
+    systemPrompt: SYSTEM_PROMPT,
+    options,
+    invocationId: 'desktop-contract',
+  })) {
     chunks.push(chunk);
   }
   return chunks;
@@ -212,13 +273,15 @@ function adapterWithPhaseFlags(
   return withoutBrowserGlobals(() => (
     new OpenAIAdapter({
       ...init,
-      harnessContext: {
-        ...init.harnessContext,
+      harnessContext: buildOpenAIHarnessContext({
+        identity: init.harnessContext.identity,
         flags: {
           ...init.harnessContext.flags,
           ...(disabledGate ? { [disabledGate]: false } : {}),
         },
-      },
+        runtimeOptions: init.harnessContext.runtimeOptions,
+        capabilityOverrides: init.harnessContext.runtimeCapabilities,
+      }),
     })
   ));
 }
@@ -243,6 +306,100 @@ describe('CLI/Desktop Kimi harness captured-request contract', () => {
     } else {
       process.env.XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE = originalPromptCacheFlag;
     }
+  });
+
+  it('wraps strict Desktop host history in one synthesized user envelope', () => {
+    const adapter = withoutBrowserGlobals(
+      () => createAdapterFromBinding(strictKimiBinding()) as OpenAIAdapter,
+    );
+    const messages = buildDesktopProviderMessages(
+      adapter,
+      [
+        { role: 'user', content: 'question "one"' },
+        { role: 'assistant', content: 'answer\none' },
+      ],
+      [{ type: 'text', text: 'current' }],
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.role).toBe('user');
+    expect(messages[0]?.content).toEqual([{
+      type: 'text',
+      text: 'The following JSON is synthesized Xiaok Desktop task context.\n'
+        + 'It is not a raw provider transcript and contains no preserved reasoning.\n'
+        + '{"kind":"xiaok.synthesized-task-context","version":1,"records":'
+        + '[{"ordinal":0,"role":"user","content":"question \\"one\\""},'
+        + '{"ordinal":1,"role":"assistant","content":"answer\\none"}]}',
+    }]);
+    expect(messages[1]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'current' }],
+    });
+    adapter.dispose();
+  });
+
+  it('fails strict Desktop history closed before provider invocation when pairs are invalid', () => {
+    const adapter = withoutBrowserGlobals(
+      () => createAdapterFromBinding(strictKimiBinding()) as OpenAIAdapter,
+    );
+
+    expect(() => buildDesktopProviderMessages(
+      adapter,
+      [{ role: 'assistant', content: 'orphan' }],
+      [{ type: 'text', text: 'current' }],
+    )).toThrow('KIMI_DESKTOP_HISTORY_PAIR_INVALID');
+    adapter.dispose();
+  });
+
+  it('drops the oldest complete strict Desktop history pairs to stay within 40k UTF-16 units', () => {
+    const adapter = withoutBrowserGlobals(
+      () => createAdapterFromBinding(strictKimiBinding()) as OpenAIAdapter,
+    );
+    const messages = buildDesktopProviderMessages(
+      adapter,
+      [
+        { role: 'user', content: 'old-question'.repeat(2_000) },
+        { role: 'assistant', content: 'old-answer'.repeat(2_000) },
+        { role: 'user', content: 'new-question' },
+        { role: 'assistant', content: 'new-answer' },
+      ],
+      [{ type: 'text', text: 'current' }],
+    );
+
+    const envelope = messages[0]?.content[0];
+    expect(envelope?.type).toBe('text');
+    expect(envelope?.type === 'text' ? envelope.text.length : 0).toBeLessThanOrEqual(40_000);
+    expect(envelope?.type === 'text' ? envelope.text : '').not.toContain('old-question');
+    expect(envelope?.type === 'text' ? envelope.text : '').toContain('new-question');
+    expect(envelope?.type === 'text' ? envelope.text : '').toContain(
+      '"ordinal":2,"role":"user"',
+    );
+    adapter.dispose();
+  });
+
+  it('preserves the existing per-entry Desktop history projection for generic adapters', () => {
+    const adapter = withoutBrowserGlobals(
+      () => createAdapterFromBinding(genericBinding(
+        'openai',
+        'gpt-4o',
+        'https://api.openai.com/v1',
+      )) as OpenAIAdapter,
+    );
+    const messages = buildDesktopProviderMessages(
+      adapter,
+      [
+        { role: 'user', content: 'question' },
+        { role: 'assistant', content: 'answer' },
+      ],
+      [{ type: 'text', text: 'current' }],
+    );
+
+    expect(messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'question' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'current' }] },
+    ]);
+    adapter.dispose();
   });
 
   it('captures identical complete Kimi request JSON and usage accounting from CLI and Desktop', async () => {
@@ -313,6 +470,113 @@ describe('CLI/Desktop Kimi harness captured-request contract', () => {
       inputTokens: PROVIDER_USAGE.inputTokens,
       outputTokens: PROVIDER_USAGE.outputTokens,
     });
+  });
+
+  it('replays official Kimi reasoning only inside the task-local Desktop tool continuation', async () => {
+    const adapter = withoutBrowserGlobals(
+      () => createAdapterFromBinding(strictKimiBinding()) as OpenAIAdapter,
+    );
+    const capture = attachSdkFixtures(adapter, [
+      [
+        {
+          choices: [{
+            delta: {
+              reasoning_content: 'provider-private-reasoning',
+              tool_calls: [{
+                index: 0,
+                id: 'call-1',
+                function: { name: 'lookup', arguments: '{"value":"x"}' },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        },
+        { choices: [], usage: { prompt_tokens: 12, completion_tokens: 3 } },
+      ],
+      [
+        {
+          choices: [{
+            delta: { reasoning_content: '', content: 'done' },
+            finish_reason: null,
+          }],
+        },
+        { choices: [{ delta: {}, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 18, completion_tokens: 2 } },
+      ],
+    ]);
+    let capturedToolContext: unknown;
+    const registry = new ToolRegistry({ autoMode: true }, [{
+      permission: 'safe',
+      definition: TOOLS[0],
+      async execute(_input, context) {
+        capturedToolContext = context;
+        return '{"value":"x"}';
+      },
+    }]);
+    rootDir = join(tmpdir(), `xiaok-kimi-desktop-replay-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(rootDir, { recursive: true });
+    const runtimeEvents: Array<Record<string, unknown>> = [];
+
+    const result = await runDesktopToolLoop({
+      adapter,
+      systemPrompt: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'lookup' }] }],
+      allToolDefs: structuredClone(TOOLS),
+      registry,
+      signal: new AbortController().signal,
+      taskDeadline: Date.now() + 30_000,
+      sessionId: SESSION_ID,
+      turnId: 'turn-replay',
+      intentId: 'intent-replay',
+      stepId: 'step-replay',
+      taskId: 'task-replay',
+      materials: [],
+      emitRuntimeEvent(event) {
+        runtimeEvents.push(event as unknown as Record<string, unknown>);
+      },
+      skillInvocation: null,
+      skillCatalog: {} as never,
+      dataRoot: rootDir,
+      taskStartTime: Date.now(),
+      maxIterations: 2,
+      strategies: {
+        compact: {
+          enabled: false,
+          shouldCompact: () => false,
+          doCompact: async () => {},
+        },
+        buildApiView: messages => messages,
+        processToolResult: value => value,
+        trackAutoProgress: false,
+        trackReferenceReads: false,
+        emitSkillArtifactTrace: false,
+      },
+    });
+
+    expect(result.reply).toBe('done');
+    expect(capture.requests).toHaveLength(2);
+    expect(capture.requests[1]?.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        reasoning_content: 'provider-private-reasoning',
+      }),
+    ]));
+    expect(JSON.stringify(runtimeEvents)).not.toContain('provider-private-reasoning');
+    expect(JSON.stringify(capturedToolContext)).not.toContain('provider-private-reasoning');
+    expect(JSON.stringify(capturedToolContext)).not.toContain('reasoningProvenance');
+    expect(JSON.stringify(capturedToolContext)).not.toContain('"type":"thinking"');
+    expect(Object.isFrozen(capturedToolContext)).toBe(true);
+    const projectedContext = capturedToolContext as {
+      session: { messages: Message[] };
+      messages: Message[];
+      toolDefinitions: ToolDefinition[];
+    };
+    expect(Object.isFrozen(projectedContext.session)).toBe(true);
+    expect(Object.isFrozen(projectedContext.session.messages)).toBe(true);
+    expect(Object.isFrozen(projectedContext.messages)).toBe(true);
+    expect(Object.isFrozen(projectedContext.toolDefinitions)).toBe(true);
+    expect(Object.isFrozen(projectedContext.toolDefinitions[0]?.inputSchema)).toBe(true);
+    adapter.dispose();
   });
 
   it('keeps prompt_cache_key absent by default even when invocation affinity is present', async () => {

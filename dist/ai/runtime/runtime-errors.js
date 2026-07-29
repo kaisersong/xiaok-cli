@@ -5,6 +5,13 @@ export function normalizeRuntimeError(error) {
         return { code: 'runtime_aborted', message, retryable: false };
     }
     const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('KIMI_K3_DURABLE_RESUME_UNSUPPORTED')) {
+        return {
+            code: 'kimi_k3_durable_resume_unsupported',
+            message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
+            retryable: false,
+        };
+    }
     if (/502|503|timeout|ECONNRESET|Bad gateway/i.test(message)) {
         return { code: 'model_failed', message, retryable: true };
     }

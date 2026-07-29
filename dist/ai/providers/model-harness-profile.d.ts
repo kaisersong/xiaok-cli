@@ -35,7 +35,7 @@ export type KimiUsageDiagnostic = {
 };
 export type KimiUsageDiagnosticSink = (diagnostic: KimiUsageDiagnostic) => void;
 export interface ModelHarnessProfile {
-    readonly id: 'generic-openai' | 'kimi-k3-coding-openai';
+    readonly id: 'generic-openai' | 'kimi-k3-coding-openai' | 'kimi-k3-256k-coding-openai';
     normalizeToolSchema?: (schema: Record<string, unknown>) => NormalizedKimiSchema;
     serializeReasoning?: (blocks: MessageBlock[], dialect: ReasoningKeyName, preservedThinkingEnabled: boolean) => {
         field: ReasoningKeyName;
@@ -72,7 +72,9 @@ export interface BuildOpenAIHarnessContextInput {
     readonly capabilityOverrides?: Partial<ModelCapabilities>;
 }
 export declare const GENERIC_OPENAI_HARNESS_PROFILE: ModelHarnessProfile;
+export declare function isOwnedStrictOpenAIHarnessContext(context: OpenAIHarnessContext): boolean;
 export declare const KIMI_K3_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile;
+export declare const KIMI_K3_256K_CODING_OPENAI_HARNESS_PROFILE: ModelHarnessProfile;
 export declare function observeReasoningDialect(state: ReasoningDialectState, delta: Record<string, unknown>): {
     conflict?: {
         previous: ReasoningKeyName;

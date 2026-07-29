@@ -1,9 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { Message, UsageStats } from '../../../src/types.js';
-import { FileSessionStore, SQLiteSessionStore } from '../../../src/ai/runtime/session-store.js';
+import {
+  FileSessionStore,
+  SQLiteSessionStore,
+  assertKimiK3TargetResumeSupported,
+} from '../../../src/ai/runtime/session-store.js';
 import { createFileSessionStore } from '../../../src/ai/runtime/session-store/file-store.js';
 import type { SessionStore } from '../../../src/ai/runtime/session-store/store.js';
 import { AgentSessionState } from '../../../src/ai/runtime/session.js';
@@ -11,25 +21,32 @@ import { createPromptCacheAffinity } from '../../../src/ai/runtime/prompt-cache-
 import { createEmptySessionIntentLedger } from '../../../src/runtime/intent-delegation/store.js';
 import { createEmptySessionSkillEvalState } from '../../../src/runtime/intent-delegation/skill-eval.js';
 import { createEmptySessionSkillExecutionState } from '../../../src/ai/skills/execution-state.js';
-import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
-import {
-  buildOpenAIHarnessContext,
-  resolveKimiHarnessFeatureFlags,
-} from '../../../src/ai/providers/model-harness-profile.js';
+
+const KIMI_K3_DURABLE_RESUME_UNSUPPORTED =
+  'KIMI_K3_DURABLE_RESUME_UNSUPPORTED';
 
 function preservedThinkingRoundTripMessages(): Message[] {
+  const official = (thinking: string) => ({
+    type: 'thinking' as const,
+    thinking,
+    reasoningProvenance: {
+      captureVersion: 1 as const,
+      source: 'reasoning_content' as const,
+      fieldPresence: 'present' as const,
+    },
+  });
   return [
     {
       role: 'assistant',
       content: [
-        { type: 'thinking', thinking: 'non-empty reasoning' },
+        official('non-empty reasoning'),
         { type: 'text', text: 'first answer' },
       ],
     },
     {
       role: 'assistant',
       content: [
-        { type: 'thinking', thinking: ' \n\t ' },
+        official(' \n\t '),
         { type: 'text', text: 'second answer' },
       ],
     },
@@ -47,54 +64,6 @@ function preservedThinkingRoundTripMessages(): Message[] {
       }],
     },
   ];
-}
-
-async function serializeResumedKimiMessages(
-  messages: Message[],
-): Promise<Array<Record<string, unknown>>> {
-  const adapter = new OpenAIAdapter({
-    apiKey: 'test-key',
-    kimiCodingHeadersApplied: true,
-    harnessContext: buildOpenAIHarnessContext({
-      identity: {
-        providerId: 'kimi',
-        providerType: 'first_party',
-        protocol: 'openai_legacy',
-        canonicalBaseUrl: 'https://api.kimi.com/coding/v1',
-        wireModel: 'k3',
-        capabilities: ['tools', 'thinking'],
-      },
-      flags: resolveKimiHarnessFeatureFlags({
-        XIAOK_EXPERIMENTAL_KIMI_PRESERVED_THINKING: '1',
-      }),
-    }),
-  });
-  let captured: { messages: Array<Record<string, unknown>> } | undefined;
-  const client = {
-    chat: {
-      completions: {
-        create: async (request: { messages: Array<Record<string, unknown>> }) => {
-          captured = request;
-          return {
-            async *[Symbol.asyncIterator]() {
-              yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
-            },
-          };
-        },
-      },
-    },
-  };
-  (adapter as unknown as { client: typeof client }).client = client;
-
-  try {
-    for await (const _ of adapter.stream(messages, [], 'system')) { /* consume */ }
-  } finally {
-    adapter.dispose();
-  }
-  if (!captured) {
-    throw new Error('Kimi request was not captured');
-  }
-  return captured.messages;
 }
 
 const FORK_INTENT_LEDGER_STORES: Array<{
@@ -126,6 +95,45 @@ const FORK_INTENT_LEDGER_STORES: Array<{
 ];
 
 describe('FileSessionStore', () => {
+  it('rejects a generic assistant snapshot when the target adapter is strict K3', () => {
+    expect(() => assertKimiK3TargetResumeSupported(true, {
+      sessionId: 'sess_generic_history',
+      cwd: '/workspace',
+      model: 'gpt-4o',
+      createdAt: 1,
+      updatedAt: 2,
+      lineage: ['sess_generic_history'],
+      messages: [{
+        role: 'assistant',
+        content: [{ type: 'text', text: 'generic answer' }],
+      }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    })).toThrow('KIMI_K3_DURABLE_RESUME_UNSUPPORTED');
+  });
+
+  it('rejects a K3 assistant snapshot when the target adapter has switched to generic', () => {
+    expect(() => assertKimiK3TargetResumeSupported(false, {
+      sessionId: 'sess_k3_history',
+      cwd: '/workspace',
+      model: 'k3',
+      createdAt: 1,
+      updatedAt: 2,
+      lineage: ['sess_k3_history'],
+      messages: [{
+        role: 'assistant',
+        content: [{ type: 'text', text: 'durable K3 answer' }],
+      }],
+      usage: { inputTokens: 1, outputTokens: 1 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    })).toThrow('KIMI_K3_DURABLE_RESUME_UNSUPPORTED');
+  });
   let rootDir: string;
 
   beforeEach(() => {
@@ -217,12 +225,17 @@ describe('FileSessionStore', () => {
       sessionId: forked.sessionId,
       forkedFromSessionId: sessionId,
     });
-    expect(createPromptCacheAffinity(secondNewSessionId))
-      .not.toBe(createPromptCacheAffinity(sessionId));
-    expect(createPromptCacheAffinity(forked.sessionId))
-      .not.toBe(createPromptCacheAffinity(sessionId));
-    expect(createPromptCacheAffinity(forked.sessionId))
-      .not.toBe(createPromptCacheAffinity(secondNewSessionId));
+    const cacheAffinities = [
+      createPromptCacheAffinity(sessionId),
+      createPromptCacheAffinity(secondNewSessionId),
+      createPromptCacheAffinity(forked.sessionId),
+    ];
+    expect(cacheAffinities).toEqual([
+      expect.stringMatching(/^pc1_[0-9a-f]{64}$/),
+      expect.stringMatching(/^pc1_[0-9a-f]{64}$/),
+      expect.stringMatching(/^pc1_[0-9a-f]{64}$/),
+    ]);
+    expect(new Set(cacheAffinities).size).toBe(3);
   });
 
   it('keeps legacy session IDs loadable without rewriting them', async () => {
@@ -281,17 +294,80 @@ describe('FileSessionStore', () => {
     expect(resumed.planCompaction().invalidReason).toBeUndefined();
   });
 
-  it('round-trips preserved Kimi reasoning through file save, restore, and serialization', async () => {
+
+  it.each(['k3', 'k3-256k'] as const)(
+    'redacts %s durable messages without mutating live messages and rejects bound resume',
+    async (model) => {
+      const store = new FileSessionStore(rootDir);
+      const sessionId = `sess_kimi_${model.replace('-', '_')}_durable`;
+      const messages = preservedThinkingRoundTripMessages();
+
+      await store.save({
+        sessionId,
+        cwd: '/workspace/kimi',
+        model,
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: [sessionId],
+        messages,
+        usage: { inputTokens: 10, outputTokens: 5 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      const persisted = JSON.parse(
+        readFileSync(join(rootDir, `${sessionId}.json`), 'utf8'),
+      ) as { messages: Message[] };
+      expect(
+        persisted.messages.flatMap((message) => message.content.map((block) => block.type)),
+      ).not.toContain('thinking');
+      expect(JSON.stringify(persisted.messages)).not.toContain('reasoningProvenance');
+      expect(messages[0]?.content[0]).toMatchObject({
+        type: 'thinking',
+        thinking: 'non-empty reasoning',
+        reasoningProvenance: {
+          source: 'reasoning_content',
+        },
+      });
+      expect(messages[3]?.content[0]).toMatchObject({
+        type: 'tool_use',
+        input: { q: 'round trip' },
+      });
+
+      const loaded = await store.load(sessionId);
+      const loadedLast = await store.loadLast();
+      expect(loaded?.messages).toEqual(persisted.messages);
+      expect(loadedLast?.messages).toEqual(persisted.messages);
+      expect(() => assertKimiK3TargetResumeSupported(true, loaded!))
+        .toThrow(KIMI_K3_DURABLE_RESUME_UNSUPPORTED);
+
+      const expectedError = {
+        code: KIMI_K3_DURABLE_RESUME_UNSUPPORTED,
+        message: KIMI_K3_DURABLE_RESUME_UNSUPPORTED,
+      };
+      await expect(store.fork(sessionId)).rejects.toMatchObject(expectedError);
+      await expect(store.list()).resolves.toEqual([
+        expect.objectContaining({
+          sessionId,
+          preview: 'empty backfill answer',
+        }),
+      ]);
+    },
+  );
+
+  it('redacts official K3 reasoning even after the live session switches to a generic model', async () => {
     const store = new FileSessionStore(rootDir);
-    const messages = preservedThinkingRoundTripMessages();
+    const sessionId = 'sess_kimi_switched_to_generic';
     await store.save({
-      sessionId: 'sess_kimi_file_round_trip',
-      cwd: 'D:/projects/workspace/xiaok-cli',
-      model: 'k3',
+      sessionId,
+      cwd: '/workspace/kimi',
+      model: 'gpt-4o',
       createdAt: 100,
       updatedAt: 200,
-      lineage: ['sess_kimi_file_round_trip'],
-      messages,
+      lineage: [sessionId],
+      messages: preservedThinkingRoundTripMessages(),
       usage: { inputTokens: 10, outputTokens: 5 },
       compactions: [],
       memoryRefs: [],
@@ -299,22 +375,97 @@ describe('FileSessionStore', () => {
       backgroundJobRefs: [],
     });
 
-    const loaded = await store.load('sess_kimi_file_round_trip');
-    expect(loaded).not.toBeNull();
-    const resumed = new AgentSessionState();
-    resumed.restoreSnapshot(loaded!);
-    const wireMessages = await serializeResumedKimiMessages(resumed.getMessages());
-    const assistants = wireMessages.filter((message) => message.role === 'assistant');
+    const persisted = readFileSync(
+      join(rootDir, `${sessionId}.json`),
+      'utf8',
+    );
+    expect(persisted).not.toContain('non-empty reasoning');
+    expect(persisted).not.toContain('reasoningProvenance');
+    await expect(store.load(sessionId)).resolves.toMatchObject({
+      sessionId,
+      model: 'gpt-4o',
+    });
+  });
 
-    expect(assistants.map((message) => message.reasoning_content)).toEqual([
-      'non-empty reasoning',
-      ' \n\t ',
-      '',
-      '',
+  it.each(['k3', 'k3-256k'] as const)(
+    'loads and forks a user-only %s durable snapshot',
+    async (model) => {
+      const store = new FileSessionStore(rootDir);
+      const sessionId = `sess_kimi_${model.replace('-', '_')}_fresh`;
+      await store.save({
+        sessionId,
+        cwd: '/workspace/kimi',
+        model,
+        createdAt: 100,
+        updatedAt: 200,
+        lineage: [sessionId],
+        messages: [{
+          role: 'user',
+          content: [{ type: 'text', text: 'fresh request' }],
+        }],
+        usage: { inputTokens: 1, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      });
+
+      await expect(store.load(sessionId)).resolves.toMatchObject({
+        sessionId,
+        model,
+      });
+      await expect(store.loadLast()).resolves.toMatchObject({ sessionId });
+      const forked = await store.fork(sessionId);
+      await expect(store.load(forked.sessionId)).resolves.toMatchObject({
+        sessionId: forked.sessionId,
+        model,
+        forkedFromSessionId: sessionId,
+      });
+    },
+  );
+
+  it('lists legacy sess_k3 development residue as an ordinary session', async () => {
+    const store = new FileSessionStore(rootDir);
+    const visibleSessionId = 'sess_kimi_durable_visible';
+    await store.save({
+      sessionId: visibleSessionId,
+      cwd: '/workspace/kimi',
+      model: 'k3',
+      createdAt: 100,
+      updatedAt: 200,
+      lineage: [visibleSessionId],
+      messages: preservedThinkingRoundTripMessages(),
+      usage: { inputTokens: 1, outputTokens: 1 },
+      compactions: [],
+      memoryRefs: [],
+      approvalRefs: [],
+      backgroundJobRefs: [],
+    });
+    const residueId = 'sess_k3_123e4567-e89b-42d3-a456-426614174000';
+    writeFileSync(
+      join(rootDir, `${residueId}.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessionId: residueId,
+        cwd: '/development-residue',
+        model: 'k3',
+        createdAt: 1,
+        updatedAt: 999,
+        lineage: [residueId],
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'residue' }] }],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        compactions: [],
+        memoryRefs: [],
+        approvalRefs: [],
+        backgroundJobRefs: [],
+      }),
+      'utf8',
+    );
+
+    await expect(store.list()).resolves.toEqual([
+      expect.objectContaining({ sessionId: residueId }),
+      expect.objectContaining({ sessionId: visibleSessionId }),
     ]);
-    expect(assistants[2]).toHaveProperty('content', 'empty backfill answer');
-    expect(assistants[3]?.tool_calls).toHaveLength(1);
-    expect(Object.hasOwn(assistants[3]!, 'content')).toBe(false);
   });
 
   it('lists saved sessions ordered by most recent update', async () => {

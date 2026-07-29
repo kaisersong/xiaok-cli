@@ -11,6 +11,7 @@ export type { MessageBlock, UsageStats };
 export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     getModelName(): string;
+    getHarnessProfileId?(): string;
 }
 export type StreamChunk = {
     type: 'text';
@@ -18,7 +19,8 @@ export type StreamChunk = {
 } | {
     type: 'thinking';
     delta: string;
-    signature?: string;
+    signature?: import('./ai/runtime/blocks.js').ReasoningSource;
+    reasoningProvenance?: import('./ai/runtime/blocks.js').ReasoningBlockProvenance;
 } | {
     type: 'tool_use';
     id: string;

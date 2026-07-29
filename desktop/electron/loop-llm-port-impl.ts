@@ -2,6 +2,8 @@ import { createAdapter } from '../../src/ai/models.js';
 import type { Message } from '../../src/types.js';
 import { loadConfig } from '../../src/utils/config.js';
 import type { LoopLLMPort } from './loop-llm-port.js';
+import { randomUUID } from 'node:crypto';
+import { streamStatelessSideCallProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 
 const COMPLETION_TIMEOUT_MS = 30_000;
 
@@ -17,7 +19,14 @@ export function createDesktopLoopLLMPort(): LoopLLMPort {
       const timer = setTimeout(() => controller.abort(), COMPLETION_TIMEOUT_MS);
       let text = '';
       try {
-        for await (const chunk of adapter.stream(messages, [], input.systemPrompt, { signal: controller.signal })) {
+        for await (const chunk of streamStatelessSideCallProviderConversation({
+          adapter,
+          messages,
+          tools: [],
+          systemPrompt: input.systemPrompt,
+          options: { signal: controller.signal },
+          invocationId: `inv_${randomUUID()}`,
+        })) {
           if (chunk.type === 'text') {
             text += chunk.delta;
             if (text.length >= input.maxTokens * 4) {

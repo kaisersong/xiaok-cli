@@ -1,6 +1,8 @@
 import type { Message, ModelAdapter } from '../../types.js';
 import type { IntentBoundaryConfig, LlmBoundaryDecision } from './boundary-types.js';
 import type { IntentType } from './types.js';
+import { randomUUID } from 'node:crypto';
+import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
 
 const INTENT_TYPES = new Set(['generate', 'revise', 'summarize', 'analyze']);
 
@@ -34,7 +36,13 @@ export function createAdapterBoundaryInvoker(
         content: [{ type: 'text', text: prompt }],
       }];
       let text = '';
-      for await (const chunk of adapter.stream(messages, [], 'Return JSON only. Do not call tools.')) {
+      for await (const chunk of streamStatelessSideCallProviderConversation({
+        adapter,
+        messages,
+        tools: [],
+        systemPrompt: 'Return JSON only. Do not call tools.',
+        invocationId: `inv_${randomUUID()}`,
+      })) {
         if (chunk.type === 'text') text += chunk.delta;
         if (chunk.type === 'done') break;
       }

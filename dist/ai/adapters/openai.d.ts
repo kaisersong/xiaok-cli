@@ -13,6 +13,12 @@ export declare class OpenAIAdapter implements ModelAdapter {
     private reasoningDialectState;
     constructor(init: OpenAIAdapterInit);
     getModelName(): string;
+    getHarnessProfileId(): string;
+    /**
+     * Read-only identity view. Authorization ownership is established by the
+     * concrete adapter instance, never by a caller-provided string or registrar.
+     */
+    getOwnedHarnessProfileId(): OpenAIAdapterInit['harnessContext']['profile']['id'] | undefined;
     getCapabilities(): Readonly<ModelCapabilities>;
     dispose(): void;
     cloneWithModel(newWireModel: string): OpenAIAdapter;

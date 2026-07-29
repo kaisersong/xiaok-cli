@@ -3299,7 +3299,10 @@ describe('chat interactive runtime', () => {
       harness.send('\r');
 
       await waitFor(() => {
-        expect(adapterCalls.length).toBeGreaterThan(adapterCallCount);
+        expect(
+          adapterCalls.length,
+          harness.output.normalized.slice(outputStart),
+        ).toBeGreaterThan(adapterCallCount);
       }, { timeoutMs: 3_000 });
       await waitForInputTurnReady(harness);
 
@@ -3326,7 +3329,6 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
       expect.soft(statusBarUpdateSpy).not.toHaveBeenCalled();
       expect.soft(readPersistedConfig().defaultModelId).toBe('kimi-k2.7');
-      await runProbe('kimi-k2.7', 200_000);
 
       // Catalog registration must carry K3's default runtime policy into config and live state.
       harness.send('/models');
@@ -3350,7 +3352,8 @@ describe('chat interactive runtime', () => {
       expect.soft(statusBarUpdateSpy.mock.calls.at(-1)).toEqual(['k3', 1_048_576]);
       await runProbe('k3', 1_048_576);
 
-      // Leaving K3 must clear its limit and use the target model's resolved capability.
+      // The generic fake adapter keeps this test focused on atomic policy refresh; the
+      // strict profile boundary has a dedicated identity-owner contract test.
       harness.send('/models');
       harness.send('\r');
       await waitFor(() => {

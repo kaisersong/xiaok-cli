@@ -46,6 +46,18 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.24 introduces first-class Kimi K3 and K3 256K model support with a dedicated harness profile that enables preserved thinking, prompt cache affinity, Kimi-specific tool schema normalization, and reasoning serialization out of the box. Both CLI and Desktop resolve the K3 harness automatically when the configured provider and endpoint match the official Kimi Coding API.
+
+**Kimi K3 Model Optimization:**
+
+- **Dedicated Harness Profile**: `kimi-k3-coding-openai` and `kimi-k3-256k-coding-openai` profiles are resolved automatically for the official Kimi Coding endpoint. They enable tool schema normalization, usage extraction, empty assistant content omission, and reasoning serialization without per-session configuration.
+- **Preserved Thinking**: `preservedThinking` defaults to `true` for K3 models. The runtime forwards `reasoning_content` from the Kimi streaming response, making the model's chain-of-thought visible in Desktop and CLI without user opt-in.
+- **Prompt Cache Affinity**: Prompt cache key injection is available via `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`. When enabled, the harness encodes a stable cache key per session, enabling Kimi's server-side prompt caching (observed 29K+ cached input tokens on typical sessions).
+- **OpenAI Responses Native Adapter**: A new adapter path supports the OpenAI Responses API wire format with native compaction, portable compaction executor, and session graph integration for models that expose it.
+- **D9 Evaluation Infrastructure**: A production-grade, fail-closed evaluation harness (`scripts/evals/kimi-k3-d9/`) provides deterministic fixture servers, canonical JSON attestation, immutable preflight plans, full-tree digests, paired stratified bootstrap statistics, and formal artifact construction for reproducible A/B model comparisons.
+- **Release Validation**: The release gate covers 2400+ sandbox tests, 13 Kimi harness contract tests, 133 Desktop service tests, D9 canonical/statistics/manifest/preflight/assignment/coordinator/fixtures/scanner suites (23 tests), real Kimi K3 API smoke (correct response with prompt cache hit), Desktop build, and unsigned macOS packaging with installation to `/Applications`.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, and package locks align on `1.4.24` / `desktop-v1.4.24`.
+
 Xiaok Desktop v1.4.23 turns Canvas into a task-owned artifact workspace and removes the cramped split between content preview and the spatial canvas. Preview and Canvas are now independent, full-height surfaces, while revisions, comparisons, task provenance, and multi-window updates stay attached to the artifact that produced them.
 
 **Artifact Workspace, Canvas, and Release Integrity Update:**
@@ -598,9 +610,13 @@ xiaok config get models
 
 #### Kimi K3
 
-New Kimi configurations use the official wire model ID `k3`. Existing Kimi configurations keep their current model and are not migrated automatically. K3 defaults to a 262,144-token context window and `high` reasoning effort; Allegretto and higher plans can explicitly select the 1,048,576-token window. Reasoning effort supports `low`, `high`, and `max`—there is no `none` option because disabling reasoning routes to a different model.
+New Kimi configurations use the official wire model ID `k3`; `k3-256k` is also available as an exact K3 profile. Existing Kimi configurations keep their current model and are not migrated automatically. K3 defaults to a 262,144-token context window and `high` reasoning effort; Allegretto and higher plans can explicitly select the 1,048,576-token window. Reasoning effort supports `low`, `high`, and `max`—there is no `none` option because disabling reasoning routes to a different model.
 
-Desktop model settings expose the 262K/1M context and Low/High/Max effort controls for the active K3 model. Changing the model or reasoning effort invalidates Kimi's prompt cache, so starting a new session is recommended after a switch. See the [official Kimi Code model documentation](https://www.kimi.com/code/docs/kimi-code/models) for current plan limits and model behavior.
+CLI and Desktop preserve Kimi's official `reasoning_content` by default, but only in task-local memory for the current provider conversation and tool chain. Raw reasoning and its provenance are stripped before durable session/task persistence and never enter terminal output, Desktop events, Canvas, ordinary logs, or tool-facing context. K3 resume, continue, and fork requests whose durable history already contains an assistant turn fail before any provider request or state mutation with `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`; a pre-bound session with no assistant turn is treated as a fresh conversation.
+
+Accordingly, `preservedThinking` is default-on for exact `k3` and `k3-256k` profiles on both surfaces. Explicit `prompt_cache_key` emission remains default-off because no valid product-level paired evaluation has demonstrated the required benefit; Xiaok makes no explicit-key performance claim. The diagnostic opt-in remains `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`.
+
+Desktop model settings expose the 262K/1M context and Low/High/Max effort controls for the active K3 model. Changing the model or reasoning effort invalidates Kimi's provider conversation state, so starting a new session is recommended after a switch. See the [official Kimi Code model documentation](https://www.kimi.com/code/docs/kimi-code/models) for current plan limits and model behavior.
 
 **Project Settings:** `<repo>/.xiaok/settings.json`
 

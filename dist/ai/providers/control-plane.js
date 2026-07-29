@@ -27,12 +27,12 @@ export function resolveRuntimeModelBinding(rawConfig, requestedModelId) {
         throw new Error('custom 模型需要配置 baseUrl。请运行: xiaok config set model custom --base-url <url>');
     }
     const catalogRuntimeModel = providerId === 'kimi'
-        && catalogModel?.model === 'k3'
+        && (catalogModel?.model === 'k3' || catalogModel?.model === 'k3-256k')
         && (providerConfig.protocol !== 'openai_legacy'
             || !isOfficialKimiK3OpenAIEndpoint(transport.baseUrl))
         ? undefined
         : catalogModel;
-    const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || (wireModel === 'k3'
+    const acceptsConfiguredRuntimeOptions = providerId !== 'kimi' || ((wireModel === 'k3' || wireModel === 'k3-256k')
         && providerConfig.protocol === 'openai_legacy'
         && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl));
     const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
