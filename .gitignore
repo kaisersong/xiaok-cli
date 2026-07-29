@@ -87,3 +87,6 @@ docs/skill-observability-design.md
 
 # iOS 本地构建产物
 /mobile/ios/build/
+
+# xiaok-product eval run outputs (may contain sensitive raw material — local only)
+/.eval-runs/

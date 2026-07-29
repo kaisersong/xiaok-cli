@@ -1,0 +1,38 @@
+{
+  "taskId": "prod:slide:quarterly-review",
+  "category": "slide",
+  "title": "季度业务回顾幻灯片（虚构示例数据）",
+  "artifactSystem": "A",
+  "turns": [
+    {
+      "ordinal": 1,
+      "prompt": "帮我制作「季度业务回顾幻灯片（虚构示例数据）」，中文，至少 6 页，每页有标题和要点，生成幻灯片文件并保存。"
+    }
+  ],
+  "expectations": {
+    "artifactType": "slide",
+    "mustExist": true,
+    "artifactMatch": {
+      "kindAnyOf": [
+        "html",
+        "pptx",
+        "other"
+      ],
+      "extensionAnyOf": [
+        ".html",
+        ".pptx"
+      ]
+    },
+    "structure": {
+      "minSlides": 6,
+      "minBytes": 10240
+    },
+    "projectCreatedOnly": false,
+    "forbiddenAgentTools": [
+      "scheduled_task_cancel"
+    ]
+  },
+  "timeoutMs": 900000,
+  "passK": 3,
+  "notes": "二进制 pptx 只校验存在与体积；文本型按 section 计数。"
+}

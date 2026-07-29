@@ -1,0 +1,38 @@
+{
+  "taskId": "prod:slide:tech-share-electron",
+  "category": "slide",
+  "title": "Electron 桌面开发技术分享幻灯片",
+  "artifactSystem": "A",
+  "turns": [
+    {
+      "ordinal": 1,
+      "prompt": "帮我制作「Electron 桌面开发技术分享幻灯片」，中文，至少 8 页，每页有标题和要点，生成幻灯片文件并保存。"
+    }
+  ],
+  "expectations": {
+    "artifactType": "slide",
+    "mustExist": true,
+    "artifactMatch": {
+      "kindAnyOf": [
+        "html",
+        "pptx",
+        "other"
+      ],
+      "extensionAnyOf": [
+        ".html",
+        ".pptx"
+      ]
+    },
+    "structure": {
+      "minSlides": 8,
+      "minBytes": 10240
+    },
+    "projectCreatedOnly": false,
+    "forbiddenAgentTools": [
+      "scheduled_task_cancel"
+    ]
+  },
+  "timeoutMs": 900000,
+  "passK": 3,
+  "notes": "二进制 pptx 只校验存在与体积；文本型按 section 计数。"
+}

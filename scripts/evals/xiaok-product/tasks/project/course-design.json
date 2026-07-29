@@ -1,0 +1,23 @@
+{
+  "taskId": "prod:project:course-design",
+  "category": "project",
+  "title": "设计一门 AI 入门课程",
+  "artifactSystem": "A",
+  "turns": [
+    {
+      "ordinal": 1,
+      "prompt": "这是一个复杂任务：「设计一门 AI 入门课程」。请把它创建为一个多智能体项目来推进。"
+    }
+  ],
+  "expectations": {
+    "artifactType": "project",
+    "mustExist": false,
+    "projectCreatedOnly": true,
+    "forbiddenAgentTools": [
+      "scheduled_task_cancel"
+    ]
+  },
+  "timeoutMs": 600000,
+  "passK": 1,
+  "notes": "MVP 只判项目成功创建（project_card 无 error）；交付终态归二期。"
+}

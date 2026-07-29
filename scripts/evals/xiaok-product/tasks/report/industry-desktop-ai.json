@@ -1,0 +1,43 @@
+{
+  "taskId": "prod:report:industry-desktop-ai",
+  "category": "report",
+  "title": "桌面端 AI 助手行业格局分析报告",
+  "artifactSystem": "A",
+  "turns": [
+    {
+      "ordinal": 1,
+      "prompt": "帮我完成「桌面端 AI 助手行业格局分析报告」：请调研并输出结构化中文报告，必须包含以下章节：现状、趋势、机会、结论。要求正文不少于 800 字，并把最终报告保存为 Markdown 文件。"
+    }
+  ],
+  "expectations": {
+    "artifactType": "report",
+    "mustExist": true,
+    "artifactMatch": {
+      "kindAnyOf": [
+        "text",
+        "html"
+      ],
+      "extensionAnyOf": [
+        ".md",
+        ".html"
+      ]
+    },
+    "structure": {
+      "minSections": 4,
+      "requiredSectionKeywords": [
+        "现状",
+        "趋势",
+        "机会",
+        "结论"
+      ],
+      "minChars": 800
+    },
+    "projectCreatedOnly": false,
+    "forbiddenAgentTools": [
+      "scheduled_task_cancel"
+    ]
+  },
+  "timeoutMs": 600000,
+  "passK": 3,
+  "notes": "结构达标 ≠ 内容质量；人工抽检时关注论据真实性。"
+}

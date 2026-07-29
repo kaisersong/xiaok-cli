@@ -1,0 +1,23 @@
+{
+  "taskId": "prod:project:market-research",
+  "category": "project",
+  "title": "完成一次奶茶行业市场调研并产出报告",
+  "artifactSystem": "A",
+  "turns": [
+    {
+      "ordinal": 1,
+      "prompt": "这是一个复杂任务：「完成一次奶茶行业市场调研并产出报告」。请把它创建为一个多智能体项目来推进。"
+    }
+  ],
+  "expectations": {
+    "artifactType": "project",
+    "mustExist": false,
+    "projectCreatedOnly": true,
+    "forbiddenAgentTools": [
+      "scheduled_task_cancel"
+    ]
+  },
+  "timeoutMs": 600000,
+  "passK": 1,
+  "notes": "MVP 只判项目成功创建（project_card 无 error）；交付终态归二期。"
+}
