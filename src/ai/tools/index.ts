@@ -271,7 +271,7 @@ export class ToolRegistry {
           input,
           reason: 'prompt_declined',
         });
-        return `（已取消: ${name}）`;
+        return `${TOOL_CANCELLED_PREFIX}${name}）`;
       }
     }
 
@@ -363,6 +363,30 @@ function isSuccessfulToolResult(result: string): boolean {
     return false;
   }
   if (normalized.startsWith('（已取消')) {
+    return false;
+  }
+  return true;
+}
+
+export const TOOL_CANCELLED_PREFIX = '（已取消: ';
+
+/**
+ * Model-facing verdict: may this result be replayed to the model, and to the
+ * event stream, as a success?
+ *
+ * Deliberately separate from `isSuccessfulToolResult` above, which feeds
+ * `onToolObserved` (skill evidence) and keeps its narrower `Error:` rule.
+ * Widening that one has a much larger blast radius and no test reachability,
+ * so it is tracked as follow-up work rather than folded in here.
+ */
+export function isSuccessfulModelToolResult(result: string): boolean {
+  const normalized = result.trimStart();
+  // Intentionally not /^Error\b/: `Errors found: 0` must stay a failure here,
+  // because relaxing it is the one change that would open a fail-open path.
+  if (normalized.startsWith('Error')) {
+    return false;
+  }
+  if (normalized.startsWith(TOOL_CANCELLED_PREFIX)) {
     return false;
   }
   return true;

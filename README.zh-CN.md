@@ -46,6 +46,18 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.25 让"被拒绝的工具调用"变成一次诚实的失败。此前用户在权限提示里点了拒绝，运行时却告诉模型这次调用成功了——模型据此继续推进，甚至能用一条从未真正执行的命令满足"完成前必须验证"守卫。现在 Desktop 与 CLI 共用同一套面向模型的成败判定，并把历史工作流产物恢复回 Canvas。
+
+**工具结果的真实性：**
+
+- **拒绝即失败**：`agent-runtime.ts` 与 Desktop 工具循环各带一份逐字相同的临场判定 `!result.startsWith('Error')`，且两份都不认识取消前缀。现在统一走导出的 `isSuccessfulModelToolResult`：被拒绝的调用发出 `post_tool_use_failure`、向模型置 `is_error: true`，且不再从一次被拒调用推断出产物或文件变更事件。
+- **验证守卫不再被绕过**：此前一条被拒绝的 `npm run build` 会被计为验证证据，使 verification-before-completion 守卫在用户明确拒绝的命令上判定通过。该路径已封闭。
+- **不引入 fail-open 方向**：统一后的判定保持 `startsWith('Error')`，没有放宽成 `/^Error\b/`，因此 `Errors found: 0` 这类输出仍判为失败。所有语义变化都是 fail-closed；取消前缀导出为常量，判定与其唯一生产者不可能漂移。
+- **工作流产物恢复**：已完成任务如果其产物只体现在一次 `get_dynamic_workflow_status` 调用里，现在会在 `recoverTask` 时把这些产物恢复进任务快照与 Canvas，而不是显示一个"完成但什么都没有"的任务。
+- **合并调和**：合并验证时发现恢复层与产物解析器对"workspace 路径在哪"的认定不一致。解析器现在优先读取权威的顶层 `projectWorkspacePath`，回退到脚本声明的 `scriptResult.workspacePath`；没有这一步，恢复会静默地解析不到任何产物。
+- **发布验证**：CLI 沙箱 335 个测试文件（2683 测试）零失败；8 个被沙箱排除的套件单独跑通；Desktop 218 个文件（1813 测试），仅剩 5 条既有环境失败（缺 API Key、preload key 数量快照、React Doctor 诊断），这 5 条在未改动的代码树上同样失败。Desktop typecheck、`build:main` 与 CLI release build 均干净。两个新增回归套件都通过"回退修复"实证过红态。
+- **发布对齐**：root CLI 元数据与 Desktop package 元数据统一为 `1.4.25` / `desktop-v1.4.25`。
+
 Xiaok Desktop v1.4.24 为 Kimi K3 和 K3 256K 模型提供一等支持：专属 harness profile 默认开启 preserved thinking、prompt cache affinity、Kimi 专用 tool schema 标准化和 reasoning 序列化。CLI 和 Desktop 在配置的 provider/endpoint 匹配官方 Kimi Coding API 时自动解析 K3 harness。
 
 **Kimi K3 模型优化：**

@@ -47,7 +47,7 @@ import {
   writeTraceBundleToPath,
 } from '../../src/runtime/trace/exporter.js';
 import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition, ToolExecutionContext } from '../../src/types.js';
-import { buildToolList, ToolRegistry } from '../../src/ai/tools/index.js';
+import { buildToolList, isSuccessfulModelToolResult, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
@@ -4564,7 +4564,7 @@ async function executeDesktopTaskTool(
     });
   }
   const result = await options.registry.executeTool(toolCall.name, toolCall.input, options.context);
-  return { ok: !result.startsWith('Error'), result };
+  return { ok: isSuccessfulModelToolResult(result), result };
 }
 
 function normalizeReadMaterialLimit(inputLimit: unknown, fallback?: number): number {
@@ -4786,7 +4786,9 @@ function resolveKSwarmWorkflowStatusArtifacts(
   const scriptResult = isRecord(parsed.scriptResult) ? parsed.scriptResult : null;
   if (!workflowRunId || !scriptResult || !Array.isArray(scriptResult.artifacts)) return [];
 
-  const workspaceValue = readString(scriptResult.workspacePath) || readString(scriptResult.workFolder);
+  const workspaceValue = readString(parsed.projectWorkspacePath)
+    || readString(scriptResult.workspacePath)
+    || readString(scriptResult.workFolder);
   if (!workspaceValue || !isAbsolute(workspaceValue)) return [];
 
   let workspacePath: string;

@@ -216,25 +216,17 @@ npm run dev
 - 恢复网络后发送：正常工作
 - 运行中断网：流停止，显示部分响应 + 错误提示
 
-### 3.8 用户问答（NeedsUserQuestion）
+### 3.8 用户问答（NeedsUserQuestion）—— **当前不可执行（Desktop 无生产者）**
 
-**测试步骤**：
-1. 输入一个需要澄清的任务
-2. 等待 `needs_user` 事件
-3. 观察问题卡片：显示 prompt 文本 + 可选 choices 按钮
-4. 点击一个选项
+> 本节原先描述的往返在 Desktop 路径上**不存在**，请勿按此验收。证据：
+> - `needs_user` 唯一投影源是 `src/runtime/task-host/event-projection.ts:65-79` 的 `approval_required`，而 `approval_required` 全仓只有 `src/commands/yzj.ts:347`（YZJ 通道）发出，`desktop/` 零命中。
+> - 即使发出 live `needs_user`，`answerQuestion`（`src/runtime/task-host/task-runtime-host.ts:310-325`）也会抛 `question not found`——`questions.publish` 只在 `rehydrateWaitingQuestion`（`:728`）被调用，`appendEvent` 不调用。
+> - `answerQuestion` 仅对 `kind === 'confirm_understanding'` 恢复执行，而没有代码产生该 kind。
+> - `TaskSnapshotStatus` 含 `'waiting_user'`，但 `src/runtime/**` 从不写入；重启时 `recoverStaleRunningTask`（`:599-612`）会把 running 一律转 `failed`。
+>
+> 恢复本节前需先补 Desktop 侧的挂起传输（main→renderer 推送 + renderer→main 解决 + 按 id 键的 pending promise）与 durable 挂起状态。参见 `docs/design/2026-07-30-desktop-permission-enforcement-design.md` §2 / §6。
 
-**预期结果**：
-- 问题显示为带边框卡片，prompt 文本可读
-- choices 按钮垂直排列，可点击
-- 点击后卡片消失，status 回到 Running
-- 选择传递给后端（后续行为反映选择）
-
-**边界测试**：
-- 不回答直接关闭窗口再打开：任务恢复为 waiting_user 状态，问题重新显示
-- 多个问题连续出现：逐个处理，前一个回答后才出现下一个
-- 问题文本很长（>500 字）：UI 滚动显示，不溢出
-- 问题文本包含 markdown：正确渲染
+**测试步骤**：无。见上方说明。
 
 ### 3.9 任务恢复（recoverTask）
 
@@ -255,21 +247,27 @@ npm run dev
 - 任务在关闭期间失败：打开后显示错误
 - 后端进程已终止（app 完全退出后重开）：恢复失败时降级显示空白，不崩溃
 
-### 3.10 工具权限审批
+### 3.10 工具权限审批 —— **当前无 Allow/Deny 交互**
+
+> Desktop 的三个 `ToolRegistry` 都是 `{ autoMode: true }` 且从不提供 `onPrompt`（`desktop/electron/desktop-services.ts:676, 1094, 1180`），默认 `onPrompt` 直接返回 false（`src/ai/tools/index.ts:105`）。因此**不存在权限请求卡片，也没有 Allow / Deny 按钮**。
+>
+> `auto` 模式下唯一能走到"需要询问"的分支是命中 `AUTO_PROMPT_PATTERNS`（`src/ai/tools/bash-safety.ts:57-68`，如 `git push --force`、`rm -rf ./build`、`git reset --hard`）的 bash 命令；它会被静默拒绝。
 
 **测试步骤**：
-1. 输入需要执行命令的任务（如 "list files in current directory"）
-2. 等待工具权限请求
-3. 点击 Allow
+1. 让 agent 执行一条命中 auto-prompt 模式的 bash 命令（如 `rm -rf ./build`）
+2. 观察该工具步骤的状态
 
 **预期结果**：
-- 权限请求显示工具名称和参数
-- Allow 后继续执行
-- Deny 后任务失败并显示拒绝原因
+- 该步骤显示为**失败**（`✗ bash: （已取消: bash）`），而不是成功
+- 不因此推断出任何产物（无 artifact 卡片、无文件变更）
+- 模型收到 `is_error: true`，会看到自己被拒绝
+
+> 这条预期由 `desktop/tests/main/desktop-tool-result-classification.test.ts` 自动化覆盖。
+> 真正的交互式审批（挂起 → 询问 → 恢复）尚未实现，见 `docs/design/2026-07-30-desktop-permission-enforcement-design.md` §6。
 
 **边界测试**：
-- Cancel 权限请求（非 Allow/Deny）：任务取消
-- 权限请求弹出时关闭窗口：重新打开后任务为 waiting 状态
+- 拒绝发生在一轮里的多个工具调用中：每个都独立记为失败，不影响其他调用
+- 被拒绝后模型改道（换用其他命令）：后续调用正常执行
 
 ### 3.11 DesktopSettings Providers
 
@@ -472,7 +470,7 @@ npm run dev
 ```
 1. 打开应用 → 首页显示
 2. 输入 "List files in current directory" → 任务开始
-3. 等待工具权限请求 → 点击 Allow
+3. 观察工具步骤依次执行（无权限弹窗，见 §3.10）
 4. 观察进度 → 完成 → 显示 Result
 5. 返回首页 → 最近对话显示刚才的任务
 6. 从 Sidebar 点击任务 → 恢复对话视图
@@ -513,9 +511,9 @@ npm run dev
 | 4 | 任务完成 | 等待 → status = Completed，Result 显示 |
 | 5 | 任务取消 | Running 时点 Cancel → status = Idle |
 | 6 | 任务失败 | 错误 API Key → status = Failed，错误可读 |
-| 7 | 用户问答 | needs_user → 选择 → 继续 |
+| 7 | 用户问答 | **N/A** — Desktop 无 `needs_user` 生产者，见 §3.8 |
 | 8 | Skill 调用 | /test-fixture → 输出 "FIXTURE_OK" |
-| 9 | 工具权限 | 工具请求 → Allow → 继续 |
+| 9 | 工具权限 | auto-prompt bash（如 `rm -rf ./build`）→ 记为失败、无产物推断，见 §3.10 |
 | 10 | Provider 配置 | Settings > Providers → 设置 Key → 保存成功 |
 | 11 | 任务恢复 | 关闭/重开 → 任务状态正确 |
 | 12 | Sidebar 列表 | 创建任务 → 显示在 Sidebar |

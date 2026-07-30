@@ -46,6 +46,18 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.25 makes a refused tool call an honest failure. When a user declines a permission prompt, the runtime previously told the model the call had succeeded, letting the agent proceed on a false premise — and even satisfied the "verify before completion" guard with a command that never ran. Desktop and CLI now share one model-facing verdict, and historical workflow artifacts are recovered back into Canvas.
+
+**Tool Result Truthfulness:**
+
+- **Declined Calls Report Failure**: `agent-runtime.ts` and the Desktop tool loop carried two byte-identical copies of an ad-hoc `!result.startsWith('Error')` check, and neither recognised the cancellation prefix. Both now route through one exported `isSuccessfulModelToolResult`, so a refusal emits `post_tool_use_failure`, sets `is_error: true` for the model, and no longer fabricates artifact or file-change events.
+- **Verification Guard Integrity**: A declined `npm run build` previously counted as verification evidence, letting the verification-before-completion guard pass on a command the user had refused. That path is now closed.
+- **No Fail-Open Direction**: The unified predicate keeps `startsWith('Error')` instead of widening to `/^Error\b/`, so output such as `Errors found: 0` stays classified as a failure. Every semantic change is fail-closed, and the cancellation prefix is exported as a constant so the classifier and its only producer cannot drift apart.
+- **Workflow Artifact Recovery**: Completed tasks whose files were only visible through a `get_dynamic_workflow_status` call now have those artifacts recovered into the task snapshot and Canvas during `recoverTask`, instead of showing a finished task with nothing attached.
+- **Merge Reconciliation**: Merge verification caught that the recovery layer and the artifact resolver disagreed on where the workspace path lives. The resolver now reads the authoritative top-level `projectWorkspacePath` first and falls back to the script-declared `scriptResult.workspacePath`; without this the recovery silently resolved nothing.
+- **Release Validation**: 335 CLI sandbox test files (2683 tests) pass with zero failures; the eight sandbox-excluded suites pass separately; Desktop runs 218 files (1813 tests) with only the five pre-existing environment failures (missing API key, preload key-count snapshot, React Doctor diagnostics) that also fail on an unmodified tree. Desktop typecheck, `build:main`, and the CLI release build are clean. Both new regression suites were proven red before the fix by reverting it.
+- **Release Alignment**: Root CLI metadata and Desktop package metadata align on `1.4.25` / `desktop-v1.4.25`.
+
 Xiaok Desktop v1.4.24 introduces first-class Kimi K3 and K3 256K model support with a dedicated harness profile that enables preserved thinking, prompt cache affinity, Kimi-specific tool schema normalization, and reasoning serialization out of the box. Both CLI and Desktop resolve the K3 harness automatically when the configured provider and endpoint match the official Kimi Coding API.
 
 **Kimi K3 Model Optimization:**

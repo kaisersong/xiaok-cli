@@ -421,3 +421,83 @@ describe('Agent', () => {
     ]);
   });
 });
+
+describe('declined tool calls are reported as failures', () => {
+  function twoRoundAdapter(
+    toolCall: { id: string; name: string; input: Record<string, unknown> },
+    seenMessages: Message[][],
+  ): ModelAdapter {
+    let streamCalls = 0;
+    return {
+      stream: (messages) => {
+        seenMessages.push(messages.map((message) => ({
+          role: message.role,
+          content: message.content.map((block) => ({ ...block })),
+        })));
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          return mockStream([
+            { type: 'tool_use', ...toolCall },
+            { type: 'done' },
+          ]);
+        }
+        return mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]);
+      },
+    };
+  }
+
+  it('marks tool_finished not-ok and sets is_error on the replayed tool result', async () => {
+    const { Agent } = await import('../../src/ai/agent.js');
+    const seenMessages: Message[][] = [];
+    const events: unknown[] = [];
+    const adapter = twoRoundAdapter(
+      { id: 'tu_1', name: 'bash', input: { command: 'rm -rf ./build' } },
+      seenMessages,
+    );
+    const registry = createRegistryMock({
+      executeTool: async () => '（已取消: bash）',
+    });
+    const agent = new Agent(adapter, registry as never, 'system', {
+      hooks: { emit: (event) => { events.push(event); } },
+    });
+
+    await agent.runTurn('清理构建产物', () => {});
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool_finished',
+      ok: false,
+    }));
+
+    const replayed = seenMessages.at(-1) ?? [];
+    const toolResult = replayed
+      .flatMap((message) => message.content)
+      .find((block) => block.type === 'tool_result');
+    expect(toolResult).toMatchObject({ type: 'tool_result', is_error: true });
+  });
+
+  it('no longer accepts a declined verification command as verification evidence', async () => {
+    const { Agent } = await import('../../src/ai/agent.js');
+    const seenMessages: Message[][] = [];
+    const events: unknown[] = [];
+    // `npm run build` is the only single call that satisfies both the
+    // code-mutating classifier and the verification patterns.
+    const adapter = twoRoundAdapter(
+      { id: 'tu_1', name: 'bash', input: { command: 'npm run build' } },
+      seenMessages,
+    );
+    const registry = createRegistryMock({
+      executeTool: async () => '（已取消: bash）',
+    });
+    const agent = new Agent(adapter, registry as never, 'system', {
+      hooks: { emit: (event) => { events.push(event); } },
+    });
+
+    await agent.runTurn('修复代码里的类型错误', () => {});
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'guard_evaluated',
+      guardId: 'verification-before-completion',
+      category: 'missing_verification',
+    }));
+  });
+});

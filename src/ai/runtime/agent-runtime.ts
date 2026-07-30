@@ -1,6 +1,7 @@
 import type { MessageBlock, ModelAdapter, ToolCall, ToolExecutionContext } from '../../types.js';
 import { join } from 'node:path';
 import type { ToolRegistry } from '../tools/index.js';
+import { isSuccessfulModelToolResult } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
 import { AgentRunController } from './controller.js';
 import { createLogger } from '../../utils/logger.js';
@@ -345,7 +346,7 @@ export class AgentRuntime {
           });
 
           const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
-          const ok = !result.startsWith('Error');
+          const ok = isSuccessfulModelToolResult(result);
           executedToolIds.add(toolCall.id);
           verificationToolCalls.push({
             id: toolCall.id,

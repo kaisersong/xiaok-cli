@@ -1,7 +1,7 @@
 // tests/ai/tools/index.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
-import { ToolRegistry } from '../../../src/ai/tools/index.js';
+import { isSuccessfulModelToolResult, TOOL_CANCELLED_PREFIX, ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { Tool } from '../../../src/types.js';
 import { CapabilityRegistry } from '../../../src/platform/runtime/capability-registry.js';
 import { MODEL_OUTPUT_CAP } from '../../../src/shared/stream-safety/redact.js';
@@ -483,7 +483,8 @@ describe('ToolRegistry', () => {
 
     expect(onPrompt).toHaveBeenCalledWith('bash', { command: 'rm -rf ./build' });
     expect(execute).not.toHaveBeenCalled();
-    expect(result).toContain('已取消');
+    // Pins the exact cancellation format the model-facing classifier matches on.
+    expect(result.startsWith('（已取消: ')).toBe(true);
   });
 
   it('auto mode denies block-level bash commands before prompt and execution', async () => {
@@ -632,5 +633,57 @@ describe('ToolRegistry', () => {
     expect(runHooks).toHaveBeenCalledWith('PostToolUseFailure', expect.objectContaining({
       tool_name: 'failing_tool',
     }));
+  });
+});
+
+describe('isSuccessfulModelToolResult', () => {
+  const cases: Array<{ input: string; expected: boolean; note: string }> = [
+    { input: 'Error: 权限不足: write', expected: false, note: 'policy deny' },
+    { input: 'Error (exit 1): boom', expected: false, note: 'non-zero bash exit' },
+    { input: 'Error x', expected: false, note: 'Error without colon' },
+    // Locks the decision to NOT use /^Error\b/: with \b these two flip to success.
+    { input: 'Errors found: 0', expected: false, note: 'anti-\\b lock' },
+    { input: 'ErrorCode: 5', expected: false, note: 'anti-\\b lock' },
+    { input: '  Error: x', expected: false, note: 'leading whitespace, fail-closed' },
+    { input: '（已取消: bash）', expected: false, note: 'the only target of this change' },
+    { input: '已取消提醒 3', expected: true, note: 'reminder_cancel success string' },
+    { input: '已取消自动任务 7', expected: true, note: 'scheduled_task_cancel success string' },
+    { input: 'ok', expected: true, note: 'baseline' },
+  ];
+
+  for (const { input, expected, note } of cases) {
+    it(`${JSON.stringify(input)} => ${expected} (${note})`, () => {
+      expect(isSuccessfulModelToolResult(input)).toBe(expected);
+    });
+  }
+
+  it('exposes the cancellation prefix that ToolRegistry produces', () => {
+    expect(TOOL_CANCELLED_PREFIX).toBe('（已取消: ');
+    expect(isSuccessfulModelToolResult(`${TOOL_CANCELLED_PREFIX}bash）`)).toBe(false);
+  });
+});
+
+describe('observation face stays unchanged', () => {
+  // Green-to-green lock. The observation face (onToolObserved -> skill evidence)
+  // deliberately keeps its narrower `Error:` rule; widening it is registered as
+  // follow-up work because its blast radius is far larger and untestable today.
+  it('still reports ok=true for a non-zero bash exit result', async () => {
+    const observed: boolean[] = [];
+    const registry = new ToolRegistry({
+      permissionManager: new PermissionManager({ mode: 'auto' }),
+      onToolObserved: async (event) => { observed.push(event.ok); },
+    }, [{
+      permission: 'safe',
+      definition: {
+        name: 'exit_code_tool',
+        description: 'returns a non-zero exit style failure',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      execute: async () => 'Error (exit 1): boom',
+    }]);
+
+    await registry.executeTool('exit_code_tool', {});
+
+    expect(observed).toEqual([true]);
   });
 });
