@@ -250,6 +250,21 @@ describe('ChatShell canvas is scoped per session', () => {
         status: 'completed',
         events: [
           {
+            type: 'canvas_tool_call',
+            toolName: 'get_dynamic_workflow_status',
+            input: { projectId: 'proj-1', workflowRunId: `workflow-${taskId}` },
+            toolUseId: `status-${taskId}`,
+            eventId: `turn-${taskId}:canvas:status-${taskId}:call`,
+          },
+          {
+            type: 'canvas_tool_result',
+            toolName: 'get_dynamic_workflow_status',
+            toolUseId: `status-${taskId}`,
+            ok: true,
+            response: '{"ok":true',
+            eventId: `turn-${taskId}:canvas:status-${taskId}:result`,
+          },
+          {
             type: 'artifact_recorded',
             artifactId: `artifact-${taskId}`,
             kind: 'html',

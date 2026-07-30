@@ -322,11 +322,14 @@ export function createKSwarmGetDynamicWorkflowStatusTool(kswarmService: KSwarmSe
           : '';
         if (!workflowRunId) return validationFailure({ error: 'workflowRunId_required' });
         const workflowRun = await fetchKSwarmWorkflowRunSnapshot(kswarmService, projectId, workflowRunId);
+        const projectWorkspacePath = await fetchKSwarmProjectWorkspacePath(kswarmService, projectId)
+          .catch(() => null);
         const backgroundJob = backgroundJobs.get(`wf-script-job-${workflowRunId}`) || null;
         return JSON.stringify({
           ok: true,
           projectId,
           workflowRunId,
+          ...(projectWorkspacePath ? { projectWorkspacePath } : {}),
           status: readString(workflowRun.status) || 'unknown',
           workflowId: readString(workflowRun.workflowId),
           source: readString(workflowRun.source),
@@ -468,6 +471,21 @@ async function fetchKSwarmWorkflowRunSnapshot(
     throw workflowScriptToolError('workflow_script_run_missing', 'KSwarm did not return a workflow run');
   }
   return workflowRun;
+}
+
+async function fetchKSwarmProjectWorkspacePath(
+  kswarmService: KSwarmService,
+  projectId: string,
+): Promise<string | null> {
+  const response = await kswarmService.request(`/projects/${encodeURIComponent(projectId)}`);
+  const payload = readRecord(await response.json().catch(() => ({})));
+  if (!response.ok) return null;
+  const project = readRecord(payload.project);
+  return readString(readRecord(payload.workspace).path)
+    || readString(readRecord(project.workspace).path)
+    || readString(project.workFolder)
+    || readString(payload.workFolder)
+    || null;
 }
 
 async function runAndCompleteWorkflowScript({

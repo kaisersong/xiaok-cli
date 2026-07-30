@@ -33,7 +33,9 @@ import type {
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
-import type { MaterialRecord, MaterialRole, TaskCreateContext, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import { projectRuntimeEventsToDesktopEvents } from '../../src/runtime/task-host/event-projection.js';
+import type { ArtifactSummary, DesktopTaskEvent, MaterialRecord, MaterialRole, TaskCreateContext, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import type { RuntimeEvent } from '../../src/runtime/events.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
 import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
@@ -1560,6 +1562,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   };
 
+  const historicalWorkflowArtifactRecovery = new Map<string, Promise<TaskSnapshot>>();
+  const workflowStatusTool = createKSwarmGetDynamicWorkflowStatusTool(options.kswarmService);
+  const recoverTaskWithWorkflowArtifacts = async (taskId: string): Promise<{ snapshot: TaskSnapshot }> => {
+    let pending = historicalWorkflowArtifactRecovery.get(taskId);
+    if (!pending) {
+      pending = (async () => {
+        const recovered = await host.recoverTask(taskId);
+        const lookup = findHistoricalWorkflowStatusLookup(recovered.snapshot);
+        return lookup
+          ? recoverHistoricalWorkflowStatusArtifacts({
+              snapshot: recovered.snapshot,
+              lookup,
+              statusTool: workflowStatusTool,
+            })
+          : recovered.snapshot;
+      })();
+      historicalWorkflowArtifactRecovery.set(taskId, pending);
+    }
+    try {
+      return { snapshot: await pending };
+    } finally {
+      if (historicalWorkflowArtifactRecovery.get(taskId) === pending) {
+        historicalWorkflowArtifactRecovery.delete(taskId);
+      }
+    }
+  };
+
   return {
     registerTimedActionService(service: TimedActionService) {
       for (const tool of createTimedActionTools(service)) {
@@ -2225,7 +2254,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     answerQuestion: host.answerQuestion.bind(host),
     cancelTask: host.cancelTask.bind(host),
     getActiveTask: host.getActiveTask.bind(host),
-    recoverTask: host.recoverTask.bind(host),
+    recoverTask: recoverTaskWithWorkflowArtifacts,
     async recoverStaleTasks(): Promise<void> {
       const active = await host.getActiveTasks();
       for (const ref of active) {
@@ -4725,6 +4754,12 @@ interface KSwarmWorkflowStatusArtifact {
   creator: string;
 }
 
+interface HistoricalWorkflowStatusLookup {
+  projectId: string;
+  workflowRunId: string;
+  turnId: string;
+}
+
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const relativePath = relative(rootPath, candidatePath);
   return Boolean(relativePath)
@@ -4799,6 +4834,142 @@ function resolveKSwarmWorkflowStatusArtifacts(
   }
 
   return artifacts;
+}
+
+function findHistoricalWorkflowStatusLookup(snapshot: TaskSnapshot): HistoricalWorkflowStatusLookup | null {
+  if (snapshot.status !== 'completed') return null;
+  if (snapshot.events.some(event => event.type === 'artifact_recorded')) return null;
+  if ((snapshot.result?.artifacts?.length ?? 0) > 0) return null;
+  if (snapshot.events.some(event => event.type === 'result' && event.result.artifacts.length > 0)) return null;
+
+  const successfulResults = new Set(
+    snapshot.events.flatMap(event => (
+      event.type === 'canvas_tool_result'
+      && event.ok
+      && isToolName(event.toolName, 'get_dynamic_workflow_status')
+        ? [event.toolUseId]
+        : []
+    )),
+  );
+  for (let index = snapshot.events.length - 1; index >= 0; index -= 1) {
+    const event = snapshot.events[index];
+    if (
+      event.type !== 'canvas_tool_call'
+      || !isToolName(event.toolName, 'get_dynamic_workflow_status')
+      || !successfulResults.has(event.toolUseId)
+      || !isRecord(event.input)
+    ) {
+      continue;
+    }
+    const projectId = readString(event.input.projectId);
+    const workflowRunId = readString(event.input.workflowRunId);
+    if (!projectId || !workflowRunId) continue;
+    const canvasMarker = ':canvas:';
+    const markerIndex = event.eventId.indexOf(canvasMarker);
+    return {
+      projectId,
+      workflowRunId,
+      turnId: markerIndex > 0
+        ? event.eventId.slice(0, markerIndex)
+        : `recovered-${workflowRunId}`,
+    };
+  }
+  return null;
+}
+
+async function recoverHistoricalWorkflowStatusArtifacts(input: {
+  snapshot: TaskSnapshot;
+  lookup: HistoricalWorkflowStatusLookup;
+  statusTool: Tool;
+}): Promise<TaskSnapshot> {
+  try {
+    const result = await withWorkflowArtifactRecoveryTimeout(
+      Promise.resolve(input.statusTool.execute({
+        projectId: input.lookup.projectId,
+        workflowRunId: input.lookup.workflowRunId,
+      })),
+      3_000,
+    );
+    const artifacts = resolveKSwarmWorkflowStatusArtifacts('get_dynamic_workflow_status', result);
+    if (artifacts.length === 0) return input.snapshot;
+    return overlayHistoricalWorkflowArtifacts(input.snapshot, input.lookup.turnId, artifacts);
+  } catch {
+    return input.snapshot;
+  }
+}
+
+function withWorkflowArtifactRecoveryTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error('workflow_artifact_recovery_timeout')), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function overlayHistoricalWorkflowArtifacts(
+  snapshot: TaskSnapshot,
+  turnId: string,
+  artifacts: KSwarmWorkflowStatusArtifact[],
+): TaskSnapshot {
+  let resultIndex = -1;
+  for (let index = snapshot.events.length - 1; index >= 0; index -= 1) {
+    if (snapshot.events[index].type === 'result') {
+      resultIndex = index;
+      break;
+    }
+  }
+  if (resultIndex < 0) return snapshot;
+
+  const runtimeEvents: RuntimeEvent[] = artifacts.map(artifact => ({
+    type: 'artifact_recorded',
+    sessionId: snapshot.sessionId,
+    turnId,
+    intentId: 'historical-workflow-artifact-recovery',
+    stageId: 'historical-workflow-artifact-recovery',
+    artifactId: artifact.artifactId,
+    label: artifact.label,
+    kind: artifact.kind,
+    path: artifact.filePath,
+    creator: artifact.creator,
+  }));
+  const artifactEvents = projectRuntimeEventsToDesktopEvents({
+    taskId: snapshot.taskId,
+    events: runtimeEvents,
+  }).filter((event): event is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => (
+    event.type === 'artifact_recorded'
+  ));
+  if (artifactEvents.length === 0) return snapshot;
+
+  const artifactSummaries: ArtifactSummary[] = artifactEvents.map(event => ({
+    artifactId: event.artifactId,
+    kind: event.kind as ArtifactSummary['kind'],
+    title: event.label,
+    createdAt: event.turnId,
+    previewAvailable: event.previewAvailable,
+    filePath: event.filePath,
+    creator: event.creator ?? 'kswarm',
+    ...(event.mimeType ? { mimeType: event.mimeType } : {}),
+  }));
+  const resultEvent = snapshot.events[resultIndex];
+  if (resultEvent.type !== 'result') return snapshot;
+  const recoveredResult = {
+    ...resultEvent.result,
+    artifacts: [...resultEvent.result.artifacts, ...artifactSummaries],
+  };
+  return {
+    ...snapshot,
+    events: [
+      ...snapshot.events.slice(0, resultIndex),
+      ...artifactEvents,
+      { ...resultEvent, result: recoveredResult },
+      ...snapshot.events.slice(resultIndex + 1),
+    ],
+    result: snapshot.result
+      ? { ...snapshot.result, artifacts: [...snapshot.result.artifacts, ...artifactSummaries] }
+      : recoveredResult,
+  };
 }
 
 function parseArtifactWorkspaceToolAck(result: string): ArtifactWorkspaceToolAck | null {
