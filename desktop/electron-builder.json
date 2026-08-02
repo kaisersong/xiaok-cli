@@ -17,6 +17,9 @@
     "dist/**/*",
     "package.json"
   ],
+  "asarUnpack": [
+    "**/node_modules/nodejieba/**"
+  ],
   "extraResources": [
     {
       "from": "../../kswarm/src",

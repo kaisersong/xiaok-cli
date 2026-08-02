@@ -41,6 +41,9 @@
     "tailwind-merge": "^3.6.0",
     "ws": "^8.21.0"
   },
+  "optionalDependencies": {
+    "nodejieba": "^3.5.8"
+  },
   "devDependencies": {
     "@dagrejs/dagre": "^3.0.0",
     "@pierre/diffs": "^1.1.20",
