@@ -213,7 +213,7 @@ Run a single release-readiness pass for one code change.
       if (
         lastToolResult.includes('"path"')
         && lastToolResult.includes('release-checklist')
-        && lastToolResult.includes('"ok": true')
+        && lastToolResult.includes('"valid": true')
       ) {
         yield { type: 'text', delta: 'release-checklist 已创建并通过校验。' };
         yield { type: 'done' };

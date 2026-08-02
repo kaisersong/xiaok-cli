@@ -649,6 +649,49 @@ describe('isSuccessfulModelToolResult', () => {
     { input: '已取消提醒 3', expected: true, note: 'reminder_cancel success string' },
     { input: '已取消自动任务 7', expected: true, note: 'scheduled_task_cancel success string' },
     { input: 'ok', expected: true, note: 'baseline' },
+
+    // Domain-level failures: Desktop returns JSON.stringify({ok:false,...}) for
+    // HTTP and operation failures, which never starts with `Error`.
+    { input: '{"ok":false,"error":"project_not_found","projectName":"Dream"}', expected: false, note: 'top-level ok:false' },
+    { input: '{"ok":false,"status":400,"error":"workflow_script_agent_required"}', expected: false, note: 'kswarm 400' },
+    { input: '{"success":false,"html":"","errors":["BRIEF validation failed"]}', expected: false, note: 'slide render produced nothing' },
+    { input: '{"ok":false,"code":"COMPUTER_USE_NEEDS_ENABLEMENT","waitForUserAction":true}', expected: false, note: 'did not execute' },
+    { input: '  {"ok":false,"error":"x"}', expected: false, note: 'leading whitespace' },
+
+    // A previously proposed exception for kswarm's `no_intervention_required`
+    // was rejected: most of those payloads are repair submissions that kswarm
+    // refused and whose artifact it discarded, not healthy projects.
+    {
+      input: '{"ok":false,"status":400,"error":"no_intervention_required","intervention":{"required":false,"severity":"normal","reason":"no_blocking_task"}}',
+      expected: false,
+      note: 'nothing advanced, so not a success',
+    },
+
+    // A previously proposed exception for a non-empty output_path was rejected
+    // as fail-open: the report renderer writes best-effort inside a try/catch,
+    // pushes write errors into `warnings`, and returns outputPath regardless,
+    // so the path proves nothing about the artifact existing.
+    { input: '{"success":false,"output_path":"/tmp/r.html","validation":{"l2_passed":false}}', expected: false, note: 'path does not prove the file exists' },
+
+    // Validator verdicts use `valid`: the call itself succeeded, the input was
+    // rejected. Treating it as a tool failure makes the model retry the call
+    // instead of fixing the input.
+    { input: '{"valid":false,"errors":["JSON parse error"]}', expected: true, note: 'verdict, not operation status' },
+
+    // Strict boundaries.
+    { input: '{"ok":"false"}', expected: true, note: 'string, not boolean' },
+    { input: '{"ok":0}', expected: true, note: 'number, not boolean' },
+    { input: '{"ok":null}', expected: true, note: 'null is not false' },
+    { input: '{}', expected: true, note: 'absent field' },
+    { input: '{"validation":{"l2_passed":false}}', expected: true, note: 'not recursive' },
+    { input: '[{"ok":false}]', expected: true, note: 'arrays are not verdict objects' },
+    { input: '{"strict":false}', expected: true, note: 'skill_plan config echo' },
+    { input: '{"hasNext":false}', expected: true, note: 'pagination flag' },
+    { input: '{"humanActionRequired":false}', expected: true, note: 'not a failure signal' },
+    { input: '{"contentAvailable":false,"ok":true}', expected: true, note: 'explicitly ok' },
+    { input: '{"ok":false', expected: true, note: 'truncated JSON keeps the old verdict' },
+    { input: 'ok: {"ok":false}', expected: true, note: 'only leading-brace payloads are parsed' },
+    { input: '已写入: /tmp/x.md（12 字符）', expected: true, note: 'write tool success string' },
   ];
 
   for (const { input, expected, note } of cases) {

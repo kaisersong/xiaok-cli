@@ -145,6 +145,63 @@ describe('desktop tool result classification', () => {
     expect(emitted).not.toContain('post_tool_use_failure');
   });
 
+  it('reports a JSON domain-level failure as a failure, not a success', async () => {
+    const { context, emitted } = await runWith(cannedTool(
+      'inspect_project',
+      'safe',
+      '{"ok":false,"status":400,"error":"project_not_found","projectName":"Dream"}',
+    ));
+
+    expect(emitted).toContain('post_tool_use_failure');
+    expect(emitted).not.toContain('post_tool_use');
+
+    const toolResult = context.messages
+      .flatMap(message => message.content)
+      .find(block => block.type === 'tool_result');
+    expect(toolResult).toMatchObject({ type: 'tool_result', is_error: true });
+  });
+
+  it('reports a renderer that produced nothing as a failure', async () => {
+    const { emitted } = await runWith(cannedTool(
+      'mcp__slide-renderer__render_slide',
+      'safe',
+      '{"success":false,"html":"","errors":["BRIEF validation failed"]}',
+    ));
+
+    expect(emitted).toContain('post_tool_use_failure');
+  });
+
+  // A kswarm call that advanced nothing is not a success. An exception for
+  // `no_intervention_required` was rejected: most of those payloads are repair
+  // submissions kswarm refused while discarding the artifact.
+  it('reports a kswarm call that advanced nothing as a failure', async () => {
+    const { context, emitted } = await runWith(cannedTool(
+      'continue_project',
+      'safe',
+      '{"ok":false,"status":400,"error":"no_intervention_required","intervention":{"required":false,"severity":"normal","reason":"no_blocking_task"}}',
+    ));
+
+    expect(emitted).toContain('post_tool_use_failure');
+
+    const toolResult = context.messages
+      .flatMap(message => message.content)
+      .find(block => block.type === 'tool_result');
+    expect(toolResult).toMatchObject({ type: 'tool_result', is_error: true });
+  });
+
+  // An exception for a non-empty output_path was rejected as fail-open: the
+  // report renderer writes best-effort inside a try/catch and returns the path
+  // regardless, so the path proves nothing about the artifact existing.
+  it('reports a failed report render as a failure even when it names an output path', async () => {
+    const { emitted } = await runWith(cannedTool(
+      'render_report_artifact',
+      'safe',
+      `{"success":false,"output_path":"${join(rootDir, 'report.html').replace(/\\/g, '\\\\')}","validation":{"l0_passed":true,"l2_passed":false}}`,
+    ));
+
+    expect(emitted).toContain('post_tool_use_failure');
+  });
+
   // End-to-end through the real bash tool. The permission decline happens before
   // tool.execute, so no shell is ever spawned.
   it('reports a real auto-mode bash decline as a failure without spawning a shell', async () => {

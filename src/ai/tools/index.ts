@@ -389,7 +389,30 @@ export function isSuccessfulModelToolResult(result: string): boolean {
   if (normalized.startsWith(TOOL_CANCELLED_PREFIX)) {
     return false;
   }
-  return true;
+  return !isDomainLevelFailurePayload(normalized);
+}
+
+/**
+ * Desktop serialises operation failures as `JSON.stringify({ok:false, ...})`,
+ * which never starts with `Error`. Only the top-level `ok` / `success` booleans
+ * count: they carry operation status. A validator's `valid` field is a verdict
+ * about the caller's input — the call itself succeeded — so it is excluded.
+ */
+function isDomainLevelFailurePayload(normalized: string): boolean {
+  if (!normalized.startsWith('{')) {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(normalized);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return false;
+  }
+  const payload = parsed as Record<string, unknown>;
+  return payload.ok === false || payload.success === false;
 }
 
 function appendToolWarnings(result: string, warnings: string[]): string {

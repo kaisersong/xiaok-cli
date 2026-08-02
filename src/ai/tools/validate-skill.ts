@@ -35,7 +35,11 @@ export function createValidateSkillTool(options: ValidateSkillToolOptions = {}):
         cwd,
         xiaokConfigDir: configDir,
       });
-      return JSON.stringify(result, null, 2);
+      // `ok` here is a verdict about the skill file, not the tool call. Exposing
+      // it under that name would make a skill with errors look like a failed
+      // call, so the model would retry instead of fixing the skill.
+      const { ok, ...report } = result;
+      return JSON.stringify({ valid: ok, ...report }, null, 2);
     },
   };
 }

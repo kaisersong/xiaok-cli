@@ -107,6 +107,7 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
       },
     };
   }
+
   if (event.type === 'tool_started' || event.type === 'pre_tool_use') {
     const toolName = event.toolName;
     if (event.type === 'pre_tool_use' && toolName === 'render_ui') return null;
@@ -136,7 +137,7 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
     return {
       type: 'progress',
       eventId: `${event.turnId}:tool-fail:${event.toolName}:${Date.now()}`,
-      message: `✗ ${event.toolName}: ${event.error.slice(0, 100)}`,
+      message: `✗ ${event.toolName}: ${summarizeToolFailure(event.error)}`,
       stage: 'failed',
     };
   }
@@ -303,6 +304,27 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+// Desktop tools serialise failures as JSON, so slicing the raw error dumps a
+// truncated payload into the user-visible progress stream.
+function summarizeToolFailure(error: string): string {
+  const trimmed = error.trimStart();
+  if (trimmed.startsWith('{')) {
+    const payload = parseJsonObject(trimmed);
+    if (payload) {
+      for (const key of ['error', 'code', 'message', 'reason'] as const) {
+        const value = payload[key];
+        if (typeof value === 'string' && value.trim()) return value.slice(0, 100);
+      }
+      const errors = payload.errors;
+      if (Array.isArray(errors)) {
+        const first = errors.find(entry => typeof entry === 'string' && entry.trim());
+        if (typeof first === 'string') return first.slice(0, 100);
+      }
+    }
+  }
+  return error.slice(0, 100);
 }
 
 function resultFromReceipt(note: string, turnId: string): Extract<DesktopTaskEvent, { type: 'result' }>['result'] {

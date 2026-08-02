@@ -193,6 +193,43 @@ describe('DesktopTaskEvent projection', () => {
     expect(desktopEvent).not.toBeNull();
     expect(desktopEvent!.type).toBe('progress');
     expect((desktopEvent! as any).stage).toBe('failed');
+    expect((desktopEvent! as any).message).toBe('✗ Bash: Permission denied');
+  });
+
+  it('summarizes a JSON failure payload instead of dumping truncated JSON', () => {
+    // Desktop tools serialise failures as JSON, so slicing the raw error would
+    // put a cut-off `{"ok":false,...` object in the user-visible progress row.
+    const runtimeEvent: RuntimeEvent = {
+      type: 'post_tool_use_failure',
+      sessionId: 'sess_1',
+      turnId: 'turn_1',
+      toolName: 'inspect_project',
+      toolInput: {},
+      toolUseId: 'tu_3',
+      error: '{"ok":false,"status":400,"error":"project_not_found","projectName":"Dream"}',
+    };
+
+    const desktopEvent = projectRuntimeEventToDesktopEvent({ taskId: 'task_1', event: runtimeEvent });
+
+    expect((desktopEvent! as any).message).toBe('✗ inspect_project: project_not_found');
+  });
+
+  it('falls back to the errors array when there is no error string', () => {
+    const runtimeEvent: RuntimeEvent = {
+      type: 'post_tool_use_failure',
+      sessionId: 'sess_1',
+      turnId: 'turn_1',
+      toolName: 'mcp__slide-renderer__render_slide',
+      toolInput: {},
+      toolUseId: 'tu_4',
+      error: '{"success":false,"html":"","errors":["BRIEF validation failed: missing narrative"]}',
+    };
+
+    const desktopEvent = projectRuntimeEventToDesktopEvent({ taskId: 'task_1', event: runtimeEvent });
+
+    expect((desktopEvent! as any).message).toBe(
+      '✗ mcp__slide-renderer__render_slide: BRIEF validation failed: missing narrative',
+    );
   });
 
   it('projects user aborts to desktop cancellation events without exposing turn_stop lifecycle noise', () => {
