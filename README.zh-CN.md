@@ -46,6 +46,19 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.26 把"工具结果诚实性"再往下推了一层。一个返回 `{"ok":false,"error":"project_not_found"}` 的工具，此前仍被判为成功——因为这个 payload 不以 `Error` 开头。在 1748 份真实任务快照里，这类假成功共 148 次、涉及 93 个任务；其中一个任务里 5 次被服务端拒收的修复提交，在界面上显示成 5 个绿勾，而项目从未推进。本次同时移除了产物预览的一处 HTML 注入面，并加固了 worktree 租约与会话写入。
+
+**诚实的失败与更安全的预览：**
+
+- **领域级失败判定**：顶层 `ok`/`success` 为布尔 `false` 现在判失败，模型收到 `is_error: true`，进度行显示 `✗` 而不是 `✓`。两个看起来合理的例外被证据推翻：`output_path` 非空并不能证明产物存在，因为报告渲染器的写盘是 `try/catch` 内的 best-effort、路径无条件返回；而多数 `intervention.required:false` 其实是服务端拒收修复提交并丢弃了产物。
+- **裁决仍算成功**：validator 用的是 `valid` 字段，保持成功——调用本身完成了。若把它判成失败，模型会去重试**调用**而不是修**输入**。`validate_skill` 的字段随之改名，避免"有问题的 skill"被读成"失败的调用"。
+- **失败文案可读**：失败进度行改为提取 payload 的 `error` / `code` / `message` / `reason` 或 `errors[]` 首项，不再向用户抛出 100 字符的截断 JSON。
+- **产物预览注入面**：产物预览的 markdown 分支用一串正则拼 HTML，从不转义 `&`、`<`、`>`，再交给顶层 renderer 文档里的 `dangerouslySetInnerHTML`——那里 `window.xiaokDesktop` 可达，而 CSP 只是 Report-Only。产物正文由 agent 写入、内容可直接来自 `web_fetch`，因此一份调研笔记里的 `<img onerror>` 就能拿到整个 preload 面。现在改用共享的 `MarkdownRenderer`，并在该路径关闭它的文件路径 linkify（其兜底会走到无路径白名单的 `shell.openPath`）。
+- **worktree 与会话持久化**：worktree 分配改为带锁的租约登记表，含进程探测、对账与 GC，崩溃的运行不再残留 worktree，也不会让第二次运行占用仍在使用的路径。会话快照改为原子写入。OpenAI adapter 强制 Kimi 的 reasoning admission 与终止边界；chat 轮次新增活跃度看门狗，provider 静默卡死会暴露出来而不是一直挂着。
+- **无障碍与门禁修复**：4 个火山 ASR 字段补上程序化标签，会议记录弹窗按 Esc 先关设置浮层；此前在干净工作区就会红的 5 个门禁全部从根因修掉——runner finalization 测试的 adapter stub 已过期、一处 import 多跳了一级目录，以及一份经审阅后重设的 preload key 快照。
+- **发布验证**：CLI 355 个测试文件（2875 个测试）与 Desktop 215 个测试文件（1786 个测试）**零失败**，包含上一版发布时不得不如实披露的那 5 个既有失败。CLI typecheck、Desktop typecheck、`build:main`、`build:renderer` 均干净。每个新增套件都先证明过红态。
+- **版本对齐**：CLI 与 Desktop 元数据统一为 `1.4.26` / `desktop-v1.4.26`。
+
 Xiaok Desktop v1.4.25 让"被拒绝的工具调用"变成一次诚实的失败。此前用户在权限提示里点了拒绝，运行时却告诉模型这次调用成功了——模型据此继续推进，甚至能用一条从未真正执行的命令满足"完成前必须验证"守卫。现在 Desktop 与 CLI 共用同一套面向模型的成败判定，并把历史工作流产物恢复回 Canvas。
 
 **工具结果的真实性：**
