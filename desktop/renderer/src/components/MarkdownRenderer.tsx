@@ -46,6 +46,10 @@ function linkifyFilePaths(children: ReactNode): ReactNode {
 interface MarkdownRendererProps {
   content: string;
   streaming?: boolean;
+  // Untrusted content (agent-written artifact files) must not turn bare path
+  // text into click targets: the fallback ends at shell.openPath, which does
+  // not allowlist the path.
+  disableLinkify?: boolean;
 }
 
 function stripUnclosedMermaid(text: string): string {
@@ -65,7 +69,7 @@ function stripUnclosedMermaid(text: string): string {
   return out;
 }
 
-export const MarkdownRenderer = memo(function MarkdownRenderer({ content, streaming }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, streaming, disableLinkify }: MarkdownRendererProps) {
   const displayContent = streaming ? stripUnclosedMermaid(content) : content;
 
   return (
@@ -138,7 +142,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
             return <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>;
           },
           p({ children }) {
-            return <p className="text-sm leading-relaxed mb-3">{linkifyFilePaths(children)}</p>;
+            return <p className="text-sm leading-relaxed mb-3">{disableLinkify ? children : linkifyFilePaths(children)}</p>;
           },
           table({ children }) {
             return (

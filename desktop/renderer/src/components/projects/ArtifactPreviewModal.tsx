@@ -11,6 +11,7 @@ import { artifactDisplayName, downloadArtifact, resolveArtifactProxyPath, resolv
 import { getDesktopApi } from '../../shared/desktop';
 import { api } from '../../api';
 import { ArtifactEditableViewer } from '../ArtifactEditableViewer';
+import { MarkdownRenderer } from '../MarkdownRenderer';
 
 interface ArtifactPreviewModalProps {
   artifact: KSwarmArtifact;
@@ -152,18 +153,6 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
     return { success: false, error: 'save_unavailable' };
   }, [artifact.path, artifactProxyPath]);
 
-  const renderMarkdown = (md: string) => {
-    const html = md
-      .replace(/^## (.+)$/gm, '<h2 style="font-size:15px;font-weight:600;margin:12px 0 6px;color:var(--c-text-primary)">$1</h2>')
-      .replace(/^### (.+)$/gm, '<h3 style="font-size:13px;font-weight:600;margin:10px 0 4px;color:var(--c-text-primary)">$1</h3>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--c-text-primary)">$1</strong>')
-      .replace(/^- (.+)$/gm, '<li style="margin-left:16px;color:var(--c-text-secondary);font-size:12px">$1</li>')
-      .replace(/^(\d+)\. (.+)$/gm, '<li style="margin-left:16px;color:var(--c-text-secondary);font-size:12px">$1. $2</li>')
-      .replace(/`([^`]+)`/g, '<code style="background:var(--c-bg-deep);padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
-      .replace(/\n\n/g, '<br/><br/>')
-      .replace(/\n/g, '<br/>');
-    return <div dangerouslySetInnerHTML={{ __html: html }} />;
-  };
 
   const renderContent = () => {
     if (loading) {
@@ -212,8 +201,8 @@ export function ArtifactPreviewModal({ artifact, onClose }: ArtifactPreviewModal
 
     if (isMarkdown) {
       return (
-        <div className="h-full overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[13px] text-[var(--c-text-primary)]">
-          {renderMarkdown(content)}
+        <div className="h-full overflow-auto rounded-lg bg-[var(--c-md-code-block-bg)] p-4 text-[13px] text-[var(--c-text-primary)]">
+          <MarkdownRenderer content={content} disableLinkify />
         </div>
       );
     }
