@@ -145,8 +145,12 @@ describe('desktop services', () => {
           }
         });
         function handleMessage(message) {
+          if (message.method === 'server/discover') {
+            respond(message.id, { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } });
+            return;
+          }
           if (message.method === 'initialize') {
-            respond(message.id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'report-renderer', version: 'test' } });
+            respond(message.id, { protocolVersion: '2026-07-28', capabilities: { tools: {} }, serverInfo: { name: 'report-renderer', version: 'test' } });
             return;
           }
           if (message.method === 'tools/call') {
@@ -164,6 +168,7 @@ describe('desktop services', () => {
                   warnings: ['L3 validation failed: soft quality warning'],
                 }),
               }],
+              resultType: 'complete',
             });
           }
         }

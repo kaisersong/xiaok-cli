@@ -1,3 +1,13 @@
+import { writeFileSync } from 'node:fs';
+
+if (process.env.XIAOK_TEST_MCP_PID_FILE) {
+  writeFileSync(process.env.XIAOK_TEST_MCP_PID_FILE, String(process.pid), 'utf8');
+}
+if (process.env.XIAOK_TEST_MCP_STUBBORN === '1') {
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1_000);
+}
+
 let buffer = '';
 let transport = null;
 
@@ -61,7 +71,7 @@ function respond(message) {
       id: message.id,
       result: {
         protocolVersion: '2024-11-05',
-        capabilities: {},
+        capabilities: { tools: {} },
         serverInfo: {
           name: 'fixture-mcp',
           version: '1.0.0',

@@ -64,4 +64,36 @@ describe('plugin manifest', () => {
     }, '/plugins/p');
     expect(manifest.mcpServers?.[0].requiresUserActivation).toBeUndefined();
   });
+
+  it('preserves MCP protocol policy and timeout configuration', () => {
+    const manifest = parsePluginManifest({
+      name: 'p',
+      version: '1.0.0',
+      mcpServers: [{
+        name: 'renderer',
+        type: 'stdio',
+        command: 'node',
+        protocol: { mode: 'modern', version: '2026-07-28' },
+        timeout: { startup: 30_000, call: 30_000 },
+      }],
+    }, '/plugins/p');
+
+    expect(manifest.mcpServers?.[0]).toMatchObject({
+      protocol: { mode: 'modern', version: '2026-07-28' },
+      timeout: { startup: 30_000, call: 30_000 },
+    });
+  });
+
+  it('rejects a modern MCP protocol policy without an explicit version', () => {
+    expect(() => parsePluginManifest({
+      name: 'p',
+      version: '1.0.0',
+      mcpServers: [{
+        name: 'renderer',
+        type: 'stdio',
+        command: 'node',
+        protocol: { mode: 'modern' },
+      }],
+    }, '/plugins/p')).toThrow('modern protocol policy requires version');
+  });
 });

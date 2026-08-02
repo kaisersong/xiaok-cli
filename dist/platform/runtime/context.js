@@ -20,6 +20,7 @@ import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
 import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpCatalogTimeoutMs, resolveStdioCommand, tryConnect, } from '../mcp/transport.js';
+import { resolveBuiltinSlideRendererConfig } from '../mcp/python-server.js';
 import { BUILT_IN_MCP_CLASSIFICATIONS, classifyMcpServer, validateRegistry, } from '../mcp/server-classification.js';
 export async function createPlatformRuntimeContext(options) {
     const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
@@ -259,7 +260,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                 const callToolTimeoutMs = frozenSnapshot.timeout?.call ?? globalCallToolTimeoutMs;
                 return {
                     callToolResult: async (name, input) => {
-                        const result = await conn.client.callTool({ name, arguments: input }, undefined, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
+                        const result = await conn.client.callTool({ name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
                         return normalizeMcpRuntimeToolResult(result);
                     },
                     dispose: () => conn.dispose(),
@@ -279,7 +280,8 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
         }
         let connection;
         try {
-            const connectResult = await tryConnect(server.name, server);
+            const launchServer = await resolveBuiltinSlideRendererConfig(server, { platform });
+            const connectResult = await tryConnect(server.name, launchServer);
             if (connectResult.status === 'disabled') {
                 capabilityHealth.push({
                     kind: 'mcp',
@@ -298,7 +300,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             tools.push(...buildMcpRuntimeTools({ name: server.name, command: '' }, {
                 listTools: async () => schemas,
                 callTool: async (name, input) => {
-                    const result = await activeConnection.client.callTool({ name, arguments: input }, undefined, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
+                    const result = await activeConnection.client.callTool({ name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
                     return normalizeMcpRuntimeToolResult(result).text;
                 },
                 dispose: activeConnection.dispose,
@@ -308,7 +310,10 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                 continue;
             }
             connection = undefined;
-            const detailParts = [`${schemas.length} tools`];
+            const detailParts = [
+                `${schemas.length} tools`,
+                `protocol ${activeConnection.protocolEra}`,
+            ];
             if (policy.source === 'legacy-manifest' && policy.reason) {
                 detailParts.push(policy.reason);
             }

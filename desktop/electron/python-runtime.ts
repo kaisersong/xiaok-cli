@@ -2,11 +2,12 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const REQUIRED_MODULES = ['mcp', 'jsonschema', 'pydantic', 'bs4'];
-const REQUIRED_DISTRIBUTIONS = ['mcp==1.27.1', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4'];
+const REQUIRED_MODULES = ['jsonschema', 'pydantic', 'bs4'];
+const REQUIRED_DISTRIBUTIONS = ['mcp==2.0.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4'];
 const REQUIRED_NATIVE_WHEEL_PREFIXES = ['pydantic_core-', 'rpds_py-'];
+const WINDOWS_REQUIRED_WHEEL_PREFIXES = ['pywin32-', 'colorama-'];
 const KNOWN_NATIVE_WHEEL_PREFIXES = [...REQUIRED_NATIVE_WHEEL_PREFIXES, 'cffi-', 'cryptography-', 'pywin32-'];
-const IMPORT_CHECK_SNIPPET = `import ${REQUIRED_MODULES.join(', ')}`;
+const IMPORT_CHECK_SNIPPET = `from mcp.server.mcpserver import MCPServer; import ${REQUIRED_MODULES.join(', ')}`;
 const PYTHON_COMPATIBILITY_TAG_SNIPPET = 'import sys; print(f"cp{sys.version_info[0]}{sys.version_info[1]}")';
 
 export type PythonExecFile = (
@@ -58,16 +59,28 @@ export function isCompatibleSlideRendererWheelhouse(
     .filter(name => name.toLowerCase().endsWith('.whl'))
     .map(name => name.toLowerCase());
 
-  const hasRequiredNativeWheels = REQUIRED_NATIVE_WHEEL_PREFIXES.every(prefix =>
+  const requiredWheelPrefixes = platform === 'win32'
+    ? [...REQUIRED_NATIVE_WHEEL_PREFIXES, ...WINDOWS_REQUIRED_WHEEL_PREFIXES]
+    : REQUIRED_NATIVE_WHEEL_PREFIXES;
+  const hasRequiredNativeWheels = requiredWheelPrefixes.every(prefix =>
     normalized.some(name => name.startsWith(prefix) && isCompatibleNativeWheelName(name, platform, arch, pythonTag))
   );
   if (!hasRequiredNativeWheels) return false;
 
   return KNOWN_NATIVE_WHEEL_PREFIXES
-    .filter(prefix => normalized.some(name => name.startsWith(prefix)))
+    .filter(prefix => normalized.some(name =>
+      name.startsWith(prefix) && isWheelForPlatform(name, platform)
+    ))
     .every(prefix =>
       normalized.some(name => name.startsWith(prefix) && isCompatibleNativeWheelName(name, platform, arch, pythonTag))
     );
+}
+
+function isWheelForPlatform(wheelName: string, platform: NodeJS.Platform): boolean {
+  if (platform === 'win32') return /-win(?:32|_arm64|_amd64)\.whl$/.test(wheelName);
+  if (platform === 'darwin') return wheelName.includes('-macosx_');
+  if (platform === 'linux') return /-(?:manylinux|musllinux|linux)_/.test(wheelName);
+  return false;
 }
 
 function isCompatibleNativeWheelName(

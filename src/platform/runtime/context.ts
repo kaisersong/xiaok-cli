@@ -32,6 +32,7 @@ import {
   resolveStdioCommand,
   tryConnect,
 } from '../mcp/transport.js';
+import { resolveBuiltinSlideRendererConfig } from '../mcp/python-server.js';
 import type { NamedMcpServerConfig } from '../mcp/types.js';
 import {
   BUILT_IN_MCP_CLASSIFICATIONS,
@@ -374,7 +375,6 @@ async function connectWorkspaceMcpServers(
           callToolResult: async (name, input) => {
             const result = await conn.client.callTool(
               { name, arguments: input },
-              undefined,
               { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true },
             );
             return normalizeMcpRuntimeToolResult(result);
@@ -397,7 +397,8 @@ async function connectWorkspaceMcpServers(
 
     let connection: Awaited<ReturnType<typeof createMcpClientConnection>> | undefined;
     try {
-      const connectResult = await tryConnect(server.name, server);
+      const launchServer = await resolveBuiltinSlideRendererConfig(server, { platform });
+      const connectResult = await tryConnect(server.name, launchServer);
       if (connectResult.status === 'disabled') {
         capabilityHealth.push({
           kind: 'mcp',
@@ -423,7 +424,6 @@ async function connectWorkspaceMcpServers(
             callTool: async (name, input) => {
               const result = await activeConnection.client.callTool(
                 { name, arguments: input },
-                undefined,
                 { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true },
               );
               return normalizeMcpRuntimeToolResult(result).text;
@@ -439,7 +439,10 @@ async function connectWorkspaceMcpServers(
         continue;
       }
       connection = undefined;
-      const detailParts: string[] = [`${schemas.length} tools`];
+      const detailParts: string[] = [
+        `${schemas.length} tools`,
+        `protocol ${activeConnection.protocolEra}`,
+      ];
       if (policy.source === 'legacy-manifest' && policy.reason) {
         detailParts.push(policy.reason);
       }

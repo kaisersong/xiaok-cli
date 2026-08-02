@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,6 +10,12 @@ import {
   buildBackgroundNodeSpawnOptions,
   buildIntentBrokerServiceEnv,
   checkKSwarmHealthServiceIdentity,
+  classifyKSwarmExit,
+  createKSwarmService,
+  KSWARM_EXIT_LOAD_UNRECOVERABLE,
+  KSWARM_EXIT_SAVE_FAILED,
+  shouldStopAfterPersistenceFailStops,
+  transitionKSwarmTerminalDegraded,
   doesKSwarmHealthMatchExpectedService,
   findPidOnPort,
   hasDynamicWorkflowSupport,
@@ -24,6 +31,35 @@ import {
   shouldRestartAfterHealthFailures,
   uniqueServiceUrls,
 } from '../../electron/kswarm-service.js';
+
+const spawnMock = vi.hoisted(() => vi.fn());
+
+class FakeKSwarmChild extends EventEmitter {
+  pid: number;
+  alive = true;
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  kill: ReturnType<typeof vi.fn>;
+
+  constructor(pid: number) {
+    super();
+    this.pid = pid;
+    this.kill = vi.fn((signal?: NodeJS.Signals) => {
+      queueMicrotask(() => {
+        this.alive = false;
+        this.emit('exit', 0, signal ?? null);
+      });
+      return true;
+    });
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  spawnMock.mockReset();
+});
 
 // We can't actually spawn kswarm in unit tests, so request() behavior is tested
 // with a mock that mirrors the service gateway contract.
@@ -675,5 +711,750 @@ describe('killStaleServiceOnPort', () => {
   it('findPidOnPort returns null for an unused port', async () => {
     const pid = await findPidOnPort(19999);
     expect(pid).toBeNull();
+  });
+});
+
+describe('kswarm durable-state fail-stop exit classification', () => {
+  it('treats exit 78 as terminal degraded (no auto-restart)', () => {
+    expect(KSWARM_EXIT_LOAD_UNRECOVERABLE).toBe(78);
+    expect(classifyKSwarmExit(78)).toEqual({
+      action: 'terminal_degraded',
+      reason: 'persistence_unrecoverable',
+    });
+  });
+
+  it('treats exit 75 as a limited restart from the last durable revision', () => {
+    expect(KSWARM_EXIT_SAVE_FAILED).toBe(75);
+    expect(classifyKSwarmExit(75)).toEqual({
+      action: 'limited_restart',
+      reason: 'persistence_commit_failed',
+    });
+  });
+
+  it('treats normal crashes, signals, and clean exits as regular restarts', () => {
+    expect(classifyKSwarmExit(0)).toEqual({ action: 'restart' });
+    expect(classifyKSwarmExit(1)).toEqual({ action: 'restart' });
+    expect(classifyKSwarmExit(null)).toEqual({ action: 'restart' });
+    expect(classifyKSwarmExit(undefined)).toEqual({ action: 'restart' });
+  });
+
+  it('clears terminal degraded state after a successful manual recovery', () => {
+    expect(transitionKSwarmTerminalDegraded(false, 'unrecoverable_exit')).toBe(true);
+    expect(transitionKSwarmTerminalDegraded(true, 'ready')).toBe(false);
+  });
+
+  it('bounds repeated persistence fail-stop restarts independently of ready-state resets', () => {
+    expect(shouldStopAfterPersistenceFailStops(2, 3)).toBe(false);
+    expect(shouldStopAfterPersistenceFailStops(3, 3)).toBe(true);
+  });
+
+  it('wires exit 78 and repeated exit 75 into stable service-level recovery gates', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-service-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let nextPid = 41_000;
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(nextPid++);
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.includes(':4400/health')) {
+        return new Response(JSON.stringify(kswarmHealthy ? { ok: true } : { ok: false }), {
+          status: kswarmHealthy ? 200 : 503,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/agents')) {
+        return new Response(JSON.stringify({ agents: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+
+    const spawnProcess = spawnMock as unknown as typeof import('node:child_process').spawn;
+    const findPortOwner = async () => null;
+    const terminalService = createKSwarmService({ spawnProcess, findPortOwner });
+    await terminalService.start();
+    kswarmHealthy = false;
+    children.at(-1)?.emit('exit', KSWARM_EXIT_LOAD_UNRECOVERABLE, null);
+    expect(terminalService.getStatus()).toMatchObject({
+      running: false,
+      terminalDegraded: true,
+      persistenceFailStopCount: 0,
+      lastError: expect.stringContaining('terminal degraded'),
+    });
+    await expect(terminalService.start()).rejects.toThrow(/terminal degraded|manual recovery/i);
+    await terminalService.restart();
+    expect(terminalService.getStatus()).toMatchObject({
+      running: true,
+      terminalDegraded: false,
+      persistenceFailStopCount: 0,
+    });
+    await terminalService.stop();
+
+    kswarmHealthy = false;
+    const failStopService = createKSwarmService({ spawnProcess, findPortOwner });
+    await failStopService.start();
+    vi.useFakeTimers();
+    for (let failure = 1; failure <= 3; failure++) {
+      kswarmHealthy = false;
+      children.at(-1)?.emit('exit', KSWARM_EXIT_SAVE_FAILED, null);
+      if (failure < 3) {
+        await vi.advanceTimersByTimeAsync(2_000);
+      }
+    }
+
+    expect(failStopService.getStatus()).toMatchObject({
+      running: false,
+      terminalDegraded: false,
+      persistenceFailStopCount: 3,
+    });
+    const spawnCountAtCap = spawnMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(spawnMock).toHaveBeenCalledTimes(spawnCountAtCap);
+    await expect(failStopService.start()).rejects.toThrow(/manual recovery|maximum limited restarts/i);
+    await failStopService.restart();
+    expect(failStopService.getStatus()).toMatchObject({
+      running: true,
+      terminalDegraded: false,
+      persistenceFailStopCount: 0,
+    });
+    await failStopService.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  }, 20_000);
+
+  it('reaps the owned child before restarting after repeated health failures', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-health-restart-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(42_000 + children.length);
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) {
+        return new Response('{}', { status: 200 });
+      }
+      if (url.includes(':4400/health')) {
+        return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      }
+      if (url.endsWith('/agents')) {
+        return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+
+    vi.useFakeTimers();
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    await service.start();
+    expect(children).toHaveLength(1);
+    const originalChild = children[0];
+
+    kswarmHealthy = false;
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(originalChild.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(originalChild.alive).toBe(false);
+    expect(children).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(children).toHaveLength(2);
+    expect(children.filter((child) => child.alive)).toHaveLength(1);
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  }, 20_000);
+
+  it('reclaims an unhealthy orphan port owner before spawning a new server', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-orphan-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    const findPortOwner = vi.fn(async () => 43_210);
+    const killStalePortOwner = vi.fn(async () => true);
+    spawnMock.mockImplementation(() => {
+      kswarmHealthy = true;
+      return new FakeKSwarmChild(43_211);
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner,
+      killStalePortOwner,
+    });
+    await service.start();
+
+    expect(findPortOwner).toHaveBeenCalledWith(4400);
+    expect(killStalePortOwner).toHaveBeenCalledWith(4400);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('cancels a pending backoff restart when start already spawned a replacement', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-backoff-race-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(44_000 + children.length);
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    vi.useFakeTimers();
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    await service.start();
+    children[0].alive = false;
+    kswarmHealthy = false;
+    children[0].emit('exit', 1, null);
+
+    await service.start();
+    expect(children).toHaveLength(2);
+    expect(children.filter((child) => child.alive)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(children).toHaveLength(2);
+    expect(children.filter((child) => child.alive)).toHaveLength(1);
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('shares one spawn when start races a backoff callback before child assignment', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-spawn-race-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let blockNextHealth = false;
+    let releaseBlockedHealth: (() => void) | null = null;
+    let signalBlockedHealth: (() => void) | null = null;
+    const blockedHealth = new Promise<void>((resolve) => { signalBlockedHealth = resolve; });
+    const releaseHealth = new Promise<void>((resolve) => { releaseBlockedHealth = resolve; });
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(45_000 + children.length);
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) {
+        if (blockNextHealth) {
+          blockNextHealth = false;
+          signalBlockedHealth?.();
+          await releaseHealth;
+          return new Response('{}', { status: 503 });
+        }
+        return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      }
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    vi.useFakeTimers();
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    await service.start();
+    children[0].alive = false;
+    kswarmHealthy = false;
+    children[0].emit('exit', 1, null);
+    blockNextHealth = true;
+
+    const backoffRestart = vi.advanceTimersByTimeAsync(2_000);
+    await blockedHealth;
+    const manualStart = service.start();
+    releaseBlockedHealth?.();
+    await Promise.all([backoffRestart, manualStart]);
+
+    expect(children).toHaveLength(2);
+    expect(children.filter((child) => child.alive)).toHaveLength(1);
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('does not spawn after stop wins while startup health probing is in flight', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-stop-race-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let releaseBlockedHealth: (() => void) | null = null;
+    let signalBlockedHealth: (() => void) | null = null;
+    const blockedHealth = new Promise<void>((resolve) => { signalBlockedHealth = resolve; });
+    const releaseHealth = new Promise<void>((resolve) => { releaseBlockedHealth = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4400/health')) {
+        signalBlockedHealth?.();
+        await releaseHealth;
+        return new Response('{}', { status: 503 });
+      }
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const start = service.start();
+    await blockedHealth;
+    releaseBlockedHealth?.();
+    const stop = service.stop();
+    await Promise.all([start, stop]);
+
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(service.getStatus()).toMatchObject({ running: false, pid: null });
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('reaps a child that misses the startup deadline and schedules a fresh recovery', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-startup-timeout-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let allowReadyOnSpawn = false;
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(46_000 + children.length);
+      children.push(child);
+      if (allowReadyOnSpawn) kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    vi.useFakeTimers();
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const firstStart = service.start();
+    await vi.advanceTimersByTimeAsync(8_500);
+    await firstStart;
+
+    expect(children).toHaveLength(1);
+    expect(children[0].kill).toHaveBeenCalledWith('SIGTERM');
+    expect(children[0].alive).toBe(false);
+    expect(service.getStatus()).toMatchObject({ running: false, pid: null });
+
+    allowReadyOnSpawn = true;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(children).toHaveLength(2);
+    expect(service.getStatus()).toMatchObject({ running: true, pid: children[1].pid });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  }, 20_000);
+
+  it('restart waits for an in-flight start to stop and then launches a fresh server', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-restart-join-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let releaseBlockedHealth: (() => void) | null = null;
+    let signalBlockedHealth: (() => void) | null = null;
+    let blockFirstHealth = true;
+    const blockedHealth = new Promise<void>((resolve) => { signalBlockedHealth = resolve; });
+    const releaseHealth = new Promise<void>((resolve) => { releaseBlockedHealth = resolve; });
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(47_000 + children.length);
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) {
+        if (blockFirstHealth) {
+          blockFirstHealth = false;
+          signalBlockedHealth?.();
+          await releaseHealth;
+          return new Response('{}', { status: 503 });
+        }
+        return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      }
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const start = service.start();
+    await blockedHealth;
+    releaseBlockedHealth?.();
+    const restart = service.restart();
+    await Promise.all([start, restart]);
+
+    expect(children).toHaveLength(1);
+    expect(service.getStatus()).toMatchObject({ running: true, pid: children[0].pid });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('start waits for an in-flight stop before launching a fresh server', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-stop-start-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let releaseFirstExit: (() => void) | null = null;
+    let signalFirstKill: (() => void) | null = null;
+    const firstKillStarted = new Promise<void>((resolve) => { signalFirstKill = resolve; });
+    const releaseExit = new Promise<void>((resolve) => { releaseFirstExit = resolve; });
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(48_000 + children.length);
+      if (children.length === 0) {
+        child.kill = vi.fn((signal?: NodeJS.Signals) => {
+          if (signal === 'SIGTERM') {
+            signalFirstKill?.();
+            void releaseExit.then(() => {
+              child.alive = false;
+              child.emit('exit', 0, signal);
+            });
+          }
+          return true;
+        });
+      }
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    await service.start();
+    const stop = service.stop();
+    await firstKillStarted;
+    kswarmHealthy = false;
+    const start = service.start();
+    releaseFirstExit?.();
+    await Promise.all([stop, start]);
+
+    expect(children).toHaveLength(2);
+    expect(children.filter((child) => child.alive)).toHaveLength(1);
+    expect(service.getStatus()).toMatchObject({ running: true, pid: children[1].pid });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('joins an owned startup before checking request availability', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-request-startup-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let signalChildSpawned: (() => void) | null = null;
+    const childSpawned = new Promise<void>((resolve) => { signalChildSpawned = resolve; });
+    const child = new FakeKSwarmChild(48_500);
+    spawnMock.mockImplementation(() => {
+      signalChildSpawned?.();
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const start = service.start();
+    await childSpawned;
+    const request = service.request('/agents');
+    kswarmHealthy = true;
+
+    await expect(request).resolves.toMatchObject({ ok: true });
+    await start;
+    expect(service.getStatus()).toMatchObject({ running: true, pid: child.pid });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('does not publish an adopted service after stop wins seed reconciliation', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-stop-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let blockSeedReconciliation = true;
+    let releaseSeedReconciliation: (() => void) | null = null;
+    let signalSeedReconciliation: (() => void) | null = null;
+    const seedReconciliationStarted = new Promise<void>((resolve) => { signalSeedReconciliation = resolve; });
+    const releaseReconciliation = new Promise<void>((resolve) => { releaseSeedReconciliation = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          features: ['dynamic_workflows'],
+          workflowCapabilities: {
+            schemaVersion: 'kswarm_workflow_patterns_v1',
+            compiledContract: true,
+            patternPublicView: true,
+          },
+          service: { entryPath: serverPath },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/agents')) {
+        if (blockSeedReconciliation) {
+          blockSeedReconciliation = false;
+          signalSeedReconciliation?.();
+          await releaseReconciliation;
+        }
+        return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      }
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const start = service.start();
+    await seedReconciliationStarted;
+    await service.stop();
+    releaseSeedReconciliation?.();
+    await start;
+
+    expect(service.getStatus()).toMatchObject({ running: false, pid: null });
+    await service.start();
+    expect(service.getStatus()).toMatchObject({ running: true, pid: null });
+    expect(spawnMock).not.toHaveBeenCalled();
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('does not bootstrap a broker after stop wins external-service adoption', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-broker-stop-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let brokerHealthChecks = 0;
+    let brokerAvailable = false;
+    let releaseBrokerProbe: (() => void) | null = null;
+    let signalBrokerProbe: (() => void) | null = null;
+    const brokerProbeStarted = new Promise<void>((resolve) => { signalBrokerProbe = resolve; });
+    const releaseProbe = new Promise<void>((resolve) => { releaseBrokerProbe = resolve; });
+    spawnMock.mockImplementation(() => new FakeKSwarmChild(49_500));
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) {
+        brokerHealthChecks++;
+        if (brokerHealthChecks === 1) {
+          signalBrokerProbe?.();
+          await releaseProbe;
+        }
+        return new Response('{}', { status: brokerAvailable || brokerHealthChecks > 4 ? 200 : 503 });
+      }
+      if (url.includes(':4400/health')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          features: ['dynamic_workflows'],
+          workflowCapabilities: {
+            schemaVersion: 'kswarm_workflow_patterns_v1',
+            compiledContract: true,
+            patternPublicView: true,
+          },
+          service: { entryPath: serverPath },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const start = service.start();
+    await brokerProbeStarted;
+    await service.stop();
+    releaseBrokerProbe?.();
+    await start;
+
+    expect(service.getStatus()).toMatchObject({ running: false, pid: null });
+    expect(spawnMock).not.toHaveBeenCalled();
+    brokerAvailable = true;
+    await service.start();
+    expect(service.getStatus()).toMatchObject({ running: true, pid: null });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('does not publish ready after stop wins an in-flight health probe', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-ready-stop-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    let blockReadyProbe = true;
+    let releaseReadyProbe: (() => void) | null = null;
+    let signalReadyProbe: (() => void) | null = null;
+    const readyProbeStarted = new Promise<void>((resolve) => { signalReadyProbe = resolve; });
+    const releaseProbe = new Promise<void>((resolve) => { releaseReadyProbe = resolve; });
+    const children: FakeKSwarmChild[] = [];
+    spawnMock.mockImplementation(() => {
+      const child = new FakeKSwarmChild(49_000 + children.length);
+      children.push(child);
+      kswarmHealthy = true;
+      return child;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) {
+        if (kswarmHealthy && blockReadyProbe) {
+          blockReadyProbe = false;
+          signalReadyProbe?.();
+          await releaseProbe;
+          return new Response('{}', { status: 200 });
+        }
+        return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      }
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    const start = service.start();
+    await readyProbeStarted;
+    await service.stop();
+    kswarmHealthy = false;
+    releaseReadyProbe?.();
+    await start;
+
+    expect(service.getStatus()).toMatchObject({ running: false, pid: null });
+    await service.start();
+    expect(children).toHaveLength(2);
+    expect(service.getStatus()).toMatchObject({ running: true, pid: children[1].pid });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
+  });
+
+  it('contains backoff spawn failures and keeps the service recoverable', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-restart-error-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    let kswarmHealthy = false;
+    const firstChild = new FakeKSwarmChild(50_000);
+    spawnMock
+      .mockImplementationOnce(() => {
+        kswarmHealthy = true;
+        return firstChild;
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('spawn boom');
+      });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes(':4318/health')) return new Response('{}', { status: 200 });
+      if (url.includes(':4400/health')) return new Response('{}', { status: kswarmHealthy ? 200 : 503 });
+      if (url.endsWith('/agents')) return new Response(JSON.stringify({ agents: [] }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    vi.useFakeTimers();
+    const service = createKSwarmService({
+      spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn,
+      findPortOwner: async () => null,
+    });
+    await service.start();
+    firstChild.alive = false;
+    kswarmHealthy = false;
+    firstChild.emit('exit', 1, null);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(service.getStatus()).toMatchObject({
+      running: false,
+      pid: null,
+      lastError: expect.stringContaining('spawn boom'),
+    });
+    await service.stop();
+    rmSync(serviceRoot, { recursive: true, force: true });
   });
 });

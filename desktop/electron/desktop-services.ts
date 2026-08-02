@@ -63,9 +63,18 @@ import type { TimedActionTrigger } from './timed-action-types.js';
 import { ConnectorsService } from './connectors-service.js';
 import { ConnectorsStore } from './connectors-store.js';
 import { maybePersistToolResult, buildViewForAPI, shouldAutoCompact, compactConversation, getContextLimit } from './context-manager.js';
-import { startMcpServerProcess, createStdioMcpTransport } from '../../src/ai/mcp/runtime/server-process.js';
-import { createMcpRuntimeClient } from '../../src/ai/mcp/runtime/client.js';
+import {
+  normalizeMcpRuntimeToolResult,
+} from '../../src/ai/mcp/runtime/client.js';
+import type { McpToolSchema } from '../../src/ai/mcp/client.js';
 import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
+import {
+  createMcpClientConnection,
+  getMcpConnectionStderrTail,
+  resolveMcpCatalogTimeoutMs,
+  resolveMcpCallToolTimeoutMs,
+  type McpClientConnection,
+} from '../../src/platform/mcp/transport.js';
 import { classifyMcpStartupError, type McpErrorDetail } from './mcp-error-classifier.js';
 import { loadPlugins } from '../../src/platform/plugins/loader.js';
 import {
@@ -935,7 +944,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             });
             continue;
           }
-          let transportRef: { getStderrTail(): string } | null = null;
+          let connectionRef: McpClientConnection | null = null;
           let resolvedCommand: string | undefined;
           try {
             const launch = await resolvePluginMcpLaunch(plugin.name, server.name, server.command, server.args ?? []);
@@ -955,28 +964,43 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
                 ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
                 : baseEnv;
-            const proc = startMcpServerProcess(command, launch.args, {
-              cwd: plugin.rootDir,
+            const connection = await createMcpClientConnection(server.name, {
+              type: 'stdio',
+              command,
+              args: launch.args,
               env: runtimeEnv,
+              timeout: server.timeout,
+              protocol: server.protocol,
+            }, {
+              cwd: plugin.rootDir,
+              clientName: 'xiaok-desktop',
             });
-            const transport = createStdioMcpTransport(proc.child);
-            transportRef = transport;
-            const client = createMcpRuntimeClient(transport);
-            await client.initialize();
-            const schemas = await client.listTools();
+            connectionRef = connection;
+            const catalogTimeout = server.timeout?.catalog ?? resolveMcpCatalogTimeoutMs();
+            const callTimeout = server.timeout?.call ?? resolveMcpCallToolTimeoutMs();
+            const schemas = (await connection.client.listTools(
+              undefined,
+              { timeout: catalogTimeout },
+            )).tools as McpToolSchema[];
+            const callToolResult = async (name: string, input: Record<string, unknown>) =>
+              normalizeMcpRuntimeToolResult(await connection.client.callTool(
+                { name, arguments: input },
+                { timeout: callTimeout },
+              ));
+            const callTool = async (name: string, input: Record<string, unknown>) =>
+              (await callToolResult(name, input)).text;
             let mcpTools: Tool[];
             let toolCount = 0;
             if (server.name === 'cua-driver') {
               const readiness = await runCuaMcpReadinessSmoke({
                 schemas,
-                callToolResult: (name, input) => client.callToolResult(name, input),
+                callToolResult,
               });
               if (!readiness.ready) {
-                transport.dispose();
-                proc.dispose();
+                connection.dispose();
                 throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
               }
-              computerUseBackend = { callToolResult: (name, input) => client.callToolResult(name, input) };
+              computerUseBackend = { callToolResult };
               if (options.userInitiated || options.autoConnectComputerUse) {
                 recordComputerUseReady(options.userInitiated ? 'user_enable' : 'auto_recovery');
               }
@@ -985,7 +1009,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             } else {
               mcpTools = buildMcpRuntimeTools(
                 { name: server.name, command: server.command },
-                { listTools: () => Promise.resolve(schemas), callTool: (name, input) => client.callTool(name, input), dispose: () => { transport.dispose(); proc.dispose(); } },
+                {
+                  listTools: () => Promise.resolve(schemas),
+                  callTool,
+                  dispose: connection.dispose,
+                },
                 schemas,
               );
               toolCount = mcpTools.length;
@@ -1016,8 +1044,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                   computerUseBackend = null;
                   computerUseUnavailableError = buildComputerUseNeedsEnablementError();
                 }
-                transport.dispose();
-                proc.dispose();
+                connection.dispose();
               },
             });
             pluginMcpServers.push({
@@ -1029,7 +1056,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             });
           } catch (e) {
             const baseMessage = e instanceof Error ? e.message : String(e);
-            const stderrTail = transportRef?.getStderrTail() ?? '';
+            const stderrTail = connectionRef?.getStderrTail() || getMcpConnectionStderrTail(e);
+            connectionRef?.dispose();
             const combinedDetail = stderrTail ? `${baseMessage}\n${stderrTail}` : baseMessage;
             const errorDetail = classifyMcpStartupError(combinedDetail, resolvedCommand);
             if (server.name === 'cua-driver') {
@@ -4326,22 +4354,29 @@ async function renderReportArtifactViaBundledMcp({
   const runtimeEnv = !process.env.XIAOK_NODE_CMD && process.versions.electron
     ? { ELECTRON_RUN_AS_NODE: '1' }
     : undefined;
-  const proc = startMcpServerProcess(command, [serverBundlePath], {
-    cwd: pluginDir,
+  const connection = await createMcpClientConnection('report-renderer', {
+    type: 'stdio',
+    command,
+    args: [serverBundlePath],
     env: runtimeEnv,
+    protocol: { mode: 'modern', version: '2026-07-28' },
+    timeout: { startup: 30_000, call: 30_000 },
+  }, {
+    cwd: pluginDir,
+    clientName: 'xiaok-desktop-report-renderer',
   });
-  const transport = createStdioMcpTransport(proc.child);
-  const client = createMcpRuntimeClient(transport);
   try {
-    await withReportRendererTimeout(client.initialize(), 'report_renderer_initialize');
-    const raw = await withReportRendererTimeout(
-      client.callTool('render_report', {
-        ir_content: irContent,
-        output_path: outputPath,
-        ...(theme ? { theme } : {}),
-      }),
-      'report_renderer_render',
-    );
+    const raw = normalizeMcpRuntimeToolResult(await connection.client.callTool(
+      {
+        name: 'render_report',
+        arguments: {
+          ir_content: irContent,
+          output_path: outputPath,
+          ...(theme ? { theme } : {}),
+        },
+      },
+      { timeout: 30_000 },
+    )).text;
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (isRecord(parsed)) return parsed;
@@ -4354,8 +4389,7 @@ async function renderReportArtifactViaBundledMcp({
       response: raw.slice(0, 2000),
     };
   } finally {
-    transport.dispose();
-    proc.dispose();
+    connection.dispose();
   }
 }
 
@@ -4365,16 +4399,6 @@ function isReportRendererStructurallyValid(validation: unknown): boolean {
   const l1 = validation.l1_passed ?? validation.l1;
   const l2 = validation.l2_passed ?? validation.l2;
   return l0 === true && l1 === true && l2 === true;
-}
-
-function withReportRendererTimeout<T>(promise: Promise<T>, operation: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${operation}_timeout`)), 30_000);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
 }
 
 function isAllowedReportArtifactOutputPath(outputPath: string): boolean {

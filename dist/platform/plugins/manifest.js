@@ -94,6 +94,39 @@ export function parsePluginManifest(raw, pluginDir) {
                 throw new Error(`Plugin MCP server "${name}" has invalid type: ${type}`);
             };
             const base = buildBase();
+            if (entry.protocol !== undefined) {
+                if (!entry.protocol || typeof entry.protocol !== 'object') {
+                    throw new Error(`Plugin MCP server "${name}" has invalid protocol policy`);
+                }
+                const rawProtocol = entry.protocol;
+                if (rawProtocol.mode === 'auto' || rawProtocol.mode === 'legacy') {
+                    base.protocol = { mode: rawProtocol.mode };
+                }
+                else if (rawProtocol.mode === 'modern') {
+                    if (rawProtocol.version !== '2026-07-28') {
+                        throw new Error(`Plugin MCP server "${name}" modern protocol policy requires version "2026-07-28"`);
+                    }
+                    base.protocol = {
+                        mode: 'modern',
+                        version: rawProtocol.version,
+                    };
+                }
+                else {
+                    throw new Error(`Plugin MCP server "${name}" has invalid protocol policy`);
+                }
+            }
+            if (entry.timeout && typeof entry.timeout === 'object') {
+                const rawTimeout = entry.timeout;
+                const timeout = {};
+                for (const key of ['startup', 'catalog', 'call', 'resource']) {
+                    const timeoutValue = rawTimeout[key];
+                    if (typeof timeoutValue === 'number' && Number.isFinite(timeoutValue) && timeoutValue > 0) {
+                        timeout[key] = timeoutValue;
+                    }
+                }
+                if (Object.keys(timeout).length > 0)
+                    base.timeout = timeout;
+            }
             if (entry.requiresUserActivation === true) {
                 base.requiresUserActivation = true;
             }

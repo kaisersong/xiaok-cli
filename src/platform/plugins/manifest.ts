@@ -1,6 +1,10 @@
 import { resolve } from 'path';
 import type { HookEventName, HookType } from '../../runtime/hooks-runner.js';
-import type { PluginManifestMcpServer } from '../mcp/types.js';
+import type {
+  McpProtocolPolicy,
+  McpTimeoutConfig,
+  PluginManifestMcpServer,
+} from '../mcp/types.js';
 
 export interface PluginManifestServer {
   name: string;
@@ -142,6 +146,36 @@ export function parsePluginManifest(raw: Record<string, unknown>, pluginDir: str
         };
 
         const base = buildBase();
+        if (entry.protocol !== undefined) {
+          if (!entry.protocol || typeof entry.protocol !== 'object') {
+            throw new Error(`Plugin MCP server "${name}" has invalid protocol policy`);
+          }
+          const rawProtocol = entry.protocol as Record<string, unknown>;
+          if (rawProtocol.mode === 'auto' || rawProtocol.mode === 'legacy') {
+            base.protocol = { mode: rawProtocol.mode };
+          } else if (rawProtocol.mode === 'modern') {
+            if (rawProtocol.version !== '2026-07-28') {
+              throw new Error(`Plugin MCP server "${name}" modern protocol policy requires version "2026-07-28"`);
+            }
+            base.protocol = {
+              mode: 'modern',
+              version: rawProtocol.version,
+            } satisfies McpProtocolPolicy;
+          } else {
+            throw new Error(`Plugin MCP server "${name}" has invalid protocol policy`);
+          }
+        }
+        if (entry.timeout && typeof entry.timeout === 'object') {
+          const rawTimeout = entry.timeout as Record<string, unknown>;
+          const timeout: McpTimeoutConfig = {};
+          for (const key of ['startup', 'catalog', 'call', 'resource'] as const) {
+            const timeoutValue = rawTimeout[key];
+            if (typeof timeoutValue === 'number' && Number.isFinite(timeoutValue) && timeoutValue > 0) {
+              timeout[key] = timeoutValue;
+            }
+          }
+          if (Object.keys(timeout).length > 0) base.timeout = timeout;
+        }
         if (entry.requiresUserActivation === true) {
           (base as PluginManifestMcpServer & { requiresUserActivation?: boolean }).requiresUserActivation = true;
         }

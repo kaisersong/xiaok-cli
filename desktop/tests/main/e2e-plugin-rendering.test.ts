@@ -3,8 +3,11 @@ import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-import { createMcpRuntimeClient } from '../../../src/ai/mcp/runtime/client.js';
-import { createStdioMcpTransport, startMcpServerProcess } from '../../../src/ai/mcp/runtime/server-process.js';
+import {
+  createMcpClientConnection,
+  type McpClientConnection,
+} from '../../../src/platform/mcp/transport.js';
+import { normalizeMcpRuntimeToolResult } from '../../../src/ai/mcp/runtime/client.js';
 import { ensureReportRendererCssCompat } from '../../electron/deploy-bundled-plugins.js';
 import { buildPythonServerEnv, ensureSlideRendererPythonReady } from '../../electron/python-runtime.js';
 
@@ -37,25 +40,36 @@ async function withMcpClient<T>(
   args: string[],
   cwd: string,
   env: Record<string, string> | undefined,
-  run: (client: ReturnType<typeof createMcpRuntimeClient>) => Promise<T>,
+  run: (client: McpClientConnection['client']) => Promise<T>,
 ): Promise<T> {
-  const proc = startMcpServerProcess(command, args, { cwd, env });
-  const transport = createStdioMcpTransport(proc.child);
-  const client = createMcpRuntimeClient(transport);
+  const connection = await createMcpClientConnection('plugin-rendering-test', {
+    type: 'stdio',
+    command,
+    args,
+    env,
+    protocol: { mode: 'modern', version: '2026-07-28' },
+    timeout: { startup: 30_000, call: 30_000 },
+  }, {
+    cwd,
+    clientName: 'xiaok-desktop-plugin-rendering-test',
+  });
   try {
-    await client.initialize();
-    return await run(client);
+    expect(connection.protocolEra).toBe('modern');
+    return await run(connection.client);
   } finally {
-    transport.dispose();
-    proc.dispose();
-    await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 500);
-      proc.child.once('exit', () => {
-        clearTimeout(timer);
-        resolve(undefined);
-      });
-    });
+    connection.dispose();
   }
+}
+
+async function callMcpToolText(
+  client: McpClientConnection['client'],
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  return normalizeMcpRuntimeToolResult(await client.callTool(
+    { name, arguments: args },
+    { timeout: 30_000 },
+  )).text;
 }
 
 describe('e2e: plugin rendering', () => {
@@ -89,7 +103,7 @@ describe('e2e: plugin rendering', () => {
     const bundlePath = join(pluginDir, 'mcp-servers', 'report-renderer', 'dist', 'server.bundle.js');
 
     const result = await withMcpClient('node', [bundlePath], pluginDir, undefined, async (client) => {
-      const raw = await client.callTool('render_report', {
+      const raw = await callMcpToolText(client, 'render_report', {
         ir_content: irContent,
         output_path: outputPath,
       });
@@ -139,7 +153,7 @@ describe('e2e: plugin rendering', () => {
       pluginDir,
       buildPythonServerEnv(),
       async (client) => {
-      const raw = await client.callTool('render_slide', {
+      const raw = await callMcpToolText(client, 'render_slide', {
         brief_json: briefJson,
         output_path: outputPath,
       });

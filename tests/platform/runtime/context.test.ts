@@ -206,6 +206,7 @@ describe('platform runtime context', () => {
 
     expect(context.health.hasDegradedCapabilities()).toBe(false);
     expect(context.health.summary()).toContain('mcp:fixture-docs connected');
+    expect(context.health.summary()).toContain('1 tools; protocol legacy');
     expect(context.health.summary()).toContain('lsp:fixture-lsp connected');
     expect(context.mcpTools.map((tool) => tool.definition.name)).toEqual(['mcp__fixture-docs__search']);
     expect(context.capabilityRegistry.get('mcp__fixture-docs__search')).toMatchObject({

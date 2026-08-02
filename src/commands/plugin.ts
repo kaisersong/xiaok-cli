@@ -1,242 +1,239 @@
 import type { Command } from 'commander';
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  rmSync,
-  readFileSync,
-  writeFileSync,
-  createWriteStream,
-} from 'fs';
-import { join, resolve } from 'path';
-import { createGunzip } from 'zlib';
-import { pipeline } from 'stream/promises';
-import { createReadStream, createWriteStream as fsCreateWriteStream } from 'fs';
-import { execSync } from 'child_process';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'fs';
+import { join } from 'path';
 import https from 'https';
-import http from 'http';
+import {
+  readActivePluginPointer,
+  assertValidPluginName,
+  removeActivePluginPointer,
+  resolveManagedPlugins,
+} from '../platform/plugins/install/active-pointer.js';
+import { installPlugin, type InstallEvent } from '../platform/plugins/install/installer.js';
+import {
+  DEFAULT_REGISTRY_V2_URL,
+  parseTrustedRegistry,
+} from '../platform/plugins/install/registry.js';
+import {
+  RESERVED_PLUGIN_DIR_NAMES,
+  resolveDefaultPluginsDir,
+  resolveInstallPaths,
+} from '../platform/plugins/install/source.js';
 
-const DEFAULT_REGISTRY_URL =
+const LEGACY_REGISTRY_URL =
   'https://raw.githubusercontent.com/kaisersong/kai-xiaok-plugins/main/registry.json';
-const FALLBACK_REGISTRY_URL =
-  'https://api.github.com/repos/kaisersong/kai-xiaok-plugins/contents/registry.json';
 
-interface RegistryPlugin {
+interface SearchablePlugin {
   name: string;
-  display_name: string;
+  displayName: string;
   description: string;
-  repo: string;
-  path: string;
   version: string;
-  keywords?: string[];
-  dependencies: {
-    runtime: string;
-    install: string;
-    test?: string;
-  };
-}
-
-interface Registry {
-  version: number;
-  repo: string;
-  plugins: RegistryPlugin[];
+  keywords: string[];
+  installable: boolean;
 }
 
 function getPluginsDir(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || '~';
-  return resolve(home, '.xiaok', 'plugins');
+  return resolveDefaultPluginsDir();
 }
 
 function downloadFile(url: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const client = url.startsWith('https') ? https : http;
-    const follow = (u: string, redirects: number) => {
-      if (redirects > 5) return reject(new Error('Too many redirects'));
-      client
-        .get(u, { headers: { 'User-Agent': 'xiaok-cli' } }, (res) => {
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            follow(res.headers.location, redirects + 1);
-            res.resume();
-            return;
-          }
-          if (res.statusCode !== 200) {
-            res.resume();
-            reject(new Error(`HTTP ${res.statusCode} fetching ${u}`));
-            return;
-          }
-          const chunks: Buffer[] = [];
-          res.on('data', (chunk) => chunks.push(chunk));
-          res.on('end', () => resolve(Buffer.concat(chunks)));
-          res.on('error', reject);
-        })
-        .on('error', reject);
-    };
-    follow(url, 0);
+    if (!url.startsWith('https://')) {
+      reject(new Error(`Plugin registry must be served over https, got "${url}"`));
+      return;
+    }
+    https
+      .get(url, { headers: { 'User-Agent': 'xiaok-cli', Accept: 'application/json' } }, (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on('error', reject);
+      })
+      .on('error', reject);
   });
 }
 
-async function fetchRegistry(registryUrl?: string): Promise<Registry> {
-  if (registryUrl) {
-    const data = await downloadFile(registryUrl);
-    return JSON.parse(data.toString('utf8')) as Registry;
-  }
-
-  // Try raw URL first, fallback to API URL
+/** Search tolerates the legacy v1 document; install never does. */
+async function fetchSearchableRegistry(registryUrl?: string): Promise<SearchablePlugin[]> {
+  const url = registryUrl ?? DEFAULT_REGISTRY_V2_URL;
+  let raw: unknown;
   try {
-    const data = await downloadFile(DEFAULT_REGISTRY_URL);
-    return JSON.parse(data.toString('utf8')) as Registry;
+    raw = JSON.parse((await downloadFile(url)).toString('utf8'));
+  } catch (error) {
+    if (registryUrl) throw error;
+    raw = JSON.parse((await downloadFile(LEGACY_REGISTRY_URL)).toString('utf8'));
+  }
+
+  const doc = raw as { version?: unknown; plugins?: unknown };
+  if (doc.version === 2) {
+    return parseTrustedRegistry(raw).plugins.map((plugin) => ({
+      name: plugin.name,
+      displayName: plugin.displayName,
+      description: plugin.description,
+      version: plugin.version,
+      keywords: plugin.keywords,
+      installable: true,
+    }));
+  }
+
+  const plugins = Array.isArray(doc.plugins) ? (doc.plugins as Array<Record<string, unknown>>) : [];
+  return plugins.map((plugin) => ({
+    name: String(plugin.name ?? ''),
+    displayName: String(plugin.display_name ?? plugin.name ?? ''),
+    description: String(plugin.description ?? ''),
+    version: String(plugin.version ?? '?'),
+    keywords: Array.isArray(plugin.keywords)
+      ? plugin.keywords.filter((keyword): keyword is string => typeof keyword === 'string')
+      : [],
+    installable: false,
+  }));
+}
+
+interface InstalledPlugin {
+  name: string;
+  version: string;
+  displayName: string;
+  description: string;
+  origin: 'managed' | 'directory';
+  probeStatus?: 'verified' | 'unverified';
+  invalid?: string;
+}
+
+export function listInstalledPlugins(pluginsDir = getPluginsDir()): InstalledPlugin[] {
+  const installed: InstalledPlugin[] = [];
+  if (!existsSync(pluginsDir)) return installed;
+
+  const managed = resolveManagedPlugins(pluginsDir);
+  const managedNames = new Set([
+    ...managed.entries.map((entry) => entry.name),
+    ...managed.invalid.map((entry) => entry.name),
+  ]);
+
+  for (const entry of managed.entries) {
+    installed.push({
+      ...describeManifest(entry.pointer.pluginDir, entry.name, entry.pointer.version),
+      origin: 'managed',
+      probeStatus: entry.pointer.probe.status,
+    });
+  }
+  for (const invalid of managed.invalid) {
+    installed.push({
+      name: invalid.name,
+      version: '?',
+      displayName: invalid.name,
+      description: '',
+      origin: 'managed',
+      invalid: `invalid pointer: ${invalid.reason}`,
+    });
+  }
+
+  for (const entry of readdirSync(pluginsDir).sort()) {
+    if (RESERVED_PLUGIN_DIR_NAMES.includes(entry) || managedNames.has(entry)) continue;
+    const pluginDir = join(pluginsDir, entry);
+    if (!existsSync(join(pluginDir, 'plugin.json'))) continue;
+    installed.push({ ...describeManifest(pluginDir, entry), origin: 'directory' });
+  }
+
+  return installed;
+}
+
+function describeManifest(
+  pluginDir: string,
+  name: string,
+  fallbackVersion = '?',
+): Omit<InstalledPlugin, 'origin'> {
+  try {
+    const raw = JSON.parse(readFileSync(join(pluginDir, 'plugin.json'), 'utf8')) as Record<string, unknown>;
+    const iface = (raw.interface as Record<string, string> | undefined) ?? {};
+    return {
+      name,
+      version: String(raw.version ?? fallbackVersion),
+      displayName: iface.display_name || String(raw.name ?? name),
+      description: iface.short_description || '',
+    };
   } catch {
-    // API URL returns base64-encoded content
-    const data = await downloadFile(FALLBACK_REGISTRY_URL);
-    const apiResp = JSON.parse(data.toString('utf8')) as { content?: string };
-    if (!apiResp.content) throw new Error('Failed to fetch registry');
-    const decoded = Buffer.from(apiResp.content, 'base64').toString('utf8');
-    return JSON.parse(decoded) as Registry;
+    return {
+      name,
+      version: fallbackVersion,
+      displayName: name,
+      description: '',
+      invalid: 'invalid manifest',
+    };
   }
 }
 
-function execCmd(cmd: string, cwd?: string): void {
-  execSync(cmd, { cwd, stdio: 'inherit', timeout: 120_000 });
-}
+export async function runInstall(
+  name: string,
+  opts: { registry?: string; force?: boolean; trustRegistry?: boolean },
+): Promise<void> {
+  const result = await installPlugin(name, {
+    pluginsDir: getPluginsDir(),
+    registryUrl: opts.registry,
+    trustRegistry: opts.trustRegistry,
+    force: opts.force,
+    onEvent: (event: InstallEvent) => console.log(`  ${event.message}`),
+  });
 
-export async function runInstall(name: string, opts: { registry?: string; force?: boolean }): Promise<void> {
-  const pluginsDir = getPluginsDir();
-  const targetDir = join(pluginsDir, name);
-
-  // Check if already installed (plugin.json must exist)
-  if (existsSync(targetDir) && existsSync(join(targetDir, 'plugin.json')) && !opts.force) {
-    console.log(`Plugin "${name}" already installed. Use --force to reinstall.`);
+  if (result.status === 'already-installed') {
+    console.log(`Plugin "${name}" is already installed at digest ${result.digest.slice(0, 12)}. Use --force to reinstall.`);
     return;
   }
 
-  console.log(`Fetching plugin registry...`);
-  const registry = await fetchRegistry(opts.registry);
-  const plugin = registry.plugins.find((p) => p.name === name);
+  console.log(`\n  ${result.displayName} v${result.version} installed.`);
+  console.log(`  Location: ${result.pluginDir}`);
+  console.log(`  Source: ${result.commit.slice(0, 12)} (tree ${result.digest.slice(0, 12)})`);
 
-  if (!plugin) {
-    console.error(
-      `Plugin "${name}" not found in registry.`,
-    );
-    console.error(`Available: ${registry.plugins.map((p) => p.name).join(', ')}`);
-    process.exit(1);
+  const connected = result.probe.outcomes.filter((outcome) => outcome.status === 'connected');
+  if (result.probe.status === 'verified') {
+    console.log(`  MCP verified: ${connected.map((outcome) => `${outcome.serverName} (${outcome.toolCount} tools)`).join(', ')}`);
+  } else {
+    console.log('  MCP not verified: no applicable server was probed.');
   }
-
-  console.log(`Installing ${plugin.display_name} v${plugin.version}...`);
-
-  if (existsSync(targetDir)) {
-    rmSync(targetDir, { recursive: true, force: true });
+  for (const outcome of result.probe.outcomes.filter((item) => item.status === 'skipped')) {
+    console.log(`  Skipped ${outcome.serverName}: ${outcome.reason}`);
   }
-  mkdirSync(targetDir, { recursive: true });
-
-  // Strategy: git clone the repo, then copy the plugin subdirectory
-  const { execSync: exec } = await import('child_process');
-  const tmpDir = join(pluginsDir, `.tmp-${name}-${Date.now()}`);
-
-  try {
-    // Normalize repo URL: short form → HTTPS URL
-    const cloneUrl = plugin.repo.startsWith('http')
-      ? plugin.repo
-      : `https://github.com/${plugin.repo}`;
-
-    console.log(`  Cloning ${cloneUrl}...`);
-    exec(
-      `git clone --depth 1 --sparse ${cloneUrl} "${tmpDir}"`,
-      { stdio: 'pipe', timeout: 60_000 },
-    );
-
-    // Sparse checkout just the plugin subdirectory
-    exec(`cd "${tmpDir}" && git sparse-checkout set ${plugin.path}`, {
-      stdio: 'pipe',
-      timeout: 30_000,
-    });
-
-    // Copy plugin files
-    const srcDir = join(tmpDir, plugin.path);
-    if (!existsSync(srcDir)) {
-      throw new Error(`Plugin path "${plugin.path}" not found in repo`);
-    }
-    exec(`cp -r "${srcDir}/." "${targetDir}/"`, { stdio: 'pipe' });
-
-    console.log(`  Files installed.`);
-
-    // Install dependencies
-    if (plugin.dependencies?.install) {
-      console.log(`  Installing dependencies...`);
-      try {
-        execCmd(plugin.dependencies.install, targetDir);
-        console.log(`  Dependencies installed.`);
-      } catch {
-        console.warn(`  Warning: dependency install failed. You may need to run manually:`);
-        console.warn(`    cd ${targetDir} && ${plugin.dependencies.install}`);
-      }
-    }
-
-    // Verify
-    const manifestPath = join(targetDir, 'plugin.json');
-    if (!existsSync(manifestPath)) {
-      throw new Error('Installation failed: plugin.json not found after install');
-    }
-
-    console.log(`\n  ${plugin.display_name} v${plugin.version} installed successfully.`);
-    console.log(`  Location: ${targetDir}`);
-
-    if (plugin.dependencies?.runtime) {
-      console.log(`  Runtime: ${plugin.dependencies.runtime}`);
-    }
-  } finally {
-    // Cleanup temp dir
-    if (existsSync(tmpDir)) {
-      rmSync(tmpDir, { recursive: true, force: true });
-    }
+  if (result.skippedServerNames.length > 0) {
+    console.log(`  Manual setup required for: ${result.skippedServerNames.join(', ')}`);
   }
 }
 
 export function runList(): void {
-  const pluginsDir = getPluginsDir();
-  if (!existsSync(pluginsDir)) {
-    console.log('No plugins installed.');
-    return;
-  }
+  const installed = listInstalledPlugins();
 
-  const entries = readdirSync(pluginsDir).filter((e) => {
-    const manifest = join(pluginsDir, e, 'plugin.json');
-    return existsSync(manifest);
-  });
-
-  if (entries.length === 0) {
+  if (installed.length === 0) {
     console.log('No plugins installed.');
     return;
   }
 
   console.log('Installed plugins:\n');
-  for (const name of entries) {
-    const manifestPath = join(pluginsDir, name, 'plugin.json');
-    try {
-      const raw = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
-      const displayName = (raw.interface as Record<string, string>)?.display_name || (raw.name as string) || name;
-      const version = raw.version || '?';
-      const desc = (raw.interface as Record<string, string>)?.short_description || '';
-      console.log(`  ${name}  ${version}  ${displayName}`);
-      if (desc) console.log(`    ${desc}`);
-    } catch {
-      console.log(`  ${name}  (invalid manifest)`);
+  for (const plugin of installed) {
+    if (plugin.invalid) {
+      console.log(`  ${plugin.name}  (${plugin.invalid})`);
+      continue;
     }
+    const badge = plugin.origin === 'managed' ? `  [managed/${plugin.probeStatus}]` : '';
+    console.log(`  ${plugin.name}  ${plugin.version}  ${plugin.displayName}${badge}`);
+    if (plugin.description) console.log(`    ${plugin.description}`);
   }
 }
 
 export async function runSearch(query?: string, opts?: { registry?: string }): Promise<void> {
   console.log('Fetching plugin registry...');
-  const registry = await fetchRegistry(opts?.registry);
+  let plugins = await fetchSearchableRegistry(opts?.registry);
+  const installedNames = new Set(listInstalledPlugins().map((plugin) => plugin.name));
 
-  let plugins = registry.plugins;
   if (query) {
-    const q = query.toLowerCase();
+    const needle = query.toLowerCase();
     plugins = plugins.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.display_name.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q) ||
-        p.keywords?.some((k) => k.toLowerCase().includes(q)),
+      (plugin) =>
+        plugin.name.toLowerCase().includes(needle) ||
+        plugin.displayName.toLowerCase().includes(needle) ||
+        plugin.description.toLowerCase().includes(needle) ||
+        plugin.keywords.some((keyword) => keyword.toLowerCase().includes(needle)),
     );
   }
 
@@ -246,25 +243,45 @@ export async function runSearch(query?: string, opts?: { registry?: string }): P
   }
 
   console.log('\nAvailable plugins:\n');
-  for (const p of plugins) {
-    const installed = existsSync(join(getPluginsDir(), p.name, 'plugin.json'));
-    const status = installed ? '[installed]' : '';
-    console.log(`  ${p.name}  v${p.version}  ${p.display_name}  ${status}`);
-    console.log(`    ${p.description}`);
+  for (const plugin of plugins) {
+    const status = installedNames.has(plugin.name) ? '[installed]' : '';
+    const trust = plugin.installable ? '' : '[registry v1: install disabled]';
+    console.log(`  ${plugin.name}  v${plugin.version}  ${plugin.displayName}  ${status}${trust}`);
+    if (plugin.description) console.log(`    ${plugin.description}`);
   }
 }
 
 export function runUninstall(name: string): void {
+  assertValidPluginName(name);
   const pluginsDir = getPluginsDir();
-  const targetDir = join(pluginsDir, name);
+  const paths = resolveInstallPaths(pluginsDir);
+  const legacyDir = join(pluginsDir, name);
+  let removed = false;
 
-  if (!existsSync(targetDir)) {
-    console.error(`Plugin "${name}" is not installed.`);
-    process.exit(1);
+  const hasPointer = existsSync(join(paths.activeDir, `${name}.json`));
+  if (hasPointer) {
+    let pluginVersion = '';
+    try {
+      pluginVersion = readActivePluginPointer(paths, name).version;
+    } catch {
+      pluginVersion = '';
+    }
+    removeActivePluginPointer(paths, name);
+    rmSync(join(paths.managedDir, name), { recursive: true, force: true });
+    rmSync(join(paths.runtimesDir, name), { recursive: true, force: true });
+    removed = true;
+    console.log(`Plugin "${name}"${pluginVersion ? ` v${pluginVersion}` : ''} uninstalled.`);
   }
 
-  rmSync(targetDir, { recursive: true, force: true });
-  console.log(`Plugin "${name}" uninstalled.`);
+  if (existsSync(join(legacyDir, 'plugin.json'))) {
+    rmSync(legacyDir, { recursive: true, force: true });
+    if (!removed) console.log(`Plugin "${name}" uninstalled.`);
+    removed = true;
+  }
+
+  if (!removed) {
+    throw new Error(`Plugin "${name}" is not installed.`);
+  }
 }
 
 export function registerPluginCommands(program: Command): void {
@@ -272,18 +289,29 @@ export function registerPluginCommands(program: Command): void {
 
   plugin
     .command('install <name>')
-    .description('安装插件')
-    .option('--registry <url>', '自定义 registry URL')
+    .description('安装插件（校验来源摘要并验证 MCP 可用后才激活）')
+    .option('--registry <url>', '自定义 registry v2 URL')
+    .option('--trust-registry', '显式信任自定义 registry（会执行其声明的构建步骤）')
     .option('--force', '强制重新安装')
-    .action(async (name: string, opts: { registry?: string; force?: boolean }) => {
-      await runInstall(name, opts);
+    .action(async (name: string, opts: { registry?: string; force?: boolean; trustRegistry?: boolean }) => {
+      try {
+        await runInstall(name, opts);
+      } catch (error) {
+        console.error(`安装失败: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
     });
 
   plugin
     .command('uninstall <name>')
     .description('卸载插件')
     .action((name: string) => {
-      runUninstall(name);
+      try {
+        runUninstall(name);
+      } catch (error) {
+        console.error((error as Error).message);
+        process.exitCode = 1;
+      }
     });
 
   plugin
@@ -298,6 +326,11 @@ export function registerPluginCommands(program: Command): void {
     .description('搜索可用插件')
     .option('--registry <url>', '自定义 registry URL')
     .action(async (query?: string, opts?: { registry?: string }) => {
-      await runSearch(query, opts);
+      try {
+        await runSearch(query, opts);
+      } catch (error) {
+        console.error(`搜索失败: ${(error as Error).message}`);
+        process.exitCode = 1;
+      }
     });
 }

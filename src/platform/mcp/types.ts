@@ -12,15 +12,21 @@ export interface McpTimeoutConfig {
   resource?: number;
 }
 
-interface McpTimeoutConfigHost {
+export type McpProtocolPolicy =
+  | { mode: 'auto' }
+  | { mode: 'legacy' }
+  | { mode: 'modern'; version: '2026-07-28' };
+
+interface McpConnectionConfigHost {
   timeout?: McpTimeoutConfig;
+  protocol?: McpProtocolPolicy;
 }
 
 /**
  * Stdio MCP Server Configuration
  * 启动子进程并通过 stdio 通信
  */
-export interface McpStdioServerConfig extends McpTimeoutConfigHost {
+export interface McpStdioServerConfig extends McpConnectionConfigHost {
   type: 'stdio';
   command: string;
   args?: string[];
@@ -31,7 +37,7 @@ export interface McpStdioServerConfig extends McpTimeoutConfigHost {
  * SSE MCP Server Configuration
  * Server-Sent Events transport
  */
-export interface McpSSEServerConfig extends McpTimeoutConfigHost {
+export interface McpSSEServerConfig extends McpConnectionConfigHost {
   type: 'sse';
   url: string;
   headers?: Record<string, string>;
@@ -41,7 +47,7 @@ export interface McpSSEServerConfig extends McpTimeoutConfigHost {
  * HTTP MCP Server Configuration
  * Streamable HTTP transport
  */
-export interface McpHTTPServerConfig extends McpTimeoutConfigHost {
+export interface McpHTTPServerConfig extends McpConnectionConfigHost {
   type: 'http';
   url: string;
   headers?: Record<string, string>;
@@ -50,7 +56,7 @@ export interface McpHTTPServerConfig extends McpTimeoutConfigHost {
 /**
  * WebSocket MCP Server Configuration
  */
-export interface McpWebSocketServerConfig extends McpTimeoutConfigHost {
+export interface McpWebSocketServerConfig extends McpConnectionConfigHost {
   type: 'ws';
   url: string;
 }

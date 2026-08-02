@@ -49,6 +49,7 @@ const HEALTH_FAILURE_RESTART_THRESHOLD = 3;
 const RESTART_BASE_DELAY_MS = 2_000;
 const MAX_RESTART_DELAY_MS = 30_000;
 const MAX_RESTART_ATTEMPTS = 10;
+const MAX_PERSISTENCE_FAIL_STOP_RESTARTS = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
 const WORKFLOW_PATTERN_SCHEMA_VERSION = 'kswarm_workflow_patterns_v1';
@@ -98,6 +99,49 @@ export function shouldRestartAfterHealthFailures(
   threshold = HEALTH_FAILURE_RESTART_THRESHOLD,
 ): boolean {
   return failureCount >= threshold;
+}
+
+// KSwarm durable-state fail-stop exit codes (see kswarm src/core/sqlite-persistence.js).
+export const KSWARM_EXIT_SAVE_FAILED = 75; // durable commit failed -> limited restart from last revision
+export const KSWARM_EXIT_LOAD_UNRECOVERABLE = 78; // corrupt/unrecoverable load -> terminal degraded, no auto-restart
+
+export type KSwarmExitDecision =
+  | { action: 'restart' }
+  | { action: 'limited_restart'; reason: 'persistence_commit_failed' }
+  | { action: 'terminal_degraded'; reason: 'persistence_unrecoverable' };
+
+/**
+ * Classify a KSwarm server exit code into a restart decision.
+ * - 78: unrecoverable durable-state load/corruption -> terminal degraded (do NOT
+ *   auto-restart; the same corrupt state would loop forever).
+ * - 75: durable commit failure fail-stop -> limited restart from the last durable
+ *   revision (still bounded by MAX_RESTART_ATTEMPTS).
+ * - anything else (crash, signal, code 0): normal restart handling.
+ */
+export function classifyKSwarmExit(code: number | null | undefined): KSwarmExitDecision {
+  if (code === KSWARM_EXIT_LOAD_UNRECOVERABLE) {
+    return { action: 'terminal_degraded', reason: 'persistence_unrecoverable' };
+  }
+  if (code === KSWARM_EXIT_SAVE_FAILED) {
+    return { action: 'limited_restart', reason: 'persistence_commit_failed' };
+  }
+  return { action: 'restart' };
+}
+
+export function transitionKSwarmTerminalDegraded(
+  current: boolean,
+  event: 'unrecoverable_exit' | 'ready',
+): boolean {
+  if (event === 'unrecoverable_exit') return true;
+  if (event === 'ready') return false;
+  return current;
+}
+
+export function shouldStopAfterPersistenceFailStops(
+  count: number,
+  maximum = MAX_PERSISTENCE_FAIL_STOP_RESTARTS,
+): boolean {
+  return count >= maximum;
 }
 
 export async function requestWithFallbackBaseUrls(options: {
@@ -205,6 +249,9 @@ export interface KSwarmServiceStatus {
   pid: number | null;
   restartCount: number;
   lastError: string | null;
+  terminalDegraded?: boolean;
+  persistenceFailStopCount?: number;
+  lastPersistenceFailStop?: string | null;
 }
 
 interface HealthJsonResult {
@@ -499,6 +546,12 @@ export interface KSwarmService {
   request(path: string, init?: RequestInit): Promise<Response>;
 }
 
+export interface CreateKSwarmServiceOptions {
+  spawnProcess?: typeof spawn;
+  findPortOwner?: typeof findPidOnPort;
+  killStalePortOwner?: typeof killStaleServiceOnPort;
+}
+
 export async function killStaleServiceOnPort(port: number): Promise<boolean> {
   const pid = await findPidOnPort(port);
   if (pid == null || pid === process.pid) return false;
@@ -547,7 +600,10 @@ export function findPidOnPort(port: number): Promise<number | null> {
   });
 }
 
-export function createKSwarmService(): KSwarmService {
+export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): KSwarmService {
+  const spawnProcess = options.spawnProcess ?? spawn;
+  const findPortOwner = options.findPortOwner ?? findPidOnPort;
+  const killStalePortOwner = options.killStalePortOwner ?? killStaleServiceOnPort;
   let child: ChildProcess | null = null;
   let brokerChild: ChildProcess | null = null;
   let running = false;
@@ -557,7 +613,12 @@ export function createKSwarmService(): KSwarmService {
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stopping = false;
   let startingPromise: Promise<void> | null = null;
+  let stopPromise: Promise<void> | null = null;
   let healthFailureCount = 0;
+  let terminalDegraded = false;
+  let persistenceFailStopCount = 0;
+  let lastPersistenceFailStop: string | null = null;
+  const suppressedServerExits = new WeakSet<ChildProcess>();
   const desktopMutationToken = `xiaok-desktop-${randomBytes(32).toString('base64url')}`;
   const listeners = new Set<(status: KSwarmServiceStatus) => void>();
 
@@ -568,6 +629,9 @@ export function createKSwarmService(): KSwarmService {
       pid: child?.pid ?? null,
       restartCount,
       lastError,
+      terminalDegraded,
+      persistenceFailStopCount,
+      lastPersistenceFailStop,
     };
   }
 
@@ -677,8 +741,10 @@ export function createKSwarmService(): KSwarmService {
         console.log('[kswarm-service] Health check failed repeatedly, attempting restart...');
         running = false;
         healthFailureCount = 0;
+        stopHealthCheck();
         notifyListeners();
-        scheduleRestart();
+        await killOwnedServer();
+        if (!stopping) scheduleRestart();
       }
     }, HEALTH_INTERVAL_MS);
   }
@@ -687,6 +753,13 @@ export function createKSwarmService(): KSwarmService {
     if (healthTimer) {
       clearInterval(healthTimer);
       healthTimer = null;
+    }
+  }
+
+  function clearRestartTimer() {
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
     }
   }
 
@@ -771,6 +844,10 @@ export function createKSwarmService(): KSwarmService {
   }
 
   function scheduleRestart() {
+    if (terminalDegraded) {
+      console.warn('[kswarm-service] Terminal degraded (unrecoverable durable state); skipping restart');
+      return;
+    }
     if (stopping || restartCount >= MAX_RESTART_ATTEMPTS) {
       if (restartCount >= MAX_RESTART_ATTEMPTS) {
         lastError = `Max restart attempts (${MAX_RESTART_ATTEMPTS}) reached`;
@@ -778,20 +855,43 @@ export function createKSwarmService(): KSwarmService {
       }
       return;
     }
+    if (restartTimer) return;
     const delay = Math.min(RESTART_BASE_DELAY_MS * Math.pow(2, restartCount), MAX_RESTART_DELAY_MS);
     console.log(`[kswarm-service] Scheduling restart in ${delay}ms (attempt ${restartCount + 1})`);
     restartTimer = setTimeout(async () => {
       restartTimer = null;
-      if (!stopping) {
+      if (!stopping && !running && !child) {
         restartCount++;
-        await spawnServer();
+        try {
+          await spawnServerOnce();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          running = false;
+          lastError = `KSwarm restart failed: ${message}`;
+          console.error(`[kswarm-service] ${lastError}`);
+          logKSwarmServiceLine('server', 'lifecycle', lastError);
+          notifyListeners();
+          if (!stopping) scheduleRestart();
+        }
       }
     }, delay);
+  }
+
+  async function spawnServerOnce(): Promise<void> {
+    if (startingPromise) {
+      await startingPromise;
+      return;
+    }
+    startingPromise = spawnServer().finally(() => {
+      startingPromise = null;
+    });
+    await startingPromise;
   }
 
   async function ensureBroker(): Promise<boolean> {
     // Check if broker is already running
     if (await brokerHealthCheck()) return true;
+    if (stopping) return false;
 
     const brokerLaunch = resolveBrokerLaunchSpec();
     if (!brokerLaunch) {
@@ -813,7 +913,7 @@ export function createKSwarmService(): KSwarmService {
       `spawn command=${nodeRuntime.command} entryPath=${brokerLaunch.entryPath} cwd=${brokerLaunch.cwd}`,
     );
     mkdirSync(brokerLaunch.cwd, { recursive: true });
-    brokerChild = spawn(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
+    brokerChild = spawnProcess(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
       cwd: brokerLaunch.cwd,
       env: nodeRuntime.env,
     }));
@@ -841,31 +941,57 @@ export function createKSwarmService(): KSwarmService {
     // Wait briefly for broker to be ready
     for (let i = 0; i < 10; i++) {
       await new Promise(r => setTimeout(r, 300));
+      if (stopping) return false;
       if (await brokerHealthCheck()) return true;
     }
     return false;
   }
 
   async function spawnServer(): Promise<void> {
+    if (child) return;
     const existingHealth = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
+    if (stopping) return;
     const existingHealthy = existingHealth.ok;
     const dynamicWorkflowReady = hasDynamicWorkflowSupport(existingHealth.body);
     const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
     const expectedSourceHash = computeKSwarmServiceSourceHash(serverPath);
     const serviceIdentity = checkKSwarmHealthServiceIdentity(existingHealth.body, serverPath, expectedSourceHash);
     const serviceIdentityMatches = serviceIdentity.compatible;
+    let killedStale = false;
+    if (!existingHealthy && !child) {
+      const portOwner = await findPortOwner(KSWARM_PORT);
+      if (stopping) return;
+      if (portOwner !== null && portOwner !== process.pid) {
+        logKSwarmServiceLine(
+          'server',
+          'lifecycle',
+          `replacing unhealthy orphan service pid=${portOwner} port=${KSWARM_PORT}`,
+        );
+        const killed = await killStalePortOwner(KSWARM_PORT);
+        if (stopping) return;
+        if (!killed) {
+          lastError = `failed to kill unhealthy orphan kswarm service on port ${KSWARM_PORT}`;
+          running = false;
+          notifyListeners();
+          return;
+        }
+        killedStale = true;
+      }
+    }
+
     let brokerReady = await brokerHealthCheck();
+    if (stopping) return;
     if (existingHealthy && serviceIdentity.warning) {
       const warning = formatServiceIdentityWarning(serviceIdentity);
       console.warn(`[kswarm-service] ${warning}`);
       logKSwarmServiceLine('server', 'lifecycle', warning);
     }
-    let killedStale = false;
     if (existingHealthy && serverPath && !serviceIdentityMatches && !child) {
       const reason = formatServiceIdentityBlock(serviceIdentity);
       console.warn(`[kswarm-service] ${reason}`);
       logKSwarmServiceLine('server', 'lifecycle', `replacing stale service: ${reason}`);
-      const killed = await killStaleServiceOnPort(KSWARM_PORT);
+      const killed = await killStalePortOwner(KSWARM_PORT);
+      if (stopping) return;
       if (!killed) {
         lastError = `failed to kill stale kswarm service on port ${KSWARM_PORT}: ${reason}`;
         console.error(`[kswarm-service] ${lastError}`);
@@ -886,6 +1012,7 @@ export function createKSwarmService(): KSwarmService {
     })) {
       console.log(`[kswarm-service] Adopting existing healthy kswarm service on port ${KSWARM_PORT}`);
       await reconcileSeedAgents();
+      if (stopping) return;
       running = true;
       lastError = null;
       restartCount = 0;
@@ -899,7 +1026,8 @@ export function createKSwarmService(): KSwarmService {
       const reason = `existing kswarm service on port ${KSWARM_PORT} does not support dynamic workflows`;
       console.warn(`[kswarm-service] ${reason}`);
       logKSwarmServiceLine('server', 'lifecycle', `replacing incompatible service: ${reason}`);
-      const killed = await killStaleServiceOnPort(KSWARM_PORT);
+      const killed = await killStalePortOwner(KSWARM_PORT);
+      if (stopping) return;
       if (!killed) {
         lastError = `failed to kill incompatible kswarm service on port ${KSWARM_PORT}`;
         console.error(`[kswarm-service] ${lastError}`);
@@ -914,8 +1042,10 @@ export function createKSwarmService(): KSwarmService {
 
     if (existingHealthy && !killedStale && !child) {
       brokerReady = await ensureBroker();
+      if (stopping) return;
       console.log(`[kswarm-service] Adopting existing kswarm service on port ${KSWARM_PORT}${brokerReady ? '' : ' (broker degraded)'}`);
       await reconcileSeedAgents();
+      if (stopping) return;
       running = true;
       lastError = brokerReady ? null : 'intent-broker health check failed';
       restartCount = 0;
@@ -956,17 +1086,19 @@ export function createKSwarmService(): KSwarmService {
         })()),
       },
     });
+    if (stopping || child) return;
     console.log(`[kswarm-service] Spawning kswarm server: ${serverPath}`);
     logKSwarmServiceLine(
       'server',
       'lifecycle',
       `spawn command=${nodeRuntime.command} entryPath=${serverPath}`,
     );
-    child = spawn(nodeRuntime.command, [serverPath], buildBackgroundNodeSpawnOptions({
+    const serverChild = spawnProcess(nodeRuntime.command, [serverPath], buildBackgroundNodeSpawnOptions({
       env: nodeRuntime.env,
     }));
+    child = serverChild;
 
-    child.stdout?.on('data', (data: Buffer) => {
+    serverChild.stdout?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
       if (msg) {
         console.log(`[kswarm] ${msg}`);
@@ -974,7 +1106,7 @@ export function createKSwarmService(): KSwarmService {
       }
     });
 
-    child.stderr?.on('data', (data: Buffer) => {
+    serverChild.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
       if (msg) {
         console.error(`[kswarm:err] ${msg}`);
@@ -982,23 +1114,48 @@ export function createKSwarmService(): KSwarmService {
       }
     });
 
-    child.on('exit', (code, signal) => {
+    serverChild.on('exit', (code, signal) => {
       const message = `Process exited: code=${code} signal=${signal}`;
       console.log(`[kswarm-service] ${message}`);
       logKSwarmServiceLine('server', 'lifecycle', message);
+      if (child !== serverChild) return;
       child = null;
       running = false;
-      if (!stopping) {
-        lastError = `Process exited with code ${code}`;
+      if (!stopping && !suppressedServerExits.has(serverChild)) {
+        const decision = classifyKSwarmExit(code);
+        if (decision.action === 'terminal_degraded') {
+          // Unrecoverable durable-state corruption: do NOT auto-restart, the same
+          // state would loop forever. Enter a stable degraded state for diagnostics.
+          terminalDegraded = transitionKSwarmTerminalDegraded(terminalDegraded, 'unrecoverable_exit');
+          lastError = `KSwarm entered terminal degraded state (exit ${code}: ${decision.reason}); auto-restart disabled`;
+          console.error(`[kswarm-service] ${lastError}`);
+          logKSwarmServiceLine('server', 'lifecycle', lastError);
+          notifyListeners();
+          return;
+        }
+        if (decision.action === 'limited_restart') {
+          persistenceFailStopCount += 1;
+          lastPersistenceFailStop = `KSwarm fail-stop (exit ${code}: ${decision.reason})`;
+          lastError = `${lastPersistenceFailStop}; restarting from last durable revision`;
+          logKSwarmServiceLine('server', 'lifecycle', lastError);
+          if (shouldStopAfterPersistenceFailStops(persistenceFailStopCount)) {
+            lastError = `${lastPersistenceFailStop}; maximum limited restarts (${MAX_PERSISTENCE_FAIL_STOP_RESTARTS}) reached`;
+            notifyListeners();
+            return;
+          }
+        } else {
+          lastError = `Process exited with code ${code}`;
+        }
         notifyListeners();
         scheduleRestart();
       }
     });
 
-    child.on('error', (err) => {
+    serverChild.on('error', (err) => {
       console.error('[kswarm-service] Spawn error:', err.message);
       logKSwarmServiceLine('server', 'lifecycle', `Spawn error: ${err.message}`);
       lastError = err.message;
+      if (child !== serverChild) return;
       child = null;
       running = false;
       notifyListeners();
@@ -1007,12 +1164,14 @@ export function createKSwarmService(): KSwarmService {
 
     // Wait for health check to confirm server is ready
     const ready = await waitForReady(8_000);
-    if (ready) {
+    if (ready && !stopping && child === serverChild) {
       await reconcileSeedAgents();
+      if (stopping || child !== serverChild) return;
       running = true;
       lastError = null;
       restartCount = 0; // Reset on successful start
       healthFailureCount = 0;
+      terminalDegraded = transitionKSwarmTerminalDegraded(terminalDegraded, 'ready');
       console.log(`[kswarm-service] Server ready on port ${KSWARM_PORT}`);
       logKSwarmServiceLine('server', 'lifecycle', `Server ready on port ${KSWARM_PORT}`);
       startHealthCheck();
@@ -1021,7 +1180,10 @@ export function createKSwarmService(): KSwarmService {
       console.log('[kswarm-service] Server did not become ready in time');
       logKSwarmServiceLine('server', 'lifecycle', 'Server did not become ready in time');
       lastError = 'Server startup timeout';
+      running = false;
       notifyListeners();
+      await killOwnedServer();
+      if (!stopping) scheduleRestart();
     }
   }
 
@@ -1061,52 +1223,79 @@ export function createKSwarmService(): KSwarmService {
   }
 
   async function start(): Promise<void> {
-    if (running || child) return;
-    if (startingPromise) {
-      await startingPromise;
-      return;
+    const requestedWhileStopping = stopping;
+    const inFlightStop = stopPromise;
+    if (inFlightStop) {
+      await inFlightStop;
     }
-    startingPromise = (async () => {
+    clearRestartTimer();
+    if (running) return;
+    const inFlightStart = startingPromise;
+    if (inFlightStart) {
+      await inFlightStart.catch(() => undefined);
       if (running || child) return;
-      stopping = false;
-      restartCount = 0;
-      healthFailureCount = 0;
-      lastError = null;
-      await spawnServer();
-    })().finally(() => { startingPromise = null; });
-    await startingPromise;
+      if (stopping && !requestedWhileStopping) return;
+    }
+    if (child) return;
+    if (terminalDegraded || shouldStopAfterPersistenceFailStops(persistenceFailStopCount)) {
+      throw new KSwarmUnavailableError(lastError || 'KSwarm automatic restart is blocked pending manual recovery');
+    }
+    if (stopping && !requestedWhileStopping) return;
+    stopping = false;
+    restartCount = 0;
+    healthFailureCount = 0;
+    lastError = null;
+    await spawnServerOnce();
   }
 
   async function stop(): Promise<void> {
+    if (stopPromise) {
+      await stopPromise;
+      return;
+    }
     stopping = true;
-    stopHealthCheck();
-    if (restartTimer) {
-      clearTimeout(restartTimer);
-      restartTimer = null;
+    stopPromise = (async () => {
+      stopHealthCheck();
+      clearRestartTimer();
+      await killOwnedServer();
+      await stopOwnedBroker();
+      running = false;
+      healthFailureCount = 0;
+      notifyListeners();
+    })().finally(() => {
+      stopPromise = null;
+    });
+    await stopPromise;
+  }
+
+  async function killOwnedServer(): Promise<void> {
+    const ownedChild = child;
+    if (!ownedChild) return;
+    suppressedServerExits.add(ownedChild);
+    const exitPromise = new Promise<void>(resolve => {
+      ownedChild.once('exit', () => resolve());
+      setTimeout(resolve, 5_000);
+    });
+    ownedChild.kill('SIGTERM');
+    await exitPromise;
+    if (child === ownedChild) {
+      ownedChild.kill('SIGKILL');
+      child = null;
     }
-    if (child) {
-      const exitPromise = new Promise<void>(resolve => {
-        child!.on('exit', () => resolve());
-        setTimeout(resolve, 5_000); // Force timeout
-      });
-      child.kill('SIGTERM');
-      await exitPromise;
-      if (child) {
-        child.kill('SIGKILL');
-        child = null;
-      }
-    }
-    await stopOwnedBroker();
-    running = false;
-    healthFailureCount = 0;
-    notifyListeners();
   }
 
   async function restart(): Promise<void> {
     await stop();
+    const inFlightStart = startingPromise;
+    if (inFlightStart) {
+      await inFlightStart.catch(() => undefined);
+    }
     stopping = false;
     restartCount = 0;
-    await spawnServer();
+    persistenceFailStopCount = 0;
+    lastPersistenceFailStop = null;
+    terminalDegraded = false;
+    await spawnServerOnce();
   }
 
   async function stopOwnedBroker(): Promise<void> {

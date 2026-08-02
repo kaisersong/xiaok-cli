@@ -2,16 +2,18 @@
  * MCP Transport Client Implementations
  *
  * 支持 stdio/sse/http/ws 四种 transport
- * 使用 @modelcontextprotocol/sdk 提供的 transport classes
+ * 使用 @modelcontextprotocol/client v2 提供的 transport classes
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, SSEClientTransport, StreamableHTTPClientTransport, } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { WebSocket } from 'ws';
+const MCP_STDERR_TAIL = Symbol('mcpStderrTail');
+const STDERR_TAIL_LIMIT = 4096;
+export class InPlaceStdioClientTransport extends StdioClientTransport {
+}
 export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
 export const DEFAULT_MCP_CATALOG_TIMEOUT_MS = 10_000;
 export const DEFAULT_MCP_CALL_TIMEOUT_MS = 120_000;
@@ -44,6 +46,28 @@ export function resolveMcpClientVersion() {
         return '0.0.0';
     }
 }
+export function createMcpClientOptions(probeTimeoutMs = resolveMcpStartupTimeoutMs(), protocol = { mode: 'auto' }) {
+    const mode = protocol.mode === 'modern'
+        ? { pin: protocol.version }
+        : protocol.mode;
+    return {
+        capabilities: {},
+        versionNegotiation: {
+            mode,
+            ...(protocol.mode === 'legacy'
+                ? {}
+                : {
+                    probe: {
+                        timeoutMs: probeTimeoutMs,
+                        maxRetries: 0,
+                    },
+                }),
+        },
+    };
+}
+export function createMcpSdkClient(probeTimeoutMs = resolveMcpStartupTimeoutMs(), protocol = { mode: 'auto' }, clientName = 'xiaok-cli') {
+    return new Client({ name: clientName, version: resolveMcpClientVersion() }, createMcpClientOptions(probeTimeoutMs, protocol));
+}
 export function resolveStdioCommand(command, platform = process.platform, env = process.env) {
     if ((command === 'python' || command === 'python3') && env.XIAOK_PYTHON_CMD) {
         return env.XIAOK_PYTHON_CMD;
@@ -56,24 +80,109 @@ export function resolveStdioCommand(command, platform = process.platform, env = 
 /**
  * 创建 MCP client 连接（统一入口）
  */
-export async function createMcpClientConnection(serverName, config) {
+export async function createMcpClientConnection(serverName, config, options = {}) {
     const startupTimeoutMs = config.timeout?.startup ?? resolveMcpStartupTimeoutMs();
-    const transport = await createTransport(serverName, config);
-    const client = new Client({ name: 'xiaok-cli', version: resolveMcpClientVersion() }, { capabilities: {} });
+    const createdTransport = await createTransport(config, options);
+    const client = createMcpSdkClient(startupTimeoutMs, config.protocol, options.clientName);
     try {
-        await client.connect(transport, { timeout: startupTimeoutMs });
+        await client.connect(createdTransport.transport, { timeout: startupTimeoutMs });
     }
     catch (error) {
-        transport.close?.();
+        const stderrTail = createdTransport.getStderrTail();
+        const childPid = createdTransport.getChildPid();
+        await createdTransport.transport.close?.().catch(() => undefined);
+        if (childPid !== null) {
+            await waitForProcessExit(childPid).catch(() => undefined);
+        }
+        createdTransport.disposeObservability();
+        if (error && typeof error === 'object' && stderrTail) {
+            Object.defineProperty(error, MCP_STDERR_TAIL, { value: stderrTail });
+        }
         throw error;
     }
+    const protocolEra = client.getProtocolEra();
+    if (!protocolEra) {
+        const childPid = createdTransport.getChildPid();
+        await client.close().catch(() => undefined);
+        if (childPid !== null) {
+            await waitForProcessExit(childPid);
+        }
+        createdTransport.disposeObservability();
+        throw new Error(`MCP server ${serverName} connected without a negotiated protocol era`);
+    }
+    const childPid = createdTransport.getChildPid();
+    let disposed = false;
+    let closing = null;
+    const closeFully = async () => {
+        createdTransport.disposeObservability();
+        await client.close().catch(() => undefined);
+        if (childPid !== null) {
+            await waitForProcessExit(childPid);
+        }
+    };
     return {
         client,
+        protocolEra,
+        getStderrTail: createdTransport.getStderrTail,
+        getChildPid: () => childPid,
+        close: () => {
+            disposed = true;
+            closing ??= closeFully();
+            return closing;
+        },
         dispose: () => {
-            client.close();
-            transport.close?.();
+            if (disposed)
+                return;
+            disposed = true;
+            createdTransport.disposeObservability();
+            void client.close().catch(() => undefined);
         },
     };
+}
+const PROCESS_EXIT_POLL_MS = 25;
+const PROCESS_EXIT_TIMEOUT_MS = 10_000;
+export async function waitForProcessExit(pid, timeoutMs = PROCESS_EXIT_TIMEOUT_MS, killProcess = process.kill.bind(process)) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try {
+            killProcess(pid, 0);
+        }
+        catch {
+            return;
+        }
+        await new Promise((resolve) => {
+            const timer = setTimeout(resolve, PROCESS_EXIT_POLL_MS);
+            timer.unref?.();
+        });
+    }
+    try {
+        killProcess(pid, 'SIGKILL');
+    }
+    catch (error) {
+        if (error.code === 'ESRCH')
+            return;
+        throw new Error(`MCP server child process ${pid} did not exit within ${timeoutMs}ms and could not be force-killed: ${error.message}`);
+    }
+    const forceDeadline = Date.now() + 1_000;
+    while (Date.now() < forceDeadline) {
+        try {
+            killProcess(pid, 0);
+        }
+        catch {
+            return;
+        }
+        await new Promise((resolve) => {
+            const timer = setTimeout(resolve, PROCESS_EXIT_POLL_MS);
+            timer.unref?.();
+        });
+    }
+    throw new Error(`MCP server child process ${pid} remained alive after SIGKILL`);
+}
+export function getMcpConnectionStderrTail(error) {
+    if (!error || typeof error !== 'object')
+        return '';
+    const stderrTail = error[MCP_STDERR_TAIL];
+    return typeof stderrTail === 'string' ? stderrTail : '';
 }
 export async function tryConnect(serverName, config) {
     try {
@@ -88,19 +197,16 @@ export async function tryConnect(serverName, config) {
         };
     }
 }
-/**
- * 根据 config type 创建对应的 transport
- */
-async function createTransport(serverName, config) {
+async function createTransport(config, options) {
     switch (config.type) {
         case 'stdio':
-            return createStdioTransport(config);
+            return createStdioTransport(config, options);
         case 'sse':
-            return createSSETransport(config);
+            return withoutStderr(createSSETransport(config));
         case 'http':
-            return createHTTPTransport(config);
+            return withoutStderr(createHTTPTransport(config));
         case 'ws':
-            return createWebSocketTransport(config);
+            return withoutStderr(createWebSocketTransport(config));
         default:
             throw new Error(`Unsupported MCP transport type: ${config.type}`);
     }
@@ -108,7 +214,7 @@ async function createTransport(serverName, config) {
 /**
  * Stdio transport: 通过子进程启动 MCP server
  */
-async function createStdioTransport(config) {
+async function createStdioTransport(config, options) {
     // 过滤掉 undefined 值，确保 env 是 Record<string, string>
     const env = {};
     for (const [key, value] of Object.entries({ ...process.env, ...config.env })) {
@@ -116,14 +222,35 @@ async function createStdioTransport(config) {
             env[key] = value;
         }
     }
-    const transport = new StdioClientTransport({
+    const TransportClass = config.protocol?.mode === 'modern'
+        ? InPlaceStdioClientTransport
+        : StdioClientTransport;
+    const transport = new TransportClass({
         command: resolveStdioCommand(config.command),
         args: config.args ?? [],
         env,
         stderr: 'pipe',
+        cwd: options.cwd,
     });
-    // 注意：不要调用 start()，Client.connect() 会自动调用
-    return transport;
+    let stderrTail = '';
+    const onStderr = (chunk) => {
+        stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_LIMIT);
+    };
+    transport.stderr?.on('data', onStderr);
+    return {
+        transport,
+        getStderrTail: () => stderrTail,
+        getChildPid: () => transport.pid ?? null,
+        disposeObservability: () => transport.stderr?.off('data', onStderr),
+    };
+}
+async function withoutStderr(transportPromise) {
+    return {
+        transport: await transportPromise,
+        getStderrTail: () => '',
+        getChildPid: () => null,
+        disposeObservability: () => { },
+    };
 }
 /**
  * SSE transport: Server-Sent Events
@@ -134,7 +261,6 @@ async function createSSETransport(config) {
             headers: config.headers,
         },
     });
-    await transport.start();
     return transport;
 }
 /**
@@ -146,7 +272,6 @@ async function createHTTPTransport(config) {
             headers: config.headers,
         },
     });
-    await transport.start();
     return transport;
 }
 /**
