@@ -2044,7 +2044,7 @@ function MeetingRecorderWindowSurface({
       >
         <div className="flex items-start gap-3">
           <p className="line-clamp-2 min-h-[52px] min-w-0 flex-1 text-lg leading-7">{latestText}</p>
-          <button type="button" onClick={onExpand} aria-label={t.knowledge.meetingRecorderExpand} title={t.knowledge.meetingRecorderExpand} data-app-region="no-drag" className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button type="button" onClick={onExpand} aria-label={t.knowledge.meetingRecorderExpand} title={t.knowledge.meetingRecorderExpand} data-app-region="no-drag" className="grid size-8 shrink-0 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <Maximize2 size={18} />
           </button>
         </div>
@@ -2053,7 +2053,7 @@ function MeetingRecorderWindowSurface({
         </div>
         <div data-testid="meeting-compact-controls" className="grid grid-cols-[80px_1fr_80px] items-center gap-3" style={{ marginTop: 4 }}>
           <span className="text-base tabular-nums text-[var(--c-text-secondary)]">{elapsed}</span>
-          <button type="button" onClick={paused ? onResumeRecording : onPauseRecording} aria-label={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} title={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} data-app-region="no-drag" className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-[var(--c-bg-deep)] text-[var(--c-text-primary)] hover:bg-[var(--c-border)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <button type="button" onClick={paused ? onResumeRecording : onPauseRecording} aria-label={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} title={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} data-app-region="no-drag" className="mx-auto grid size-12 place-items-center rounded-full bg-[var(--c-bg-deep)] text-[var(--c-text-primary)] hover:bg-[var(--c-border)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             {paused ? <Play size={22} fill="currentColor" /> : <Pause size={22} fill="currentColor" />}
           </button>
           <button type="button" onClick={onFinishRecording} disabled={busy} data-app-region="no-drag" className="rounded-full bg-[var(--c-bg-deep)] px-4 py-2 text-sm font-medium hover:bg-[var(--c-border)] disabled:opacity-50" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -2075,11 +2075,11 @@ function MeetingRecorderWindowSurface({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {summaryTab === 'summary' && (
-                <button type="button" onClick={() => setSummaryEditing(value => !value)} aria-label={summaryEditing ? t.knowledge.meetingRecorderFinishEditing : t.knowledge.meetingRecorderEditSummary} title={summaryEditing ? t.knowledge.meetingRecorderFinishEditing : t.knowledge.meetingRecorderEditSummary} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+                <button type="button" onClick={() => setSummaryEditing(value => !value)} aria-label={summaryEditing ? t.knowledge.meetingRecorderFinishEditing : t.knowledge.meetingRecorderEditSummary} title={summaryEditing ? t.knowledge.meetingRecorderFinishEditing : t.knowledge.meetingRecorderEditSummary} className="grid size-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
                   {summaryEditing ? <Check size={19} /> : <Pencil size={18} />}
                 </button>
               )}
-              <button type="button" onClick={onCancel} disabled={draftSaving} aria-label={t.knowledge.cancel} title={t.knowledge.cancel} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50">
+              <button type="button" onClick={onCancel} disabled={draftSaving} aria-label={t.knowledge.cancel} title={t.knowledge.cancel} className="grid size-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50">
                 <X size={20} />
               </button>
             </div>
@@ -2133,7 +2133,7 @@ function MeetingRecorderWindowSurface({
             <h1 className="text-4xl font-semibold leading-tight">{t.knowledge.meetingRecorderTitle}</h1>
             <p className="mt-3 text-sm text-[var(--c-text-tertiary)]">{engineLabels[transcriberEngine]} / {languageLabels[transcriberLanguage]}</p>
           </div>
-          <button type="button" onClick={onCancel} aria-label={t.knowledge.cancel} title={t.knowledge.cancel} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+          <button type="button" onClick={onCancel} aria-label={t.knowledge.cancel} title={t.knowledge.cancel} className="grid size-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
             <X size={20} />
           </button>
         </div>
@@ -2165,7 +2165,7 @@ function MeetingRecorderWindowSurface({
           <input value={title} onChange={event => setTitle(event.target.value)} aria-label={t.knowledge.meetingRecordingTitleLabel} className="w-full min-w-[360px] bg-transparent text-2xl font-semibold outline-none" />
           <p className="mt-2 text-sm tabular-nums text-[var(--c-text-tertiary)]">{elapsed} · {paused ? t.knowledge.meetingRecordingPaused : t.knowledge.meetingRecording}</p>
         </div>
-        <button type="button" onClick={onCompact} aria-label={t.knowledge.meetingRecorderMinimize} title={t.knowledge.meetingRecorderMinimize} className="grid h-9 w-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
+        <button type="button" onClick={onCompact} aria-label={t.knowledge.meetingRecorderMinimize} title={t.knowledge.meetingRecorderMinimize} className="grid size-9 place-items-center rounded-md text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">
           <Minimize2 size={19} />
         </button>
       </header>
@@ -2190,7 +2190,7 @@ function MeetingRecorderWindowSurface({
       <footer className="grid shrink-0 grid-cols-[90px_minmax(200px,1fr)_56px_90px] items-center gap-5 border-t border-[var(--c-border)] px-12 py-5">
         <span className="text-lg tabular-nums">{elapsed}</span>
         <MeetingAudioWaveform audioLevels={audioLevels} active={recording} paused={paused} />
-        <button type="button" onClick={paused ? onResumeRecording : onPauseRecording} aria-label={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} title={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} className="grid h-12 w-12 place-items-center rounded-full bg-[var(--c-bg-deep)] hover:bg-[var(--c-border)]">
+        <button type="button" onClick={paused ? onResumeRecording : onPauseRecording} aria-label={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} title={paused ? t.knowledge.meetingRecordResume : t.knowledge.meetingRecordPause} className="grid size-12 place-items-center rounded-full bg-[var(--c-bg-deep)] hover:bg-[var(--c-border)]">
           {paused ? <Play size={21} fill="currentColor" /> : <Pause size={21} fill="currentColor" />}
         </button>
         <button type="button" onClick={onFinishRecording} className="rounded-full bg-[var(--c-bg-deep)] px-5 py-2.5 text-sm font-medium hover:bg-[var(--c-border)]">
@@ -2297,7 +2297,7 @@ function MeetingRecorderDialog({
         </div>
       </div>
 
-      <div className="space-y-3 px-4 py-4">
+      <div className="space-y-3 p-4">
         <label className="block">
           <span className="mb-1 block text-xs text-[var(--c-text-secondary)]">{t.knowledge.meetingRecordingTitleLabel}</span>
           <input
@@ -2704,7 +2704,7 @@ function LegacyMeetingRecorderDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-[2px]" role="presentation" onClick={onCancel} onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}>
-      <div className="flex max-h-[86vh] w-[920px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg" role="dialog" aria-label={t.knowledge.meetingRecorderTitle} onClick={e => { e.stopPropagation(); setSettingsOpen(false); }}>
+      <div className="flex max-h-[86vh] w-[920px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg" role="dialog" aria-label={t.knowledge.meetingRecorderTitle} onClick={e => { e.stopPropagation(); setSettingsOpen(false); }} onKeyDown={e => { if (e.key === 'Escape' && settingsOpen) { e.stopPropagation(); setSettingsOpen(false); } }}>
         <div className="flex items-center justify-between gap-3 border-b border-[var(--c-border)] px-5 py-4">
           <div className="min-w-0">
             <h3 className="text-sm font-medium text-[var(--c-text-primary)]">{t.knowledge.meetingRecorderTitle}</h3>
@@ -2940,7 +2940,7 @@ function LegacyMeetingRecorderDialog({
                                       disabled={actionDisabled}
                                       aria-label={actionLabel}
                                       title={actionRunning ? t.knowledge.meetingModelActionRunning : actionTitle}
-                                      className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+                                      className="inline-flex size-6 items-center justify-center rounded-md border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
                                     >
                                       {model.status === 'downloaded' ? (
                                         <Trash2 size={12} aria-hidden="true" />
@@ -3008,7 +3008,7 @@ function LegacyMeetingRecorderDialog({
                 </select>
               </label>
 
-              <div className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-3">
+              <div className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3">
                 <div className="flex items-center gap-2">
                   <span className={`h-2.5 w-2.5 rounded-full ${recording && !paused ? 'animate-pulse bg-red-500' : paused ? 'bg-amber-500' : 'bg-[var(--c-text-tertiary)]'}`} />
                   <span className="min-w-0 truncate text-sm text-[var(--c-text-primary)]">{statusText}</span>
@@ -3029,7 +3029,7 @@ function LegacyMeetingRecorderDialog({
               </div>
 
               {hasSummaryDraft ? (
-                <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-700">
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
                   {t.knowledge.meetingDraftReady}
                 </div>
               ) : recording ? (
@@ -3116,7 +3116,7 @@ function LegacyMeetingRecorderDialog({
                 </div>
               </div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] px-4 py-4">
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-4">
                 {previewSegments.length > 0 ? (
                   <div className="space-y-3" role="list" aria-label={t.knowledge.meetingLiveTranscriptTitle}>
                     {previewSegments.map((segment, index) => {
@@ -3141,7 +3141,7 @@ function LegacyMeetingRecorderDialog({
                     })}
                     {recording && !paused && !processing && (
                       <div className="flex items-center gap-2 pl-14 text-sm text-[var(--c-text-secondary)]">
-                        <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                        <span className="size-2 rounded-full bg-blue-500 animate-pulse" />
                         <span>{t.knowledge.meetingListening}</span>
                       </div>
                     )}

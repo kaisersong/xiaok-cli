@@ -589,7 +589,7 @@ function VoicePane() {
               disabled={Boolean(modelAction)}
               aria-label={actionLabel}
               title={actionRunning ? t.knowledge.meetingModelActionRunning : actionTitle}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+              className="inline-flex size-7 items-center justify-center rounded-md border border-[var(--c-border)] text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
             >
               {item.status === 'downloaded' ? (
                 <Trash2 size={13} aria-hidden="true" />

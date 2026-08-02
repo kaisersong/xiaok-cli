@@ -785,6 +785,7 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
                 <label className={fieldLabelCls}>{ds.meetingAsrAppKey}</label>
                 <input
                   type="password"
+                  aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAppKey}`}
                   value={meetingAsrDraft.volcAppKey}
                   onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcAppKey: e.target.value }))}
                   placeholder={meetingAsrConfig?.volcengine.appKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAppKey}
@@ -796,6 +797,7 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
                 <label className={fieldLabelCls}>{ds.meetingAsrAccessKey}</label>
                 <input
                   type="password"
+                  aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrAccessKey}`}
                   value={meetingAsrDraft.volcAccessKey}
                   onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcAccessKey: e.target.value }))}
                   placeholder={meetingAsrConfig?.volcengine.accessKeyConfigured ? ds.meetingAsrConfigured : ds.meetingAsrAccessKey}
@@ -806,6 +808,7 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
               <div>
                 <label className={fieldLabelCls}>{ds.meetingAsrEndpoint}</label>
                 <input
+                  aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrEndpoint}`}
                   value={meetingAsrDraft.volcEndpoint}
                   onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcEndpoint: e.target.value }))}
                   className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
@@ -815,6 +818,7 @@ export function VoiceSettings({ accessToken, initialConfig = null }: Props) {
               <div>
                 <label className={fieldLabelCls}>{ds.meetingAsrResourceId}</label>
                 <input
+                  aria-label={`${ds.meetingAsrVolcengineTitle} ${ds.meetingAsrResourceId}`}
                   value={meetingAsrDraft.volcResourceId}
                   onChange={(e) => setMeetingAsrDraft(prev => ({ ...prev, volcResourceId: e.target.value }))}
                   className="w-full rounded-[10px] bg-[var(--c-bg-input)] text-[13px] font-medium text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-placeholder)]"
