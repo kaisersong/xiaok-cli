@@ -81,7 +81,7 @@ import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand, type ShellCommandResult, type ShellEscapeExecutor } from './chat-shell-escape.js';
-import { resolveAgentMaxIterations, resolveTurnTimeoutMs, runCleanupWithTimeout } from './chat-runtime-config.js';
+import { createTurnActivityWatchdog, resolveAgentMaxIterations, resolveTurnTimeoutMs, runCleanupWithTimeout } from './chat-runtime-config.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -418,10 +418,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   type RuntimeTurnRequestArg = Parameters<RuntimeFacade['runTurn']>[0];
   type RuntimeTurnChunkHandler = Parameters<RuntimeFacade['runTurn']>[1];
+  type RuntimeTurnActivityHandler = Parameters<RuntimeFacade['runTurn']>[3];
   const runRuntimeTurn = async (
     request: RuntimeTurnRequestArg,
     onChunk: RuntimeTurnChunkHandler,
     externalSignal?: AbortSignal,
+    onRuntimeActivity?: RuntimeTurnActivityHandler,
   ): Promise<void> => {
     const previousController: AbortController | null = currentTurnAbortController;
     const controller = new AbortController();
@@ -437,7 +439,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
     }
     try {
-      await runtimeFacade!.runTurn(request, onChunk, controller.signal);
+      await runtimeFacade!.runTurn(request, onChunk, controller.signal, onRuntimeActivity);
     } finally {
       if (externalSignal && onExternalAbort) {
         externalSignal.removeEventListener('abort', onExternalAbort);
@@ -2147,14 +2149,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       await primeTurnIntentPlan();
       await maybePrepareFreshContextHandoff();
       const turnTimeoutMs = resolveTurnTimeoutMs();
-      const turnDeadlineController = new AbortController();
-      let turnTimeoutFired = false;
-      const turnDeadlineTimer = turnTimeoutMs !== null
-        ? setTimeout(() => {
-            turnTimeoutFired = true;
-            turnDeadlineController.abort();
-          }, turnTimeoutMs)
-        : null;
+      const turnWatchdog = createTurnActivityWatchdog(turnTimeoutMs);
       try {
         await runRuntimeTurn({
           sessionId,
@@ -2177,11 +2172,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (chunk.type === 'usage') {
             statusBar.update(chunk.usage);
           }
-        }, turnDeadlineController.signal);
+        }, turnWatchdog.signal, () => turnWatchdog.noteActivity());
       } catch (turnError) {
-        if (turnTimeoutFired) {
+        if (turnWatchdog.didTimeout()) {
           const partialText = printChunks.join('');
-          process.stderr.write(`xiaok: turn timed out after ${turnTimeoutMs}ms (set XIAOK_TURN_TIMEOUT_MS=0 to disable)\n`);
+          process.stderr.write(`xiaok: turn made no progress for ${turnTimeoutMs}ms (set XIAOK_TURN_TIMEOUT_MS=0 to disable)\n`);
           if (opts.print || opts.json) {
             process.stdout.write(formatPrintOutput({
               sessionId,
@@ -2204,9 +2199,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
         throw turnError;
       } finally {
-        if (turnDeadlineTimer) {
-          clearTimeout(turnDeadlineTimer);
-        }
+        turnWatchdog.dispose();
       }
       await finalizeCurrentTurnIntentIfNeeded();
       await persistSession();

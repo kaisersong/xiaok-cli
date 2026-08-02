@@ -188,6 +188,55 @@ describe('RuntimeFacade', () => {
     );
   });
 
+  it('passes an optional runtime activity observer through to Agent', async () => {
+    const agent = {
+      getSessionState: vi.fn(() => ({ attachPromptSnapshot: vi.fn() })),
+      setPromptSnapshot: vi.fn(),
+      setSystemPrompt: vi.fn(),
+      runTurn: vi.fn().mockResolvedValue(undefined),
+    };
+    const facade = new RuntimeFacade({
+      promptBuilder: {
+        build: vi.fn().mockResolvedValue({
+          id: 'prompt_1',
+          rendered: 'system',
+          memoryRefs: [],
+          segments: [],
+          createdAt: 1,
+          cwd: '/repo',
+          channel: 'chat',
+        }),
+      },
+      getPromptInput: async () => ({
+        enterpriseId: null,
+        devApp: null,
+        budget: 2000,
+        skills: [],
+        deferredTools: [],
+        agents: [],
+        pluginCommands: [],
+        lspDiagnostics: '',
+      }),
+      agent,
+    });
+    const onActivity = vi.fn();
+
+    await facade.runTurn({
+      sessionId: 'sess_1',
+      cwd: '/repo',
+      source: 'chat',
+      input: 'legacy',
+    }, () => {}, undefined, onActivity);
+
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      'legacy',
+      expect.any(Function),
+      undefined,
+      undefined,
+      onActivity,
+    );
+  });
+
   it('does not invent cache affinity for a legacy session ID', async () => {
     const agent = {
       getSessionState: vi.fn(() => ({ attachPromptSnapshot: vi.fn() })),

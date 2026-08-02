@@ -3,7 +3,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -24,6 +23,10 @@ import {
 } from '../../../runtime/intent-delegation/types.js';
 import { cloneSessionSkillEvalState } from '../../../runtime/intent-delegation/skill-eval.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
+import {
+  writeFileAtomicallySync,
+  type AtomicWriteFile,
+} from '../../../utils/atomic-file.js';
 
 const SESSION_SCHEMA_VERSION = 1;
 interface PersistedSessionDocument extends PersistedSessionSnapshot {
@@ -33,6 +36,7 @@ interface PersistedSessionDocument extends PersistedSessionSnapshot {
 export class FileSessionStore implements SessionStore {
   constructor(
     private readonly rootDir = join(getConfigDir(), 'sessions'),
+    private readonly atomicWrite: AtomicWriteFile = writeFileAtomicallySync,
   ) {}
 
   createSessionId(): string {
@@ -46,25 +50,32 @@ export class FileSessionStore implements SessionStore {
       schemaVersion: SESSION_SCHEMA_VERSION,
       ...durableSnapshot,
     };
-    writeFileSync(
+    this.atomicWrite(
       this.getFilePath(snapshot.sessionId),
       JSON.stringify(document, null, 2),
-      'utf8',
     );
-    writeFileSync(
+    this.atomicWrite(
       join(this.rootDir, 'last_session'),
       snapshot.sessionId,
-      'utf8',
     );
   }
 
   async loadLast(): Promise<PersistedSessionSnapshot | null> {
     const lastFile = join(this.rootDir, 'last_session');
-    if (!existsSync(lastFile)) {
-      return null;
+    if (existsSync(lastFile)) {
+      try {
+        const sessionId = readFileSync(lastFile, 'utf8').trim();
+        if (sessionId) {
+          const snapshot = this.readSnapshot(sessionId);
+          if (snapshot) {
+            return snapshot;
+          }
+        }
+      } catch {}
     }
-    const sessionId = readFileSync(lastFile, 'utf8').trim();
-    return this.load(sessionId);
+    return this.readSnapshots()
+      .sort(compareSnapshots)
+      .at(0) ?? null;
   }
 
   async load(sessionId: string): Promise<PersistedSessionSnapshot | null> {
@@ -76,22 +87,10 @@ export class FileSessionStore implements SessionStore {
       return [];
     }
 
-    const snapshots = readdirSync(this.rootDir)
-      .filter((entry) => entry.endsWith('.json'))
-      .map((entry) => {
-        const sessionId = entry.slice(0, -'.json'.length);
-        try {
-          return this.readSnapshot(sessionId);
-        } catch {
-          return null;
-        }
-      })
-      .filter(
-        (snapshot): snapshot is PersistedSessionSnapshot => snapshot !== null,
-      );
+    const snapshots = this.readSnapshots();
 
     return snapshots
-      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .sort(compareSnapshots)
       .map((snapshot) => ({
         sessionId: snapshot.sessionId,
         cwd: snapshot.cwd,
@@ -186,6 +185,25 @@ export class FileSessionStore implements SessionStore {
   private ensureRoot(): void {
     mkdirSync(this.rootDir, { recursive: true });
   }
+
+  private readSnapshots(): PersistedSessionSnapshot[] {
+    if (!existsSync(this.rootDir)) {
+      return [];
+    }
+    return readdirSync(this.rootDir)
+      .filter((entry) => entry.endsWith('.json'))
+      .map((entry) => {
+        const sessionId = entry.slice(0, -'.json'.length);
+        try {
+          return this.readSnapshot(sessionId);
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (snapshot): snapshot is PersistedSessionSnapshot => snapshot !== null,
+      );
+  }
 }
 
 export function createFileSessionStore(rootDir?: string): FileSessionStore {
@@ -201,4 +219,12 @@ function getPreview(messages: Message[]): string {
     }
   }
   return '';
+}
+
+function compareSnapshots(
+  left: PersistedSessionSnapshot,
+  right: PersistedSessionSnapshot,
+): number {
+  return right.updatedAt - left.updatedAt
+    || left.sessionId.localeCompare(right.sessionId);
 }

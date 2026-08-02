@@ -22,7 +22,7 @@ export function resolveAgentMaxIterations(
 }
 
 /**
- * Wall-clock timeout for a single non-interactive (`--print` / `--auto`) turn.
+ * Idle timeout for a single non-interactive (`--print` / `--auto`) turn.
  *
  * Returns null when the user explicitly disables the deadline by setting
  * XIAOK_TURN_TIMEOUT_MS to "0" or a negative value. Non-numeric input falls
@@ -37,6 +37,50 @@ export function resolveTurnTimeoutMs(
   if (!Number.isFinite(parsed)) return DEFAULT_TURN_TIMEOUT_MS;
   if (parsed <= 0) return null;
   return Math.floor(parsed);
+}
+
+export interface TurnActivityWatchdog {
+  signal: AbortSignal;
+  noteActivity(): void;
+  didTimeout(): boolean;
+  dispose(): void;
+}
+
+export function createTurnActivityWatchdog(
+  timeoutMs: number | null,
+): TurnActivityWatchdog {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  let disposed = false;
+
+  const clearTimer = (): void => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  const arm = (): void => {
+    clearTimer();
+    if (timeoutMs === null || disposed || controller.signal.aborted) {
+      return;
+    }
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  };
+
+  arm();
+  return {
+    signal: controller.signal,
+    noteActivity: arm,
+    didTimeout: () => timedOut,
+    dispose() {
+      disposed = true;
+      clearTimer();
+    },
+  };
 }
 
 export type CleanupStep = () => void | Promise<void>;

@@ -109,6 +109,46 @@ interface StreamAttemptState {
   outputChars: number;
 }
 
+interface BufferedToolCall {
+  id: string;
+  name: string;
+  argsBuffer: string;
+}
+
+function drainBufferedToolCalls(
+  toolBuffers: Map<number, BufferedToolCall>,
+  strictKimiK3: boolean,
+): Array<Extract<StreamChunk, { type: 'tool_use' }>> {
+  const calls: Array<Extract<StreamChunk, { type: 'tool_use' }>> = [];
+  for (const buffer of toolBuffers.values()) {
+    let input: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(buffer.argsBuffer || '{}') as unknown;
+      if (
+        strictKimiK3
+        && (
+          typeof parsed !== 'object'
+          || parsed === null
+          || Array.isArray(parsed)
+          || !buffer.id
+          || !buffer.name
+        )
+      ) {
+        throw new Error('invalid strict Kimi tool call');
+      }
+      input = parsed as Record<string, unknown>;
+    } catch {
+      if (strictKimiK3) {
+        throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+      }
+      input = { _raw: buffer.argsBuffer };
+    }
+    calls.push({ type: 'tool_use', id: buffer.id, name: buffer.name, input });
+  }
+  toolBuffers.clear();
+  return calls;
+}
+
 function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
   const protocol = new URL(baseUrl ?? DEFAULT_OPENAI_BASE_URL).protocol;
   return protocol === 'http:'
@@ -865,7 +905,7 @@ export class OpenAIAdapter implements ModelAdapter {
       () => this.client.chat.completions.create(request, { signal }),
     );
 
-    const toolBuffers = new Map<number, { id: string; name: string; argsBuffer: string }>();
+    const toolBuffers = new Map<number, BufferedToolCall>();
     const rawThinkParser: RawThinkParserState = {
       active: true,
       mode: 'outside',
@@ -987,16 +1027,9 @@ export class OpenAIAdapter implements ModelAdapter {
           yield segment;
         }
 
-        for (const buf of toolBuffers.values()) {
-          let input: Record<string, unknown> = {};
-          try {
-            input = JSON.parse(buf.argsBuffer || '{}');
-          } catch {
-            input = { _raw: buf.argsBuffer };
-          }
-          yield { type: 'tool_use', id: buf.id, name: buf.name, input };
+        for (const toolCall of drainBufferedToolCalls(toolBuffers, strictKimiK3)) {
+          yield toolCall;
         }
-        toolBuffers.clear();
 
         if (attemptState) {
           emittedDone = true;
@@ -1020,7 +1053,27 @@ export class OpenAIAdapter implements ModelAdapter {
 
     if (!emittedDone) {
       if (strictKimiK3) {
-        throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+        if (toolBuffers.size === 0) {
+          throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+        }
+        if (!officialReasoningSeen) {
+          throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+        }
+        for (const toolCall of drainBufferedToolCalls(toolBuffers, true)) {
+          yield toolCall;
+        }
+        if (attemptState) {
+          return;
+        }
+        if (!usageReceived) {
+          yield {
+            type: 'usage',
+            usage: estimateStreamUsage(messages, systemPrompt, outputChars),
+          };
+          throwIfCallerAborted(options?.signal);
+        }
+        yield { type: 'done' };
+        return;
       }
       for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
         if (segment.type === 'thinking') {
@@ -1034,14 +1087,8 @@ export class OpenAIAdapter implements ModelAdapter {
         yield segment;
       }
 
-      for (const buf of toolBuffers.values()) {
-        let input: Record<string, unknown> = {};
-        try {
-          input = JSON.parse(buf.argsBuffer || '{}');
-        } catch {
-          input = { _raw: buf.argsBuffer };
-        }
-        yield { type: 'tool_use', id: buf.id, name: buf.name, input };
+      for (const toolCall of drainBufferedToolCalls(toolBuffers, false)) {
+        yield toolCall;
       }
 
       if (attemptState) {

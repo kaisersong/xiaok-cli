@@ -16,6 +16,7 @@ import type { MemoryStore } from './memory/store.js';
 import type { RunInvocationContext } from './runtime/model-capabilities.js';
 
 export type OnChunk = (chunk: StreamChunk) => void;
+export type OnRuntimeEvent = (event: AgentRuntimeEvent) => void;
 
 let nextSessionOrdinal = 0;
 
@@ -50,6 +51,7 @@ export class Agent {
     onChunk: OnChunk,
     signal?: AbortSignal,
     invocationContext?: RunInvocationContext,
+    onRuntimeEvent?: OnRuntimeEvent,
   ): Promise<void> {
     if (signal?.aborted) {
       throw new DOMException('agent aborted', 'AbortError');
@@ -61,6 +63,7 @@ export class Agent {
       userInput,
       (event) => {
         this.emitLegacyHook(event, turnId);
+        onRuntimeEvent?.(event);
 
         const chunk = toLegacyStreamChunk(event);
         if (chunk) {

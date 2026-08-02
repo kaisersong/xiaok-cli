@@ -94,6 +94,11 @@ describe('typed install steps', () => {
     expect(invocation.args).toContain('--ignore-scripts');
     expect(invocation.args).toContain('--registry');
     expect(invocation.args).toContain('https://registry.npmjs.org/');
+    const userConfig = invocation.args[invocation.args.indexOf('--userconfig') + 1];
+    const globalConfig = invocation.args[invocation.args.indexOf('--globalconfig') + 1];
+    expect(userConfig).not.toBe(globalConfig);
+    expect(existsSync(userConfig)).toBe(true);
+    expect(existsSync(globalConfig)).toBe(true);
     expect(invocation.args.some((arg) => arg === '-c' || arg === '/c')).toBe(false);
     expect(invocation.command).not.toMatch(/\.cmd$/);
   });

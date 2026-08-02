@@ -91,6 +91,31 @@ describe('Agent', () => {
     expect(outputs.join('')).toBe('Hello world');
   });
 
+  it('reports runtime activity events to an optional observer', async () => {
+    const { Agent } = await import('../../src/ai/agent.js');
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => mockStream([
+        { type: 'text', delta: 'done' },
+        { type: 'done' },
+      ]),
+    };
+    const agent = new Agent(adapter, createRegistryMock() as never, 'system');
+    const eventTypes: string[] = [];
+
+    await agent.runTurn(
+      'hi',
+      () => {},
+      undefined,
+      undefined,
+      (event) => eventTypes.push(event.type),
+    );
+
+    expect(eventTypes).toContain('run_started');
+    expect(eventTypes).toContain('assistant_text');
+    expect(eventTypes).toContain('run_completed');
+  });
+
   it('executes a tool call and loops back', async () => {
     const { Agent } = await import('../../src/ai/agent.js');
     let callCount = 0;

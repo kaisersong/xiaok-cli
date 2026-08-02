@@ -2135,6 +2135,143 @@ describe('OpenAIAdapter', () => {
     })()).rejects.toThrow('KIMI_REASONING_ADMISSION_REQUIRED');
   });
 
+  it('accepts a complete strict K3 tool call when the SDK stream ends without finish_reason', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+        yield {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_1',
+                function: { name: 'web_fetch', arguments: '{"url":"https://example.com"}' },
+              }],
+            },
+            finish_reason: null,
+          }],
+        };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const chunks = [];
+    for await (const chunk of adapter.stream([], [], 'system')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toContainEqual({
+      type: 'tool_use',
+      id: 'call_1',
+      name: 'web_fetch',
+      input: { url: 'https://example.com' },
+    });
+    expect(chunks.at(-1)).toEqual({ type: 'done' });
+  });
+
+  it('rejects truncated strict K3 tool arguments at iterator EOF', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+        yield {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_1',
+                function: { name: 'web_fetch', arguments: '{"url":"https://example.com"' },
+              }],
+            },
+            finish_reason: null,
+          }],
+        };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    await expect((async () => {
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+    })()).rejects.toThrow('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+  });
+
+  it('rejects truncated strict K3 tool arguments even with finish_reason', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+        yield {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_1',
+                function: { name: 'web_fetch', arguments: '{"url":"https://example.com"' },
+              }],
+            },
+            finish_reason: 'tool_calls',
+          }],
+        };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    await expect((async () => {
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+    })()).rejects.toThrow('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+  });
+
+  it('rejects a strict K3 iterator EOF tool call without an id', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+        yield {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                function: { name: 'web_fetch', arguments: '{}' },
+              }],
+            },
+            finish_reason: null,
+          }],
+        };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    await expect((async () => {
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+    })()).rejects.toThrow('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+  });
+
+  it('keeps strict K3 text-only iterator EOF fail-closed', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: '' }, finish_reason: null }] };
+        yield { choices: [{ delta: { content: 'partial' }, finish_reason: null }] };
+      },
+    } as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    await expect((async () => {
+      for await (const _ of adapter.stream([], [], 'system')) { /* consume */ }
+    })()).rejects.toThrow('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+  });
+
   it('keeps an own empty reasoning_content and does not fall back to alternate reasoning', async () => {
     const mockStream = {
       async *[Symbol.asyncIterator]() {

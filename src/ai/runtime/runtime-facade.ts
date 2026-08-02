@@ -1,4 +1,4 @@
-import type { Agent } from '../agent.js';
+import type { Agent, OnRuntimeEvent } from '../agent.js';
 import type { MessageBlock, StreamChunk } from '../../types.js';
 import type { PromptBuilder, PromptBuilderInput } from '../prompts/builder.js';
 import { isAbortError } from './abort-utils.js';
@@ -35,6 +35,7 @@ export class RuntimeFacade {
     request: RuntimeTurnRequest,
     onChunk: (chunk: StreamChunk) => void,
     signal?: AbortSignal,
+    onRuntimeEvent?: OnRuntimeEvent,
   ): Promise<void> {
     const newSkillsThisTurn: string[] = [];
     let input: string | MessageBlock[];
@@ -61,11 +62,29 @@ export class RuntimeFacade {
     try {
       const cacheKey = createPromptCacheAffinity(request.sessionId);
       if (cacheKey) {
+        if (onRuntimeEvent) {
+          await this.options.agent.runTurn(
+            input,
+            onChunk,
+            signal,
+            { cacheKey },
+            onRuntimeEvent,
+          );
+        } else {
+          await this.options.agent.runTurn(
+            input,
+            onChunk,
+            signal,
+            { cacheKey },
+          );
+        }
+      } else if (onRuntimeEvent) {
         await this.options.agent.runTurn(
           input,
           onChunk,
           signal,
-          { cacheKey },
+          undefined,
+          onRuntimeEvent,
         );
       } else {
         await this.options.agent.runTurn(input, onChunk, signal);
