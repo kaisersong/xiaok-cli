@@ -11,8 +11,8 @@ const adapterState = vi.hoisted(() => ({
   emptySecondTurn: false,
 }));
 
-vi.mock('../../../src/ai/models.js', () => ({
-  createAdapter: vi.fn(() => ({
+function stubAdapter() {
+  return {
     getModelName: () => 'unit-test-model',
     async *stream(_messages: Message[], tools: ToolDefinition[]) {
       adapterState.streamCalls += 1;
@@ -44,7 +44,16 @@ vi.mock('../../../src/ai/models.js', () => ({
         },
       };
     },
-  })),
+  };
+}
+
+// The runner resolves a model binding and then calls createAdapterFromBinding,
+// so stubbing createAdapter alone intercepts nothing. Keep the rest of the
+// module real: other desktop code paths import from it too.
+vi.mock('../../../src/ai/models.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/ai/models.js')>()),
+  createAdapter: vi.fn(() => stubAdapter()),
+  createAdapterFromBinding: vi.fn(() => stubAdapter()),
 }));
 
 const { createDesktopServices } = await import('../../electron/desktop-services.js');
@@ -85,6 +94,9 @@ describe('desktop runner finalization', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
+    // Binding resolution runs before the adapter is built and rejects an empty
+    // config, so the finalization logic under test is never reached without it.
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
 
     const result = await services.runKSwarmWorkflowNode({
       handoff: {
@@ -116,6 +128,7 @@ describe('desktop runner finalization', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
 
     const result = await services.runKSwarmWorkflowNode({
       handoff: {

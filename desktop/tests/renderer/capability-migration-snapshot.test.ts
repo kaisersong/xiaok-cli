@@ -33,7 +33,11 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
   });
 
   it('tracks the current legacy flat key count for regression', () => {
-    expect(keys.length).toMatchInlineSnapshot(`232`);
+    // Grew from 232 by two intentional additions: updateModelRuntimeOptions
+    // (K3 Desktop runtime settings contract) and onSkillsChanged (skill catalog
+    // auto-reload). Further growth should be reviewed against the capability
+    // migration rather than silently rebaselined.
+    expect(keys.length).toMatchInlineSnapshot(`236`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

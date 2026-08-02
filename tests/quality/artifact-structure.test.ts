@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   resolveStructuralKind,
   validateArtifactStructure,
-} from '../../../src/quality/artifact-structure.js';
+} from '../../src/quality/artifact-structure.js';
 
 let tempDir: string;
 
