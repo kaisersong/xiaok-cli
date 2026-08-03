@@ -9,6 +9,7 @@ import { DirectionAwareTabs, type DirectionAwareTab } from '../ui/direction-awar
 import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
 import type { AutomationOverviewSnapshotView } from '../../api/types';
+import { automationFailureRoute } from '../welcome-home-projection';
 
 function formatRelativeTime(ts: number, t: Pick<import('../../locales').LocaleStrings, 'automationsRelativeJustNow' | 'automationsRelativeMinutesAgo' | 'automationsRelativeHoursAgo'>): string {
   const diff = Date.now() - ts;
@@ -167,21 +168,15 @@ export function AutomationsPage() {
                         <p className="mt-1 text-xs leading-5 text-[var(--c-text-secondary)] break-words whitespace-pre-wrap">{item.message}</p>
                       )}
                       <div className="mt-2 flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (item.source === 'loop_run' && item.loopId) {
-                              navigate(`/automations/loops#loop-${item.loopId}`);
-                            } else if (item.actionId) {
-                              navigate(`/automations/schedules#task-${item.actionId}`);
-                            } else {
-                              openTab(item.source === 'loop_run' ? 'loops' : 'schedules');
-                            }
-                          }}
-                          className="text-[10px] text-[var(--c-accent)] hover:underline"
-                        >
-                          {item.source === 'loop_run' ? `${t.automationsViewLoopDetail} →` : `${t.automationsViewScheduleDetail} →`}
-                        </button>
+                        {(item.source === 'loop_run' || item.actionAvailableInSchedules !== false) && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(automationFailureRoute(item))}
+                            className="text-[10px] text-[var(--c-accent)] hover:underline"
+                          >
+                            {item.source === 'loop_run' ? `${t.automationsViewLoopDetail} →` : `${t.automationsViewScheduleDetail} →`}
+                          </button>
+                        )}
                         {item.source === 'loop_run' && item.loopId && (
                           <button
                             type="button"

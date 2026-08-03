@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucide-react';
 import { api } from '../api';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
 import {
@@ -11,6 +11,7 @@ import {
   mergeScheduledTaskCache,
   normalizeScheduledTaskRuntimeLink,
 } from '../lib/scheduled-task-threads';
+import { automationFocusTargetId } from '../lib/automation-deep-link';
 
 export {
   collectScheduledRuntimeTaskIds,
@@ -256,6 +257,8 @@ interface ScheduledPageProps {
 
 export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationHash = location.hash;
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useLocale();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
@@ -329,6 +332,22 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
     window.addEventListener('xiaok:scheduled-tasks-updated', handleUpdated);
     return () => window.removeEventListener('xiaok:scheduled-tasks-updated', handleUpdated);
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const targetId = automationFocusTargetId(locationHash, 'task');
+    if (!targetId) return;
+    const element = document.getElementById(targetId);
+    if (!element) return;
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element.style.outline = '2px solid var(--c-accent)';
+    element.style.outlineOffset = '2px';
+    const timer = window.setTimeout(() => {
+      element.style.outline = '';
+      element.style.outlineOffset = '';
+    }, 2_000);
+    return () => window.clearTimeout(timer);
+  }, [loading, locationHash]);
 
   const loadTasks = async () => {
     try {
@@ -836,6 +855,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
             {visibleTasks.map(task => (
               <div
                 key={task.id}
+                id={`task-${task.id}`}
                 className="rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-5"
               >
                 <div className="flex items-start justify-between gap-4">

@@ -16,6 +16,7 @@
     "dev:all": "node scripts/dev-runner.mjs",
     "test": "vitest run",
     "test:smoke": "vitest run --reporter=verbose tests/renderer tests/main",
+    "verify:welcome-home-layout": "node scripts/verify-welcome-home-layout.mjs",
     "typecheck": "node scripts/typecheck-baseline.mjs",
     "typecheck:raw": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "typecheck:update-baseline": "node scripts/typecheck-baseline.mjs --update",

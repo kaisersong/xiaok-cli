@@ -9,7 +9,7 @@ import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js'
 import type { ModelInvocationOptions, StreamOptions } from '../../src/ai/runtime/model-capabilities.js';
 import { createDesktopPromptCacheAffinity } from '../../src/ai/runtime/prompt-cache-affinity.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
-import { getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
+import { findCatalogModel, getProviderProfile, listProviderProfiles } from '../../src/ai/providers/registry.js';
 import {
   isOfficialKimiK3OpenAIEndpoint,
   resolveModelRuntimeOptions,
@@ -3773,25 +3773,17 @@ function cloneRuntimeConstraints(constraints: ModelRuntimeConstraints): ModelRun
   };
 }
 
-function findExactCatalogModel(
-  providerId: string,
-  modelId: string,
-  wireModel: string,
-): ProviderModelVariant | undefined {
-  const profile = getProviderProfile(providerId);
-  return [profile?.defaultModel, ...(profile?.availableModels ?? [])]
-    .find((model): model is ProviderModelVariant => (
-      model?.modelId === modelId && model.model === wireModel
-    ));
-}
-
 function findApplicableCatalogModel(
   config: Config,
   providerId: string,
   modelId: string,
   wireModel: string,
 ): ProviderModelVariant | undefined {
-  const catalogModel = findExactCatalogModel(providerId, modelId, wireModel);
+  // 与 control-plane.resolveRuntimeModelBinding 保持同一条规则：getProviderProfile
+  // 只按 id 查表，所以 id 与官方撞名的 custom provider 不得继承 catalog 元数据。
+  if (config.providers[providerId]?.type !== 'first_party') return undefined;
+
+  const catalogModel = findCatalogModel(getProviderProfile(providerId), modelId, wireModel);
   if (!catalogModel) return undefined;
 
   if (

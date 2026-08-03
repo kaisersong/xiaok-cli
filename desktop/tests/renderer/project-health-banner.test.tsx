@@ -189,6 +189,23 @@ describe('project health status UI', () => {
     expect(screen.getByText(/最终校验失败/)).toBeInTheDocument();
   });
 
+  it('does not count stopped tasks as completed progress on project list cards', () => {
+    renderWithProviders(
+      <ProjectCard
+        project={{
+          id: 'proj-progress',
+          name: '进度口径验证',
+          status: 'active',
+          taskCount: 5,
+          doneCount: 3,
+          stoppedCount: 1,
+        }}
+      />
+    );
+
+    expect(screen.getByText('60%')).toBeInTheDocument();
+  });
+
   it('does not show the project instance id on project list cards', () => {
     renderWithProviders(
       <ProjectCard
@@ -322,6 +339,23 @@ describe('project health status UI', () => {
     expect(screen.getByText('可派发 1')).toBeInTheDocument();
     expect(screen.getByText('阻塞 1')).toBeInTheDocument();
     expect(screen.getByText('等待 1')).toBeInTheDocument();
+  });
+
+  it('does not count stopped tasks as completed progress on inline project cards', () => {
+    const { container } = renderWithProviders(
+      <ProjectProgressCard
+        project={{
+          id: 'proj-progress-inline',
+          name: '内联进度口径验证',
+          status: 'active',
+          taskCount: 5,
+          doneCount: 3,
+          stoppedCount: 1,
+        }}
+      />
+    );
+
+    expect(container.querySelector('[style="width: 60%;"]')).toBeTruthy();
   });
 
   it('shows needs-review health on inline project progress cards', () => {

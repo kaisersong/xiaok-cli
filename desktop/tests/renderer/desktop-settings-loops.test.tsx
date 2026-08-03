@@ -53,9 +53,9 @@ vi.mock('../../renderer/src/api/bridge', () => ({
   },
 }));
 
-function renderSettings() {
+function renderSettings(path = '/automations/loops') {
   render(
-    <MemoryRouter initialEntries={['/automations/loops']}>
+    <MemoryRouter initialEntries={[path]}>
       <LocaleProvider>
         <Routes>
           <Route path="/automations/:tab" element={<AutomationsPage />} />
@@ -66,7 +66,13 @@ function renderSettings() {
 }
 
 describe('Automations Loops page', () => {
+  const scrollIntoView = vi.fn();
+
   beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
     mocks.getServiceStatus.mockResolvedValue({
       checkedAt: 1779545079000,
       services: [],
@@ -178,6 +184,7 @@ describe('Automations Loops page', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    scrollIntoView.mockReset();
   });
 
   it('shows user Markdown loops with output path and reuses Run now from the Loops page', async () => {
@@ -313,5 +320,13 @@ describe('Automations Loops page', () => {
     expect(mocks.createUserLoopTemplate.mock.calls[0][0]).not.toHaveProperty('scheduleEnabled');
     expect(mocks.createUserLoopTemplate.mock.calls[0][0]).not.toHaveProperty('scheduleTrigger');
     expect(mocks.createUserLoopTemplate.mock.calls[0][0]).not.toHaveProperty('autoRunApproved');
+  });
+
+  it('按首页深链定位并高亮对应循环', async () => {
+    renderSettings('/automations/loops#loop-user-loop-1');
+
+    await screen.findByText('Weekly Briefing');
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' }));
+    expect(document.getElementById('loop-user-loop-1')).toBeTruthy();
   });
 });

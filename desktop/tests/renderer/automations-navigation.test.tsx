@@ -35,6 +35,10 @@ vi.mock('../../renderer/src/components/ScheduledPage', () => ({
   ),
 }));
 
+vi.mock('../../renderer/src/components/DesktopSettings', () => ({
+  LoopsPane: () => <div data-testid="loops-pane" />,
+}));
+
 vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
   LocaleProvider: ({ children }: { children: React.ReactNode }) => children,
   useLocale: () => ({
@@ -60,6 +64,13 @@ vi.mock('../../renderer/src/contexts/LocaleContext', () => ({
       automationsOverviewLoopsCount: '循环',
       automationsOverviewSchedulesCount: '计划',
       automationsOverviewFailuresCount: '待处理',
+      automationsViewLoopDetail: '查看循环详情',
+      automationsViewScheduleDetail: '查看计划详情',
+      automationsClearConfirm: (title: string) => `清除 ${title}`,
+      automationsClearRecord: '清除记录',
+      automationsRelativeJustNow: '刚刚',
+      automationsRelativeMinutesAgo: (minutes: number) => `${minutes} 分钟前`,
+      automationsRelativeHoursAgo: (hours: number) => `${hours} 小时前`,
     },
   }),
 }));
@@ -107,7 +118,7 @@ vi.mock('../../renderer/src/api', () => ({
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return <div data-testid="location">{location.pathname}{location.hash}</div>;
 }
 
 function renderApp(path: string) {
@@ -191,6 +202,50 @@ describe('Automations navigation', () => {
     });
     expect(await screen.findByText('后台自动运行已暂停')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '启用后台自动运行' })).toBeInTheDocument();
+  });
+
+  it('routes built-in loop failures to diagnostics instead of a dead user-loop hash', async () => {
+    apiMocks.getAutomationOverviewSnapshot.mockResolvedValueOnce({
+      generatedAt: 10_000,
+      globalBackgroundAutoRunEnabled: true,
+      totals: { loops: 1, userLoops: 0, schedules: 0, activeSchedules: 0, diagnostics: 1, recentFailures: 1 },
+      recentFailures: [{
+        id: 'loop-run:built-in',
+        source: 'loop_run',
+        ownerId: 'built-in-loop',
+        loopId: 'built-in-loop',
+        loopOrigin: 'built_in',
+        title: 'Built-in Loop',
+        status: 'failed',
+        occurredAt: 9_000,
+      }],
+    });
+    renderApp('/automations');
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看循环详情 →' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/automations/diagnostics');
+  });
+
+  it('does not offer a dead schedule-detail link for inactive schedules', async () => {
+    apiMocks.getAutomationOverviewSnapshot.mockResolvedValueOnce({
+      generatedAt: 10_000,
+      globalBackgroundAutoRunEnabled: true,
+      totals: { loops: 0, userLoops: 0, schedules: 0, activeSchedules: 0, diagnostics: 1, recentFailures: 1 },
+      recentFailures: [{
+        id: 'timed-action:inactive',
+        source: 'timed_action_run',
+        ownerId: 'inactive-schedule',
+        actionId: 'inactive-schedule',
+        actionAvailableInSchedules: false,
+        title: 'Inactive Schedule',
+        status: 'failed',
+        occurredAt: 9_000,
+      }],
+    });
+    renderApp('/automations');
+
+    expect(await screen.findByText('Inactive Schedule')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看计划详情 →' })).not.toBeInTheDocument();
   });
 
   it('redirects the legacy scheduled route into Automations schedules', async () => {

@@ -141,6 +141,8 @@ export interface KSwarmProject {
   createdAt?: string;
   updatedAt?: string;
   progress?: number;
+  taskCount?: number;
+  doneCount?: number;
   stoppedCount?: number;
   deliverables?: KSwarmDeliverable[];
   enableSummary?: boolean;
@@ -299,6 +301,7 @@ export interface DispatchTasksResult {
 export interface KSwarmClientState {
   connected: boolean;
   projects: KSwarmProject[];
+  projectsLoaded: boolean;
   agents: KSwarmAgent[];
   participants: KSwarmParticipant[];
   lastEvent: KSwarmEvent | null;
@@ -945,6 +948,7 @@ async function httpDelete(path: string): Promise<boolean> {
 export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   const [connected, setConnected] = useState(false);
   const [projects, setProjects] = useState<KSwarmProject[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [agents, setAgents] = useState<KSwarmAgent[]>([]);
   const [participants, setParticipants] = useState<KSwarmParticipant[]>([]);
   const [lastEvent, setLastEvent] = useState<KSwarmEvent | null>(null);
@@ -1015,6 +1019,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       if (projectList) {
         projectsRef.current = projectList;
         setProjects(projectList);
+        setProjectsLoaded(true);
         snapshotRetryAttempt = 0;
         clearSnapshotRetry();
       } else if (retryOnFailure) {
@@ -1094,6 +1099,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     const list = data.projects;
     projectsRef.current = list;
     setProjects(list);
+    setProjectsLoaded(true);
     return list;
   }, []);
 
@@ -1366,6 +1372,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     // State
     connected,
     projects,
+    projectsLoaded,
     agents,
     participants,
     lastEvent,

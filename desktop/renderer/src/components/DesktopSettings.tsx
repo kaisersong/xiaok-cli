@@ -40,9 +40,10 @@ import {
   Mic,
   RotateCcw,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
+import { automationFocusTargetId } from '../lib/automation-deep-link';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
 import { McpErrorRemediationBanner } from './settings/McpErrorRemediationBanner';
@@ -2802,6 +2803,8 @@ function createUserLoopId(): string {
 export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'diagnostics' }) {
   const { t } = useLocale();
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationHash = location.hash;
   const toast = useToast() as {
     addToast?: (message: string, type?: 'success' | 'error') => void;
     show?: (message: string, type?: 'success' | 'error') => void;
@@ -2881,9 +2884,9 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
 
   useEffect(() => {
     if (loopDiagnosticsLoading) return;
-    const hash = window.location.hash;
-    if (!hash || !hash.startsWith('#loop-')) return;
-    const el = document.getElementById(hash.slice(1));
+    const targetId = automationFocusTargetId(locationHash, 'loop');
+    if (!targetId) return;
+    const el = document.getElementById(targetId);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       el.style.outline = '2px solid var(--c-accent)';
@@ -2894,7 +2897,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [loopDiagnosticsLoading]);
+  }, [locationHash, loopDiagnosticsLoading]);
 
   const handleRunLoopNow = async (loopId: string) => {
     if (runningLoopId) return;

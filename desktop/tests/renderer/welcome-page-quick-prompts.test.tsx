@@ -16,7 +16,18 @@ vi.mock('../../renderer/src/api', () => ({
     createTask: mockCreateTask,
     createTaskWithFiles: mockCreateTaskWithFiles,
     updateThreadTaskId: mockUpdateThreadTaskId,
+    getAutomationOverviewSnapshot: vi.fn().mockResolvedValue({
+      generatedAt: 0,
+      sourceVersions: { loopStore: 0, timedActionStore: 0 },
+      globalBackgroundAutoRunEnabled: true,
+      totals: { loops: 0, userLoops: 0, schedules: 0, activeSchedules: 0, diagnostics: 0, recentFailures: 0 },
+      recentFailures: [],
+    }),
   },
+}));
+
+vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
+  useKSwarm: () => ({ projects: [] }),
 }));
 
 vi.mock('../../renderer/src/components/ChatInput', () => ({

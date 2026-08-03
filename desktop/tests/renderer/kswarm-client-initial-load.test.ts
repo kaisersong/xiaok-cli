@@ -53,10 +53,37 @@ describe('useKSwarmClient initial load', () => {
     await waitFor(() => {
       expect(result.current.connected).toBe(true);
       expect(result.current.projects).toHaveLength(1);
+      expect(result.current.projectsLoaded).toBe(true);
     });
 
     expect(kswarmProxyGetMock).toHaveBeenCalledWith('/projects');
     expect(result.current.projects[0]).toMatchObject({ id: 'proj-live', name: 'Live project' });
+  });
+
+  it('keeps projects marked unloaded while connection arrives before the first snapshot', async () => {
+    let resolveProjects: ((value: { projects: Array<{ id: string; name: string; status: string }> }) => void) | null = null;
+    kswarmProxyGetMock.mockImplementation(async (path: string) => {
+      if (path === '/projects') {
+        return await new Promise(resolve => {
+          resolveProjects = resolve;
+        });
+      }
+      if (path === '/agents') return { agents: [] };
+      if (path === '/participants') return { participants: [] };
+      return null;
+    });
+
+    const { result } = renderHook(() => useKSwarmClient());
+
+    await waitFor(() => expect(result.current.connected).toBe(true));
+    expect(result.current.projectsLoaded).toBe(false);
+
+    await act(async () => {
+      resolveProjects?.({ projects: [] });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(result.current.projectsLoaded).toBe(true));
   });
 
   it('loads the initial REST snapshot even when the stream is disconnected', async () => {

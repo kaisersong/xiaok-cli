@@ -327,7 +327,9 @@ export interface AutomationRecentFailureItemView {
   message?: string;
   occurredAt: number;
   loopId?: string;
+  loopOrigin?: 'built_in' | 'user_template';
   actionId?: string;
+  actionAvailableInSchedules?: boolean;
 }
 
 export interface AutomationOverviewSnapshotView {

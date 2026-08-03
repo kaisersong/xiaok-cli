@@ -78,8 +78,7 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
   const stoppedTasks = project.stoppedCount || 0;
-  const completedTasks = doneTasks + stoppedTasks;
-  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
   const poAgentName = project.poAgent
     ? agents.find(agent => agent.id === project.poAgent)?.name || project.poAgent
     : '';

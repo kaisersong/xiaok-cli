@@ -49,17 +49,45 @@ function renderScheduledPage(path = '/automations/schedules') {
 }
 
 describe('ScheduledPage stale schedule edits', () => {
+  const scrollIntoView = vi.fn();
+
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('xiaok:locale', 'zh');
     mocks.onReminder.mockReturnValue(() => undefined);
     mocks.getReminderStatus.mockResolvedValue({ activeReminders: [] });
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
   });
 
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
     localStorage.clear();
+    scrollIntoView.mockReset();
+  });
+
+  it('按首页深链定位并高亮对应计划', async () => {
+    mocks.getScheduledTasks.mockResolvedValue([{
+      id: 'schedule-1',
+      name: '每日价格监控',
+      description: '',
+      prompt: '检查价格',
+      frequency: 'daily',
+      scheduleConfig: { hour: 9, minute: 0 },
+      status: 'active',
+      userApprovedAuto: true,
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    }]);
+
+    renderScheduledPage('/automations/schedules#task-schedule-1');
+
+    await screen.findByText('每日价格监控');
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' }));
+    expect(document.getElementById('task-schedule-1')).toBeTruthy();
   });
 
   it('刷新最新计划并提示用户，而不是用旧编辑覆盖并保存', async () => {

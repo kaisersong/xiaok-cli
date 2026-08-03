@@ -2423,6 +2423,23 @@ export interface LocaleStrings {
     greetingSuffix: string;
     inputPlaceholder: string;
     quickPrompts: readonly string[];
+    conversationSubtitle: string;
+    overviewTitle: string;
+    readOnlySummary: string;
+    activeProjects: string;
+    needsAttention: string;
+    activeAutomations: string;
+    recentlyCompleted: string;
+    continueWork: string;
+    topItemsOnly: string;
+    noAttention: string;
+    automationLoading: string;
+    automationUnavailable: string;
+    projectsUnavailable: string;
+    nextStep: (value: string) => string;
+    statusNeedsAction: string;
+    statusFailed: string;
+    openAttentionItem: (title: string, status: string, reason?: string, nextStep?: string) => string;
   };
 
   // knowledge page

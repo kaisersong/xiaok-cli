@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveAppAsarSha256, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
+import { createAdapterFromBinding } from '../../../src/ai/models.js';
+import { resolveModelCapabilities } from '../../../src/ai/runtime/model-capabilities.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import type { Message, StreamChunk, ToolDefinition } from '../../../src/types.js';
 import type { ExternalPluginDependency } from '../../electron/plugin-dependency-service.js';
@@ -2057,10 +2060,12 @@ describe('desktop services', () => {
       },
     });
 
-    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
-    const stable = snapshot.models.find(model => model.id === 'kimi-kimi-k2.7');
-    expect(stable).toMatchObject({ model: 'kimi-k2.7' });
-    expect(stable).not.toHaveProperty('runtimeOptions');
+    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.6' });
+    const stable = snapshot.models.find(model => model.id === 'kimi-kimi-k2.6');
+    expect(stable).toMatchObject({ model: 'kimi-k2.6' });
+    // K2.6 有自己的官方窗口（262,144，与 K3 恰好相同），所以不能只看 contextLimit；
+    // 区分点是 K3 独有的 reasoning 策略与 constraints。
+    expect(stable?.runtimeOptions?.reasoningEffort).toBeUndefined();
     expect(stable).not.toHaveProperty('runtimeConstraints');
 
     const available = await services.listAvailableModelsForProvider('kimi');
@@ -2071,7 +2076,9 @@ describe('desktop services', () => {
         reasoningEfforts: ['low', 'high', 'max'],
       },
     });
-    expect(available.find(model => model.modelId === 'kimi-k2.7')).not.toHaveProperty('runtimeOptions');
+    const k26 = available.find(model => model.modelId === 'kimi-k2.6');
+    expect(k26?.runtimeOptions?.reasoningEffort).toBeUndefined();
+    expect(k26).not.toHaveProperty('runtimeConstraints');
   });
 
   it('does not expose stale K3 runtime options on a Kimi K2.7 snapshot', async () => {
@@ -2093,6 +2100,39 @@ describe('desktop services', () => {
     const snapshot = await services.getModelConfig();
     expect(snapshot.models.find(model => model.id === 'kimi-kimi-k2.7'))
       .not.toHaveProperty('runtimeOptions');
+  });
+
+  it('carries the official GLM context window from Desktop save through to adapter capabilities', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    const snapshot = await services.saveModelConfig({
+      providerId: 'glm',
+      apiKey: 'sk-glm',
+      modelName: 'GLM-5.2',
+    });
+
+    // Desktop 合成的 modelId 与 catalog 的 'glm-5.2' 并不相等 —— 这是本测试要守的前提，
+    // 而不是要修的东西。修的是「即使 id 不相等，元数据也必须到位」。
+    const saved = snapshot.models.find(model => model.model === 'GLM-5.2');
+    expect(saved?.id).toBe('glm-glm-5.2');
+    expect(saved).toMatchObject({ runtimeOptions: { contextLimit: 1_000_000 } });
+
+    // 跨层闭环：读回真正落盘的 config.json，走 CLI 的运行时绑定与 adapter。
+    const persisted = JSON.parse(
+      readFileSync(join(rootDir, 'config', 'config.json'), 'utf-8'),
+    );
+    const binding = resolveRuntimeModelBinding(persisted, 'glm-glm-5.2');
+    expect(binding.runtimeOptions).toEqual({ contextLimit: 1_000_000 });
+
+    // OpenAI SDK 在 jsdom 环境下拒绝初始化，需临时摘掉 browser globals。
+    const contextLimit = await withoutBrowserGlobals(async () => (
+      resolveModelCapabilities(createAdapterFromBinding(binding)).contextLimit
+    ));
+    expect(contextLimit).toBe(1_000_000);
   });
 
   it('filters custom-endpoint Kimi K3 options without suppressing another provider named K3', async () => {
@@ -2790,7 +2830,7 @@ describe('desktop services', () => {
       kimi: 'https://api.kimi.com/coding/v1',
       deepseek: 'https://api.deepseek.com/v1',
       glm: 'https://open.bigmodel.cn/api/paas/v4',
-      minimax: 'https://api.minimax.chat/v1',
+      minimax: 'https://api.minimax.io/v1',
       gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
     };
 

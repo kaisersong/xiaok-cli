@@ -108,6 +108,7 @@ describe('automation overview snapshot', () => {
     expect(snapshot.recentFailures[0]).toMatchObject({
       source: 'timed_action_run',
       ownerId: 'failed-agent',
+      actionAvailableInSchedules: true,
       title: 'Failed Agent Task',
       status: 'failed',
       message: 'agent crashed',
@@ -116,11 +117,92 @@ describe('automation overview snapshot', () => {
     expect(snapshot.recentFailures[1]).toMatchObject({
       source: 'loop_run',
       ownerId: 'briefing-loop',
+      loopOrigin: 'user_template',
       title: 'Briefing Loop',
       status: 'failed',
       message: 'Output file was not created.',
       occurredAt: 3_100,
     });
+  });
+
+  it('fuses a linked failed TimedActionRun and LoopRun into one recent failure', () => {
+    const outputDirectory = join(rootDir, 'outputs');
+    loopStore.createUserLoopTemplate({
+      loopId: 'linked-loop',
+      title: 'Linked Loop',
+      description: 'Run from a schedule.',
+      kind: 'markdown_file',
+      prompt: 'Write output',
+      outputDirectory,
+      outputFileName: 'linked.md',
+      now: 1_000,
+    });
+    const action = timedActionStore.createAction({
+      id: 'linked-schedule',
+      title: 'Linked Schedule',
+      trigger: { kind: 'once', at: 4_000 },
+      executor: { kind: 'loop', loopId: 'linked-loop' },
+      source: 'user',
+      now: 1_500,
+      nextDueAt: 4_000,
+    });
+    const [claimed] = timedActionStore.claimDueActions(4_000, 1);
+    const loopRun = loopStore.beginLoopRun('linked-loop', {
+      kind: 'scheduled',
+      timedActionId: action.id,
+      timedActionRunId: claimed.runId,
+    }, 4_050, 60_000);
+    expect(loopRun.status).toBe('started');
+    if (loopRun.status !== 'started') throw new Error('expected loop run to start');
+    loopStore.finishLoopRunFailure(loopRun.run.id, 'evidence_missing', 'Loop output missing.', [], 4_100);
+    timedActionStore.finishRunFailure(action.id, claimed.runId, 4_120, `loop failed: ${loopRun.run.id}`);
+
+    const snapshot = buildAutomationOverviewSnapshot({
+      loopStore,
+      timedActionStore,
+      globalBackgroundAutoRunEnabled: true,
+      now: 5_000,
+    });
+
+    expect(snapshot.totals.recentFailures).toBe(1);
+    expect(snapshot.recentFailures).toEqual([
+      expect.objectContaining({
+        id: `timed-action:${claimed.runId}`,
+        source: 'timed_action_run',
+        actionId: action.id,
+        loopId: 'linked-loop',
+      }),
+    ]);
+  });
+
+  it('marks inactive schedules as unavailable for schedule-list deep links', () => {
+    const action = timedActionStore.createAction({
+      id: 'cancelled-schedule',
+      title: 'Cancelled Schedule',
+      trigger: { kind: 'once', at: 4_000 },
+      executor: { kind: 'agent_task', prompt: 'Run once' },
+      source: 'user',
+      now: 1_000,
+      nextDueAt: 4_000,
+    });
+    const [claimed] = timedActionStore.claimDueActions(4_000, 1);
+    timedActionStore.finishRunFailure(action.id, claimed.runId, 4_100, 'failed before cancellation');
+    expect(timedActionStore.cancelAction(action.id, 'user cancelled', 4_200)).toBe(true);
+
+    const snapshot = buildAutomationOverviewSnapshot({
+      loopStore,
+      timedActionStore,
+      globalBackgroundAutoRunEnabled: true,
+      now: 5_000,
+    });
+
+    expect(snapshot.recentFailures).toEqual([
+      expect.objectContaining({
+        source: 'timed_action_run',
+        actionId: action.id,
+        actionAvailableInSchedules: false,
+      }),
+    ]);
   });
 
   it('returns fused run history rows for linked TimedActionRun and LoopRun facts without duplicates', () => {

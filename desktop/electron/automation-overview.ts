@@ -14,7 +14,9 @@ export interface AutomationRecentFailureItem {
   message?: string;
   occurredAt: number;
   loopId?: string;
+  loopOrigin?: LoopDefinition['origin'];
   actionId?: string;
+  actionAvailableInSchedules?: boolean;
 }
 
 export interface AutomationOverviewSnapshot {
@@ -87,21 +89,39 @@ export function buildAutomationOverviewSnapshot(input: BuildAutomationOverviewSn
   const scheduleActions = actions.filter(isAutomationScheduleAction);
   const actionById = new Map(scheduleActions.map(action => [action.id, action]));
 
-  const loopFailures = definitions
+  const loopFailureRuns = definitions
     .filter(definition => definition.status !== 'deleted')
     .flatMap(definition =>
       input.loopStore
         .listLoopRuns(definition.id, recentLimit)
         .filter(run => FAILURE_LOOP_STATUSES.has(run.status))
-        .map(run => loopFailureItem(run, definition))
+        .map(run => ({ run, definition }))
     );
+  const loopFailureById = new Map(loopFailureRuns.map(item => [item.run.id, item]));
+  const loopFailureByTimedActionRunId = new Map<string, (typeof loopFailureRuns)[number]>();
+  for (const item of loopFailureRuns) {
+    const timedActionRunId = typeof item.run.trigger.timedActionRunId === 'string'
+      ? item.run.trigger.timedActionRunId
+      : undefined;
+    if (timedActionRunId) loopFailureByTimedActionRunId.set(timedActionRunId, item);
+  }
 
+  const linkedLoopRunIds = new Set<string>();
   const timedActionFailures = scheduleActions.flatMap(action =>
     input.timedActionStore
       .listRuns(action.id)
       .filter(isAttentionTimedActionRun)
-      .map(run => timedActionFailureItem(run, actionById.get(run.actionId) ?? action))
+      .map(run => {
+        const linkedLoopRunId = readLoopRunId(run.decision);
+        const linked = (linkedLoopRunId ? loopFailureById.get(linkedLoopRunId) : undefined)
+          ?? loopFailureByTimedActionRunId.get(run.runId);
+        if (linked) linkedLoopRunIds.add(linked.run.id);
+        return timedActionFailureItem(run, actionById.get(run.actionId) ?? action);
+      })
   );
+  const loopFailures = loopFailureRuns
+    .filter(item => !linkedLoopRunIds.has(item.run.id))
+    .map(item => loopFailureItem(item.run, item.definition));
 
   const recentFailures = [...loopFailures, ...timedActionFailures]
     .sort((a, b) => b.occurredAt - a.occurredAt || a.id.localeCompare(b.id))
@@ -185,6 +205,7 @@ function loopFailureItem(run: LoopRun, definition: LoopDefinition): AutomationRe
     source: 'loop_run',
     ownerId: run.loopId,
     loopId: run.loopId,
+    loopOrigin: definition.origin,
     title: definition.title,
     status: run.status,
     message: run.message ?? run.nextActionSummary ?? run.failureKind,
@@ -199,6 +220,7 @@ function timedActionFailureItem(run: TimedActionRunRecord, action: TimedActionRe
     source: 'timed_action_run',
     ownerId: action.id,
     actionId: action.id,
+    actionAvailableInSchedules: action.status === 'active' || action.status === 'paused',
     loopId,
     title: action.title,
     status: run.status,

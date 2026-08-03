@@ -40,8 +40,7 @@ export function ProjectProgressCard({ project }: ProjectProgressCardProps) {
   const totalTasks = project.taskCount || 0;
   const doneTasks = project.doneCount || 0;
   const stoppedTasks = project.stoppedCount || 0;
-  const completedTasks = doneTasks + stoppedTasks;
-  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
   const statusLabels: Record<string, string> = {
     draft: t.projectsStatusDraft, planning: t.projectsStatusPlanning, created: t.projectsStatusCreated,
