@@ -60,7 +60,7 @@ Xiaok Desktop v1.4.26 把"工具结果诚实性"再往下推了一层。一个�
 - **对话优先的 Graph / Loop 体验**：Desktop 首页继续把对话作为主入口，项目和自动化上下文下移到可滚动的续接区域。项目 Graph 可恢复有向边、并行组、汇聚节点、run/handoff 元数据和上下游关系；用户 Loop 提供运行中互斥、Markdown 预览、结构化成功证据、preflight 阻断和修复配置后的恢复运行。
 - **Modern MCP 插件基线**：`kai-report-creator` `2.1.1` 与 `kai-slide-creator` `3.2.2` 使用 modern MCP `2026-07-28` 合同和 MCP 2.0 server API。 `cua-computer-use` `0.2.1` 因 CuaDriver 尚未迁移，明确继续走 legacy stdio adapter；`kai-meeting-assistant` 保持现有 runtime，只修复 tool annotation 可解析性，不虚构协议迁移。
 - **无障碍与门禁修复**：4 个火山 ASR 字段补上程序化标签，会议记录弹窗按 Esc 先关设置浮层；此前在干净工作区就会红的 5 个门禁全部从根因修掉——runner finalization 测试的 adapter stub 已过期、一处 import 多跳了一级目录，以及一份经审阅后重设的 preload key 快照。
-- **发布验证**：CLI 355 个测试文件（2875 个测试）与 Desktop 215 个测试文件（1786 个测试）**零失败**，包含上一版发布时不得不如实披露的那 5 个既有失败。CLI typecheck、Desktop typecheck、`build:main`、`build:renderer` 均干净。每个新增套件都先证明过红态。
+- **发布验证**：当前发布树通过 CLI sandbox 346 个测试文件（2871 个测试，另有 8 项按平台门禁跳过）与 Desktop 224 个测试文件（1890 个测试，另有 2 项 opt-in 真实音频测试跳过），**零失败**。Modern MCP 打包门禁另有 84 项 focused check，包含真实 report / slide server 启动与渲染。CLI release build、Desktop typecheck、`build:main`、`build:renderer` 均干净。
 - **版本对齐**：CLI 与 Desktop 元数据统一为 `1.4.26` / `desktop-v1.4.26`。
 
 Xiaok Desktop v1.4.25 让"被拒绝的工具调用"变成一次诚实的失败。此前用户在权限提示里点了拒绝，运行时却告诉模型这次调用成功了——模型据此继续推进，甚至能用一条从未真正执行的命令满足"完成前必须验证"守卫。现在 Desktop 与 CLI 共用同一套面向模型的成败判定，并把历史工作流产物恢复回 Canvas。
