@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { isSuccessfulModelToolResult } from '../tools/index.js';
 import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('agent-runtime');
 const MAX_COMPACT_MEMORY_REMINDER_CHARS = 8_000;
@@ -6,7 +7,7 @@ const COMPACT_MEMORY_REMINDER_PREFIX = '<system-reminder>\n[Memory restored afte
 const COMPACT_MEMORY_REMINDER_SUFFIX = '\n</system-reminder>';
 import { isAbortError } from './abort-utils.js';
 import { buildPromptCacheSegments, resolveModelCapabilities, } from './model-capabilities.js';
-import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
 import { executePortableCompaction } from './portable-compaction-executor.js';
 import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/verification-before-completion-guard.js';
@@ -122,7 +123,8 @@ export class AgentRuntime {
                     return;
                 }
                 if (!autoCompactionBlocked
-                    && shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)) {
+                    && shouldCompact(estimateTokens(this.session.getMessages())
+                        + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()), this.contextLimit, this.compactThreshold)) {
                     const plan = this.session.planCompaction();
                     if (plan.sourceRevision === noReplacementRevision) {
                         // The same frozen history still has no replaceable prefix.
@@ -259,7 +261,7 @@ export class AgentRuntime {
                         input: toolCall.input,
                     });
                     const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
-                    const ok = !result.startsWith('Error');
+                    const ok = isSuccessfulModelToolResult(result);
                     executedToolIds.add(toolCall.id);
                     verificationToolCalls.push({
                         id: toolCall.id,

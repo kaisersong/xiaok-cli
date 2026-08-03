@@ -1,6 +1,7 @@
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
+import { resolveClonedCapabilityOverrides, type AdapterCatalogIdentity } from './catalog-identity.js';
 
 type ResponsesUsage = {
   input_tokens?: number;
@@ -40,6 +41,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
   private readonly baseUrl?: string;
   private readonly defaultHeaders?: Record<string, string>;
   private readonly capabilityOverrides?: Partial<ModelCapabilities>;
+  private readonly catalogIdentity?: AdapterCatalogIdentity;
   private model: string;
 
   constructor(
@@ -48,11 +50,13 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     baseUrl?: string,
     defaultHeaders?: Record<string, string>,
     capabilityOverrides?: Partial<ModelCapabilities>,
+    catalogIdentity?: AdapterCatalogIdentity,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.defaultHeaders = defaultHeaders;
     this.capabilityOverrides = capabilityOverrides;
+    this.catalogIdentity = catalogIdentity;
     this.model = model;
   }
 
@@ -65,7 +69,14 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
   }
 
   cloneWithModel(model: string): OpenAIResponsesAdapter {
-    return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
+    return new OpenAIResponsesAdapter(
+      this.apiKey,
+      model,
+      this.baseUrl,
+      this.defaultHeaders,
+      resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity),
+      this.catalogIdentity,
+    );
   }
 
   async *stream(

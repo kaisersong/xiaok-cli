@@ -46,7 +46,7 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-Xiaok Desktop v1.4.26 把"工具结果诚实性"再往下推了一层。一个返回 `{"ok":false,"error":"project_not_found"}` 的工具，此前仍被判为成功——因为这个 payload 不以 `Error` 开头。在 1748 份真实任务快照里，这类假成功共 148 次、涉及 93 个任务；其中一个任务里 5 次被服务端拒收的修复提交，在界面上显示成 5 个绿勾，而项目从未推进。本次同时移除了产物预览的一处 HTML 注入面，并加固了 worktree 租约与会话写入。
+Xiaok Desktop v1.4.26 把"工具结果诚实性"再往下推了一层。一个返回 `{"ok":false,"error":"project_not_found"}` 的工具，此前仍被判为成功——因为这个 payload 不以 `Error` 开头。在 1748 份真实任务快照里，这类假成功共 148 次、涉及 93 个任务；其中一个任务里 5 次被服务端拒收的修复提交，在界面上显示成 5 个绿勾，而项目从未推进。本次同时移除了产物预览的一处 HTML 注入面，加固了 worktree 租约与会话写入，刷新了官方模型目录，并把随包 renderer 插件对齐到 modern MCP 协议。
 
 **诚实的失败与更安全的预览：**
 
@@ -55,6 +55,10 @@ Xiaok Desktop v1.4.26 把"工具结果诚实性"再往下推了一层。一个�
 - **失败文案可读**：失败进度行改为提取 payload 的 `error` / `code` / `message` / `reason` 或 `errors[]` 首项，不再向用户抛出 100 字符的截断 JSON。
 - **产物预览注入面**：产物预览的 markdown 分支用一串正则拼 HTML，从不转义 `&`、`<`、`>`，再交给顶层 renderer 文档里的 `dangerouslySetInnerHTML`——那里 `window.xiaokDesktop` 可达，而 CSP 只是 Report-Only。产物正文由 agent 写入、内容可直接来自 `web_fetch`，因此一份调研笔记里的 `<img onerror>` 就能拿到整个 preload 面。现在改用共享的 `MarkdownRenderer`，并在该路径关闭它的文件路径 linkify（其兜底会走到无路径白名单的 `shell.openPath`）。
 - **worktree 与会话持久化**：worktree 分配改为带锁的租约登记表，含进程探测、对账与 GC，崩溃的运行不再残留 worktree，也不会让第二次运行占用仍在使用的路径。会话快照改为原子写入。OpenAI adapter 强制 Kimi 的 reasoning admission 与终止边界；chat 轮次新增活跃度看门狗，provider 静默卡死会暴露出来而不是一直挂着。
+- **模型目录驱动的上下文窗口**：OpenAI、Kimi、DeepSeek、GLM、MiniMax、Gemini 等 first-party 条目补齐逐模型核验的 context window 和当前 wire model。Custom provider 即使复用官方 id 也不能继承官方元数据；`cloneWithModel` 会按目标模型重新解析，不再把 1M 模型的窗口错误带到小窗口模型。
+- **按真实请求计算压缩时机**：上下文压力现在同时计算每次请求都会携带的 system prompt 与工具定义序列化成本，修复“session message 看起来未超阈值、实际 provider 请求已经接近窗口”的漏算。
+- **对话优先的 Graph / Loop 体验**：Desktop 首页继续把对话作为主入口，项目和自动化上下文下移到可滚动的续接区域。项目 Graph 可恢复有向边、并行组、汇聚节点、run/handoff 元数据和上下游关系；用户 Loop 提供运行中互斥、Markdown 预览、结构化成功证据、preflight 阻断和修复配置后的恢复运行。
+- **Modern MCP 插件基线**：`kai-report-creator` `2.1.1` 与 `kai-slide-creator` `3.2.2` 使用 modern MCP `2026-07-28` 合同和 MCP 2.0 server API。 `cua-computer-use` `0.2.1` 因 CuaDriver 尚未迁移，明确继续走 legacy stdio adapter；`kai-meeting-assistant` 保持现有 runtime，只修复 tool annotation 可解析性，不虚构协议迁移。
 - **无障碍与门禁修复**：4 个火山 ASR 字段补上程序化标签，会议记录弹窗按 Esc 先关设置浮层；此前在干净工作区就会红的 5 个门禁全部从根因修掉——runner finalization 测试的 adapter stub 已过期、一处 import 多跳了一级目录，以及一份经审阅后重设的 preload key 快照。
 - **发布验证**：CLI 355 个测试文件（2875 个测试）与 Desktop 215 个测试文件（1786 个测试）**零失败**，包含上一版发布时不得不如实披露的那 5 个既有失败。CLI typecheck、Desktop typecheck、`build:main`、`build:renderer` 均干净。每个新增套件都先证明过红态。
 - **版本对齐**：CLI 与 Desktop 元数据统一为 `1.4.26` / `desktop-v1.4.26`。

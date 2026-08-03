@@ -187,20 +187,23 @@ describe('config commands', () => {
       },
     );
 
-    it('does not copy K3 runtime options to an explicit K2.7 model', async () => {
+    it('does not copy K3 runtime options to an explicit non-K3 Kimi model', async () => {
       await freshProgram().parseAsync([
-        'node', 'xiaok', 'config', 'set', 'model', 'kimi/kimi-k2.7',
+        'node', 'xiaok', 'config', 'set', 'model', 'kimi/kimi-k2.6',
       ]);
 
       const updated = await loadConfig();
       const entry = updated.models[updated.defaultModelId];
       expect(entry).toMatchObject({
         provider: 'kimi',
-        model: 'kimi-k2.7',
-        label: 'Kimi K2.7',
+        model: 'kimi-k2.6',
+        label: 'Kimi K2.6',
         capabilities: ['tools', 'thinking'],
       });
-      expect(entry.runtimeOptions).toBeUndefined();
+      // K2.6 有自己的官方窗口（262,144，与 K3 恰好相同），所以不能只看 contextLimit；
+      // 区分点是 K3 独有的 reasoning 策略与 constraints。
+      expect(entry.runtimeOptions?.reasoningEffort).toBeUndefined();
+      expect(entry.runtimeConstraints).toBeUndefined();
     });
 
     it('creates model from provider/model syntax', async () => {

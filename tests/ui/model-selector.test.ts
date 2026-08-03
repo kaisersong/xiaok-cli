@@ -4,6 +4,7 @@ import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
+import { getProviderProfile } from '../../src/ai/providers/registry.js';
 
 const configFixture = {
   schemaVersion: 2 as const,
@@ -56,26 +57,31 @@ describe('buildModelOptions', () => {
       },
     });
 
-    expect(options.map((option) => option.id)).toEqual([
-      'kimi-coding',
-      'kimi-k2-thinking',
-      'kimi-k3',
-      'kimi-k3-256k',
-      'kimi-k2.7',
-      'kimi-k2.6',
-      'kimi-k2.5',
-      'kimi-for-coding',
-    ]);
-    expect(options.map((option) => option.label)).toEqual([
-      'Kimi Coding',
-      'Kimi K2 Thinking',
-      'Kimi K3',
-      'Kimi K3 256K',
-      'Kimi K2.7',
-      'Kimi K2.6',
-      'Kimi K2.5',
-      'Kimi for Coding',
-    ]);
+    // 契约式断言而非全量有序列表：给任意 provider 增删模型都不该需要改这个测试。
+    // 之前这里断言 8 个 id 与 8 个 label 的完整顺序，任何目录变动都会误报。
+    const ids = options.map((option) => option.id);
+    const profile = getProviderProfile('kimi')!;
+    const catalogIds = (profile.availableModels ?? []).map((variant) => variant.modelId);
+
+    // 1. 无重复
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // 2. 已配置的模型全部出现，且排在所有仅存在于目录里的模型之前
+    const configuredIds = ['kimi-coding', 'kimi-k2-thinking'];
+    for (const id of configuredIds) expect(ids).toContain(id);
+    const lastConfigured = Math.max(...configuredIds.map((id) => ids.indexOf(id)));
+    const firstCatalogOnly = Math.min(
+      ...catalogIds.filter((id) => !configuredIds.includes(id)).map((id) => ids.indexOf(id)),
+    );
+    expect(lastConfigured).toBeLessThan(firstCatalogOnly);
+
+    // 3. 目录里的模型全部出现，且 label 取自 registry
+    for (const variant of profile.availableModels ?? []) {
+      if (configuredIds.includes(variant.modelId)) continue;
+      const option = options.find((candidate) => candidate.id === variant.modelId);
+      expect(option, variant.modelId).toBeDefined();
+      expect(option?.label, variant.modelId).toBe(variant.label);
+    }
   });
 
   it('renders the model selector as a multi-line overlay above the footer when a repl renderer is active', async () => {

@@ -1,7 +1,7 @@
 import type { Config, LegacyConfig } from '../../types.js';
 import { normalizeConfig } from './normalize.js';
-import { getProviderProfile } from './registry.js';
-import type { ModelRuntimeOptions, ProtocolId, ProviderModelVariant, ProviderProfile } from './types.js';
+import { findCatalogModel, getProviderProfile } from './registry.js';
+import type { ModelRuntimeOptions, ProtocolId } from './types.js';
 import { resolveProviderTransport } from './auth-resolver.js';
 import { resolveConfiguredModelBinding } from './model-binding.js';
 import {
@@ -22,17 +22,6 @@ export interface ResolvedModelBinding {
   runtimeOptions?: ModelRuntimeOptions;
 }
 
-function findExactCatalogModel(
-  profile: ProviderProfile | undefined,
-  modelId: string,
-  wireModel: string,
-): ProviderModelVariant | undefined {
-  if (!profile) return undefined;
-
-  return [profile.defaultModel, ...(profile.availableModels ?? [])]
-    .find((variant) => variant.modelId === modelId && variant.model === wireModel);
-}
-
 export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, requestedModelId?: string): ResolvedModelBinding {
   const config = normalizeConfig(rawConfig);
   const { modelId, providerId, modelEntry, providerConfig } = resolveConfiguredModelBinding(config, requestedModelId);
@@ -41,7 +30,12 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
   const wireModel = modelEntry.model
     || providerProfile?.defaultModel.model
     || (providerConfig.protocol === 'anthropic' ? 'claude-opus-4-6' : 'default');
-  const catalogModel = findExactCatalogModel(providerProfile, modelId, wireModel);
+  // getProviderProfile 按 id 查表，不看 providerConfig.type —— 所以一个 id 与官方
+  // 撞名的 custom provider（Desktop 允许用户把自定义 provider 命名为 "GLM"）会拿到
+  // 官方 profile。只有 first-party 才允许继承 catalog 元数据。
+  const catalogModel = providerConfig.type === 'first_party'
+    ? findCatalogModel(providerProfile, modelId, wireModel)
+    : undefined;
 
   if (!transport.apiKey && providerConfig.type !== 'custom') {
     const envHint = (providerProfile?.envPrefixes[0] ?? providerId.toUpperCase()).toUpperCase();

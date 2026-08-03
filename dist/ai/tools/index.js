@@ -198,7 +198,7 @@ export class ToolRegistry {
                     input,
                     reason: 'prompt_declined',
                 });
-                return `（已取消: ${name}）`;
+                return `${TOOL_CANCELLED_PREFIX}${name}）`;
             }
         }
         const preHookResult = await this.options.hooksRunner?.runPreHooks(tool.definition.name, input);
@@ -279,6 +279,51 @@ function isSuccessfulToolResult(result) {
         return false;
     }
     return true;
+}
+export const TOOL_CANCELLED_PREFIX = '（已取消: ';
+/**
+ * Model-facing verdict: may this result be replayed to the model, and to the
+ * event stream, as a success?
+ *
+ * Deliberately separate from `isSuccessfulToolResult` above, which feeds
+ * `onToolObserved` (skill evidence) and keeps its narrower `Error:` rule.
+ * Widening that one has a much larger blast radius and no test reachability,
+ * so it is tracked as follow-up work rather than folded in here.
+ */
+export function isSuccessfulModelToolResult(result) {
+    const normalized = result.trimStart();
+    // Intentionally not /^Error\b/: `Errors found: 0` must stay a failure here,
+    // because relaxing it is the one change that would open a fail-open path.
+    if (normalized.startsWith('Error')) {
+        return false;
+    }
+    if (normalized.startsWith(TOOL_CANCELLED_PREFIX)) {
+        return false;
+    }
+    return !isDomainLevelFailurePayload(normalized);
+}
+/**
+ * Desktop serialises operation failures as `JSON.stringify({ok:false, ...})`,
+ * which never starts with `Error`. Only the top-level `ok` / `success` booleans
+ * count: they carry operation status. A validator's `valid` field is a verdict
+ * about the caller's input — the call itself succeeded — so it is excluded.
+ */
+function isDomainLevelFailurePayload(normalized) {
+    if (!normalized.startsWith('{')) {
+        return false;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(normalized);
+    }
+    catch {
+        return false;
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return false;
+    }
+    const payload = parsed;
+    return payload.ok === false || payload.success === false;
 }
 function appendToolWarnings(result, warnings) {
     const uniqueWarnings = [...new Set(warnings)];

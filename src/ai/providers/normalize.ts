@@ -45,7 +45,12 @@ function detectKnownProvider(baseUrl?: string): ProviderId | null {
   }
   if (normalizedBaseUrl.startsWith('https://api.deepseek.com')) return 'deepseek';
   if (normalizedBaseUrl.startsWith('https://open.bigmodel.cn')) return 'glm';
-  if (normalizedBaseUrl.startsWith('https://api.minimax.chat')) return 'minimax';
+  // api.minimax.chat 是官方旧域名，存量 legacy 配置里仍有，必须继续识别。
+  if (
+    normalizedBaseUrl.startsWith('https://api.minimax.chat')
+    || normalizedBaseUrl.startsWith('https://api.minimax.io')
+    || normalizedBaseUrl.startsWith('https://api.minimaxi.com')
+  ) return 'minimax';
   if (normalizedBaseUrl.startsWith('https://generativelanguage.googleapis.com')) return 'gemini';
   return null;
 }
@@ -147,7 +152,9 @@ function normalizeLegacyConfig(config: LegacyConfig): Config {
   const detectedProvider = detectKnownProvider(customBaseUrl);
   if (detectedProvider) {
     const legacyModel = config.models.custom?.model
-      ?? (detectedProvider === 'kimi' ? 'kimi-k2.7' : undefined);
+      // 迁移时不要把用户悄悄换代。原先 pin 的裸 `kimi-k2.7` 在官方任何 endpoint
+      // 都不存在，`kimi-for-coding` 才是官方在售的 Kimi K2.7 Code。
+      ?? (detectedProvider === 'kimi' ? 'kimi-for-coding' : undefined);
     const known = buildFirstPartyConfig(detectedProvider, {
       apiKey: config.models.custom?.apiKey,
       baseUrl: customBaseUrl,

@@ -20,13 +20,14 @@ export class Agent {
         this.options = options;
         this.runtime = this.createRuntime();
     }
-    async runTurn(userInput, onChunk, signal, invocationContext) {
+    async runTurn(userInput, onChunk, signal, invocationContext, onRuntimeEvent) {
         if (signal?.aborted) {
             throw new DOMException('agent aborted', 'AbortError');
         }
         const turnId = `turn_${(this.turnCount += 1)}`;
         await this.runtime.run(userInput, (event) => {
             this.emitLegacyHook(event, turnId);
+            onRuntimeEvent?.(event);
             const chunk = toLegacyStreamChunk(event);
             if (chunk) {
                 onChunk(chunk);

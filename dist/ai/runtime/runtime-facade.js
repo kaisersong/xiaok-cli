@@ -8,7 +8,7 @@ export class RuntimeFacade {
     constructor(options) {
         this.options = options;
     }
-    async runTurn(request, onChunk, signal) {
+    async runTurn(request, onChunk, signal, onRuntimeEvent) {
         const newSkillsThisTurn = [];
         let input;
         try {
@@ -33,7 +33,15 @@ export class RuntimeFacade {
         try {
             const cacheKey = createPromptCacheAffinity(request.sessionId);
             if (cacheKey) {
-                await this.options.agent.runTurn(input, onChunk, signal, { cacheKey });
+                if (onRuntimeEvent) {
+                    await this.options.agent.runTurn(input, onChunk, signal, { cacheKey }, onRuntimeEvent);
+                }
+                else {
+                    await this.options.agent.runTurn(input, onChunk, signal, { cacheKey });
+                }
+            }
+            else if (onRuntimeEvent) {
+                await this.options.agent.runTurn(input, onChunk, signal, undefined, onRuntimeEvent);
             }
             else {
                 await this.options.agent.runTurn(input, onChunk, signal);

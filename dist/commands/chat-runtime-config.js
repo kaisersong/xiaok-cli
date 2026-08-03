@@ -18,7 +18,7 @@ export function resolveAgentMaxIterations(env = process.env) {
     return Math.floor(parsed);
 }
 /**
- * Wall-clock timeout for a single non-interactive (`--print` / `--auto`) turn.
+ * Idle timeout for a single non-interactive (`--print` / `--auto`) turn.
  *
  * Returns null when the user explicitly disables the deadline by setting
  * XIAOK_TURN_TIMEOUT_MS to "0" or a negative value. Non-numeric input falls
@@ -34,6 +34,38 @@ export function resolveTurnTimeoutMs(env = process.env) {
     if (parsed <= 0)
         return null;
     return Math.floor(parsed);
+}
+export function createTurnActivityWatchdog(timeoutMs) {
+    const controller = new AbortController();
+    let timer = null;
+    let timedOut = false;
+    let disposed = false;
+    const clearTimer = () => {
+        if (timer) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    };
+    const arm = () => {
+        clearTimer();
+        if (timeoutMs === null || disposed || controller.signal.aborted) {
+            return;
+        }
+        timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutMs);
+    };
+    arm();
+    return {
+        signal: controller.signal,
+        noteActivity: arm,
+        didTimeout: () => timedOut,
+        dispose() {
+            disposed = true;
+            clearTimer();
+        },
+    };
 }
 /**
  * Run cleanup steps sequentially with an overall timeout. If a step hangs,

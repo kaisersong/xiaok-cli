@@ -84,7 +84,7 @@ describe('normalizeConfig', () => {
     });
   });
 
-  it('pins a schema-v1 Kimi config without a model to the previous K2.7 default', () => {
+  it('pins a schema-v1 Kimi config without a model to the still-served K2.7 generation', () => {
     const normalized = normalizeConfig({
       schemaVersion: 1,
       defaultModel: 'custom',
@@ -100,12 +100,16 @@ describe('normalizeConfig', () => {
 
     expect(normalized.schemaVersion).toBe(2);
     expect(normalized.defaultModelId).toBe('kimi-default');
+    // 原本 pin 的是裸 `kimi-k2.7`，但官方任何 endpoint 都没有这个 ID。
+    // `kimi-for-coding` 就是官方的 Kimi K2.7 Code，既有效又不跨代升级用户。
     expect(normalized.models['kimi-default']).toMatchObject({
       provider: 'kimi',
-      model: 'kimi-k2.7',
-      label: 'Kimi K2.7',
+      model: 'kimi-for-coding',
     });
-    expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
+    // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
+    // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
+    expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
+    expect(normalized.models['kimi-default'].runtimeConstraints).toBeUndefined();
   });
 
   it('recognizes an explicit default HTTPS port in a schema-v1 Kimi endpoint', () => {
@@ -126,10 +130,30 @@ describe('normalizeConfig', () => {
     expect(normalized.defaultModelId).toBe('kimi-default');
     expect(normalized.models['kimi-default']).toMatchObject({
       provider: 'kimi',
-      model: 'kimi-k2.7',
-      label: 'Kimi K2.7',
+      model: 'kimi-for-coding',
     });
-    expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
+    // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
+    // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
+    expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
+    expect(normalized.models['kimi-default'].runtimeConstraints).toBeUndefined();
+  });
+
+  it('detects MiniMax from both the legacy and the current official host', () => {
+    for (const baseUrl of [
+      'https://api.minimax.chat/v1',   // 存量配置里的旧域名
+      'https://api.minimax.io/v1',     // 官方现行（国际）
+      'https://api.minimaxi.com/v1',   // 官方现行（国内）
+    ]) {
+      const normalized = normalizeConfig({
+        schemaVersion: 1,
+        defaultModel: 'custom',
+        models: { custom: { baseUrl, apiKey: 'sk-mm' } },
+        defaultMode: 'interactive',
+        channels: {},
+      });
+
+      expect(normalized.defaultProvider, baseUrl).toBe('minimax');
+    }
   });
 
   it('copies catalog runtime options for an explicit schema-v1 K3 model', () => {
@@ -185,7 +209,10 @@ describe('normalizeConfig', () => {
       model: 'k3',
       label: 'Kimi K3',
     });
+    // 非官方 endpoint 上的 K3 完全不得拿到 catalog runtimeOptions —— 包括 contextLimit。
+    // 这条不能弱化成「只是不带 reasoningEffort」。
     expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
+    expect(normalized.models['kimi-default'].runtimeConstraints).toBeUndefined();
   });
 
   it('preserves an existing schema-v2 kimi-default K2.7 entry without K3 options', () => {

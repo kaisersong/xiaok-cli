@@ -1,4 +1,5 @@
 import { isAbortError } from '../runtime/abort-utils.js';
+import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
 const STREAM_TIMEOUT_MS = 5 * 60_000;
 const MAX_RETRIES = 2;
 function isRetryableError(error) {
@@ -24,12 +25,14 @@ export class OpenAIResponsesAdapter {
     baseUrl;
     defaultHeaders;
     capabilityOverrides;
+    catalogIdentity;
     model;
-    constructor(apiKey, model = 'gpt-4.1', baseUrl, defaultHeaders, capabilityOverrides) {
+    constructor(apiKey, model = 'gpt-4.1', baseUrl, defaultHeaders, capabilityOverrides, catalogIdentity) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.defaultHeaders = defaultHeaders;
         this.capabilityOverrides = capabilityOverrides;
+        this.catalogIdentity = catalogIdentity;
         this.model = model;
     }
     getModelName() {
@@ -39,7 +42,7 @@ export class OpenAIResponsesAdapter {
         return this.capabilityOverrides ?? {};
     }
     cloneWithModel(model) {
-        return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, this.capabilityOverrides);
+        return new OpenAIResponsesAdapter(this.apiKey, model, this.baseUrl, this.defaultHeaders, resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity), this.catalogIdentity);
     }
     async *stream(messages, tools, systemPrompt, options) {
         let attempt = 0;

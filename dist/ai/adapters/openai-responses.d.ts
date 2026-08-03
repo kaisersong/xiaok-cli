@@ -1,12 +1,14 @@
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
+import { type AdapterCatalogIdentity } from './catalog-identity.js';
 export declare class OpenAIResponsesAdapter implements ModelAdapter {
     private readonly apiKey;
     private readonly baseUrl?;
     private readonly defaultHeaders?;
     private readonly capabilityOverrides?;
+    private readonly catalogIdentity?;
     private model;
-    constructor(apiKey: string, model?: string, baseUrl?: string, defaultHeaders?: Record<string, string>, capabilityOverrides?: Partial<ModelCapabilities>);
+    constructor(apiKey: string, model?: string, baseUrl?: string, defaultHeaders?: Record<string, string>, capabilityOverrides?: Partial<ModelCapabilities>, catalogIdentity?: AdapterCatalogIdentity);
     getModelName(): string;
     getCapabilities(): Partial<ModelCapabilities>;
     cloneWithModel(model: string): OpenAIResponsesAdapter;

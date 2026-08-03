@@ -77,10 +77,28 @@ export function buildOpenAIAdapterInit(
 }
 
 export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAdapter {
-  const capabilityOverrides = modelCapabilitiesFromFlags(binding.capabilities);
+  // 只透传 contextLimit：reasoningEffort 是 OpenAI-compatible 的请求字段，
+  // Claude 用 thinking.type、Gemini 用别的机制，透传过去没有接收方。
+  const capabilityOverrides = {
+    ...modelCapabilitiesFromFlags(binding.capabilities),
+    ...(binding.runtimeOptions?.contextLimit !== undefined
+      ? { contextLimit: binding.runtimeOptions.contextLimit }
+      : {}),
+  };
+  // cloneWithModel 需要它才能按新模型重查目录，而不是沿用旧模型的窗口。
+  const catalogIdentity = {
+    providerId: binding.providerId,
+    providerType: binding.providerType,
+  };
 
   if (binding.protocol === 'anthropic') {
-    return new ClaudeAdapter(binding.apiKey, binding.wireModel, binding.baseUrl, capabilityOverrides);
+    return new ClaudeAdapter(
+      binding.apiKey,
+      binding.wireModel,
+      binding.baseUrl,
+      capabilityOverrides,
+      catalogIdentity,
+    );
   }
 
   if (binding.protocol === 'openai_legacy') {
@@ -94,6 +112,7 @@ export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAd
       binding.baseUrl,
       binding.headers,
       capabilityOverrides,
+      catalogIdentity,
     );
   }
 

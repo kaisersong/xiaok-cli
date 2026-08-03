@@ -1,4 +1,5 @@
 import { isAbortError } from '../runtime/abort-utils.js';
+import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
@@ -51,12 +52,14 @@ export class ClaudeAdapter {
     apiKey;
     baseUrl;
     capabilityOverrides;
+    catalogIdentity;
     model;
     clientPromise = null;
-    constructor(apiKey, model = 'claude-opus-4-6', baseUrl, capabilityOverrides) {
+    constructor(apiKey, model = 'claude-opus-4-6', baseUrl, capabilityOverrides, catalogIdentity) {
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.capabilityOverrides = capabilityOverrides;
+        this.catalogIdentity = catalogIdentity;
         this.model = model;
     }
     getModelName() {
@@ -66,7 +69,7 @@ export class ClaudeAdapter {
         return this.capabilityOverrides ?? {};
     }
     cloneWithModel(model) {
-        return new ClaudeAdapter(this.apiKey, model, this.baseUrl, this.capabilityOverrides);
+        return new ClaudeAdapter(this.apiKey, model, this.baseUrl, resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity), this.catalogIdentity);
     }
     async getClient() {
         if (this.client) {

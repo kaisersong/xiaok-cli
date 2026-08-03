@@ -26,6 +26,21 @@ export function estimateTokens(messages) {
     }
     return Math.ceil(chars / 4);
 }
+/**
+ * 估算每次请求除 session messages 之外**必然**携带的部分：system prompt 与全部
+ * tool 定义（见 agent-runtime 调用 stream 时传入的 `systemPrompt` / `tools`）。
+ *
+ * 压缩判定原先只估算 messages，于是这部分固定开销一直不占额度，导致压缩偏晚。
+ * 口径与 estimateTokens 一致（chars/4），因此两者可直接相加。
+ */
+export function estimateRequestOverheadTokens(systemPrompt, tools) {
+    let chars = systemPrompt.length;
+    for (const tool of tools) {
+        chars += tool.name.length + tool.description.length;
+        chars += JSON.stringify(tool.inputSchema ?? {}).length;
+    }
+    return Math.ceil(chars / 4);
+}
 export function shouldCompact(estimatedTokens, contextLimit, threshold = 0.85) {
     return estimatedTokens > contextLimit * threshold;
 }

@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelAdapter, Message, ToolDefinition, StreamChunk } from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { CachedToolDefinition, ModelCapabilities, StreamOptions, SystemPromptBlock } from '../runtime/model-capabilities.js';
+import { resolveClonedCapabilityOverrides, type AdapterCatalogIdentity } from './catalog-identity.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
@@ -54,6 +55,7 @@ export class ClaudeAdapter implements ModelAdapter {
   private readonly apiKey: string;
   private readonly baseUrl?: string;
   private readonly capabilityOverrides?: Partial<ModelCapabilities>;
+  private readonly catalogIdentity?: AdapterCatalogIdentity;
   private model: string;
   private clientPromise: Promise<Anthropic> | null = null;
 
@@ -62,10 +64,12 @@ export class ClaudeAdapter implements ModelAdapter {
     model = 'claude-opus-4-6',
     baseUrl?: string,
     capabilityOverrides?: Partial<ModelCapabilities>,
+    catalogIdentity?: AdapterCatalogIdentity,
   ) {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
     this.capabilityOverrides = capabilityOverrides;
+    this.catalogIdentity = catalogIdentity;
     this.model = model;
   }
 
@@ -78,7 +82,13 @@ export class ClaudeAdapter implements ModelAdapter {
   }
 
   cloneWithModel(model: string): ClaudeAdapter {
-    return new ClaudeAdapter(this.apiKey, model, this.baseUrl, this.capabilityOverrides);
+    return new ClaudeAdapter(
+      this.apiKey,
+      model,
+      this.baseUrl,
+      resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity),
+      this.catalogIdentity,
+    );
   }
 
   private async getClient(): Promise<Anthropic> {

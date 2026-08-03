@@ -1,4 +1,4 @@
-import type { Agent } from '../agent.js';
+import type { Agent, OnRuntimeEvent } from '../agent.js';
 import type { MessageBlock, StreamChunk } from '../../types.js';
 import type { PromptBuilder, PromptBuilderInput } from '../prompts/builder.js';
 export interface RuntimeTurnRequest {
@@ -22,7 +22,7 @@ export declare class RuntimeFacade {
     private readonly options;
     private readonly sentSkillNames;
     constructor(options: RuntimeFacadeOptions);
-    runTurn(request: RuntimeTurnRequest, onChunk: (chunk: StreamChunk) => void, signal?: AbortSignal): Promise<void>;
+    runTurn(request: RuntimeTurnRequest, onChunk: (chunk: StreamChunk) => void, signal?: AbortSignal, onRuntimeEvent?: OnRuntimeEvent): Promise<void>;
     /** Reset deduplication state (e.g. after skill install/uninstall). */
     resetSkillTracking(): void;
     private buildInput;

@@ -66,6 +66,33 @@ function sleep(ms, signal) {
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+function drainBufferedToolCalls(toolBuffers, strictKimiK3) {
+    const calls = [];
+    for (const buffer of toolBuffers.values()) {
+        let input;
+        try {
+            const parsed = JSON.parse(buffer.argsBuffer || '{}');
+            if (strictKimiK3
+                && (typeof parsed !== 'object'
+                    || parsed === null
+                    || Array.isArray(parsed)
+                    || !buffer.id
+                    || !buffer.name)) {
+                throw new Error('invalid strict Kimi tool call');
+            }
+            input = parsed;
+        }
+        catch {
+            if (strictKimiK3) {
+                throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+            }
+            input = { _raw: buffer.argsBuffer };
+        }
+        calls.push({ type: 'tool_use', id: buffer.id, name: buffer.name, input });
+    }
+    toolBuffers.clear();
+    return calls;
+}
 function createOpenAIHttpAgent(baseUrl) {
     const protocol = new URL(baseUrl ?? DEFAULT_OPENAI_BASE_URL).protocol;
     return protocol === 'http:'
@@ -782,17 +809,9 @@ export class OpenAIAdapter {
                     }
                     yield segment;
                 }
-                for (const buf of toolBuffers.values()) {
-                    let input = {};
-                    try {
-                        input = JSON.parse(buf.argsBuffer || '{}');
-                    }
-                    catch {
-                        input = { _raw: buf.argsBuffer };
-                    }
-                    yield { type: 'tool_use', id: buf.id, name: buf.name, input };
+                for (const toolCall of drainBufferedToolCalls(toolBuffers, strictKimiK3)) {
+                    yield toolCall;
                 }
-                toolBuffers.clear();
                 if (attemptState) {
                     emittedDone = true;
                     continue;
@@ -812,7 +831,27 @@ export class OpenAIAdapter {
         }
         if (!emittedDone) {
             if (strictKimiK3) {
-                throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+                if (toolBuffers.size === 0) {
+                    throw new Error('KIMI_REASONING_TERMINAL_BOUNDARY_REQUIRED');
+                }
+                if (!officialReasoningSeen) {
+                    throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
+                }
+                for (const toolCall of drainBufferedToolCalls(toolBuffers, true)) {
+                    yield toolCall;
+                }
+                if (attemptState) {
+                    return;
+                }
+                if (!usageReceived) {
+                    yield {
+                        type: 'usage',
+                        usage: estimateStreamUsage(messages, systemPrompt, outputChars),
+                    };
+                    throwIfCallerAborted(options?.signal);
+                }
+                yield { type: 'done' };
+                return;
             }
             for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
                 if (segment.type === 'thinking') {
@@ -825,15 +864,8 @@ export class OpenAIAdapter {
                 }
                 yield segment;
             }
-            for (const buf of toolBuffers.values()) {
-                let input = {};
-                try {
-                    input = JSON.parse(buf.argsBuffer || '{}');
-                }
-                catch {
-                    input = { _raw: buf.argsBuffer };
-                }
-                yield { type: 'tool_use', id: buf.id, name: buf.name, input };
+            for (const toolCall of drainBufferedToolCalls(toolBuffers, false)) {
+                yield toolCall;
             }
             if (attemptState) {
                 return;

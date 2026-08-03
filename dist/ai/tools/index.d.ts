@@ -50,3 +50,14 @@ export declare class ToolRegistry {
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
     enableAutoMode(): void;
 }
+export declare const TOOL_CANCELLED_PREFIX = "\uFF08\u5DF2\u53D6\u6D88: ";
+/**
+ * Model-facing verdict: may this result be replayed to the model, and to the
+ * event stream, as a success?
+ *
+ * Deliberately separate from `isSuccessfulToolResult` above, which feeds
+ * `onToolObserved` (skill evidence) and keeps its narrower `Error:` rule.
+ * Widening that one has a much larger blast radius and no test reachability,
+ * so it is tracked as follow-up work rather than folded in here.
+ */
+export declare function isSuccessfulModelToolResult(result: string): boolean;

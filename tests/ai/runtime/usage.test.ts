@@ -5,6 +5,7 @@ import {
   computeCost,
   computeCostWithConfidence,
   estimateTokens,
+  estimateRequestOverheadTokens,
   mergeUsage,
   planCompaction,
   shouldCompact,
@@ -22,6 +23,30 @@ describe('runtime usage helpers', () => {
         { role: 'user', content: [{ type: 'text', text: 'hello world' }] },
       ])
     ).toBeGreaterThan(0);
+  });
+
+  it('counts the system prompt and tool definitions that every request also carries', () => {
+    // 压缩判定原先只估算 session messages，但每次请求还会带上 systemPrompt 与
+    // 全部 tool 定义（agent-runtime 的 stream 调用）。漏算它们会让压缩偏晚。
+    const tools = [
+      { name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+      { name: 'write', description: 'Write a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+    ] as never;
+
+    const systemOnly = estimateRequestOverheadTokens('a'.repeat(400), []);
+    const toolsOnly = estimateRequestOverheadTokens('', tools);
+    const both = estimateRequestOverheadTokens('a'.repeat(400), tools);
+
+    expect(systemOnly).toBe(100);
+    expect(toolsOnly).toBeGreaterThan(0);
+    // 两部分都要计入，不能只算其中一个
+    expect(both).toBeGreaterThanOrEqual(systemOnly + toolsOnly - 1);
+    expect(both).toBeGreaterThan(systemOnly);
+    expect(both).toBeGreaterThan(toolsOnly);
+  });
+
+  it('returns zero overhead when there is no system prompt and no tools', () => {
+    expect(estimateRequestOverheadTokens('', [])).toBe(0);
   });
 
   it('requests compact when threshold exceeded', () => {

@@ -20,7 +20,7 @@ import {
   type StreamOptions,
 } from './model-capabilities.js';
 import { AgentSessionState } from './session.js';
-import { estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
 import { executePortableCompaction } from './portable-compaction-executor.js';
 import type { MemoryStore } from '../memory/store.js';
@@ -187,7 +187,12 @@ export class AgentRuntime {
 
         if (
           !autoCompactionBlocked
-          && shouldCompact(estimateTokens(this.session.getMessages()), this.contextLimit, this.compactThreshold)
+          && shouldCompact(
+            estimateTokens(this.session.getMessages())
+              + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
+            this.contextLimit,
+            this.compactThreshold,
+          )
         ) {
           const plan = this.session.planCompaction();
           if (plan.sourceRevision === noReplacementRevision) {

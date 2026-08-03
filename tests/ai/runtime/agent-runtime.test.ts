@@ -658,6 +658,41 @@ describe('AgentRuntime', () => {
     expect(events).toContain('usage_updated');
   });
 
+  it('counts the system prompt against the context limit, not just session messages', async () => {
+    // 每次请求都会带上 systemPrompt 与全部 tool 定义（agent-runtime 的 stream 调用），
+    // 但压缩判定原先只估算 session messages。这里让消息本身远不到阈值、
+    // 只有把 systemPrompt 计入后才越界 —— 漏算时这条测试必须失败。
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () =>
+        mockStream([
+          { type: 'text', delta: 'ok' },
+          { type: 'done' },
+        ]),
+    };
+    const session = new AgentSessionState();
+    session.appendUserText('a'.repeat(400));
+    session.appendAssistantBlocks([{ type: 'text', text: 'b'.repeat(400) }]);
+
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock() as never,
+      session,
+      controller: new AgentRunController(),
+      systemPrompt: 's'.repeat(4_000),
+      maxIterations: 2,
+      // 阈值 850：仅消息约 200 token 不触发，计入 systemPrompt 约 1000 token 后触发
+      contextLimit: 1_000,
+    });
+
+    const events: string[] = [];
+    await runtime.run('next', (event) => {
+      events.push(event.type);
+    });
+
+    expect(events).toContain('compact_triggered');
+  });
+
   it('summarizes only the frozen prefix and applies the exact LLM summary once', async () => {
     const session = new AgentSessionState();
     session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);

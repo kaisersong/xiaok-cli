@@ -1,15 +1,87 @@
 // ESM-compatible wrapper for nodejieba.
 // nodejieba is a CJS package; use createRequire for ESM compat.
+import { accessSync, constants as fsConstants } from 'node:fs';
 import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 const require = createRequire(import.meta.url);
 let jieba = null;
 let jiebaLoadFailed = false;
+// The five dictionaries cppjieba opens natively.
+const DICT_FILES = {
+    dict: 'jieba.dict.utf8',
+    hmmDict: 'hmm_model.utf8',
+    userDict: 'user.dict.utf8',
+    idfDict: 'idf.utf8',
+    stopWordDict: 'stop_words.utf8',
+};
+/**
+ * Point a path at app.asar.unpacked instead of app.asar.
+ *
+ * Electron patches `fs` so JS reads inside app.asar work, but cppjieba opens
+ * its dictionaries with C++ ifstream, which bypasses that patch. electron-builder
+ * unpacks native modules to app.asar.unpacked while `__dirname` still reports the
+ * app.asar path, so the path has to be rewritten explicitly.
+ */
+export function rewriteAsarPath(filePath) {
+    if (filePath.includes('app.asar.unpacked'))
+        return filePath;
+    // Only rewrite when `app.asar` is a full path segment, so a directory that
+    // merely starts with that name is left alone. Handles both separators.
+    return filePath.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1');
+}
+/**
+ * Resolve every dictionary to a path that is readable from JS, or null when
+ * nodejieba is not installed.
+ */
+export function resolveJiebaDictPaths() {
+    let entry;
+    try {
+        entry = require.resolve('nodejieba');
+    }
+    catch {
+        return null;
+    }
+    const dictDir = rewriteAsarPath(join(dirname(entry), 'submodules', 'cppjieba', 'dict'));
+    const resolved = {};
+    for (const fileName of Object.values(DICT_FILES)) {
+        resolved[fileName] = join(dictDir, fileName);
+    }
+    return resolved;
+}
+/**
+ * Whether Chinese segmentation can actually run.
+ *
+ * Requiring nodejieba is not enough: dictionary loading is lazy, so a require
+ * succeeds even when the dictionaries are unreachable, and the first cut() would
+ * then abort the process from C++. This probes readability from JS first.
+ */
+export function segmentationAvailable() {
+    return getJieba() !== null;
+}
 function getJieba() {
     if (jiebaLoadFailed)
         return null;
     if (!jieba) {
         try {
-            jieba = require('nodejieba');
+            const paths = resolveJiebaDictPaths();
+            if (paths === null) {
+                jiebaLoadFailed = true;
+                return null;
+            }
+            // Verify every dictionary is readable before handing paths to native code,
+            // because a failed native open calls abort() and cannot be caught here.
+            for (const fileName of Object.values(DICT_FILES)) {
+                accessSync(paths[fileName], fsConstants.R_OK);
+            }
+            const mod = require('nodejieba');
+            mod.load({
+                dict: paths[DICT_FILES.dict],
+                hmmDict: paths[DICT_FILES.hmmDict],
+                userDict: paths[DICT_FILES.userDict],
+                idfDict: paths[DICT_FILES.idfDict],
+                stopWordDict: paths[DICT_FILES.stopWordDict],
+            });
+            jieba = mod;
         }
         catch {
             jiebaLoadFailed = true;

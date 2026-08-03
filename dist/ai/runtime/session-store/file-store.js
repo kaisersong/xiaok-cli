@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { getConfigDir } from '../../../utils/config.js';
@@ -6,11 +6,14 @@ import { assertKimiK3DurableResumeSupported, toDurableSessionSnapshot, } from '.
 import { cloneSessionIntentLedger, rekeySessionIntentLedger, } from '../../../runtime/intent-delegation/types.js';
 import { cloneSessionSkillEvalState } from '../../../runtime/intent-delegation/skill-eval.js';
 import { cloneSessionSkillExecutionState } from '../../skills/execution-state.js';
+import { writeFileAtomicallySync, } from '../../../utils/atomic-file.js';
 const SESSION_SCHEMA_VERSION = 1;
 export class FileSessionStore {
     rootDir;
-    constructor(rootDir = join(getConfigDir(), 'sessions')) {
+    atomicWrite;
+    constructor(rootDir = join(getConfigDir(), 'sessions'), atomicWrite = writeFileAtomicallySync) {
         this.rootDir = rootDir;
+        this.atomicWrite = atomicWrite;
     }
     createSessionId() {
         return `sess_${randomUUID()}`;
@@ -22,16 +25,26 @@ export class FileSessionStore {
             schemaVersion: SESSION_SCHEMA_VERSION,
             ...durableSnapshot,
         };
-        writeFileSync(this.getFilePath(snapshot.sessionId), JSON.stringify(document, null, 2), 'utf8');
-        writeFileSync(join(this.rootDir, 'last_session'), snapshot.sessionId, 'utf8');
+        this.atomicWrite(this.getFilePath(snapshot.sessionId), JSON.stringify(document, null, 2));
+        this.atomicWrite(join(this.rootDir, 'last_session'), snapshot.sessionId);
     }
     async loadLast() {
         const lastFile = join(this.rootDir, 'last_session');
-        if (!existsSync(lastFile)) {
-            return null;
+        if (existsSync(lastFile)) {
+            try {
+                const sessionId = readFileSync(lastFile, 'utf8').trim();
+                if (sessionId) {
+                    const snapshot = this.readSnapshot(sessionId);
+                    if (snapshot) {
+                        return snapshot;
+                    }
+                }
+            }
+            catch { }
         }
-        const sessionId = readFileSync(lastFile, 'utf8').trim();
-        return this.load(sessionId);
+        return this.readSnapshots()
+            .sort(compareSnapshots)
+            .at(0) ?? null;
     }
     async load(sessionId) {
         return this.readSnapshot(sessionId);
@@ -40,20 +53,9 @@ export class FileSessionStore {
         if (!existsSync(this.rootDir)) {
             return [];
         }
-        const snapshots = readdirSync(this.rootDir)
-            .filter((entry) => entry.endsWith('.json'))
-            .map((entry) => {
-            const sessionId = entry.slice(0, -'.json'.length);
-            try {
-                return this.readSnapshot(sessionId);
-            }
-            catch {
-                return null;
-            }
-        })
-            .filter((snapshot) => snapshot !== null);
+        const snapshots = this.readSnapshots();
         return snapshots
-            .sort((left, right) => right.updatedAt - left.updatedAt)
+            .sort(compareSnapshots)
             .map((snapshot) => ({
             sessionId: snapshot.sessionId,
             cwd: snapshot.cwd,
@@ -136,6 +138,23 @@ export class FileSessionStore {
     ensureRoot() {
         mkdirSync(this.rootDir, { recursive: true });
     }
+    readSnapshots() {
+        if (!existsSync(this.rootDir)) {
+            return [];
+        }
+        return readdirSync(this.rootDir)
+            .filter((entry) => entry.endsWith('.json'))
+            .map((entry) => {
+            const sessionId = entry.slice(0, -'.json'.length);
+            try {
+                return this.readSnapshot(sessionId);
+            }
+            catch {
+                return null;
+            }
+        })
+            .filter((snapshot) => snapshot !== null);
+    }
 }
 export function createFileSessionStore(rootDir) {
     return new FileSessionStore(rootDir);
@@ -149,4 +168,8 @@ function getPreview(messages) {
         }
     }
     return '';
+}
+function compareSnapshots(left, right) {
+    return right.updatedAt - left.updatedAt
+        || left.sessionId.localeCompare(right.sessionId);
 }

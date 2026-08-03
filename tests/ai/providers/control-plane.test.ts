@@ -95,6 +95,9 @@ describe('resolveRuntimeModelBinding', () => {
         'x-project': 'xiaok-cli',
       },
       capabilities: ['tools', 'reasoning'],
+      // modelId 是非规范的 'openai-project'，双键匹配不中；wireModel 回退命中
+      // 目录里的 gpt-4.1 并带上其官方窗口。
+      runtimeOptions: { contextLimit: 1_047_576 },
     });
   });
 
@@ -134,7 +137,10 @@ describe('resolveRuntimeModelBinding', () => {
     });
   });
 
-  it('marks built-in DeepSeek V4 bindings as image-capable for pasted images and CUA screenshots', () => {
+  it('does not mark DeepSeek V4 bindings image-capable, since the API silently drops images', () => {
+    // 官方三处独立说明不支持图片输入；Responses API 文档还写明 `input_image`
+    // 「不会报错，但会被替换成占位文本」。标成支持 = 用户粘了图、模型没看到、
+    // 也没人告诉他，比直接不给粘更糟。
     const config: Config = {
       schemaVersion: 2,
       defaultProvider: 'deepseek',
@@ -162,7 +168,7 @@ describe('resolveRuntimeModelBinding', () => {
       modelId: 'deepseek-default',
       wireModel: 'deepseek-v4-pro',
       protocol: 'openai_legacy',
-      capabilities: ['tools', 'image_in'],
+      capabilities: ['tools', 'thinking'],
     });
   });
 
@@ -365,6 +371,106 @@ describe('resolveRuntimeModelBinding', () => {
     expect(uppercaseAdapter.harnessContext.identityFingerprint)
       .toBe(canonicalAdapter.harnessContext.identityFingerprint);
   });
+
+  it('recovers GLM catalog context limit for a modelId synthesized by Desktop', () => {
+    // Desktop 的 saveModelConfig 把 'GLM-5.2' 合成为 modelId 'glm-glm-5.2'，
+    // 与 catalog 的 'glm-5.2' 双键失配。存量配置不应因此丢掉窗口。
+    const config = createOpenAICompatibleConfig({
+      providerId: 'glm',
+      providerType: 'first_party',
+      modelId: 'glm-glm-5.2',
+      wireModel: 'GLM-5.2',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions)
+      .toEqual({ contextLimit: 1_000_000 });
+  });
+
+  it('recovers GLM catalog context limit for a modelId synthesized by the CLI', () => {
+    // CLI 的 sanitizer 把点换成连字符，得到 'glm-glm-5-2'。
+    const config = createOpenAICompatibleConfig({
+      providerId: 'glm',
+      providerType: 'first_party',
+      modelId: 'glm-glm-5-2',
+      wireModel: 'GLM-5.2',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions)
+      .toEqual({ contextLimit: 1_000_000 });
+  });
+
+  it('applies the smaller published window for GLM-4.5 instead of the 200K default', () => {
+    // GLM-4.5 官方窗口是 128K。按 200K 兜底会让压缩阈值 170K 超过真实上限。
+    const config = createOpenAICompatibleConfig({
+      providerId: 'glm',
+      providerType: 'first_party',
+      modelId: 'glm-4.5',
+      wireModel: 'glm-4.5',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions)
+      .toEqual({ contextLimit: 128_000 });
+  });
+
+  it('does not lend first-party GLM catalog metadata to a custom provider of the same id', () => {
+    // 危险反例：Desktop 允许用户自定义 provider 名，输入 "GLM" 即得到 id 'glm'。
+    // 该 provider 指向用户自建代理，真实窗口未知，绝不能继承官方 1M。
+    const config = createOpenAICompatibleConfig({
+      providerId: 'glm',
+      providerType: 'custom',
+      modelId: 'glm-glm-5.2',
+      wireModel: 'GLM-5.2',
+      baseUrl: 'https://proxy.example.com/v1',
+    });
+
+    expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
+  });
+
+  it('still honors runtime options a custom provider configured explicitly', () => {
+    // first-party 闸门只拦 catalog 查询，不能拦用户自己填的值。
+    const config = createOpenAICompatibleConfig({
+      providerId: 'glm',
+      providerType: 'custom',
+      modelId: 'glm-glm-5.2',
+      wireModel: 'GLM-5.2',
+      baseUrl: 'https://proxy.example.com/v1',
+      runtimeOptions: { contextLimit: 64_000 },
+    });
+
+    expect(resolveRuntimeModelBinding(config).runtimeOptions)
+      .toEqual({ contextLimit: 64_000 });
+  });
+
+  it.each([
+    ['k3', 'https://api.kimi.com/coding/v1', true],
+    ['k3-256k', 'https://api.kimi.com/coding/v1', true],
+    ['k3', 'https://proxy.example.com/coding/v1', false],
+    ['k3-256k', 'https://proxy.example.com/coding/v1', false],
+  ] as const)(
+    'keeps Kimi %s on %s runtime-option eligibility unchanged',
+    (wireModel, baseUrl, eligible) => {
+      const config = createOpenAICompatibleConfig({
+        providerId: 'kimi',
+        providerType: 'first_party',
+        modelId: `kimi-${wireModel}`,
+        wireModel,
+        baseUrl,
+      });
+
+      const binding = resolveRuntimeModelBinding(config);
+      if (eligible) {
+        expect(binding.runtimeOptions).toEqual({
+          contextLimit: 262_144,
+          reasoningEffort: 'high',
+        });
+      } else {
+        expect(binding).not.toHaveProperty('runtimeOptions');
+      }
+    },
+  );
 });
 
 describe('createAdapterFromBinding', () => {
@@ -400,5 +506,114 @@ describe('createAdapterFromBinding', () => {
     });
 
     expect(resolveModelCapabilities(adapter).supportsImageInput).toBe(true);
+  });
+});
+
+describe('contextLimit reaches every protocol, not just openai_legacy', () => {
+  function bind(input: {
+    providerId: string;
+    providerType?: 'first_party' | 'custom';
+    protocol: 'anthropic' | 'openai_responses';
+    wireModel: string;
+    contextLimit?: number;
+    reasoningEffort?: 'low' | 'high' | 'max';
+  }) {
+    return createAdapterFromBinding({
+      providerId: input.providerId,
+      providerType: input.providerType ?? 'first_party',
+      modelId: `${input.providerId}-under-test`,
+      wireModel: input.wireModel,
+      protocol: input.protocol,
+      apiKey: 'sk-test',
+      headers: {},
+      capabilities: ['tools'],
+      ...(input.contextLimit !== undefined || input.reasoningEffort !== undefined
+        ? {
+            runtimeOptions: {
+              ...(input.contextLimit !== undefined ? { contextLimit: input.contextLimit } : {}),
+              ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
+            },
+          }
+        : {}),
+    });
+  }
+
+  it('carries contextLimit into the anthropic protocol', () => {
+    // 之前 models.ts 的 anthropic 分支只传 modelCapabilitiesFromFlags，
+    // runtimeOptions 被整体丢弃 —— Claude 的窗口因此完全不可配。
+    const adapter = bind({
+      providerId: 'anthropic',
+      protocol: 'anthropic',
+      wireModel: 'claude-sonnet-4-6',
+      contextLimit: 1_000_000,
+    });
+
+    expect(resolveModelCapabilities(adapter).contextLimit).toBe(1_000_000);
+  });
+
+  it('carries contextLimit into the openai_responses protocol', () => {
+    const adapter = bind({
+      providerId: 'gemini',
+      protocol: 'openai_responses',
+      wireModel: 'gemini-2.5-pro',
+      contextLimit: 1_048_576,
+    });
+
+    expect(resolveModelCapabilities(adapter).contextLimit).toBe(1_048_576);
+  });
+
+  it('does not leak reasoningEffort into model capabilities', () => {
+    // reasoningEffort 是 OpenAI-compatible 的请求字段；Claude 用 thinking.type、
+    // Gemini 用别的机制，透传过去没有接收方。
+    for (const protocol of ['anthropic', 'openai_responses'] as const) {
+      const adapter = bind({
+        providerId: protocol === 'anthropic' ? 'anthropic' : 'gemini',
+        protocol,
+        wireModel: protocol === 'anthropic' ? 'claude-sonnet-4-6' : 'gemini-2.5-pro',
+        contextLimit: 500_000,
+        reasoningEffort: 'max',
+      });
+
+      expect(adapter.getCapabilities?.(), protocol).not.toHaveProperty('reasoningEffort');
+    }
+  });
+
+  it('re-resolves the window on cloneWithModel instead of carrying the previous one', () => {
+    // 关键回归：subagent 换模型时，1M 的窗口不能被带到一个未知/更小的模型上。
+    // 断言目标刻意选一个 catalog 里没有的 wireModel —— 若实现只是透传旧
+    // capabilityOverrides，这条会拿到 1_000_000 而失败。
+    for (const [providerId, protocol, wireModel] of [
+      ['anthropic', 'anthropic', 'claude-sonnet-4-6'],
+      ['gemini', 'openai_responses', 'gemini-2.5-pro'],
+    ] as const) {
+      const adapter = bind({ providerId, protocol, wireModel, contextLimit: 1_000_000 });
+      expect(resolveModelCapabilities(adapter).contextLimit, providerId).toBe(1_000_000);
+
+      const cloned = (adapter as unknown as {
+        cloneWithModel(model: string): typeof adapter;
+      }).cloneWithModel('not-in-any-catalog');
+
+      expect(resolveModelCapabilities(cloned).contextLimit, providerId).not.toBe(1_000_000);
+    }
+  });
+
+  it('does not lend catalog windows to a custom provider sharing a first-party id', () => {
+    // 与 control-plane 的 first-party 闸门同一条规则。
+    const adapter = bind({
+      providerId: 'gemini',
+      providerType: 'custom',
+      protocol: 'openai_responses',
+      wireModel: 'gemini-2.5-pro',
+      contextLimit: 700_000,
+    });
+
+    // 用户显式配置的值仍要生效
+    expect(resolveModelCapabilities(adapter).contextLimit).toBe(700_000);
+
+    // 但 clone 到别的模型时不得从官方目录借值
+    const cloned = (adapter as unknown as {
+      cloneWithModel(model: string): typeof adapter;
+    }).cloneWithModel('gemini-2.5-flash');
+    expect(resolveModelCapabilities(cloned).contextLimit).not.toBe(1_048_576);
   });
 });

@@ -1,7 +1,9 @@
 import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
+import { type AtomicWriteFile } from '../../../utils/atomic-file.js';
 export declare class FileSessionStore implements SessionStore {
     private readonly rootDir;
-    constructor(rootDir?: string);
+    private readonly atomicWrite;
+    constructor(rootDir?: string, atomicWrite?: AtomicWriteFile);
     createSessionId(): string;
     save(snapshot: PersistedSessionSnapshot): Promise<void>;
     loadLast(): Promise<PersistedSessionSnapshot | null>;
@@ -11,5 +13,6 @@ export declare class FileSessionStore implements SessionStore {
     private readSnapshot;
     private getFilePath;
     private ensureRoot;
+    private readSnapshots;
 }
 export declare function createFileSessionStore(rootDir?: string): FileSessionStore;

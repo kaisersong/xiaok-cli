@@ -111,19 +111,22 @@ export async function runInstallSteps(options) {
             }
             if (step.kind === 'npm_ci' || step.kind === 'npm_run') {
                 const npm = resolveNpmInvocation({ platform, execPath: options.execPath, env });
-                const emptyNpmrc = join(options.paths.runtimesDir, 'empty.npmrc');
+                const emptyUserNpmrc = join(options.paths.runtimesDir, 'empty-user.npmrc');
+                const emptyGlobalNpmrc = join(options.paths.runtimesDir, 'empty-global.npmrc');
                 mkdirSync(options.paths.runtimesDir, { recursive: true });
-                if (!existsSync(emptyNpmrc))
-                    writeFileSync(emptyNpmrc, '', 'utf8');
+                if (!existsSync(emptyUserNpmrc))
+                    writeFileSync(emptyUserNpmrc, '', 'utf8');
+                if (!existsSync(emptyGlobalNpmrc))
+                    writeFileSync(emptyGlobalNpmrc, '', 'utf8');
                 const configArgs = [
                     '--no-audit',
                     '--no-fund',
                     '--registry',
                     NPM_REGISTRY_URL,
                     '--userconfig',
-                    emptyNpmrc,
+                    emptyUserNpmrc,
                     '--globalconfig',
-                    emptyNpmrc,
+                    emptyGlobalNpmrc,
                 ];
                 const args = step.kind === 'npm_ci'
                     ? ['ci', '--ignore-scripts', ...configArgs]
