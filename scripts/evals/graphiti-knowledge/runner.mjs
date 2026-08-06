@@ -77,6 +77,12 @@ function provenanceEdgeUuids(response) {
     : [];
 }
 
+function provenanceNodeUuids(response) {
+  return Array.isArray(response?.nodes)
+    ? response.nodes.map((node) => node?.uuid).filter((value) => typeof value === 'string')
+    : [];
+}
+
 function discoverEpisodeMap(response, expectedSources, groupId) {
   if (!Array.isArray(response?.episodes)) throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
   const expectedByDescription = new Map(expectedSources.map((source) => [
@@ -155,13 +161,14 @@ export async function runGraphitiKnowledgeEval({
         const canaryUuid = discovered.mapping[state.canary.sourceId];
         const provenance = await invoke(() => state.client.getEpisodeProvenance([canaryUuid]));
         if ((provenance?.nodes?.length ?? 0) > 0 || (provenance?.edges?.length ?? 0) > 0) {
-          const canaryHits = normalizeFacts(await invoke(() => state.client.searchFacts({
+          const canaryHits = normalizeNodes(await invoke(() => state.client.searchNodes({
             query: state.canary.token,
-            maxFacts: 5,
+            maxNodes: 5,
           })));
+          const provenanceNodes = provenanceNodeUuids(provenance);
           const ownCanaryVisible = canaryHits.some((hit) => (
             hit.groupId === state.groupId
-            && hit.episodeUuids.includes(canaryUuid)
+            && provenanceNodes.includes(hit.nodeUuid)
             && hit.text.includes(state.canary.token)
           ));
           if (ownCanaryVisible) return;
@@ -264,12 +271,12 @@ export async function runGraphitiKnowledgeEval({
     for (const state of states) {
       for (const other of states) {
         if (other === state) continue;
-        const response = await invoke(() => state.client.searchFacts({
+        const response = await invoke(() => state.client.searchNodes({
           query: other.canary.token,
-          maxFacts: 5,
+          maxNodes: 5,
         }));
         state.crossGroupLeaks ??= [];
-        if (normalizeFacts(response).length > 0) {
+        if (normalizeNodes(response).length > 0) {
           state.crossGroupLeaks.push({ otherReplicaIndex: other.replicaIndex });
         }
       }

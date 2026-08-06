@@ -87,14 +87,6 @@ function createFakeGraphiti({
         async searchFacts({ query }: any) {
           record(audit, groupId, 'search_memory_facts', { query });
           if (query.startsWith('xiaok-canary-')) {
-            const own = data.get(groupId)!.find((source) => source.body.includes(query));
-            if (own && !hideOwnCanary) {
-              const episodeUuid = actualEpisodeUuid(groupId, own.sourceId);
-              return { facts: [{ uuid: `edge-${episodeUuid}`, fact: query, episodes: [episodeUuid], group_id: groupId }] };
-            }
-            if (crossLeak) {
-              return { facts: [{ uuid: 'leaked-edge', fact: query, episodes: ['leaked-episode'], group_id: 'another-group' }] };
-            }
             return { facts: [] };
           }
           const question = questions.find((item) => item.query === query);
@@ -115,6 +107,16 @@ function createFakeGraphiti({
         },
         async searchNodes({ query }: any) {
           record(audit, groupId, 'search_nodes', { query });
+          if (query.startsWith('xiaok-canary-')) {
+            const own = data.get(groupId)!.find((source) => source.body.includes(query));
+            if (own && !hideOwnCanary) {
+              const episodeUuid = actualEpisodeUuid(groupId, own.sourceId);
+              return { nodes: [{ uuid: `node-${episodeUuid}`, name: query, summary: 'READY', group_id: groupId }] };
+            }
+            if (crossLeak) {
+              return { nodes: [{ uuid: 'leaked-node', name: query, summary: 'READY', group_id: 'another-group' }] };
+            }
+          }
           return { nodes: [] };
         },
         async close() {
