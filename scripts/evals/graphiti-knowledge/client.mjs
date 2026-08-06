@@ -129,6 +129,7 @@ function normalizeToolResult(result) {
     }
   }
   value ??= {};
+  if (Object.keys(value).length === 1 && isRecord(value.result)) value = value.result;
   if (typeof value.error === 'string' && value.error) throw new Error('GRAPHITI_EVAL_TOOL_RESPONSE_ERROR');
   return value;
 }

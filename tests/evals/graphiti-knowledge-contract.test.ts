@@ -248,14 +248,16 @@ describe('Graphiti MCP capability and mutation boundary', () => {
         async callTool(call: any) {
           calls.push(call);
           if (call.name === 'get_status') return { structuredContent: { status: 'ok', message: 'ready' } };
-          if (call.name === 'get_episodes') return { structuredContent: { episodes: [] } };
+          if (call.name === 'get_episodes') {
+            return { structuredContent: { result: { episodes: [{ uuid: 'server-assigned' }] } } };
+          }
           return { structuredContent: { message: 'ok' } };
         },
         async close() {},
       }),
     });
 
-    await client.listEpisodes(20);
+    const result = await client.listEpisodes(20);
 
     expect(calls.at(-1)).toEqual({
       name: 'get_episodes',
@@ -264,6 +266,7 @@ describe('Graphiti MCP capability and mutation boundary', () => {
         max_episodes: 20,
       },
     });
+    expect(result).toEqual({ episodes: [{ uuid: 'server-assigned' }] });
     await client.close();
   });
 
