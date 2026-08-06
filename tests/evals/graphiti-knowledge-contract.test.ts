@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -358,6 +359,22 @@ describe('Graphiti MCP capability and mutation boundary', () => {
 });
 
 describe('Graphiti CLI preflight and evidence', () => {
+  it('keeps repeated process interrupts captured until evidence cleanup', async () => {
+    const { installInterruptHandlers } = await loadRunModule();
+    const processRef = new EventEmitter();
+    const controller = new AbortController();
+    const dispose = installInterruptHandlers({ controller, processRef });
+
+    processRef.emit('SIGINT');
+    processRef.emit('SIGINT');
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(processRef.listenerCount('SIGINT')).toBe(1);
+    dispose();
+    expect(processRef.listenerCount('SIGINT')).toBe(0);
+    expect(processRef.listenerCount('SIGTERM')).toBe(0);
+  });
+
   it('preflights capabilities without ingesting an episode', async () => {
     const { runGraphitiPreflight } = await loadRunModule();
     const calls: string[] = [];

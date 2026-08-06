@@ -58,6 +58,16 @@ function readGitHead(cwd) {
   }
 }
 
+export function installInterruptHandlers({ controller, processRef = process }) {
+  const interrupt = () => controller.abort();
+  processRef.on('SIGINT', interrupt);
+  processRef.on('SIGTERM', interrupt);
+  return () => {
+    processRef.removeListener('SIGINT', interrupt);
+    processRef.removeListener('SIGTERM', interrupt);
+  };
+}
+
 async function main() {
   const config = resolveEvalConfig({
     env: process.env,
@@ -71,9 +81,7 @@ async function main() {
   }
 
   const controller = new AbortController();
-  const interrupt = () => controller.abort();
-  process.once('SIGINT', interrupt);
-  process.once('SIGTERM', interrupt);
+  const disposeInterruptHandlers = installInterruptHandlers({ controller });
   let report;
   let evidence;
   try {
@@ -110,8 +118,7 @@ async function main() {
       },
     });
   } finally {
-    process.removeListener('SIGINT', interrupt);
-    process.removeListener('SIGTERM', interrupt);
+    disposeInterruptHandlers();
   }
   console.log(JSON.stringify({
     recommendation: report.qualification.recommendation,
