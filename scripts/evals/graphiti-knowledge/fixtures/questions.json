@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "questions": [
+    { "id": "alias-01", "category": "alias", "query": "Project Starbridge 中文 名称", "expectedAnyTerms": ["星桥计划"], "expectedSourceIds": ["syn-alias-person-project"], "topK": 10 },
+    { "id": "alias-02", "category": "alias", "query": "星桥计划 英文 代号", "expectedAnyTerms": ["Project Starbridge", "Starbridge"], "expectedSourceIds": ["syn-alias-person-project"], "topK": 10 },
+    { "id": "alias-03", "category": "alias", "query": "阿澄 全名", "expectedAnyTerms": ["林澄"], "expectedSourceIds": ["syn-alias-person-project"], "topK": 10 },
+    { "id": "alias-04", "category": "alias", "query": "远岚研究院 林澄 参与 项目", "expectedAnyTerms": ["星桥计划"], "expectedSourceIds": ["syn-alias-person-project", "syn-project-owner"], "topK": 10 },
+    { "id": "alias-05", "category": "alias", "query": "Aurora Gateway 中文 名称", "expectedAnyTerms": ["曙光网关"], "expectedSourceIds": ["syn-project-dependency"], "topK": 10 },
+    { "id": "alias-06", "category": "alias", "query": "Polaris Identity Service 中文 名称", "expectedAnyTerms": ["北极星身份服务"], "expectedSourceIds": ["syn-gateway-dependency"], "topK": 10 },
+
+    { "id": "multi-01", "category": "multi_hop", "query": "星桥计划 最终 依赖 身份 服务", "expectedAnyTerms": ["北极星身份服务", "Polaris Identity Service"], "expectedSourceIds": ["syn-project-dependency", "syn-gateway-dependency"], "topK": 10 },
+    { "id": "multi-02", "category": "multi_hop", "query": "远岚研究院 项目 依赖 网关", "expectedAnyTerms": ["曙光网关", "Aurora Gateway"], "expectedSourceIds": ["syn-project-owner", "syn-project-dependency"], "topK": 10 },
+    { "id": "multi-03", "category": "multi_hop", "query": "林澄 负责 项目 依赖 组件", "expectedAnyTerms": ["曙光网关", "Aurora Gateway"], "expectedSourceIds": ["syn-lead-january", "syn-project-dependency"], "topK": 10 },
+    { "id": "multi-04", "category": "multi_hop", "query": "曙光网关 身份 校验 依赖 什么", "expectedAnyTerms": ["北极星身份服务", "Polaris Identity Service"], "expectedSourceIds": ["syn-gateway-dependency"], "topK": 10 },
+    { "id": "multi-05", "category": "multi_hop", "query": "离线模式 从 提议 到 接受", "expectedAnyTerms": ["架构委员会", "接受"], "expectedSourceIds": ["syn-offline-proposal", "syn-offline-decision"], "topK": 10 },
+    { "id": "multi-06", "category": "multi_hop", "query": "Project Starbridge 所属 机构 发起", "expectedAnyTerms": ["远岚研究院"], "expectedSourceIds": ["syn-alias-person-project", "syn-project-owner"], "topK": 10 },
+
+    { "id": "temporal-01", "category": "temporal", "query": "2025年2月 星桥计划 负责人", "expectedAnyTerms": ["林澄"], "expectedSourceIds": ["syn-lead-january"], "topK": 10, "validAt": "2025-02-01T00:00:00Z" },
+    { "id": "temporal-02", "category": "temporal", "query": "2025年7月 星桥计划 负责人", "expectedAnyTerms": ["周野"], "expectedSourceIds": ["syn-lead-june"], "topK": 10, "validAt": "2025-07-01T00:00:00Z" },
+    { "id": "temporal-03", "category": "temporal", "query": "2025年5月 星桥计划 负责人", "expectedAnyTerms": ["林澄"], "expectedSourceIds": ["syn-lead-january"], "topK": 10, "validAt": "2025-05-01T00:00:00Z" },
+    { "id": "temporal-04", "category": "temporal", "query": "2025年6月20日 星桥计划 负责人", "expectedAnyTerms": ["周野"], "expectedSourceIds": ["syn-lead-june"], "topK": 10, "validAt": "2025-06-20T00:00:00Z" },
+    { "id": "temporal-05", "category": "temporal", "query": "2025年3月10日 离线模式 状态", "expectedAnyTerms": ["提议", "尚未批准"], "expectedSourceIds": ["syn-offline-proposal"], "topK": 10, "validAt": "2025-03-10T00:00:00Z" },
+    { "id": "temporal-06", "category": "temporal", "query": "2025年3月25日 离线模式 状态", "expectedAnyTerms": ["接受", "列入下一版本"], "expectedSourceIds": ["syn-offline-decision"], "topK": 10, "validAt": "2025-03-25T00:00:00Z" },
+
+    { "id": "provenance-01", "category": "provenance", "query": "Project Starbridge 别名 来源", "expectedAnyTerms": ["星桥计划"], "expectedSourceIds": ["syn-alias-person-project"], "topK": 10 },
+    { "id": "provenance-02", "category": "provenance", "query": "负责人 变更 周野 来源", "expectedAnyTerms": ["周野"], "expectedSourceIds": ["syn-lead-june"], "topK": 10 },
+    { "id": "provenance-03", "category": "provenance", "query": "星桥计划 依赖 曙光网关 来源", "expectedAnyTerms": ["曙光网关"], "expectedSourceIds": ["syn-project-dependency"], "topK": 10 },
+    { "id": "provenance-04", "category": "provenance", "query": "北极星身份服务 依赖 链 来源", "expectedAnyTerms": ["北极星身份服务"], "expectedSourceIds": ["syn-project-dependency", "syn-gateway-dependency"], "topK": 10 },
+    { "id": "provenance-05", "category": "provenance", "query": "离线模式 接受 决策 来源", "expectedAnyTerms": ["接受"], "expectedSourceIds": ["syn-offline-proposal", "syn-offline-decision"], "topK": 10 },
+    { "id": "provenance-06", "category": "provenance", "query": "首发 华东一区 双重 来源", "expectedAnyTerms": ["华东一区"], "expectedSourceIds": ["syn-region-report", "syn-region-decision"], "topK": 10 },
+
+    { "id": "control-01", "category": "control", "query": "青羽终端 外壳颜色 雾蓝色", "expectedAnyTerms": ["雾蓝色"], "expectedSourceIds": ["syn-control-manual"], "topK": 10 },
+    { "id": "control-02", "category": "control", "query": "青羽终端 管理端口 7443", "expectedAnyTerms": ["7443"], "expectedSourceIds": ["syn-control-manual"], "topK": 10 },
+    { "id": "control-03", "category": "control", "query": "青羽终端 默认日志级别 info", "expectedAnyTerms": ["info"], "expectedSourceIds": ["syn-control-manual"], "topK": 10 },
+    { "id": "control-04", "category": "control", "query": "青羽终端 净重 2.4千克", "expectedAnyTerms": ["2.4千克"], "expectedSourceIds": ["syn-control-manual"], "topK": 10 },
+    { "id": "control-05", "category": "control", "query": "青羽终端 保修期 三年", "expectedAnyTerms": ["三年"], "expectedSourceIds": ["syn-control-manual"], "topK": 10 },
+    { "id": "control-06", "category": "control", "query": "青羽终端 状态灯 绿色 正常", "expectedAnyTerms": ["绿色", "运行正常"], "expectedSourceIds": ["syn-control-manual"], "topK": 10 }
+  ]
+}
