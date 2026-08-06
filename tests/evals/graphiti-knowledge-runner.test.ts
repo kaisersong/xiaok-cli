@@ -7,6 +7,10 @@ let runGraphitiKnowledgeEval: any;
 let corpus: any[];
 let questions: any[];
 
+function isCanaryQuery(query: string) {
+  return /^XKCANARY[A-F0-9]{12}$/.test(query);
+}
+
 beforeAll(async () => {
   const runner = await import(pathToFileURL(join(evalRoot, 'runner.mjs')).href);
   const contracts = await import(pathToFileURL(join(evalRoot, 'contracts.mjs')).href);
@@ -87,7 +91,7 @@ function createFakeGraphiti({
         },
         async searchFacts({ query }: any) {
           record(audit, groupId, 'search_memory_facts', { query });
-          if (query.startsWith('xiaok-canary-')) {
+          if (isCanaryQuery(query)) {
             return { facts: [] };
           }
           const question = questions.find((item) => item.query === query);
@@ -108,7 +112,7 @@ function createFakeGraphiti({
         },
         async searchNodes({ query }: any) {
           record(audit, groupId, 'search_nodes', { query });
-          if (query.startsWith('xiaok-canary-')) {
+          if (isCanaryQuery(query)) {
             const own = data.get(groupId)!.find((source) => source.body.includes(query));
             if (own && !hideOwnCanary) {
               const episodeUuid = actualEpisodeUuid(groupId, own.sourceId);
@@ -180,7 +184,7 @@ describe('Graphiti knowledge evaluation runner', () => {
 
     for (const groupId of fake.groups()) {
       const groupCalls = fake.calls.filter((call) => call.groupId === groupId);
-      const firstScoredSearch = groupCalls.findIndex((call) => call.tool === 'search_memory_facts' && !call.args.query.startsWith('xiaok-canary-'));
+      const firstScoredSearch = groupCalls.findIndex((call) => call.tool === 'search_memory_facts' && !isCanaryQuery(call.args.query));
       const provenanceBeforeSearch = groupCalls
         .slice(0, firstScoredSearch)
         .filter((call) => call.tool === 'get_episode_entities');
@@ -199,7 +203,7 @@ describe('Graphiti knowledge evaluation runner', () => {
       .filter((call) => (
         call.groupId === 'xiaok-g0-20260806-fixed-r1'
         && call.tool === 'search_memory_facts'
-        && !call.args.query.startsWith('xiaok-canary-')
+        && !isCanaryQuery(call.args.query)
       ));
 
     expect(firstGroupScoredSearches).toHaveLength(30);
@@ -296,7 +300,7 @@ describe('Graphiti knowledge evaluation runner', () => {
 
     const canaryAdds = fake.calls.filter((call) => call.tool === 'add_memory' && call.args.sourceId.startsWith('syn-canary-'));
     expect(canaryAdds).toHaveLength(3);
-    expect(canaryAdds.every((call) => /^IsolationProbe xiaok-canary-.+ HAS_STATUS READY\./.test(call.args.body)))
+    expect(canaryAdds.every((call) => /^IsolationProbe XKCANARY[A-F0-9]{12} HAS_STATUS READY\./.test(call.args.body)))
       .toBe(true);
   });
 });

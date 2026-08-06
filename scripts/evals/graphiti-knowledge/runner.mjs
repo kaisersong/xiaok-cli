@@ -27,7 +27,7 @@ function errorCode(error) {
 function createCanarySource(runId, replicaIndex) {
   const digest = createHash('sha256').update(`${runId}:${replicaIndex}`, 'utf8').digest('hex');
   const episodeUuid = `ca00000${replicaIndex}-0000-4000-8000-${digest.slice(0, 12)}`;
-  const token = `xiaok-canary-${runId}-r${replicaIndex}-${digest.slice(12, 20)}`;
+  const token = `XKCANARY${digest.slice(0, 12).toUpperCase()}`;
   return Object.freeze({
     sourceId: `syn-canary-r${replicaIndex}`,
     episodeUuid,
