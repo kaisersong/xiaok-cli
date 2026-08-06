@@ -186,6 +186,55 @@ export async function runGraphitiKnowledgeEval({
     }
   }
 
+  async function scoreState(state) {
+    const sourceEpisodeMap = state.sourceEpisodeMap;
+    if (!sourceEpisodeMap) throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
+    for (const question of questions) {
+      const baselineHits = runSubstringBaseline({
+        sources: corpus,
+        query: question.query,
+        topK: question.topK,
+        segment,
+      });
+      state.baselineScores.push(scoreQuestion(question, baselineHits, {
+        mode: 'baseline',
+        sourceEpisodeMap,
+      }));
+
+      const factResponse = await invoke(() => state.client.searchFacts({
+        query: question.query,
+        maxFacts: question.topK,
+      }));
+      const graphHits = normalizeFacts(factResponse);
+      if (question.category === 'alias') {
+        const nodeResponse = await invoke(() => state.client.searchNodes({
+          query: question.query,
+          maxNodes: question.topK,
+        }));
+        graphHits.push(...normalizeNodes(nodeResponse));
+      }
+      const groupMismatches = graphHits.filter((hit) => hit.groupId !== state.groupId);
+      if (groupMismatches.length > 0) {
+        state.crossGroupLeaks ??= [];
+        state.crossGroupLeaks.push({
+          questionId: question.id,
+          mismatchCount: groupMismatches.length,
+        });
+      }
+      if (question.category === 'provenance') {
+        const episodeUuids = question.expectedSourceIds.map((sourceId) => sourceEpisodeMap[sourceId]);
+        const provenance = await invoke(() => state.client.getEpisodeProvenance(episodeUuids));
+        const edgeUuids = provenanceEdgeUuids(provenance);
+        for (const hit of graphHits) hit.provenanceEdgeUuids = edgeUuids;
+      }
+      state.graphScores.push(scoreQuestion(question, graphHits, {
+        mode: 'graph',
+        sourceEpisodeMap,
+      }));
+    }
+    state.completed = true;
+  }
+
   try {
     for (let replicaIndex = 1; replicaIndex <= replicaCount; replicaIndex += 1) {
       assertBudget();
@@ -219,55 +268,7 @@ export async function runGraphitiKnowledgeEval({
       }
       if (ingestFailures > 0) throw new Error('GRAPHITI_EVAL_INGESTION_FAILED');
       await waitUntilReady(state);
-    }
-
-    for (const state of states) {
-      const sourceEpisodeMap = state.sourceEpisodeMap;
-      if (!sourceEpisodeMap) throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
-      for (const question of questions) {
-        const baselineHits = runSubstringBaseline({
-          sources: corpus,
-          query: question.query,
-          topK: question.topK,
-          segment,
-        });
-        state.baselineScores.push(scoreQuestion(question, baselineHits, {
-          mode: 'baseline',
-          sourceEpisodeMap,
-        }));
-
-        const factResponse = await invoke(() => state.client.searchFacts({
-          query: question.query,
-          maxFacts: question.topK,
-        }));
-        const graphHits = normalizeFacts(factResponse);
-        if (question.category === 'alias') {
-          const nodeResponse = await invoke(() => state.client.searchNodes({
-            query: question.query,
-            maxNodes: question.topK,
-          }));
-          graphHits.push(...normalizeNodes(nodeResponse));
-        }
-        const groupMismatches = graphHits.filter((hit) => hit.groupId !== state.groupId);
-        if (groupMismatches.length > 0) {
-          state.crossGroupLeaks ??= [];
-          state.crossGroupLeaks.push({
-            questionId: question.id,
-            mismatchCount: groupMismatches.length,
-          });
-        }
-        if (question.category === 'provenance') {
-          const episodeUuids = question.expectedSourceIds.map((sourceId) => sourceEpisodeMap[sourceId]);
-          const provenance = await invoke(() => state.client.getEpisodeProvenance(episodeUuids));
-          const edgeUuids = provenanceEdgeUuids(provenance);
-          for (const hit of graphHits) hit.provenanceEdgeUuids = edgeUuids;
-        }
-        state.graphScores.push(scoreQuestion(question, graphHits, {
-          mode: 'graph',
-          sourceEpisodeMap,
-        }));
-      }
-      state.completed = true;
+      await scoreState(state);
     }
 
     for (const state of states) {

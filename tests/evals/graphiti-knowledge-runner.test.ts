@@ -188,6 +188,23 @@ describe('Graphiti knowledge evaluation runner', () => {
     }
   });
 
+  it('finishes each replica scoring before ingestion switches the shared driver group', async () => {
+    const fake = createFakeGraphiti();
+    await runGraphitiKnowledgeEval(options(fake));
+    const secondGroupAdd = fake.calls.findIndex((call) => (
+      call.groupId === 'xiaok-g0-20260806-fixed-r2' && call.tool === 'add_memory'
+    ));
+    const firstGroupScoredSearches = fake.calls
+      .slice(0, secondGroupAdd)
+      .filter((call) => (
+        call.groupId === 'xiaok-g0-20260806-fixed-r1'
+        && call.tool === 'search_memory_facts'
+        && !call.args.query.startsWith('xiaok-canary-')
+      ));
+
+    expect(firstGroupScoredSearches).toHaveLength(30);
+  });
+
   it('keeps polling at the capped interval for a slow sequential ingestion queue', async () => {
     const fake = createFakeGraphiti({ episodesReadyAfter: 25 });
     const report = await runGraphitiKnowledgeEval(options(fake));
