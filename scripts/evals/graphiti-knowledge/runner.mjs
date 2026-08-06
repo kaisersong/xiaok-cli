@@ -117,6 +117,7 @@ export async function runGraphitiKnowledgeEval({
   sleep = sleepDefault,
   now = Date.now,
   budgets = {},
+  signal,
 }) {
   validateFixturePair(corpus, questions);
   const maxWallMs = budgets.maxWallMs ?? 600_000;
@@ -135,6 +136,7 @@ export async function runGraphitiKnowledgeEval({
   }
 
   function assertBudget() {
+    if (signal?.aborted) throw new Error('GRAPHITI_EVAL_INTERRUPTED');
     if (callCount >= maxCalls) throw new Error('GRAPHITI_EVAL_CALL_BUDGET_EXHAUSTED');
     if (now() - startedAtMs >= maxWallMs) throw new Error('GRAPHITI_EVAL_WALL_BUDGET_EXHAUSTED');
   }

@@ -70,37 +70,49 @@ async function main() {
     return;
   }
 
-  const [corpus, questions, segmentModule] = await Promise.all([
-    loadCorpus(corpusPath),
-    loadQuestions(questionsPath),
-    import('../../../src/ai/memory/segment.js'),
-  ]);
-  const report = await runGraphitiKnowledgeEval({
-    runId: config.runId,
-    replicaCount: config.replicas,
-    endpoint: config.endpoint,
-    authHeader: config.authHeader,
-    corpus,
-    questions,
-    segment: segmentModule.segmentQuery,
-    budgets: {
-      maxWallMs: config.maxWallMs,
-      maxCalls: config.maxCalls,
-      maxIngestFailures: config.maxIngestFailures,
-    },
-  });
-  const evidence = await writeEvidenceBundle({
-    config,
-    report,
-    manifestBase: {
-      gitHead: readGitHead(process.cwd()),
-      nodeVersion: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      corpusSha256: await sha256File(corpusPath),
-      questionsSha256: await sha256File(questionsPath),
-    },
-  });
+  const controller = new AbortController();
+  const interrupt = () => controller.abort();
+  process.once('SIGINT', interrupt);
+  process.once('SIGTERM', interrupt);
+  let report;
+  let evidence;
+  try {
+    const [corpus, questions, segmentModule] = await Promise.all([
+      loadCorpus(corpusPath),
+      loadQuestions(questionsPath),
+      import('../../../src/ai/memory/segment.js'),
+    ]);
+    report = await runGraphitiKnowledgeEval({
+      runId: config.runId,
+      replicaCount: config.replicas,
+      endpoint: config.endpoint,
+      authHeader: config.authHeader,
+      corpus,
+      questions,
+      segment: segmentModule.segmentQuery,
+      budgets: {
+        maxWallMs: config.maxWallMs,
+        maxCalls: config.maxCalls,
+        maxIngestFailures: config.maxIngestFailures,
+      },
+      signal: controller.signal,
+    });
+    evidence = await writeEvidenceBundle({
+      config,
+      report,
+      manifestBase: {
+        gitHead: readGitHead(process.cwd()),
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        corpusSha256: await sha256File(corpusPath),
+        questionsSha256: await sha256File(questionsPath),
+      },
+    });
+  } finally {
+    process.removeListener('SIGINT', interrupt);
+    process.removeListener('SIGTERM', interrupt);
+  }
   console.log(JSON.stringify({
     recommendation: report.qualification.recommendation,
     runId: report.runId,

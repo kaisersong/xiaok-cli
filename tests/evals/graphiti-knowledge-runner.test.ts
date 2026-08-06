@@ -218,6 +218,17 @@ describe('Graphiti knowledge evaluation runner', () => {
     expect(fake.calls.filter((call) => call.tool !== 'close').length).toBeLessThanOrEqual(5);
   });
 
+  it('returns an evidence-ready INCOMPLETE report when interrupted', async () => {
+    const fake = createFakeGraphiti();
+    const controller = new AbortController();
+    controller.abort();
+    const report = await runGraphitiKnowledgeEval(options(fake, { signal: controller.signal }));
+
+    expect(report.qualification).toMatchObject({ recommendation: 'INCOMPLETE' });
+    expect(report.failureCode).toBe('GRAPHITI_EVAL_INTERRUPTED');
+    expect(fake.calls).toEqual([]);
+  });
+
   it.each([
     ['missing', { missingEpisode: true }],
     ['duplicate', { duplicateEpisode: true }],
