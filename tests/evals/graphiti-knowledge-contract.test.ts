@@ -272,6 +272,34 @@ describe('Graphiti MCP capability and mutation boundary', () => {
     await client.close();
   });
 
+  it('routes searches through the FalkorDB single-group compatibility path', async () => {
+    const { createGuardedGraphitiClient } = await loadClient();
+    const calls: any[] = [];
+    const client = await createGuardedGraphitiClient({
+      endpoint: 'https://graph.example.test/mcp/',
+      groupId: 'xiaok-g0-20260806-fixed-r1',
+      connect: async () => ({
+        async listTools() { return { tools: graphitiSchemas() }; },
+        async callTool(call: any) {
+          calls.push(call);
+          return call.name === 'get_status'
+            ? { structuredContent: { status: 'ok', message: 'ready' } }
+            : { structuredContent: {} };
+        },
+        async close() {},
+      }),
+    });
+
+    await client.searchNodes({ query: 'node' });
+    await client.searchFacts({ query: 'fact' });
+
+    expect(calls.slice(-2).map((call) => call.arguments.group_ids)).toEqual([
+      ['xiaok-g0-20260806-fixed-r1', 'xiaok-g0-20260806-fixed-r1'],
+      ['xiaok-g0-20260806-fixed-r1', 'xiaok-g0-20260806-fixed-r1'],
+    ]);
+    await client.close();
+  });
+
   it('writes a redacted audit record without auth or episode body', async () => {
     const { createGuardedGraphitiClient } = await loadClient();
     const audit: any[] = [];

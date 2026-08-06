@@ -138,6 +138,15 @@ function hashText(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+function searchGroupArgument(parameter, groupId) {
+  if (parameter === 'group_id') return groupId;
+  // graphiti-core 0.29.2 only switches a FalkorDB search to the requested graph
+  // when the group_ids list has more than one entry. Repeating the same opaque
+  // group is set-equivalent for fixed and non-FalkorDB servers, while activating
+  // the correct graph clone on the affected release.
+  return [groupId, groupId];
+}
+
 export async function createGuardedGraphitiClient({
   endpoint,
   authHeader,
@@ -211,14 +220,14 @@ export async function createGuardedGraphitiClient({
       async searchNodes({ query, maxNodes = 10 }) {
         return call('search_nodes', {
           query,
-          [capabilities.nodeGroupParameter]: capabilities.nodeGroupParameter === 'group_ids' ? [groupId] : groupId,
+          [capabilities.nodeGroupParameter]: searchGroupArgument(capabilities.nodeGroupParameter, groupId),
           max_nodes: maxNodes,
         });
       },
       async searchFacts({ query, maxFacts = 10 }) {
         return call('search_memory_facts', {
           query,
-          [capabilities.factGroupParameter]: capabilities.factGroupParameter === 'group_ids' ? [groupId] : groupId,
+          [capabilities.factGroupParameter]: searchGroupArgument(capabilities.factGroupParameter, groupId),
           max_facts: maxFacts,
         });
       },
