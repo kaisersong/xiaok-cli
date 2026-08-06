@@ -124,6 +124,20 @@ describe('Graphiti knowledge evaluation runner', () => {
       .toBe(false);
   });
 
+  it('preserves each replica capability snapshot for evidence', async () => {
+    const fake = createFakeGraphiti();
+    const report = await runGraphitiKnowledgeEval(options(fake));
+
+    expect(report.replicas).toHaveLength(3);
+    for (const replica of report.replicas) {
+      expect(replica.capabilities).toEqual({
+        advertisedToolNames: ['add_memory', 'get_episode_entities', 'get_status', 'search_memory_facts', 'search_nodes'],
+        rejectedTools: [],
+      });
+      expect(replica.initialStatus).toEqual({ status: 'ok', message: 'ready' });
+    }
+  });
+
   it('waits for the last canary provenance before issuing scored queries', async () => {
     const fake = createFakeGraphiti({ readyAfter: 3 });
     await runGraphitiKnowledgeEval(options(fake));

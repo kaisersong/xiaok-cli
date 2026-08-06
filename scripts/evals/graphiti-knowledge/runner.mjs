@@ -231,6 +231,8 @@ export async function runGraphitiKnowledgeEval({
   const replicas = states.map((state) => ({
     replicaIndex: state.replicaIndex,
     groupId: state.groupId,
+    capabilities: state.client?.capabilities,
+    initialStatus: state.client?.initialStatus,
     canaryTokenSha256: createHash('sha256').update(state.canary.token, 'utf8').digest('hex'),
     crossGroupLeaks: state.crossGroupLeaks ?? [],
     baselineScores: state.baselineScores,
