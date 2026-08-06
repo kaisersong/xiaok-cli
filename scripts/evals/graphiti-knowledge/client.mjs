@@ -5,6 +5,7 @@ const REQUIRED_TOOLS = Object.freeze([
   'add_memory',
   'search_nodes',
   'search_memory_facts',
+  'get_episodes',
   'get_episode_entities',
   'get_status',
 ]);
@@ -48,6 +49,8 @@ export function negotiateCapabilities(tools) {
   requireProperties(nodeProperties, ['query', 'max_nodes'], 'search_nodes');
   const factProperties = schemaProperties(byName.get('search_memory_facts'), 'search_memory_facts');
   requireProperties(factProperties, ['query', 'max_facts'], 'search_memory_facts');
+  const episodeProperties = schemaProperties(byName.get('get_episodes'), 'get_episodes');
+  requireProperties(episodeProperties, ['group_ids', 'max_episodes'], 'get_episodes');
   const provenanceProperties = schemaProperties(byName.get('get_episode_entities'), 'get_episode_entities');
   requireProperties(provenanceProperties, ['episode_uuids'], 'get_episode_entities');
   schemaProperties(byName.get('get_status'), 'get_status');
@@ -194,9 +197,14 @@ export async function createGuardedGraphitiClient({
           group_id: groupId,
           source: 'text',
           source_description: `xiaok synthetic source ${source.sourceId}`,
-          uuid: source.episodeUuid,
           reference_time: source.referenceTime,
           update_communities: false,
+        });
+      },
+      async listEpisodes(maxEpisodes) {
+        return call('get_episodes', {
+          group_ids: [groupId],
+          max_episodes: maxEpisodes,
         });
       },
       async searchNodes({ query, maxNodes = 10 }) {

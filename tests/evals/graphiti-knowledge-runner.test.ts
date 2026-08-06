@@ -15,11 +15,22 @@ beforeAll(async () => {
   questions = await contracts.loadQuestions(join(evalRoot, 'fixtures', 'questions.json'));
 });
 
-function createFakeGraphiti({ readyAfter = 1, crossLeak = false, wrongGroupFacts = false } = {}) {
+function createFakeGraphiti({
+  readyAfter = 1,
+  crossLeak = false,
+  wrongGroupFacts = false,
+  missingEpisode = false,
+  duplicateEpisode = false,
+  wrongGroupEpisodes = false,
+} = {}) {
   const calls: any[] = [];
   const data = new Map<string, any[]>();
   const provenancePolls = new Map<string, number>();
   const sourceById = new Map(corpus.map((source) => [source.sourceId, source]));
+
+  function actualEpisodeUuid(groupId: string, sourceId: string) {
+    return `actual-${groupId}-${sourceId}`;
+  }
 
   function record(audit: (record: any) => void, groupId: string, tool: string, args: any = {}) {
     const call = { groupId, tool, args };
@@ -35,16 +46,28 @@ function createFakeGraphiti({ readyAfter = 1, crossLeak = false, wrongGroupFacts
       data.set(groupId, []);
       record(audit, groupId, 'get_status');
       return {
-        capabilities: { advertisedToolNames: ['add_memory', 'get_episode_entities', 'get_status', 'search_memory_facts', 'search_nodes'], rejectedTools: [] },
+        capabilities: { advertisedToolNames: ['add_memory', 'get_episode_entities', 'get_episodes', 'get_status', 'search_memory_facts', 'search_nodes'], rejectedTools: [] },
         initialStatus: { status: 'ok', message: 'ready' },
         async addEpisode(source: any) {
           record(audit, groupId, 'add_memory', { sourceId: source.sourceId });
           data.get(groupId)!.push(source);
           return { message: 'queued' };
         },
+        async listEpisodes() {
+          record(audit, groupId, 'get_episodes', {});
+          const episodes = data.get(groupId)!
+            .filter((source) => !(missingEpisode && source.sourceId === corpus[0].sourceId))
+            .map((source) => ({
+              uuid: actualEpisodeUuid(groupId, source.sourceId),
+              source_description: `xiaok synthetic source ${source.sourceId}`,
+              group_id: wrongGroupEpisodes ? 'unexpected-group' : groupId,
+            }));
+          if (duplicateEpisode && episodes[0]) episodes.push({ ...episodes[0], uuid: `${episodes[0].uuid}-duplicate` });
+          return { episodes };
+        },
         async getEpisodeProvenance(episodeUuids: string[]) {
           record(audit, groupId, 'get_episode_entities', { episodeUuids });
-          const isCanary = episodeUuids.some((uuid) => uuid.startsWith('ca'));
+          const isCanary = episodeUuids.some((uuid) => uuid.includes('syn-canary-'));
           if (isCanary) {
             const count = (provenancePolls.get(groupId) ?? 0) + 1;
             provenancePolls.set(groupId, count);
@@ -60,7 +83,8 @@ function createFakeGraphiti({ readyAfter = 1, crossLeak = false, wrongGroupFacts
           if (query.startsWith('xiaok-canary-')) {
             const own = data.get(groupId)!.find((source) => source.body.includes(query));
             if (own) {
-              return { facts: [{ uuid: `edge-${own.episodeUuid}`, fact: query, episodes: [own.episodeUuid], group_id: groupId }] };
+              const episodeUuid = actualEpisodeUuid(groupId, own.sourceId);
+              return { facts: [{ uuid: `edge-${episodeUuid}`, fact: query, episodes: [episodeUuid], group_id: groupId }] };
             }
             if (crossLeak) {
               return { facts: [{ uuid: 'leaked-edge', fact: query, episodes: ['leaked-episode'], group_id: 'another-group' }] };
@@ -73,9 +97,9 @@ function createFakeGraphiti({ readyAfter = 1, crossLeak = false, wrongGroupFacts
             facts: question.expectedSourceIds.map((sourceId: string) => {
               const source = sourceById.get(sourceId)!;
               return {
-                uuid: `edge-${source.episodeUuid}`,
+                uuid: `edge-${actualEpisodeUuid(groupId, source.sourceId)}`,
                 fact: `${question.expectedAnyTerms[0]} ${question.query}`,
-                episodes: [source.episodeUuid],
+                episodes: [actualEpisodeUuid(groupId, source.sourceId)],
                 group_id: wrongGroupFacts ? 'unexpected-group' : groupId,
                 valid_at: '2020-01-01T00:00:00Z',
                 invalid_at: null,
@@ -131,7 +155,7 @@ describe('Graphiti knowledge evaluation runner', () => {
     expect(report.replicas).toHaveLength(3);
     for (const replica of report.replicas) {
       expect(replica.capabilities).toEqual({
-        advertisedToolNames: ['add_memory', 'get_episode_entities', 'get_status', 'search_memory_facts', 'search_nodes'],
+        advertisedToolNames: ['add_memory', 'get_episode_entities', 'get_episodes', 'get_status', 'search_memory_facts', 'search_nodes'],
         rejectedTools: [],
       });
       expect(replica.initialStatus).toEqual({ status: 'ok', message: 'ready' });
@@ -161,6 +185,18 @@ describe('Graphiti knowledge evaluation runner', () => {
     expect(report.qualification).toMatchObject({ recommendation: 'INCOMPLETE' });
     expect(report.failureCode).toBe('GRAPHITI_EVAL_CALL_BUDGET_EXHAUSTED');
     expect(fake.calls.filter((call) => call.tool !== 'close').length).toBeLessThanOrEqual(5);
+  });
+
+  it.each([
+    ['missing', { missingEpisode: true }],
+    ['duplicate', { duplicateEpisode: true }],
+    ['cross-group', { wrongGroupEpisodes: true }],
+  ])('fails closed when discovered episode identities are %s', async (_name, fakeOptions) => {
+    const fake = createFakeGraphiti(fakeOptions);
+    const report = await runGraphitiKnowledgeEval(options(fake));
+
+    expect(report.qualification).toMatchObject({ recommendation: 'INCOMPLETE' });
+    expect(report.failureCode).toBe('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
   });
 
   it('returns NO_GO when a replica can see another group canary', async () => {

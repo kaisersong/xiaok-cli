@@ -47,6 +47,10 @@ function graphitiSchemas() {
       group_ids: { type: ['string', 'array'] },
       max_facts: { type: 'integer' },
     }),
+    schema('get_episodes', {
+      group_ids: { type: ['string', 'array'] },
+      max_episodes: { type: 'integer' },
+    }),
     schema('get_episode_entities', { episode_uuids: { type: 'array' } }),
     schema('get_status'),
     schema('clear_graph', { group_ids: { type: 'array' } }),
@@ -159,6 +163,13 @@ describe('Graphiti MCP capability and mutation boundary', () => {
       .toThrow('GRAPHITI_EVAL_REQUIRED_CAPABILITY_MISSING:get_episode_entities');
   });
 
+  it('fails preflight before ingestion when episode identity discovery is absent', async () => {
+    const { negotiateCapabilities } = await loadClient();
+
+    expect(() => negotiateCapabilities(graphitiSchemas().filter((tool) => tool.name !== 'get_episodes')))
+      .toThrow('GRAPHITI_EVAL_REQUIRED_CAPABILITY_MISSING:get_episodes');
+  });
+
   it('does not expose raw or destructive sibling tool paths', async () => {
     const { createGuardedGraphitiClient } = await loadClient();
     const raw = {
@@ -219,9 +230,40 @@ describe('Graphiti MCP capability and mutation boundary', () => {
     expect(calls[1].arguments).toMatchObject({
       group_id: 'xiaok-g0-20260806-fixed-r1',
       source: 'text',
-      uuid: '10000000-0000-4000-8000-000000000099',
+      source_description: 'xiaok synthetic source syn-safe',
     });
+    expect(calls[1].arguments).not.toHaveProperty('uuid');
     expect(calls[1].arguments).not.toHaveProperty('custom_extraction_instructions');
+    await client.close();
+  });
+
+  it('discovers server-assigned episode identities within the current group only', async () => {
+    const { createGuardedGraphitiClient } = await loadClient();
+    const calls: any[] = [];
+    const client = await createGuardedGraphitiClient({
+      endpoint: 'https://graph.example.test/mcp/',
+      groupId: 'xiaok-g0-20260806-fixed-r1',
+      connect: async () => ({
+        async listTools() { return { tools: graphitiSchemas() }; },
+        async callTool(call: any) {
+          calls.push(call);
+          if (call.name === 'get_status') return { structuredContent: { status: 'ok', message: 'ready' } };
+          if (call.name === 'get_episodes') return { structuredContent: { episodes: [] } };
+          return { structuredContent: { message: 'ok' } };
+        },
+        async close() {},
+      }),
+    });
+
+    await client.listEpisodes(20);
+
+    expect(calls.at(-1)).toEqual({
+      name: 'get_episodes',
+      arguments: {
+        group_ids: ['xiaok-g0-20260806-fixed-r1'],
+        max_episodes: 20,
+      },
+    });
     await client.close();
   });
 

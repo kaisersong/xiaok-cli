@@ -9,6 +9,7 @@ const ALLOWED_AUDIT_TOOLS = new Set([
   'add_memory',
   'search_nodes',
   'search_memory_facts',
+  'get_episodes',
   'get_episode_entities',
 ]);
 const READY_DELAYS_MS = Object.freeze([1_000, 2_000, 4_000, 5_000, 5_000, 5_000]);
@@ -75,6 +76,28 @@ function provenanceEdgeUuids(response) {
     : [];
 }
 
+function discoverEpisodeMap(response, expectedSources, groupId) {
+  if (!Array.isArray(response?.episodes)) throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
+  const expectedByDescription = new Map(expectedSources.map((source) => [
+    `xiaok synthetic source ${source.sourceId}`,
+    source.sourceId,
+  ]));
+  const mapping = {};
+  for (const episode of response.episodes) {
+    const sourceId = expectedByDescription.get(episode?.source_description);
+    if (!sourceId) continue;
+    if (episode?.group_id !== groupId || typeof episode?.uuid !== 'string' || !episode.uuid) {
+      throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
+    }
+    if (Object.hasOwn(mapping, sourceId)) throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
+    mapping[sourceId] = episode.uuid;
+  }
+  return Object.freeze({
+    complete: Object.keys(mapping).length === expectedSources.length,
+    mapping: Object.freeze(mapping),
+  });
+}
+
 export async function runGraphitiKnowledgeEval({
   runId,
   replicaCount = 3,
@@ -118,10 +141,25 @@ export async function runGraphitiKnowledgeEval({
   }
 
   async function waitUntilReady(state) {
+    let mappingComplete = false;
     for (let attempt = 0; attempt <= READY_DELAYS_MS.length; attempt += 1) {
-      const provenance = await invoke(() => state.client.getEpisodeProvenance([state.canary.episodeUuid]));
-      if ((provenance?.nodes?.length ?? 0) > 0 || (provenance?.edges?.length ?? 0) > 0) return;
-      if (attempt === READY_DELAYS_MS.length) throw new Error('GRAPHITI_EVAL_INGESTION_NOT_READY');
+      const discovered = discoverEpisodeMap(
+        await invoke(() => state.client.listEpisodes(corpus.length + 1)),
+        [...corpus, state.canary],
+        state.groupId,
+      );
+      if (discovered.complete) {
+        mappingComplete = true;
+        state.sourceEpisodeMap = discovered.mapping;
+        const canaryUuid = discovered.mapping[state.canary.sourceId];
+        const provenance = await invoke(() => state.client.getEpisodeProvenance([canaryUuid]));
+        if ((provenance?.nodes?.length ?? 0) > 0 || (provenance?.edges?.length ?? 0) > 0) return;
+      }
+      if (attempt === READY_DELAYS_MS.length) {
+        throw new Error(mappingComplete
+          ? 'GRAPHITI_EVAL_INGESTION_NOT_READY'
+          : 'GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
+      }
       await sleep(READY_DELAYS_MS[attempt]);
       assertBudget();
     }
@@ -139,6 +177,7 @@ export async function runGraphitiKnowledgeEval({
         client: null,
         baselineScores: [],
         graphScores: [],
+        sourceEpisodeMap: undefined,
         completed: false,
       };
       states.push(state);
@@ -161,8 +200,9 @@ export async function runGraphitiKnowledgeEval({
       await waitUntilReady(state);
     }
 
-    const sourceEpisodeMap = Object.fromEntries(corpus.map((source) => [source.sourceId, source.episodeUuid]));
     for (const state of states) {
+      const sourceEpisodeMap = state.sourceEpisodeMap;
+      if (!sourceEpisodeMap) throw new Error('GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
       for (const question of questions) {
         const baselineHits = runSubstringBaseline({
           sources: corpus,
@@ -233,6 +273,7 @@ export async function runGraphitiKnowledgeEval({
     groupId: state.groupId,
     capabilities: state.client?.capabilities,
     initialStatus: state.client?.initialStatus,
+    sourceEpisodeMap: state.sourceEpisodeMap,
     canaryTokenSha256: createHash('sha256').update(state.canary.token, 'utf8').digest('hex'),
     crossGroupLeaks: state.crossGroupLeaks ?? [],
     baselineScores: state.baselineScores,
