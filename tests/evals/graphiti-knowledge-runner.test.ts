@@ -24,6 +24,7 @@ function createFakeGraphiti({
   wrongGroupEpisodes = false,
   episodesReadyAfter = 1,
   hideOwnCanary = false,
+  nearestNeighborNoise = false,
 } = {}) {
   const calls: any[] = [];
   const data = new Map<string, any[]>();
@@ -115,6 +116,9 @@ function createFakeGraphiti({
             }
             if (crossLeak) {
               return { nodes: [{ uuid: 'leaked-node', name: query, summary: 'READY', group_id: 'another-group' }] };
+            }
+            if (nearestNeighborNoise) {
+              return { nodes: [{ uuid: 'nearest-node', name: 'unrelated entity', summary: 'nearest vector result', group_id: groupId }] };
             }
           }
           return { nodes: [] };
@@ -232,6 +236,13 @@ describe('Graphiti knowledge evaluation runner', () => {
 
     expect(report.safety.crossGroupLeakCount).toBeGreaterThan(0);
     expect(report.qualification).toMatchObject({ recommendation: 'NO_GO' });
+  });
+
+  it('does not report a cross-group leak for unrelated nearest-neighbor results', async () => {
+    const fake = createFakeGraphiti({ nearestNeighborNoise: true });
+    const report = await runGraphitiKnowledgeEval(options(fake));
+
+    expect(report.safety.crossGroupLeakCount).toBe(0);
   });
 
   it('returns NO_GO when a scored fact claims another group', async () => {

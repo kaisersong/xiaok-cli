@@ -276,7 +276,7 @@ export async function runGraphitiKnowledgeEval({
           maxNodes: 5,
         }));
         state.crossGroupLeaks ??= [];
-        if (normalizeNodes(response).length > 0) {
+        if (normalizeNodes(response).some((hit) => hit.text.includes(other.canary.token))) {
           state.crossGroupLeaks.push({ otherReplicaIndex: other.replicaIndex });
         }
       }
