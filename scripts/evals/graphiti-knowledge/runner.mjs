@@ -32,7 +32,7 @@ function createCanarySource(runId, replicaIndex) {
     sourceId: `syn-canary-r${replicaIndex}`,
     episodeUuid,
     title: `隔离探针 ${replicaIndex}`,
-    body: `隔离探针 ${token} 的状态是就绪。该探针只属于当前评测分组。`,
+    body: `IsolationProbe ${token} HAS_STATUS READY. IsolationProbe ${token} BELONGS_TO this evaluation group only.`,
     referenceTime: '2025-12-31T00:00:00Z',
     expectedFacts: [`${token}状态就绪`],
     isInjection: false,
@@ -154,7 +154,18 @@ export async function runGraphitiKnowledgeEval({
         state.sourceEpisodeMap = discovered.mapping;
         const canaryUuid = discovered.mapping[state.canary.sourceId];
         const provenance = await invoke(() => state.client.getEpisodeProvenance([canaryUuid]));
-        if ((provenance?.nodes?.length ?? 0) > 0 || (provenance?.edges?.length ?? 0) > 0) return;
+        if ((provenance?.nodes?.length ?? 0) > 0 || (provenance?.edges?.length ?? 0) > 0) {
+          const canaryHits = normalizeFacts(await invoke(() => state.client.searchFacts({
+            query: state.canary.token,
+            maxFacts: 5,
+          })));
+          const ownCanaryVisible = canaryHits.some((hit) => (
+            hit.groupId === state.groupId
+            && hit.episodeUuids.includes(canaryUuid)
+            && hit.text.includes(state.canary.token)
+          ));
+          if (ownCanaryVisible) return;
+        }
       }
       if (attempt === READY_MAX_ATTEMPTS - 1) {
         throw new Error(mappingComplete

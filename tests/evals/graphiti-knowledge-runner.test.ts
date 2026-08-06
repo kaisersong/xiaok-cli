@@ -23,6 +23,7 @@ function createFakeGraphiti({
   duplicateEpisode = false,
   wrongGroupEpisodes = false,
   episodesReadyAfter = 1,
+  hideOwnCanary = false,
 } = {}) {
   const calls: any[] = [];
   const data = new Map<string, any[]>();
@@ -51,7 +52,7 @@ function createFakeGraphiti({
         capabilities: { advertisedToolNames: ['add_memory', 'get_episode_entities', 'get_episodes', 'get_status', 'search_memory_facts', 'search_nodes'], rejectedTools: [] },
         initialStatus: { status: 'ok', message: 'ready' },
         async addEpisode(source: any) {
-          record(audit, groupId, 'add_memory', { sourceId: source.sourceId });
+          record(audit, groupId, 'add_memory', { sourceId: source.sourceId, body: source.body });
           data.get(groupId)!.push(source);
           return { message: 'queued' };
         },
@@ -87,7 +88,7 @@ function createFakeGraphiti({
           record(audit, groupId, 'search_memory_facts', { query });
           if (query.startsWith('xiaok-canary-')) {
             const own = data.get(groupId)!.find((source) => source.body.includes(query));
-            if (own) {
+            if (own && !hideOwnCanary) {
               const episodeUuid = actualEpisodeUuid(groupId, own.sourceId);
               return { facts: [{ uuid: `edge-${episodeUuid}`, fact: query, episodes: [episodeUuid], group_id: groupId }] };
             }
@@ -192,6 +193,14 @@ describe('Graphiti knowledge evaluation runner', () => {
     }
   });
 
+  it('cannot claim isolation when the current group cannot retrieve its own canary', async () => {
+    const fake = createFakeGraphiti({ hideOwnCanary: true });
+    const report = await runGraphitiKnowledgeEval(options(fake));
+
+    expect(report.qualification).toMatchObject({ recommendation: 'INCOMPLETE' });
+    expect(report.failureCode).toBe('GRAPHITI_EVAL_INGESTION_NOT_READY');
+  });
+
   it('returns INCOMPLETE when the call budget is exhausted', async () => {
     const fake = createFakeGraphiti();
     const report = await runGraphitiKnowledgeEval(options(fake, {
@@ -238,5 +247,15 @@ describe('Graphiti knowledge evaluation runner', () => {
     const injectionAdds = fake.calls.filter((call) => call.tool === 'add_memory' && call.args.sourceId === 'syn-injection-drill');
     expect(injectionAdds).toHaveLength(3);
     expect(fake.calls.some((call) => call.tool === 'clear_graph' || call.tool === 'add_triplet')).toBe(false);
+  });
+
+  it('uses an explicit English relation for the non-scored isolation canary', async () => {
+    const fake = createFakeGraphiti();
+    await runGraphitiKnowledgeEval(options(fake));
+
+    const canaryAdds = fake.calls.filter((call) => call.tool === 'add_memory' && call.args.sourceId.startsWith('syn-canary-'));
+    expect(canaryAdds).toHaveLength(3);
+    expect(canaryAdds.every((call) => /^IsolationProbe xiaok-canary-.+ HAS_STATUS READY\./.test(call.args.body)))
+      .toBe(true);
   });
 });
