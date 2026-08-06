@@ -115,6 +115,23 @@ describe('Graphiti deterministic question scoring', () => {
       .toMatchObject({ correct: false, temporalMatch: false });
   });
 
+  it('rejects an otherwise correct answer when a forbidden conflicting term is present', () => {
+    const temporalQuestion = question({
+      id: 'temporal-01',
+      category: 'temporal',
+      validAt: '2025-02-01T00:00:00Z',
+      forbiddenTerms: ['周野'],
+    });
+
+    expect(scoreQuestion(temporalQuestion, [{
+      text: '林澄负责星桥计划；周野后来负责星桥计划',
+      sourceIds: ['syn-a'],
+    }], { mode: 'baseline', sourceEpisodeMap })).toMatchObject({
+      correct: false,
+      forbiddenMatch: true,
+    });
+  });
+
   it('aggregates all five categories without dropping failed questions', () => {
     const categories = ['alias', 'multi_hop', 'temporal', 'provenance', 'control'];
     const baselineScores = categories.flatMap((category) => Array.from({ length: 6 }, (_, index) => ({

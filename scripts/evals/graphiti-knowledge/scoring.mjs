@@ -64,6 +64,8 @@ export function scoreQuestion(question, hits, { mode, sourceEpisodeMap }) {
   const haystack = eligibleHits.map(hitText).join('\n');
   const termMatch = question.expectedAnyTerms
     .some((term) => haystack.includes(term.toLowerCase()));
+  const forbiddenMatch = Array.isArray(question.forbiddenTerms)
+    && question.forbiddenTerms.some((term) => haystack.includes(term.toLowerCase()));
   const sourceMatch = question.expectedSourceIds
     .every((sourceId) => sourceCovered(sourceId, eligibleHits, mode, sourceEpisodeMap));
   const provenanceMatch = question.category !== 'provenance'
@@ -74,8 +76,9 @@ export function scoreQuestion(question, hits, { mode, sourceEpisodeMap }) {
   return Object.freeze({
     questionId: question.id,
     category: question.category,
-    correct: termMatch && sourceMatch && temporalMatch && provenanceMatch,
+    correct: termMatch && !forbiddenMatch && sourceMatch && temporalMatch && provenanceMatch,
     termMatch,
+    forbiddenMatch,
     sourceMatch,
     temporalMatch,
     provenanceMatch,

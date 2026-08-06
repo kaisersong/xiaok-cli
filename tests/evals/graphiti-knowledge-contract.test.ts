@@ -83,12 +83,14 @@ describe('Graphiti knowledge evaluation contracts', () => {
     }
   });
 
-  it('requires temporal questions to carry an explicit validAt timestamp', async () => {
+  it('requires temporal questions to carry validity and conflicting-answer contracts', async () => {
     const { loadQuestions } = await loadContracts();
     const questions = await loadQuestions(questionsPath);
     const temporal = questions.filter((question: any) => question.category === 'temporal');
 
     expect(temporal.every((question: any) => /Z$/.test(question.validAt))).toBe(true);
+    expect(temporal.every((question: any) => Array.isArray(question.forbiddenTerms) && question.forbiddenTerms.length > 0))
+      .toBe(true);
   });
 
   it('creates three stable and distinct opaque replica group ids', async () => {

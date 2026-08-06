@@ -4,6 +4,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 let tokenizeBaseline: any;
 let runSubstringBaseline: any;
+let loadCorpus: any;
+let loadQuestions: any;
+let scoreQuestion: any;
+let segmentQuery: any;
 
 beforeAll(async () => {
   const module = await import(pathToFileURL(join(
@@ -12,6 +16,22 @@ beforeAll(async () => {
   )).href);
   tokenizeBaseline = module.tokenizeBaseline;
   runSubstringBaseline = module.runSubstringBaseline;
+  const contracts = await import(pathToFileURL(join(
+    process.cwd(),
+    'scripts/evals/graphiti-knowledge/contracts.mjs',
+  )).href);
+  const scoring = await import(pathToFileURL(join(
+    process.cwd(),
+    'scripts/evals/graphiti-knowledge/scoring.mjs',
+  )).href);
+  const segment = await import(pathToFileURL(join(
+    process.cwd(),
+    'src/ai/memory/segment.ts',
+  )).href);
+  loadCorpus = contracts.loadCorpus;
+  loadQuestions = contracts.loadQuestions;
+  scoreQuestion = scoring.scoreQuestion;
+  segmentQuery = segment.segmentQuery;
 });
 
 describe('Graphiti evaluation production substring baseline', () => {
@@ -76,5 +96,23 @@ describe('Graphiti evaluation production substring baseline', () => {
       query: '   ',
       segment: (value: string) => value,
     })).toEqual([]);
+  });
+
+  it('keeps the frozen qualification gate mathematically reachable', async () => {
+    const fixtureRoot = join(process.cwd(), 'scripts/evals/graphiti-knowledge/fixtures');
+    const sources = await loadCorpus(join(fixtureRoot, 'corpus.json'));
+    const questions = await loadQuestions(join(fixtureRoot, 'questions.json'));
+    const sourceEpisodeMap = Object.fromEntries(sources.map((source: any) => [source.sourceId, source.episodeUuid]));
+    const scores = questions.map((question: any) => scoreQuestion(question, runSubstringBaseline({
+      sources,
+      query: question.query,
+      topK: question.topK,
+      segment: segmentQuery,
+    }), { mode: 'baseline', sourceEpisodeMap }));
+    const targeted = scores.filter((score: any) => score.category !== 'control');
+    const control = scores.filter((score: any) => score.category === 'control');
+
+    expect(targeted.filter((score: any) => score.correct).length / targeted.length).toBeLessThanOrEqual(0.85);
+    expect(control.every((score: any) => score.correct)).toBe(true);
   });
 });

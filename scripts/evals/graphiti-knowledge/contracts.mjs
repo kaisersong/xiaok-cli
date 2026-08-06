@@ -82,7 +82,7 @@ function validateSource(source) {
 
 function validateQuestion(question) {
   const required = question?.category === 'temporal'
-    ? [...QUESTION_KEYS, 'validAt']
+    ? [...QUESTION_KEYS, 'validAt', 'forbiddenTerms']
     : QUESTION_KEYS;
   assertExactKeys(question, required);
   if (!QUESTION_ID.test(question.id)) throw new Error('GRAPHITI_EVAL_QUESTION_ID_INVALID');
@@ -96,10 +96,16 @@ function validateQuestion(question) {
   if (question.category === 'temporal' && !RFC3339_WITH_ZONE.test(question.validAt)) {
     throw new Error('GRAPHITI_EVAL_VALID_AT_INVALID');
   }
+  if (question.category === 'temporal') {
+    assertStringArray(question.forbiddenTerms, 'GRAPHITI_EVAL_FORBIDDEN_TERMS_INVALID');
+  }
   return Object.freeze({
     ...question,
     expectedAnyTerms: Object.freeze([...question.expectedAnyTerms]),
     expectedSourceIds: Object.freeze([...question.expectedSourceIds]),
+    ...(question.category === 'temporal'
+      ? { forbiddenTerms: Object.freeze([...question.forbiddenTerms]) }
+      : {}),
   });
 }
 
