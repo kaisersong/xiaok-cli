@@ -22,10 +22,12 @@ function createFakeGraphiti({
   missingEpisode = false,
   duplicateEpisode = false,
   wrongGroupEpisodes = false,
+  episodesReadyAfter = 1,
 } = {}) {
   const calls: any[] = [];
   const data = new Map<string, any[]>();
   const provenancePolls = new Map<string, number>();
+  const episodePolls = new Map<string, number>();
   const sourceById = new Map(corpus.map((source) => [source.sourceId, source]));
 
   function actualEpisodeUuid(groupId: string, sourceId: string) {
@@ -55,6 +57,9 @@ function createFakeGraphiti({
         },
         async listEpisodes() {
           record(audit, groupId, 'get_episodes', {});
+          const pollCount = (episodePolls.get(groupId) ?? 0) + 1;
+          episodePolls.set(groupId, pollCount);
+          if (pollCount < episodesReadyAfter) return { episodes: [] };
           const episodes = data.get(groupId)!
             .filter((source) => !(missingEpisode && source.sourceId === corpus[0].sourceId))
             .map((source) => ({
@@ -173,6 +178,17 @@ describe('Graphiti knowledge evaluation runner', () => {
         .slice(0, firstScoredSearch)
         .filter((call) => call.tool === 'get_episode_entities');
       expect(provenanceBeforeSearch).toHaveLength(3);
+    }
+  });
+
+  it('keeps polling at the capped interval for a slow sequential ingestion queue', async () => {
+    const fake = createFakeGraphiti({ episodesReadyAfter: 25 });
+    const report = await runGraphitiKnowledgeEval(options(fake));
+
+    expect(report.qualification.recommendation).not.toBe('INCOMPLETE');
+    for (const groupId of fake.groups()) {
+      expect(fake.calls.filter((call) => call.groupId === groupId && call.tool === 'get_episodes'))
+        .toHaveLength(25);
     }
   });
 

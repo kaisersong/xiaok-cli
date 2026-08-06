@@ -12,7 +12,8 @@ const ALLOWED_AUDIT_TOOLS = new Set([
   'get_episodes',
   'get_episode_entities',
 ]);
-const READY_DELAYS_MS = Object.freeze([1_000, 2_000, 4_000, 5_000, 5_000, 5_000]);
+const READY_DELAYS_MS = Object.freeze([1_000, 2_000, 4_000, 5_000]);
+const READY_MAX_ATTEMPTS = 240;
 
 function sleepDefault(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -142,7 +143,7 @@ export async function runGraphitiKnowledgeEval({
 
   async function waitUntilReady(state) {
     let mappingComplete = false;
-    for (let attempt = 0; attempt <= READY_DELAYS_MS.length; attempt += 1) {
+    for (let attempt = 0; attempt < READY_MAX_ATTEMPTS; attempt += 1) {
       const discovered = discoverEpisodeMap(
         await invoke(() => state.client.listEpisodes(corpus.length + 1)),
         [...corpus, state.canary],
@@ -155,12 +156,12 @@ export async function runGraphitiKnowledgeEval({
         const provenance = await invoke(() => state.client.getEpisodeProvenance([canaryUuid]));
         if ((provenance?.nodes?.length ?? 0) > 0 || (provenance?.edges?.length ?? 0) > 0) return;
       }
-      if (attempt === READY_DELAYS_MS.length) {
+      if (attempt === READY_MAX_ATTEMPTS - 1) {
         throw new Error(mappingComplete
           ? 'GRAPHITI_EVAL_INGESTION_NOT_READY'
           : 'GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');
       }
-      await sleep(READY_DELAYS_MS[attempt]);
+      await sleep(READY_DELAYS_MS[Math.min(attempt, READY_DELAYS_MS.length - 1)]);
       assertBudget();
     }
   }
