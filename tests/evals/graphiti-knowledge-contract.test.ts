@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -12,6 +14,14 @@ async function loadContracts(): Promise<any> {
 
 async function loadClient(): Promise<any> {
   return import(pathToFileURL(join(evalRoot, 'client.mjs')).href);
+}
+
+async function loadEvidence(): Promise<any> {
+  return import(pathToFileURL(join(evalRoot, 'evidence.mjs')).href);
+}
+
+async function loadRunModule(): Promise<any> {
+  return import(pathToFileURL(join(evalRoot, 'run.mjs')).href);
 }
 
 function schema(name: string, properties: Record<string, unknown> = {}) {
@@ -269,5 +279,105 @@ describe('Graphiti MCP capability and mutation boundary', () => {
       },
     })).rejects.toThrow('GRAPHITI_EVAL_AUTH_HEADER_INVALID');
     expect(connected).toBe(false);
+  });
+});
+
+describe('Graphiti CLI preflight and evidence', () => {
+  it('preflights capabilities without ingesting an episode', async () => {
+    const { runGraphitiPreflight } = await loadRunModule();
+    const calls: string[] = [];
+    const result = await runGraphitiPreflight({
+      config: {
+        endpoint: 'https://graph.example.test/mcp/',
+        groupId: 'unused',
+        runId: '20260806-fixed',
+      },
+      clientFactory: async ({ audit }: any) => {
+        audit({ tool: 'get_status', groupId: 'xiaok-g0-20260806-fixed-r1', outcome: 'ok' });
+        return {
+          capabilities: { advertisedToolNames: ['add_memory', 'get_status'], rejectedTools: [] },
+          initialStatus: { status: 'ok', message: 'ready' },
+          async close() { calls.push('close'); },
+        };
+      },
+    });
+
+    expect(result).toMatchObject({ recommendation: 'PREFLIGHT_OK' });
+    expect(result.audit.map((record: any) => record.tool)).toEqual(['get_status']);
+    expect(calls).toEqual(['close']);
+  });
+
+  it('writes the complete evidence bundle without endpoint or auth secrets', async () => {
+    const { writeEvidenceBundle } = await loadEvidence();
+    const root = await mkdtemp(join(tmpdir(), 'graphiti-evidence-'));
+    try {
+      const outputDir = join(root, '20260806-fixed');
+      const result = await writeEvidenceBundle({
+        config: {
+          endpoint: 'https://graph.example.test/private/mcp/?tenant=secret',
+          endpointOrigin: 'https://graph.example.test',
+          authHeader: 'Authorization: Bearer super-secret',
+          authConfigured: true,
+          runId: '20260806-fixed',
+          runRoot: root,
+          outputDir,
+          preflightOnly: false,
+          replicas: 3,
+          maxWallMs: 30_000,
+          maxCalls: 1000,
+          maxIngestFailures: 0,
+        },
+        report: {
+          schemaVersion: 1,
+          runId: '20260806-fixed',
+          audit: [{ tool: 'get_status', groupId: 'g1', outcome: 'ok' }],
+          replicas: [{ replicaIndex: 1, completed: true }],
+          safety: { unauthorizedMutationCount: 0, crossGroupLeakCount: 0 },
+          qualification: { recommendation: 'NO_GO', reasons: ['fixture'] },
+          failureCode: 'fixture',
+        },
+        manifestBase: { gitHead: 'a'.repeat(40), corpusSha256: 'b'.repeat(64), questionsSha256: 'c'.repeat(64) },
+      });
+
+      expect(result.reportPath).toBe(join(outputDir, 'report.md'));
+      for (const name of ['manifest.json', 'audit.jsonl', 'qualification.json', 'report.md', 'failure.json']) {
+        await expect(readFile(join(outputDir, name), 'utf8')).resolves.toBeTruthy();
+      }
+      const all = await Promise.all([
+        'manifest.json', 'audit.jsonl', 'qualification.json', 'report.md', 'failure.json',
+      ].map((name) => readFile(join(outputDir, name), 'utf8')));
+      expect(all.join('\n')).not.toMatch(/private|tenant|super-secret|Authorization/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects an output directory symlinked outside the run root', async () => {
+    const { writeEvidenceBundle } = await loadEvidence();
+    const root = await mkdtemp(join(tmpdir(), 'graphiti-evidence-root-'));
+    const outside = await mkdtemp(join(tmpdir(), 'graphiti-evidence-outside-'));
+    try {
+      await mkdir(join(root, 'runs'));
+      await symlink(outside, join(root, 'runs', 'escape'));
+      await expect(writeEvidenceBundle({
+        config: {
+          endpointOrigin: 'https://graph.example.test',
+          authConfigured: false,
+          runId: '20260806-fixed',
+          runRoot: root,
+          outputDir: join(root, 'runs', 'escape'),
+          preflightOnly: false,
+          replicas: 3,
+          maxWallMs: 30_000,
+          maxCalls: 1000,
+          maxIngestFailures: 0,
+        },
+        report: { audit: [], replicas: [], safety: {}, qualification: { recommendation: 'INCOMPLETE', reasons: [] } },
+        manifestBase: {},
+      })).rejects.toThrow('GRAPHITI_EVAL_OUTPUT_OUTSIDE_RUN_ROOT');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
