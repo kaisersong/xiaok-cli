@@ -39,7 +39,11 @@ describe('desktop file content IPC binary handling', () => {
     await registerDesktopIpc(ipcMain as never, window as never, services as never);
     electronMocks.showOpenDialog.mockReset();
     electronMocks.showSaveDialog.mockReset();
-  });
+    // registerDesktopIpc 顺序动态 import 十几个 desktop 模块。Windows CI 冷启动
+    // 时 vitest 逐个 transform 这些 TypeScript 模块，耗时贴着默认的 10s hook 超时
+    // 线，已实测随机失败 —— 超时后 electron mock 已被 teardown，次级症状表现为
+    // getElectronPath 抛「Electron failed to install correctly」。
+  }, 60_000);
 
   afterEach(() => {
     // Windows can hold transient locks on just-written files, making recursive
