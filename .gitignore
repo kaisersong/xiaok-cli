@@ -90,3 +90,7 @@ docs/skill-observability-design.md
 
 # xiaok-product eval run outputs (may contain sensitive raw material — local only)
 /.eval-runs/
+
+# CodeGraph index cache (107MB local artifact)
+.codegraph/
+.artifacts/

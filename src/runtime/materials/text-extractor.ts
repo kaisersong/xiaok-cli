@@ -7,6 +7,11 @@ export interface MaterialTextExtractionInput {
   workspacePath: string;
   mimeType: string;
   maxChars?: number;
+  /**
+   * PDF text extraction is a host capability, not a built-in: Desktop ships
+   * pdfjs, the CLI does not. Hosts that omit it keep the unsupported contract.
+   */
+  pdfToText?: (bytes: Uint8Array) => Promise<string>;
 }
 
 export interface MaterialTextExtractionResult {
@@ -20,12 +25,21 @@ const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.
 const UNSUPPORTED_EXTENSIONS = new Set(['.pdf', '.rtf']);
 const DEFAULT_MAX_CHARS = 50_000;
 
+/**
+ * Bump whenever extraction output changes. Callers that persist extracted text
+ * compare this against the version their cache was written with; a mismatch
+ * means the cache predates the current algorithm and must be discarded.
+ *
+ * 2: pptx paragraph grouping, xlsx sparse-column placement, boolean cells.
+ */
+export const MATERIAL_EXTRACTOR_VERSION = 2;
+
 export async function extractMaterialText(input: MaterialTextExtractionInput): Promise<MaterialTextExtractionResult> {
   const extension = extname(input.workspacePath).toLowerCase();
   const mimeType = input.mimeType.toLowerCase();
   const maxChars = input.maxChars ?? DEFAULT_MAX_CHARS;
 
-  if (isUnsupportedHeavyFormat(extension, mimeType)) {
+  if (isUnsupportedHeavyFormat(extension, mimeType) && !canExtractPdf(extension, mimeType, input.pdfToText)) {
     return {
       parseStatus: 'unsupported',
       errorMessage: `暂不支持直接解析 ${extension || mimeType} 文件；请转换为文本、docx、pptx 或 xlsx 后重试。`,
@@ -34,7 +48,15 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
 
   try {
     const buffer = await readFile(input.workspacePath);
+    const legacyFormat = detectLegacyOleFormat(extension, buffer);
+    if (legacyFormat) {
+      return {
+        parseStatus: 'unsupported',
+        errorMessage: `这个文件其实是旧版 ${legacyFormat.legacyExtension}（OLE2）格式，只是扩展名写成了 ${legacyFormat.claimedExtension}。请在 Office 中打开后"另存为" ${legacyFormat.claimedExtension} 再重试。`,
+      };
+    }
     let text: string | undefined;
+    let stoppedAtBudget = false;
     if (isTextLike(extension, mimeType)) {
       text = buffer.toString('utf8');
     } else if (extension === '.docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
@@ -42,7 +64,11 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
     } else if (extension === '.pptx' || mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
       text = extractPptxText(buffer);
     } else if (extension === '.xlsx' || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-      text = extractXlsxText(buffer);
+      const extracted = extractXlsxText(buffer, maxChars);
+      text = extracted.text;
+      stoppedAtBudget = extracted.stoppedAtBudget;
+    } else if (canExtractPdf(extension, mimeType, input.pdfToText)) {
+      text = await input.pdfToText!(new Uint8Array(buffer));
     } else {
       return {
         parseStatus: 'unsupported',
@@ -61,7 +87,7 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
     return {
       parseStatus: 'parsed',
       text: truncated,
-      parseSummary: `已提取 ${normalized.length} 字符${truncated.length < normalized.length ? `，返回前 ${truncated.length} 字符` : ''}`,
+      parseSummary: `已提取 ${normalized.length} 字符${truncated.length < normalized.length ? `，返回前 ${truncated.length} 字符` : ''}${stoppedAtBudget ? '；表格过大，已到提取上限，后续行未读完' : ''}`,
     };
   } catch (error) {
     return {
@@ -111,31 +137,86 @@ function extractPptxText(buffer: Buffer): string {
   const slides: string[] = [];
   for (const entry of entries) {
     const xml = readZipLocalEntry(buffer, entry.localHeaderOffset, entry.compressedSize, entry.compressionMethod).toString('utf8');
-    const texts = [...xml.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)]
-      .map((match) => decodeXmlEntities(match[1] ?? ''))
-      .filter(Boolean);
-    if (texts.length > 0) {
-      slides.push(texts.join('\n'));
+    const lines: string[] = [];
+    // One a:p is one paragraph; its a:r runs belong to the same line even when
+    // formatting splits them. Scanning the body linearly keeps a:t / a:br order.
+    for (const paragraphMatch of xml.matchAll(/<a:p\b[^>]*>([\s\S]*?)<\/a:p>/g)) {
+      const tokens = (paragraphMatch[1] ?? '').match(/<a:t\b[^>]*>[\s\S]*?<\/a:t>|<a:br\b[^>]*\/>/g) ?? [];
+      let line = '';
+      for (const token of tokens) {
+        if (token.startsWith('<a:br')) {
+          line += '\n';
+          continue;
+        }
+        line += decodeXmlEntities(stripXmlTag(token, 'a:t'));
+      }
+      if (line.trim()) lines.push(line);
+    }
+    if (lines.length > 0) {
+      slides.push(lines.join('\n'));
     }
   }
   return slides.join('\n\n');
 }
 
-function extractXlsxText(buffer: Buffer): string {
+function extractXlsxText(buffer: Buffer, budget: number): { text: string; stoppedAtBudget: boolean } {
   const sharedStrings = readXlsxSharedStrings(buffer);
+  const sheetLabels = readXlsxSheetLabels(buffer);
   const sheets = listZipEntries(buffer)
     .filter((entry) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(entry.name))
     .sort((left, right) => extractNumericSuffix(left.name) - extractNumericSuffix(right.name));
   const output: string[] = [];
+  let emitted = 0;
   for (const sheet of sheets) {
     const xml = readZipLocalEntry(buffer, sheet.localHeaderOffset, sheet.compressedSize, sheet.compressionMethod).toString('utf8');
     const rows = extractWorksheetRows(xml, sharedStrings);
-    if (rows.length > 0) {
-      output.push(`# ${sheet.name.replace(/^xl\/worksheets\//, '').replace(/\.xml$/i, '')}`);
-      output.push(...rows.map((row) => row.join('\t')));
+    if (rows.length === 0) continue;
+    const label = sheetLabels.get(sheet.name)
+      ?? sheet.name.replace(/^xl\/worksheets\//, '').replace(/\.xml$/i, '');
+    const header = `# ${label}`;
+    output.push(header);
+    emitted += header.length + 1;
+    for (const row of rows) {
+      const line = row.join('\t');
+      output.push(line);
+      emitted += line.length + 1;
+      // Column padding makes output size independent of input size, so the
+      // caller's limit has to apply here rather than after joining everything.
+      if (emitted >= budget) return { text: output.join('\n'), stoppedAtBudget: true };
     }
   }
-  return output.join('\n');
+  return { text: output.join('\n'), stoppedAtBudget: false };
+}
+
+/** Maps each worksheet part path to the tab name the user sees in Excel. */
+function readXlsxSheetLabels(buffer: Buffer): Map<string, string> {
+  const labels = new Map<string, string>();
+  try {
+    const workbookXml = readZipEntry(buffer, 'xl/workbook.xml').toString('utf8');
+    const relsXml = readZipEntry(buffer, 'xl/_rels/workbook.xml.rels').toString('utf8');
+    const targetByRelationshipId = new Map<string, string>();
+    for (const match of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
+      const id = match[0].match(/\bId="([^"]+)"/)?.[1];
+      const target = match[0].match(/\bTarget="([^"]+)"/)?.[1];
+      if (id && target) targetByRelationshipId.set(id, normalizeWorkbookPartPath(target));
+    }
+    for (const match of workbookXml.matchAll(/<sheet\b[^>]*>/g)) {
+      const name = match[0].match(/\bname="([^"]*)"/)?.[1];
+      const relationshipId = match[0].match(/\br:id="([^"]+)"/)?.[1];
+      if (!name || !relationshipId) continue;
+      const target = targetByRelationshipId.get(relationshipId);
+      if (target) labels.set(target, decodeXmlEntities(name));
+    }
+  } catch {
+    // Missing workbook parts just mean the internal file names stay in use.
+  }
+  return labels;
+}
+
+/** Relationship targets are either relative to xl/ or absolute from the package root. */
+function normalizeWorkbookPartPath(target: string): string {
+  const trimmed = target.replace(/^\/+/, '');
+  return trimmed.startsWith('xl/') ? trimmed : `xl/${trimmed}`;
 }
 
 function readXlsxSharedStrings(buffer: Buffer): string[] {
@@ -157,16 +238,30 @@ function extractWorksheetRows(xml: string, sharedStrings: string[]): string[][] 
   for (const rowMatch of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
     const rowXml = rowMatch[1] ?? '';
     const cells: string[] = [];
+    let nextColumn = 0;
     for (const cellMatch of rowXml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
       const attrs = cellMatch[1] ?? '';
       const body = cellMatch[2] ?? '';
-      cells.push(extractCellValue(attrs, body, sharedStrings));
+      // Excel omits empty cells, so document order is not column order.
+      const reference = attrs.match(/\br="([A-Z]+)\d+"/)?.[1];
+      const column = reference ? columnIndexFromReference(reference) : nextColumn;
+      while (cells.length < column) cells.push('');
+      cells[column] = extractCellValue(attrs, body, sharedStrings);
+      nextColumn = column + 1;
     }
     if (cells.some((cell) => cell.trim())) {
       rows.push(cells);
     }
   }
   return rows;
+}
+
+function columnIndexFromReference(reference: string): number {
+  let index = 0;
+  for (const character of reference) {
+    index = index * 26 + (character.charCodeAt(0) - 64);
+  }
+  return index - 1;
 }
 
 function extractCellValue(attrs: string, body: string, sharedStrings: string[]): string {
@@ -178,6 +273,9 @@ function extractCellValue(attrs: string, body: string, sharedStrings: string[]):
       .join('');
   }
   const value = body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/)?.[1] ?? '';
+  if (cellType === 'b') {
+    return value.trim() === '1' ? 'TRUE' : 'FALSE';
+  }
   if (cellType === 's') {
     const index = Number.parseInt(value, 10);
     return Number.isFinite(index) ? sharedStrings[index] ?? '' : '';
@@ -271,11 +369,44 @@ function decodeXmlEntities(value: string): string {
 }
 
 function normalizeExtractedText(text: string): string {
+  // Split-and-trim rather than /[ \t]+\n/g: that pattern backtracks
+  // catastrophically over the long tab runs that sparse-column padding emits.
   return text
     .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+const OLE2_SIGNATURE = Buffer.from('d0cf11e0a1b11ae1', 'hex');
+
+function canExtractPdf(
+  extension: string,
+  mimeType: string,
+  pdfToText: MaterialTextExtractionInput['pdfToText'],
+): boolean {
+  if (!pdfToText) return false;
+  return extension === '.pdf' || mimeType === 'application/pdf';
+}
+
+const LEGACY_EXTENSION_BY_OOXML = new Map<string, string>([
+  ['.docx', '.doc'],
+  ['.pptx', '.ppt'],
+  ['.xlsx', '.xls'],
+]);
+
+/** An OOXML extension on an OLE2 compound file means the file was merely renamed. */
+function detectLegacyOleFormat(
+  extension: string,
+  buffer: Buffer,
+): { claimedExtension: string; legacyExtension: string } | undefined {
+  const legacyExtension = LEGACY_EXTENSION_BY_OOXML.get(extension);
+  if (!legacyExtension) return undefined;
+  if (buffer.length < OLE2_SIGNATURE.length) return undefined;
+  if (!buffer.subarray(0, OLE2_SIGNATURE.length).equals(OLE2_SIGNATURE)) return undefined;
+  return { claimedExtension: extension, legacyExtension };
 }
 
 function truncateText(text: string, maxChars: number): string {

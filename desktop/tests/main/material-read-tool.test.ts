@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
+import { MATERIAL_EXTRACTOR_VERSION } from '../../../src/runtime/materials/text-extractor.js';
 import {
   READ_MATERIAL_TOOL_DEFINITION,
   buildMaterialManifestForPrompt,
@@ -81,6 +82,128 @@ describe('desktop read_material tool', () => {
     expect(updated?.parseStatus).toBe('parsed');
     expect(updated?.extractedTextPath).toBeTruthy();
     expect(existsSync(updated!.extractedTextPath!)).toBe(true);
+  });
+
+  // D7：提取器改了算法（pptx 段落合并、xlsx 稀疏列补位）之后，已经读过一次的材料
+  // 必须重新提取。否则修复对老材料永远不生效。
+  it('discards a cache written by an older extractor version and re-extracts', async () => {
+    const sourcePath = join(sourceDir, '季度复盘.pptx');
+    writeFileSync(sourcePath, createMinimalPptx(['第一页标题']));
+    const record = await registry.importMaterial({
+      taskId: 'task_1',
+      sourcePath,
+      role: 'customer_material',
+      roleSource: 'user',
+    });
+
+    // 模拟旧版本提取器留下的缓存：内容是旧算法的产物，版本号比当前低。
+    const stalePath = join(dirname(record.workspacePath), `${record.materialId}.txt`);
+    writeFileSync(stalePath, '旧版提取器的碎片结果', 'utf8');
+    await registry.updateMaterialExtraction(record.materialId, {
+      extractedTextPath: stalePath,
+      parseStatus: 'parsed',
+      extractorVersion: MATERIAL_EXTRACTOR_VERSION - 1,
+    });
+
+    const stale = registry.get(record.materialId)!;
+    const result = await executeReadMaterialForDesktop(
+      { materialId: record.materialId },
+      { taskId: 'task_1', materials: [stale], materialRegistry: registry, maxChars: 5000 },
+    );
+    const payload = JSON.parse(result.result);
+
+    expect(result.ok).toBe(true);
+    expect(payload.cached).not.toBe(true);
+    expect(payload.content).not.toContain('旧版提取器的碎片结果');
+    expect(payload.content).toContain('第一页标题');
+    expect(registry.get(record.materialId)?.extractorVersion).toBe(MATERIAL_EXTRACTOR_VERSION);
+  });
+
+  // 现有用户的记录里根本没有 extractorVersion 字段，这是真实的迁移场景。
+  it('treats a cache with no recorded extractor version as stale', async () => {
+    const sourcePath = join(sourceDir, '历史材料.pptx');
+    writeFileSync(sourcePath, createMinimalPptx(['第一页标题']));
+    const record = await registry.importMaterial({
+      taskId: 'task_1',
+      sourcePath,
+      role: 'customer_material',
+      roleSource: 'user',
+    });
+
+    const legacyPath = join(dirname(record.workspacePath), `${record.materialId}.txt`);
+    writeFileSync(legacyPath, '版本化之前留下的缓存', 'utf8');
+    const legacy = { ...registry.get(record.materialId)!, extractedTextPath: legacyPath };
+
+    const result = await executeReadMaterialForDesktop(
+      { materialId: record.materialId },
+      { taskId: 'task_1', materials: [legacy], materialRegistry: registry, maxChars: 5000 },
+    );
+    const payload = JSON.parse(result.result);
+
+    expect(payload.cached).not.toBe(true);
+    expect(payload.content).not.toContain('版本化之前留下的缓存');
+    expect(payload.content).toContain('第一页标题');
+    expect(registry.get(record.materialId)?.extractorVersion).toBe(MATERIAL_EXTRACTOR_VERSION);
+  });
+
+  it('still reuses a cache stamped with the current extractor version', async () => {
+    const sourcePath = join(sourceDir, '季度复盘.pptx');
+    writeFileSync(sourcePath, createMinimalPptx(['第一页标题']));
+    const record = await registry.importMaterial({
+      taskId: 'task_1',
+      sourcePath,
+      role: 'customer_material',
+      roleSource: 'user',
+    });
+
+    const currentPath = join(dirname(record.workspacePath), `${record.materialId}.txt`);
+    writeFileSync(currentPath, '当前版本缓存内容', 'utf8');
+    await registry.updateMaterialExtraction(record.materialId, {
+      extractedTextPath: currentPath,
+      parseStatus: 'parsed',
+      extractorVersion: MATERIAL_EXTRACTOR_VERSION,
+    });
+
+    const fresh = registry.get(record.materialId)!;
+    const result = await executeReadMaterialForDesktop(
+      { materialId: record.materialId },
+      { taskId: 'task_1', materials: [fresh], materialRegistry: registry, maxChars: 5000 },
+    );
+    const payload = JSON.parse(result.result);
+
+    expect(payload.cached).toBe(true);
+    expect(payload.content).toContain('当前版本缓存内容');
+  });
+
+  // D5：Desktop 注入 pdfjs 后 read_material 能读 PDF。
+  // 未注入的宿主仍走 unsupported —— 由下方既有测试守住，此处不重复。
+  it('reads a PDF when the host injects a pdf extractor', async () => {
+    const sourcePath = join(sourceDir, '扫描合同.pdf');
+    writeFileSync(sourcePath, '%PDF-1.7\n占位内容');
+    const record = await registry.importMaterial({
+      taskId: 'task_1',
+      sourcePath,
+      role: 'customer_material',
+      roleSource: 'user',
+    });
+
+    const result = await executeReadMaterialForDesktop(
+      { materialId: record.materialId },
+      {
+        taskId: 'task_1',
+        materials: [record],
+        materialRegistry: registry,
+        maxChars: 5000,
+        pdfToText: async () => '合同第一页\n\n合同第二页',
+      },
+    );
+    const payload = JSON.parse(result.result);
+
+    expect(result.ok).toBe(true);
+    expect(payload.parseStatus).toBe('parsed');
+    expect(payload.content).toContain('合同第一页');
+    expect(payload.content).toContain('合同第二页');
+    expect(registry.get(record.materialId)?.extractorVersion).toBe(MATERIAL_EXTRACTOR_VERSION);
   });
 
   it('allows a staged material once it is attached to the current task', async () => {
@@ -162,6 +285,20 @@ function createMinimalDocx(paragraphs: string[]): Buffer {
   return createZip([
     { name: '[Content_Types].xml', content: '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types" />' },
     { name: 'word/document.xml', content: documentXml },
+  ]);
+}
+
+function createMinimalPptx(slides: string[]): Buffer {
+  return createZip([
+    { name: '[Content_Types].xml', content: '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types" />' },
+    ...slides.map((text, index) => ({
+      name: `ppt/slides/slide${index + 1}.xml`,
+      content:
+        '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        + '<p:cSld><p:spTree><p:sp><p:txBody>'
+        + `<a:p><a:r><a:t>${escapeXml(text)}</a:t></a:r></a:p>`
+        + '</p:txBody></p:sp></p:spTree></p:cSld></p:sld>',
+    })),
   ]);
 }
 

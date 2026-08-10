@@ -274,6 +274,80 @@ describe('KB Contract — SourceExtractor', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBeTruthy();
   });
+
+  /**
+   * 真实语料实测：3 个 HTML source 的正文只占 11.4%–18.5%，全语料 74.1% 的
+   * 索引字符是标签与 CSS。而同文件的 extractDocx / extractPptx 早就在剥标签。
+   */
+  it('strips tags, style and script from html so only body text is indexed', async () => {
+    const extractor = createSourceExtractor();
+    const filePath = join(rootDir, 'report.html');
+    writeFileSync(filePath, [
+      '<!DOCTYPE html><html><head>',
+      '<style>.fade-in-up{opacity:0;transform:translateY(20px)}h2{font-size:24px}</style>',
+      '<script>window.__DATA__={"title":"4.2 竞争态势总览"};</script>',
+      '</head><body>',
+      '<h1 id="section-1">月度分析</h1>',
+      '<p class="fade-in-up">Anthropic 与 OpenAI 的模型对比</p>',
+      '<!-- 内部备注，不应进索引 -->',
+      '</body></html>',
+    ].join('\n'));
+
+    const result = await extractor.extract({ filePath, mimeType: 'text/html' });
+
+    expect(result.ok).toBe(true);
+    const text = result.text!;
+    expect(text).toContain('月度分析');
+    expect(text).toContain('Anthropic 与 OpenAI 的模型对比');
+    expect(text).not.toMatch(/<[^>]+>/);
+    expect(text).not.toContain('translateY');
+    expect(text).not.toContain('font-size');
+    expect(text).not.toContain('window.__DATA__');
+    expect(text).not.toContain('内部备注');
+    expect(text).not.toContain('fade-in-up');
+  });
+
+  it('decodes html entities instead of indexing them raw', async () => {
+    const extractor = createSourceExtractor();
+    const filePath = join(rootDir, 'entities.html');
+    writeFileSync(filePath, '<p>&quot;效率 vs 规模&quot; &amp; &lt;成本&gt;&nbsp;分析</p>');
+    const result = await extractor.extract({ filePath, mimeType: 'text/html' });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain('"效率 vs 规模" & <成本> 分析');
+    expect(result.text).not.toContain('&quot;');
+    expect(result.text).not.toContain('&nbsp;');
+  });
+
+  it('keeps plain text and markdown files byte-for-byte', async () => {
+    const extractor = createSourceExtractor();
+    const mdPath = join(rootDir, 'notes.md');
+    // Markdown 里的 `<` 与自动链接必须原样保留 —— 剥离只适用于 markup 类扩展
+    const md = '# 标题\n\n用 `a < b` 比较，见 <https://example.com>\n';
+    writeFileSync(mdPath, md);
+    const result = await extractor.extract({ filePath: mdPath, mimeType: 'text/markdown' });
+    expect(result.ok).toBe(true);
+    expect(result.text).toBe(md);
+  });
+
+  it('strips markup from xml and svg too', async () => {
+    const extractor = createSourceExtractor();
+    const xmlPath = join(rootDir, 'data.xml');
+    writeFileSync(xmlPath, '<root><item id="1">端口配置</item></root>');
+    const xml = await extractor.extract({ filePath: xmlPath, mimeType: 'application/xml' });
+    expect(xml.ok).toBe(true);
+    expect(xml.text).toContain('端口配置');
+    expect(xml.text).not.toMatch(/<[^>]+>/);
+  });
+
+  it('strips markup when a text/html file has no markup extension', async () => {
+    const extractor = createSourceExtractor();
+    const filePath = join(rootDir, 'page');
+    writeFileSync(filePath, '<html><body><p>正文内容</p></body></html>');
+    const result = await extractor.extract({ filePath, mimeType: 'text/html' });
+    expect(result.ok).toBe(true);
+    expect(result.text).toContain('正文内容');
+    expect(result.text).not.toMatch(/<[^>]+>/);
+  });
 });
 
 describe('KB Integration — addSource sets parsed status', () => {

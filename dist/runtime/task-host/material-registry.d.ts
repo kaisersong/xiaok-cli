@@ -22,6 +22,7 @@ export declare class MaterialRegistry {
     list(taskId: string): MaterialRecord[];
     updateMaterialExtraction(materialId: string, extraction: {
         extractedTextPath?: string;
+        extractorVersion?: number;
         parseStatus: MaterialParseStatus;
         parseSummary?: string;
         errorMessage?: string;

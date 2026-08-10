@@ -2,6 +2,22 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { InferenceSession, Tensor } from 'onnxruntime-node';
 import { getModelDir } from './model-registry.js';
+// 注册表里两个模型都是 BERT 系、position embedding 上限 512。超限时
+// onnxruntime 抛 `idx=512 must be within [-512,511]`，而非静默降级。
+const MAX_SEQUENCE_TOKENS = 512;
+/**
+ * 截断时保留末位 token（BERT tokenizer 的 [SEP]），否则序列失去结束标记，
+ * 池化结果与模型训练分布不一致。
+ */
+function truncateToWindow(ids, attentionMask) {
+    if (ids.length <= MAX_SEQUENCE_TOKENS)
+        return { ids, mask: attentionMask };
+    const separator = ids[ids.length - 1];
+    return {
+        ids: [...ids.slice(0, MAX_SEQUENCE_TOKENS - 1), separator],
+        mask: attentionMask.slice(0, MAX_SEQUENCE_TOKENS),
+    };
+}
 export class OnnxEmbeddingEngine {
     session = null;
     tokenizer = null;
@@ -29,9 +45,10 @@ export class OnnxEmbeddingEngine {
             });
             const { Tokenizer } = await import('@huggingface/tokenizers');
             const tokenizerJson = fs.readFileSync(tokenizerPath, 'utf-8');
-            const tok = Tokenizer.fromString(tokenizerJson);
-            tok.setPadding({ maxLength: 512, padding: 'LONGEST' });
-            this.tokenizer = tok;
+            // 该包导出的是构造函数（解析后的 tokenizer.json + config），既没有静态
+            // fromString 也没有 setPadding。embed() 逐条推理，每批只有一条序列，
+            // 因此不需要 padding。
+            this.tokenizer = new Tokenizer(JSON.parse(tokenizerJson), {});
             const dummyIds = new Tensor('int64', new BigInt64Array([101n, 102n]), [1, 2]);
             const dummyMask = new Tensor('int64', new BigInt64Array([1n, 1n]), [1, 2]);
             const dummyTypes = new Tensor('int64', new BigInt64Array([0n, 0n]), [1, 2]);
@@ -52,9 +69,10 @@ export class OnnxEmbeddingEngine {
         const results = [];
         for (const text of texts) {
             const encoded = this.tokenizer.encode(text);
-            const inputIds = new Tensor('int64', BigInt64Array.from(encoded.ids.map(BigInt)), [1, encoded.ids.length]);
-            const attentionMask = new Tensor('int64', BigInt64Array.from(encoded.attention_mask.map(BigInt)), [1, encoded.attention_mask.length]);
-            const tokenTypeIds = new Tensor('int64', new BigInt64Array(inputIds.size), [1, encoded.ids.length]);
+            const { ids, mask } = truncateToWindow(encoded.ids, encoded.attention_mask);
+            const inputIds = new Tensor('int64', BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
+            const attentionMask = new Tensor('int64', BigInt64Array.from(mask.map(BigInt)), [1, mask.length]);
+            const tokenTypeIds = new Tensor('int64', new BigInt64Array(inputIds.size), [1, ids.length]);
             const output = await this.session.run({
                 input_ids: inputIds,
                 attention_mask: attentionMask,

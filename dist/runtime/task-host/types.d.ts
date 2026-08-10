@@ -7,6 +7,8 @@ export interface MaterialRecord {
     originalName: string;
     workspacePath: string;
     extractedTextPath?: string;
+    /** Extractor version that produced extractedTextPath; absent means it predates versioning. */
+    extractorVersion?: number;
     mimeType: string;
     sizeBytes: number;
     sha256: string;

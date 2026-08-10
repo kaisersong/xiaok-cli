@@ -237,6 +237,7 @@ export function resolveEvalConfig({
     replicas,
     maxWallMs: readPositiveInteger(readArg(argv, '--max-wall-ms'), 600_000, 'GRAPHITI_EVAL_MAX_WALL_INVALID'),
     maxCalls: readPositiveInteger(readArg(argv, '--max-calls'), 400, 'GRAPHITI_EVAL_MAX_CALLS_INVALID'),
+    maxReadyAttempts: readPositiveInteger(readArg(argv, '--max-ready-attempts'), 240, 'GRAPHITI_EVAL_MAX_READY_ATTEMPTS_INVALID'),
     maxIngestFailures: readPositiveInteger(readArg(argv, '--max-ingest-failures'), 0, 'GRAPHITI_EVAL_MAX_INGEST_FAILURES_INVALID', { min: 0 }),
   });
 }

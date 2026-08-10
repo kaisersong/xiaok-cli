@@ -99,29 +99,32 @@ describe('KB Integration — Chinese search with jieba', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
+  /**
+   * 必须通过 kb_search tool 调用生产检索路径。
+   * 这两条测试原先在测试代码里自己写 `chunk.text.includes(term)`，
+   * 于是生产实现无论对错都绿 —— 那是自证，不是回归。
+   */
+  async function searchViaProductionTool(query: string): Promise<string> {
+    const retriever = createKbRetriever({ db: (store as unknown as { _db: never })._db, embedFn: () => null });
+    const tools = createKbTools(store, retriever);
+    const kbSearch = tools.find(t => t.definition.name === 'kb_search');
+    expect(kbSearch).toBeDefined();
+    return await kbSearch!.execute({ query }) as string;
+  }
+
   it('finds Chinese content using jieba-segmented terms', async () => {
     const col = store.createCollection({ name: 'CN', embeddingModelId: 'm', embeddingDim: 384 });
     const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' });
 
     const chunker = createChunker();
     const text = 'AI原生组织架构是一种新型的企业组织形态，它将人工智能深度融入组织的核心流程和决策体系中。';
-    const chunks = chunker.chunk({ text });
-    store.insertChunks(src.id, chunks);
+    store.insertChunks(src.id, chunker.chunk({ text }));
 
-    // Search using the same jieba segmentation the IPC handler uses
-    const { segmentQuery } = await import('../../../src/ai/memory/segment.js');
-    const query = 'AI原生组织';
-    const segmented = segmentQuery(query);
-    const terms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];
+    const output = await searchViaProductionTool('AI原生组织');
 
-    const allChunks = store.listChunks(src.id);
-    const matches = allChunks.filter(chunk => {
-      const lower = chunk.text.toLowerCase();
-      return terms.some((t: string) => lower.includes(t));
-    });
-
-    expect(matches.length).toBeGreaterThan(0);
-    expect(matches[0].text).toContain('AI原生组织');
+    expect(output).toContain('AI原生组织');
+    expect(output).toContain('AI文档');
+    expect(output).not.toBe('未找到相关内容。');
   });
 
   it('matches partial Chinese terms', async () => {
@@ -131,12 +134,20 @@ describe('KB Integration — Chinese search with jieba', () => {
     const chunker = createChunker();
     store.insertChunks(src.id, chunker.chunk({ text: '深度学习和自然语言处理是人工智能的核心技术' }));
 
-    const { segmentQuery } = await import('../../../src/ai/memory/segment.js');
-    const terms = [...new Set(segmentQuery('自然语言处理').split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];
+    const output = await searchViaProductionTool('自然语言处理');
 
-    const allChunks = store.listChunks(src.id);
-    const matches = allChunks.filter(chunk => terms.some((t: string) => chunk.text.toLowerCase().includes(t)));
-    expect(matches.length).toBeGreaterThan(0);
+    expect(output).toContain('自然语言处理');
+    expect(output).not.toBe('未找到相关内容。');
+  });
+
+  it('returns the explicit empty message when nothing matches', async () => {
+    const col = store.createCollection({ name: 'Empty', embeddingModelId: 'm', embeddingDim: 384 });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '无关文档' });
+    store.insertChunks(src.id, createChunker().chunk({ text: '深度学习和自然语言处理是人工智能的核心技术' }));
+
+    const output = await searchViaProductionTool('高压锅炖牛腩的火候');
+
+    expect(output).toBe('未找到相关内容。');
   });
 });
 

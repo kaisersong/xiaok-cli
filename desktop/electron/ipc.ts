@@ -1845,9 +1845,8 @@ export async function registerDesktopIpc(
     const sourceIds = input?.sourceIds as string[] | undefined;
     const allSources = store.listSources(collectionId);
     const filteredSources = sourceIds?.length ? allSources.filter(s => sourceIds.includes(s.id)) : allSources;
-    const { segmentQuery } = await import('../../src/ai/memory/segment.js');
-    const segmented = segmentQuery(query);
-    const uniqueTerms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];
+    const { extractQueryTerms } = await import('./kb-query-terms.js');
+    const uniqueTerms = extractQueryTerms(query);
     const results: Array<{ chunkId: string; sourceId: string; sourceTitle: string; collectionId: string; text: string; pageIndex: number | null; slideIndex: number | null; sheetName: string | null; bm25Score: number; vectorScore: number; fusedScore: number }> = [];
     for (const src of filteredSources) {
       const srcChunks = store.listChunks(src.id);

@@ -7,7 +7,7 @@
 
 import type { Tool } from '../../src/types.js';
 import type { KbStore, KbRetriever } from './kb-store.js';
-import { segmentQuery } from '../../src/ai/memory/segment.js';
+import { extractQueryTerms } from './kb-query-terms.js';
 
 export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
   return [
@@ -157,8 +157,7 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
         const sourceIds = input.source_ids as string[] | undefined;
         const topK = (input.top_k as number) || 10;
 
-        const segmented = segmentQuery(query);
-        const uniqueTerms = [...new Set(segmented.split(/\s+/).filter(Boolean).map((t: string) => t.toLowerCase()))];
+        const uniqueTerms = extractQueryTerms(query);
         if (uniqueTerms.length === 0) return '未找到相关内容。';
 
         const allSources = store.listSources(collectionId);

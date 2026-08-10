@@ -39,7 +39,7 @@ import type { RuntimeEvent } from '../../src/runtime/events.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
 import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
-import { extractMaterialText } from '../../src/runtime/materials/text-extractor.js';
+import { extractMaterialText, MATERIAL_EXTRACTOR_VERSION } from '../../src/runtime/materials/text-extractor.js';
 import {
   buildProjectTraceBundleFromKSwarmDetail,
   buildSessionTraceBundleFromSnapshots,
@@ -4471,6 +4471,7 @@ export async function executeReadMaterialForDesktop(
     materials: MaterialRecord[];
     materialRegistry?: MaterialRegistry;
     maxChars?: number;
+    pdfToText?: (bytes: Uint8Array) => Promise<string>;
   },
 ): Promise<{ ok: boolean; result: string }> {
   const materialId = typeof input.materialId === 'string' ? input.materialId.trim() : '';
@@ -4504,7 +4505,11 @@ export async function executeReadMaterialForDesktop(
     });
   }
 
-  if (material.extractedTextPath && existsSync(material.extractedTextPath)) {
+  if (
+    material.extractedTextPath
+    && material.extractorVersion === MATERIAL_EXTRACTOR_VERSION
+    && existsSync(material.extractedTextPath)
+  ) {
     const cached = truncateMaterialText(readFileSync(material.extractedTextPath, 'utf8'), maxChars);
     return createReadMaterialResult(true, {
       ok: true,
@@ -4519,12 +4524,14 @@ export async function executeReadMaterialForDesktop(
     workspacePath: material.workspacePath,
     mimeType: material.mimeType,
     maxChars,
+    pdfToText: options.pdfToText,
   });
   if (extraction.parseStatus === 'parsed' && extraction.text) {
     const extractedTextPath = join(dirname(material.workspacePath), `${material.materialId}.txt`);
     writeFileSync(extractedTextPath, extraction.text, 'utf8');
     await options.materialRegistry.updateMaterialExtraction(material.materialId, {
       extractedTextPath,
+      extractorVersion: MATERIAL_EXTRACTOR_VERSION,
       parseStatus: 'parsed',
       parseSummary: extraction.parseSummary,
     });
@@ -4577,6 +4584,10 @@ async function executeDesktopTaskTool(
       taskId: options.taskId,
       materials: options.materials,
       materialRegistry: options.materialRegistry,
+      pdfToText: async (bytes) => {
+        const { extractPdfText } = await import('./pdf-text.js');
+        return extractPdfText(bytes);
+      },
     });
   }
   const result = await options.registry.executeTool(toolCall.name, toolCall.input, options.context);

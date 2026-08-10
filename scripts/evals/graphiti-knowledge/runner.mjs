@@ -122,6 +122,10 @@ export async function runGraphitiKnowledgeEval({
   validateFixturePair(corpus, questions);
   const maxWallMs = budgets.maxWallMs ?? 600_000;
   const maxCalls = budgets.maxCalls ?? 400;
+  // Readiness polling ceiling. 240 attempts capped at 5s tops out near 20
+  // minutes, which a larger corpus cannot finish ingesting. This is a budget,
+  // not a quality threshold, so it is configurable like the other two.
+  const maxReadyAttempts = budgets.maxReadyAttempts ?? READY_MAX_ATTEMPTS;
   const maxIngestFailures = budgets.maxIngestFailures ?? 0;
   const startedAtMs = now();
   const audit = [];
@@ -151,7 +155,7 @@ export async function runGraphitiKnowledgeEval({
 
   async function waitUntilReady(state) {
     let mappingComplete = false;
-    for (let attempt = 0; attempt < READY_MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 0; attempt < maxReadyAttempts; attempt += 1) {
       const discovered = discoverEpisodeMap(
         await invoke(() => state.client.listEpisodes(corpus.length + 1)),
         [...corpus, state.canary],
@@ -176,7 +180,7 @@ export async function runGraphitiKnowledgeEval({
           if (ownCanaryVisible) return;
         }
       }
-      if (attempt === READY_MAX_ATTEMPTS - 1) {
+      if (attempt === maxReadyAttempts - 1) {
         throw new Error(mappingComplete
           ? 'GRAPHITI_EVAL_INGESTION_NOT_READY'
           : 'GRAPHITI_EVAL_EPISODE_MAPPING_INVALID');

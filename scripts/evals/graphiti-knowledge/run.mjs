@@ -14,8 +14,14 @@ import { writeEvidenceBundle } from './evidence.mjs';
 import { runGraphitiKnowledgeEval } from './runner.mjs';
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
-const corpusPath = join(moduleDir, 'fixtures', 'corpus.json');
-const questionsPath = join(moduleDir, 'fixtures', 'questions.json');
+// A second frozen corpus tier lives under fixtures/scale. Selecting it by env
+// keeps the original fixtures byte-identical so earlier evidence stays
+// comparable; the manifest records each tier's own SHA-256 either way.
+const fixtureDir = process.env.XIAOK_GRAPHITI_FIXTURE_DIR?.trim()
+  ? resolve(process.env.XIAOK_GRAPHITI_FIXTURE_DIR.trim())
+  : join(moduleDir, 'fixtures');
+const corpusPath = join(fixtureDir, 'corpus.json');
+const questionsPath = join(fixtureDir, 'questions.json');
 
 export async function runGraphitiPreflight({
   config,
@@ -101,6 +107,7 @@ async function main() {
       budgets: {
         maxWallMs: config.maxWallMs,
         maxCalls: config.maxCalls,
+        maxReadyAttempts: config.maxReadyAttempts,
         maxIngestFailures: config.maxIngestFailures,
       },
       signal: controller.signal,

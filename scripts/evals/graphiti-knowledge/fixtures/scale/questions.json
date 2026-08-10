@@ -1,0 +1,401 @@
+{
+  "schemaVersion": 1,
+  "questions": [
+    {
+      "id": "alias-01",
+      "category": "alias",
+      "query": "97-100 外壳 颜色",
+      "expectedAnyTerms": [
+        "雾蓝色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-0-alias",
+        "syn-scale-0-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "multi-01",
+      "category": "multi_hop",
+      "query": "孙珩 负责 产品 外壳 颜色",
+      "expectedAnyTerms": [
+        "雾蓝色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-0-owner",
+        "syn-scale-0-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "temporal-01",
+      "category": "temporal",
+      "query": "2025年6月 青羽终端 管理端口",
+      "expectedAnyTerms": [
+        "7000"
+      ],
+      "forbiddenTerms": [
+        "8000"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-0-port-old"
+      ],
+      "topK": 10,
+      "validAt": "2025-06-01T00:00:00Z"
+    },
+    {
+      "id": "provenance-01",
+      "category": "provenance",
+      "query": "青羽终端 升级 版本",
+      "expectedAnyTerms": [
+        "v3.0"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-0-release"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "control-01",
+      "category": "control",
+      "query": "青羽终端 外壳颜色 雾蓝色",
+      "expectedAnyTerms": [
+        "雾蓝色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-0-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "alias-02",
+      "category": "alias",
+      "query": "6D-101 外壳 颜色",
+      "expectedAnyTerms": [
+        "砂岩灰"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-1-alias",
+        "syn-scale-1-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "multi-02",
+      "category": "multi_hop",
+      "query": "冯砚 负责 产品 外壳 颜色",
+      "expectedAnyTerms": [
+        "砂岩灰"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-1-owner",
+        "syn-scale-1-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "temporal-02",
+      "category": "temporal",
+      "query": "2025年6月 流岚终端 管理端口",
+      "expectedAnyTerms": [
+        "7007"
+      ],
+      "forbiddenTerms": [
+        "8007"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-1-port-old"
+      ],
+      "topK": 10,
+      "validAt": "2025-06-01T00:00:00Z"
+    },
+    {
+      "id": "provenance-02",
+      "category": "provenance",
+      "query": "流岚终端 升级 版本",
+      "expectedAnyTerms": [
+        "v4.0"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-1-release"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "control-02",
+      "category": "control",
+      "query": "流岚终端 外壳颜色 砂岩灰",
+      "expectedAnyTerms": [
+        "砂岩灰"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-1-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "alias-03",
+      "category": "alias",
+      "query": "78-102 外壳 颜色",
+      "expectedAnyTerms": [
+        "苔绿色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-2-alias",
+        "syn-scale-2-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "multi-03",
+      "category": "multi_hop",
+      "query": "冯昭 负责 产品 外壳 颜色",
+      "expectedAnyTerms": [
+        "苔绿色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-2-owner",
+        "syn-scale-2-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "temporal-03",
+      "category": "temporal",
+      "query": "2025年6月 磐石终端 管理端口",
+      "expectedAnyTerms": [
+        "7014"
+      ],
+      "forbiddenTerms": [
+        "8014"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-2-port-old"
+      ],
+      "topK": 10,
+      "validAt": "2025-06-01T00:00:00Z"
+    },
+    {
+      "id": "provenance-03",
+      "category": "provenance",
+      "query": "磐石终端 升级 版本",
+      "expectedAnyTerms": [
+        "v5.0"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-2-release"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "control-03",
+      "category": "control",
+      "query": "磐石终端 外壳颜色 苔绿色",
+      "expectedAnyTerms": [
+        "苔绿色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-2-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "alias-04",
+      "category": "alias",
+      "query": "4E-103 外壳 颜色",
+      "expectedAnyTerms": [
+        "暮橙色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-3-alias",
+        "syn-scale-3-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "multi-04",
+      "category": "multi_hop",
+      "query": "冯澄 负责 产品 外壳 颜色",
+      "expectedAnyTerms": [
+        "暮橙色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-3-owner",
+        "syn-scale-3-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "temporal-04",
+      "category": "temporal",
+      "query": "2025年6月 云梭终端 管理端口",
+      "expectedAnyTerms": [
+        "7021"
+      ],
+      "forbiddenTerms": [
+        "8021"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-3-port-old"
+      ],
+      "topK": 10,
+      "validAt": "2025-06-01T00:00:00Z"
+    },
+    {
+      "id": "provenance-04",
+      "category": "provenance",
+      "query": "云梭终端 升级 版本",
+      "expectedAnyTerms": [
+        "v3.0"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-3-release"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "control-04",
+      "category": "control",
+      "query": "云梭终端 外壳颜色 暮橙色",
+      "expectedAnyTerms": [
+        "暮橙色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-3-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "alias-05",
+      "category": "alias",
+      "query": "66-104 外壳 颜色",
+      "expectedAnyTerms": [
+        "雾蓝色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-4-alias",
+        "syn-scale-4-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "multi-05",
+      "category": "multi_hop",
+      "query": "冯沁 负责 产品 外壳 颜色",
+      "expectedAnyTerms": [
+        "雾蓝色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-4-owner",
+        "syn-scale-4-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "temporal-05",
+      "category": "temporal",
+      "query": "2025年6月 星轨终端 管理端口",
+      "expectedAnyTerms": [
+        "7028"
+      ],
+      "forbiddenTerms": [
+        "8028"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-4-port-old"
+      ],
+      "topK": 10,
+      "validAt": "2025-06-01T00:00:00Z"
+    },
+    {
+      "id": "provenance-05",
+      "category": "provenance",
+      "query": "星轨终端 升级 版本",
+      "expectedAnyTerms": [
+        "v4.0"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-4-release"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "control-05",
+      "category": "control",
+      "query": "星轨终端 外壳颜色 雾蓝色",
+      "expectedAnyTerms": [
+        "雾蓝色"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-4-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "alias-06",
+      "category": "alias",
+      "query": "67-105 外壳 颜色",
+      "expectedAnyTerms": [
+        "砂岩灰"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-5-alias",
+        "syn-scale-5-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "multi-06",
+      "category": "multi_hop",
+      "query": "郑峻 负责 产品 外壳 颜色",
+      "expectedAnyTerms": [
+        "砂岩灰"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-5-owner",
+        "syn-scale-5-spec"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "temporal-06",
+      "category": "temporal",
+      "query": "2025年6月 木樨终端 管理端口",
+      "expectedAnyTerms": [
+        "7035"
+      ],
+      "forbiddenTerms": [
+        "8035"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-5-port-old"
+      ],
+      "topK": 10,
+      "validAt": "2025-06-01T00:00:00Z"
+    },
+    {
+      "id": "provenance-06",
+      "category": "provenance",
+      "query": "木樨终端 升级 版本",
+      "expectedAnyTerms": [
+        "v5.0"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-5-release"
+      ],
+      "topK": 10
+    },
+    {
+      "id": "control-06",
+      "category": "control",
+      "query": "木樨终端 外壳颜色 砂岩灰",
+      "expectedAnyTerms": [
+        "砂岩灰"
+      ],
+      "expectedSourceIds": [
+        "syn-scale-5-spec"
+      ],
+      "topK": 10
+    }
+  ]
+}

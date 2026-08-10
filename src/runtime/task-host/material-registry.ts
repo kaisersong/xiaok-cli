@@ -104,6 +104,7 @@ export class MaterialRegistry {
 
   async updateMaterialExtraction(materialId: string, extraction: {
     extractedTextPath?: string;
+    extractorVersion?: number;
     parseStatus: MaterialParseStatus;
     parseSummary?: string;
     errorMessage?: string;
@@ -113,6 +114,7 @@ export class MaterialRegistry {
     const updated: MaterialRecord = {
       ...existing,
       extractedTextPath: extraction.extractedTextPath,
+      extractorVersion: extraction.extractorVersion,
       parseStatus: extraction.parseStatus,
       parseSummary: extraction.parseSummary,
       errorMessage: extraction.errorMessage,

@@ -388,9 +388,11 @@ describe('ToolRegistry', () => {
 
     registry.setAllowedTools(['Read']);
 
-    const result = await registry.executeTool('read', { file_path: 'src/ai/tools/read.ts', limit: 1 });
+    const result = await registry.executeTool('read', { file_path: 'src/ai/tools/read.ts', limit: 80 });
 
-    expect(result).toContain('import { readFileSync, existsSync } from \'fs\';');
+    // 断言稳定的导出符号，而不是 import 行 —— 后者会因无关的 import 变动而断。
+    expect(result).toContain('export function createReadTool');
+    expect(result).toMatch(/^1\t/);
     expect(result).not.toContain('is not allowed');
   });
 

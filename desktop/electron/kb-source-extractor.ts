@@ -9,8 +9,55 @@ import { extname } from 'node:path';
 import type { SourceExtractor, SourceExtractionResult } from './kb-store.js';
 
 const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.html', '.htm', '.svg', '.xml']);
+const MARKUP_EXTENSIONS = new Set(['.html', '.htm', '.svg', '.xml']);
 const UNSUPPORTED_EXTENSIONS = new Set(['.exe', '.dll', '.so', '.dylib', '.bin', '.dmg', '.iso']);
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+
+function isMarkupMimeType(mimeType: string): boolean {
+  return /^(text\/html|text\/xml|application\/(xhtml\+xml|xml)|image\/svg\+xml)/.test(mimeType);
+}
+
+/**
+ * 剥离 markup，只保留正文。
+ *
+ * 顺序不可换：先删 script/style/注释（它们的内容不是正文），再删标签，
+ * 最后才解码实体 —— 反过来会把 `&lt;成本&gt;` 解码成 `<成本>` 后当标签删掉。
+ * `dropInlineGraphics` 只对 HTML 开启；对 .svg 文件本身删 <svg> 块会清空全文。
+ */
+export function stripMarkup(input: string, options: { dropInlineGraphics: boolean }): string {
+  let text = input
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ');
+
+  if (options.dropInlineGraphics) {
+    text = text.replace(/<svg\b[\s\S]*?<\/svg\s*>/gi, ' ');
+  }
+
+  return decodeEntities(text.replace(/<[^>]*>/g, ' '))
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  quot: '"', apos: "'", lt: '<', gt: '>', nbsp: ' ', ensp: ' ', emsp: ' ',
+  mdash: '—', ndash: '–', hellip: '…', ldquo: '"', rdquo: '"', lsquo: "'", rsquo: "'",
+};
+
+function decodeEntities(text: string): string {
+  // &amp; 必须最后解码，否则 `&amp;lt;` 会被两段式解码成 `<`
+  return text
+    .replace(/&#x([0-9a-f]+);/gi, (_m, hex) => safeCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec) => safeCodePoint(parseInt(dec, 10)))
+    .replace(/&([a-z]+);/gi, (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match)
+    .replace(/&amp;/gi, '&');
+}
+
+function safeCodePoint(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '';
+  return String.fromCodePoint(code);
+}
 
 export function createSourceExtractor(): SourceExtractor {
   return {
@@ -28,7 +75,12 @@ export function createSourceExtractor(): SourceExtractor {
         }
 
         if (TEXT_EXTENSIONS.has(ext) || input.mimeType.startsWith('text/')) {
-          return { ok: true, text: buf.toString('utf8'), mimeType: input.mimeType };
+          const raw = buf.toString('utf8');
+          const isMarkup = MARKUP_EXTENSIONS.has(ext) || (ext === '' && isMarkupMimeType(input.mimeType));
+          const text = isMarkup
+            ? stripMarkup(raw, { dropInlineGraphics: ext !== '.svg' })
+            : raw;
+          return { ok: true, text, mimeType: input.mimeType };
         }
 
         if (ext === '.pdf' || input.mimeType === 'application/pdf') {
@@ -61,8 +113,12 @@ export function createSourceExtractor(): SourceExtractor {
       try {
         const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
         if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
-        const text = await response.text();
-        return { ok: true, text, mimeType: response.headers.get('content-type') ?? 'text/html' };
+        const raw = await response.text();
+        const mimeType = response.headers.get('content-type') ?? 'text/html';
+        const text = isMarkupMimeType(mimeType)
+          ? stripMarkup(raw, { dropInlineGraphics: !mimeType.startsWith('image/svg') })
+          : raw;
+        return { ok: true, text, mimeType };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
@@ -75,20 +131,8 @@ export function createSourceExtractor(): SourceExtractor {
 }
 
 async function extractPdf(buf: Buffer): Promise<string> {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) });
-  const doc = await loadingTask.promise;
-  const pages: string[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    const text = content.items
-      .filter((item: any) => 'str' in item)
-      .map((item: any) => item.str)
-      .join('');
-    if (text.trim()) pages.push(text);
-  }
-  return pages.join('\n\n');
+  const { extractPdfText } = await import('./pdf-text.js');
+  return extractPdfText(new Uint8Array(buf));
 }
 
 async function extractDocx(buf: Buffer): Promise<string> {

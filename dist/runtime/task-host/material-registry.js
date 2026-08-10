@@ -83,6 +83,7 @@ export class MaterialRegistry {
         const updated = {
             ...existing,
             extractedTextPath: extraction.extractedTextPath,
+            extractorVersion: extraction.extractorVersion,
             parseStatus: extraction.parseStatus,
             parseSummary: extraction.parseSummary,
             errorMessage: extraction.errorMessage,
