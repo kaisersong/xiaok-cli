@@ -149,6 +149,32 @@ describe('KB Integration — Chinese search with jieba', () => {
 
     expect(output).toBe('未找到相关内容。');
   });
+
+  /**
+   * golden set 实测：无答案查询的 top1 命中率最高 0.250，有答案查询最低 0.333。
+   * 下限挡掉弱信号，但不能挡掉 1/3 —— 否则会误杀真实查询。
+   */
+  it('rejects weak single-term matches below the relevance floor', async () => {
+    const col = store.createCollection({ name: 'Floor', embeddingModelId: 'm', embeddingDim: 384 });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '技术笔记' });
+    store.insertChunks(src.id, createChunker().chunk({ text: '深度学习模型的训练需要大量标注数据。' }));
+
+    // 分词后 4 个实词，只有「模型」命中 → 命中率 0.25，低于下限
+    const output = await searchViaProductionTool('高压锅 炖牛腩 火候 模型');
+
+    expect(output).toBe('未找到相关内容。');
+  });
+
+  it('keeps a one-in-three match, which is above the floor', async () => {
+    const col = store.createCollection({ name: 'Keep', embeddingModelId: 'm', embeddingDim: 384 });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '技术笔记' });
+    store.insertChunks(src.id, createChunker().chunk({ text: '深度学习模型的训练需要大量标注数据。' }));
+
+    const output = await searchViaProductionTool('标注数据 火候 高压锅');
+
+    expect(output).toContain('技术笔记');
+    expect(output).not.toBe('未找到相关内容。');
+  });
 });
 
 describe('KB Integration — default collection and startup fix', () => {

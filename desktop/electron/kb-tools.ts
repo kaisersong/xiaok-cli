@@ -7,7 +7,7 @@
 
 import type { Tool } from '../../src/types.js';
 import type { KbStore, KbRetriever } from './kb-store.js';
-import { extractQueryTerms } from './kb-query-terms.js';
+import { extractQueryTerms, meetsRelevanceFloor } from './kb-query-terms.js';
 
 export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
   return [
@@ -169,14 +169,15 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
           for (const chunk of srcChunks) {
             const lower = chunk.text.toLowerCase();
             const matchCount = uniqueTerms.filter(t => lower.includes(t)).length;
-            if (matchCount > 0) {
+            const score = matchCount / uniqueTerms.length;
+            if (meetsRelevanceFloor(score)) {
               results.push({
                 sourceTitle: src.title,
                 text: chunk.text,
                 pageIndex: chunk.pageIndex,
                 slideIndex: chunk.slideIndex,
                 sheetName: chunk.sheetName,
-                score: matchCount / uniqueTerms.length,
+                score,
               });
             }
           }

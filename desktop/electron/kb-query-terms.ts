@@ -37,3 +37,19 @@ export function extractQueryTerms(query: string): string[] {
   const meaningful = all.filter(term => !STOP_WORDS.has(term));
   return meaningful.length > 0 ? meaningful : all;
 }
+
+/**
+ * 命中率下限。低于它的结果不返回。
+ *
+ * golden set 实测：无答案查询的 top1 命中率最高 0.250，有答案查询最低 0.333，
+ * 因此 (0.250, 0.333] 内的任意阈值都能让无答案误召归零且不误杀任何有答案查询。
+ * 取 0.3 —— 命中率的实际取值是 matched/terms，0.25 = 1/4、0.333 = 1/3，所以它
+ * 恰好排除「4 词及以上的查询只命中 1 个词」这类弱信号，而保留 1/3。
+ *
+ * 这是 topK 截断给不了的：topK 只控制数量，不判断相关性下限。
+ */
+export const MIN_MATCH_RATIO = 0.3;
+
+export function meetsRelevanceFloor(matchRatio: number): boolean {
+  return matchRatio >= MIN_MATCH_RATIO;
+}

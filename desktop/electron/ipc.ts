@@ -1845,7 +1845,7 @@ export async function registerDesktopIpc(
     const sourceIds = input?.sourceIds as string[] | undefined;
     const allSources = store.listSources(collectionId);
     const filteredSources = sourceIds?.length ? allSources.filter(s => sourceIds.includes(s.id)) : allSources;
-    const { extractQueryTerms } = await import('./kb-query-terms.js');
+    const { extractQueryTerms, meetsRelevanceFloor } = await import('./kb-query-terms.js');
     const uniqueTerms = extractQueryTerms(query);
     const results: Array<{ chunkId: string; sourceId: string; sourceTitle: string; collectionId: string; text: string; pageIndex: number | null; slideIndex: number | null; sheetName: string | null; bm25Score: number; vectorScore: number; fusedScore: number }> = [];
     for (const src of filteredSources) {
@@ -1853,7 +1853,8 @@ export async function registerDesktopIpc(
       for (const chunk of srcChunks) {
         const lower = chunk.text.toLowerCase();
         const matchCount = uniqueTerms.filter((t: string) => lower.includes(t)).length;
-        if (matchCount > 0) {
+        const score = matchCount / uniqueTerms.length;
+        if (meetsRelevanceFloor(score)) {
           results.push({
             chunkId: chunk.id,
             sourceId: chunk.sourceId,
@@ -1863,9 +1864,9 @@ export async function registerDesktopIpc(
             pageIndex: chunk.pageIndex,
             slideIndex: chunk.slideIndex,
             sheetName: chunk.sheetName,
-            bm25Score: matchCount / uniqueTerms.length,
+            bm25Score: score,
             vectorScore: 0,
-            fusedScore: matchCount / uniqueTerms.length,
+            fusedScore: score,
           });
         }
       }

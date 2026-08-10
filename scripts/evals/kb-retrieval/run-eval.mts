@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { createKbStoreSqlite } from '../../../desktop/electron/kb-store-sqlite.js';
 import { createChunker } from '../../../desktop/electron/kb-chunker.js';
 import { segmentQuery } from '../../../src/ai/memory/segment.js';
-import { extractQueryTerms } from '../../../desktop/electron/kb-query-terms.js';
+import { extractQueryTerms, meetsRelevanceFloor } from '../../../desktop/electron/kb-query-terms.js';
 import { GOLDEN_QUERIES, NOISE_PATTERNS, type GoldenQuery, type LiteralOverlap } from './golden-set.mjs';
 
 const CORPUS_DIR = join(homedir(), '.xiaok', 'eval-fixtures', 'kb-retrieval');
@@ -45,7 +45,7 @@ function searchSubstring(chunks: Chunk[], query: string): Candidate[] {
   for (const chunk of chunks) {
     const lower = chunk.text.toLowerCase();
     const matched = qt.filter(t => lower.includes(t)).length;
-    if (matched > 0) {
+    if (meetsRelevanceFloor(matched / qt.length)) {
       out.push({ sourceId: chunk.sourceId, sourceTitle: chunk.sourceTitle, text: chunk.text, score: matched / qt.length });
     }
   }
