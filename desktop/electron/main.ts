@@ -86,6 +86,17 @@ app.commandLine.appendSwitch('disable-breakpad');
 configureSafeCrashCapture();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * 必须在任何 `app.setName()` 之前解析，且全进程只解析一次。
+ *
+ * Chromium 的 PathService 缓存 `DIR_USER_DATA`：首次读取即固化。而下面
+ * `app.setName('xiaok')` 会把它改成 `~/Library/Application Support/xiaok`，
+ * 那个目录在真实机器上已被另一个应用占用。在钉住之前，路径还正确的唯一原因是
+ * 一句模块作用域的 `debugMain()` 恰好先读了它 —— 也就是删掉一行日志就会搬走
+ * 用户的知识库和会话数据。`tests/main/user-data-path-invariant.test.ts` 守这条。
+ */
+const USER_DATA_DIR = app.getPath('userData');
 let mainWindow: BrowserWindow | null = null;
 let meetingRecorderController: MeetingRecorderWindowController | null = null;
 let isQuitting = false;
@@ -95,7 +106,7 @@ function debugMain(message: string, extra?: unknown): void {
   const suffix = extra === undefined ? '' : ` ${JSON.stringify(extra)}`;
   const line = `[main-debug] ${message}${suffix}`;
   try {
-    const logDir = join(app.getPath('userData'), 'logs');
+    const logDir = join(USER_DATA_DIR, 'logs');
     mkdirSync(logDir, { recursive: true });
     appendFileSync(join(logDir, 'main-debug.log'), `${new Date().toISOString()} ${line}\n`);
   } catch {}
@@ -677,8 +688,8 @@ async function createWindow(): Promise<BrowserWindow> {
     },
     kswarmHealthProbe: () => kswarmService.getHealthDiagnosticInput(),
     kswarmHealthLogPaths: [
-      join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'server.log'),
-      join(resolveKSwarmServiceLogRoot(app.getPath('userData')), 'broker.log'),
+      join(resolveKSwarmServiceLogRoot(USER_DATA_DIR), 'server.log'),
+      join(resolveKSwarmServiceLogRoot(USER_DATA_DIR), 'broker.log'),
     ],
   });
   loopStoreRef = loopRuntime.loopStore;
