@@ -8,6 +8,7 @@ import { MarkdownRenderer } from './MarkdownRenderer';
 import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
+import { getDesktopDocumentMimeType } from '../shared/document-formats';
 import { useLocale } from '../contexts/LocaleContext';
 import { fileBasename } from '../lib/file-path';
 import type { ThreadRecord } from '../api/types';
@@ -568,9 +569,7 @@ function ArtifactKbButton({ artifactId, title, filePath }: { artifactId: string;
       const collectionId = collections?.[0]?.id;
       if (!collectionId) return;
       if (filePath) {
-        const ext = filePath.split('.').pop()?.toLowerCase() || '';
-        const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-        await desktop.kbAddSource({ collectionId, kind: 'file', title: title || t.chatView.artifact, filePath, mimeType: mimeMap[ext] || 'application/octet-stream' });
+        await desktop.kbAddSource({ collectionId, kind: 'file', title: title || t.chatView.artifact, filePath, mimeType: getDesktopDocumentMimeType(filePath) || 'application/octet-stream' });
       } else {
         await desktop.kbAddSource({ collectionId, kind: 'paste', title: title || t.chatView.artifact, text: `[${t.chatView.artifact}] ${title} (${artifactId})` });
       }

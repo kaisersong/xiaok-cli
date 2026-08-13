@@ -162,6 +162,7 @@ describe('desktop read_material tool', () => {
       extractedTextPath: currentPath,
       parseStatus: 'parsed',
       extractorVersion: MATERIAL_EXTRACTOR_VERSION,
+      sourceFingerprint: record.sha256,
     });
 
     const fresh = registry.get(record.materialId)!;
@@ -173,6 +174,51 @@ describe('desktop read_material tool', () => {
 
     expect(payload.cached).toBe(true);
     expect(payload.content).toContain('当前版本缓存内容');
+  });
+
+  it('keeps a canonical cache so an early small read does not poison a later large read', async () => {
+    const sourcePath = join(sourceDir, 'legacy.doc');
+    writeFileSync(sourcePath, 'legacy office bytes');
+    const record = await registry.importMaterial({
+      taskId: 'task_1',
+      sourcePath,
+      role: 'customer_material',
+      roleSource: 'user',
+    });
+    const canonical = `# Full document\n${'完整正文'.repeat(20_000)}`;
+    let parseCalls = 0;
+    const officeToMarkdown = async () => {
+      parseCalls += 1;
+      return {
+        ok: true as const,
+        markdown: canonical,
+        format: 'doc',
+        engine: 'anydoc' as const,
+        engineVersion: '0.1.8',
+        chars: canonical.length,
+        truncated: false,
+      };
+    };
+
+    const first = await executeReadMaterialForDesktop(
+      { materialId: record.materialId, maxChars: 1000 },
+      { taskId: 'task_1', materials: [record], materialRegistry: registry, officeToMarkdown },
+    );
+    expect(JSON.parse(first.result).content.length).toBeLessThan(canonical.length);
+
+    const updated = registry.get(record.materialId)!;
+    const second = await executeReadMaterialForDesktop(
+      { materialId: record.materialId, maxChars: 100_000 },
+      { taskId: 'task_1', materials: [updated], materialRegistry: registry, officeToMarkdown },
+    );
+    const secondPayload = JSON.parse(second.result);
+    expect(secondPayload.cached).toBe(true);
+    expect(secondPayload.content.length).toBeGreaterThan(1000);
+    expect(secondPayload.content).toContain('完整正文');
+    expect(parseCalls).toBe(1);
+    expect(updated.extractionEngine).toBe('anydoc');
+    expect(updated.extractionEngineVersion).toBe('0.1.8');
+    expect(updated.sourceFingerprint).toBe(record.sha256);
   });
 
   // D5：Desktop 注入 pdfjs 后 read_material 能读 PDF。

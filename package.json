@@ -63,6 +63,7 @@
     "eval:dynamic-workflow": "node --import tsx scripts/evals/dynamic-workflow-parallel.ts",
     "eval:ahe-lite": "node --import tsx scripts/evals/ahe-lite.ts --scenario all --output .xiaok/evals/ahe-lite/latest.json",
     "eval:ahe-lite:live": "node --import tsx scripts/evals/ahe-lite-live-smoke.ts --output .xiaok/evals/ahe-lite/live-smoke.json",
+    "eval:anydoc-office": "node --import tsx scripts/evals/anydoc-office/run.mts",
     "eval:graphiti-knowledge": "node --import tsx scripts/evals/graphiti-knowledge/run.mjs",
     "eval:graphiti-knowledge:test": "npm run test:sandbox:build && npm run test:sandbox:run -- .test-dist/tests/evals/graphiti-knowledge-*.test.js",
     "eval:kimi-k3:d9:test": "npm run test:sandbox:build && npm run test:sandbox:run -- .test-dist/tests/evals/kimi-k3-d9-*.test.js",

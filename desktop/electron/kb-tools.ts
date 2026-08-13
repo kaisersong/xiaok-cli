@@ -6,10 +6,14 @@
  */
 
 import type { Tool } from '../../src/types.js';
-import type { KbStore, KbRetriever } from './kb-store.js';
+import type { KbStore, KbRetriever, SourceExtractor, SourceExtractionResult } from './kb-store.js';
 import { extractQueryTerms, meetsRelevanceFloor } from './kb-query-terms.js';
 
-export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
+export function createKbTools(
+  store: KbStore,
+  retriever: KbRetriever,
+  options: { sourceExtractor?: SourceExtractor } = {},
+): Tool[] {
   return [
     {
       permission: 'safe',
@@ -53,10 +57,10 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
       },
     },
     {
-      permission: 'safe',
+      permission: 'write',
       definition: {
         name: 'kb_add_source',
-        description: '向知识库写入内容。支持三种方式：paste（直接传文本）、file（本地文件路径）、url（网页地址）。写入后自动分片索引，后续可通过 kb_search 检索。',
+        description: '向知识库创建一个新的内容来源。只能创建本次调用拥有的新 source；严禁覆盖、重解析、删除或归档已有用户 source。支持 paste、file、url，写入后自动分片索引。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -85,25 +89,35 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
         if (kind === 'paste') {
           const text = (input.text as string || '').trim();
           if (!text) return '错误：kind=paste 时 text 不能为空。';
-          const source = store.addSource({ collectionId, kind: 'paste', title, text });
+          const source = store.addSource({ collectionId, kind: 'paste', title, text }, 'agent');
           const chunks = simpleChunk(text);
           store.insertChunks(source.id, chunks);
-          markSourceParsed(store, source.id);
+          markSourceParsed(store, source.id, { engine: 'builtin-text' });
           return `已写入「${title}」到知识库（${chunks.length} 片段）。`;
         }
 
         if (kind === 'file') {
           const filePath = (input.file_path as string || '').trim();
           if (!filePath) return '错误：kind=file 时 file_path 不能为空。';
-          const source = store.addSource({ collectionId, kind: 'file', title, filePath });
+          const source = store.addSource({ collectionId, kind: 'file', title, filePath }, 'agent');
           try {
-            const { readFileSync } = await import('node:fs');
-            const text = readFileSync(filePath, 'utf-8');
-            const chunks = simpleChunk(text);
+            const extractor = options.sourceExtractor;
+            if (!extractor) throw new Error('source_extractor_unavailable');
+            const extracted = await extractor.extract({ filePath, mimeType: 'application/octet-stream' });
+            if (!extracted.ok || !extracted.text) {
+              markSourceFailed(store, source.id, extracted);
+              return `错误：读取文件失败 — ${extracted.errorCode ?? 'extraction_failed'}: ${extracted.error ?? 'unknown'}`;
+            }
+            const chunks = simpleChunk(extracted.text);
             store.insertChunks(source.id, chunks);
-            markSourceParsed(store, source.id);
+            markSourceParsed(store, source.id, extractionMetadata(extracted));
             return `已写入文件「${title}」到知识库（${chunks.length} 片段）。`;
           } catch (e) {
+            markSourceFailed(store, source.id, {
+              ok: false,
+              errorCode: 'io_error',
+              error: e instanceof Error ? e.message : String(e),
+            });
             return `错误：读取文件失败 — ${e instanceof Error ? e.message : String(e)}`;
           }
         }
@@ -111,17 +125,29 @@ export function createKbTools(store: KbStore, retriever: KbRetriever): Tool[] {
         if (kind === 'url') {
           const url = (input.url as string || '').trim();
           if (!url) return '错误：kind=url 时 url 不能为空。';
-          const source = store.addSource({ collectionId, kind: 'url', title, uri: url });
+          const source = store.addSource({ collectionId, kind: 'url', title, uri: url }, 'agent');
           try {
             const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-            if (!resp.ok) return `错误：抓取 URL 失败 — HTTP ${resp.status}`;
+            if (!resp.ok) {
+              markSourceFailed(store, source.id, {
+                ok: false,
+                errorCode: 'io_error',
+                error: `HTTP ${resp.status}`,
+              });
+              return `错误：抓取 URL 失败 — HTTP ${resp.status}`;
+            }
             const text = await resp.text();
             const plainText = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
             const chunks = simpleChunk(plainText);
             store.insertChunks(source.id, chunks);
-            markSourceParsed(store, source.id);
+            markSourceParsed(store, source.id, { engine: 'builtin-url' });
             return `已写入 URL「${title}」到知识库（${chunks.length} 片段）。`;
           } catch (e) {
+            markSourceFailed(store, source.id, {
+              ok: false,
+              errorCode: 'io_error',
+              error: e instanceof Error ? e.message : String(e),
+            });
             return `错误：抓取 URL 失败 — ${e instanceof Error ? e.message : String(e)}`;
           }
         }
@@ -238,14 +264,32 @@ function simpleChunk(text: string): Array<{ idx: number; text: string; charStart
     const end = Math.min(start + CHUNK_SIZE, text.length);
     chunks.push({ idx, text: text.slice(start, end), charStart: start, charEnd: end });
     idx++;
+    if (end >= text.length) break;
     start = end - CHUNK_OVERLAP;
     if (start >= text.length) break;
   }
   return chunks;
 }
 
-function markSourceParsed(store: KbStore, sourceId: string): void {
-  try {
-    (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed', updated_at = ? WHERE id = ?").run(Date.now(), sourceId);
-  } catch {}
+function markSourceParsed(store: KbStore, sourceId: string, metadata: Record<string, unknown>): void {
+  store.updateSourceParseResult(sourceId, { parseStatus: 'parsed', metadata }, 'agent');
+}
+
+function markSourceFailed(store: KbStore, sourceId: string, result: SourceExtractionResult): void {
+  const current = store.getSource(sourceId);
+  if (!current || current.parseStatus !== 'pending') return;
+  store.updateSourceParseResult(sourceId, {
+    parseStatus: result.errorCode === 'unsupported_format' ? 'unsupported' : 'failed',
+    errorCode: result.errorCode ?? 'extraction_failed',
+    errorMessage: result.error ?? 'unknown',
+    metadata: extractionMetadata(result),
+  }, 'agent');
+}
+
+function extractionMetadata(result: SourceExtractionResult): Record<string, unknown> {
+  return {
+    ...(result.engine ? { engine: result.engine } : {}),
+    ...(result.engineVersion ? { engineVersion: result.engineVersion } : {}),
+    ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+  };
 }

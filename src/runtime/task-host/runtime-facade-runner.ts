@@ -20,14 +20,47 @@ interface CreateRuntimeFacadeTaskRunnerOptions {
   onChunk?: (chunk: StreamChunk) => void;
 }
 
+const MAX_QUEUED_ASSISTANT_DELTA_CHARS = 16 * 1024;
+
 export function createRuntimeFacadeTaskRunner(options: CreateRuntimeFacadeTaskRunnerOptions): TaskRunner {
   return async (input: TaskRunnerInput): Promise<void> => {
+    const queuedEvents: RuntimeEvent[] = [];
+    let drainPromise: Promise<void> | null = null;
+    let eventWriteError: unknown;
+    const drainEvents = async (): Promise<void> => {
+      while (queuedEvents.length > 0) {
+        const event = queuedEvents.shift()!;
+        try {
+          await input.emitRuntimeEvent(event);
+        } catch (error) {
+          eventWriteError ??= error;
+        }
+      }
+      drainPromise = null;
+    };
+    const enqueueEvent = (event: RuntimeEvent): void => {
+      const previous = queuedEvents[queuedEvents.length - 1];
+      if (
+        previous?.type === 'assistant_delta'
+        && event.type === 'assistant_delta'
+        && canMergeAssistantDeltas(previous, event)
+      ) {
+        queuedEvents[queuedEvents.length - 1] = {
+          ...previous,
+          delta: previous.delta + event.delta,
+        };
+      } else {
+        queuedEvents.push(event.type === 'assistant_delta' ? { ...event } : event);
+      }
+      drainPromise ??= drainEvents();
+    };
     const unsubscribe = options.hooks.onAny((event) => {
       if (event.sessionId === input.sessionId) {
-        input.emitRuntimeEvent(event);
+        enqueueEvent(event);
       }
     });
 
+    let turnError: unknown;
     try {
       await options.runtimeFacade.runTurn({
         sessionId: input.sessionId,
@@ -35,10 +68,30 @@ export function createRuntimeFacadeTaskRunner(options: CreateRuntimeFacadeTaskRu
         source: options.source,
         input: buildTaskRunnerInput(input),
       }, options.onChunk ?? (() => undefined), input.signal);
+    } catch (error) {
+      turnError = error;
     } finally {
       unsubscribe();
     }
+    await drainPromise;
+    if (turnError !== undefined) {
+      throw turnError;
+    }
+    if (eventWriteError !== undefined) {
+      throw eventWriteError;
+    }
   };
+}
+
+function canMergeAssistantDeltas(
+  previous: Extract<RuntimeEvent, { type: 'assistant_delta' }>,
+  next: Extract<RuntimeEvent, { type: 'assistant_delta' }>,
+): boolean {
+  return previous.sessionId === next.sessionId
+    && previous.turnId === next.turnId
+    && previous.intentId === next.intentId
+    && previous.stepId === next.stepId
+    && previous.delta.length + next.delta.length <= MAX_QUEUED_ASSISTANT_DELTA_CHARS;
 }
 
 function buildTaskRunnerInput(input: TaskRunnerInput): MessageBlock[] {

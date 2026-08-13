@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { extractMaterialText } from '../../../src/runtime/materials/text-extractor.js';
+import { extractMaterialText, MATERIAL_EXTRACTOR_VERSION } from '../../../src/runtime/materials/text-extractor.js';
 
 describe('extractMaterialText', () => {
   let rootDir: string;
@@ -64,6 +64,81 @@ describe('extractMaterialText', () => {
       .resolves.toMatchObject({ parseStatus: 'unsupported' });
     await expect(extractMaterialText({ workspacePath: rtfPath, mimeType: 'application/rtf' }))
       .resolves.toMatchObject({ parseStatus: 'unsupported' });
+  });
+
+  it('routes legacy, macro-enabled, and binary Office files through the host capability', async () => {
+    expect(MATERIAL_EXTRACTOR_VERSION).toBe(3);
+    for (const name of ['legacy.doc', 'macro.docm', 'slides.ppt', 'slides.pptm', 'ledger.xls', 'ledger.xlsb']) {
+      const filePath = join(rootDir, name);
+      writeFileSync(filePath, 'office bytes');
+      const calls: unknown[] = [];
+      const result = await extractMaterialText({
+        workspacePath: filePath,
+        mimeType: 'application/octet-stream',
+        officeToMarkdown: async (input) => {
+          calls.push(input);
+          const markdown = `# AnyDoc\n${name}`;
+          return {
+            ok: true,
+            markdown,
+            format: name.split('.').pop()!,
+            engine: 'anydoc',
+            engineVersion: '0.1.8',
+            chars: markdown.length,
+            truncated: false,
+          };
+        },
+      });
+      expect(calls, name).toHaveLength(1);
+      expect(result, name).toMatchObject({
+        parseStatus: 'parsed',
+        engine: 'anydoc',
+        engineVersion: '0.1.8',
+        truncated: false,
+      });
+    }
+  });
+
+  it('keeps legacy Office unsupported when the host capability is absent', async () => {
+    const filePath = join(rootDir, 'legacy.doc');
+    writeFileSync(filePath, 'office bytes');
+    await expect(extractMaterialText({ workspacePath: filePath, mimeType: 'application/msword' }))
+      .resolves.toMatchObject({ parseStatus: 'unsupported' });
+  });
+
+  it('falls back only for OOXML infrastructure failures', async () => {
+    const filePath = join(rootDir, 'report.docx');
+    writeFileSync(filePath, createMinimalDocx(['轻量解析器回退成功']));
+
+    const fallback = await extractMaterialText({
+      workspacePath: filePath,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      officeToMarkdown: async () => ({
+        ok: false,
+        code: 'binding_unavailable',
+        message: 'binding unavailable',
+        retryable: true,
+      }),
+    });
+    expect(fallback).toMatchObject({ parseStatus: 'parsed', engine: 'lightweight-ooxml' });
+    expect(fallback.text).toContain('轻量解析器回退成功');
+
+    const failClosed = await extractMaterialText({
+      workspacePath: filePath,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      officeToMarkdown: async () => ({
+        ok: false,
+        code: 'resource_limit',
+        message: 'too large',
+        retryable: false,
+      }),
+    });
+    expect(failClosed).toMatchObject({
+      parseStatus: 'failed',
+      errorCode: 'resource_limit',
+      errorMessage: 'too large',
+    });
+    expect(failClosed.text).toBeUndefined();
   });
 });
 

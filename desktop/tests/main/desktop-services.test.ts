@@ -276,9 +276,10 @@ describe('desktop services', () => {
       expect.objectContaining({ type: 'progress', message: '正在解析材料' }),
       expect.objectContaining({ type: 'result', result: expect.objectContaining({ summary: '已生成可继续细化的方案大纲' }) }),
     ]));
+    expect(recovered.snapshot.events
+      .map(event => event.type === 'assistant_delta' ? event.delta : '')
+      .join('')).toBe('模型回复内容');
     expect(recovered.snapshot.events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'assistant_delta', delta: '模型' }),
-      expect.objectContaining({ type: 'assistant_delta', delta: '回复内容' }),
       expect.objectContaining({ type: 'result', result: expect.objectContaining({ summary: '模型回复内容' }) }),
       expect.objectContaining({ type: 'result' }),
     ]));

@@ -59,7 +59,7 @@ describe('KB Contract — KbStore', () => {
 
   it('deletes collection and cascades to sources and chunks', () => {
     const col = store.createCollection({ name: 'ToDelete', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'test' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'test' }, 'user');
     store.insertChunks(src.id, [{ idx: 0, text: 'hello', charStart: 0, charEnd: 5 }]);
     store.deleteCollection(col.id);
     expect(store.getCollection(col.id)).toBeUndefined();
@@ -68,13 +68,75 @@ describe('KB Contract — KbStore', () => {
 
   it('adds a source to a collection', () => {
     const col = store.createCollection({ name: 'C', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'Report.pdf' });
+    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'Report.pdf' }, 'user');
     expect(src).toMatchObject({
       collectionId: col.id,
       kind: 'file',
       title: 'Report.pdf',
       parseStatus: 'pending',
     });
+  });
+
+  it('enforces parse-result ownership and state transitions in the store', () => {
+    const col = store.createCollection({ name: 'Authority', embeddingModelId: 'm', embeddingDim: 384 });
+    const userSource = store.addSource({ collectionId: col.id, kind: 'file', title: 'user.doc' }, 'user');
+    const agentSource = store.addSource({ collectionId: col.id, kind: 'file', title: 'agent.doc' }, 'agent');
+
+    expect(() => store.updateSourceParseResult(userSource.id, {
+      parseStatus: 'parsed',
+      metadata: { engine: 'anydoc', engineVersion: '0.1.8' },
+    }, 'agent')).toThrow(/not allowed/i);
+
+    const parsed = store.updateSourceParseResult(agentSource.id, {
+      parseStatus: 'parsed',
+      metadata: { engine: 'anydoc', engineVersion: '0.1.8', truncated: false },
+    }, 'agent');
+    expect(parsed).toMatchObject({
+      parseStatus: 'parsed',
+      parseError: '',
+      metadata: {
+        createdBy: 'agent',
+        engine: 'anydoc',
+        engineVersion: '0.1.8',
+        truncated: false,
+      },
+    });
+    expect(() => store.updateSourceParseResult(agentSource.id, {
+      parseStatus: 'failed',
+      errorCode: 'malformed_document',
+      errorMessage: 'bad',
+    }, 'agent')).toThrow(/state/i);
+  });
+
+  it('rejects missing mutation authority and agent-created terminal source states', () => {
+    const col = store.createCollection({ name: 'Default deny', embeddingModelId: 'm', embeddingDim: 384 });
+    expect(() => store.addSource({
+      collectionId: col.id,
+      kind: 'file',
+      title: 'missing-authority.doc',
+    }, undefined as never)).toThrow(/request source/i);
+    expect(() => store.addSource({
+      collectionId: col.id,
+      kind: 'file',
+      title: 'pre-parsed.doc',
+      parseStatus: 'parsed',
+    }, 'agent')).toThrow(/pending/i);
+    expect(store.listSources(col.id)).toHaveLength(0);
+  });
+
+  it('allows scheduler recovery only for pending sources', () => {
+    const col = store.createCollection({ name: 'Recovery', embeddingModelId: 'm', embeddingDim: 384 });
+    const legacyPending = store.addSource({ collectionId: col.id, kind: 'file', title: 'pending.doc' }, 'user');
+    const recovered = store.updateSourceParseResult(legacyPending.id, {
+      parseStatus: 'failed',
+      errorCode: 'malformed_document',
+      errorMessage: 'bad document',
+    }, 'scheduler');
+    expect(recovered).toMatchObject({ parseStatus: 'failed', parseError: 'bad document' });
+    expect(recovered.metadata).toMatchObject({ errorCode: 'malformed_document' });
+    expect(() => store.updateSourceParseResult(legacyPending.id, {
+      parseStatus: 'parsed',
+    }, 'scheduler')).toThrow(/state/i);
   });
 
   it('persists meeting source metadata and parsed status', () => {
@@ -92,7 +154,7 @@ describe('KB Contract — KbStore', () => {
         audioRetention: 'kept',
         participantHints: ['Alice', 'Bob'],
       },
-    });
+    }, 'user');
 
     expect(src).toMatchObject({
       collectionId: col.id,
@@ -112,7 +174,7 @@ describe('KB Contract — KbStore', () => {
 
   it('inserts chunks for a source', () => {
     const col = store.createCollection({ name: 'D', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' }, 'user');
     const chunks = store.insertChunks(src.id, [
       { idx: 0, text: 'chunk one', charStart: 0, charEnd: 9 },
       { idx: 1, text: 'chunk two', charStart: 9, charEnd: 18 },
@@ -123,7 +185,7 @@ describe('KB Contract — KbStore', () => {
 
   it('persists meeting chunk timestamps in metadata', () => {
     const col = store.createCollection({ name: 'Timed Chunks', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'meeting', title: 'Timed Meeting' });
+    const src = store.addSource({ collectionId: col.id, kind: 'meeting', title: 'Timed Meeting' }, 'user');
     const chunks = store.insertChunks(src.id, [
       {
         idx: 0,
@@ -140,7 +202,7 @@ describe('KB Contract — KbStore', () => {
 
   it('marks chunk as embedded', () => {
     const col = store.createCollection({ name: 'E', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'x' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'x' }, 'user');
     const chunks = store.insertChunks(src.id, [{ idx: 0, text: 'x', charStart: 0, charEnd: 1 }]);
     store.markChunkEmbedded(chunks[0].id);
     const updated = store.listChunks(src.id);
@@ -149,7 +211,7 @@ describe('KB Contract — KbStore', () => {
 
   it('marks chunk as failed', () => {
     const col = store.createCollection({ name: 'F', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'x' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'x' }, 'user');
     const chunks = store.insertChunks(src.id, [{ idx: 0, text: 'x', charStart: 0, charEnd: 1 }]);
     store.markChunkFailed(chunks[0].id, 'onnx crash');
     const updated = store.listChunks(src.id);
@@ -159,7 +221,7 @@ describe('KB Contract — KbStore', () => {
 
   it('returns embedding progress for a source', () => {
     const col = store.createCollection({ name: 'G', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'multi' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'multi' }, 'user');
     store.insertChunks(src.id, [
       { idx: 0, text: 'a', charStart: 0, charEnd: 1 },
       { idx: 1, text: 'b', charStart: 1, charEnd: 2 },
@@ -174,7 +236,7 @@ describe('KB Contract — KbStore', () => {
 
   it('retrySource resets parse status', () => {
     const col = store.createCollection({ name: 'H', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'bad.pdf' });
+    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'bad.pdf' }, 'user');
     // Simulate failed state would be set by ingest worker — here we just verify retry resets
     const retried = store.retrySource(src.id);
     expect(retried).toMatchObject({ parseStatus: 'pending', parseAttempts: 0 });
@@ -182,8 +244,8 @@ describe('KB Contract — KbStore', () => {
 
   it('getCollectionState returns aggregated progress', () => {
     const col = store.createCollection({ name: 'I', embeddingModelId: 'm', embeddingDim: 384 });
-    store.addSource({ collectionId: col.id, kind: 'paste', title: 'one' });
-    store.addSource({ collectionId: col.id, kind: 'url', title: 'two' });
+    store.addSource({ collectionId: col.id, kind: 'paste', title: 'one' }, 'user');
+    store.addSource({ collectionId: col.id, kind: 'url', title: 'two' }, 'user');
     const state = store.getCollectionState(col.id);
     expect(state).toBeDefined();
     expect(state!.sources).toHaveLength(2);
@@ -191,7 +253,7 @@ describe('KB Contract — KbStore', () => {
 
   it('getSourceWithContent supports offset/limit pagination', () => {
     const col = store.createCollection({ name: 'J', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'long' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'long' }, 'user');
     // Insert chunks manually (ingest pipeline would do this in production)
     store.insertChunks(src.id, [
       { idx: 0, text: 'a'.repeat(50), charStart: 0, charEnd: 50 },
@@ -367,7 +429,7 @@ describe('KB Integration — addSource sets parsed status', () => {
 
   it('source with chunks should be marked as parsed after insert', () => {
     const col = store.createCollection({ name: 'Test', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' }, 'user');
     expect(src.parseStatus).toBe('pending');
     store.insertChunks(src.id, [
       { idx: 0, text: '测试内容', charStart: 0, charEnd: 4 },
@@ -406,7 +468,7 @@ describe('KB Integration — Chinese search with jieba', () => {
     }
 
     const col = store.createCollection({ name: 'CN', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' }, 'user');
     store.insertChunks(src.id, [
       { idx: 0, text: 'AI 原生组织架构是一种全新的组织设计理念', charStart: 0, charEnd: 20 },
       { idx: 1, text: '传统的企业管理方式已经不适应数字化转型需求', charStart: 20, charEnd: 40 },

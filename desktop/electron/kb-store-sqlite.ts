@@ -21,7 +21,9 @@ import type {
   SourceEmbeddingProgress,
   ChunkEmbeddingStatus,
   SourceParseStatus,
+  RequestSource,
   UpdateMeetingInput,
+  UpdateSourceParseResultInput,
 } from './kb-types.js';
 import type { KbStore } from './kb-store.js';
 
@@ -166,11 +168,17 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     db.prepare('DELETE FROM collections WHERE id = ?').run(id);
   }
 
-  function addSource(input: AddSourceInput): Source {
+  function addSource(input: AddSourceInput, requestSource: RequestSource): Source {
+    if (requestSource !== 'user' && requestSource !== 'agent' && requestSource !== 'scheduler') {
+      throw new Error('A valid request source is required to add a Knowledge source');
+    }
+    if (requestSource === 'agent' && input.parseStatus && input.parseStatus !== 'pending') {
+      throw new Error('Agent-created Knowledge sources must start in the pending state');
+    }
     const id = randomUUID();
     const ts = now();
     const rawPath = input.rawPath ?? input.filePath ?? '';
-    const metadataJson = JSON.stringify(input.metadata ?? {});
+    const metadataJson = JSON.stringify({ ...input.metadata, createdBy: requestSource });
     db.prepare(`
       INSERT INTO sources (id, collection_id, kind, title, uri, mime_type, sha256, byte_size, raw_path, extracted_text_path, parse_status, parse_error, parse_attempts, chunk_count, metadata_json, created_at, updated_at)
       VALUES (@id, @collectionId, @kind, @title, @uri, @mimeType, '', @byteSize, @rawPath, '', @parseStatus, '', 0, 0, @metadataJson, @ts, @ts)
@@ -207,6 +215,44 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     const ts = now();
     db.prepare("UPDATE sources SET parse_status = 'pending', parse_error = '', parse_attempts = 0, updated_at = @ts WHERE id = @id").run({ id, ts });
     return getSource(id);
+  }
+
+  function updateSourceParseResult(
+    id: string,
+    input: UpdateSourceParseResultInput,
+    requestSource: RequestSource,
+  ): Source {
+    const source = getSource(id);
+    if (!source) throw new Error(`Source not found: ${id}`);
+    if (source.parseStatus !== 'pending' && source.parseStatus !== 'parsing') {
+      throw new Error(`Source state does not allow parse update: ${source.parseStatus}`);
+    }
+    const createdBy = source.metadata.createdBy;
+    if (requestSource !== 'scheduler' && createdBy !== requestSource) {
+      throw new Error(`Request source ${requestSource} is not allowed to update this source`);
+    }
+    const metadata = {
+      ...source.metadata,
+      ...input.metadata,
+      ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+    };
+    const ts = now();
+    db.prepare(`
+      UPDATE sources
+      SET parse_status = @parseStatus,
+          parse_error = @parseError,
+          parse_attempts = parse_attempts + 1,
+          metadata_json = @metadataJson,
+          updated_at = @ts
+      WHERE id = @id
+    `).run({
+      id,
+      parseStatus: input.parseStatus,
+      parseError: input.errorMessage ?? '',
+      metadataJson: JSON.stringify(metadata),
+      ts,
+    });
+    return getSource(id)!;
   }
 
   function getSourceEmbeddingProgress(sourceId: string): SourceEmbeddingProgress {
@@ -397,7 +443,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   return {
     _db: db,
     createCollection, getCollection, listCollections, renameCollection, deleteCollection,
-    addSource, getSource, listSources, deleteSource, retrySource, getSourceEmbeddingProgress,
+    addSource, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
     insertChunks, listChunks, markChunkEmbedded, markChunkFailed,
     createMeeting, getMeeting, listMeetings, updateMeeting,
     getCollectionState, getSourceWithContent, close,

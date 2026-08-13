@@ -10,6 +10,7 @@ import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
 import type { ArtifactWorkspaceErrorCode } from '../shared/artifact-workspace-types.js';
+import { OFFICE_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
@@ -1438,6 +1439,38 @@ export async function registerDesktopIpc(
   const { createChunker } = await import('./kb-chunker.js');
   const { createSourceExtractor } = await import('./kb-source-extractor.js');
   const { app } = await import('electron');
+  const kbSourceExtractor = createSourceExtractor({
+    officeParser: { parse: input => services.parseOfficeDocument(input) },
+  });
+  const kbChunker = createChunker();
+
+  const sourceExtractionMetadata = (result: import('./kb-store.js').SourceExtractionResult): Record<string, unknown> => ({
+    ...(result.engine ? { engine: result.engine } : {}),
+    ...(result.engineVersion ? { engineVersion: result.engineVersion } : {}),
+    ...(result.truncated !== undefined ? { truncated: result.truncated } : {}),
+  });
+
+  const finishSourceExtraction = (
+    store: import('./kb-store.js').KbStore,
+    sourceId: string,
+    result: import('./kb-store.js').SourceExtractionResult,
+    requestSource: import('./kb-types.js').RequestSource,
+  ) => {
+    if (result.ok && result.text) {
+      const chunks = kbChunker.chunk({ text: result.text, mimeType: result.mimeType });
+      store.insertChunks(sourceId, chunks);
+      return store.updateSourceParseResult(sourceId, {
+        parseStatus: 'parsed',
+        metadata: sourceExtractionMetadata(result),
+      }, requestSource);
+    }
+    return store.updateSourceParseResult(sourceId, {
+      parseStatus: result.errorCode === 'unsupported_format' ? 'unsupported' : 'failed',
+      errorCode: result.errorCode ?? 'extraction_failed',
+      errorMessage: result.error ?? 'unknown',
+      metadata: sourceExtractionMetadata(result),
+    }, requestSource);
+  };
 
   let kbStore: import('./kb-store.js').KbStore | null = null;
   function getKbStore() {
@@ -1451,25 +1484,34 @@ export async function registerDesktopIpc(
           embeddingDim: 512,
         });
       }
-      (kbStore as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed' WHERE parse_status = 'pending' AND id IN (SELECT DISTINCT source_id FROM chunks)").run();
-      const pendingSources = (kbStore as any)._db?.prepare("SELECT id, raw_path, mime_type FROM sources WHERE parse_status = 'pending' AND raw_path != ''").all() as Array<{ id: string; raw_path: string; mime_type: string }> | undefined;
-      if (pendingSources?.length) {
+      const pendingSources = kbStore.listCollections()
+        .flatMap(collection => kbStore!.listSources(collection.id))
+        .filter(source => source.parseStatus === 'pending');
+      if (pendingSources.length) {
         const store = kbStore!;
         setImmediate(async () => {
-          const extractor = createSourceExtractor();
-          const chunker = createChunker();
           for (const src of pendingSources) {
             try {
-              const extractResult = await extractor.extract({ filePath: src.raw_path, mimeType: src.mime_type || 'application/octet-stream' });
-              if (extractResult.ok && extractResult.text) {
-                const chunks = chunker.chunk({ text: extractResult.text, mimeType: extractResult.mimeType });
-                store.insertChunks(src.id, chunks);
-                (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed', updated_at = ? WHERE id = ?").run(Date.now(), src.id);
-              } else {
-                (store as any)._db?.prepare("UPDATE sources SET parse_status = 'failed', updated_at = ? WHERE id = ?").run(Date.now(), src.id);
+              if (store.listChunks(src.id).length > 0) {
+                store.updateSourceParseResult(src.id, { parseStatus: 'parsed' }, 'scheduler');
+                continue;
               }
-            } catch {
-              (store as any)._db?.prepare("UPDATE sources SET parse_status = 'failed', updated_at = ? WHERE id = ?").run(Date.now(), src.id);
+              if (!src.rawPath) continue;
+              const extractResult = await kbSourceExtractor.extract({
+                filePath: src.rawPath,
+                mimeType: src.mimeType || 'application/octet-stream',
+              });
+              finishSourceExtraction(store, src.id, extractResult, 'scheduler');
+            } catch (error) {
+              try {
+                store.updateSourceParseResult(src.id, {
+                  parseStatus: 'failed',
+                  errorCode: 'io_error',
+                  errorMessage: error instanceof Error ? error.message : String(error),
+                }, 'scheduler');
+              } catch {
+                // Another recovery path already finalized this source.
+              }
             }
           }
         });
@@ -1501,27 +1543,50 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:kb:addSource', async (_event, input) => {
     log('info', 'kb:addSource', { kind: input?.kind, title: input?.title });
     const store = getKbStore();
-    const source = store.addSource(input);
-    const extractor = createSourceExtractor();
-    const chunker = createChunker();
+    const unsafeMetadata = input?.metadata && typeof input.metadata === 'object'
+      ? input.metadata as Record<string, unknown>
+      : {};
+    const { createdBy: _createdBy, requestSource: _requestSource, ...metadata } = unsafeMetadata;
+    const source = store.addSource({
+      collectionId: input?.collectionId,
+      kind: input?.kind,
+      title: input?.title,
+      uri: input?.uri,
+      filePath: input?.filePath,
+      mimeType: input?.mimeType,
+      text: input?.text,
+      byteSize: input?.byteSize,
+      rawPath: input?.rawPath,
+      parseStatus: 'pending',
+      metadata,
+    }, 'user');
     try {
-      let extractResult: { ok: boolean; text?: string; mimeType?: string } | null = null;
+      let extractResult: import('./kb-store.js').SourceExtractionResult | null = null;
       if (input?.kind === 'paste' && input?.text) {
-        extractResult = extractor.extractFromText(input.text, input.title || '粘贴文本');
+        extractResult = kbSourceExtractor.extractFromText(input.text, input.title || '粘贴文本');
       } else if (input?.kind === 'file' && input?.filePath) {
-        extractResult = await extractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
+        extractResult = await kbSourceExtractor.extract({ filePath: input.filePath, mimeType: input.mimeType || 'application/octet-stream' });
       } else if (input?.kind === 'url' && input?.uri) {
-        extractResult = await extractor.extractFromUrl(input.uri);
+        extractResult = await kbSourceExtractor.extractFromUrl(input.uri);
       }
-      if (extractResult?.ok && extractResult.text) {
-        const chunks = chunker.chunk({ text: extractResult.text, mimeType: extractResult.mimeType });
-        store.insertChunks(source.id, chunks);
-        (store as any)._db?.prepare("UPDATE sources SET parse_status = 'parsed', updated_at = ? WHERE id = ?").run(Date.now(), source.id);
-      }
+      finishSourceExtraction(store, source.id, extractResult ?? {
+        ok: false,
+        errorCode: 'invalid_source_input',
+        error: 'Source content is missing.',
+      }, 'user');
     } catch (e) {
       log('error', 'kb:addSource processing failed', String(e));
+      try {
+        store.updateSourceParseResult(source.id, {
+          parseStatus: 'failed',
+          errorCode: 'io_error',
+          errorMessage: e instanceof Error ? e.message : String(e),
+        }, 'user');
+      } catch {
+        // The source may already have reached a terminal parse state.
+      }
     }
-    return source;
+    return store.getSource(source.id) ?? source;
   });
 
   ipcMain.handle('desktop:kb:pickFiles', async () => {
@@ -1529,7 +1594,13 @@ export async function registerDesktopIpc(
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: '文档', extensions: ['pdf', 'txt', 'md', 'docx', 'pptx', 'xlsx', 'html', 'json', 'csv'] },
+        {
+          name: '文档',
+          extensions: [
+            'pdf', 'txt', 'md', 'html', 'json', 'csv',
+            ...Array.from(OFFICE_EXTENSIONS, extension => extension.slice(1)),
+          ],
+        },
         { name: '所有文件', extensions: ['*'] },
       ],
     });

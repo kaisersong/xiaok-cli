@@ -4029,4 +4029,59 @@ describe('OpenAIAdapter', () => {
     expect(caughtError?.message).toBe('Premature close');
     vi.useRealTimers();
   });
+
+  it('stops an openai-compatible stream when cumulative text exceeds the local hard limit', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: { content: 'x'.repeat(2 * 1024 * 1024 + 1) },
+            finish_reason: null,
+          }],
+        };
+      },
+    } as never);
+    const adapter = createTestAdapter({ wireModel: 'deepseek-v4-flash' });
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const consume = async () => {
+      for await (const _ of adapter.stream([], [], 'sys')) { /* drain */ }
+    };
+
+    await expect(consume()).rejects.toThrow('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+  });
+
+  it('stops an openai-compatible stream when one tool call arguments buffer exceeds the local hard limit', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [{
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: 'call_large',
+                function: {
+                  name: 'write',
+                  arguments: 'x'.repeat(2 * 1024 * 1024 + 1),
+                },
+              }],
+            },
+            finish_reason: null,
+          }],
+        };
+      },
+    } as never);
+    const adapter = createTestAdapter({ wireModel: 'deepseek-v4-flash' });
+    (adapter as unknown as { client: typeof instance }).client = instance;
+
+    const consume = async () => {
+      for await (const _ of adapter.stream([], [], 'sys')) { /* drain */ }
+    };
+
+    await expect(consume()).rejects.toThrow('OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED');
+  });
 });

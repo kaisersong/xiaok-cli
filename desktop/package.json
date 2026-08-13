@@ -10,7 +10,7 @@
     "build:icon": "node ../scripts/desktop-icon.mjs",
     "build": "npm run build:main && npm run build:renderer",
     "build:clean": "node -e \"const fs=require('fs'); fs.rmSync('.tsbuildinfo',{force:true}); fs.rmSync('dist',{recursive:true,force:true});\" && npm run build",
-    "build:main": "node ../scripts/generate-desktop-service-overrides.mjs && tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); const main='dist/main/desktop/electron/main.js'; if(!fs.existsSync(main)){ throw new Error('missing desktop main output: '+main); } fs.mkdirSync('dist/main/desktop/electron',{recursive:true}); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs'); fs.mkdirSync('dist/main/desktop/build',{recursive:true}); if(fs.existsSync('build/tray-icon.png')){ fs.copyFileSync('build/tray-icon.png','dist/main/desktop/electron/tray-icon.png'); fs.copyFileSync('build/tray-icon.png','dist/main/desktop/build/tray-icon.png'); } if(fs.existsSync('build/icon.png')){ fs.copyFileSync('build/icon.png','dist/main/desktop/build/icon.png'); }\"",
+    "build:main": "node ../scripts/generate-desktop-service-overrides.mjs && tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); const main='dist/main/desktop/electron/main.js'; if(!fs.existsSync(main)){ throw new Error('missing desktop main output: '+main); } fs.mkdirSync('dist/main/desktop/electron',{recursive:true}); fs.copyFileSync('electron/preload.cjs','dist/main/desktop/electron/preload.cjs'); fs.copyFileSync('electron/office-parser-worker.mjs','dist/main/desktop/electron/office-parser-worker.mjs'); fs.mkdirSync('dist/main/desktop/build',{recursive:true}); if(fs.existsSync('build/tray-icon.png')){ fs.copyFileSync('build/tray-icon.png','dist/main/desktop/electron/tray-icon.png'); fs.copyFileSync('build/tray-icon.png','dist/main/desktop/build/tray-icon.png'); } if(fs.existsSync('build/icon.png')){ fs.copyFileSync('build/icon.png','dist/main/desktop/build/icon.png'); }\"",
     "build:renderer": "node scripts/build-renderer.mjs",
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "dev:all": "node scripts/dev-runner.mjs",
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@firecrawl/anydoc": "0.1.8",
     "@modelcontextprotocol/client": "^2.0.0",
     "@tanstack/react-query": "^5.100.10",
     "better-sqlite3": "^12.10.0",

@@ -1,7 +1,25 @@
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
+import { isOfficeDocument, OOXML_FALLBACK_EXTENSIONS } from './document-formats.js';
 import type { MaterialParseStatus } from '../task-host/types.js';
+
+export type OfficeTextExtractionResult =
+  | {
+      ok: true;
+      markdown: string;
+      format: string;
+      engine: 'anydoc';
+      engineVersion: string;
+      chars: number;
+      truncated: boolean;
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      retryable: boolean;
+    };
 
 export interface MaterialTextExtractionInput {
   workspacePath: string;
@@ -12,6 +30,12 @@ export interface MaterialTextExtractionInput {
    * pdfjs, the CLI does not. Hosts that omit it keep the unsupported contract.
    */
   pdfToText?: (bytes: Uint8Array) => Promise<string>;
+  officeToMarkdown?: (input: {
+    absolutePath: string;
+    maxOutputChars: number;
+    signal?: AbortSignal;
+  }) => Promise<OfficeTextExtractionResult>;
+  signal?: AbortSignal;
 }
 
 export interface MaterialTextExtractionResult {
@@ -19,6 +43,10 @@ export interface MaterialTextExtractionResult {
   text?: string;
   parseSummary?: string;
   errorMessage?: string;
+  errorCode?: string;
+  engine?: 'anydoc' | 'lightweight-ooxml' | 'builtin-text' | 'pdf';
+  engineVersion?: string;
+  truncated?: boolean;
 }
 
 const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.html', '.htm', '.svg', '.xml']);
@@ -32,7 +60,7 @@ const DEFAULT_MAX_CHARS = 50_000;
  *
  * 2: pptx paragraph grouping, xlsx sparse-column placement, boolean cells.
  */
-export const MATERIAL_EXTRACTOR_VERSION = 2;
+export const MATERIAL_EXTRACTOR_VERSION = 3;
 
 export async function extractMaterialText(input: MaterialTextExtractionInput): Promise<MaterialTextExtractionResult> {
   const extension = extname(input.workspacePath).toLowerCase();
@@ -48,6 +76,37 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
 
   try {
     const buffer = await readFile(input.workspacePath);
+    if (isOfficeDocument(extension) && input.officeToMarkdown) {
+      const office = await input.officeToMarkdown({
+        absolutePath: input.workspacePath,
+        maxOutputChars: maxChars,
+        signal: input.signal,
+      });
+      if (office.ok) {
+        const normalized = normalizeExtractedText(office.markdown);
+        if (!normalized) {
+          return { parseStatus: 'failed', errorCode: 'empty_output', errorMessage: '未提取到可读正文。' };
+        }
+        const text = truncateText(normalized, maxChars);
+        return {
+          parseStatus: 'parsed',
+          text,
+          parseSummary: `AnyDoc 已提取 ${office.chars} 字符${office.truncated || text.length < office.chars ? `，返回前 ${text.length} 字符` : ''}`,
+          engine: 'anydoc',
+          engineVersion: office.engineVersion,
+          truncated: office.truncated || text.length < office.chars,
+        };
+      }
+      const canFallback = OOXML_FALLBACK_EXTENSIONS.has(extension)
+        && (office.code === 'binding_unavailable' || office.code === 'worker_start_failed');
+      if (!canFallback) {
+        return {
+          parseStatus: office.code === 'unsupported_format' ? 'unsupported' : 'failed',
+          errorCode: office.code,
+          errorMessage: office.message,
+        };
+      }
+    }
     const legacyFormat = detectLegacyOleFormat(extension, buffer);
     if (legacyFormat) {
       return {
@@ -56,19 +115,25 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
       };
     }
     let text: string | undefined;
+    let engine: MaterialTextExtractionResult['engine'];
     let stoppedAtBudget = false;
     if (isTextLike(extension, mimeType)) {
       text = buffer.toString('utf8');
+      engine = 'builtin-text';
     } else if (extension === '.docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       text = extractDocxText(buffer);
+      engine = 'lightweight-ooxml';
     } else if (extension === '.pptx' || mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
       text = extractPptxText(buffer);
+      engine = 'lightweight-ooxml';
     } else if (extension === '.xlsx' || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
       const extracted = extractXlsxText(buffer, maxChars);
       text = extracted.text;
       stoppedAtBudget = extracted.stoppedAtBudget;
+      engine = 'lightweight-ooxml';
     } else if (canExtractPdf(extension, mimeType, input.pdfToText)) {
       text = await input.pdfToText!(new Uint8Array(buffer));
+      engine = 'pdf';
     } else {
       return {
         parseStatus: 'unsupported',
@@ -88,6 +153,8 @@ export async function extractMaterialText(input: MaterialTextExtractionInput): P
       parseStatus: 'parsed',
       text: truncated,
       parseSummary: `已提取 ${normalized.length} 字符${truncated.length < normalized.length ? `，返回前 ${truncated.length} 字符` : ''}${stoppedAtBudget ? '；表格过大，已到提取上限，后续行未读完' : ''}`,
+      engine,
+      truncated: truncated.length < normalized.length || stoppedAtBudget,
     };
   } catch (error) {
     return {

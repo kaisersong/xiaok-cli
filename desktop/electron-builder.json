@@ -13,12 +13,16 @@
   "directories": {
     "output": "release"
   },
+  "afterPack": "scripts/verify-packaged-main-freshness.cjs",
   "files": [
     "dist/**/*",
     "package.json"
   ],
   "asarUnpack": [
-    "**/node_modules/nodejieba/**"
+    "**/node_modules/nodejieba/**",
+    "dist/main/desktop/electron/office-parser-worker.mjs",
+    "**/node_modules/@firecrawl/anydoc/**",
+    "**/node_modules/@firecrawl/anydoc-*/**"
   ],
   "extraResources": [
     {
@@ -151,6 +155,10 @@
     {
       "from": "app-update.yml",
       "to": "."
+    },
+    {
+      "from": "THIRD_PARTY_NOTICES.md",
+      "to": "THIRD_PARTY_NOTICES.md"
     }
   ],
   "publish": {

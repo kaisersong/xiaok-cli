@@ -97,6 +97,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const MAX_OPENAI_STREAM_TEXT_CHARS = 2 * 1024 * 1024;
+const MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS = 2 * 1024 * 1024;
 
 type OpenAIHttpAgent = HttpAgent | HttpsAgent;
 
@@ -113,6 +115,12 @@ interface BufferedToolCall {
   id: string;
   name: string;
   argsBuffer: string;
+}
+
+function openAIStreamLimitError(
+  code: 'OPENAI_STREAM_TEXT_LIMIT_EXCEEDED' | 'OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED',
+): Error & { code: string } {
+  return Object.assign(new Error(code), { code });
 }
 
 function drainBufferedToolCalls(
@@ -913,6 +921,7 @@ export class OpenAIAdapter implements ModelAdapter {
     };
     let emittedDone = false;
     let outputChars = 0;
+    let streamTextChars = 0;
     let usageReceived = false;
     let officialReasoningSeen = false;
     const extractBufferedUsage = attemptState
@@ -980,16 +989,34 @@ export class OpenAIAdapter implements ModelAdapter {
         delta as Record<string, unknown>,
         strictKimiK3,
       )) {
+        if (reasoning.type !== 'thinking') {
+          continue;
+        }
+        streamTextChars += reasoning.delta.length;
+        if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+          await streamIterator.return?.();
+          throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+        }
         yield reasoning;
       }
 
       if (delta.content) {
         for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
           if (segment.type === 'thinking') {
+            streamTextChars += segment.delta.length;
+            if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+              await streamIterator.return?.();
+              throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+            }
             if (!strictKimiK3) {
               yield segment;
             }
             continue;
+          }
+          streamTextChars += segment.delta.length;
+          if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+            await streamIterator.return?.();
+            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
           }
           outputChars += segment.delta.length;
           if (attemptState) {
@@ -1004,7 +1031,16 @@ export class OpenAIAdapter implements ModelAdapter {
           const current = toolBuffers.get(tc.index) ?? { id: '', name: '', argsBuffer: '' };
           if (tc.id) current.id = tc.id;
           if (tc.function?.name) current.name = tc.function.name;
-          if (tc.function?.arguments) current.argsBuffer += tc.function.arguments;
+          if (tc.function?.arguments) {
+            if (
+              current.argsBuffer.length + tc.function.arguments.length
+              > MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS
+            ) {
+              await streamIterator.return?.();
+              throw openAIStreamLimitError('OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED');
+            }
+            current.argsBuffer += tc.function.arguments;
+          }
           toolBuffers.set(tc.index, current);
         }
       }
@@ -1015,10 +1051,20 @@ export class OpenAIAdapter implements ModelAdapter {
         }
         for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
           if (segment.type === 'thinking') {
+            streamTextChars += segment.delta.length;
+            if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+              await streamIterator.return?.();
+              throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+            }
             if (!strictKimiK3) {
               yield segment;
             }
             continue;
+          }
+          streamTextChars += segment.delta.length;
+          if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+            await streamIterator.return?.();
+            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
           }
           outputChars += segment.delta.length;
           if (attemptState) {
@@ -1077,8 +1123,18 @@ export class OpenAIAdapter implements ModelAdapter {
       }
       for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
         if (segment.type === 'thinking') {
+          streamTextChars += segment.delta.length;
+          if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+            await streamIterator.return?.();
+            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+          }
           yield segment;
           continue;
+        }
+        streamTextChars += segment.delta.length;
+        if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+          await streamIterator.return?.();
+          throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
         }
         outputChars += segment.delta.length;
         if (attemptState) {

@@ -1,7 +1,8 @@
-export interface MeetingMediaPermissionPolicyInput {
+export interface DesktopRendererPermissionPolicyInput {
   permission: string;
   mediaTypes: readonly string[];
-  isTrustedWebContents: boolean;
+  isMainWindowWebContents: boolean;
+  isMeetingRecorderWebContents: boolean;
 }
 
 export function readMediaTypesFromPermissionDetails(details: unknown): readonly string[] {
@@ -11,8 +12,11 @@ export function readMediaTypesFromPermissionDetails(details: unknown): readonly 
   return mediaTypes.filter((type): type is string => typeof type === 'string');
 }
 
-export function shouldAllowMeetingMediaPermission(input: MeetingMediaPermissionPolicyInput): boolean {
-  if (!input.isTrustedWebContents) return false;
+export function shouldAllowDesktopRendererPermission(input: DesktopRendererPermissionPolicyInput): boolean {
+  if (input.permission === 'clipboard-sanitized-write') {
+    return input.isMainWindowWebContents;
+  }
   if (input.permission !== 'media') return false;
+  if (!input.isMainWindowWebContents && !input.isMeetingRecorderWebContents) return false;
   return input.mediaTypes.includes('audio');
 }

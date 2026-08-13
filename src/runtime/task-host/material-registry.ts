@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative } from 'node:path';
+import { getDocumentMimeType } from '../materials/document-formats.js';
 import type { MaterialParseStatus, MaterialRecord, MaterialRole, MaterialRoleSource, MaterialView } from './types.js';
 
 interface MaterialRegistryOptions {
@@ -23,9 +24,6 @@ const MIME_BY_EXTENSION = new Map<string, string>([
   ['.txt', 'text/plain'],
   ['.md', 'text/markdown'],
   ['.pdf', 'application/pdf'],
-  ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-  ['.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-  ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
   ['.jpeg', 'image/jpeg'],
@@ -53,7 +51,7 @@ export class MaterialRegistry {
     }
 
     const ext = extname(sourceRealPath).toLowerCase();
-    const mimeType = MIME_BY_EXTENSION.get(ext);
+    const mimeType = getDocumentMimeType(ext) ?? MIME_BY_EXTENSION.get(ext);
     if (!mimeType) {
       throw new Error(`unsupported material format: ${ext || 'unknown'}`);
     }
@@ -108,6 +106,11 @@ export class MaterialRegistry {
     parseStatus: MaterialParseStatus;
     parseSummary?: string;
     errorMessage?: string;
+    extractionEngine?: string;
+    extractionEngineVersion?: string;
+    extractionTruncated?: boolean;
+    sourceFingerprint?: string;
+    extractionErrorCode?: string;
   }): Promise<MaterialRecord> {
     const existing = this.records.get(materialId);
     if (!existing) throw new Error(`unknown material: ${materialId}`);
@@ -118,6 +121,11 @@ export class MaterialRegistry {
       parseStatus: extraction.parseStatus,
       parseSummary: extraction.parseSummary,
       errorMessage: extraction.errorMessage,
+      extractionEngine: extraction.extractionEngine,
+      extractionEngineVersion: extraction.extractionEngineVersion,
+      extractionTruncated: extraction.extractionTruncated,
+      sourceFingerprint: extraction.sourceFingerprint,
+      extractionErrorCode: extraction.extractionErrorCode,
     };
     this.records.set(materialId, updated);
     await this.saveIndex();

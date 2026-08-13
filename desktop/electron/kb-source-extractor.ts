@@ -6,12 +6,15 @@
 
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { isOfficeDocument, OOXML_FALLBACK_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
 import type { SourceExtractor, SourceExtractionResult } from './kb-store.js';
+import type { OfficeDocumentParser } from './office-document-parser.js';
 
 const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.html', '.htm', '.svg', '.xml']);
 const MARKUP_EXTENSIONS = new Set(['.html', '.htm', '.svg', '.xml']);
 const UNSUPPORTED_EXTENSIONS = new Set(['.exe', '.dll', '.so', '.dylib', '.bin', '.dmg', '.iso']);
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_KNOWLEDGE_MARKDOWN_CHARS = 16_000_000;
 
 function isMarkupMimeType(mimeType: string): boolean {
   return /^(text\/html|text\/xml|application\/(xhtml\+xml|xml)|image\/svg\+xml)/.test(mimeType);
@@ -59,19 +62,55 @@ function safeCodePoint(code: number): string {
   return String.fromCodePoint(code);
 }
 
-export function createSourceExtractor(): SourceExtractor {
+export function createSourceExtractor(options: { officeParser?: OfficeDocumentParser } = {}): SourceExtractor {
   return {
     async extract(input: { filePath: string; mimeType: string }): Promise<SourceExtractionResult> {
       const ext = extname(input.filePath).toLowerCase();
 
       if (UNSUPPORTED_EXTENSIONS.has(ext)) {
-        return { ok: false, error: `Unsupported file format: ${ext}` };
+        return { ok: false, errorCode: 'unsupported_format', error: `Unsupported file format: ${ext}` };
       }
 
       try {
         const buf = await readFile(input.filePath);
         if (buf.length > MAX_FILE_SIZE) {
-          return { ok: false, error: `File too large: ${buf.length} bytes (max ${MAX_FILE_SIZE})` };
+          return { ok: false, errorCode: 'resource_limit', error: `File too large: ${buf.length} bytes (max ${MAX_FILE_SIZE})` };
+        }
+
+        if (isOfficeDocument(ext) && options.officeParser) {
+          const result = await options.officeParser.parse({
+            absolutePath: input.filePath,
+            maxOutputChars: MAX_KNOWLEDGE_MARKDOWN_CHARS + 1,
+          });
+          if (result.ok) {
+            if (result.truncated || result.chars > MAX_KNOWLEDGE_MARKDOWN_CHARS) {
+              return {
+                ok: false,
+                error: 'Office document exceeds the Knowledge ingestion limit.',
+                errorCode: 'resource_limit',
+                engine: result.engine,
+                engineVersion: result.engineVersion,
+                truncated: true,
+              };
+            }
+            return {
+              ok: true,
+              text: result.markdown,
+              mimeType: input.mimeType,
+              engine: result.engine,
+              engineVersion: result.engineVersion,
+              truncated: false,
+            };
+          }
+          const canFallback = OOXML_FALLBACK_EXTENSIONS.has(ext)
+            && (result.code === 'binding_unavailable' || result.code === 'worker_start_failed');
+          if (!canFallback) {
+            return {
+              ok: false,
+              error: result.message,
+              errorCode: result.code,
+            };
+          }
         }
 
         if (TEXT_EXTENSIONS.has(ext) || input.mimeType.startsWith('text/')) {
@@ -103,9 +142,9 @@ export function createSourceExtractor(): SourceExtractor {
           return { ok: true, text, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
         }
 
-        return { ok: false, error: `Cannot extract text from ${ext}` };
+        return { ok: false, errorCode: 'unsupported_format', error: `Cannot extract text from ${ext}` };
       } catch (err) {
-        return { ok: false, error: (err as Error).message };
+        return { ok: false, errorCode: 'io_error', error: (err as Error).message };
       }
     },
 
