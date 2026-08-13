@@ -3,6 +3,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Download, RotateCcw, Trash2, FileText, Globe, ClipboardPaste, Search, BookOpen, Link, Mic, ChevronRight, Settings2, Minimize2, Maximize2, Pause, Play, LoaderCircle, X, Pencil, Check } from 'lucide-react';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
+import { getDesktopDocumentMimeType } from '../shared/document-formats';
+import { fileBasename } from '../lib/file-path';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface KbCollection {
@@ -857,15 +859,13 @@ export function KnowledgePage() {
     try {
       const filePaths = await desktop.kbPickFiles();
       for (const fp of filePaths) {
-        const name = fp.split('/').pop() || fp.split('\\').pop() || 'file';
-        const ext = name.split('.').pop()?.toLowerCase() || '';
-        const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', htm: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+        const name = fileBasename(fp) || 'file';
         await desktop.kbAddSource({
           collectionId,
           kind: 'file',
           title: name,
           filePath: fp,
-          mimeType: mimeMap[ext] || 'application/octet-stream',
+          mimeType: getDesktopDocumentMimeType(name) || 'application/octet-stream',
         });
       }
       if (filePaths.length > 0) {
@@ -1337,14 +1337,12 @@ export function KnowledgePage() {
       const file = files[i];
       const filePath = (file as any).path as string | undefined;
       if (filePath) {
-        const ext = file.name.split('.').pop()?.toLowerCase() || '';
-        const mimeMap: Record<string, string> = { pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', html: 'text/html', htm: 'text/html', json: 'application/json', csv: 'text/csv', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
         await desktop.kbAddSource({
           collectionId,
           kind: 'file',
           title: file.name,
           filePath,
-          mimeType: mimeMap[ext] || file.type || 'application/octet-stream',
+          mimeType: getDesktopDocumentMimeType(file.name) || file.type || 'application/octet-stream',
         });
       } else {
         const text = await file.text();

@@ -10,6 +10,7 @@ import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
 import type { ArtifactWorkspaceErrorCode } from '../shared/artifact-workspace-types.js';
+import { OFFICE_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
@@ -1593,7 +1594,13 @@ export async function registerDesktopIpc(
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: [
-        { name: '文档', extensions: ['pdf', 'txt', 'md', 'docx', 'pptx', 'xlsx', 'html', 'json', 'csv'] },
+        {
+          name: '文档',
+          extensions: [
+            'pdf', 'txt', 'md', 'html', 'json', 'csv',
+            ...Array.from(OFFICE_EXTENSIONS, extension => extension.slice(1)),
+          ],
+        },
         { name: '所有文件', extensions: ['*'] },
       ],
     });

@@ -18,7 +18,10 @@
     "package.json"
   ],
   "asarUnpack": [
-    "**/node_modules/nodejieba/**"
+    "**/node_modules/nodejieba/**",
+    "dist/main/desktop/electron/office-parser-worker.mjs",
+    "**/node_modules/@firecrawl/anydoc/**",
+    "**/node_modules/@firecrawl/anydoc-*/**"
   ],
   "extraResources": [
     {
