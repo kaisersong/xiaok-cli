@@ -169,6 +169,12 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   }
 
   function addSource(input: AddSourceInput, requestSource: RequestSource): Source {
+    if (requestSource !== 'user' && requestSource !== 'agent' && requestSource !== 'scheduler') {
+      throw new Error('A valid request source is required to add a Knowledge source');
+    }
+    if (requestSource === 'agent' && input.parseStatus && input.parseStatus !== 'pending') {
+      throw new Error('Agent-created Knowledge sources must start in the pending state');
+    }
     const id = randomUUID();
     const ts = now();
     const rawPath = input.rawPath ?? input.filePath ?? '';

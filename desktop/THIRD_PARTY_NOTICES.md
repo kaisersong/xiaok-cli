@@ -2,7 +2,7 @@
 
 ## @firecrawl/anydoc 0.1.8
 
-Copyright (c) 2026 Firecrawl
+Copyright (c) 2026 Sideguide Technologies Inc.
 
 MIT License
 

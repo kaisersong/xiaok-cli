@@ -144,7 +144,7 @@ async function main(): Promise<void> {
 
     for (const entry of corpus) {
       const text = readFileSync(join(CORPUS_DIR, entry.file), 'utf8');
-      const source = store.addSource({ collectionId: collection.id, kind: 'paste', title: entry.title, text });
+      const source = store.addSource({ collectionId: collection.id, kind: 'paste', title: entry.title, text }, 'scheduler');
       store.insertChunks(source.id, chunker.chunk({ text, mimeType: 'text/plain' }));
     }
 

@@ -36,7 +36,7 @@ describe('KB Integration — addSource pipeline', () => {
 
   it('paste source ends up as parsed with chunks after inline processing', () => {
     const col = store.createCollection({ name: 'Test', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'note' }, 'user');
 
     const extractor = createSourceExtractor();
     const chunker = createChunker();
@@ -56,7 +56,7 @@ describe('KB Integration — addSource pipeline', () => {
 
   it('file source with extractable content ends up parsed', async () => {
     const col = store.createCollection({ name: 'Files', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'test.txt' });
+    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'test.txt' }, 'user');
 
     const { writeFileSync } = await import('node:fs');
     const filePath = join(rootDir, 'test.txt');
@@ -78,7 +78,7 @@ describe('KB Integration — addSource pipeline', () => {
 
   it('source without chunks stays pending (not falsely marked parsed)', () => {
     const col = store.createCollection({ name: 'Empty', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'empty.bin' });
+    const src = store.addSource({ collectionId: col.id, kind: 'file', title: 'empty.bin' }, 'user');
     // No extraction/chunking — status stays pending
     expect(store.getSource(src.id)!.parseStatus).toBe('pending');
   });
@@ -114,7 +114,7 @@ describe('KB Integration — Chinese search with jieba', () => {
 
   it('finds Chinese content using jieba-segmented terms', async () => {
     const col = store.createCollection({ name: 'CN', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'AI文档' }, 'user');
 
     const chunker = createChunker();
     const text = 'AI原生组织架构是一种新型的企业组织形态，它将人工智能深度融入组织的核心流程和决策体系中。';
@@ -129,7 +129,7 @@ describe('KB Integration — Chinese search with jieba', () => {
 
   it('matches partial Chinese terms', async () => {
     const col = store.createCollection({ name: 'Partial', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '测试' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '测试' }, 'user');
 
     const chunker = createChunker();
     store.insertChunks(src.id, chunker.chunk({ text: '深度学习和自然语言处理是人工智能的核心技术' }));
@@ -142,7 +142,7 @@ describe('KB Integration — Chinese search with jieba', () => {
 
   it('returns the explicit empty message when nothing matches', async () => {
     const col = store.createCollection({ name: 'Empty', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '无关文档' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '无关文档' }, 'user');
     store.insertChunks(src.id, createChunker().chunk({ text: '深度学习和自然语言处理是人工智能的核心技术' }));
 
     const output = await searchViaProductionTool('高压锅炖牛腩的火候');
@@ -156,7 +156,7 @@ describe('KB Integration — Chinese search with jieba', () => {
    */
   it('rejects weak single-term matches below the relevance floor', async () => {
     const col = store.createCollection({ name: 'Floor', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '技术笔记' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '技术笔记' }, 'user');
     store.insertChunks(src.id, createChunker().chunk({ text: '深度学习模型的训练需要大量标注数据。' }));
 
     // 分词后 4 个实词，只有「模型」命中 → 命中率 0.25，低于下限
@@ -167,7 +167,7 @@ describe('KB Integration — Chinese search with jieba', () => {
 
   it('keeps a one-in-three match, which is above the floor', async () => {
     const col = store.createCollection({ name: 'Keep', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '技术笔记' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '技术笔记' }, 'user');
     store.insertChunks(src.id, createChunker().chunk({ text: '深度学习模型的训练需要大量标注数据。' }));
 
     const output = await searchViaProductionTool('标注数据 火候 高压锅');
@@ -207,7 +207,7 @@ describe('KB Integration — default collection and startup fix', () => {
   it('startup fix updates pending sources that already have chunks', () => {
     const store = createKbStoreSqlite(join(rootDir, 'knowledge.db'));
     const col = store.createCollection({ name: 'Fix', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'old' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: 'old' }, 'user');
     store.insertChunks(src.id, [{ idx: 0, text: 'content', charStart: 0, charEnd: 7 }]);
 
     // Source is still pending (simulates pre-fix behavior)
@@ -238,7 +238,7 @@ describe('KB Integration — kb_search tool returns actual results', () => {
 
   it('kb_search tool finds content in the same DB instance', async () => {
     const col = store.createCollection({ name: 'ToolTest', embeddingModelId: 'm', embeddingDim: 384 });
-    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '知识' });
+    const src = store.addSource({ collectionId: col.id, kind: 'paste', title: '知识' }, 'user');
     store.insertChunks(src.id, [
       { idx: 0, text: '金蝶AI原生协同办公平台是一款面向企业的智能化办公工具', charStart: 0, charEnd: 26 },
       { idx: 1, text: '它支持多智能体协作、知识库管理和自动化任务编排', charStart: 26, charEnd: 49 },
