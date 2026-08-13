@@ -157,6 +157,40 @@ describe('MaterialRegistry', () => {
     });
   });
 
+  it('imports every supported legacy, macro-enabled, and binary Office material with its canonical MIME type', async () => {
+    const registry = new MaterialRegistry({
+      workspaceRoot,
+      maxBytes: 1024 * 1024,
+      now: () => 1_777_000_000,
+    });
+    const cases = [
+      ['proposal.doc', 'application/msword'],
+      ['proposal.docm', 'application/vnd.ms-word.document.macroEnabled.12'],
+      ['brief.ppt', 'application/vnd.ms-powerpoint'],
+      ['brief.pps', 'application/vnd.ms-powerpoint'],
+      ['brief.pot', 'application/vnd.ms-powerpoint'],
+      ['brief.pptm', 'application/vnd.ms-powerpoint.presentation.macroEnabled.12'],
+      ['brief.ppsx', 'application/vnd.openxmlformats-officedocument.presentationml.slideshow'],
+      ['brief.ppsm', 'application/vnd.ms-powerpoint.slideshow.macroEnabled.12'],
+      ['ledger.xls', 'application/vnd.ms-excel'],
+      ['ledger.xlsm', 'application/vnd.ms-excel.sheet.macroEnabled.12'],
+      ['ledger.xlsb', 'application/vnd.ms-excel.sheet.binary.macroEnabled.12'],
+    ] as const;
+
+    for (const [name, mimeType] of cases) {
+      const sourcePath = join(sourceDir, name);
+      writeFileSync(sourcePath, 'office bytes');
+      const record = await registry.importMaterial({
+        taskId: 'task_office',
+        sourcePath,
+        role: 'customer_material',
+        roleSource: 'user',
+      });
+      expect(record.mimeType, name).toBe(mimeType);
+      expect(record.parseStatus, name).toBe('pending');
+    }
+  });
+
   it('rejects unsupported, oversized, and unsafe source files', async () => {
     const registry = new MaterialRegistry({
       workspaceRoot,
