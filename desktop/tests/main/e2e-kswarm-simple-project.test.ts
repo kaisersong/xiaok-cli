@@ -323,7 +323,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
     const baseDir = join(process.cwd(), '.tmp', 'kswarm-e2e');
     mkdirSync(baseDir, { recursive: true });
     tempRoot = mkdtempSync(join(baseDir, 'run-'));
-    tempHome = join(tempRoot, 'home');
+    tempHome = join(tempRoot, `home-${'x'.repeat(96)}`);
     tempWorkFolder = join(tempRoot, 'workspace');
     mkdirSync(tempHome, { recursive: true });
     mkdirSync(tempWorkFolder, { recursive: true });
@@ -350,6 +350,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         INTENT_BROKER_DB: join(tempRoot, 'intent-broker.db'),
         INTENT_BROKER_DISABLE_CODEX_DISCOVERY: '1',
         INTENT_BROKER_PERSISTED_SESSION_REFRESH_INTERVAL_MS: '0',
+        INTENT_BROKER_SOCKET_PATH: '',
         INTENT_BROKER_CONFIG: join(tempRoot, 'intent-broker.config.json'),
         INTENT_BROKER_LOCAL_CONFIG: join(tempRoot, 'intent-broker.local.json'),
         INTENT_BROKER_HEARTBEAT_PATH: join(tempRoot, 'intent-broker.heartbeat.json'),
@@ -443,6 +444,14 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
       expect(detail.tasks).toEqual([]);
       expect(detail.workspace.artifacts).toEqual([]);
       expect(fakeOpenAi.requests).toEqual([]);
+    } catch (error) {
+      throw new Error([
+        error instanceof Error ? error.stack || error.message : String(error),
+        '--- intent-broker logs ---',
+        broker.logs(),
+        '--- kswarm logs ---',
+        kswarm.logs(),
+      ].join('\n'));
     } finally {
       await cleanupKswarmAgents(kswarmUrl, tempHome);
       await kswarm.stop();
