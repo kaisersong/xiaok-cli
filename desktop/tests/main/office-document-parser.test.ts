@@ -96,6 +96,49 @@ describe('OfficeDocumentParser process isolation', () => {
     );
   });
 
+  it('removes an aborted request from the queue before it starts a worker', async () => {
+    const controller = new AbortController();
+    const parser = createOfficeDocumentParser({ workerPath, maxConcurrency: 1, timeoutMs: 80 });
+    const active = parser.parse({ absolutePath: createInput(rootDir, 'hang.docx'), maxOutputChars: 1000 });
+    const queued = parser.parse({
+      absolutePath: createInput(rootDir, 'queue-b.docx'),
+      maxOutputChars: 1000,
+      signal: controller.signal,
+    });
+    const abortedAt = Date.now();
+    controller.abort();
+    await expect(queued).resolves.toMatchObject({ ok: false, code: 'aborted' });
+    expect(Date.now() - abortedAt).toBeLessThan(40);
+    await active;
+    const tracePath = join(rootDir, 'queue.trace');
+    await expect((await import('node:fs/promises')).readFile(tracePath, 'utf8')).rejects.toThrow();
+  });
+
+  it('emits bounded diagnostics without exposing the absolute path', async () => {
+    const diagnostics: unknown[] = [];
+    const inputPath = createInput(rootDir, 'success.docx');
+    const parser = createOfficeDocumentParser({
+      workerPath,
+      onDiagnostic: diagnostic => diagnostics.push(diagnostic),
+    });
+    await parser.parse({ absolutePath: inputPath, maxOutputChars: 1000 });
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({
+      format: 'docx',
+      inputBytes: 7,
+      outputChars: 21,
+      success: true,
+    });
+    expect(diagnostics[0]).toEqual(expect.objectContaining({
+      pathHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      queueMs: expect.any(Number),
+      spawnMs: expect.any(Number),
+      parseMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    }));
+    expect(JSON.stringify(diagnostics[0])).not.toContain(inputPath);
+  });
+
   it('passes only the runtime environment allowlist to the child', () => {
     const env = buildOfficeWorkerEnv({
       PATH: '/bin',

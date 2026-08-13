@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { officeFormatForPath } from '../../src/runtime/materials/document-formats.js';
@@ -28,11 +30,26 @@ export interface OfficeDocumentParserOptions {
   maxStdoutBytes?: number;
   maxConcurrency?: number;
   env?: NodeJS.ProcessEnv;
+  onDiagnostic?: (diagnostic: OfficeParserDiagnostic) => void;
+}
+
+export interface OfficeParserDiagnostic {
+  format: string;
+  pathHash: string;
+  inputBytes: number | null;
+  outputChars: number;
+  queueMs: number;
+  spawnMs: number;
+  parseMs: number;
+  totalMs: number;
+  success: boolean;
+  code?: OfficeParserErrorCode;
 }
 
 interface QueuedJob {
   run: () => Promise<OfficeParseResult>;
   resolve: (result: OfficeParseResult) => void;
+  cancelQueued?: () => void;
 }
 
 export function createOfficeDocumentParser(options: OfficeDocumentParserOptions = {}): OfficeDocumentParser {
@@ -47,6 +64,7 @@ export function createOfficeDocumentParser(options: OfficeDocumentParserOptions 
   const drain = () => {
     while (active < maxConcurrency && queue.length > 0) {
       const job = queue.shift()!;
+      job.cancelQueued?.();
       active += 1;
       void job.run().then(job.resolve).finally(() => {
         active -= 1;
@@ -67,10 +85,33 @@ export function createOfficeDocumentParser(options: OfficeDocumentParserOptions 
         maxOutputChars: input.maxOutputChars,
       };
       return new Promise<OfficeParseResult>((resolve) => {
-        queue.push({
+        const enqueuedAt = Date.now();
+        const job: QueuedJob = {
           resolve,
-          run: () => runWorker({ workerPath, timeoutMs, maxStdoutBytes, env, request, signal: input.signal }),
-        });
+          run: () => runWorker({
+            workerPath,
+            timeoutMs,
+            maxStdoutBytes,
+            env,
+            request,
+            signal: input.signal,
+            enqueuedAt,
+            onDiagnostic: options.onDiagnostic,
+          }),
+        };
+        if (input.signal) {
+          const abortQueued = () => {
+            const index = queue.indexOf(job);
+            if (index < 0) return;
+            queue.splice(index, 1);
+            const result = failure('aborted', 'Office parsing was aborted.', false);
+            emitDiagnostic({ request, enqueuedAt, onDiagnostic: options.onDiagnostic }, result, enqueuedAt, enqueuedAt, Date.now());
+            resolve(result);
+          };
+          input.signal.addEventListener('abort', abortQueued, { once: true });
+          job.cancelQueued = () => input.signal?.removeEventListener('abort', abortQueued);
+        }
+        queue.push(job);
         drain();
       });
     },
@@ -104,9 +145,17 @@ async function runWorker(input: {
   env: NodeJS.ProcessEnv;
   request: OfficeParserRequestV1;
   signal?: AbortSignal;
+  enqueuedAt: number;
+  onDiagnostic?: (diagnostic: OfficeParserDiagnostic) => void;
 }): Promise<OfficeParseResult> {
-  if (input.signal?.aborted) return failure('aborted', 'Office parsing was aborted.', false);
+  if (input.signal?.aborted) {
+    const result = failure('aborted', 'Office parsing was aborted.', false);
+    emitDiagnostic(input, result, input.enqueuedAt, input.enqueuedAt, 0);
+    return result;
+  }
   return new Promise<OfficeParseResult>((resolve) => {
+    const startedAt = Date.now();
+    let spawnedAt = startedAt;
     let settled = false;
     let stdoutBytes = 0;
     const stdout: Buffer[] = [];
@@ -122,6 +171,7 @@ async function runWorker(input: {
       settled = true;
       clearTimeout(timer);
       input.signal?.removeEventListener('abort', abort);
+      emitDiagnostic(input, result, startedAt, spawnedAt, Date.now());
       resolve(result);
     };
     const terminate = (result: OfficeParseResult) => {
@@ -134,6 +184,9 @@ async function runWorker(input: {
     }, input.timeoutMs);
 
     input.signal?.addEventListener('abort', abort, { once: true });
+    child.once('spawn', () => {
+      spawnedAt = Date.now();
+    });
     child.once('error', (error) => {
       finish(failure('worker_start_failed', sanitizeError(error), true));
     });
@@ -175,6 +228,43 @@ async function runWorker(input: {
     child.stdin.once('error', () => undefined);
     child.stdin.end(JSON.stringify(input.request));
   });
+}
+
+function emitDiagnostic(
+  input: {
+    request: OfficeParserRequestV1;
+    enqueuedAt: number;
+    onDiagnostic?: (diagnostic: OfficeParserDiagnostic) => void;
+  },
+  result: OfficeParseResult,
+  startedAt: number,
+  spawnedAt: number,
+  finishedAt: number,
+): void {
+  if (!input.onDiagnostic) return;
+  let inputBytes: number | null = null;
+  try {
+    inputBytes = statSync(input.request.absolutePath).size;
+  } catch {
+    // The stable result code already captures an unreadable source.
+  }
+  const diagnostic: OfficeParserDiagnostic = {
+    format: input.request.format,
+    pathHash: createHash('sha256').update(input.request.absolutePath).digest('hex'),
+    inputBytes,
+    outputChars: result.ok ? result.chars : 0,
+    queueMs: Math.max(0, startedAt - input.enqueuedAt),
+    spawnMs: Math.max(0, spawnedAt - startedAt),
+    parseMs: Math.max(0, finishedAt - spawnedAt),
+    totalMs: Math.max(0, finishedAt - input.enqueuedAt),
+    success: result.ok,
+    ...(!result.ok ? { code: result.code } : {}),
+  };
+  try {
+    input.onDiagnostic(diagnostic);
+  } catch {
+    // Diagnostics must never change parse behavior.
+  }
 }
 
 function validateInput(

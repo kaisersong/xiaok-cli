@@ -25,6 +25,18 @@ describe('Office parser packaging contract', () => {
     ]));
   });
 
+  it('ships the AnyDoc MIT notice as a readable packaged resource', () => {
+    const config = JSON.parse(readFileSync(join(desktopRoot, 'electron-builder.json'), 'utf8')) as {
+      extraResources?: Array<{ from?: string; to?: string }>;
+    };
+    expect(config.extraResources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: 'THIRD_PARTY_NOTICES.md', to: 'THIRD_PARTY_NOTICES.md' }),
+    ]));
+    const notice = readFileSync(join(desktopRoot, 'THIRD_PARTY_NOTICES.md'), 'utf8');
+    expect(notice).toContain('@firecrawl/anydoc 0.1.8');
+    expect(notice).toContain('MIT License');
+  });
+
   it('finds the compiled worker after build:main', () => {
     expect(existsSync(join(desktopRoot, 'dist', 'main', 'desktop', 'electron', 'office-parser-worker.mjs'))).toBe(true);
   });

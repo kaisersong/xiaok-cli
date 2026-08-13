@@ -154,6 +154,10 @@
     {
       "from": "app-update.yml",
       "to": "."
+    },
+    {
+      "from": "THIRD_PARTY_NOTICES.md",
+      "to": "THIRD_PARTY_NOTICES.md"
     }
   ],
   "publish": {

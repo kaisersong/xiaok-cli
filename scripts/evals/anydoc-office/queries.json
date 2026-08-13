@@ -1,0 +1,44 @@
+[
+  {
+    "id": "no-answer-word-1",
+    "family": "word",
+    "kind": "no_answer",
+    "query": "紫色独角兽量子推进器校准编号 QZ-88421",
+    "expectedSourceHashes": []
+  },
+  {
+    "id": "no-answer-word-2",
+    "family": "word",
+    "kind": "no_answer",
+    "query": "火星南极温室第七批蓝莓产量",
+    "expectedSourceHashes": []
+  },
+  {
+    "id": "no-answer-presentation-1",
+    "family": "presentation",
+    "kind": "no_answer",
+    "query": "海王星轨道电梯风险评审结论",
+    "expectedSourceHashes": []
+  },
+  {
+    "id": "no-answer-presentation-2",
+    "family": "presentation",
+    "kind": "no_answer",
+    "query": "虚构产品 Nebula-X9 上市日期",
+    "expectedSourceHashes": []
+  },
+  {
+    "id": "no-answer-spreadsheet-1",
+    "family": "spreadsheet",
+    "kind": "no_answer",
+    "query": "木星采矿站 2099 年钛合金库存",
+    "expectedSourceHashes": []
+  },
+  {
+    "id": "no-answer-spreadsheet-2",
+    "family": "spreadsheet",
+    "kind": "no_answer",
+    "query": "不存在的成本中心 ZXCV-998877",
+    "expectedSourceHashes": []
+  }
+]

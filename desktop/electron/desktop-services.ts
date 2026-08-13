@@ -671,7 +671,9 @@ export interface DesktopUpdateModelRuntimeOptionsInput {
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
-  const officeDocumentParser = createOfficeDocumentParser();
+  const officeDocumentParser = createOfficeDocumentParser({
+    onDiagnostic: diagnostic => console.info('[office-parser]', JSON.stringify(diagnostic)),
+  });
   const materialRegistry = new MaterialRegistry({
     workspaceRoot: join(options.dataRoot, 'workspace'),
     maxBytes: 50 * 1024 * 1024,
