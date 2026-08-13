@@ -114,6 +114,177 @@ describe('createRuntimeFacadeTaskRunner', () => {
 
     expect(emitted).toEqual([]);
   });
+
+  it('waits for scoped runtime event persistence before resolving the runner', async () => {
+    const hooks = createRuntimeHooks();
+    let releasePersistence: (() => void) | undefined;
+    const persistenceRelease = new Promise<void>((resolve) => { releasePersistence = resolve; });
+    let markPersistenceStarted: (() => void) | undefined;
+    const persistenceStarted = new Promise<void>((resolve) => { markPersistenceStarted = resolve; });
+    const runner = createRuntimeFacadeTaskRunner({
+      runtimeFacade: {
+        runTurn: async () => {
+          hooks.emit({
+            type: 'breadcrumb_emitted',
+            sessionId: 'sess_backpressure',
+            turnId: 'turn_1',
+            intentId: 'intent_1',
+            stepId: 'step_1',
+            status: 'running',
+            message: '等待落盘',
+          });
+        },
+      },
+      hooks,
+      cwd: '/workspace/project',
+      source: 'chat',
+    });
+    let runnerSettled = false;
+
+    const execution = runner({
+      taskId: 'task_1',
+      sessionId: 'sess_backpressure',
+      prompt: '验证事件落盘',
+      materials: [],
+      understanding: createUnderstanding(),
+      signal: new AbortController().signal,
+      emitRuntimeEvent: async () => {
+        markPersistenceStarted?.();
+        await persistenceRelease;
+      },
+    }).finally(() => { runnerSettled = true; });
+
+    await persistenceStarted;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(runnerSettled).toBe(false);
+    releasePersistence?.();
+    await execution;
+    expect(runnerSettled).toBe(true);
+  });
+
+  it('bounds synchronous assistant delta bursts before the async persistence chain', async () => {
+    const hooks = createRuntimeHooks();
+    const sessionId = 'sess_bounded_hook_queue';
+    let releaseFirstWrite: (() => void) | undefined;
+    const firstWriteRelease = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+    let markFirstWriteStarted: (() => void) | undefined;
+    const firstWriteStarted = new Promise<void>((resolve) => { markFirstWriteStarted = resolve; });
+    const forwarded: RuntimeEvent[] = [];
+    const runner = createRuntimeFacadeTaskRunner({
+      runtimeFacade: {
+        runTurn: async () => {
+          for (let index = 0; index < 20_000; index += 1) {
+            hooks.emit({
+              type: 'assistant_delta',
+              sessionId,
+              turnId: 'turn_burst',
+              intentId: 'intent_burst',
+              stepId: 'step_burst',
+              delta: '字',
+            });
+          }
+        },
+      },
+      hooks,
+      cwd: '/workspace/project',
+      source: 'chat',
+    });
+
+    const execution = runner({
+      taskId: 'task_burst',
+      sessionId,
+      prompt: '验证同步流式突发有界',
+      materials: [],
+      understanding: createUnderstanding(),
+      signal: new AbortController().signal,
+      emitRuntimeEvent: async (event) => {
+        forwarded.push(event);
+        if (forwarded.length === 1) {
+          markFirstWriteStarted?.();
+          await firstWriteRelease;
+        }
+      },
+    });
+
+    await firstWriteStarted;
+    expect(forwarded).toHaveLength(1);
+    releaseFirstWrite?.();
+    await execution;
+
+    const deltas = forwarded.filter((event): event is Extract<RuntimeEvent, { type: 'assistant_delta' }> => (
+      event.type === 'assistant_delta'
+    ));
+    expect(deltas.length).toBeLessThanOrEqual(4);
+    expect(deltas.map(event => event.delta).join('')).toBe('字'.repeat(20_000));
+  });
+
+  it('does not merge assistant deltas across a non-delta ordering barrier', async () => {
+    const hooks = createRuntimeHooks();
+    const sessionId = 'sess_hook_ordering';
+    const forwarded: RuntimeEvent[] = [];
+    const runner = createRuntimeFacadeTaskRunner({
+      runtimeFacade: {
+        runTurn: async () => {
+          hooks.emit({
+            type: 'assistant_delta', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', delta: '前',
+          });
+          hooks.emit({
+            type: 'breadcrumb_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', status: 'running', message: '中',
+          });
+          hooks.emit({
+            type: 'assistant_delta', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', delta: '后',
+          });
+        },
+      },
+      hooks,
+      cwd: '/workspace/project',
+      source: 'chat',
+    });
+
+    await runner({
+      taskId: 'task_ordering',
+      sessionId,
+      prompt: '验证事件顺序',
+      materials: [],
+      understanding: createUnderstanding(),
+      signal: new AbortController().signal,
+      emitRuntimeEvent: async (event) => { forwarded.push(event); },
+    });
+
+    expect(forwarded.map(event => event.type)).toEqual([
+      'assistant_delta',
+      'breadcrumb_emitted',
+      'assistant_delta',
+    ]);
+    expect(forwarded.filter(event => event.type === 'assistant_delta').map(event => event.delta)).toEqual(['前', '后']);
+  });
+
+  it('reports a drain persistence failure after consuming the bounded queue', async () => {
+    const hooks = createRuntimeHooks();
+    const sessionId = 'sess_hook_write_failure';
+    const runner = createRuntimeFacadeTaskRunner({
+      runtimeFacade: {
+        runTurn: async () => {
+          hooks.emit({
+            type: 'assistant_delta', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', delta: '内容',
+          });
+        },
+      },
+      hooks,
+      cwd: '/workspace/project',
+      source: 'chat',
+    });
+
+    await expect(runner({
+      taskId: 'task_write_failure',
+      sessionId,
+      prompt: '验证写失败',
+      materials: [],
+      understanding: createUnderstanding(),
+      signal: new AbortController().signal,
+      emitRuntimeEvent: async () => { throw new Error('event_store_unavailable'); },
+    })).rejects.toThrow('event_store_unavailable');
+  });
 });
 
 function createMaterial(): MaterialRecord {

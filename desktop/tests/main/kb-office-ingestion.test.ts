@@ -138,4 +138,27 @@ describe('Knowledge Office ingestion', () => {
     expect(source.metadata).toMatchObject({ createdBy: 'agent', errorCode: 'encrypted_document' });
     expect(store.listChunks(source.id)).toHaveLength(0);
   });
+
+  it('finishes a 39,444-character kb_add_source import with a finite tail chunk', async () => {
+    const collection = store.createCollection({ name: 'Large Markdown', embeddingModelId: 'm', embeddingDim: 384 });
+    const retriever = createKbRetriever({ db: (store as unknown as { _db: never })._db, embedFn: () => null });
+    const addSource = createKbTools(store, retriever)
+      .find(tool => tool.definition.name === 'kb_add_source')!;
+    const text = '知'.repeat(39_444);
+
+    const output = await addSource.execute({
+      collection_id: collection.id,
+      title: '39,444 字符回归样本',
+      kind: 'paste',
+      text,
+    });
+
+    expect(output).toContain('57 片段');
+    const source = store.listSources(collection.id)[0];
+    expect(source.parseStatus).toBe('parsed');
+    const chunks = store.listChunks(source.id);
+    expect(chunks).toHaveLength(57);
+    expect(chunks.at(-1)).toMatchObject({ charEnd: text.length });
+    expect(chunks.at(-1)?.text).toBe(text.slice(chunks.at(-1)!.charStart));
+  });
 });

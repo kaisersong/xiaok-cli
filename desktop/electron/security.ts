@@ -1,9 +1,14 @@
 import type { BrowserWindowConstructorOptions } from 'electron';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 interface BrowserWindowBuildOptions {
   platform?: NodeJS.Platform;
   iconPath?: string;
+}
+
+interface TrustedDesktopRendererUrlOptions {
+  devServer?: string;
+  rendererFile: string;
 }
 
 export function buildBrowserWindowOptions(
@@ -37,6 +42,23 @@ export function isAllowedNavigationUrl(rawUrl: string): boolean {
       return true;
     }
     return url.protocol === 'http:' && url.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+export function isTrustedDesktopRendererUrl(
+  rawUrl: string,
+  options: TrustedDesktopRendererUrlOptions,
+): boolean {
+  try {
+    const actual = new URL(rawUrl);
+    const expected = options.devServer
+      ? new URL(options.devServer)
+      : pathToFileURL(options.rendererFile);
+    actual.hash = '';
+    expected.hash = '';
+    return actual.href === expected.href;
   } catch {
     return false;
   }

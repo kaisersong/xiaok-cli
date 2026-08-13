@@ -13,6 +13,7 @@
   "directories": {
     "output": "release"
   },
+  "afterPack": "scripts/verify-packaged-main-freshness.cjs",
   "files": [
     "dist/**/*",
     "package.json"

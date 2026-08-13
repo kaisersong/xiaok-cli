@@ -46,7 +46,7 @@ export interface TaskRunnerInput {
   permissionMode?: 'plan' | 'auto' | 'default';
   maxToolLoopIterations?: number;
   executionScope?: ArtifactWorkspaceExecutionScope;
-  emitRuntimeEvent(event: RuntimeEvent): void;
+  emitRuntimeEvent(event: RuntimeEvent): Promise<void>;
 }
 
 export interface PersistedTaskEvent {
@@ -84,12 +84,20 @@ interface ActiveExecution {
   controller: AbortController;
 }
 
+interface PendingAssistantDelta {
+  delta: string;
+  eventId: string;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 const TERMINAL_STATUSES = new Set<TaskSnapshot['status']>(['completed', 'failed', 'cancelled']);
 const DEFAULT_CONTEXT_MAX_TASKS = 12;
 const DEFAULT_CONTEXT_MAX_USER_CHARS = 4000;
 const DEFAULT_CONTEXT_MAX_ASSISTANT_CHARS = 6000;
 const DEFAULT_CONTEXT_MAX_TOTAL_CHARS = 30000;
 const RUNNER_DEADLINE_RESERVE_MS = 2 * 60_000;
+const ASSISTANT_DELTA_FLUSH_MS = 50;
+const ASSISTANT_DELTA_MAX_BUFFER_CHARS = 16 * 1024;
 
 function abortWithReason(controller: AbortController, reason: string): void {
   controller.abort(new Error(reason));
@@ -198,6 +206,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private taskOrdinal = 0;
   private readonly permissionModes = new Map<string, TaskPermissionMode>();
   private readonly maxToolLoopIterations = new Map<string, number>();
+  private readonly pendingAssistantDeltas = new Map<string, PendingAssistantDelta>();
+  private readonly runtimeEventErrors = new Map<string, unknown>();
 
   constructor(private readonly options: InProcessTaskRuntimeHostOptions) {}
 
@@ -339,6 +349,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       summary: ['任务已取消，可基于已识别的任务理解继续。'],
       reason: 'cancelled',
     };
+    await this.flushRuntimeEvents(taskId);
     await this.appendEvent(taskId, { type: 'salvage', salvage });
     await this.updateSnapshot(taskId, {
       status: 'cancelled',
@@ -412,11 +423,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         permissionMode: this.permissionModes.get(taskId),
         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
         executionScope: snapshot.executionScope,
-        emitRuntimeEvent: (event) => {
-          void this.appendRuntimeEvent(taskId, event);
-        },
+        emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
       });
-      await this.flushMutations(taskId);
+      await this.flushRuntimeEvents(taskId);
       const latest = await this.requireSnapshot(taskId);
       if (latest.status !== 'cancelled' && !this.cancellingTaskIds.has(taskId)) {
         // Layer 3: Deliverable Gate — check if all requested deliverables were produced
@@ -435,11 +444,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
             permissionMode: this.permissionModes.get(taskId),
             maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
             executionScope: snapshot.executionScope,
-            emitRuntimeEvent: (event) => {
-              void this.appendRuntimeEvent(taskId, event);
-            },
+            emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
           });
-          await this.flushMutations(taskId);
+          await this.flushRuntimeEvents(taskId);
         }
         const guardedLatest = await this.requireSnapshot(taskId);
         if (!await this.applyArtifactEvidenceGuard(taskId, guardedLatest)) {
@@ -462,14 +469,20 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         this.closeSubscribers(taskId);
       }
     } catch (error) {
+      let executionError: unknown = error;
+      try {
+        await this.flushRuntimeEvents(taskId);
+      } catch (flushError) {
+        executionError = flushError;
+      }
       if (this.cancellingTaskIds.has(taskId)) {
         return;
       }
       const message = controller.signal.aborted
         ? normalizeAbortReason(controller.signal.reason)
-        : error instanceof Error
-          ? error.message
-          : String(error);
+        : executionError instanceof Error
+          ? executionError.message
+          : String(executionError);
       const salvage: SalvageSummary = {
         summary: [
           snapshot.understanding ? '已保留任务理解' : '已保留任务输入',
@@ -481,7 +494,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       await this.updateSnapshot(taskId, { status: 'failed', salvage });
       await this.options.snapshotStore.clearActiveTask(taskId);
       this.closeSubscribers(taskId);
-      throw error;
+      throw executionError;
     } finally {
       clearTimeout(watchdogTimer);
       this.taskHistories.delete(taskId);
@@ -491,6 +504,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.activeExecutions.delete(taskId);
       this.executionPromises.delete(taskId);
       this.cancellingTaskIds.delete(taskId);
+      this.clearPendingAssistantDelta(taskId);
+      this.runtimeEventErrors.delete(taskId);
     }
   }
 
@@ -545,10 +560,83 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   private async appendRuntimeEvent(taskId: string, event: RuntimeEvent): Promise<void> {
+    this.throwRuntimeEventError(taskId);
     const desktopEvents = projectRuntimeEventsToDesktopEvents({ taskId, events: [event] });
     for (const desktopEvent of desktopEvents) {
+      if (desktopEvent.type === 'assistant_delta') {
+        await this.bufferAssistantDelta(taskId, desktopEvent);
+        continue;
+      }
+      await this.flushPendingAssistantDelta(taskId);
+      this.throwRuntimeEventError(taskId);
       await this.appendEvent(taskId, desktopEvent);
     }
+  }
+
+  private bufferAssistantDelta(
+    taskId: string,
+    event: Extract<DesktopTaskEvent, { type: 'assistant_delta' }>,
+  ): Promise<void> {
+    let pending = this.pendingAssistantDeltas.get(taskId);
+    if (!pending) {
+      pending = { delta: '', eventId: event.eventId, timer: null };
+      this.pendingAssistantDeltas.set(taskId, pending);
+    }
+    pending.delta += event.delta;
+
+    if (pending.delta.length >= ASSISTANT_DELTA_MAX_BUFFER_CHARS) {
+      return this.flushPendingAssistantDelta(taskId);
+    }
+    if (!pending.timer) {
+      pending.timer = setTimeout(() => {
+        void this.flushPendingAssistantDelta(taskId).catch((error) => {
+          this.runtimeEventErrors.set(taskId, error);
+        });
+      }, ASSISTANT_DELTA_FLUSH_MS);
+    }
+    return Promise.resolve();
+  }
+
+  private async flushPendingAssistantDelta(taskId: string): Promise<void> {
+    const pending = this.pendingAssistantDeltas.get(taskId);
+    if (!pending) {
+      return;
+    }
+    this.pendingAssistantDeltas.delete(taskId);
+    if (pending.timer) {
+      clearTimeout(pending.timer);
+    }
+    if (pending.delta.length === 0) {
+      return;
+    }
+    await this.appendEvent(taskId, {
+      type: 'assistant_delta',
+      eventId: pending.eventId,
+      delta: pending.delta,
+    });
+  }
+
+  private async flushRuntimeEvents(taskId: string): Promise<void> {
+    await this.flushPendingAssistantDelta(taskId);
+    await this.flushMutations(taskId);
+    this.throwRuntimeEventError(taskId);
+  }
+
+  private throwRuntimeEventError(taskId: string): void {
+    if (!this.runtimeEventErrors.has(taskId)) {
+      return;
+    }
+    const error = this.runtimeEventErrors.get(taskId);
+    this.runtimeEventErrors.delete(taskId);
+    throw error;
+  }
+
+  private clearPendingAssistantDelta(taskId: string): void {
+    const pending = this.pendingAssistantDeltas.get(taskId);
+    if (pending?.timer) {
+      clearTimeout(pending.timer);
+    }
+    this.pendingAssistantDeltas.delete(taskId);
   }
 
   private async applyArtifactEvidenceGuard(taskId: string, snapshot: TaskSnapshot): Promise<boolean> {
@@ -700,6 +788,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       }
       await chain;
       if (this.mutationChains.get(taskId) === chain) {
+        this.mutationChains.delete(taskId);
         return;
       }
     }

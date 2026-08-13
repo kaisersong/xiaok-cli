@@ -205,7 +205,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
       stepId: 'step-1',
       taskId: 'task-1',
       materials: [],
-      emitRuntimeEvent: vi.fn(),
+      emitRuntimeEvent: vi.fn(async () => undefined),
       skillInvocation: null,
       skillCatalog: {} as never,
       dataRoot: rootDir,
@@ -285,6 +285,38 @@ describe('desktop tool loop invocation and consumer ordering', () => {
     expect(streamOptions[0]?.signal).not.toBe(staleController.signal);
     const expectedMainTools = context.allToolDefs.map(tool => tool.name);
     expect(streamTools).toEqual([expectedMainTools, expectedMainTools, []]);
+  });
+
+  it('waits for assistant delta persistence before consuming the next provider chunk', async () => {
+    let markEmitStarted: (() => void) | undefined;
+    const emitStarted = new Promise<void>((resolve) => { markEmitStarted = resolve; });
+    let releaseEmit: (() => void) | undefined;
+    const emitRelease = new Promise<void>((resolve) => { releaseEmit = resolve; });
+    let providerAdvanced = false;
+    const context = baseContext();
+
+    const execution = runDesktopToolLoop({
+      ...context,
+      emitRuntimeEvent: vi.fn(async (event) => {
+        if (event.type !== 'assistant_delta') return;
+        markEmitStarted?.();
+        await emitRelease;
+      }),
+      adapter: {
+        async *stream() {
+          yield { type: 'text' as const, delta: 'first' };
+          providerAdvanced = true;
+          yield { type: 'text' as const, delta: 'second' };
+          yield { type: 'done' as const };
+        },
+      },
+    });
+
+    await emitStarted;
+    expect(providerAdvanced).toBe(false);
+    releaseEmit?.();
+    await expect(execution).resolves.toMatchObject({ reply: 'firstsecond' });
+    expect(providerAdvanced).toBe(true);
   });
 
   it('accounts main-stream usage once before propagating the same pending AbortError', async () => {

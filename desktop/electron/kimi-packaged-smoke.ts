@@ -124,7 +124,7 @@ async function runDesktopTurn(
     stepId: `step_${ordinal}`,
     taskId: `task_${ordinal}`,
     materials: [],
-    emitRuntimeEvent() {},
+    async emitRuntimeEvent() {},
     skillInvocation: null,
     skillCatalog: {} as never,
     dataRoot: join(tmpdir(), 'xiaok-packaged-kimi-smoke'),

@@ -4734,7 +4734,7 @@ async function streamDesktopToolLoopFinalization(input: {
         assistantBlocks.push({ type: 'text', text: chunk.delta });
       }
       reply += chunk.delta;
-      input.emitRuntimeEvent({
+      await input.emitRuntimeEvent({
         type: 'assistant_delta',
         sessionId: input.sessionId,
         turnId: input.turnId,
@@ -5162,7 +5162,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           assistantBlocks.push({ type: 'text', text: chunk.delta });
         }
         reply += chunk.delta;
-        ctx.emitRuntimeEvent({ type: 'assistant_delta', sessionId: ctx.sessionId, turnId: ctx.turnId, intentId: ctx.intentId, stepId: ctx.stepId, delta: chunk.delta });
+        await ctx.emitRuntimeEvent({ type: 'assistant_delta', sessionId: ctx.sessionId, turnId: ctx.turnId, intentId: ctx.intentId, stepId: ctx.stepId, delta: chunk.delta });
       } else if (chunk.type === 'tool_use') {
         assistantBlocks.push({ type: 'tool_use', id: chunk.id, name: chunk.name, input: chunk.input });
       } else if (chunk.type === 'thinking') {
@@ -5202,7 +5202,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       if (!isInternalTool && !planEmitted) {
         planEmitted = true;
       }
-      ctx.emitRuntimeEvent({ type: 'pre_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
+      await ctx.emitRuntimeEvent({ type: 'pre_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id });
 
       if (skillInvocation) {
         appendTrace(ctx.dataRoot, {
@@ -5281,14 +5281,14 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         officeToMarkdown: ctx.officeToMarkdown,
       });
       if (ok) {
-        ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+        await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
       } else {
-        ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
+        await ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
       }
       if (ctx.strategies.trackAutoProgress && !isInternalTool) {
         const label = toolNameToLabel(toolCall.name, toolCall.input as Record<string, unknown>);
         autoSteps.push({ id: `auto-${totalToolCalls}`, label, status: ok ? 'completed' : 'failed' });
-        ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: autoSteps });
+        await ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: autoSteps });
       }
 
       if (skillInvocation) {
@@ -5305,8 +5305,8 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       let artifactEventEmitted = false;
       if (scopedArtifact) {
         artifactEventEmitted = true;
-        ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath: scopedArtifact.artifactPath, event: 'add' });
-        ctx.emitRuntimeEvent({
+        await ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath: scopedArtifact.artifactPath, event: 'add' });
+        await ctx.emitRuntimeEvent({
           type: 'artifact_recorded',
           sessionId: ctx.sessionId,
           turnId: ctx.turnId,
@@ -5323,11 +5323,11 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
       if (ok && !artifactEventEmitted && writeArtifactPath) {
         const filePath = writeArtifactPath;
-        ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
+        await ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
         const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
         const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
         const fileName = basename(filePath) || filePath;
-        ctx.emitRuntimeEvent({
+        await ctx.emitRuntimeEvent({
           type: 'artifact_recorded',
           sessionId: ctx.sessionId,
           turnId: ctx.turnId,
@@ -5353,7 +5353,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       if (workflowStatusArtifacts.length > 0) {
         artifactEventEmitted = true;
         for (const artifact of workflowStatusArtifacts) {
-          ctx.emitRuntimeEvent({
+          await ctx.emitRuntimeEvent({
             type: 'artifact_recorded',
             sessionId: ctx.sessionId,
             turnId: ctx.turnId,
@@ -5376,11 +5376,11 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       ) {
         const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
         if (filePath) {
-          ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
+          await ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
           const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
           const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
           const fileName = basename(filePath) || filePath;
-          ctx.emitRuntimeEvent({
+          await ctx.emitRuntimeEvent({
             type: 'artifact_recorded',
             sessionId: ctx.sessionId,
             turnId: ctx.turnId,
@@ -5398,7 +5398,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         try {
           const parsed = JSON.parse(result);
           if (parsed._validated) {
-            ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: parsed._validated });
+            await ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: parsed._validated });
             result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
           }
         } catch { /* non-critical */ }
@@ -6477,7 +6477,7 @@ export function createDesktopModelRunnerWithRegistry(
         const stages = analyzeStageIntent(prompt, currentSkills, process.cwd());
         const stageSummary = stages.map(s => `  ${s.id}. ${s.title} (${s.skill})`).join('\n');
         const debugText = `[stage:plan] Detected ${stages.length} stages:\n${stageSummary}`;
-        emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: `${debugText}\n\n` });
+        await emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: `${debugText}\n\n` });
       } catch {
         // Stage analysis is optional, don't block execution
       }
@@ -6545,7 +6545,7 @@ export function createDesktopModelRunnerWithRegistry(
     skillTriggerType = loopResult.skillTriggerType !== 'auto' ? loopResult.skillTriggerType : skillTriggerType;
     skillInvocation = loopResult.skillInvocation ?? skillInvocation;
 
-    emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
+    await emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId, intentId, stepId, note: reply.trim() || '模型没有返回内容。' });
     if (skillNamesDetected.length > 0) {
       try {
         await appendExecRecord(dataRoot, {

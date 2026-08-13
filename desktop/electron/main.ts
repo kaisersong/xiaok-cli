@@ -9,12 +9,13 @@ import {
   buildBrowserWindowOptions,
   isAllowedNavigationUrl,
   isAllowedShellExternalUrl,
+  isTrustedDesktopRendererUrl,
   resolveLocalFileOpenPath,
 } from './security.js';
 import {
   readMediaTypesFromPermissionDetails,
-  shouldAllowMeetingMediaPermission,
-} from './meeting-media-permission-policy.js';
+  shouldAllowDesktopRendererPermission,
+} from './desktop-permission-policy.js';
 import {
   findIntentBrokerProtocolUrl,
   registerIntentBrokerProtocolClient,
@@ -113,21 +114,28 @@ function debugMain(message: string, extra?: unknown): void {
   console.log(line);
 }
 
-function registerMeetingMediaPermissionHandlers(): void {
+function registerDesktopPermissionHandlers(options: {
+  devServer?: string;
+  rendererFile: string;
+}): void {
+  const isTrustedMainRenderer = (webContents: Electron.WebContents | null): boolean => (
+    webContents === mainWindow?.webContents
+      && isTrustedDesktopRendererUrl(webContents?.getURL() ?? '', options)
+  );
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _requestingOrigin, details) => {
-    return shouldAllowMeetingMediaPermission({
+    return shouldAllowDesktopRendererPermission({
       permission,
       mediaTypes: readMediaTypesFromPermissionDetails(details),
-      isTrustedWebContents: webContents === mainWindow?.webContents
-        || meetingRecorderController?.ownsWebContents(webContents) === true,
+      isMainWindowWebContents: isTrustedMainRenderer(webContents),
+      isMeetingRecorderWebContents: meetingRecorderController?.ownsWebContents(webContents) === true,
     });
   });
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    callback(shouldAllowMeetingMediaPermission({
+    callback(shouldAllowDesktopRendererPermission({
       permission,
       mediaTypes: readMediaTypesFromPermissionDetails(details),
-      isTrustedWebContents: webContents === mainWindow?.webContents
-        || meetingRecorderController?.ownsWebContents(webContents) === true,
+      isMainWindowWebContents: isTrustedMainRenderer(webContents),
+      isMeetingRecorderWebContents: meetingRecorderController?.ownsWebContents(webContents) === true,
     }));
   });
 }
@@ -382,6 +390,8 @@ if (singleInstanceDisabled) {
 async function createWindow(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
   const preloadPath = join(__dirname, 'preload.cjs');
+  const rendererFile = join(__dirname, '../../../renderer/index.html');
+  const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
   const window = new BrowserWindow(buildBrowserWindowOptions(preloadPath, {
     platform: process.platform,
     iconPath: resolveDesktopWindowIconPath(__dirname, process.platform),
@@ -396,11 +406,11 @@ async function createWindow(): Promise<BrowserWindow> {
     notificationPort: createElectronDesktopNotificationPort(),
     platform: process.platform,
     preloadPath,
-    rendererFile: join(__dirname, '../../../renderer/index.html'),
-    devServer: process.env['XIAOK_DESKTOP_DEV_SERVER'],
+    rendererFile,
+    devServer,
     screen,
   });
-  registerMeetingMediaPermissionHandlers();
+  registerDesktopPermissionHandlers({ rendererFile, devServer });
   const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === window.webContents;
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
@@ -1165,8 +1175,6 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   });
 
-  const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
-
   // CSP — Report-Only mode to observe violations before enforcing
   const isDev = !!devServer;
   const cspDirectives = [
@@ -1196,7 +1204,7 @@ async function createWindow(): Promise<BrowserWindow> {
   if (devServer) {
     await window.loadURL(devServer);
   } else {
-    await window.loadFile(join(__dirname, '../../../renderer/index.html'));
+    await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
   return window;

@@ -1847,6 +1847,194 @@ describe('InProcessTaskRuntimeHost', () => {
     ]));
   });
 
+  describe('streaming event memory bounds', () => {
+    it('coalesces a burst of assistant deltas without losing text', async () => {
+      const countingStore = new InstrumentedSnapshotStore(join(rootDir, 'batched-snapshots'));
+      const expected = Array.from({ length: 400 }, (_, index) => `${index % 10}`).join('');
+      const runner: TaskRunner = async ({ sessionId, emitRuntimeEvent }) => {
+        for (let index = 0; index < expected.length; index += 1) {
+          await emitRuntimeEvent({
+            type: 'assistant_delta',
+            sessionId,
+            turnId: 'turn_batch',
+            intentId: 'intent_batch',
+            stepId: 'step_batch',
+            delta: expected[index]!,
+          });
+        }
+        await emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_batch',
+          intentId: 'intent_batch',
+          stepId: 'step_batch',
+          note: expected,
+        });
+      };
+      const host = createHostWithStore(runner, countingStore, 'task_batch');
+
+      await host.createTask({ prompt: '输出流式文本', materials: [] });
+      await waitFor(async () => (await host.recoverTask('task_batch')).snapshot.status === 'completed', 5000);
+
+      const snapshot = (await host.recoverTask('task_batch')).snapshot;
+      const deltaEvents = snapshot.events.filter(
+        (event): event is Extract<DesktopTaskEvent, { type: 'assistant_delta' }> => event.type === 'assistant_delta',
+      );
+      expect(deltaEvents.map(event => event.delta).join('')).toBe(expected);
+      expect(deltaEvents.length).toBeLessThanOrEqual(4);
+      expect(countingStore.assistantDeltaSaveCount).toBeLessThanOrEqual(4);
+    });
+
+    it('returns backpressure when the assistant delta buffer reaches its hard threshold', async () => {
+      const blockingStore = new InstrumentedSnapshotStore(join(rootDir, 'blocking-snapshots'));
+      blockingStore.blockAssistantDeltaSaves();
+      let emitReturnedPromise = false;
+      let emitSettled = false;
+      const runner: TaskRunner = async ({ sessionId, emitRuntimeEvent }) => {
+        const emitted = emitRuntimeEvent({
+          type: 'assistant_delta',
+          sessionId,
+          turnId: 'turn_threshold',
+          intentId: 'intent_threshold',
+          stepId: 'step_threshold',
+          delta: 'x'.repeat(16 * 1024),
+        });
+        emitReturnedPromise = emitted instanceof Promise;
+        void Promise.resolve(emitted).then(() => { emitSettled = true; });
+        await emitted;
+      };
+      const host = createHostWithStore(runner, blockingStore, 'task_threshold');
+
+      await host.createTask({ prompt: '验证流式背压', materials: [] });
+      await blockingStore.waitForBlockedAssistantSave();
+      const settledBeforeSave = emitSettled;
+      blockingStore.releaseAssistantDeltaSaves();
+      await waitFor(async () => (await host.recoverTask('task_threshold')).snapshot.status === 'completed', 5000);
+
+      expect(emitReturnedPromise).toBe(true);
+      expect(settledBeforeSave).toBe(false);
+      expect(emitSettled).toBe(true);
+    });
+
+    it('preserves each delta exactly once when timer and threshold flushes overlap', async () => {
+      const blockingStore = new InstrumentedSnapshotStore(join(rootDir, 'overlap-snapshots'));
+      blockingStore.blockAssistantDeltaSaves();
+      let markThresholdEmitStarted: (() => void) | undefined;
+      const thresholdEmitStarted = new Promise<void>((resolve) => { markThresholdEmitStarted = resolve; });
+      const suffix = 'B'.repeat(16 * 1024);
+      const runner: TaskRunner = async ({ sessionId, emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn_overlap', intentId: 'intent_overlap', stepId: 'step_overlap', delta: 'A',
+        });
+        await new Promise(resolve => setTimeout(resolve, 70));
+        markThresholdEmitStarted?.();
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn_overlap', intentId: 'intent_overlap', stepId: 'step_overlap', delta: suffix,
+        });
+        await emitRuntimeEvent({
+          type: 'receipt_emitted', sessionId, turnId: 'turn_overlap', intentId: 'intent_overlap', stepId: 'step_overlap', note: 'done',
+        });
+      };
+      const host = createHostWithStore(runner, blockingStore, 'task_overlap');
+
+      await host.createTask({ prompt: '验证 timer 与 threshold 交错', materials: [] });
+      await blockingStore.waitForBlockedAssistantSave();
+      await thresholdEmitStarted;
+      blockingStore.releaseAssistantDeltaSaves();
+      await waitFor(async () => (await host.recoverTask('task_overlap')).snapshot.status === 'completed', 5000);
+
+      const deltas = (await host.recoverTask('task_overlap')).snapshot.events.filter(
+        (event): event is Extract<DesktopTaskEvent, { type: 'assistant_delta' }> => event.type === 'assistant_delta',
+      );
+      expect(deltas.map(event => event.delta).join('')).toBe(`A${suffix}`);
+      expect(deltas).toHaveLength(2);
+    });
+
+    it('flushes assistant text before later progress and receipt events', async () => {
+      const runner: TaskRunner = async ({ sessionId, emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn_order', intentId: 'intent_order', stepId: 'step_order', delta: 'A',
+        });
+        await emitRuntimeEvent({
+          type: 'breadcrumb_emitted', sessionId, turnId: 'turn_order', intentId: 'intent_order', stepId: 'step_order', status: 'running', message: '处理中',
+        });
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn_order', intentId: 'intent_order', stepId: 'step_order', delta: 'B',
+        });
+        await emitRuntimeEvent({
+          type: 'receipt_emitted', sessionId, turnId: 'turn_order', intentId: 'intent_order', stepId: 'step_order', note: 'AB',
+        });
+      };
+      const host = createHostWithStore(runner, snapshotStore, 'task_order');
+
+      await host.createTask({ prompt: '验证事件顺序', materials: [] });
+      await waitFor(async () => (await host.recoverTask('task_order')).snapshot.status === 'completed', 5000);
+
+      const relevant = (await host.recoverTask('task_order')).snapshot.events.filter(
+        event => event.type === 'assistant_delta' || event.type === 'progress' || event.type === 'result',
+      );
+      expect(relevant.map(event => event.type)).toEqual([
+        'assistant_delta',
+        'progress',
+        'assistant_delta',
+        'result',
+      ]);
+      expect(relevant.filter(
+        (event): event is Extract<DesktopTaskEvent, { type: 'assistant_delta' }> => event.type === 'assistant_delta',
+      ).map(event => event.delta).join('')).toBe('AB');
+    });
+
+    it('surfaces an asynchronous assistant delta save failure instead of completing the task', async () => {
+      const failingStore = new InstrumentedSnapshotStore(join(rootDir, 'failing-snapshots'));
+      failingStore.failNextAssistantDeltaSave(new Error('simulated_snapshot_write_failure'));
+      const runner: TaskRunner = async ({ sessionId, emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'assistant_delta',
+          sessionId,
+          turnId: 'turn_failure',
+          intentId: 'intent_failure',
+          stepId: 'step_failure',
+          delta: '尾部文本',
+        });
+      };
+      const host = createHostWithStore(runner, failingStore, 'task_failure');
+
+      await host.createTask({ prompt: '验证写盘失败', materials: [] });
+      await waitFor(async () => (await host.recoverTask('task_failure')).snapshot.status === 'failed', 5000);
+
+      const snapshot = (await host.recoverTask('task_failure')).snapshot;
+      expect(snapshot.salvage?.reason).toContain('simulated_snapshot_write_failure');
+      expect(snapshot.events).toEqual(expect.arrayContaining([
+        { type: 'error', message: expect.stringContaining('simulated_snapshot_write_failure') },
+      ]));
+    });
+
+    it('flushes buffered assistant text before a running task is cancelled', async () => {
+      let markDeltaEmitted: (() => void) | undefined;
+      const deltaEmitted = new Promise<void>((resolve) => { markDeltaEmitted = resolve; });
+      const runner: TaskRunner = async ({ sessionId, signal, emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn_cancel', intentId: 'intent_cancel', stepId: 'step_cancel', delta: '取消前文本',
+        });
+        markDeltaEmitted?.();
+        await new Promise<void>((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      };
+      const host = createHostWithStore(runner, snapshotStore, 'task_cancel_buffer');
+
+      await host.createTask({ prompt: '验证取消前 flush', materials: [] });
+      await deltaEmitted;
+      await host.cancelTask('task_cancel_buffer');
+
+      const snapshot = (await host.recoverTask('task_cancel_buffer')).snapshot;
+      expect(snapshot.status).toBe('cancelled');
+      expect(snapshot.events.filter(
+        (event): event is Extract<DesktopTaskEvent, { type: 'assistant_delta' }> => event.type === 'assistant_delta',
+      ).map(event => event.delta).join('')).toBe('取消前文本');
+    });
+  });
+
   it('aborts execution via watchdog when runner hangs beyond timeout', async () => {
     const runner = vi.fn<TaskRunner>(async ({ signal }) => {
       await new Promise<void>((_, reject) => {
@@ -1886,7 +2074,71 @@ describe('InProcessTaskRuntimeHost', () => {
       createSessionId: () => 'sess_1',
     });
   }
+
+  function createHostWithStore(
+    runner: TaskRunner,
+    store: FileTaskSnapshotStore,
+    taskId: string,
+  ): InProcessTaskRuntimeHost {
+    return new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore: store,
+      runner,
+      now: () => 200,
+      createTaskId: () => taskId,
+      createSessionId: () => `sess_${taskId}`,
+    });
+  }
 });
+
+class InstrumentedSnapshotStore extends FileTaskSnapshotStore {
+  assistantDeltaSaveCount = 0;
+  private previousAssistantDeltaCount = 0;
+  private blockedAssistantSaveStartedResolve: (() => void) | undefined;
+  private readonly blockedAssistantSaveStarted = new Promise<void>((resolve) => {
+    this.blockedAssistantSaveStartedResolve = resolve;
+  });
+  private assistantSaveReleaseResolve: (() => void) | undefined;
+  private assistantSaveRelease: Promise<void> | undefined;
+  private nextAssistantSaveError: Error | undefined;
+
+  blockAssistantDeltaSaves(): void {
+    this.assistantSaveRelease = new Promise<void>((resolve) => {
+      this.assistantSaveReleaseResolve = resolve;
+    });
+  }
+
+  waitForBlockedAssistantSave(): Promise<void> {
+    return this.blockedAssistantSaveStarted;
+  }
+
+  releaseAssistantDeltaSaves(): void {
+    this.assistantSaveReleaseResolve?.();
+  }
+
+  failNextAssistantDeltaSave(error: Error): void {
+    this.nextAssistantSaveError = error;
+  }
+
+  override async save(snapshot: TaskSnapshot): Promise<void> {
+    const assistantDeltaCount = snapshot.events.filter(event => event.type === 'assistant_delta').length;
+    const appendsAssistantDelta = assistantDeltaCount > this.previousAssistantDeltaCount;
+    if (appendsAssistantDelta) {
+      this.assistantDeltaSaveCount += 1;
+      this.blockedAssistantSaveStartedResolve?.();
+      if (this.assistantSaveRelease) {
+        await this.assistantSaveRelease;
+      }
+      if (this.nextAssistantSaveError) {
+        const error = this.nextAssistantSaveError;
+        this.nextAssistantSaveError = undefined;
+        throw error;
+      }
+    }
+    await super.save(snapshot);
+    this.previousAssistantDeltaCount = assistantDeltaCount;
+  }
+}
 
 function makeSnapshot(overrides: Partial<TaskSnapshot> & { taskId: string; summary?: string }): TaskSnapshot {
   const taskId = overrides.taskId;

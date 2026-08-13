@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   buildBrowserWindowOptions,
   isAllowedNavigationUrl,
   isAllowedShellExternalUrl,
+  isTrustedDesktopRendererUrl,
   resolveLocalFileOpenPath,
 } from '../../electron/security.js';
 
@@ -37,6 +41,45 @@ describe('desktop security baseline', () => {
     expect(isAllowedNavigationUrl('http://127.0.0.1:5173')).toBe(true);
     expect(isAllowedNavigationUrl('https://example.com')).toBe(false);
     expect(isAllowedNavigationUrl('http://evil.test')).toBe(false);
+  });
+
+  it('trusts only the configured desktop renderer entry while allowing hash routes', () => {
+    const rendererFile = join(process.cwd(), 'dist', 'renderer', 'index.html');
+    const rendererUrl = pathToFileURL(rendererFile).href;
+
+    expect(isTrustedDesktopRendererUrl(rendererUrl, {
+      rendererFile,
+    })).toBe(true);
+    expect(isTrustedDesktopRendererUrl(`${rendererUrl}#/t/thread-1`, {
+      rendererFile,
+    })).toBe(true);
+    expect(isTrustedDesktopRendererUrl(pathToFileURL(join(process.cwd(), 'untrusted.html')).href, {
+      rendererFile,
+    })).toBe(false);
+    expect(isTrustedDesktopRendererUrl(`${rendererUrl}?untrusted=1`, {
+      rendererFile,
+    })).toBe(false);
+
+    expect(isTrustedDesktopRendererUrl('http://127.0.0.1:5173/#/t/thread-1', {
+      devServer: 'http://127.0.0.1:5173',
+      rendererFile,
+    })).toBe(true);
+    expect(isTrustedDesktopRendererUrl('http://127.0.0.1:5174/', {
+      devServer: 'http://127.0.0.1:5173',
+      rendererFile,
+    })).toBe(false);
+    expect(isTrustedDesktopRendererUrl('not a URL', {
+      rendererFile,
+    })).toBe(false);
+  });
+
+  it('gates both desktop permission handlers on the current trusted renderer URL', () => {
+    const mainSource = readFileSync(join(__dirname, '..', '..', 'electron', 'main.ts'), 'utf8');
+
+    expect(mainSource).toContain('const isTrustedMainRenderer =');
+    expect(mainSource).toContain("isTrustedDesktopRendererUrl(webContents?.getURL() ?? '', options)");
+    expect(mainSource.match(/isMainWindowWebContents: isTrustedMainRenderer\(webContents\)/g))
+      .toHaveLength(2);
   });
 
   it('allows shell external opens only for browser URLs', () => {
