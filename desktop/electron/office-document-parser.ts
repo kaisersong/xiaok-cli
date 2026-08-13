@@ -53,7 +53,7 @@ interface QueuedJob {
 }
 
 export function createOfficeDocumentParser(options: OfficeDocumentParserOptions = {}): OfficeDocumentParser {
-  const workerPath = options.workerPath ?? fileURLToPath(new URL('./office-parser-worker.mjs', import.meta.url));
+  const configuredWorkerPath = options.workerPath;
   const timeoutMs = positiveInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS);
   const maxStdoutBytes = positiveInteger(options.maxStdoutBytes, DEFAULT_MAX_STDOUT_BYTES);
   const maxConcurrency = positiveInteger(options.maxConcurrency, DEFAULT_MAX_CONCURRENCY);
@@ -89,7 +89,7 @@ export function createOfficeDocumentParser(options: OfficeDocumentParserOptions 
         const job: QueuedJob = {
           resolve,
           run: () => runWorker({
-            workerPath,
+            workerPath: configuredWorkerPath ?? fileURLToPath(new URL('./office-parser-worker.mjs', import.meta.url)),
             timeoutMs,
             maxStdoutBytes,
             env,
