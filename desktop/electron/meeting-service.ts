@@ -198,7 +198,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         participantHints: summaryResult.summary.attendees,
         summary: summaryResult.summary,
       },
-    });
+    }, input.requestSource);
     const chunks = deps.store.insertChunks(source.id, buildMeetingChunks(transcription.segments, summaryResult.summary));
     const saved = deps.store.updateMeeting(meeting.id, {
       sourceId: source.id,
@@ -307,7 +307,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         audioRetention: 'kept',
         participantHints: [],
       },
-    });
+    }, input.requestSource);
     const chunks = deps.store.insertChunks(source.id, buildMeetingChunks(
       input.segments?.length ? input.segments : [{
         start: 0,

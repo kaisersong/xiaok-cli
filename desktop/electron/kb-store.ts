@@ -15,10 +15,12 @@ import type {
   KbSearchInput,
   KbSearchResult,
   MeetingRecord,
+  RequestSource,
   Source,
   AddSourceInput,
   SourceEmbeddingProgress,
   UpdateMeetingInput,
+  UpdateSourceParseResultInput,
 } from './kb-types.js';
 
 export interface KbStore {
@@ -31,11 +33,12 @@ export interface KbStore {
   deleteCollection(id: string): void;
 
   // Source CRUD
-  addSource(input: AddSourceInput): Source;
+  addSource(input: AddSourceInput, requestSource: RequestSource): Source;
   getSource(id: string): Source | undefined;
   listSources(collectionId: string): Source[];
   deleteSource(id: string): void;
   retrySource(id: string): Source | undefined;
+  updateSourceParseResult(id: string, input: UpdateSourceParseResultInput, requestSource: RequestSource): Source;
   getSourceEmbeddingProgress(sourceId: string): SourceEmbeddingProgress;
 
   // Chunk operations
@@ -69,6 +72,10 @@ export interface SourceExtractionResult {
   mimeType?: string;
   error?: string;
   pageCount?: number;
+  errorCode?: string;
+  engine?: string;
+  engineVersion?: string;
+  truncated?: boolean;
 }
 
 export interface ChunkerInput {

@@ -9,6 +9,7 @@
 export type CollectionScope = 'global' | 'project';
 export type SourceKind = 'file' | 'url' | 'paste' | 'meeting';
 export type SourceParseStatus = 'pending' | 'parsing' | 'parsed' | 'failed' | 'unsupported';
+export type RequestSource = 'user' | 'agent' | 'scheduler';
 export type ChunkEmbeddingStatus = 'pending' | 'embedding' | 'embedded' | 'failed';
 export type MeetingStatus =
   | 'recording'
@@ -112,6 +113,13 @@ export interface AddSourceInput {
   byteSize?: number;
   rawPath?: string;
   parseStatus?: SourceParseStatus;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateSourceParseResultInput {
+  parseStatus: Extract<SourceParseStatus, 'parsed' | 'failed' | 'unsupported'>;
+  errorCode?: string;
+  errorMessage?: string;
   metadata?: Record<string, unknown>;
 }
 

@@ -99,6 +99,7 @@ import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import { createKbTools } from './kb-tools.js';
 import { createKbStoreSqlite } from './kb-store-sqlite.js';
 import { createKbRetriever } from './kb-retrieval.js';
+import { createSourceExtractor } from './kb-source-extractor.js';
 import type { MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
@@ -706,7 +707,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const kbDbPath = join(kbUserData, 'knowledge.db');
     const kbStore = createKbStoreSqlite(kbDbPath);
     const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
-    for (const tool of createKbTools(kbStore, kbRetriever)) {
+    const kbSourceExtractor = createSourceExtractor({ officeParser: officeDocumentParser });
+    for (const tool of createKbTools(kbStore, kbRetriever, { sourceExtractor: kbSourceExtractor })) {
       registry.registerTool(tool);
     }
   } catch (e) {
@@ -1632,6 +1634,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   return {
+    parseOfficeDocument(input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) {
+      return officeDocumentParser.parse(input);
+    },
     registerTimedActionService(service: TimedActionService) {
       for (const tool of createTimedActionTools(service)) {
         registry.registerTool(tool);

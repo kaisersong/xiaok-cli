@@ -77,6 +77,52 @@ describe('KB Contract — KbStore', () => {
     });
   });
 
+  it('enforces parse-result ownership and state transitions in the store', () => {
+    const col = store.createCollection({ name: 'Authority', embeddingModelId: 'm', embeddingDim: 384 });
+    const userSource = store.addSource({ collectionId: col.id, kind: 'file', title: 'user.doc' }, 'user');
+    const agentSource = store.addSource({ collectionId: col.id, kind: 'file', title: 'agent.doc' }, 'agent');
+
+    expect(() => store.updateSourceParseResult(userSource.id, {
+      parseStatus: 'parsed',
+      metadata: { engine: 'anydoc', engineVersion: '0.1.8' },
+    }, 'agent')).toThrow(/not allowed/i);
+
+    const parsed = store.updateSourceParseResult(agentSource.id, {
+      parseStatus: 'parsed',
+      metadata: { engine: 'anydoc', engineVersion: '0.1.8', truncated: false },
+    }, 'agent');
+    expect(parsed).toMatchObject({
+      parseStatus: 'parsed',
+      parseError: '',
+      metadata: {
+        createdBy: 'agent',
+        engine: 'anydoc',
+        engineVersion: '0.1.8',
+        truncated: false,
+      },
+    });
+    expect(() => store.updateSourceParseResult(agentSource.id, {
+      parseStatus: 'failed',
+      errorCode: 'malformed_document',
+      errorMessage: 'bad',
+    }, 'agent')).toThrow(/state/i);
+  });
+
+  it('allows scheduler recovery only for pending sources', () => {
+    const col = store.createCollection({ name: 'Recovery', embeddingModelId: 'm', embeddingDim: 384 });
+    const legacyPending = store.addSource({ collectionId: col.id, kind: 'file', title: 'pending.doc' }, 'user');
+    const recovered = store.updateSourceParseResult(legacyPending.id, {
+      parseStatus: 'failed',
+      errorCode: 'malformed_document',
+      errorMessage: 'bad document',
+    }, 'scheduler');
+    expect(recovered).toMatchObject({ parseStatus: 'failed', parseError: 'bad document' });
+    expect(recovered.metadata).toMatchObject({ errorCode: 'malformed_document' });
+    expect(() => store.updateSourceParseResult(legacyPending.id, {
+      parseStatus: 'parsed',
+    }, 'scheduler')).toThrow(/state/i);
+  });
+
   it('persists meeting source metadata and parsed status', () => {
     const col = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
     const src = store.addSource({
