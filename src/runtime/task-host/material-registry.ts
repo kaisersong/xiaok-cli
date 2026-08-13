@@ -106,6 +106,11 @@ export class MaterialRegistry {
     parseStatus: MaterialParseStatus;
     parseSummary?: string;
     errorMessage?: string;
+    extractionEngine?: string;
+    extractionEngineVersion?: string;
+    extractionTruncated?: boolean;
+    sourceFingerprint?: string;
+    extractionErrorCode?: string;
   }): Promise<MaterialRecord> {
     const existing = this.records.get(materialId);
     if (!existing) throw new Error(`unknown material: ${materialId}`);
@@ -116,6 +121,11 @@ export class MaterialRegistry {
       parseStatus: extraction.parseStatus,
       parseSummary: extraction.parseSummary,
       errorMessage: extraction.errorMessage,
+      extractionEngine: extraction.extractionEngine,
+      extractionEngineVersion: extraction.extractionEngineVersion,
+      extractionTruncated: extraction.extractionTruncated,
+      sourceFingerprint: extraction.sourceFingerprint,
+      extractionErrorCode: extraction.extractionErrorCode,
     };
     this.records.set(materialId, updated);
     await this.saveIndex();

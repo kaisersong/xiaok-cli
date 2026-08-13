@@ -39,7 +39,8 @@ import type { RuntimeEvent } from '../../src/runtime/events.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
 import type { DiagnosisReport } from '../../src/runtime/diagnostics/types.js';
-import { extractMaterialText, MATERIAL_EXTRACTOR_VERSION } from '../../src/runtime/materials/text-extractor.js';
+import { extractMaterialText, MATERIAL_EXTRACTOR_VERSION, type OfficeTextExtractionResult } from '../../src/runtime/materials/text-extractor.js';
+import { createOfficeDocumentParser } from './office-document-parser.js';
 import {
   buildProjectTraceBundleFromKSwarmDetail,
   buildSessionTraceBundleFromSnapshots,
@@ -669,6 +670,7 @@ export interface DesktopUpdateModelRuntimeOptionsInput {
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
+  const officeDocumentParser = createOfficeDocumentParser();
   const materialRegistry = new MaterialRegistry({
     workspaceRoot: join(options.dataRoot, 'workspace'),
     maxBytes: 50 * 1024 * 1024,
@@ -1147,6 +1149,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     options.kswarmService,
     materialRegistry,
     kswarmCreateProjectToolOptions,
+    { officeToMarkdown: input => officeDocumentParser.parse(input) },
   );
   const restrictedArtifactRunner = createDesktopModelRunnerWithRegistry(
     artifactGenerationRegistry,
@@ -1155,7 +1158,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     options.kswarmService,
     materialRegistry,
     kswarmCreateProjectToolOptions,
-    { restrictedArtifactGeneration: true },
+    {
+      restrictedArtifactGeneration: true,
+      officeToMarkdown: input => officeDocumentParser.parse(input),
+    },
   );
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
@@ -1211,7 +1217,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: options.runner ?? createDesktopModelRunnerWithRegistry(scopedRegistry, scopedTools, options.dataRoot, options.kswarmService, materialRegistry, kswarmCreateProjectToolOptions),
+      runner: options.runner ?? createDesktopModelRunnerWithRegistry(
+        scopedRegistry,
+        scopedTools,
+        options.dataRoot,
+        options.kswarmService,
+        materialRegistry,
+        kswarmCreateProjectToolOptions,
+        { officeToMarkdown: input => officeDocumentParser.parse(input) },
+      ),
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -4472,6 +4486,8 @@ export async function executeReadMaterialForDesktop(
     materialRegistry?: MaterialRegistry;
     maxChars?: number;
     pdfToText?: (bytes: Uint8Array) => Promise<string>;
+    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
+    signal?: AbortSignal;
   },
 ): Promise<{ ok: boolean; result: string }> {
   const materialId = typeof input.materialId === 'string' ? input.materialId.trim() : '';
@@ -4508,6 +4524,7 @@ export async function executeReadMaterialForDesktop(
   if (
     material.extractedTextPath
     && material.extractorVersion === MATERIAL_EXTRACTOR_VERSION
+    && material.sourceFingerprint === material.sha256
     && existsSync(material.extractedTextPath)
   ) {
     const cached = truncateMaterialText(readFileSync(material.extractedTextPath, 'utf8'), maxChars);
@@ -4523,8 +4540,10 @@ export async function executeReadMaterialForDesktop(
   const extraction = await extractMaterialText({
     workspacePath: material.workspacePath,
     mimeType: material.mimeType,
-    maxChars,
+    maxChars: 2_000_000,
     pdfToText: options.pdfToText,
+    officeToMarkdown: options.officeToMarkdown,
+    signal: options.signal,
   });
   if (extraction.parseStatus === 'parsed' && extraction.text) {
     const extractedTextPath = join(dirname(material.workspacePath), `${material.materialId}.txt`);
@@ -4534,13 +4553,17 @@ export async function executeReadMaterialForDesktop(
       extractorVersion: MATERIAL_EXTRACTOR_VERSION,
       parseStatus: 'parsed',
       parseSummary: extraction.parseSummary,
+      extractionEngine: extraction.engine,
+      extractionEngineVersion: extraction.engineVersion,
+      extractionTruncated: extraction.truncated,
+      sourceFingerprint: material.sha256,
     });
     return createReadMaterialResult(true, {
       ok: true,
       ...buildReadMaterialMetadata(material),
       parseStatus: 'parsed',
       parseSummary: extraction.parseSummary,
-      content: extraction.text,
+      content: truncateMaterialText(extraction.text, maxChars),
     });
   }
 
@@ -4548,6 +4571,11 @@ export async function executeReadMaterialForDesktop(
     parseStatus: extraction.parseStatus,
     parseSummary: extraction.parseSummary,
     errorMessage: extraction.errorMessage,
+    extractionEngine: extraction.engine,
+    extractionEngineVersion: extraction.engineVersion,
+    extractionTruncated: extraction.truncated,
+    sourceFingerprint: material.sha256,
+    extractionErrorCode: extraction.errorCode,
   });
   if (extraction.parseStatus === 'unsupported') {
     return createReadMaterialResult(true, {
@@ -4577,6 +4605,7 @@ async function executeDesktopTaskTool(
     materials: MaterialRecord[];
     materialRegistry?: MaterialRegistry;
     context: ToolExecutionContext;
+    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   },
 ): Promise<{ ok: boolean; result: string }> {
   if (toolCall.name === 'read_material') {
@@ -4588,6 +4617,8 @@ async function executeDesktopTaskTool(
         const { extractPdfText } = await import('./pdf-text.js');
         return extractPdfText(bytes);
       },
+      officeToMarkdown: options.officeToMarkdown,
+      signal: options.context.signal,
     });
   }
   const result = await options.registry.executeTool(toolCall.name, toolCall.input, options.context);
@@ -4754,6 +4785,7 @@ interface ToolLoopContext {
   executionScope?: TaskRunnerInput['executionScope'];
   materials: MaterialRecord[];
   materialRegistry?: MaterialRegistry;
+  officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
   skillInvocation: SkillInvocation | null;
   skillCatalog: SkillCatalog;
@@ -5239,6 +5271,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         materials: ctx.materials,
         materialRegistry: ctx.materialRegistry,
         context: toolContext,
+        officeToMarkdown: ctx.officeToMarkdown,
       });
       if (ok) {
         ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
@@ -6337,7 +6370,10 @@ export function createDesktopModelRunnerWithRegistry(
   kswarmService: KSwarmService,
   materialRegistry: MaterialRegistry,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
-  runnerOptions: { restrictedArtifactGeneration?: boolean } = {},
+  runnerOptions: {
+    restrictedArtifactGeneration?: boolean;
+    officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
+  } = {},
 ): TaskRunner {
   const cwd = process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
@@ -6476,6 +6512,7 @@ export function createDesktopModelRunnerWithRegistry(
       executionScope,
       materials,
       materialRegistry,
+      officeToMarkdown: runnerOptions.officeToMarkdown,
       emitRuntimeEvent,
       skillInvocation,
       skillCatalog,
