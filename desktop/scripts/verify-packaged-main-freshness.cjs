@@ -2,10 +2,15 @@
 
 const { createHash } = require('node:crypto');
 const { existsSync, readFileSync } = require('node:fs');
-const { join, resolve } = require('node:path');
+const path = require('node:path');
+const { join, resolve } = path;
 const { extractFile } = require('@electron/asar');
 
-const PACKAGED_MAIN_PATH = 'dist/main/desktop/electron/kb-tools.js';
+function packagedMainPath(pathApi = path) {
+  return pathApi.join('dist', 'main', 'desktop', 'electron', 'kb-tools.js');
+}
+
+const PACKAGED_MAIN_PATH = packagedMainPath();
 const DIST_MAIN_PATH = join('main', 'desktop', 'electron', 'kb-tools.js');
 
 function sha256(contents) {
@@ -72,4 +77,5 @@ if (require.main === module) {
 }
 
 module.exports = afterPack;
+module.exports.packagedMainPath = packagedMainPath;
 module.exports.verifyPackagedMainFreshness = verifyPackagedMainFreshness;
