@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 export function getSchemaVersion(db: Database.Database): number {
   const hasTable = db.prepare(
@@ -119,9 +119,18 @@ function migrateV1toV2(db: Database.Database): void {
   setSchemaVersion(db, 2);
 }
 
+function migrateV2toV3(db: Database.Database): void {
+  const columns = db.prepare('PRAGMA table_info(memory_l1_extracted)').all() as Array<{ name: string }>;
+  if (!columns.some(column => column.name === 'provenance_json')) {
+    db.exec("ALTER TABLE memory_l1_extracted ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}'");
+  }
+  setSchemaVersion(db, 3);
+}
+
 const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
   1: migrateV0toV1,
   2: migrateV1toV2,
+  3: migrateV2toV3,
 };
 
 export function runMigrations(db: Database.Database): void {

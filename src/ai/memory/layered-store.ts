@@ -132,9 +132,9 @@ export class LayeredMemoryStore implements MemoryStore {
     ).run(id, cwd || 'manual', 'user', record.summary, segmented, scope, memType, cwd);
 
     this.db.prepare(
-      `INSERT OR REPLACE INTO memory_l1_extracted (id, source_ids, summary, tags, scope, mem_type, cwd)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, JSON.stringify([id]), record.title, JSON.stringify(record.tags || []), scope, memType, cwd);
+      `INSERT OR REPLACE INTO memory_l1_extracted (id, source_ids, summary, tags, scope, mem_type, cwd, provenance_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, JSON.stringify([id]), record.title, JSON.stringify(record.tags || []), scope, memType, cwd, JSON.stringify(record.provenance ?? {}));
 
     this.embeddingClient.embedAndStore(id, 1, `${record.title} ${record.summary}`).catch((err) => {
       logger.warn('embedAndStore failed', { id, error: err instanceof Error ? err.message : String(err) });
@@ -156,6 +156,31 @@ export class LayeredMemoryStore implements MemoryStore {
   async search(query: string, limit: number = 10): Promise<MemoryRecord[]> {
     const results = await hybridSearch(this.db, this.embeddingClient, query, { limit });
     return results.map(r => this.searchResultToRecord(r));
+  }
+
+  getById(id: string): MemoryRecord | undefined {
+    const row = this.db.prepare(
+      `SELECT l1.id, l1.summary AS title, l0.content AS content, l1.tags, l1.scope, l1.mem_type,
+              l1.cwd, l1.provenance_json, l1.updated_at
+       FROM memory_l1_extracted l1
+       LEFT JOIN memory_l0_raw l0 ON l0.id = l1.id
+       WHERE l1.id = ?`
+    ).get(id) as {
+      id: string; title: string; content?: string; tags: string; scope: 'global' | 'project'; mem_type?: MemoryType;
+      cwd?: string; provenance_json?: string; updated_at?: string;
+    } | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      scope: row.scope ?? 'global',
+      cwd: row.cwd || undefined,
+      title: row.title,
+      summary: row.content ?? row.title,
+      tags: JSON.parse(row.tags || '[]') as string[],
+      type: row.mem_type,
+      provenance: parseMemoryProvenance(row.provenance_json),
+      updatedAt: row.updated_at ? Date.parse(row.updated_at) || Date.now() : Date.now(),
+    };
   }
 
   async writeRawMessage(sessionId: string, role: string, content: string): Promise<void> {
@@ -369,19 +394,21 @@ export class LayeredMemoryStore implements MemoryStore {
       mem_type?: MemoryType;
       scope?: 'global' | 'project';
       tags?: string[];
+      provenance_json?: string;
     };
 
     // L0 results don't carry tags/scope — look up L1 for enriched metadata
     if (r.layer === 0) {
       const l1 = this.db.prepare(
-        'SELECT tags, scope, mem_type, cwd FROM memory_l1_extracted WHERE id = ?'
-      ).get(r.id) as { tags?: string; scope?: string; mem_type?: string; cwd?: string } | undefined;
+        'SELECT tags, scope, mem_type, cwd, provenance_json FROM memory_l1_extracted WHERE id = ?'
+      ).get(r.id) as { tags?: string; scope?: string; mem_type?: string; cwd?: string; provenance_json?: string } | undefined;
       if (l1) {
         meta = {
           tags: l1.tags ? JSON.parse(l1.tags) : [],
           scope: (l1.scope as 'global' | 'project') || 'global',
           mem_type: l1.mem_type as MemoryType | undefined,
           cwd: l1.cwd || undefined,
+          provenance_json: l1.provenance_json,
         };
       }
     }
@@ -394,6 +421,7 @@ export class LayeredMemoryStore implements MemoryStore {
       summary: r.content,
       tags: meta?.tags || [],
       type: meta?.mem_type,
+      provenance: parseMemoryProvenance(meta?.provenance_json),
       updatedAt: Date.now(),
     };
   }
@@ -404,5 +432,22 @@ export class LayeredMemoryStore implements MemoryStore {
         console.error('[memory] auto-compaction failed:', (err as Error).message);
       });
     }, this.compactionConfig.compactIntervalMs);
+  }
+}
+
+function parseMemoryProvenance(raw: string | undefined): MemoryRecord['provenance'] | undefined {
+  if (!raw) return undefined;
+  try {
+    const value = JSON.parse(raw) as MemoryRecord['provenance'];
+    return value
+      && value.kind === 'assistant_candidate'
+      && typeof value.candidateId === 'string'
+      && typeof value.loopRunId === 'string'
+      && (value.backend === 'layered' || value.backend === 'fallback')
+      && Array.isArray(value.evidenceRefs)
+      ? value
+      : undefined;
+  } catch {
+    return undefined;
   }
 }

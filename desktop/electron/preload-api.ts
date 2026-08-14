@@ -143,6 +143,24 @@ export const PRELOAD_API_KEYS = [
   'kswarmRestart',
   'kswarmResumeWorkflowRun',
   'kswarmStartProjectPlanning',
+  'getAssistantOverview',
+  'activateAssistant',
+  'pauseAssistant',
+  'resumeAssistant',
+  'acceptAssistantCandidate',
+  'rejectAssistantCandidate',
+  'planProjectTeam',
+  'applyProjectTeamPlan',
+  'getProjectTeamOperation',
+  'createKSwarmProject',
+  'updateKSwarmProjectExecutionMode',
+  'deleteKSwarmProject',
+  'createKSwarmAgent',
+  'updateKSwarmAgent',
+  'archiveKSwarmAgent',
+  'startKSwarmAgent',
+  'stopKSwarmAgent',
+  'probeKSwarmAgent',
   'onKSwarmStatus',
   'exportTraceBundle',
   'diagnose',
@@ -414,6 +432,24 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   kswarmRestart: 'desktop:kswarm:restart',
   kswarmResumeWorkflowRun: 'desktop:kswarm:resumeWorkflowRun',
   kswarmStartProjectPlanning: 'desktop:kswarm:startProjectPlanning',
+  getAssistantOverview: 'desktop:assistant:getOverview',
+  activateAssistant: 'desktop:assistant:activate',
+  pauseAssistant: 'desktop:assistant:pause',
+  resumeAssistant: 'desktop:assistant:resume',
+  acceptAssistantCandidate: 'desktop:assistant:acceptCandidate',
+  rejectAssistantCandidate: 'desktop:assistant:rejectCandidate',
+  planProjectTeam: 'desktop:kswarm:team:plan',
+  applyProjectTeamPlan: 'desktop:kswarm:team:apply',
+  getProjectTeamOperation: 'desktop:kswarm:team:getOperation',
+  createKSwarmProject: 'desktop:kswarm:project:create',
+  updateKSwarmProjectExecutionMode: 'desktop:kswarm:project:updateExecutionMode',
+  deleteKSwarmProject: 'desktop:kswarm:project:delete',
+  createKSwarmAgent: 'desktop:kswarm:agent:create',
+  updateKSwarmAgent: 'desktop:kswarm:agent:update',
+  archiveKSwarmAgent: 'desktop:kswarm:agent:archive',
+  startKSwarmAgent: 'desktop:kswarm:agent:start',
+  stopKSwarmAgent: 'desktop:kswarm:agent:stop',
+  probeKSwarmAgent: 'desktop:kswarm:agent:probe',
   exportTraceBundle: 'desktop:trace:export',
   diagnose: 'desktop:diagnose',
   getLoopDefinitions: 'desktop:loops:listDefinitions',
@@ -943,6 +979,130 @@ export function sanitizeArtifactWorkspaceInput<T>(input: T): T {
   return safe as T;
 }
 
+function pickDefined<T extends Record<string, unknown>>(input: T): Partial<T> {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as Partial<T>;
+}
+
+export function sanitizeAssistantCandidateInput(input: { candidateId?: unknown; collectionId?: unknown }): { candidateId: string; collectionId?: string } {
+  return pickDefined({
+    candidateId: typeof input?.candidateId === 'string' ? input.candidateId : '',
+    collectionId: typeof input?.collectionId === 'string' ? input.collectionId : undefined,
+  }) as { candidateId: string; collectionId?: string };
+}
+
+export function sanitizeKSwarmSemanticInput(
+  kind: 'team-plan' | 'team-apply' | 'team-operation' | 'project-create' | 'project-execution-mode'
+    | 'project-delete' | 'agent-create' | 'agent-update' | 'agent-id',
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  if (kind === 'team-plan' || kind === 'team-operation' || kind === 'project-delete' || kind === 'agent-id') {
+    const idKey = kind === 'agent-id' ? 'agentId' : 'projectId';
+    return { [idKey]: typeof input?.[idKey] === 'string' ? input[idKey] : '' };
+  }
+  if (kind === 'team-apply') {
+    return {
+      projectId: typeof input?.projectId === 'string' ? input.projectId : '',
+      planId: typeof input?.planId === 'string' ? input.planId : '',
+      projectRevision: typeof input?.projectRevision === 'number' ? input.projectRevision : -1,
+    };
+  }
+  if (kind === 'project-execution-mode') {
+    return {
+      projectId: typeof input?.projectId === 'string' ? input.projectId : '',
+      executionMode: input?.executionMode,
+    };
+  }
+  if (kind === 'project-create') {
+    return pickDefined({
+      name: input?.name,
+      goal: input?.goal,
+      requirements: input?.requirements,
+      poAgent: input?.poAgent,
+      members: input?.members,
+      workFolder: input?.workFolder,
+      enableSummary: input?.enableSummary,
+      executionMode: input?.executionMode,
+      agentSelection: input?.agentSelection,
+      planningGuidance: input?.planningGuidance,
+      autoStartPlanning: input?.autoStartPlanning,
+    });
+  }
+  const sanitizeAgent = (candidate: Record<string, unknown>) => pickDefined({
+    name: candidate?.name,
+    description: candidate?.description,
+    roles: candidate?.roles,
+    capabilities: candidate?.capabilities,
+    instructions: candidate?.instructions,
+    runtimeType: candidate?.runtimeType,
+    maxConcurrentTasks: candidate?.maxConcurrentTasks,
+  });
+  if (kind === 'agent-update') {
+    const patch = input?.patch && typeof input.patch === 'object' && !Array.isArray(input.patch)
+      ? sanitizeAgent(input.patch as Record<string, unknown>)
+      : {};
+    return { agentId: typeof input?.agentId === 'string' ? input.agentId : '', patch };
+  }
+  return sanitizeAgent(input);
+}
+
+export interface AssistantOverviewView {
+  profile: { status: 'needs_consent' | 'active' | 'paused'; eveningTime: string; morningTime: string };
+  suggestions: Array<{ id: string; title: string; summary: string }>;
+  pendingCandidateCount: number;
+  candidates: Array<Record<string, unknown>>;
+}
+
+export interface ProjectTeamPlanItemView {
+  desiredAgentId: string;
+  action: 'keep' | 'reuse' | 'create';
+  role: string;
+  agentName?: string;
+  capabilityLabels: string[];
+  reasonCode: string;
+}
+
+export interface ProjectTeamPlanView {
+  planId: string;
+  projectId: string;
+  projectRevision: number;
+  outcome: 'proposal' | 'no_change' | 'needs_manual_scope';
+  summary: string;
+  items: ProjectTeamPlanItemView[];
+}
+
+export interface ProjectTeamOperationView {
+  operationId: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  message?: string;
+}
+
+export interface CreateKSwarmProjectSemanticInput {
+  name: string;
+  goal: string;
+  requirements?: string;
+  poAgent: string;
+  members?: string[];
+  workFolder?: string;
+  enableSummary?: boolean;
+  executionMode?: 'direct' | 'auto' | 'workflow_preferred';
+  agentSelection?: {
+    poAgent: { agentId: string; source: string };
+    members: Array<{ agentId: string; source: string }>;
+  };
+  planningGuidance?: string;
+  autoStartPlanning?: boolean;
+}
+
+export interface KSwarmAgentSemanticInput {
+  name: string;
+  description?: string;
+  roles?: string[];
+  capabilities?: string[];
+  instructions?: string;
+  runtimeType?: string;
+  maxConcurrentTasks?: number;
+}
+
 export interface DesktopApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
@@ -1068,6 +1228,24 @@ export interface DesktopApi {
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
   kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[] }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  getAssistantOverview(): Promise<AssistantOverviewView>;
+  activateAssistant(): Promise<unknown>;
+  pauseAssistant(): Promise<unknown>;
+  resumeAssistant(): Promise<unknown>;
+  acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }): Promise<unknown>;
+  rejectAssistantCandidate(input: { candidateId: string }): Promise<unknown>;
+  planProjectTeam(input: { projectId: string }): Promise<ProjectTeamPlanView>;
+  applyProjectTeamPlan(input: { projectId: string; planId: string; projectRevision: number }): Promise<ProjectTeamOperationView>;
+  getProjectTeamOperation(input: { projectId: string }): Promise<ProjectTeamOperationView | null>;
+  createKSwarmProject(input: CreateKSwarmProjectSemanticInput): Promise<unknown>;
+  updateKSwarmProjectExecutionMode(input: { projectId: string; executionMode: 'direct' | 'auto' | 'workflow_preferred' }): Promise<unknown>;
+  deleteKSwarmProject(input: { projectId: string }): Promise<unknown>;
+  createKSwarmAgent(input: KSwarmAgentSemanticInput): Promise<unknown>;
+  updateKSwarmAgent(input: { agentId: string; patch: Partial<KSwarmAgentSemanticInput> }): Promise<unknown>;
+  archiveKSwarmAgent(input: { agentId: string }): Promise<unknown>;
+  startKSwarmAgent(input: { agentId: string }): Promise<unknown>;
+  stopKSwarmAgent(input: { agentId: string }): Promise<unknown>;
+  probeKSwarmAgent(input: { agentId: string }): Promise<unknown>;
   onKSwarmStatus(handler: (status: KSwarmServiceStatus) => void): () => void;
   exportTraceBundle(input: DesktopTraceTarget): Promise<{ ok: boolean; path?: string; error?: string }>;
   diagnose(input: DesktopTraceTarget): Promise<unknown>;
@@ -1481,6 +1659,60 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
     kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input) as Promise<{ restored: boolean; reason?: string; jobId?: string }>,
     kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input) as Promise<{ ok: boolean; status?: string; error?: string }>,
+    getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview') as ReturnType<DesktopApi['getAssistantOverview']>,
+    activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate'),
+    pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause'),
+    resumeAssistant: () => ipcRenderer.invoke('desktop:assistant:resume'),
+    acceptAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:acceptCandidate', sanitizeAssistantCandidateInput(input)),
+    rejectAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:rejectCandidate', sanitizeAssistantCandidateInput(input)),
+    planProjectTeam: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:team:plan',
+      sanitizeKSwarmSemanticInput('team-plan', input),
+    ) as ReturnType<DesktopApi['planProjectTeam']>,
+    applyProjectTeamPlan: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:team:apply',
+      sanitizeKSwarmSemanticInput('team-apply', input),
+    ) as ReturnType<DesktopApi['applyProjectTeamPlan']>,
+    getProjectTeamOperation: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:team:getOperation',
+      sanitizeKSwarmSemanticInput('team-operation', input),
+    ) as ReturnType<DesktopApi['getProjectTeamOperation']>,
+    createKSwarmProject: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:project:create',
+      sanitizeKSwarmSemanticInput('project-create', input as unknown as Record<string, unknown>),
+    ),
+    updateKSwarmProjectExecutionMode: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:project:updateExecutionMode',
+      sanitizeKSwarmSemanticInput('project-execution-mode', input),
+    ),
+    deleteKSwarmProject: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:project:delete',
+      sanitizeKSwarmSemanticInput('project-delete', input),
+    ),
+    createKSwarmAgent: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:agent:create',
+      sanitizeKSwarmSemanticInput('agent-create', input as unknown as Record<string, unknown>),
+    ),
+    updateKSwarmAgent: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:agent:update',
+      sanitizeKSwarmSemanticInput('agent-update', input),
+    ),
+    archiveKSwarmAgent: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:agent:archive',
+      sanitizeKSwarmSemanticInput('agent-id', input),
+    ),
+    startKSwarmAgent: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:agent:start',
+      sanitizeKSwarmSemanticInput('agent-id', input),
+    ),
+    stopKSwarmAgent: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:agent:stop',
+      sanitizeKSwarmSemanticInput('agent-id', input),
+    ),
+    probeKSwarmAgent: (input) => ipcRenderer.invoke(
+      'desktop:kswarm:agent:probe',
+      sanitizeKSwarmSemanticInput('agent-id', input),
+    ),
     onKSwarmStatus(handler) {
       const channel = 'desktop:kswarm:statusChange';
       const listener = (_event: unknown, payload: unknown) => {

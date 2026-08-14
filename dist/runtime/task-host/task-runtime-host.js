@@ -10,6 +10,8 @@ const DEFAULT_CONTEXT_MAX_USER_CHARS = 4000;
 const DEFAULT_CONTEXT_MAX_ASSISTANT_CHARS = 6000;
 const DEFAULT_CONTEXT_MAX_TOTAL_CHARS = 30000;
 const RUNNER_DEADLINE_RESERVE_MS = 2 * 60_000;
+const ASSISTANT_DELTA_FLUSH_MS = 50;
+const ASSISTANT_DELTA_MAX_BUFFER_CHARS = 16 * 1024;
 function abortWithReason(controller, reason) {
     controller.abort(new Error(reason));
 }
@@ -88,6 +90,8 @@ export class InProcessTaskRuntimeHost {
     taskOrdinal = 0;
     permissionModes = new Map();
     maxToolLoopIterations = new Map();
+    pendingAssistantDeltas = new Map();
+    runtimeEventErrors = new Map();
     constructor(options) {
         this.options = options;
     }
@@ -219,6 +223,7 @@ export class InProcessTaskRuntimeHost {
             summary: ['任务已取消，可基于已识别的任务理解继续。'],
             reason: 'cancelled',
         };
+        await this.flushRuntimeEvents(taskId);
         await this.appendEvent(taskId, { type: 'salvage', salvage });
         await this.updateSnapshot(taskId, {
             status: 'cancelled',
@@ -284,11 +289,9 @@ export class InProcessTaskRuntimeHost {
                 permissionMode: this.permissionModes.get(taskId),
                 maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                 executionScope: snapshot.executionScope,
-                emitRuntimeEvent: (event) => {
-                    void this.appendRuntimeEvent(taskId, event);
-                },
+                emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
             });
-            await this.flushMutations(taskId);
+            await this.flushRuntimeEvents(taskId);
             const latest = await this.requireSnapshot(taskId);
             if (latest.status !== 'cancelled' && !this.cancellingTaskIds.has(taskId)) {
                 // Layer 3: Deliverable Gate — check if all requested deliverables were produced
@@ -307,11 +310,9 @@ export class InProcessTaskRuntimeHost {
                         permissionMode: this.permissionModes.get(taskId),
                         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                         executionScope: snapshot.executionScope,
-                        emitRuntimeEvent: (event) => {
-                            void this.appendRuntimeEvent(taskId, event);
-                        },
+                        emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
                     });
-                    await this.flushMutations(taskId);
+                    await this.flushRuntimeEvents(taskId);
                 }
                 const guardedLatest = await this.requireSnapshot(taskId);
                 if (!await this.applyArtifactEvidenceGuard(taskId, guardedLatest)) {
@@ -335,14 +336,21 @@ export class InProcessTaskRuntimeHost {
             }
         }
         catch (error) {
+            let executionError = error;
+            try {
+                await this.flushRuntimeEvents(taskId);
+            }
+            catch (flushError) {
+                executionError = flushError;
+            }
             if (this.cancellingTaskIds.has(taskId)) {
                 return;
             }
             const message = controller.signal.aborted
                 ? normalizeAbortReason(controller.signal.reason)
-                : error instanceof Error
-                    ? error.message
-                    : String(error);
+                : executionError instanceof Error
+                    ? executionError.message
+                    : String(executionError);
             const salvage = {
                 summary: [
                     snapshot.understanding ? '已保留任务理解' : '已保留任务输入',
@@ -354,7 +362,7 @@ export class InProcessTaskRuntimeHost {
             await this.updateSnapshot(taskId, { status: 'failed', salvage });
             await this.options.snapshotStore.clearActiveTask(taskId);
             this.closeSubscribers(taskId);
-            throw error;
+            throw executionError;
         }
         finally {
             clearTimeout(watchdogTimer);
@@ -365,6 +373,8 @@ export class InProcessTaskRuntimeHost {
             this.activeExecutions.delete(taskId);
             this.executionPromises.delete(taskId);
             this.cancellingTaskIds.delete(taskId);
+            this.clearPendingAssistantDelta(taskId);
+            this.runtimeEventErrors.delete(taskId);
         }
     }
     async resolveContextHistory(currentTaskId, context) {
@@ -412,10 +422,74 @@ export class InProcessTaskRuntimeHost {
         return isFallbackSummary && !hasArtifacts && !hasRecordedArtifacts && !hasAssistantOutput;
     }
     async appendRuntimeEvent(taskId, event) {
+        this.throwRuntimeEventError(taskId);
         const desktopEvents = projectRuntimeEventsToDesktopEvents({ taskId, events: [event] });
         for (const desktopEvent of desktopEvents) {
+            if (desktopEvent.type === 'assistant_delta') {
+                await this.bufferAssistantDelta(taskId, desktopEvent);
+                continue;
+            }
+            await this.flushPendingAssistantDelta(taskId);
+            this.throwRuntimeEventError(taskId);
             await this.appendEvent(taskId, desktopEvent);
         }
+    }
+    bufferAssistantDelta(taskId, event) {
+        let pending = this.pendingAssistantDeltas.get(taskId);
+        if (!pending) {
+            pending = { delta: '', eventId: event.eventId, timer: null };
+            this.pendingAssistantDeltas.set(taskId, pending);
+        }
+        pending.delta += event.delta;
+        if (pending.delta.length >= ASSISTANT_DELTA_MAX_BUFFER_CHARS) {
+            return this.flushPendingAssistantDelta(taskId);
+        }
+        if (!pending.timer) {
+            pending.timer = setTimeout(() => {
+                void this.flushPendingAssistantDelta(taskId).catch((error) => {
+                    this.runtimeEventErrors.set(taskId, error);
+                });
+            }, ASSISTANT_DELTA_FLUSH_MS);
+        }
+        return Promise.resolve();
+    }
+    async flushPendingAssistantDelta(taskId) {
+        const pending = this.pendingAssistantDeltas.get(taskId);
+        if (!pending) {
+            return;
+        }
+        this.pendingAssistantDeltas.delete(taskId);
+        if (pending.timer) {
+            clearTimeout(pending.timer);
+        }
+        if (pending.delta.length === 0) {
+            return;
+        }
+        await this.appendEvent(taskId, {
+            type: 'assistant_delta',
+            eventId: pending.eventId,
+            delta: pending.delta,
+        });
+    }
+    async flushRuntimeEvents(taskId) {
+        await this.flushPendingAssistantDelta(taskId);
+        await this.flushMutations(taskId);
+        this.throwRuntimeEventError(taskId);
+    }
+    throwRuntimeEventError(taskId) {
+        if (!this.runtimeEventErrors.has(taskId)) {
+            return;
+        }
+        const error = this.runtimeEventErrors.get(taskId);
+        this.runtimeEventErrors.delete(taskId);
+        throw error;
+    }
+    clearPendingAssistantDelta(taskId) {
+        const pending = this.pendingAssistantDeltas.get(taskId);
+        if (pending?.timer) {
+            clearTimeout(pending.timer);
+        }
+        this.pendingAssistantDeltas.delete(taskId);
     }
     async applyArtifactEvidenceGuard(taskId, snapshot) {
         if (!this.options.aheGuards?.artifactEvidence) {
@@ -559,6 +633,7 @@ export class InProcessTaskRuntimeHost {
             }
             await chain;
             if (this.mutationChains.get(taskId) === chain) {
+                this.mutationChains.delete(taskId);
                 return;
             }
         }

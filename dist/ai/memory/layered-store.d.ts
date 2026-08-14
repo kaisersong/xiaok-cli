@@ -33,6 +33,7 @@ export declare class LayeredMemoryStore implements MemoryStore {
         typeFilter?: MemoryType;
     }): Promise<MemoryRecord[]>;
     search(query: string, limit?: number): Promise<MemoryRecord[]>;
+    getById(id: string): MemoryRecord | undefined;
     writeRawMessage(sessionId: string, role: string, content: string): Promise<void>;
     compact(): Promise<void>;
     delete(id: string, layer?: number): Promise<boolean>;

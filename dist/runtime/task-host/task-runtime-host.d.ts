@@ -19,7 +19,7 @@ export interface TaskRunnerInput {
     permissionMode?: 'plan' | 'auto' | 'default';
     maxToolLoopIterations?: number;
     executionScope?: ArtifactWorkspaceExecutionScope;
-    emitRuntimeEvent(event: RuntimeEvent): void;
+    emitRuntimeEvent(event: RuntimeEvent): Promise<void>;
 }
 export interface PersistedTaskEvent {
     taskId: string;
@@ -69,6 +69,8 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private taskOrdinal;
     private readonly permissionModes;
     private readonly maxToolLoopIterations;
+    private readonly pendingAssistantDeltas;
+    private readonly runtimeEventErrors;
     constructor(options: InProcessTaskRuntimeHostOptions);
     prepareTask(input: TaskCreateInput): Promise<{
         taskId: string;
@@ -101,6 +103,11 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private resolveContextHistory;
     private isEmptyDelivery;
     private appendRuntimeEvent;
+    private bufferAssistantDelta;
+    private flushPendingAssistantDelta;
+    private flushRuntimeEvents;
+    private throwRuntimeEventError;
+    private clearPendingAssistantDelta;
     private applyArtifactEvidenceGuard;
     private recoverStaleRunningTask;
     private appendEvent;

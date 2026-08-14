@@ -12,6 +12,7 @@ import {
   normalizeScheduledTaskRuntimeLink,
 } from '../lib/scheduled-task-threads';
 import { automationFocusTargetId } from '../lib/automation-deep-link';
+import { getAssistantScheduleDisplayName } from '../lib/assistant-schedule-display';
 
 export {
   collectScheduledRuntimeTaskIds,
@@ -861,7 +862,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-[var(--c-text-primary)]">{task.name}</span>
+                      <span className="text-sm font-medium text-[var(--c-text-primary)]">{getAssistantScheduleDisplayName(task, t.assistant)}</span>
                       <span className={`rounded-full px-2 py-0.5 text-xs ${
                         task.status === 'active'
                           ? 'bg-green-50 text-green-600'

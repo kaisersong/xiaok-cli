@@ -46,6 +46,19 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.28 新增主动型每日助理与项目一键智能组队。每日助理在用户明确启用后，晚间分析本地工作、早上给出建议，并把值得沉淀的记忆或知识作为候选交给用户确认；项目可以先分析能力缺口、复用合适的现有智能体、提议缺失角色，再在用户确认后应用与当前项目版本绑定的团队方案。
+
+**主动助理与智能组队：**
+
+- **先同意、再启用的每日助理**：启用后创建带稳定 ID 和明确所有权的晚间、晨间日程。暂停、恢复、过期补跑、时区/DST 与逻辑 exactly-once 都持久化在 Electron main process，不把 renderer 当最终事实来源。
+- **先评审、再写入记忆**：晚间分析只生成带 evidence 的记忆、知识与跟进候选。agent 和 scheduler 路径不能直接写入用户拥有的 store；采纳或忽略候选是用户授权 mutation，状态迁移支持重启恢复。
+- **基于真实工作状态的晨间建议**：晨间输出组合有界 Desktop 活动快照、待确认候选、项目关注事项与既有记忆。结构化 LLM 输出经过校验，provider 不可用时退回确定性的本地建议。
+- **一键智能组队**：KSwarm 生成含 `keep`、`reuse`、`create` 的能力方案，公开 agent API 不泄露私密 runtime 配置，只在真正需要的受信任子进程边界传递最小执行配置。
+- **预览、确认、调和**：团队方案绑定当前 project revision 与 mutation credential；过期或未授权方案 fail-closed。operation journal 让重试与 Desktop 恢复可观测，同时避免重复创建智能体。
+- **对话优先的 Desktop UI**：首页继续以对话为主，每日助理作为紧凑续接卡片；项目智能体页优先提供智能组建，手工配置保留为高级回退。内置日程名称和团队摘要按稳定语义本地化，不直接展示持久化英文。
+- **发布验证**：CLI 350 文件 / 2,968 测试，Desktop 257 文件 / 2,070 测试，KSwarm P0 E2E 85/85、完整流程 E2E 51/51，Intent Broker 388/388 与 collaboration 验证，Desktop typecheck/build/安装包新鲜度以及安装版 Computer Use 全部通过。
+- **版本对齐**：CLI、Desktop、package locks 与 Desktop Release workflow 统一为 `1.4.28` / `desktop-v1.4.28`。
+
 Xiaok Desktop v1.4.27 把同一把"诚实性"标尺对准了检索路径，而实测结果比几轮设计评审预设的更糟。**知识库里被索引的字符有 74.1% 是 HTML 标签与 CSS 噪声**（217,902 / 294,006）——一次 `kb_get_source` 调用在 32,000 字符预算里花掉约 15,000 token 去装样式表，真正的正文只占 3.6%–7.4%。本地 ONNX embedding 则从未真正跑过：它调用的 `Tokenizer.fromString` 在已安装的包里并不存在，于是静默降级到远端 HTTP 接口，让 254MB 的 `onnxruntime-node` 依赖一次推理都没做。三轮对抗性评审否掉了过程中提出的每一套复杂机件——FTS5 虚表、RRF 融合层、TF-IDF 打分器——而真正让指标动起来的两项改动，一份设计稿里都没有。
 
 **可度量的检索、真正可用的向量与文档提取：**

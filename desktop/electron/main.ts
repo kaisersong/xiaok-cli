@@ -2,7 +2,12 @@ import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMo
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { createDesktopServices, resumeOneScriptWorkflow } from './desktop-services.js';
+import {
+  createDesktopServices,
+  getDesktopMemoryBackend,
+  getDesktopMemoryStore,
+  resumeOneScriptWorkflow,
+} from './desktop-services.js';
 import { onSkillCatalogChanged } from './skill-catalog-invalidation.js';
 import { registerDesktopIpc } from './ipc.js';
 import {
@@ -45,6 +50,20 @@ import {
 } from './meeting-recorder-window.js';
 import { createDesktopLoopRuntime } from './loop-executor.js';
 import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
+import { AssistantService } from './assistant-service.js';
+import { AssistantController } from './assistant-controller.js';
+import { listLatestMorningSuggestions } from './assistant-morning-suggestions.js';
+import { buildAssistantMorningContext } from './assistant-morning-context.js';
+import { ASSISTANT_EVENING_LOOP_ID, ASSISTANT_MORNING_LOOP_ID } from './assistant-types.js';
+import { createAssistantRuntime } from './assistant-runtime.js';
+import { createAssistantDesktopSnapshotReader } from './assistant-desktop-snapshot.js';
+import { createLoopExecutionAdapter } from './loop-execution-adapter.js';
+import { createKSwarmTeamService } from './kswarm-team-service.js';
+import {
+  createKSwarmSemanticService,
+  createProjectCapabilityNeedsProposalPort,
+} from './kswarm-semantic-service.js';
+import { registerSemanticDesktopIpc } from './semantic-ipc.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -655,6 +674,7 @@ async function createWindow(): Promise<BrowserWindow> {
     debugMain('mobile-relay:disabled', 'missing relay credentials');
   }
   const loopNotificationPort = createElectronDesktopNotificationPort();
+  const loopLlmPort = createDesktopLoopLLMPort();
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
     taskPort: {
@@ -662,7 +682,7 @@ async function createWindow(): Promise<BrowserWindow> {
       recoverTask: (taskId) => services.recoverTask(taskId),
       cancelTask: (taskId, reason) => services.cancelTask(taskId, reason),
     },
-    llmPort: createDesktopLoopLLMPort(),
+    llmPort: loopLlmPort,
     onConstraintAdded: (constraint) => {
       try {
         const template = loopStoreRef?.getUserLoopTemplate(constraint.loopId);
@@ -703,9 +723,6 @@ async function createWindow(): Promise<BrowserWindow> {
     ],
   });
   loopStoreRef = loopRuntime.loopStore;
-
-  await registerDesktopIpc(ipcMain, window, services, { loopRuntime });
-  debugMain('createWindow:ipc-registered');
 
   try {
     await services.recoverStaleTasks();
@@ -768,7 +785,145 @@ async function createWindow(): Promise<BrowserWindow> {
   // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
   const timedActionService = new TimedActionService(timedActionStore);
+  const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
   services.registerTimedActionService(timedActionService);
+  const assistantService = new AssistantService({
+    loopStore: loopRuntime.loopStore,
+    timedActionService,
+  });
+  assistantService.bootstrap();
+  const projectCwdById = new Map<string, string>();
+  void fetchKSwarmProjectsForMobile(kswarmService).then(projects => {
+    for (const project of projects) {
+      if (typeof project.id === 'string' && typeof project.workFolder === 'string' && project.workFolder.trim()) {
+        projectCwdById.set(project.id, project.workFolder.trim());
+      }
+    }
+  }).catch(() => {});
+  const knowledgeBaseStore = services.getKnowledgeBaseStore();
+  const assistantSnapshotReader = createAssistantDesktopSnapshotReader({
+    listTaskSnapshots: ({ from, to }) => readRecentTaskSnapshots(dataRoot, 100)
+      .filter(snapshot => snapshot.updatedAt >= from && snapshot.updatedAt <= to)
+      .map(snapshot => ({
+        id: snapshot.taskId,
+        threadId: snapshot.context?.threadId ?? snapshot.sessionId,
+        title: snapshot.understanding?.goal ?? snapshot.prompt.slice(0, 160),
+        status: snapshot.status,
+        summary: snapshot.result?.summary ?? snapshot.understanding?.nextAction,
+        updatedAt: snapshot.updatedAt,
+        artifacts: (snapshot.result?.artifacts ?? []).map(artifact => ({
+          id: artifact.artifactId,
+          title: artifact.title,
+          summary: artifact.kind,
+          updatedAt: Number.isFinite(Date.parse(artifact.createdAt)) ? Date.parse(artifact.createdAt) : snapshot.updatedAt,
+        })),
+      })),
+    listKSwarmProjects: async ({ from, to }) => {
+      const projects = await fetchKSwarmProjectsForMobile(kswarmService);
+      return projects.flatMap(project => {
+        const id = typeof project.id === 'string' ? project.id : '';
+        const name = typeof project.name === 'string' ? project.name : '';
+        const updatedAt = typeof project.updatedAt === 'number'
+          ? project.updatedAt
+          : typeof project.createdAt === 'number' ? project.createdAt : 0;
+        if (!id || !name || updatedAt < from || updatedAt > to) return [];
+        if (typeof project.workFolder === 'string' && project.workFolder.trim()) {
+          projectCwdById.set(id, project.workFolder.trim());
+        }
+        return [{
+          id,
+          name,
+          status: typeof project.status === 'string' ? project.status : undefined,
+          summary: typeof project.summary === 'string' ? project.summary : undefined,
+          updatedAt,
+        }];
+      });
+    },
+    listTimedActions: ({ from, to }) => timedActionService.getActions().flatMap(action => {
+      const dueAt = action.lastDueAt ?? action.nextDueAt;
+      const occurrenceAt = typeof dueAt === 'number' && dueAt >= from && dueAt <= to ? dueAt : action.updatedAt;
+      if (occurrenceAt < from || occurrenceAt > to) return [];
+      return [{
+        id: action.id,
+        title: action.title,
+        status: action.status,
+        triggerKind: action.trigger.kind,
+        dueAt,
+        updatedAt: action.updatedAt,
+      }];
+    }),
+    listMeetingMetadata: ({ from, to }) => knowledgeBaseStore.listMeetings()
+      .filter(meeting => meeting.updatedAt >= from && meeting.updatedAt <= to)
+      .map(meeting => ({
+        id: meeting.id,
+        title: meeting.title || meeting.id,
+        status: meeting.status,
+        summary: meeting.failureReason || undefined,
+        updatedAt: meeting.updatedAt,
+      })),
+    listKnowledgeSourceMetadata: ({ from, to }) => knowledgeBaseStore.listCollections()
+      .flatMap(collection => knowledgeBaseStore.listSources(collection.id))
+      .filter(source => source.updatedAt >= from && source.updatedAt <= to)
+      .map(source => ({
+        id: source.id,
+        collectionId: source.collectionId,
+        title: source.title,
+        status: source.parseStatus,
+        summary: typeof source.metadata.summary === 'string' ? source.metadata.summary : undefined,
+        updatedAt: source.updatedAt,
+      })),
+  });
+  const assistantRuntime = createAssistantRuntime({
+    loopStore: loopRuntime.loopStore,
+    evidenceStore: loopRuntime.evidenceStore,
+    llmPort: loopLlmPort,
+    collect: async input => {
+      const snapshot = await assistantSnapshotReader.collect(input);
+      if (input.kind === 'evening') return snapshot;
+      return buildAssistantMorningContext({
+        snapshot,
+        eveningRun: loopRuntime.loopStore.listLoopRuns(ASSISTANT_EVENING_LOOP_ID, 10)
+          .find(run => run.status === 'success'),
+        pendingCandidates: loopRuntime.loopStore.listAssistantCandidates({ statuses: ['pending'] }),
+        pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')],
+      });
+    },
+  });
+  const assistantAwareRunner = createLoopExecutionAdapter({
+    genericRunner: loopRuntime.runner,
+    assistantRuntime,
+  });
+  const assistantController = new AssistantController({
+    assistantService,
+    candidates: loopRuntime.loopStore,
+    memoryStore: getDesktopMemoryStore(dataRoot),
+    memoryBackend: getDesktopMemoryBackend(dataRoot),
+    kbStore: knowledgeBaseStore,
+    resolveProjectCwd: projectId => projectCwdById.get(projectId),
+    listMorningSuggestions: () => listLatestMorningSuggestions({
+      listRuns: () => loopRuntime.loopStore.listLoopRuns(ASSISTANT_MORNING_LOOP_ID, 10),
+      listEvidence: runId => loopRuntime.evidenceStore.listEvidenceForOwner('loop_run', runId),
+    }),
+  });
+  void assistantController.recoverAccepting().catch(error => {
+    console.warn('[main] assistant candidate recovery failed:', (error as Error).message);
+  });
+  const kswarmTeamService = createKSwarmTeamService({
+    kswarmService,
+    needsProposal: createProjectCapabilityNeedsProposalPort(loopLlmPort),
+  });
+  const kswarmSemanticService = createKSwarmSemanticService({
+    kswarmService,
+    teamService: kswarmTeamService,
+  });
+  registerSemanticDesktopIpc(ipcMain, {
+    assistant: assistantController,
+    kswarm: kswarmSemanticService,
+  });
+  await registerDesktopIpc(ipcMain, window, services, {
+    loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },
+  });
+  debugMain('createWindow:ipc-registered');
   ipcMain.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
     loopStore: loopRuntime.loopStore,
     timedActionStore,
@@ -918,6 +1073,7 @@ async function createWindow(): Promise<BrowserWindow> {
     executors: createDesktopTimedActionExecutors({
       getMainWindow: () => window,
       loopRuntime,
+      assistantRuntime,
       createTask: (input) => services.createTask(input),
     }),
     isGlobalBackgroundAutoRunEnabled: () => globalBackgroundAutoRunEnabled,
@@ -1053,7 +1209,6 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   // Thread meta (GTD / pinned) — persistent via SQLite in main process
-  const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
   onSkillCatalogChanged(() => {
     if (window.isDestroyed()) return;
     window.webContents.send('desktop:skillsChanged');

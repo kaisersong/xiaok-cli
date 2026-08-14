@@ -282,12 +282,15 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return await response.json() as T;
 }
 
-async function cleanupKswarmAgents(apiBase: string, homeDir: string): Promise<void> {
+async function cleanupKswarmAgents(apiBase: string, homeDir: string, mutationToken?: string): Promise<void> {
   try {
     const list = await fetchJson<{ agents: Array<{ id: string }> }>(`${apiBase}/agents`);
     for (const agent of list.agents) {
       try {
-        await fetchJson(`${apiBase}/agents/${agent.id}/stop`, { method: 'POST' });
+        await fetchJson(`${apiBase}/agents/${agent.id}/stop`, {
+          method: 'POST',
+          headers: mutationToken ? { 'x-kswarm-mutation-token': mutationToken } : undefined,
+        });
       } catch {
         // ignore cleanup failures
       }
@@ -340,6 +343,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
     const kswarmPort = await reservePort();
     const brokerUrl = `http://127.0.0.1:${brokerPort}`;
     const kswarmUrl = `http://127.0.0.1:${kswarmPort}`;
+    const mutationToken = `desktop-e2e-${Date.now()}`;
 
     const broker = startNodeProcess(
       join(__dirname, '..', '..', '..', '..', 'intent-broker'),
@@ -366,6 +370,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         BROKER_URL: brokerUrl,
         KSWARM_API: kswarmUrl,
         KSWARM_PORT: String(kswarmPort),
+        KSWARM_DESKTOP_MUTATION_TOKEN: mutationToken,
         WORK_DELAY: '50',
         HOME: tempHome,
         USERPROFILE: tempHome,
@@ -414,7 +419,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         project: { id: string; poAgent: string; members: string[]; status: string };
       }>(`${kswarmUrl}/projects`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-kswarm-mutation-token': mutationToken },
         body: JSON.stringify({
           name: 'E2E 简单项目',
           goal: '生成一份简单但具体的中文测试报告',
@@ -453,7 +458,7 @@ describe('e2e: kswarm simple project with managed xiaok agents', () => {
         kswarm.logs(),
       ].join('\n'));
     } finally {
-      await cleanupKswarmAgents(kswarmUrl, tempHome);
+      await cleanupKswarmAgents(kswarmUrl, tempHome, mutationToken);
       await kswarm.stop();
       await broker.stop();
       await fakeOpenAi.close();

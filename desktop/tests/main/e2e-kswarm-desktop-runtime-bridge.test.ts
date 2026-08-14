@@ -102,8 +102,9 @@ async function waitForCondition<T>(
 async function startKSwarmForE2E(input: {
   brokerUrl: string;
   tempHome: string;
-}): Promise<{ kswarm: StartedProcess; kswarmUrl: string }> {
+}): Promise<{ kswarm: StartedProcess; kswarmUrl: string; mutationToken: string }> {
   let lastLogs = '';
+  const mutationToken = `desktop-e2e-${Date.now()}`;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const kswarmPort = await reservePort();
     const kswarmUrl = `http://127.0.0.1:${kswarmPort}`;
@@ -114,6 +115,7 @@ async function startKSwarmForE2E(input: {
         ...process.env,
         BROKER_URL: input.brokerUrl,
         KSWARM_PORT: String(kswarmPort),
+        KSWARM_DESKTOP_MUTATION_TOKEN: mutationToken,
         HOME: input.tempHome,
         USERPROFILE: input.tempHome,
       },
@@ -124,7 +126,7 @@ async function startKSwarmForE2E(input: {
         (value) => value.ok === true && value.brokerConnected === true,
         10_000,
       );
-      return { kswarm, kswarmUrl };
+      return { kswarm, kswarmUrl, mutationToken };
     } catch (error) {
       lastLogs = kswarm.logs();
       await kswarm.stop();
@@ -135,14 +137,20 @@ async function startKSwarmForE2E(input: {
   throw new Error(`failed to start kswarm after port retries\n${lastLogs}`);
 }
 
-function createKSwarmHttpService(baseUrl: string): KSwarmService {
+function createKSwarmHttpService(baseUrl: string, mutationToken: string): KSwarmService {
   return {
     start: async () => {},
     stop: async () => {},
     restart: async () => {},
     getStatus: () => ({ running: true, port: Number(new URL(baseUrl).port), pid: 1, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {},
-    request: async (path: string, init?: RequestInit) => fetch(`${baseUrl}${path}`, init),
+    request: async (path: string, init?: RequestInit) => fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: {
+        ...Object.fromEntries(new Headers(init?.headers).entries()),
+        'x-kswarm-mutation-token': mutationToken,
+      },
+    }),
   };
 }
 
@@ -220,8 +228,9 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
       const startedKSwarm = await startKSwarmForE2E({ brokerUrl, tempHome });
       kswarm = startedKSwarm.kswarm;
       kswarmUrl = startedKSwarm.kswarmUrl;
+      const mutationToken = startedKSwarm.mutationToken;
 
-      const kswarmService = createKSwarmHttpService(kswarmUrl);
+      const kswarmService = createKSwarmHttpService(kswarmUrl, mutationToken);
       const services = createDesktopServices({
         dataRoot,
         kswarmService,
@@ -349,7 +358,7 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
         project: { id: string; poAgent: string; members: string[]; status: string; workFolder?: string };
       }>(`${kswarmUrl}/projects`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-kswarm-mutation-token': mutationToken },
         body: JSON.stringify({
           name: 'E2E Desktop Runtime Bridge',
           goal: '验证 KSwarm 项目通过 xiaok desktop runtime 完成端到端闭环',
@@ -376,7 +385,7 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
 
       await fetchJson(`${kswarmUrl}/projects/${created.project.id}/approve`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-kswarm-mutation-token': mutationToken },
         body: JSON.stringify({}),
       });
 

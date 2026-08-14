@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDesktopApi } from '@xiaok/shared/desktop';
+import type { KSwarmAgentSemanticInput, ProjectTeamOperationView, ProjectTeamPlanView } from '../api/types';
 
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
@@ -323,6 +324,9 @@ export interface KSwarmClientActions {
   continueProject(projectId: string, request: ContinueProjectRequest): Promise<ContinueProjectResult | null>;
   closeProject(projectId: string): Promise<boolean>;
   deleteProject(projectId: string): Promise<boolean>;
+  planProjectTeam(input: { projectId: string }): Promise<ProjectTeamPlanView>;
+  applyProjectTeamPlan(input: { projectId: string; planId: string; projectRevision: number }): Promise<ProjectTeamOperationView>;
+  getProjectTeamOperation(input: { projectId: string }): Promise<ProjectTeamOperationView | null>;
   deliverProject(projectId: string): Promise<boolean>;
   startProjectDiagnoseWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
   startProjectAgentReviewSmokeWorkflow(projectId: string): Promise<KSwarmWorkflowRun | null>;
@@ -786,6 +790,28 @@ function readPrincipleEntries(value: unknown): PrincipleEntry[] {
     }));
 }
 
+function toSemanticAgentInput(input: Partial<CreateAgentInput>): Partial<KSwarmAgentSemanticInput> {
+  return Object.fromEntries(Object.entries({
+    name: input.name,
+    description: input.description,
+    roles: input.roles,
+    capabilities: input.capabilities,
+    instructions: input.instructions,
+    runtimeType: input.runtimeType,
+    maxConcurrentTasks: input.maxConcurrentTasks,
+  }).filter(([, value]) => value !== undefined));
+}
+
+function readSemanticAgent(value: unknown): KSwarmAgent | null {
+  if (!isRecord(value)) return null;
+  const candidate = isRecord(value.agent) ? value.agent : value;
+  return typeof candidate.id === 'string' ? candidate as unknown as KSwarmAgent : null;
+}
+
+function readSemanticOk(value: unknown): boolean {
+  return value === true || (isRecord(value) && value.ok === true);
+}
+
 export function buildCreateProjectPlanningGuidance(input: {
   goal: string;
   requirements?: string;
@@ -907,39 +933,6 @@ async function httpPostJson<T>(path: string, body?: unknown): Promise<T | null> 
   } catch (err) {
     console.warn(`[kswarm] POST(json) ${path} failed`, err);
     return null;
-  }
-}
-
-async function httpPut<T>(path: string, body?: unknown): Promise<T | null> {
-  const api = getDesktopApi();
-  if (!api?.kswarmProxyPut) return null;
-  try {
-    return await api.kswarmProxyPut(path, body) as T | null;
-  } catch (err) {
-    console.warn(`[kswarm] PUT ${path} failed`, err);
-    return null;
-  }
-}
-
-async function httpPatch<T>(path: string, body?: unknown): Promise<T | null> {
-  const api = getDesktopApi();
-  if (!api?.kswarmProxyPatch) return null;
-  try {
-    return await api.kswarmProxyPatch(path, body) as T | null;
-  } catch (err) {
-    console.warn(`[kswarm] PATCH ${path} failed`, err);
-    return null;
-  }
-}
-
-async function httpDelete(path: string): Promise<boolean> {
-  const api = getDesktopApi();
-  if (!api?.kswarmProxyDelete) return false;
-  try {
-    return await api.kswarmProxyDelete(path) as boolean;
-  } catch (err) {
-    console.warn(`[kswarm] DELETE ${path} failed`, err);
-    return false;
   }
 }
 
@@ -1127,13 +1120,16 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       requirements: input.requirements || '',
       principles,
     });
-    const response = await httpPost<CreateKSwarmProjectResponse>('/projects', {
-      ...input,
-      requirements: guidance.visibleRequirements || undefined,
-      planningGuidance: guidance.planningGuidance || undefined,
-      enableSummary: input.enableSummary ?? true,
-      autoStartPlanning: false,
-    });
+    const desktopApi = getDesktopApi();
+    const response = desktopApi?.createKSwarmProject
+      ? await desktopApi.createKSwarmProject({
+        ...input,
+        requirements: guidance.visibleRequirements || undefined,
+        planningGuidance: guidance.planningGuidance || undefined,
+        enableSummary: input.enableSummary ?? true,
+        autoStartPlanning: false,
+      }) as CreateKSwarmProjectResponse | null
+      : null;
     // Server returns { ok, project, preparation, planningStart } — unwrap the
     // project. Treating the whole envelope as a KSwarmProject left id/name
     // undefined, so the planning bootstrap below enqueued an empty projectId
@@ -1178,10 +1174,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, [fetchProjects]);
 
   const updateProjectExecutionMode = useCallback(async (projectId: string, executionMode: KSwarmProjectExecutionMode): Promise<KSwarmProject | null> => {
-    const result = await httpPatch<{ ok: boolean; project?: KSwarmProject }>(`/projects/${projectId}/execution-mode`, {
-      executionMode,
-      updatedBy: 'human',
-    });
+    const desktopApi = getDesktopApi();
+    const result = desktopApi?.updateKSwarmProjectExecutionMode
+      ? await desktopApi.updateKSwarmProjectExecutionMode({ projectId, executionMode }) as { ok?: boolean; project?: KSwarmProject } | null
+      : null;
     if (result?.ok) fetchProjects();
     return result?.project || null;
   }, [fetchProjects]);
@@ -1203,7 +1199,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, [fetchProjects]);
 
   const deleteProject = useCallback(async (projectId: string): Promise<boolean> => {
-    const ok = await httpDelete(`/projects/${projectId}`);
+    const desktopApi = getDesktopApi();
+    const ok = desktopApi?.deleteKSwarmProject
+      ? readSemanticOk(await desktopApi.deleteKSwarmProject({ projectId }))
+      : false;
     if (ok) fetchProjects();
     return ok;
   }, [fetchProjects]);
@@ -1315,37 +1314,76 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, []);
 
   const createAgent = useCallback(async (input: CreateAgentInput): Promise<KSwarmAgent | null> => {
-    const result = await httpPost<KSwarmAgent>('/agents', input);
+    const desktopApi = getDesktopApi();
+    const result = desktopApi?.createKSwarmAgent
+      ? readSemanticAgent(await desktopApi.createKSwarmAgent(toSemanticAgentInput(input) as KSwarmAgentSemanticInput))
+      : null;
     if (result) fetchAgents();
     return result;
   }, [fetchAgents]);
 
   const updateAgent = useCallback(async (id: string, input: Partial<CreateAgentInput>): Promise<KSwarmAgent | null> => {
-    const result = await httpPut<KSwarmAgent>(`/agents/${id}`, input);
+    const desktopApi = getDesktopApi();
+    const result = desktopApi?.updateKSwarmAgent
+      ? readSemanticAgent(await desktopApi.updateKSwarmAgent({ agentId: id, patch: toSemanticAgentInput(input) }))
+      : null;
     if (result) fetchAgents();
     return result;
   }, [fetchAgents]);
 
   const archiveAgent = useCallback(async (id: string): Promise<boolean> => {
-    const ok = await httpDelete(`/agents/${id}`);
+    const desktopApi = getDesktopApi();
+    const ok = desktopApi?.archiveKSwarmAgent
+      ? readSemanticOk(await desktopApi.archiveKSwarmAgent({ agentId: id }))
+      : false;
     if (ok) fetchAgents();
     return ok;
   }, [fetchAgents]);
 
   const startAgent = useCallback(async (id: string): Promise<boolean> => {
-    const result = await httpPost<{ ok: boolean }>(`/agents/${id}/start`);
-    if (result?.ok) fetchAgents();
-    return !!result?.ok;
+    const desktopApi = getDesktopApi();
+    const ok = desktopApi?.startKSwarmAgent
+      ? readSemanticOk(await desktopApi.startKSwarmAgent({ agentId: id }))
+      : false;
+    if (ok) fetchAgents();
+    return ok;
   }, [fetchAgents]);
 
   const stopAgent = useCallback(async (id: string): Promise<boolean> => {
-    const result = await httpPost<{ ok: boolean }>(`/agents/${id}/stop`);
-    if (result?.ok) fetchAgents();
-    return !!result?.ok;
+    const desktopApi = getDesktopApi();
+    const ok = desktopApi?.stopKSwarmAgent
+      ? readSemanticOk(await desktopApi.stopKSwarmAgent({ agentId: id }))
+      : false;
+    if (ok) fetchAgents();
+    return ok;
   }, [fetchAgents]);
 
+  const planProjectTeam = useCallback(async (input: { projectId: string }): Promise<ProjectTeamPlanView> => {
+    const desktopApi = getDesktopApi();
+    if (!desktopApi?.planProjectTeam) throw new Error('kswarm_team_api_unavailable');
+    return desktopApi.planProjectTeam(input);
+  }, []);
+
+  const applyProjectTeamPlan = useCallback(async (input: { projectId: string; planId: string; projectRevision: number }): Promise<ProjectTeamOperationView> => {
+    const desktopApi = getDesktopApi();
+    if (!desktopApi?.applyProjectTeamPlan) throw new Error('kswarm_team_api_unavailable');
+    const operation = await desktopApi.applyProjectTeamPlan(input);
+    fetchProjects();
+    fetchAgents();
+    return operation;
+  }, [fetchAgents, fetchProjects]);
+
+  const getProjectTeamOperation = useCallback(async (input: { projectId: string }): Promise<ProjectTeamOperationView | null> => {
+    const desktopApi = getDesktopApi();
+    if (!desktopApi?.getProjectTeamOperation) return null;
+    return desktopApi.getProjectTeamOperation(input);
+  }, []);
+
   const probeAgent = useCallback(async (id: string): Promise<AgentProbe | null> => {
-    return await httpGet<AgentProbe>(`/agents/${id}/probe`);
+    const desktopApi = getDesktopApi();
+    return desktopApi?.probeKSwarmAgent
+      ? await desktopApi.probeKSwarmAgent({ agentId: id }) as AgentProbe
+      : null;
   }, []);
 
   const fetchLiveness = useCallback(async () => {
@@ -1389,6 +1427,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     continueProject,
     closeProject,
     deleteProject,
+    planProjectTeam,
+    applyProjectTeamPlan,
+    getProjectTeamOperation,
     deliverProject,
     startProjectDiagnoseWorkflow,
     startProjectAgentReviewSmokeWorkflow,

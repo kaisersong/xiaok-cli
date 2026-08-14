@@ -1,4 +1,18 @@
 import type { MaterialParseStatus } from '../task-host/types.js';
+export type OfficeTextExtractionResult = {
+    ok: true;
+    markdown: string;
+    format: string;
+    engine: 'anydoc';
+    engineVersion: string;
+    chars: number;
+    truncated: boolean;
+} | {
+    ok: false;
+    code: string;
+    message: string;
+    retryable: boolean;
+};
 export interface MaterialTextExtractionInput {
     workspacePath: string;
     mimeType: string;
@@ -8,12 +22,22 @@ export interface MaterialTextExtractionInput {
      * pdfjs, the CLI does not. Hosts that omit it keep the unsupported contract.
      */
     pdfToText?: (bytes: Uint8Array) => Promise<string>;
+    officeToMarkdown?: (input: {
+        absolutePath: string;
+        maxOutputChars: number;
+        signal?: AbortSignal;
+    }) => Promise<OfficeTextExtractionResult>;
+    signal?: AbortSignal;
 }
 export interface MaterialTextExtractionResult {
     parseStatus: MaterialParseStatus;
     text?: string;
     parseSummary?: string;
     errorMessage?: string;
+    errorCode?: string;
+    engine?: 'anydoc' | 'lightweight-ooxml' | 'builtin-text' | 'pdf';
+    engineVersion?: string;
+    truncated?: boolean;
 }
 /**
  * Bump whenever extraction output changes. Callers that persist extracted text
@@ -22,5 +46,5 @@ export interface MaterialTextExtractionResult {
  *
  * 2: pptx paragraph grouping, xlsx sparse-column placement, boolean cells.
  */
-export declare const MATERIAL_EXTRACTOR_VERSION = 2;
+export declare const MATERIAL_EXTRACTOR_VERSION = 3;
 export declare function extractMaterialText(input: MaterialTextExtractionInput): Promise<MaterialTextExtractionResult>;

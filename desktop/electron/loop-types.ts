@@ -3,6 +3,8 @@ import type { LoopContractV1 } from './loop-contract.js';
 export const BUILT_IN_LOOP_IDS = {
   ARTIFACT_EVIDENCE_REGRESSION: 'artifact-evidence-regression',
   KSWARM_SERVICE_HEALTH: 'kswarm-service-health',
+  PERSONAL_ASSISTANT_EVENING_REFLECTION: 'personal-assistant-evening-reflection',
+  PERSONAL_ASSISTANT_MORNING_BRIEFING: 'personal-assistant-morning-briefing',
 } as const;
 
 export type BuiltInLoopId = typeof BUILT_IN_LOOP_IDS[keyof typeof BUILT_IN_LOOP_IDS];
@@ -94,6 +96,7 @@ export interface LoopRun {
   loopId: string;
   status: LoopRunStatus;
   trigger: LoopRunTrigger;
+  logicalRunKey?: string;
   evidenceIds: string[];
   startedAt: number;
   finishedAt?: number;
@@ -125,6 +128,7 @@ export interface LoopStage {
 export type BeginLoopRunResult =
   | { status: 'started'; run: LoopRun }
   | { status: 'already_running'; activeRunId: string }
+  | { status: 'already_completed'; completedRunId: string }
   | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export type RecoverStaleRunsResult =

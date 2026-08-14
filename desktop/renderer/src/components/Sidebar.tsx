@@ -15,6 +15,7 @@ import {
   normalizeScheduledTaskRuntimeLink,
   threadHasAnyRuntimeTask,
 } from '../lib/scheduled-task-threads';
+import { getAssistantScheduleDisplayName } from '../lib/assistant-schedule-display';
 
 const log = createLogger('Sidebar');
 const SIDEBAR_DETAILS_DELAY_MS = 500;
@@ -717,6 +718,7 @@ function SidebarScheduledTaskListItem({
 }) {
   const details = useDelayedSidebarDetails<HTMLButtonElement>();
   const { t } = useLocale();
+  const displayName = getAssistantScheduleDisplayName(task, t.assistant);
 
   return (
     <>
@@ -739,7 +741,7 @@ function SidebarScheduledTaskListItem({
             }`}
             aria-label={unreadCount && unreadCount > 0 ? `${unreadCount} unread` : undefined}
           />
-          <span className={`truncate ${unreadCount && unreadCount > 0 ? 'font-medium text-[var(--c-text-primary)]' : ''}`}>{task.name}</span>
+          <span className={`truncate ${unreadCount && unreadCount > 0 ? 'font-medium text-[var(--c-text-primary)]' : ''}`}>{displayName}</span>
         </div>
         <span className="ml-2 shrink-0 text-[var(--c-text-tertiary)]">{task.frequency}</span>
       </button>
@@ -748,7 +750,7 @@ function SidebarScheduledTaskListItem({
           testId={`sidebar-scheduled-details-${task.id}`}
           position={details.detailsPosition}
           rows={[
-            { label: t.sidebarTooltipScheduledTask, value: task.name },
+            { label: t.sidebarTooltipScheduledTask, value: displayName },
             { label: t.sidebarTooltipFrequency, value: task.frequency },
             { label: t.sidebarTooltipTaskId, value: task.id, mono: true },
             { label: t.sidebarTooltipThreadId, value: task.threadId, mono: true },

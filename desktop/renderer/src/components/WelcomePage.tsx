@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FolderKanban } from 'lucide-react';
 import { ChatInput } from './ChatInput';
@@ -7,12 +7,37 @@ import type { AutomationOverviewSnapshotView } from '../api/types';
 import { getDesktopApi } from '../shared/desktop';
 import { useLocale } from '../contexts/LocaleContext';
 import { useKSwarm } from '../contexts/KSwarmContext';
+import { AssistantHomeCard } from './assistant/AssistantHomeCard';
+import { AssistantDetailPanel } from './assistant/AssistantDetailPanel';
+import type {
+  AssistantCandidateView,
+  AssistantHomeSnapshot,
+} from './assistant/view-types';
 import {
   automationFailureRoute,
+  buildAssistantHomeProjection,
   buildWelcomeHomeProjection,
   type WelcomeAttentionItem,
   type WelcomeHomeProjection,
 } from './welcome-home-projection';
+
+interface AssistantOverviewView extends AssistantHomeSnapshot {
+  candidates: AssistantCandidateView[];
+}
+
+interface AssistantDesktopApi {
+  getAssistantOverview(): Promise<AssistantOverviewView>;
+  activateAssistant(): Promise<unknown>;
+  pauseAssistant(): Promise<unknown>;
+  resumeAssistant(): Promise<unknown>;
+  acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }): Promise<unknown>;
+  rejectAssistantCandidate(input: { candidateId: string }): Promise<unknown>;
+  kbListCollections(): Promise<unknown[]>;
+}
+
+function getAssistantDesktopApi(): Partial<AssistantDesktopApi> | null {
+  return getDesktopApi() as unknown as Partial<AssistantDesktopApi> | null;
+}
 
 function useProfileName() {
   const [name, setName] = useState(() =>
@@ -60,6 +85,13 @@ export function WelcomePage() {
   const [prompt, setPrompt] = useState('');
   const [automation, setAutomation] = useState<AutomationOverviewSnapshotView | null>(null);
   const [automationLoadState, setAutomationLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [assistantSnapshot, setAssistantSnapshot] = useState<AssistantHomeSnapshot | null>(null);
+  const [assistantCandidates, setAssistantCandidates] = useState<AssistantCandidateView[]>([]);
+  const [assistantLoadState, setAssistantLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantBusyCandidateId, setAssistantBusyCandidateId] = useState<string | null>(null);
+  const [assistantDetailsOpen, setAssistantDetailsOpen] = useState(false);
+  const [assistantKnowledgeCollections, setAssistantKnowledgeCollections] = useState<Array<{ id: string; name: string }>>([]);
   const { t } = useLocale();
   const { projects, projectsLoaded } = useKSwarm();
 
@@ -70,6 +102,26 @@ export function WelcomePage() {
   const projectsUnavailable = projects.length === 0 && !projectsLoaded;
   const automationLoading = automationLoadState === 'loading';
   const automationUnavailable = automationLoadState === 'error';
+
+  const loadAssistantOverview = useCallback(async () => {
+    const assistantApi = getAssistantDesktopApi();
+    if (!assistantApi?.getAssistantOverview) {
+      setAssistantSnapshot(null);
+      setAssistantCandidates([]);
+      setAssistantLoadState('unavailable');
+      return;
+    }
+    try {
+      const overview = await assistantApi.getAssistantOverview();
+      setAssistantSnapshot(buildAssistantHomeProjection(overview));
+      setAssistantCandidates(overview.candidates ?? []);
+      setAssistantLoadState('ready');
+    } catch {
+      setAssistantSnapshot(null);
+      setAssistantCandidates([]);
+      setAssistantLoadState('unavailable');
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -90,6 +142,60 @@ export function WelcomePage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    void loadAssistantOverview();
+  }, [loadAssistantOverview]);
+
+  const updateAssistantStatus = async (action: 'activateAssistant' | 'pauseAssistant' | 'resumeAssistant') => {
+    const assistantApi = getAssistantDesktopApi();
+    const mutation = assistantApi?.[action];
+    if (!mutation) {
+      setAssistantLoadState('unavailable');
+      return;
+    }
+    setAssistantBusy(true);
+    try {
+      await mutation.call(assistantApi);
+      await loadAssistantOverview();
+    } finally {
+      setAssistantBusy(false);
+    }
+  };
+
+  const decideAssistantCandidate = async (candidateId: string, decision: 'accept' | 'reject', collectionId?: string) => {
+    const assistantApi = getAssistantDesktopApi();
+    const mutation = decision === 'accept' ? assistantApi?.acceptAssistantCandidate : assistantApi?.rejectAssistantCandidate;
+    if (!mutation) {
+      setAssistantLoadState('unavailable');
+      return;
+    }
+    setAssistantBusyCandidateId(candidateId);
+    try {
+      await mutation.call(assistantApi, { candidateId, ...(collectionId ? { collectionId } : {}) });
+      await loadAssistantOverview();
+    } finally {
+      setAssistantBusyCandidateId(null);
+    }
+  };
+
+  const openAssistantDetails = async () => {
+    setAssistantDetailsOpen(true);
+    const assistantApi = getAssistantDesktopApi();
+    if (!assistantApi?.kbListCollections) return;
+    try {
+      const collections = await assistantApi.kbListCollections();
+      setAssistantKnowledgeCollections(collections.flatMap(value => {
+        if (!value || typeof value !== 'object') return [];
+        const record = value as Record<string, unknown>;
+        return typeof record.id === 'string' && typeof record.name === 'string'
+          ? [{ id: record.id, name: record.name }]
+          : [];
+      }));
+    } catch {
+      setAssistantKnowledgeCollections([]);
+    }
+  };
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     const thread = await api.createThread({ title: text.slice(0, 40) });
@@ -140,6 +246,20 @@ export function WelcomePage() {
         automationLoading={automationLoading}
         automationUnavailable={automationUnavailable}
         projectsUnavailable={projectsUnavailable}
+        assistantSnapshot={assistantSnapshot}
+        assistantCandidates={assistantCandidates}
+        assistantLoadState={assistantLoadState}
+        assistantBusy={assistantBusy}
+        assistantBusyCandidateId={assistantBusyCandidateId}
+        assistantDetailsOpen={assistantDetailsOpen}
+        assistantKnowledgeCollections={assistantKnowledgeCollections}
+        onActivateAssistant={() => updateAssistantStatus('activateAssistant')}
+        onPauseAssistant={() => updateAssistantStatus('pauseAssistant')}
+        onResumeAssistant={() => updateAssistantStatus('resumeAssistant')}
+        onOpenAssistantDetails={openAssistantDetails}
+        onCloseAssistantDetails={() => setAssistantDetailsOpen(false)}
+        onAcceptAssistantCandidate={(candidateId, collectionId) => decideAssistantCandidate(candidateId, 'accept', collectionId)}
+        onRejectAssistantCandidate={candidateId => decideAssistantCandidate(candidateId, 'reject')}
       />
     </div>
   );
@@ -155,6 +275,20 @@ type HomeContentProps = {
   automationLoading: boolean;
   automationUnavailable: boolean;
   projectsUnavailable: boolean;
+  assistantSnapshot: AssistantHomeSnapshot | null;
+  assistantCandidates: AssistantCandidateView[];
+  assistantLoadState: 'loading' | 'ready' | 'unavailable';
+  assistantBusy: boolean;
+  assistantBusyCandidateId: string | null;
+  assistantDetailsOpen: boolean;
+  assistantKnowledgeCollections: Array<{ id: string; name: string }>;
+  onActivateAssistant: () => Promise<void>;
+  onPauseAssistant: () => Promise<void>;
+  onResumeAssistant: () => Promise<void>;
+  onOpenAssistantDetails: () => void;
+  onCloseAssistantDetails: () => void;
+  onAcceptAssistantCandidate: (candidateId: string, collectionId?: string) => Promise<void>;
+  onRejectAssistantCandidate: (candidateId: string) => Promise<void>;
 };
 
 function ConversationFirstHome({
@@ -168,6 +302,20 @@ function ConversationFirstHome({
   automationLoading,
   automationUnavailable,
   projectsUnavailable,
+  assistantSnapshot,
+  assistantCandidates,
+  assistantLoadState,
+  assistantBusy,
+  assistantBusyCandidateId,
+  assistantDetailsOpen,
+  assistantKnowledgeCollections,
+  onActivateAssistant,
+  onPauseAssistant,
+  onResumeAssistant,
+  onOpenAssistantDetails,
+  onCloseAssistantDetails,
+  onAcceptAssistantCandidate,
+  onRejectAssistantCandidate,
 }: HomeContentProps & { onQuickPrompt: (prompt: string) => void }) {
   const { t } = useLocale();
   const attentionUnavailable = projectsUnavailable || automationLoading || automationUnavailable;
@@ -185,6 +333,17 @@ function ConversationFirstHome({
         <ChatInput value={prompt} onChange={setPrompt} onSubmit={onSubmit} placeholder={t.welcome.inputPlaceholder} autoFocus />
       </div>
       <QuickPrompts onSelect={onQuickPrompt} />
+      <div className="mt-[clamp(4.5rem,14vh,8rem)] w-full">
+        <AssistantHomeCard
+          snapshot={assistantSnapshot}
+          loadState={assistantLoadState}
+          busy={assistantBusy}
+          onActivate={onActivateAssistant}
+          onPause={onPauseAssistant}
+          onResume={onResumeAssistant}
+          onOpenDetails={onOpenAssistantDetails}
+        />
+      </div>
       <section className="mt-[clamp(5rem,15vh,8rem)] w-full border-y border-[var(--c-border)] py-4" aria-labelledby="welcome-overview-title">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="welcome-overview-title" className="text-sm font-semibold text-[var(--c-text-primary)]">{t.welcome.overviewTitle}</h2>
@@ -210,6 +369,18 @@ function ConversationFirstHome({
         </div>
         <AttentionList items={projection.attentionItems.slice(0, 3)} onOpen={onOpenItem} emptyLabel={attentionEmptyLabel} />
       </section>
+      {assistantSnapshot && (
+        <AssistantDetailPanel
+          open={assistantDetailsOpen}
+          profile={assistantSnapshot.profile}
+          candidates={assistantCandidates}
+          knowledgeCollections={assistantKnowledgeCollections}
+          busyCandidateId={assistantBusyCandidateId}
+          onClose={onCloseAssistantDetails}
+          onAcceptCandidate={onAcceptAssistantCandidate}
+          onRejectCandidate={onRejectAssistantCandidate}
+        />
+      )}
     </div>
   );
 }

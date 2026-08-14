@@ -38,6 +38,8 @@ import type {
   AutomationOverviewSnapshotView,
   AutomationRunHistoryItemView,
   AutomationsConfigView,
+  AssistantOverviewView,
+  CreateKSwarmProjectSemanticInput,
   EvidenceAnomalyView,
   CreateLoopScheduleInputView,
   CreateUserLoopTemplateInputView,
@@ -50,6 +52,9 @@ import type {
   LoopRunView,
   LoopScheduleBindingView,
   RunLoopNowResultView,
+  KSwarmAgentSemanticInput,
+  ProjectTeamOperationView,
+  ProjectTeamPlanView,
   TimedActionView,
   ThreadMode,
   ThreadRecord,
@@ -1124,6 +1129,49 @@ export const api = {
   },
   async saveKswarmConfig(input: { maxConcurrentTasks: number }) {
     return window.xiaokDesktop.saveKswarmConfig(input);
+  },
+
+  async getAssistantOverview(): Promise<AssistantOverviewView> {
+    return window.xiaokDesktop.getAssistantOverview();
+  },
+  async activateAssistant() {
+    return window.xiaokDesktop.activateAssistant();
+  },
+  async pauseAssistant() {
+    return window.xiaokDesktop.pauseAssistant();
+  },
+  async resumeAssistant() {
+    return window.xiaokDesktop.resumeAssistant();
+  },
+  async acceptAssistantCandidate(input: { candidateId: string; collectionId?: string }) {
+    return window.xiaokDesktop.acceptAssistantCandidate(input);
+  },
+  async rejectAssistantCandidate(input: { candidateId: string }) {
+    return window.xiaokDesktop.rejectAssistantCandidate(input);
+  },
+  async planProjectTeam(input: { projectId: string }): Promise<ProjectTeamPlanView> {
+    return window.xiaokDesktop.planProjectTeam(input);
+  },
+  async applyProjectTeamPlan(input: { projectId: string; planId: string; projectRevision: number }): Promise<ProjectTeamOperationView> {
+    return window.xiaokDesktop.applyProjectTeamPlan(input);
+  },
+  async getProjectTeamOperation(input: { projectId: string }): Promise<ProjectTeamOperationView | null> {
+    return window.xiaokDesktop.getProjectTeamOperation(input);
+  },
+  async createKSwarmProject(input: CreateKSwarmProjectSemanticInput) {
+    return window.xiaokDesktop.createKSwarmProject(input);
+  },
+  async createKSwarmAgent(input: KSwarmAgentSemanticInput) {
+    return window.xiaokDesktop.createKSwarmAgent(input);
+  },
+  async updateKSwarmAgent(input: { agentId: string; patch: Partial<KSwarmAgentSemanticInput> }) {
+    return window.xiaokDesktop.updateKSwarmAgent(input);
+  },
+  async archiveKSwarmAgent(input: { agentId: string }) {
+    return window.xiaokDesktop.archiveKSwarmAgent(input);
+  },
+  async probeKSwarmAgent(input: { agentId: string }) {
+    return window.xiaokDesktop.probeKSwarmAgent(input);
   },
 
   async getSkillStats() {

@@ -2,10 +2,27 @@ import { describe, expect, it } from 'vitest';
 
 import {
   automationFailureRoute,
+  buildAssistantHomeProjection,
   buildWelcomeHomeProjection,
 } from '../../renderer/src/components/welcome-home-projection';
 
 describe('welcome home projection', () => {
+  it('preserves assistant ranking while projecting at most three suggestions', () => {
+    const projection = buildAssistantHomeProjection({
+      profile: { status: 'active', eveningTime: '21:30', morningTime: '08:30' },
+      suggestions: [
+        { id: 'first', title: 'First', summary: 'First summary' },
+        { id: 'second', title: 'Second', summary: 'Second summary' },
+        { id: 'third', title: 'Third', summary: 'Third summary' },
+        { id: 'fourth', title: 'Fourth', summary: 'Fourth summary' },
+      ],
+      pendingCandidateCount: 4,
+    });
+
+    expect(projection.suggestions.map(item => item.id)).toEqual(['first', 'second', 'third']);
+    expect(projection.pendingCandidateCount).toBe(4);
+  });
+
   it('uses only active schedules for the running count and deduplicates failures by owner', () => {
     const projection = buildWelcomeHomeProjection([], {
       generatedAt: 10_000,

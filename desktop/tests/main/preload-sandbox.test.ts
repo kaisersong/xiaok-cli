@@ -48,4 +48,29 @@ describe('sandbox preload bundle', () => {
     expect(preload).not.toContain('renewArtifactWorkspaceLease:');
     expect(preload).not.toContain('executeCanvasCommand:');
   });
+
+  it('exposes fixed assistant and KSwarm mutation channels without token or arbitrary HTTP arguments', async () => {
+    const preload = await readFile(join(repoRoot, 'desktop', 'electron', 'preload.cjs'), 'utf8');
+
+    for (const channel of [
+      'desktop:assistant:getOverview',
+      'desktop:assistant:activate',
+      'desktop:assistant:pause',
+      'desktop:assistant:resume',
+      'desktop:assistant:acceptCandidate',
+      'desktop:assistant:rejectCandidate',
+      'desktop:kswarm:team:plan',
+      'desktop:kswarm:team:apply',
+      'desktop:kswarm:team:getOperation',
+      'desktop:kswarm:project:create',
+      'desktop:kswarm:agent:create',
+      'desktop:kswarm:agent:update',
+      'desktop:kswarm:agent:archive',
+    ]) {
+      expect(preload).toContain(channel);
+    }
+    expect(preload).toContain('sanitizeKSwarmSemanticInput');
+    expect(preload).not.toMatch(/planProjectTeam:\s*\(path/);
+    expect(preload).not.toMatch(/createKSwarmProject:\s*\(url/);
+  });
 });

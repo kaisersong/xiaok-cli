@@ -46,6 +46,19 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.28 adds a proactive daily assistant and one-click project team provisioning. The assistant reviews local work in the evening, prepares morning suggestions, and stages memory or knowledge candidates without publishing them until the user explicitly approves. Project setup can now analyze capability gaps, reuse suitable agents, propose missing roles, and apply a version-bound team plan only after confirmation.
+
+**Proactive Assistance and Smart Team Provisioning:**
+
+- **Consent-First Daily Assistant**: Enabling the assistant creates owned evening and morning schedules with stable IDs. Pause, resume, overdue recovery, timezone/DST handling, and logical exactly-once execution are persisted in the Electron main process rather than renderer state.
+- **Review Before Memory**: Evening analysis produces evidence-linked memory, knowledge, and follow-up candidates. Agent and scheduler paths cannot publish into user-owned stores; accepting or rejecting a candidate is a user-authorized mutation with restart-safe status transitions.
+- **Morning Suggestions from Real State**: Morning output combines the bounded Desktop activity snapshot, pending candidates, project attention items, and existing memory. Structured LLM output is validated and falls back to deterministic local guidance when the provider is unavailable.
+- **One-Click Smart Teams**: KSwarm derives a capability plan with `keep`, `reuse`, and `create` actions, redacts private runtime configuration from public agent APIs, and carries trusted child-runtime settings only across the process boundary that needs them.
+- **Preview, Confirm, Reconcile**: Team plans bind to the current project revision and mutation credential. Applying a stale or unauthorized plan fails closed; operation journals make retries and Desktop recovery observable without duplicate agents.
+- **Conversation-First Desktop UI**: The home screen keeps conversation primary while exposing the assistant as a compact continuation card. The project agent tab offers smart setup first and preserves manual configuration as an advanced fallback. Built-in schedule names and semantic plan summaries are localized by stable meaning rather than persisted English text.
+- **Release Validation**: CLI 350 files / 2,968 tests, Desktop 257 files / 2,070 tests, KSwarm P0 E2E 85/85 plus full-flow E2E 51/51, Intent Broker 388/388 plus collaboration verification, Desktop typecheck/build/package freshness, and installed-app Computer Use all pass.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, and the Desktop Release workflow align on `1.4.28` / `desktop-v1.4.28`.
+
 Xiaok Desktop v1.4.27 points the same honesty lens at the retrieval path, and the measurements came out worse than the design reviews had assumed. **74.1% of every character indexed in the knowledge base was HTML tag and CSS noise** (217,902 of 294,006) — a single `kb_get_source` call spent roughly 15,000 tokens of its 32,000-character budget on stylesheets, leaving 3.6–7.4% actual prose. The local ONNX embedder had never run at all: it called a `Tokenizer.fromString` API that does not exist in the installed package, silently fell back to a remote HTTP endpoint, and left a 254MB `onnxruntime-node` dependency performing no inference. Three rounds of adversarial review rejected every elaborate mechanism proposed along the way — FTS5 virtual tables, an RRF fusion layer, a TF-IDF scorer — and the two changes that actually moved the numbers appeared in none of the design drafts.
 
 **Measured Retrieval, Working Embeddings, and Document Extraction:**
