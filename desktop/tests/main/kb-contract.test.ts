@@ -87,6 +87,7 @@ describe('KB Contract — KbStore', () => {
       metadata: { engine: 'anydoc', engineVersion: '0.1.8' },
     }, 'agent')).toThrow(/not allowed/i);
 
+    store.claimSourceContentHash(agentSource.id, 'b'.repeat(64), 'agent');
     const parsed = store.updateSourceParseResult(agentSource.id, {
       parseStatus: 'parsed',
       metadata: { engine: 'anydoc', engineVersion: '0.1.8', truncated: false },

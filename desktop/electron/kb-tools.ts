@@ -8,6 +8,7 @@
 import type { Tool } from '../../src/types.js';
 import type { KbStore, KbRetriever, SourceExtractor, SourceExtractionResult } from './kb-store.js';
 import { extractQueryTerms, meetsRelevanceFloor } from './kb-query-terms.js';
+import { computeKnowledgeContentHash } from './kb-source-identity.js';
 
 export function createKbTools(
   store: KbStore,
@@ -60,7 +61,7 @@ export function createKbTools(
       permission: 'write',
       definition: {
         name: 'kb_add_source',
-        description: '向知识库创建一个新的内容来源。只能创建本次调用拥有的新 source；严禁覆盖、重解析、删除或归档已有用户 source。支持 paste、file、url，写入后自动分片索引。',
+        description: '向知识库写入一个内容来源；同一 collection 内逻辑正文相同时返回已有 source，不重复写入。只能创建本次调用拥有的新 source；严禁覆盖、重解析、删除或归档已有用户 source。支持 paste、file、url，写入后自动分片索引。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -90,6 +91,8 @@ export function createKbTools(
           const text = (input.text as string || '').trim();
           if (!text) return '错误：kind=paste 时 text 不能为空。';
           const source = store.addSource({ collectionId, kind: 'paste', title, text }, 'agent');
+          const claim = store.claimSourceContentHash(source.id, computeKnowledgeContentHash(text), 'agent');
+          if (!claim.created) return duplicateSourceMessage(claim.source.title, claim.source.id, claim.source.chunkCount);
           const chunks = simpleChunk(text);
           store.insertChunks(source.id, chunks);
           markSourceParsed(store, source.id, { engine: 'builtin-text' });
@@ -108,6 +111,8 @@ export function createKbTools(
               markSourceFailed(store, source.id, extracted);
               return `错误：读取文件失败 — ${extracted.errorCode ?? 'extraction_failed'}: ${extracted.error ?? 'unknown'}`;
             }
+            const claim = store.claimSourceContentHash(source.id, computeKnowledgeContentHash(extracted.text), 'agent');
+            if (!claim.created) return duplicateSourceMessage(claim.source.title, claim.source.id, claim.source.chunkCount);
             const chunks = simpleChunk(extracted.text);
             store.insertChunks(source.id, chunks);
             markSourceParsed(store, source.id, extractionMetadata(extracted));
@@ -138,6 +143,8 @@ export function createKbTools(
             }
             const text = await resp.text();
             const plainText = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            const claim = store.claimSourceContentHash(source.id, computeKnowledgeContentHash(plainText), 'agent');
+            if (!claim.created) return duplicateSourceMessage(claim.source.title, claim.source.id, claim.source.chunkCount);
             const chunks = simpleChunk(plainText);
             store.insertChunks(source.id, chunks);
             markSourceParsed(store, source.id, { engine: 'builtin-url' });
@@ -251,6 +258,10 @@ export function createKbTools(
       },
     },
   ];
+}
+
+function duplicateSourceMessage(title: string, sourceId: string, chunkCount: number): string {
+  return `知识库中已存在相同内容「${title}」(${sourceId})，跳过重复导入（${chunkCount} 片段，0 新增）。`;
 }
 
 const CHUNK_SIZE = 800;
