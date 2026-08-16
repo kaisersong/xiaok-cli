@@ -118,6 +118,11 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
+      // GLM-5.3（https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3，2026-08-16 查证）：
+      // 与 GLM-5.2 同底座，纯 post-training 提升。1M 上下文窗口，128K 最大输出。
+      // 思考功能始终启用，不支持 thinking.type: disabled；reasoning_effort 仅
+      // low/high/max 三档，默认 max（与 5.2 及以下版本不同，那些没有思考控制）。
+      { modelId: 'glm-5.3', model: 'GLM-5.3', label: 'GLM 5.3', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
       // 与 defaultModel 共享 wireModel，元数据必须逐字一致，否则
       // resolveProviderModelVariant 会抛 MODEL_VARIANT_AMBIGUOUS。
       { modelId: 'glm-5.2', model: 'GLM-5.2', label: 'GLM 5.2', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_000_000 } },
