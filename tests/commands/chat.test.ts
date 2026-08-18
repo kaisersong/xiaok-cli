@@ -64,7 +64,10 @@ describe('chat terminal layout', () => {
     expect(source).toContain('stopLiveActivityTimer()');
     expect(source).toContain('TuiRuntimeState');
     expect(source).toContain('TurnLayout');
-    expect(source).toContain('consumeAssistantLeadIn');
+    expect(source).toContain('ensureStreamingPhaseInOrder');
+    expect(
+      readFileSync(join(process.cwd(), 'src', 'commands', 'chat', 'terminal-streaming-boundary.ts'), 'utf8'),
+    ).toContain('consumeAssistantLeadIn');
     expect(runtimeStateSource).toContain('getReassuranceTick');
   });
 
@@ -657,7 +660,7 @@ describe('chat terminal layout', () => {
 
     expect(flushStart).toBeGreaterThan(-1);
     expect(flushEnd).toBeGreaterThan(flushStart);
-    expect(flushSource).toContain('const renderedSegment = streamingSegmentText;');
+    expect(flushSource).toContain('positionCursorAtContentCursor();');
     expect(flushSource).toContain('mdRenderer.flush();');
     expect(finallyIndex).toBeGreaterThan(-1);
     expect(resetIndex).toBeGreaterThan(finallyIndex);

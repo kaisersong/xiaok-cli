@@ -1558,10 +1558,48 @@ export class ScrollRegionManager {
       }
       self.stream.write('\n');
       self._totalRows++;
+      self.absorbRegionScroll(self._cursorRow + 1);
       self._cursorRow = self.clampCursorRow(self._cursorRow + 1);
       self._cursorCol = 0;
       self._cursorUncertain = false;
     };
+  }
+
+  /**
+   * Report visible columns written inside a rendered row that did not end in a
+   * newline. Uses the terminal's deferred-wrap rule: filling the last column
+   * leaves the cursor on the same row until one more character arrives.
+   */
+  getColumnAdvanceCallback(): ((visibleWidth: number) => void) {
+    const self = this;
+    return function columnAdvanceCallback(visibleWidth: number) {
+      if (!self.active || visibleWidth <= 0) return;
+
+      const cols = Math.max(1, self.config.columns);
+      const end = self._cursorCol + visibleWidth;
+      const rowsAdvanced = Math.floor((end - 1) / cols);
+
+      if (rowsAdvanced > 0) {
+        self._totalRows += rowsAdvanced;
+        self.absorbRegionScroll(self._cursorRow + rowsAdvanced);
+        self._cursorRow = self.clampCursorRow(self._cursorRow + rowsAdvanced);
+      }
+      self._cursorCol = ((end - 1) % cols) + 1;
+      self._contentEndRow = Math.max(self._contentEndRow, self._cursorRow);
+      self._cursorUncertain = false;
+    };
+  }
+
+  /**
+   * When content pushes past the bottom margin the region scrolls up, so every
+   * absolute row anchor recorded earlier shifts with it. `clampCursorRow` hides
+   * the overflow, hence the compensation has to be computed before clamping.
+   */
+  private absorbRegionScroll(intendedRow: number): void {
+    const overflow = intendedRow - this.getScrollBottom();
+    if (overflow > 0) {
+      this._streamStartRow = Math.max(1, this._streamStartRow - overflow);
+    }
   }
 
   syncContentCursorFromRenderedLines(lines: string[]): void {
@@ -1583,7 +1621,9 @@ export class ScrollRegionManager {
         }
 
         const w = getDisplayWidth(ch);
-        if (col + w >= cols) {
+        // Deferred wrap: the cursor only leaves a full row once the next
+        // character arrives, and a full-width glyph never straddles the margin.
+        if (col >= cols || col + w > cols) {
           row = this.clampCursorRow(row + 1);
           col = 0;
         }
