@@ -100,7 +100,7 @@ import { createKbTools } from './kb-tools.js';
 import { createKbStoreSqlite } from './kb-store-sqlite.js';
 import { createKbRetriever } from './kb-retrieval.js';
 import { createSourceExtractor } from './kb-source-extractor.js';
-import type { MemoryStore } from '../../src/ai/memory/store.js';
+import type { MemoryRecord, MemoryStore } from '../../src/ai/memory/store.js';
 import type { KSwarmService, KSwarmUnavailableError } from './kswarm-service.js';
 import { JsonKSwarmInitialPlanBootstrapStore, KSwarmInitialPlanBootstrapQueue } from './kswarm-initial-plan-bootstrap.js';
 import { extractCreatedAgentId, resolveCreateProjectMembers, sanitizeCreateProjectMembers } from './kswarm-project-tool.js';
@@ -129,6 +129,7 @@ try {
 
 let _desktopMemoryStore: MemoryStore | null = null;
 let _desktopMemoryStoreDataRoot: string | null = null;
+let _desktopMemoryStoreBackend: 'layered' | 'fallback' = 'fallback';
 
 type DesktopFallbackMemoryStore = MemoryStore & {
   getStats(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
@@ -146,34 +147,55 @@ function createFallbackMemoryStore(dataRoot: string): MemoryStore {
 
   const store: DesktopFallbackMemoryStore = {
     async save(record) {
-      userStore.create({
+      userStore.save({
+        id: record.id,
         content: record.summary || record.title || '',
         tags: record.tags || [],
+        createdAt: record.updatedAt,
         source: record.scope || 'global',
+        scope: record.scope,
+        cwd: record.cwd,
+        type: record.type,
+        provenance: record.provenance,
       });
     },
-    async listRelevant({ query }) {
-      const results = query ? userStore.search(query) : userStore.list().slice(0, 20);
+    async listRelevant({ cwd, query, typeFilter }) {
+      const results = userStore.listRelevant({ cwd, query })
+        .filter(memory => !typeFilter || memory.type === typeFilter)
+        .slice(0, 20);
       return results.map(m => ({
         id: m.id,
-        scope: 'global' as const,
+        scope: m.scope ?? 'global',
+        cwd: m.cwd,
         title: m.content.slice(0, 80),
         summary: m.content,
         tags: m.tags,
         updatedAt: m.createdAt,
-        type: 'user' as const,
+        type: m.type ?? 'user',
+        provenance: m.provenance?.kind === 'assistant_candidate'
+          ? {
+            kind: 'assistant_candidate' as const,
+            candidateId: String(m.provenance.candidateId),
+            loopRunId: String('loopRunId' in m.provenance ? m.provenance.loopRunId : m.provenance.runId),
+            backend: 'fallback' as const,
+            evidenceRefs: 'evidenceRefs' in m.provenance && Array.isArray(m.provenance.evidenceRefs)
+              ? m.provenance.evidenceRefs as Array<{ kind: string; id: string }>
+              : [],
+          }
+          : undefined,
       }));
     },
     async search(query, limit = 20) {
       const results = query ? userStore.search(query) : userStore.list();
       return results.slice(0, limit).map(m => ({
         id: m.id,
-        scope: 'global' as const,
+        scope: m.scope ?? 'global',
+        cwd: m.cwd,
         title: m.content.slice(0, 80),
         summary: m.content,
         tags: m.tags,
         updatedAt: m.createdAt,
-        type: 'user' as const,
+        type: m.type ?? 'user',
       }));
     },
     async delete(id: string, _layer?: number) {
@@ -204,40 +226,63 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     const dbPath = join(dataRoot, 'memory.db');
     const config = _resolveLayeredConfigFn({ dbPath });
     const layeredStore = new _LayeredMemoryStoreClass(config);
+    _desktopMemoryStoreBackend = 'layered';
 
     // Migrate from legacy user-memories.json if present
     const legacyPath = join(dataRoot, 'memories', 'user-memories.json');
     if (existsSync(legacyPath)) {
       try {
         const raw = readFileSync(legacyPath, 'utf-8');
-        const entries = JSON.parse(raw) as Array<{ id: string; content: string; tags: string[]; createdAt?: number }>;
+        const entries = JSON.parse(raw) as Array<{
+          id: string; content: string; tags: string[]; createdAt?: number;
+          scope?: 'global' | 'project'; cwd?: string; type?: 'user' | 'feedback' | 'project' | 'reference';
+          provenance?: MemoryRecord['provenance'];
+        }>;
         if (Array.isArray(entries)) {
           for (const entry of entries) {
-            layeredStore.save({
+            void layeredStore.save({
               id: entry.id,
-              scope: 'global',
+              scope: entry.scope ?? 'global',
+              cwd: entry.cwd,
               title: (entry.content || '').slice(0, 80),
               summary: entry.content || '',
               tags: entry.tags || [],
               updatedAt: entry.createdAt || Date.now(),
-              type: 'user',
-            }).catch(() => {});
+              type: entry.type ?? 'user',
+              provenance: entry.provenance,
+            });
+          }
+          for (const entry of entries) {
+            const migrated = layeredStore.getById(entry.id);
+            if (!migrated || migrated.scope !== (entry.scope ?? 'global') || migrated.cwd !== entry.cwd
+              || JSON.stringify(migrated.provenance) !== JSON.stringify(entry.provenance)) {
+              throw new Error(`memory migration verification failed: ${entry.id}`);
+            }
           }
         }
         // Rename to .migrated to avoid re-import
         renameSync(legacyPath, legacyPath + '.migrated');
-      } catch { /* migration is best-effort */ }
+      } catch (error) {
+        console.warn('[memory] legacy migration failed; source preserved:', (error as Error).message);
+        throw error;
+      }
     }
 
     store = layeredStore;
   } catch (err) {
     console.warn('[memory] LayeredMemoryStore unavailable (native module issue), using fallback:', (err as Error).message);
     store = createFallbackMemoryStore(dataRoot);
+    _desktopMemoryStoreBackend = 'fallback';
   }
 
   _desktopMemoryStore = store;
   _desktopMemoryStoreDataRoot = dataRoot;
   return store;
+}
+
+export function getDesktopMemoryBackend(dataRoot: string): 'layered' | 'fallback' {
+  getDesktopMemoryStore(dataRoot);
+  return _desktopMemoryStoreBackend;
 }
 import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
 import { buildManagedXiaokAgentPayload } from './managed-xiaok-agent.js';
@@ -420,7 +465,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
           required: ['content', 'schedule_at'],
         },
       },
-      async execute(input) {
+      async execute(input, context) {
         const content = String(input.content ?? '').trim();
         const scheduleAt = Number(input.schedule_at ?? 0);
         if (!content || scheduleAt <= 0) {
@@ -470,7 +515,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
           required: ['reminder_id'],
         },
       },
-      async execute(input) {
+      async execute(input, context) {
         const id = String(input.reminder_id ?? '').trim();
         if (!id) return 'Error: reminder_id 不能为空';
         const ok = service.cancelReminder(id);
@@ -481,12 +526,12 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       permission: 'write',
       definition: {
         name: 'scheduled_task_create',
-        description: '创建会在未来自动执行 AI 任务的定时任务。适用于“你/小K稍后检查/执行/生成”或“每隔N分钟检查直到完成”；不要用于单纯通知提醒。',
+        description: '创建会在未来自动执行 AI 任务的定时任务。适用于“你/小K稍后检查/执行/生成”或“每隔N分钟检查直到完成”；不要用于单纯通知提醒。取消权限独立校验，不能把取消其他 owner 的任务写进 prompt。',
         inputSchema: {
           type: 'object',
           properties: {
             name: { type: 'string', description: '任务名称' },
-            prompt: { type: 'string', description: '到期时创建 AI 任务使用的 prompt；停止条件满足时应要求调用 scheduled_task_cancel；agent 创建的 interval 临时任务取消时会删除' },
+            prompt: { type: 'string', description: '到期时创建 AI 任务使用的 prompt；只描述业务目标和停止条件，不把取消工具调用写成完成义务' },
             frequency: { type: 'string', enum: ['once', 'interval', 'daily', 'weekdays', 'weekly'] },
             schedule_at: { type: 'number', description: 'once 任务的执行时间戳（毫秒）' },
             interval_minutes: { type: 'number', description: 'interval 任务的分钟间隔，agent 创建时最小 5' },
@@ -499,7 +544,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
           required: ['name', 'prompt', 'frequency'],
         },
       },
-      async execute(input) {
+      async execute(input, context) {
         const name = String(input.name ?? '').trim();
         const prompt = String(input.prompt ?? '').trim();
         if (!name || !prompt) return 'Error: name 和 prompt 不能为空';
@@ -515,6 +560,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
             prompt,
             trigger,
             source: 'agent',
+            createdByTaskId: context?.taskId,
             policy: {
               maxRuns: input.max_runs === undefined ? undefined : Number(input.max_runs),
               expiresAt: input.expires_at === undefined ? undefined : Number(input.expires_at),
@@ -529,7 +575,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
             nextRunAt: task.nextRunAt,
             maxRuns: action?.policy.maxRuns,
             expiresAt: action?.policy.expiresAt,
-            note: 'will create AI tasks automatically; call scheduled_task_cancel when stop condition is met; agent interval tasks are deleted on cancel',
+            note: 'will create AI tasks automatically; cancellation is limited to the current agent-owned interval temporary task and remains service-authorized',
           }, null, 2);
         } catch (error) {
           return `Error: ${(error as Error).message}`;
@@ -551,7 +597,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       permission: 'write',
       definition: {
         name: 'scheduled_task_cancel',
-        description: '取消一个由 agent 自己创建的临时定时任务（interval 类型会直接删除）。**严禁取消用户创建的周期任务**（daily/weekly/cron 等 source=user 的任务），即使你认为它已经完成或不再需要——用户的周期任务由用户自己管理。',
+        description: '**严禁 agent 取消 user-owned 或 assistant-owned 定时任务**。此工具只能请求取消由当前 agent 拥有的 interval 临时任务；service 会按 requestSource 和 ownerId default-deny 校验，权限不匹配时拒绝且不修改任务。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -561,14 +607,17 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
           required: ['task_id'],
         },
       },
-      async execute(input) {
+      async execute(input, context) {
         const id = String(input.task_id ?? '').trim();
         if (!id) return 'Error: task_id 不能为空';
         const target = service.listScheduledTasks().find(t => t.id === id);
         if (target && target.source === 'user') {
           return `Error: 不允许取消用户创建的定时任务 ${id}（"${target.name}"）。这类任务只能由用户在界面上取消。`;
         }
-        const ok = service.cancelScheduledTask(id, String(input.reason ?? '').trim() || undefined, 'agent');
+        const ok = service.cancelScheduledTask(id, String(input.reason ?? '').trim() || undefined, {
+          requestSource: 'agent',
+          ownerId: context?.taskId,
+        });
         return ok ? `已取消自动任务 ${id}` : `未找到自动任务 ${id}`;
       },
     },
@@ -696,6 +745,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     input => bootstrapKSwarmInitialPlan(input),
     { now: options.now }
   );
+  let kbStore: ReturnType<typeof createKbStoreSqlite> | undefined;
   const kswarmCreateProjectToolOptions: KSwarmCreateProjectToolOptions = {
     enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
   };
@@ -707,7 +757,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
       : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
     const kbDbPath = join(kbUserData, 'knowledge.db');
-    const kbStore = createKbStoreSqlite(kbDbPath);
+    kbStore = createKbStoreSqlite(kbDbPath);
     const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
     const kbSourceExtractor = createSourceExtractor({ officeParser: officeDocumentParser });
     for (const tool of createKbTools(kbStore, kbRetriever, { sourceExtractor: kbSourceExtractor })) {
@@ -2609,6 +2659,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     getDataRoot() {
       return options.dataRoot;
     },
+    getKnowledgeBaseStore() {
+      if (!kbStore) throw new Error('knowledge_base_unavailable');
+      return kbStore;
+    },
     startProjectPlanning(input: KSwarmInitialPlanBootstrapInput) {
       return initialPlanBootstrapQueue.enqueue(input);
     },
@@ -3977,7 +4031,7 @@ function buildSystemPrompt(): string {
 - reminder_cancel: 取消一个提醒
 - scheduled_task_create: 创建未来会自动执行 AI 任务的定时任务
 - scheduled_task_list: 列出自动执行 AI 的定时任务
-- scheduled_task_cancel: 取消自动执行 AI 的定时任务
+- scheduled_task_cancel: 只能请求取消由当前 agent 拥有的 interval 临时任务；严禁 agent 取消 user-owned 或 assistant-owned 定时任务
 - channel_list: 列出所有配置的消息通道（云之家、Discord、飞书等）
 - channel_send: 向指定通道发送消息（当用户说"发消息到云之家"、"通知团队"时使用）
 - skill_install: 安装一个技能（当用户说"安装XX技能"时使用）
@@ -4008,7 +4062,7 @@ reminder_create 只创建到点通知，不会自动执行 AI 任务，不会检
 
 scheduled_task_create 会在到期时自动创建新的 AI task。用户说“你/小K 之后去检查/执行/生成/推进”时使用它。
 
-用户说“每隔N分钟检查/执行/直到完成”时，必须使用 scheduled_task_create，并在 prompt 中写明停止条件满足后调用 scheduled_task_cancel。
+用户说“每隔N分钟检查/执行/直到完成”时，使用 scheduled_task_create，并在 prompt 中写清业务停止条件。取消不是自动完成义务；只能请求取消由当前 agent 拥有的 interval 临时任务，严禁 agent 取消 user-owned 或 assistant-owned 定时任务。
 
 不要用 reminder_create 承诺会自动检查项目、调用工具或继续推理。
 
@@ -4016,7 +4070,7 @@ scheduled_task_create 会在到期时自动创建新的 AI task。用户说“�
 - "30分钟后提醒我发日报" → reminder_create(content="发日报", schedule_at=<当前时间+30分钟>)
 - "明天早上9点提醒我开会" → reminder_create(content="开会", schedule_at=<明天9点的时间戳>)
 - "10分钟后你再看一下这个项目" → scheduled_task_create(frequency="once", schedule_at=<当前时间+10分钟>, prompt="检查项目...")
-- "每5分钟检查项目直到完成" → scheduled_task_create(frequency="interval", interval_minutes=5, prompt="检查项目；完成时调用 scheduled_task_cancel")
+- "每5分钟检查项目直到完成" → scheduled_task_create(frequency="interval", interval_minutes=5, prompt="检查项目并报告是否完成", max_runs=288)
 - "每天晚上11点同步代码" → scheduled_task_create(frequency="daily", hour=23, minute=0, prompt="同步代码到GitHub")
 
 时间戳使用毫秒级 UNIX timestamp。

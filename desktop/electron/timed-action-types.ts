@@ -1,7 +1,7 @@
 export type TimedActionTrigger =
   | { kind: 'once'; at: number }
   | { kind: 'interval'; intervalMinutes: number }
-  | { kind: 'daily'; hour: number; minute: number }
+  | { kind: 'daily'; hour: number; minute: number; timeZone?: string; daysOfWeek?: number[] }
   | { kind: 'weekdays'; hour: number; minute: number }
   | { kind: 'weekly'; dayOfWeek: number; hour: number; minute: number };
 
@@ -19,7 +19,11 @@ export interface TimedActionPolicy {
 }
 
 export type TimedActionStatus = 'active' | 'paused' | 'completed' | 'cancelled';
-export type TimedActionSource = 'user' | 'agent' | 'migration';
+export type TimedActionSource = 'user' | 'agent' | 'migration' | 'system';
+export type TimedActionOwnerKind = 'user' | 'agent_task' | 'assistant' | 'migration';
+export type TimedActionRequestSource = 'user' | 'agent' | 'scheduler';
+export interface TimedActionOwnership { ownerKind: TimedActionOwnerKind; ownerId: string; }
+export interface TimedActionMutationRequest { requestSource: TimedActionRequestSource; ownerId?: string; }
 export type TimedActionExecutorKind = TimedActionExecutor['kind'];
 
 export interface TimedActionRecord {
@@ -31,6 +35,8 @@ export interface TimedActionRecord {
   policy: TimedActionPolicy;
   status: TimedActionStatus;
   source: TimedActionSource;
+  ownerKind: TimedActionOwnerKind;
+  ownerId: string;
   createdByTaskId?: string;
   nextDueAt?: number;
   lastDueAt?: number;
@@ -132,6 +138,8 @@ export interface CreateTimedActionInput {
   policy?: TimedActionPolicy;
   status?: TimedActionStatus;
   source: TimedActionSource;
+  ownerKind?: TimedActionOwnerKind;
+  ownerId?: string;
   createdByTaskId?: string;
   now?: number;
   nextDueAt?: number;

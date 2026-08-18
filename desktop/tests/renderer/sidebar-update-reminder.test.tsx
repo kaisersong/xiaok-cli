@@ -90,6 +90,31 @@ afterEach(() => {
 });
 
 describe('Sidebar update reminder', () => {
+  it('localizes the built-in assistant schedule names by stable id', async () => {
+    Object.defineProperty(window, 'xiaokDesktop', {
+      value: {
+        getScheduledTasks: vi.fn().mockResolvedValue([
+          { id: 'assistant:default-personal-assistant:morning', name: 'Personal assistant morning briefing', frequency: 'daily' },
+          { id: 'assistant:default-personal-assistant:evening', name: 'Personal assistant evening reflection', frequency: 'daily' },
+        ]),
+        getTimedActionRuns: vi.fn().mockResolvedValue([]),
+      },
+      configurable: true,
+    });
+
+    renderSidebar({
+      checking: false,
+      available: false,
+      downloading: false,
+      downloaded: false,
+      progress: 0,
+    });
+
+    expect(await screen.findByRole('button', { name: '每日助理晨间建议 daily' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '每日助理晚间整理 daily' })).toBeInTheDocument();
+    expect(screen.queryByText('Personal assistant morning briefing')).not.toBeInTheDocument();
+  });
+
   it('uses Automations as the top-level navigation entry for scheduled work', async () => {
     renderSidebar({
       checking: false,

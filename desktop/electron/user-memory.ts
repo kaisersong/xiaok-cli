@@ -7,6 +7,10 @@ export interface UserMemory {
   tags: string[];
   createdAt: number;
   source?: string;
+  scope?: 'global' | 'project';
+  cwd?: string;
+  type?: 'user' | 'feedback' | 'project' | 'reference';
+  provenance?: { kind: 'assistant_candidate'; candidateId: string; runId: string } | Record<string, unknown>;
 }
 
 export interface ImportedMemory {
@@ -39,31 +43,62 @@ export class UserMemoryStore {
     }
   }
 
-  private save(): void {
+  private persist(): void {
     try {
       mkdirSync(dirname(this.filePath), { recursive: true });
       writeFileSync(this.filePath, JSON.stringify(this.memories, null, 2));
     } catch (e) { console.warn('[memory] save to disk failed:', (e as Error).message) }
   }
 
-  create(input: { content: string; tags: string[]; source?: string }): UserMemory {
+  create(input: { content: string; tags: string[]; source?: string; scope?: UserMemory['scope']; cwd?: string; type?: UserMemory['type']; provenance?: UserMemory['provenance'] }): UserMemory {
     const m: UserMemory = {
       id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       content: input.content,
       tags: input.tags,
       createdAt: Date.now(),
       source: input.source,
+      scope: input.scope ?? 'global',
+      cwd: input.cwd,
+      type: input.type ?? 'user',
+      provenance: input.provenance,
     };
     this.memories.unshift(m);
-    if (this.memories.length > MAX_ENTRIES) {
-      this.memories = this.memories.slice(0, MAX_ENTRIES);
-    }
-    this.save();
+    this.enforceCapacity();
+    this.persist();
     return m;
   }
 
   list(): UserMemory[] {
     return [...this.memories];
+  }
+
+  getById(id: string): UserMemory | undefined {
+    const memory = this.memories.find(item => item.id === id);
+    return memory ? { ...memory, tags: [...memory.tags] } : undefined;
+  }
+
+  save(record: UserMemory): UserMemory {
+    const existingIndex = this.memories.findIndex(item => item.id === record.id);
+    const normalized: UserMemory = {
+      ...record,
+      tags: [...record.tags],
+      scope: record.scope ?? 'global',
+      type: record.type ?? 'user',
+    };
+    if (existingIndex >= 0) this.memories.splice(existingIndex, 1);
+    this.memories.unshift(normalized);
+    this.enforceCapacity();
+    this.persist();
+    return { ...normalized, tags: [...normalized.tags] };
+  }
+
+  listRelevant(input: { cwd: string; query: string }): UserMemory[] {
+    const query = input.query.trim().toLowerCase();
+    return this.memories.filter(memory => {
+      if (memory.scope === 'project' && memory.cwd !== input.cwd) return false;
+      if (!query) return true;
+      return memory.content.toLowerCase().includes(query) || memory.tags.some(tag => tag.toLowerCase().includes(query));
+    }).map(memory => ({ ...memory, tags: [...memory.tags] }));
   }
 
   search(query: string): UserMemory[] {
@@ -80,7 +115,7 @@ export class UserMemoryStore {
     if (!m) return null;
     if (input.content !== undefined) m.content = input.content;
     if (input.tags !== undefined) m.tags = input.tags;
-    this.save();
+    this.persist();
     return { ...m };
   }
 
@@ -88,7 +123,7 @@ export class UserMemoryStore {
     const idx = this.memories.findIndex(m => m.id === id);
     if (idx === -1) return false;
     this.memories.splice(idx, 1);
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -109,6 +144,15 @@ export class UserMemoryStore {
       imported++;
     }
     return { imported, deduped };
+  }
+
+  private enforceCapacity(): void {
+    while (this.memories.length > MAX_ENTRIES) {
+      const removable = this.memories.map((memory, index) => ({ memory, index })).reverse()
+        .find(({ memory }) => memory.provenance?.kind !== 'assistant_candidate');
+      if (!removable) throw new Error('User memory capacity is full of protected assistant records.');
+      this.memories.splice(removable.index, 1);
+    }
   }
 }
 

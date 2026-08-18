@@ -348,7 +348,7 @@ describe('TimedActionService', () => {
     })).toThrow('intervalMinutes must be at least 0.5');
   });
 
-  it('deletes agent-created interval scheduled tasks when they are cancelled after running', () => {
+  it('keeps user-cancelled agent interval tasks as audit records after running', () => {
     const task = service.createScheduledTask({
       name: '外贸趋势分析项目进度检查',
       prompt: '检查项目，完成时取消自动任务',
@@ -367,8 +367,12 @@ describe('TimedActionService', () => {
 
     expect(service.cancelScheduledTask(task.id, 'project completed')).toBe(true);
 
-    expect(store.getAction(task.id)).toBeUndefined();
-    expect(store.listRuns(task.id)).toEqual([]);
+    expect(store.getAction(task.id)).toMatchObject({
+      id: task.id,
+      status: 'cancelled',
+      lastRuntimeTaskId: 'runtime-task',
+    });
+    expect(store.listRuns(task.id)).toHaveLength(1);
   });
 
   it('keeps user-created scheduled tasks as cancelled records instead of deleting them', () => {

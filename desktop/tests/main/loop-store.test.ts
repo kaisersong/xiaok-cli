@@ -292,6 +292,16 @@ describe('LoopStore', () => {
         status: 'active',
         updatedAt: 1_000,
       }),
+      expect.objectContaining({
+        id: BUILT_IN_LOOP_IDS.PERSONAL_ASSISTANT_EVENING_REFLECTION,
+        status: 'paused',
+        updatedAt: 1_000,
+      }),
+      expect.objectContaining({
+        id: BUILT_IN_LOOP_IDS.PERSONAL_ASSISTANT_MORNING_BRIEFING,
+        status: 'paused',
+        updatedAt: 1_000,
+      }),
     ]);
   });
 
@@ -732,5 +742,24 @@ describe('LoopStore — task_completion kind', () => {
     store.updateLoopStageMetadata(stage.id, { taskId: 'task_123' });
     const updated = store.getLoopStage(stage.id);
     expect(updated!.metadata).toMatchObject({ trigger: { kind: 'manual' }, taskId: 'task_123' });
+  });
+
+  it('returns the completed run for a repeated logical run key without creating a second run', () => {
+    store.createUserLoopTemplate({
+      loopId: 'logical-run-loop',
+      title: 'Logical run',
+      kind: 'task_completion',
+      prompt: 'Check once per local day.',
+      now: 1_000,
+    });
+    const trigger = { kind: 'assistant', logicalRunKey: 'assistant:default-personal-assistant:evening:Asia/Shanghai:2026-08-14' };
+    const first = expectStarted(store.beginLoopRun('logical-run-loop', trigger, 2_000, 60_000));
+    store.finishLoopRunSuccess(first.id, ['evidence-1'], 2_100, 'done');
+
+    expect(store.beginLoopRun('logical-run-loop', trigger, 2_200, 60_000)).toEqual({
+      status: 'already_completed',
+      completedRunId: first.id,
+    });
+    expect(store.listLoopRuns('logical-run-loop', 10)).toHaveLength(1);
   });
 });

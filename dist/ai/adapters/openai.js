@@ -66,6 +66,11 @@ function sleep(ms, signal) {
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const MAX_OPENAI_STREAM_TEXT_CHARS = 2 * 1024 * 1024;
+const MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS = 2 * 1024 * 1024;
+function openAIStreamLimitError(code) {
+    return Object.assign(new Error(code), { code });
+}
 function drainBufferedToolCalls(toolBuffers, strictKimiK3) {
     const calls = [];
     for (const buffer of toolBuffers.values()) {
@@ -712,6 +717,7 @@ export class OpenAIAdapter {
         };
         let emittedDone = false;
         let outputChars = 0;
+        let streamTextChars = 0;
         let usageReceived = false;
         let officialReasoningSeen = false;
         const extractBufferedUsage = attemptState
@@ -763,15 +769,33 @@ export class OpenAIAdapter {
                 }
             }
             for (const reasoning of extractReasoningDeltas(delta, strictKimiK3)) {
+                if (reasoning.type !== 'thinking') {
+                    continue;
+                }
+                streamTextChars += reasoning.delta.length;
+                if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                    await streamIterator.return?.();
+                    throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+                }
                 yield reasoning;
             }
             if (delta.content) {
                 for (const segment of drainLeadingRawThinkSegments(rawThinkParser, delta.content)) {
                     if (segment.type === 'thinking') {
+                        streamTextChars += segment.delta.length;
+                        if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                            await streamIterator.return?.();
+                            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+                        }
                         if (!strictKimiK3) {
                             yield segment;
                         }
                         continue;
+                    }
+                    streamTextChars += segment.delta.length;
+                    if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                        await streamIterator.return?.();
+                        throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
                     }
                     outputChars += segment.delta.length;
                     if (attemptState) {
@@ -787,8 +811,14 @@ export class OpenAIAdapter {
                         current.id = tc.id;
                     if (tc.function?.name)
                         current.name = tc.function.name;
-                    if (tc.function?.arguments)
+                    if (tc.function?.arguments) {
+                        if (current.argsBuffer.length + tc.function.arguments.length
+                            > MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS) {
+                            await streamIterator.return?.();
+                            throw openAIStreamLimitError('OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED');
+                        }
                         current.argsBuffer += tc.function.arguments;
+                    }
                     toolBuffers.set(tc.index, current);
                 }
             }
@@ -798,10 +828,20 @@ export class OpenAIAdapter {
                 }
                 for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
                     if (segment.type === 'thinking') {
+                        streamTextChars += segment.delta.length;
+                        if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                            await streamIterator.return?.();
+                            throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+                        }
                         if (!strictKimiK3) {
                             yield segment;
                         }
                         continue;
+                    }
+                    streamTextChars += segment.delta.length;
+                    if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                        await streamIterator.return?.();
+                        throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
                     }
                     outputChars += segment.delta.length;
                     if (attemptState) {
@@ -855,8 +895,18 @@ export class OpenAIAdapter {
             }
             for (const segment of drainLeadingRawThinkSegments(rawThinkParser, '', true)) {
                 if (segment.type === 'thinking') {
+                    streamTextChars += segment.delta.length;
+                    if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                        await streamIterator.return?.();
+                        throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
+                    }
                     yield segment;
                     continue;
+                }
+                streamTextChars += segment.delta.length;
+                if (streamTextChars > MAX_OPENAI_STREAM_TEXT_CHARS) {
+                    await streamIterator.return?.();
+                    throw openAIStreamLimitError('OPENAI_STREAM_TEXT_LIMIT_EXCEEDED');
                 }
                 outputChars += segment.delta.length;
                 if (attemptState) {

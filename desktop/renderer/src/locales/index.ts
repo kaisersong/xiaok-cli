@@ -2442,6 +2442,78 @@ export interface LocaleStrings {
     openAttentionItem: (title: string, status: string, reason?: string, nextStep?: string) => string;
   };
 
+  assistant: {
+    title: string;
+    morningScheduleName: string;
+    eveningScheduleName: string;
+    loading: string;
+    unavailable: string;
+    consentDescription: string;
+    activeDescription: (eveningTime: string, morningTime: string) => string;
+    pausedTitle: string;
+    pausedDescription: string;
+    activate: string;
+    pause: string;
+    resume: string;
+    noSuggestions: string;
+    pendingCandidates: (count: number) => string;
+    openDetails: string;
+    detailTitle: string;
+    closeDetails: string;
+    detailSchedule: (eveningTime: string, morningTime: string) => string;
+    candidatesTitle: string;
+    candidateCount: (count: number) => string;
+    noCandidates: string;
+    candidateKind: (kind: 'memory' | 'knowledge' | 'follow_up') => string;
+    confidence: (value: number) => string;
+    evidence: (kind: string, id: string) => string;
+    candidateStatusStaged: string;
+    candidateStatusPending: string;
+    candidateStatusAccepting: string;
+    candidateStatusAccepted: string;
+    candidateStatusRejected: string;
+    candidateStatusSuperseded: string;
+    candidateStatusAcceptFailed: string;
+    acceptCandidate: string;
+    rejectCandidate: string;
+    acceptCandidateLabel: (title: string) => string;
+    rejectCandidateLabel: (title: string) => string;
+    knowledgeCollection: string;
+    selectKnowledgeCollection: string;
+    noKnowledgeCollections: string;
+    knowledgeCollectionLabel: (title: string) => string;
+  };
+
+  projectSmartTeam: {
+    title: string;
+    description: string;
+    planAction: string;
+    planning: string;
+    proposalTitle: string;
+    summaryAnalyzed: (count: number) => string;
+    summaryNoChange: string;
+    summaryManualScope: string;
+    projectRevision: (revision: number) => string;
+    actionKeep: string;
+    actionReuse: string;
+    actionCreate: string;
+    reasonExistingMatch: string;
+    reasonCapabilityGap: string;
+    reasonPolicyDecision: string;
+    applyAction: string;
+    applying: string;
+    manualAction: string;
+    operationPending: string;
+    operationRunning: string;
+    operationCompleted: string;
+    operationFailed: string;
+    operationDefaultMessage: string;
+    operationId: (operationId: string) => string;
+    planFailed: string;
+    applyFailed: string;
+    restoreFailed: string;
+  };
+
   // knowledge page
   knowledge: {
     loading: string;

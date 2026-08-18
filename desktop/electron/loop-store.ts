@@ -27,6 +27,14 @@ import {
   type UserLoopTemplate,
   type UserLoopTemplateKind,
 } from './loop-types.js';
+import {
+  ASSISTANT_EVENING_LOOP_ID,
+  ASSISTANT_MORNING_LOOP_ID,
+  type AssistantCandidate,
+  type AssistantCandidateStatus,
+  type AssistantProfile,
+  type CreateAssistantCandidateInput,
+} from './assistant-types.js';
 
 interface LoopDefinitionRow {
   id: string;
@@ -70,6 +78,7 @@ interface LoopRunRow {
   loop_id: string;
   status: LoopRunStatus;
   trigger_json: string;
+  logical_run_key: string | null;
   evidence_ids_json: string;
   started_at: number;
   finished_at: number | null;
@@ -79,6 +88,18 @@ interface LoopRunRow {
   summary: string | null;
   next_action_kind: string | null;
   next_action_summary: string | null;
+}
+
+interface AssistantProfileRow {
+  id: AssistantProfile['id']; status: AssistantProfile['status']; locale: AssistantProfile['locale']; time_zone: string;
+  evening_time: string; morning_time: string; workdays_json: string; quiet_hours_json: string; data_scopes_json: string;
+  created_at: number; updated_at: number;
+}
+
+interface AssistantCandidateRow {
+  id: string; run_id: string; kind: AssistantCandidate['kind']; title: string; content: string; scope: AssistantCandidate['scope'];
+  project_id: string | null; confidence: number; evidence_refs_json: string; dedupe_key: string; status: AssistantCandidateStatus;
+  target_kind: AssistantCandidate['targetKind'] | null; target_id: string | null; accepted_target_ref: string | null; created_at: number; decided_at: number | null;
 }
 
 interface LoopStageRow {
@@ -128,16 +149,30 @@ export interface AddConstraintInput {
   now: number;
 }
 
-const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description'>> = [
+const BUILT_IN_LOOPS: Array<Pick<LoopDefinition, 'id' | 'title' | 'description' | 'status'>> = [
   {
     id: BUILT_IN_LOOP_IDS.ARTIFACT_EVIDENCE_REGRESSION,
     title: 'Artifact Evidence Regression',
     description: 'Checks artifact completion evidence flows for regressions.',
+    status: 'active',
   },
   {
     id: BUILT_IN_LOOP_IDS.KSWARM_SERVICE_HEALTH,
     title: 'KSwarm Service Health',
     description: 'Checks KSwarm service startup, health, identity, and broker connectivity.',
+    status: 'active',
+  },
+  {
+    id: ASSISTANT_EVENING_LOOP_ID,
+    title: 'Personal assistant evening reflection',
+    description: 'Generates review candidates from structured Xiaok activity.',
+    status: 'paused',
+  },
+  {
+    id: ASSISTANT_MORNING_LOOP_ID,
+    title: 'Personal assistant morning briefing',
+    description: 'Generates a bounded morning briefing from structured state.',
+    status: 'paused',
   },
 ];
 
@@ -154,6 +189,7 @@ export class LoopStore {
     this.db = new DatabaseSync(dbPath);
     this.db.exec('pragma journal_mode = WAL');
     this.db.exec('pragma foreign_keys = ON');
+    this.db.exec('pragma busy_timeout = 5000');
     this.applySchema();
   }
 
@@ -175,7 +211,7 @@ export class LoopStore {
           insert into loop_definitions (
             id, title, description, status, origin, active_run_id, created_at, updated_at
           ) values (
-            @id, @title, @description, 'active', 'built_in', null, @createdAt, @updatedAt
+            @id, @title, @description, @status, 'built_in', null, @createdAt, @updatedAt
           )
           on conflict(id) do update set
             title = excluded.title,
@@ -192,6 +228,7 @@ export class LoopStore {
           id: loop.id,
           title: loop.title,
           description: loop.description,
+          status: loop.status,
           createdAt: now,
           updatedAt: now,
         });
@@ -376,6 +413,15 @@ export class LoopStore {
         runIds = rows.map(r => r.id);
       }
       if (runIds.length === 0) return 0;
+      if (
+        loopId === ASSISTANT_EVENING_LOOP_ID || loopId === ASSISTANT_MORNING_LOOP_ID ||
+        this.db.prepare(`select count(*) as count from assistant_candidates where run_id in (${runIds.map(() => '?').join(',')})`).get(...runIds) as { count: number }
+      ) {
+        const protectedCandidate = this.db.prepare(`select 1 as value from assistant_candidates where run_id in (${runIds.map(() => '?').join(',')}) limit 1`).get(...runIds) as { value: number } | undefined;
+        if (loopId === ASSISTANT_EVENING_LOOP_ID || loopId === ASSISTANT_MORNING_LOOP_ID || protectedCandidate) {
+          throw new Error('protected_history');
+        }
+      }
       const idPlaceholders = runIds.map(() => '?').join(',');
       this.db.prepare(`delete from loop_stages where run_id in (${idPlaceholders})`).run(...runIds);
       const result = this.db.prepare(`delete from loop_runs where id in (${idPlaceholders})`).run(...runIds);
@@ -390,6 +436,14 @@ export class LoopStore {
       if (!definitionRow) return { status: 'skipped', reason: 'missing_loop' };
       if (definitionRow.status === 'deleted') return { status: 'skipped', reason: 'deleted_loop' };
       if (definitionRow.status === 'paused') return { status: 'skipped', reason: 'paused' };
+
+      const logicalRunKey = typeof trigger.logicalRunKey === 'string' && trigger.logicalRunKey.trim() ? trigger.logicalRunKey.trim() : undefined;
+      if (logicalRunKey) {
+        const completed = this.db.prepare(`
+          select id from loop_runs where loop_id = ? and logical_run_key = ? and status = 'success' order by started_at desc limit 1
+        `).get(loopId, logicalRunKey) as { id: string } | undefined;
+        if (completed) return { status: 'already_completed', completedRunId: completed.id };
+      }
 
       if (definitionRow.active_run_id) {
         const activeRun = this.getLoopRunRow(definitionRow.active_run_id);
@@ -408,16 +462,17 @@ export class LoopStore {
       const evidenceIdsJson = JSON.stringify([]);
       this.db.prepare(`
         insert into loop_runs (
-          id, loop_id, status, trigger_json, evidence_ids_json, started_at, finished_at,
+          id, loop_id, status, trigger_json, logical_run_key, evidence_ids_json, started_at, finished_at,
           updated_at, failure_kind, message, summary, next_action_kind, next_action_summary
         ) values (
-          @id, @loopId, 'running', @triggerJson, @evidenceIdsJson, @startedAt, null,
+          @id, @loopId, 'running', @triggerJson, @logicalRunKey, @evidenceIdsJson, @startedAt, null,
           @updatedAt, null, null, null, null, null
         )
       `).run({
         id: runId,
         loopId,
         triggerJson,
+        logicalRunKey: logicalRunKey ?? null,
         evidenceIdsJson,
         startedAt: now,
         updatedAt: now,
@@ -444,6 +499,137 @@ export class LoopStore {
       evidenceIds,
       now,
       summary,
+    });
+  }
+
+  finishAssistantLoopRunSuccess(runId: string, evidenceIds: string[], now: number, summary: string): LoopRun | undefined {
+    return this.transaction(() => {
+      const current = this.getLoopRunRow(runId);
+      if (!current || current.status !== 'running') return current ? this.runRowToRecord(current) : undefined;
+      const updated = this.db.prepare(`
+        update loop_runs set status = 'success', evidence_ids_json = ?, finished_at = ?, updated_at = ?, summary = ?
+        where id = ? and status = 'running'
+      `).run(JSON.stringify(evidenceIds), now, now, summary, runId);
+      if (updated.changes === 1) {
+        this.db.prepare(`update assistant_candidates set status = 'pending' where run_id = ? and status = 'staged'`).run(runId);
+        this.finishOpenStagesForTerminalRun(current.loop_id, runId, { status: 'success' }, current.status, now);
+        this.clearActiveRun(current.loop_id, runId, now);
+        this.bumpAutomationStoreVersion();
+      }
+      return this.getLoopRun(runId);
+    });
+  }
+
+  ensureAssistantProfile(profile: AssistantProfile): AssistantProfile {
+    return this.transaction(() => {
+      this.db.prepare(`
+        insert into assistant_profiles (id, status, locale, time_zone, evening_time, morning_time, workdays_json, quiet_hours_json, data_scopes_json, created_at, updated_at)
+        values (@id, @status, @locale, @timeZone, @eveningTime, @morningTime, @workdaysJson, @quietHoursJson, @dataScopesJson, @createdAt, @updatedAt)
+        on conflict(id) do nothing
+      `).run({
+        id: profile.id,
+        status: profile.status,
+        locale: profile.locale,
+        timeZone: profile.timeZone,
+        eveningTime: profile.eveningTime,
+        morningTime: profile.morningTime,
+        workdaysJson: JSON.stringify(profile.workdays),
+        quietHoursJson: JSON.stringify(profile.quietHours),
+        dataScopesJson: JSON.stringify(profile.dataScopes),
+        createdAt: profile.createdAt,
+        updatedAt: profile.updatedAt,
+      });
+      return this.getAssistantProfile(profile.id)!;
+    });
+  }
+
+  getAssistantProfile(id: AssistantProfile['id']): AssistantProfile | undefined {
+    const row = this.db.prepare('select * from assistant_profiles where id = ?').get(id) as AssistantProfileRow | undefined;
+    return row ? this.assistantProfileRowToRecord(row) : undefined;
+  }
+
+  setAssistantProfileStatus(id: AssistantProfile['id'], status: AssistantProfile['status'], now: number): AssistantProfile | undefined {
+    return this.transaction(() => {
+      this.db.prepare('update assistant_profiles set status = ?, updated_at = ? where id = ?').run(status, now, id);
+      return this.getAssistantProfile(id);
+    });
+  }
+
+  stageAssistantCandidates(runId: string, inputs: CreateAssistantCandidateInput[], now: number): AssistantCandidate[] {
+    return this.transaction(() => {
+      const run = this.getLoopRunRow(runId);
+      if (!run || run.status !== 'running') throw new Error('Assistant candidates require a running loop run.');
+      return inputs.map(input => {
+        if (input.evidenceRefs.length === 0 || input.confidence < 0 || input.confidence > 1 || (input.scope === 'project' && !input.projectId)) {
+          throw new Error('Invalid assistant candidate.');
+        }
+        const id = randomUUID();
+        this.db.prepare(`
+          insert into assistant_candidates (id, run_id, kind, title, content, scope, project_id, confidence, evidence_refs_json, dedupe_key, status, target_kind, target_id, accepted_target_ref, created_at, decided_at)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'staged', null, null, null, ?, null)
+        `).run(id, runId, input.kind, input.title, input.content, input.scope, input.projectId ?? null, input.confidence, JSON.stringify(input.evidenceRefs), input.dedupeKey, now);
+        return this.getAssistantCandidate(id)!;
+      });
+    });
+  }
+
+  getAssistantCandidate(id: string): AssistantCandidate | undefined {
+    const row = this.db.prepare('select * from assistant_candidates where id = ?').get(id) as AssistantCandidateRow | undefined;
+    return row ? this.assistantCandidateRowToRecord(row) : undefined;
+  }
+
+  listAssistantCandidates(input: { statuses?: AssistantCandidateStatus[] } = {}): AssistantCandidate[] {
+    const statuses = input.statuses;
+    const rows = statuses?.length
+      ? typedRows<AssistantCandidateRow>(this.db.prepare(`select * from assistant_candidates where status in (${statuses.map(() => '?').join(',')}) order by created_at asc`).all(...statuses))
+      : typedRows<AssistantCandidateRow>(this.db.prepare('select * from assistant_candidates order by created_at asc').all());
+    return rows.map(row => this.assistantCandidateRowToRecord(row));
+  }
+
+  beginAssistantCandidateAccept(
+    candidateId: string,
+    targetKind: NonNullable<AssistantCandidate['targetKind']>,
+    targetId: string,
+    now: number,
+  ): AssistantCandidate | undefined {
+    return this.transaction(() => {
+      this.db.prepare(`
+        update assistant_candidates
+        set status = 'accepting', target_kind = ?, target_id = ?, decided_at = ?
+        where id = ? and status in ('pending', 'accept_failed')
+      `).run(targetKind, targetId, now, candidateId);
+      return this.getAssistantCandidate(candidateId);
+    });
+  }
+
+  markAssistantCandidateAccepted(candidateId: string, targetRef: string, now: number): AssistantCandidate | undefined {
+    return this.transaction(() => {
+      this.db.prepare(`
+        update assistant_candidates
+        set status = 'accepted', accepted_target_ref = ?, decided_at = ?
+        where id = ? and status = 'accepting'
+      `).run(targetRef, now, candidateId);
+      return this.getAssistantCandidate(candidateId);
+    });
+  }
+
+  markAssistantCandidateAcceptFailed(candidateId: string, now: number): AssistantCandidate | undefined {
+    return this.transaction(() => {
+      this.db.prepare(`
+        update assistant_candidates set status = 'accept_failed', decided_at = ?
+        where id = ? and status = 'accepting'
+      `).run(now, candidateId);
+      return this.getAssistantCandidate(candidateId);
+    });
+  }
+
+  rejectAssistantCandidate(candidateId: string, now: number): AssistantCandidate | undefined {
+    return this.transaction(() => {
+      this.db.prepare(`
+        update assistant_candidates set status = 'rejected', decided_at = ?
+        where id = ? and status in ('pending', 'accept_failed')
+      `).run(now, candidateId);
+      return this.getAssistantCandidate(candidateId);
     });
   }
 
@@ -943,6 +1129,42 @@ export class LoopStore {
       create index if not exists idx_loop_runs_stale
       on loop_runs(status, started_at, updated_at);
 
+      create table if not exists assistant_profiles (
+        id text primary key,
+        status text not null,
+        locale text not null,
+        time_zone text not null,
+        evening_time text not null,
+        morning_time text not null,
+        workdays_json text not null,
+        quiet_hours_json text not null,
+        data_scopes_json text not null,
+        created_at integer not null,
+        updated_at integer not null
+      );
+
+      create table if not exists assistant_candidates (
+        id text primary key,
+        run_id text not null,
+        kind text not null,
+        title text not null,
+        content text not null,
+        scope text not null,
+        project_id text,
+        confidence real not null,
+        evidence_refs_json text not null,
+        dedupe_key text not null,
+        status text not null,
+        target_kind text,
+        target_id text,
+        accepted_target_ref text,
+        created_at integer not null,
+        decided_at integer,
+        foreign key(run_id) references loop_runs(id)
+      );
+      create index if not exists idx_assistant_candidates_status_created on assistant_candidates(status, created_at);
+      create index if not exists idx_assistant_candidates_run on assistant_candidates(run_id);
+
       create table if not exists loop_stages (
         id text primary key,
         run_id text not null,
@@ -1014,8 +1236,11 @@ export class LoopStore {
     this.ensureColumn('loop_definitions', 'deleted_at', 'integer');
     this.ensureColumn('loop_definitions', 'delete_reason', 'text');
     this.ensureColumn('loop_runs', 'duration_ms', 'integer default 0');
+    this.ensureColumn('loop_runs', 'logical_run_key', 'text');
     this.ensureColumn('user_loop_templates', 'contract_json', 'text');
     this.ensureColumn('user_loop_templates', 'contract_schema_version', 'text');
+    this.db.exec(`create unique index if not exists idx_loop_runs_success_logical_key
+      on loop_runs(loop_id, logical_run_key) where status = 'success' and logical_run_key is not null`);
   }
 
   private ensureColumn(tableName: 'loop_definitions' | 'loop_runs' | 'user_loop_templates', columnName: string, definition: string): void {
@@ -1062,6 +1287,7 @@ export class LoopStore {
       );
 
       if (result.changes === 1) {
+        if (input.status !== 'success') this.supersedeStagedCandidates(runId, input.now);
         this.finishOpenStagesForTerminalRun(current.loop_id, runId, input, current.status, input.now);
         this.clearActiveRun(current.loop_id, runId, input.now);
         this.bumpAutomationStoreVersion();
@@ -1142,6 +1368,7 @@ export class LoopStore {
           failure_kind = 'executor_crash', message = ?
       where id = ? and status = 'running'
     `).run(now, now, EXECUTOR_CRASH_MESSAGE, row.id);
+    this.supersedeStagedCandidates(row.id, now);
     this.failOpenStages(row.loop_id, row.id, 'executor_crash', EXECUTOR_CRASH_MESSAGE, now);
   }
 
@@ -1239,6 +1466,35 @@ export class LoopStore {
     };
   }
 
+  private assistantProfileRowToRecord(row: AssistantProfileRow): AssistantProfile {
+    return {
+      id: row.id,
+      status: row.status,
+      locale: row.locale,
+      timeZone: row.time_zone,
+      eveningTime: row.evening_time,
+      morningTime: row.morning_time,
+      workdays: parseJson<number[]>(row.workdays_json),
+      quietHours: parseJson<AssistantProfile['quietHours']>(row.quiet_hours_json),
+      dataScopes: parseJson<AssistantProfile['dataScopes']>(row.data_scopes_json),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private assistantCandidateRowToRecord(row: AssistantCandidateRow): AssistantCandidate {
+    return {
+      id: row.id, runId: row.run_id, kind: row.kind, title: row.title, content: row.content, scope: row.scope,
+      projectId: row.project_id ?? undefined, confidence: row.confidence, evidenceRefs: parseJson<AssistantCandidate['evidenceRefs']>(row.evidence_refs_json),
+      dedupeKey: row.dedupe_key, status: row.status, targetKind: row.target_kind ?? undefined, targetId: row.target_id ?? undefined,
+      acceptedTargetRef: row.accepted_target_ref ?? undefined, createdAt: row.created_at, decidedAt: row.decided_at ?? undefined,
+    };
+  }
+
+  private supersedeStagedCandidates(runId: string, now: number): void {
+    this.db.prepare(`update assistant_candidates set status = 'superseded', decided_at = ? where run_id = ? and status = 'staged'`).run(now, runId);
+  }
+
   private userLoopTemplateRowToRecord(row: UserLoopTemplateRow): UserLoopTemplate {
     const fallbackInput = row.kind === 'task_completion'
       ? {
@@ -1284,6 +1540,7 @@ export class LoopStore {
       loopId: row.loop_id,
       status: row.status,
       trigger: parseJson<LoopRunTrigger>(row.trigger_json),
+      logicalRunKey: row.logical_run_key ?? undefined,
       evidenceIds: parseJson<string[]>(row.evidence_ids_json),
       startedAt: row.started_at,
       finishedAt: row.finished_at ?? undefined,

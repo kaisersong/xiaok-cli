@@ -83,6 +83,20 @@ describe('desktop service path contract', () => {
     expect(candidates).toContain(join(repoRoot, '..', 'kswarm', 'src', 'server', 'index.js'));
   });
 
+  it('keeps the KSwarm mutation credential inside the main process boundary', async () => {
+    const repoRoot = join(__dirname, '..', '..', '..');
+    const serviceSource = await readFile(join(repoRoot, 'desktop', 'electron', 'kswarm-service.ts'), 'utf8');
+    const preloadSource = await readFile(join(repoRoot, 'desktop', 'electron', 'preload.cjs'), 'utf8');
+    const preloadApiSource = await readFile(join(repoRoot, 'desktop', 'electron', 'preload-api.ts'), 'utf8');
+
+    expect(serviceSource).toContain('KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken');
+    expect(serviceSource).toContain('getDesktopMutationToken');
+    expect(preloadSource).not.toContain('getDesktopMutationToken');
+    expect(preloadApiSource).not.toContain('getDesktopMutationToken');
+    expect(preloadSource).not.toContain('x-kswarm-mutation-token');
+    expect(preloadApiSource).not.toContain('x-kswarm-mutation-token');
+  });
+
   it('builds the intent-broker launch spec against src/cli.js with experimental sqlite in development', () => {
     const repoRoot = join(__dirname, '..', '..', '..');
     const spec = getDevelopmentBrokerLaunchSpec(

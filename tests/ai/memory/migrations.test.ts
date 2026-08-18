@@ -26,7 +26,7 @@ describe('migrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
 
     const tables = db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -39,6 +39,8 @@ describe('migrations', () => {
     expect(tables).toContain('memory_l3_persona');
     expect(tables).toContain('memory_embeddings');
     expect(tables).toContain('memory_l0_fts');
+    const columns = db.prepare('PRAGMA table_info(memory_l1_extracted)').all().map((row: any) => row.name);
+    expect(columns).toContain('provenance_json');
   });
 
   it('should be idempotent', () => {
@@ -47,6 +49,6 @@ describe('migrations', () => {
 
     runMigrations(db);
     runMigrations(db);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
   });
 });

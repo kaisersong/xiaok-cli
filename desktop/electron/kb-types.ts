@@ -103,6 +103,8 @@ export interface CreateCollectionInput {
 }
 
 export interface AddSourceInput {
+  sourceId?: string;
+  clientRequestKey?: string;
   collectionId: string;
   kind: SourceKind;
   title: string;

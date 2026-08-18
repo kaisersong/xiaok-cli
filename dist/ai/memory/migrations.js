@@ -1,4 +1,4 @@
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 export function getSchemaVersion(db) {
     const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_meta'").get();
     if (!hasTable)
@@ -103,9 +103,17 @@ function migrateV1toV2(db) {
     db.exec('DELETE FROM memory_embeddings');
     setSchemaVersion(db, 2);
 }
+function migrateV2toV3(db) {
+    const columns = db.prepare('PRAGMA table_info(memory_l1_extracted)').all();
+    if (!columns.some(column => column.name === 'provenance_json')) {
+        db.exec("ALTER TABLE memory_l1_extracted ADD COLUMN provenance_json TEXT NOT NULL DEFAULT '{}'");
+    }
+    setSchemaVersion(db, 3);
+}
 const MIGRATIONS = {
     1: migrateV0toV1,
     2: migrateV1toV2,
+    3: migrateV2toV3,
 };
 export function runMigrations(db) {
     const current = getSchemaVersion(db);

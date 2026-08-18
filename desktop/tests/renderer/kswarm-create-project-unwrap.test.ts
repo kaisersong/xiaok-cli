@@ -4,19 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useKSwarmClient } from '../../renderer/src/hooks/useKSwarmClient';
 
 describe('useKSwarmClient.createProject envelope unwrap', () => {
-  let kswarmProxyPostMock: ReturnType<typeof vi.fn>;
+  let createKSwarmProjectMock: ReturnType<typeof vi.fn>;
   let kswarmProxyGetMock: ReturnType<typeof vi.fn>;
   let enqueueMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     kswarmProxyGetMock = vi.fn().mockResolvedValue({ projects: [] });
-    kswarmProxyPostMock = vi.fn().mockResolvedValue({ projects: [] });
+    createKSwarmProjectMock = vi.fn().mockResolvedValue({ projects: [] });
     enqueueMock = vi.fn().mockResolvedValue({ ok: true });
     (globalThis as any).window.xiaokDesktop = {
       listPrinciples: vi.fn().mockResolvedValue([]),
       kswarmStartProjectPlanning: enqueueMock,
+      createKSwarmProject: createKSwarmProjectMock,
       kswarmProxyGet: kswarmProxyGetMock,
-      kswarmProxyPost: kswarmProxyPostMock,
       kswarmProxyDelete: vi.fn().mockResolvedValue(true),
       kswarmStreamSubscribe: vi.fn().mockResolvedValue({ ok: true }),
       kswarmStreamUnsubscribe: vi.fn().mockResolvedValue({ ok: true }),
@@ -32,16 +32,11 @@ describe('useKSwarmClient.createProject envelope unwrap', () => {
   });
 
   it('unwraps response.project and enqueues planning bootstrap with the project id', async () => {
-    kswarmProxyPostMock.mockImplementation(async (path: string) => {
-      if (path === '/projects') {
-        return {
-          ok: true,
-          project: { id: 'proj-xyz', name: 'Demo', status: 'created', createdAt: 1 },
-          preparation: {},
-          planningStart: {},
-        };
-      }
-      return { projects: [] };
+    createKSwarmProjectMock.mockResolvedValue({
+      ok: true,
+      project: { id: 'proj-xyz', name: 'Demo', status: 'created', createdAt: 1 },
+      preparation: {},
+      planningStart: {},
     });
 
     const { result } = renderHook(() => useKSwarmClient());
@@ -57,6 +52,11 @@ describe('useKSwarmClient.createProject envelope unwrap', () => {
     });
 
     expect(created).toMatchObject({ id: 'proj-xyz', name: 'Demo' });
+    expect(createKSwarmProjectMock).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Demo',
+      goal: 'Build something',
+      autoStartPlanning: false,
+    }));
     expect(enqueueMock).toHaveBeenCalledTimes(1);
     expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'proj-xyz',
@@ -66,12 +66,7 @@ describe('useKSwarmClient.createProject envelope unwrap', () => {
   });
 
   it('returns null and does not enqueue planning when the project id is missing', async () => {
-    kswarmProxyPostMock.mockImplementation(async (path: string) => {
-      if (path === '/projects') {
-        return { ok: true, project: { name: 'NoId', status: 'created' } };
-      }
-      return { projects: [] };
-    });
+    createKSwarmProjectMock.mockResolvedValue({ ok: true, project: { name: 'NoId', status: 'created' } });
 
     const { result } = renderHook(() => useKSwarmClient());
 
@@ -92,14 +87,9 @@ describe('useKSwarmClient.createProject envelope unwrap', () => {
   it('still returns the project but logs when planning enqueue is rejected', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     enqueueMock.mockResolvedValue({ ok: false, error: 'queue_unavailable' });
-    kswarmProxyPostMock.mockImplementation(async (path: string) => {
-      if (path === '/projects') {
-        return {
-          ok: true,
-          project: { id: 'proj-rej', name: 'Rej', status: 'created', createdAt: 1 },
-        };
-      }
-      return { projects: [] };
+    createKSwarmProjectMock.mockResolvedValue({
+      ok: true,
+      project: { id: 'proj-rej', name: 'Rej', status: 'created', createdAt: 1 },
     });
 
     const { result } = renderHook(() => useKSwarmClient());

@@ -125,6 +125,24 @@ describe('preload API contract', () => {
       'kswarmRestart',
       'kswarmResumeWorkflowRun',
       'kswarmStartProjectPlanning',
+      'getAssistantOverview',
+      'activateAssistant',
+      'pauseAssistant',
+      'resumeAssistant',
+      'acceptAssistantCandidate',
+      'rejectAssistantCandidate',
+      'planProjectTeam',
+      'applyProjectTeamPlan',
+      'getProjectTeamOperation',
+      'createKSwarmProject',
+      'updateKSwarmProjectExecutionMode',
+      'deleteKSwarmProject',
+      'createKSwarmAgent',
+      'updateKSwarmAgent',
+      'archiveKSwarmAgent',
+      'startKSwarmAgent',
+      'stopKSwarmAgent',
+      'probeKSwarmAgent',
       'onKSwarmStatus',
       'exportTraceBundle',
       'diagnose',
@@ -621,6 +639,82 @@ describe('preload API contract', () => {
     });
   });
 
+  it('routes assistant lifecycle and candidate decisions through fixed semantic IPC channels', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ ok: true }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await api.getAssistantOverview();
+    await api.activateAssistant();
+    await api.pauseAssistant();
+    await api.resumeAssistant();
+    await api.acceptAssistantCandidate({ candidateId: 'candidate-1', collectionId: 'collection-1', requestSource: 'agent' } as any);
+    await api.rejectAssistantCandidate({ candidateId: 'candidate-2', requestSource: 'agent' } as any);
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:getOverview');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:activate');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:pause');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:resume');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:acceptCandidate', {
+      candidateId: 'candidate-1',
+      collectionId: 'collection-1',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:assistant:rejectCandidate', { candidateId: 'candidate-2' });
+  });
+
+  it('routes KSwarm team and CRUD mutations through fixed semantic IPC channels without authority fields', async () => {
+    const ipcRenderer = {
+      invoke: vi.fn().mockResolvedValue({ ok: true }),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const api = createPreloadApi(ipcRenderer);
+
+    await api.planProjectTeam({ projectId: 'project-1', token: 'forbidden' } as any);
+    await api.applyProjectTeamPlan({
+      projectId: 'project-1',
+      planId: 'plan-1',
+      projectRevision: 7,
+      clientRequestKey: 'forbidden',
+    } as any);
+    await api.getProjectTeamOperation({ projectId: 'project-1', operationId: 'forbidden' } as any);
+    await api.createKSwarmProject({ name: 'Demo', goal: 'Ship', poAgent: 'xiaok-po', members: [] });
+    await api.updateKSwarmProjectExecutionMode({ projectId: 'project-1', executionMode: 'auto', requestSource: 'agent' } as any);
+    await api.deleteKSwarmProject({ projectId: 'project-1', token: 'forbidden' } as any);
+    await api.createKSwarmAgent({ name: 'Researcher', roles: ['worker'], apiKey: 'forbidden' } as any);
+    await api.updateKSwarmAgent({ agentId: 'agent-1', patch: { name: 'Updated', provider: 'forbidden' } as any });
+    await api.archiveKSwarmAgent({ agentId: 'agent-1', requestSource: 'agent' } as any);
+    await api.startKSwarmAgent({ agentId: 'agent-1', token: 'forbidden' } as any);
+    await api.stopKSwarmAgent({ agentId: 'agent-1', token: 'forbidden' } as any);
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:team:plan', { projectId: 'project-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:team:apply', {
+      projectId: 'project-1',
+      planId: 'plan-1',
+      projectRevision: 7,
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:team:getOperation', { projectId: 'project-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:project:create', {
+      name: 'Demo', goal: 'Ship', poAgent: 'xiaok-po', members: [],
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:project:updateExecutionMode', {
+      projectId: 'project-1', executionMode: 'auto',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:project:delete', { projectId: 'project-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:create', {
+      name: 'Researcher', roles: ['worker'],
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:update', {
+      agentId: 'agent-1', patch: { name: 'Updated' },
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:archive', { agentId: 'agent-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:start', { agentId: 'agent-1' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:stop', { agentId: 'agent-1' });
+  });
+
   it('routes createTask thread context through semantic IPC channel', async () => {
     const result = { taskId: 'task_test' };
     const ipcRenderer = {
@@ -800,6 +894,7 @@ const HANDLER_REGISTRATION_FILES = [
   resolve(process.cwd(), 'electron', 'main.ts'),
   resolve(process.cwd(), 'electron', 'ipc.ts'),
   resolve(process.cwd(), 'electron', 'kswarm-ipc-proxy.ts'),
+  resolve(process.cwd(), 'electron', 'semantic-ipc.ts'),
 ];
 
 function extractRegisteredHandlerChannels(): Set<string> {

@@ -22,6 +22,11 @@ import type {
   UpdateMeetingInput,
   UpdateSourceParseResultInput,
 } from './kb-types.js';
+import { createHash } from 'node:crypto';
+
+export function computeKbSourceContentDigest(input: Pick<AddSourceInput, 'text'>): string {
+  return createHash('sha256').update(input.text ?? '', 'utf8').digest('hex');
+}
 
 export interface KbStore {
   _db?: unknown;

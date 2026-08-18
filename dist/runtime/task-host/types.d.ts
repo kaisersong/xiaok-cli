@@ -9,6 +9,11 @@ export interface MaterialRecord {
     extractedTextPath?: string;
     /** Extractor version that produced extractedTextPath; absent means it predates versioning. */
     extractorVersion?: number;
+    extractionEngine?: string;
+    extractionEngineVersion?: string;
+    extractionTruncated?: boolean;
+    sourceFingerprint?: string;
+    extractionErrorCode?: string;
     mimeType: string;
     sizeBytes: number;
     sha256: string;

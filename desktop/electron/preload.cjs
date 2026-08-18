@@ -7,6 +7,65 @@ function sanitizeArtifactWorkspaceInput(input) {
   return safe;
 }
 
+function pickDefined(input) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+}
+
+function sanitizeAssistantCandidateInput(input) {
+  return pickDefined({
+    candidateId: typeof input?.candidateId === 'string' ? input.candidateId : '',
+    collectionId: typeof input?.collectionId === 'string' ? input.collectionId : undefined,
+  });
+}
+
+function sanitizeKSwarmSemanticInput(kind, input) {
+  if (kind === 'team-plan' || kind === 'team-operation' || kind === 'project-delete' || kind === 'agent-id') {
+    const idKey = kind === 'agent-id' ? 'agentId' : 'projectId';
+    return { [idKey]: typeof input?.[idKey] === 'string' ? input[idKey] : '' };
+  }
+  if (kind === 'team-apply') {
+    return {
+      projectId: typeof input?.projectId === 'string' ? input.projectId : '',
+      planId: typeof input?.planId === 'string' ? input.planId : '',
+      projectRevision: typeof input?.projectRevision === 'number' ? input.projectRevision : -1,
+    };
+  }
+  if (kind === 'project-execution-mode') {
+    return { projectId: typeof input?.projectId === 'string' ? input.projectId : '', executionMode: input?.executionMode };
+  }
+  if (kind === 'project-create') {
+    return pickDefined({
+      name: input?.name,
+      goal: input?.goal,
+      requirements: input?.requirements,
+      poAgent: input?.poAgent,
+      members: input?.members,
+      workFolder: input?.workFolder,
+      enableSummary: input?.enableSummary,
+      executionMode: input?.executionMode,
+      agentSelection: input?.agentSelection,
+      planningGuidance: input?.planningGuidance,
+      autoStartPlanning: input?.autoStartPlanning,
+    });
+  }
+  const sanitizeAgent = (candidate) => pickDefined({
+    name: candidate?.name,
+    description: candidate?.description,
+    roles: candidate?.roles,
+    capabilities: candidate?.capabilities,
+    instructions: candidate?.instructions,
+    runtimeType: candidate?.runtimeType,
+    maxConcurrentTasks: candidate?.maxConcurrentTasks,
+  });
+  if (kind === 'agent-update') {
+    const patch = input?.patch && typeof input.patch === 'object' && !Array.isArray(input.patch)
+      ? sanitizeAgent(input.patch)
+      : {};
+    return { agentId: typeof input?.agentId === 'string' ? input.agentId : '', patch };
+  }
+  return sanitizeAgent(input);
+}
+
 contextBridge.exposeInMainWorld('xiaokDesktop', {
   systemUsername: os.userInfo().username,
   getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig'),
@@ -144,6 +203,24 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart'),
   kswarmResumeWorkflowRun: (input) => ipcRenderer.invoke('desktop:kswarm:resumeWorkflowRun', input),
   kswarmStartProjectPlanning: (input) => ipcRenderer.invoke('desktop:kswarm:startProjectPlanning', input),
+  getAssistantOverview: () => ipcRenderer.invoke('desktop:assistant:getOverview'),
+  activateAssistant: () => ipcRenderer.invoke('desktop:assistant:activate'),
+  pauseAssistant: () => ipcRenderer.invoke('desktop:assistant:pause'),
+  resumeAssistant: () => ipcRenderer.invoke('desktop:assistant:resume'),
+  acceptAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:acceptCandidate', sanitizeAssistantCandidateInput(input)),
+  rejectAssistantCandidate: (input) => ipcRenderer.invoke('desktop:assistant:rejectCandidate', sanitizeAssistantCandidateInput(input)),
+  planProjectTeam: (input) => ipcRenderer.invoke('desktop:kswarm:team:plan', sanitizeKSwarmSemanticInput('team-plan', input)),
+  applyProjectTeamPlan: (input) => ipcRenderer.invoke('desktop:kswarm:team:apply', sanitizeKSwarmSemanticInput('team-apply', input)),
+  getProjectTeamOperation: (input) => ipcRenderer.invoke('desktop:kswarm:team:getOperation', sanitizeKSwarmSemanticInput('team-operation', input)),
+  createKSwarmProject: (input) => ipcRenderer.invoke('desktop:kswarm:project:create', sanitizeKSwarmSemanticInput('project-create', input)),
+  updateKSwarmProjectExecutionMode: (input) => ipcRenderer.invoke('desktop:kswarm:project:updateExecutionMode', sanitizeKSwarmSemanticInput('project-execution-mode', input)),
+  deleteKSwarmProject: (input) => ipcRenderer.invoke('desktop:kswarm:project:delete', sanitizeKSwarmSemanticInput('project-delete', input)),
+  createKSwarmAgent: (input) => ipcRenderer.invoke('desktop:kswarm:agent:create', sanitizeKSwarmSemanticInput('agent-create', input)),
+  updateKSwarmAgent: (input) => ipcRenderer.invoke('desktop:kswarm:agent:update', sanitizeKSwarmSemanticInput('agent-update', input)),
+  archiveKSwarmAgent: (input) => ipcRenderer.invoke('desktop:kswarm:agent:archive', sanitizeKSwarmSemanticInput('agent-id', input)),
+  startKSwarmAgent: (input) => ipcRenderer.invoke('desktop:kswarm:agent:start', sanitizeKSwarmSemanticInput('agent-id', input)),
+  stopKSwarmAgent: (input) => ipcRenderer.invoke('desktop:kswarm:agent:stop', sanitizeKSwarmSemanticInput('agent-id', input)),
+  probeKSwarmAgent: (input) => ipcRenderer.invoke('desktop:kswarm:agent:probe', sanitizeKSwarmSemanticInput('agent-id', input)),
   onKSwarmStatus(handler) {
     const channel = 'desktop:kswarm:statusChange';
     const listener = (_event, payload) => {

@@ -26,6 +26,11 @@ export declare class MaterialRegistry {
         parseStatus: MaterialParseStatus;
         parseSummary?: string;
         errorMessage?: string;
+        extractionEngine?: string;
+        extractionEngineVersion?: string;
+        extractionTruncated?: boolean;
+        sourceFingerprint?: string;
+        extractionErrorCode?: string;
     }): Promise<MaterialRecord>;
     toView(record: MaterialRecord): MaterialView;
     toViews(records: MaterialRecord[]): MaterialView[];

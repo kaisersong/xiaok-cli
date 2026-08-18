@@ -246,6 +246,48 @@ describe('loop executor', () => {
     await expect(first).resolves.toMatchObject({ status: 'success' });
   });
 
+  it('maps an already completed logical run to a scheduler skip without rescanning', async () => {
+    const runLoop = vi.fn().mockResolvedValue({
+      status: 'already_completed' as const,
+      completedRunId: 'run-complete',
+    });
+    const executor = createLoopExecutor({ runLoop });
+    const action = {
+      id: 'assistant-evening',
+      title: 'Evening reflection',
+      trigger: { kind: 'daily' as const, hour: 22, minute: 30 },
+      executor: { kind: 'loop' as const, loopId: 'personal-assistant-evening-reflection' },
+      policy: {},
+      status: 'active' as const,
+      source: 'system' as const,
+      ownerKind: 'assistant' as const,
+      ownerId: 'default-personal-assistant',
+      runCount: 0,
+      consecutiveFailures: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    const result = await executor.execute(action, {
+      scheduledDueAt: 1_000,
+      claimedAt: 1_000,
+      overdueMs: 0,
+      recoveryReason: 'normal_tick',
+    });
+
+    expect(result).toEqual({
+      skip: {
+        action: 'skip',
+        reason: 'logical_run_already_completed: run-complete',
+      },
+      decision: {
+        loopRunId: 'run-complete',
+        loopStatus: 'success',
+        reused: true,
+      },
+    });
+  });
+
   it('recovers stale loop runs before starting executor work', async () => {
     const stale = expectStarted(store.beginLoopRun(ARTIFACT_LOOP_ID, { kind: 'manual' }, 2_000, 60_000));
     now = 63_000;

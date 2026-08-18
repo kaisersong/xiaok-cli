@@ -33,6 +33,14 @@ export type {
   UpdateArtifactWorkspaceLayoutInput,
   UpdateArtifactWorkspaceNoteInput,
 } from '../../../electron/preload-api';
+export type {
+  AssistantOverviewView,
+  CreateKSwarmProjectSemanticInput,
+  KSwarmAgentSemanticInput,
+  ProjectTeamOperationView,
+  ProjectTeamPlanItemView,
+  ProjectTeamPlanView,
+} from '../../../electron/preload-api';
 
 // Thread types (local storage + desktop web-client compatibility)
 export type ThreadMode = 'chat' | 'work';

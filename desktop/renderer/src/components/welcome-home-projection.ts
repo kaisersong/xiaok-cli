@@ -1,5 +1,6 @@
 import type { AutomationOverviewSnapshotView, AutomationRecentFailureItemView } from '../api/types';
 import type { KSwarmProject } from '../hooks/useKSwarmClient';
+import type { AssistantHomeSnapshot } from './assistant/view-types';
 
 const ACTIVE_PROJECT_STATUSES = new Set<KSwarmProject['status']>(['planning', 'created', 'active', 'review']);
 const COMPLETED_PROJECT_STATUSES = new Set<KSwarmProject['status']>(['delivered', 'closed']);
@@ -16,6 +17,13 @@ export interface WelcomeHomeProjection {
     completedProjects: number;
   };
   attentionItems: WelcomeAttentionItem[];
+}
+
+export function buildAssistantHomeProjection(snapshot: AssistantHomeSnapshot): AssistantHomeSnapshot {
+  return {
+    ...snapshot,
+    suggestions: snapshot.suggestions.slice(0, 3),
+  };
 }
 
 export function buildWelcomeHomeProjection(

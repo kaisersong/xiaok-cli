@@ -2,13 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative } from 'node:path';
+import { getDocumentMimeType } from '../materials/document-formats.js';
 const MIME_BY_EXTENSION = new Map([
     ['.txt', 'text/plain'],
     ['.md', 'text/markdown'],
     ['.pdf', 'application/pdf'],
-    ['.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-    ['.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-    ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     ['.png', 'image/png'],
     ['.jpg', 'image/jpeg'],
     ['.jpeg', 'image/jpeg'],
@@ -34,7 +32,7 @@ export class MaterialRegistry {
             throw new Error('unsafe material source path: source is already inside task workspace');
         }
         const ext = extname(sourceRealPath).toLowerCase();
-        const mimeType = MIME_BY_EXTENSION.get(ext);
+        const mimeType = getDocumentMimeType(ext) ?? MIME_BY_EXTENSION.get(ext);
         if (!mimeType) {
             throw new Error(`unsupported material format: ${ext || 'unknown'}`);
         }
@@ -87,6 +85,11 @@ export class MaterialRegistry {
             parseStatus: extraction.parseStatus,
             parseSummary: extraction.parseSummary,
             errorMessage: extraction.errorMessage,
+            extractionEngine: extraction.extractionEngine,
+            extractionEngineVersion: extraction.extractionEngineVersion,
+            extractionTruncated: extraction.extractionTruncated,
+            sourceFingerprint: extraction.sourceFingerprint,
+            extractionErrorCode: extraction.extractionErrorCode,
         };
         this.records.set(materialId, updated);
         await this.saveIndex();

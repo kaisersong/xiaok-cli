@@ -36,6 +36,8 @@ interface TimedActionRow {
   policy_json: string;
   status: TimedActionStatus;
   source: TimedActionSource;
+  owner_kind: TimedActionRecord['ownerKind'];
+  owner_id: string;
   created_by_task_id: string | null;
   next_due_at: number | null;
   last_due_at: number | null;
@@ -82,6 +84,7 @@ export class TimedActionStore {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     this.db.exec('pragma journal_mode = WAL');
+    this.db.exec('pragma busy_timeout = 5000');
     this.applySchema();
   }
 
@@ -111,6 +114,8 @@ export class TimedActionStore {
       policy,
       status: input.status ?? 'active',
       source: input.source,
+      ownerKind: input.ownerKind ?? defaultOwnerKind(input.source),
+      ownerId: input.ownerId ?? defaultOwnerId(input),
       createdByTaskId: input.createdByTaskId,
       nextDueAt,
       lastDueAt: input.lastDueAt,
@@ -127,12 +132,12 @@ export class TimedActionStore {
       this.db.prepare(`
         insert into timed_actions (
           id, title, description, trigger_kind, trigger_json, executor_kind, executor_json, policy_json,
-          status, source, created_by_task_id, next_due_at, last_due_at, run_count,
+          status, source, owner_kind, owner_id, created_by_task_id, next_due_at, last_due_at, run_count,
           consecutive_failures, locked_run_id, locked_at, last_runtime_task_id, last_error,
           user_approved_auto, created_at, updated_at
         ) values (
           @id, @title, @description, @triggerKind, @triggerJson, @executorKind, @executorJson, @policyJson,
-          @status, @source, @createdByTaskId, @nextDueAt, @lastDueAt, @runCount,
+          @status, @source, @ownerKind, @ownerId, @createdByTaskId, @nextDueAt, @lastDueAt, @runCount,
           @consecutiveFailures, null, null, @lastRuntimeTaskId, null,
           @userApprovedAuto, @createdAt, @updatedAt
         )
@@ -147,6 +152,8 @@ export class TimedActionStore {
         policyJson: JSON.stringify(record.policy),
         status: record.status,
         source: record.source,
+        ownerKind: record.ownerKind,
+        ownerId: record.ownerId,
         createdByTaskId: record.createdByTaskId ?? null,
         nextDueAt: record.nextDueAt ?? null,
         lastDueAt: record.lastDueAt ?? null,
@@ -525,6 +532,8 @@ export class TimedActionStore {
         policy_json text not null,
         status text not null,
         source text not null,
+        owner_kind text not null default 'migration',
+        owner_id text not null default 'legacy-migration',
         created_by_task_id text,
         next_due_at integer,
         last_due_at integer,
@@ -561,6 +570,7 @@ export class TimedActionStore {
     `);
     this.ensureTimedActionDescriptionColumn();
     this.ensureTimedActionReviewColumns();
+    this.ensureTimedActionOwnershipColumns();
   }
 
   private ensureTimedActionDescriptionColumn(): void {
@@ -578,6 +588,14 @@ export class TimedActionStore {
     if (!columns.some(column => column.name === 'user_approved_auto')) {
       this.db.exec('alter table timed_actions add column user_approved_auto integer not null default 0');
     }
+  }
+
+  private ensureTimedActionOwnershipColumns(): void {
+    const columns = typedRows<{ name: string }>(this.db.prepare('pragma table_info(timed_actions)').all());
+    if (!columns.some(column => column.name === 'owner_kind')) this.db.exec("alter table timed_actions add column owner_kind text not null default 'migration'");
+    if (!columns.some(column => column.name === 'owner_id')) this.db.exec("alter table timed_actions add column owner_id text not null default 'legacy-migration'");
+    this.db.exec(`update timed_actions set owner_kind = case source when 'user' then 'user' when 'agent' then 'agent_task' else 'migration' end where owner_kind = 'migration' and source in ('user', 'agent')`);
+    this.db.exec(`create index if not exists idx_timed_actions_owner on timed_actions(owner_kind, owner_id)`);
   }
 
   private transaction<T>(fn: () => T): T {
@@ -712,6 +730,8 @@ export class TimedActionStore {
       policy: parseJson<TimedActionPolicy>(row.policy_json),
       status: row.status,
       source: row.source,
+      ownerKind: row.owner_kind,
+      ownerId: row.owner_id,
       createdByTaskId: row.created_by_task_id ?? undefined,
       nextDueAt: row.next_due_at ?? undefined,
       lastDueAt: row.last_due_at ?? undefined,
@@ -741,6 +761,18 @@ export class TimedActionStore {
       decision: row.decision_json ? parseJson<Record<string, unknown>>(row.decision_json) : undefined,
     };
   }
+}
+
+function defaultOwnerKind(source: TimedActionSource): TimedActionRecord['ownerKind'] {
+  if (source === 'user') return 'user';
+  if (source === 'agent') return 'agent_task';
+  return 'migration';
+}
+
+function defaultOwnerId(input: CreateTimedActionInput): string {
+  if (input.source === 'user') return 'desktop-user';
+  if (input.source === 'agent') return input.createdByTaskId ?? 'legacy-agent-task';
+  return 'legacy-migration';
 }
 
 function parseJson<T>(raw: string): T {

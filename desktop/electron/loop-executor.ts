@@ -54,6 +54,7 @@ export type RunLoopNowResult =
   | { status: 'blocked'; run: LoopRun }
   | { status: 'failed'; run: LoopRun }
   | { status: 'already_running'; activeRunId: string }
+  | { status: 'already_completed'; completedRunId: string }
   | { status: 'skipped'; reason: 'paused' | 'missing_loop' | 'deleted_loop' };
 
 export interface LoopRunner {
@@ -201,6 +202,16 @@ export function createLoopExecutor(options: CreateLoopExecutorOptions): TimedAct
       const result = await options.runLoop(action.executor.loopId, scheduledLoopTrigger(action, context, runtimeContext), runtimeContext?.signal);
       if (result.status === 'already_running') {
         return { skip: { action: 'skip', reason: `loop already running: ${result.activeRunId}` } };
+      }
+      if (result.status === 'already_completed') {
+        return {
+          skip: { action: 'skip', reason: `logical_run_already_completed: ${result.completedRunId}` },
+          decision: {
+            loopRunId: result.completedRunId,
+            loopStatus: 'success',
+            reused: true,
+          },
+        };
       }
       if (result.status === 'skipped') {
         return { skip: { action: 'skip', reason: `loop ${result.reason}` } };

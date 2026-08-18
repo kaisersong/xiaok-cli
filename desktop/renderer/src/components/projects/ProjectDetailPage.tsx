@@ -17,6 +17,8 @@ import { ActivityTimeline } from './ActivityTimeline';
 import { DeliverableView } from './DeliverableView';
 import { ProjectInterventionBanner } from './ProjectInterventionBanner';
 import { WorkflowStatusStrip } from './WorkflowStatusStrip';
+import { ProjectSmartTeamPanel } from './ProjectSmartTeamPanel';
+import { CreateAgentModal } from './CreateAgentModal';
 import { exportProjectMarkdown } from './exportProjectMarkdown';
 import { getDesktopApi } from '../../shared/desktop';
 import { api } from '../../api';
@@ -424,6 +426,10 @@ export function ProjectDetailPage() {
     createWorkflowProposal,
     startWorkflowRunFromProposal,
     cancelWorkflowRun,
+    planProjectTeam,
+    applyProjectTeamPlan,
+    getProjectTeamOperation,
+    fetchAgents,
     connected,
     serviceStatus,
     agents,
@@ -439,8 +445,14 @@ export function ProjectDetailPage() {
   const [retryCooldownUntil, setRetryCooldownUntil] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false);
   const [workflowProposal, setWorkflowProposal] = useState<KSwarmWorkflowProposal | null>(null);
+  const [manualTeamOpen, setManualTeamOpen] = useState(false);
   const retryCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const smartTeamClient = useMemo(() => ({
+    planProjectTeam,
+    applyProjectTeamPlan,
+    getProjectTeamOperation,
+  }), [applyProjectTeamPlan, getProjectTeamOperation, planProjectTeam]);
 
   const TABS: Array<{ id: TabId; label: string; icon: typeof FileText }> = useMemo(() => [
     { id: 'plan', label: t.projectsDetailPlan, icon: FileText },
@@ -1252,7 +1264,15 @@ export function ProjectDetailPage() {
         )}
         {activeTab === 'agents' && (
           <div className="p-6">
-            <div className="space-y-2">
+            <div className="space-y-4">
+              {projectId && (
+                <ProjectSmartTeamPanel
+                  projectId={projectId}
+                  client={smartTeamClient}
+                  onOpenManual={() => setManualTeamOpen(true)}
+                />
+              )}
+              <div className="space-y-2">
               {/* PO Agent */}
               {project.poAgent && (() => {
                 const poAgentData = agents.find(a => a.id === project.poAgent);
@@ -1302,6 +1322,7 @@ export function ProjectDetailPage() {
               {agents.length === 0 && (
                 <p className="text-[12px] text-[var(--c-text-muted)] py-4 text-center">{t.projectsDetailNoAgents}</p>
               )}
+              </div>
             </div>
           </div>
         )}
@@ -1318,6 +1339,13 @@ export function ProjectDetailPage() {
           </div>
         )}
       </div>
+      <CreateAgentModal
+        open={manualTeamOpen}
+        onClose={() => {
+          setManualTeamOpen(false);
+          void fetchAgents();
+        }}
+      />
     </div>
   );
 }

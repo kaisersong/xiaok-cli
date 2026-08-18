@@ -4,6 +4,8 @@ import type {
   CreateTimedActionInput,
   TimedActionPolicy,
   TimedActionRecord,
+  TimedActionMutationRequest,
+  TimedActionOwnerKind,
   TimedActionSource,
   TimedActionTrigger,
 } from './timed-action-types.js';
@@ -117,6 +119,11 @@ export interface TimedActionServiceOptions {
   now?: () => number;
 }
 
+export interface CreateTimedActionOwnership extends TimedActionMutationRequest {
+  ownerKind: TimedActionOwnerKind;
+  ownerId: string;
+}
+
 export class TimedActionService {
   private readonly now: () => number;
 
@@ -124,13 +131,15 @@ export class TimedActionService {
     this.now = options.now ?? (() => Date.now());
   }
 
-  createReminder(content: string, scheduleAt: number, timezone?: string): ReminderRecord {
+  createReminder(content: string, scheduleAt: number, timezone?: string, ownership?: CreateTimedActionOwnership): ReminderRecord {
     const now = this.now();
     const record = this.store.createAction({
       title: content,
       trigger: { kind: 'once', at: scheduleAt },
       executor: { kind: 'notify', message: content },
-      source: 'agent',
+      source: ownership?.ownerKind === 'user' ? 'user' : 'agent',
+      ownerKind: ownership?.ownerKind ?? 'user',
+      ownerId: ownership?.ownerId ?? 'desktop-user',
       now,
     });
     return this.actionToReminder(record, timezone);
@@ -143,9 +152,10 @@ export class TimedActionService {
       .map(action => this.actionToReminder(action));
   }
 
-  cancelReminder(id: string): boolean {
+  cancelReminder(id: string, request: TimedActionMutationRequest = { requestSource: 'user' }): boolean {
     const action = this.store.getAction(id);
     if (!action || action.executor.kind !== 'notify') return false;
+    if (!this.authorizeTimedActionMutation(action, 'cancel', request)) return false;
     return this.store.cancelAction(id, 'reminder cancelled', this.now());
   }
 
@@ -171,6 +181,8 @@ export class TimedActionService {
       policy,
       source,
       createdByTaskId: input.createdByTaskId,
+      ownerKind: source === 'agent' ? 'agent_task' : 'user',
+      ownerId: source === 'agent' ? input.createdByTaskId ?? 'legacy-agent-task' : 'desktop-user',
       now,
       nextDueAt: input.nextDueAt,
       lastDueAt: input.lastDueAt,
@@ -194,6 +206,8 @@ export class TimedActionService {
       executor: { kind: 'loop', loopId: input.loopId },
       policy,
       source: input.source ?? 'user',
+      ownerKind: input.source === 'system' ? 'assistant' : input.source === 'agent' ? 'agent_task' : 'user',
+      ownerId: input.source === 'system' ? 'default-personal-assistant' : 'desktop-user',
       now,
       nextDueAt: input.nextDueAt,
       userApprovedAuto: false,
@@ -250,9 +264,10 @@ export class TimedActionService {
       .map(action => this.actionToScheduledTask(action));
   }
 
-  updateScheduledTask(input: UpdateScheduledTaskInput): UpdateScheduledTaskResult {
+  updateScheduledTask(input: UpdateScheduledTaskInput, request: TimedActionMutationRequest = { requestSource: 'user' }): UpdateScheduledTaskResult {
     const current = this.store.getAction(input.id);
     if (!current || (current.executor.kind !== 'agent_task' && current.executor.kind !== 'loop')) return undefined;
+    if (!this.authorizeTimedActionMutation(current, 'update', request)) return undefined;
 
     const currentStoreVersion = this.store.getAutomationStoreVersion();
     const staleByUpdatedAt = input.expectedUpdatedAt !== undefined && current.updatedAt !== input.expectedUpdatedAt;
@@ -290,12 +305,12 @@ export class TimedActionService {
     return updated ? this.actionToScheduledTask(updated) : undefined;
   }
 
-  cancelScheduledTask(id: string, reason?: string, requestSource: 'user' | 'agent' = 'user'): boolean {
+  cancelScheduledTask(id: string, reason?: string, request: TimedActionMutationRequest | 'user' | 'agent' = { requestSource: 'user' }): boolean {
     const action = this.store.getAction(id);
     if (!action || (action.executor.kind !== 'agent_task' && action.executor.kind !== 'loop')) return false;
-    // Protect user-created scheduled tasks from being cancelled by agents
-    if (requestSource === 'agent' && action.source === 'user') return false;
-    if (this.isTemporaryAgentIntervalTask(action)) {
+    const authority = typeof request === 'string' ? { requestSource: request } : request;
+    if (!this.authorizeTimedActionMutation(action, 'cancel', authority)) return false;
+    if (this.isTemporaryAgentIntervalTask(action) && authority.requestSource === 'agent') {
       return this.store.deleteAction(id);
     }
     return this.store.cancelAction(id, reason ?? 'scheduled task cancelled', this.now());
@@ -304,10 +319,12 @@ export class TimedActionService {
   setScheduledTaskStatus(
     id: string,
     status: ScheduledTaskRecord['status'],
-    now = this.now()
+    now = this.now(),
+    request: TimedActionMutationRequest = { requestSource: 'user' }
   ): ScheduledTaskRecord | undefined {
     const action = this.store.getAction(id);
     if (!action || (action.executor.kind !== 'agent_task' && action.executor.kind !== 'loop')) return undefined;
+    if (!this.authorizeTimedActionMutation(action, 'status', request)) return undefined;
     const updated = this.store.setActionStatus(id, status, now);
     return updated ? this.actionToScheduledTask(updated) : undefined;
   }
@@ -320,12 +337,45 @@ export class TimedActionService {
     return this.store.listRuns(actionId);
   }
 
-  approveAuto(id: string): TimedActionRecord | undefined {
+  approveAuto(id: string, request: TimedActionMutationRequest = { requestSource: 'user' }): TimedActionRecord | undefined {
+    const action = this.store.getAction(id);
+    if (!action || !this.authorizeTimedActionMutation(action, 'approve', request)) return undefined;
     return this.store.approveAuto(id);
   }
 
-  revokeAuto(id: string): TimedActionRecord | undefined {
+  revokeAuto(id: string, request: TimedActionMutationRequest = { requestSource: 'user' }): TimedActionRecord | undefined {
+    const action = this.store.getAction(id);
+    if (!action || !this.authorizeTimedActionMutation(action, 'revoke', request)) return undefined;
     return this.store.revokeAuto(id);
+  }
+
+  deleteScheduledTask(id: string, request: TimedActionMutationRequest = { requestSource: 'user' }): boolean {
+    const action = this.store.getAction(id);
+    if (!action || !this.authorizeTimedActionMutation(action, 'delete', request)) return false;
+    return this.store.deleteAction(id);
+  }
+
+  ensureAssistantLoopSchedule(input: { id: string; loopId: string; title: string; time: string; timeZone: string; workdays: number[]; status: 'active' | 'paused' }): TimedActionRecord {
+    const [hour, minute] = input.time.split(':').map(Number);
+    const existing = this.store.getAction(input.id);
+    if (existing) {
+      if (existing.status !== input.status) this.store.setActionStatus(existing.id, input.status, this.now());
+      return this.store.getAction(existing.id)!;
+    }
+    return this.store.createAction({
+      id: input.id, title: input.title, trigger: { kind: 'daily', hour, minute, timeZone: input.timeZone, daysOfWeek: input.workdays },
+      executor: { kind: 'loop', loopId: input.loopId }, source: 'system', ownerKind: 'assistant', ownerId: 'default-personal-assistant',
+      status: input.status, now: this.now(), userApprovedAuto: true,
+    });
+  }
+
+  private authorizeTimedActionMutation(action: TimedActionRecord, operation: 'update' | 'status' | 'cancel' | 'approve' | 'revoke' | 'delete', request: TimedActionMutationRequest): boolean {
+    if (request.requestSource === 'user') return true;
+    if (request.requestSource === 'scheduler') return action.ownerKind === 'assistant' && request.ownerId === action.ownerId && operation === 'status';
+    return action.ownerKind === 'agent_task'
+      && request.ownerId === action.ownerId
+      && operation === 'cancel'
+      && this.isTemporaryAgentIntervalTask(action);
   }
 
   private withScheduledTaskDefaults(
@@ -394,7 +444,7 @@ export class TimedActionService {
   }
 
   private isTemporaryAgentIntervalTask(action: TimedActionRecord): boolean {
-    return action.source === 'agent' && action.trigger.kind === 'interval';
+    return action.ownerKind === 'agent_task' && action.trigger.kind === 'interval';
   }
 }
 

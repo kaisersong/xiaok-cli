@@ -25,7 +25,7 @@ import type {
   UpdateMeetingInput,
   UpdateSourceParseResultInput,
 } from './kb-types.js';
-import type { KbStore } from './kb-store.js';
+import { computeKbSourceContentDigest, type KbStore } from './kb-store.js';
 import {
   computeKnowledgeContentHash,
   reconstructKnowledgeSourceText,
@@ -185,10 +185,34 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     if (requestSource === 'agent' && input.parseStatus && input.parseStatus !== 'pending') {
       throw new Error('Agent-created Knowledge sources must start in the pending state');
     }
-    const id = randomUUID();
+    const hasStableIdentity = input.sourceId !== undefined || input.clientRequestKey !== undefined;
+    if (hasStableIdentity && (!input.sourceId || !input.clientRequestKey)) {
+      throw new Error('kb_stable_source_identity_incomplete');
+    }
+    if (hasStableIdentity && requestSource !== 'user') {
+      throw new Error('kb_stable_source_user_only');
+    }
+    const assistantContentDigest = hasStableIdentity ? computeKbSourceContentDigest(input) : undefined;
+    if (hasStableIdentity) {
+      const existingById = getSource(input.sourceId!);
+      if (existingById) {
+        assertStableSourceMatches(existingById, input, assistantContentDigest!);
+        return existingById;
+      }
+      const existingByRequestKey = findSourceByClientRequestKey(input.clientRequestKey!);
+      if (existingByRequestKey) throw new Error('kb_client_request_key_conflict');
+    }
+    const id = input.sourceId ?? randomUUID();
     const ts = now();
     const rawPath = input.rawPath ?? input.filePath ?? '';
-    const metadataJson = JSON.stringify({ ...input.metadata, createdBy: requestSource });
+    const metadataJson = JSON.stringify({
+      ...input.metadata,
+      createdBy: requestSource,
+      ...(hasStableIdentity ? {
+        clientRequestKey: input.clientRequestKey,
+        assistantContentDigest,
+      } : {}),
+    });
     db.prepare(`
       INSERT INTO sources (id, collection_id, kind, title, uri, mime_type, sha256, byte_size, raw_path, extracted_text_path, parse_status, parse_error, parse_attempts, chunk_count, metadata_json, created_at, updated_at)
       VALUES (@id, @collectionId, @kind, @title, @uri, @mimeType, '', @byteSize, @rawPath, '', @parseStatus, '', 0, 0, @metadataJson, @ts, @ts)
@@ -206,6 +230,26 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       ts,
     });
     return getSource(id)!;
+  }
+
+  function findSourceByClientRequestKey(clientRequestKey: string): Source | undefined {
+    const rows = db.prepare('SELECT * FROM sources').all() as Record<string, unknown>[];
+    const row = rows.find(candidate => {
+      const metadata = JSON.parse(String(candidate.metadata_json ?? '{}')) as Record<string, unknown>;
+      return metadata.clientRequestKey === clientRequestKey;
+    });
+    return row ? mapSource(row) : undefined;
+  }
+
+  function assertStableSourceMatches(source: Source, input: AddSourceInput, contentDigest: string): void {
+    const metadata = source.metadata;
+    const matches = source.collectionId === input.collectionId
+      && metadata.clientRequestKey === input.clientRequestKey
+      && metadata.assistantCandidateId === input.metadata?.assistantCandidateId
+      && metadata.assistantRunId === input.metadata?.assistantRunId
+      && JSON.stringify(metadata.assistantEvidenceRefs ?? []) === JSON.stringify(input.metadata?.assistantEvidenceRefs ?? [])
+      && metadata.assistantContentDigest === contentDigest;
+    if (!matches) throw new Error('kb_stable_source_conflict');
   }
 
   function getSource(id: string): Source | undefined {

@@ -5,6 +5,14 @@ import { getConfigDir } from '../../utils/config.js';
 
 export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
 
+export interface MemoryProvenance extends Record<string, unknown> {
+  kind: 'assistant_candidate';
+  candidateId: string;
+  loopRunId: string;
+  backend: 'layered' | 'fallback';
+  evidenceRefs: Array<{ kind: string; id: string }>;
+}
+
 export interface MemoryRecord {
   id: string;
   scope: 'global' | 'project';
@@ -14,6 +22,7 @@ export interface MemoryRecord {
   tags: string[];
   updatedAt: number;
   type?: MemoryType;
+  provenance?: MemoryProvenance;
 }
 
 export interface LayerEntry {
@@ -26,6 +35,7 @@ export interface LayerEntry {
 
 export interface MemoryStore {
   save(record: MemoryRecord): Promise<void>;
+  getById?(id: string): MemoryRecord | undefined;
   listRelevant(input: { cwd: string; query: string; typeFilter?: MemoryType }): Promise<MemoryRecord[]>;
   search?(query: string, limit?: number): Promise<MemoryRecord[]>;
   writeRawMessage?(sessionId: string, role: string, content: string): Promise<void>;

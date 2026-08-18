@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createPackage } from '@electron/asar';
@@ -37,6 +38,15 @@ describe('packaged main freshness verifier', () => {
       '--dist-root', distRoot,
     ], { encoding: 'utf8' });
   }
+
+  it('uses target-platform separators for the ASAR entry path', () => {
+    const require = createRequire(import.meta.url);
+    const verifier = require(join(process.cwd(), 'scripts', 'verify-packaged-main-freshness.cjs'));
+
+    expect(verifier.packagedMainPath(win32)).toBe(
+      win32.join('dist', 'main', 'desktop', 'electron', 'kb-tools.js'),
+    );
+  });
 
   it('accepts an app.asar whose kb-tools bytecode matches the current main build', async () => {
     const contents = 'export const build = "current";\n';
