@@ -63,6 +63,7 @@ import { createChatIntentTurnState } from './chat/intent-turn-state.js';
 import { createStrictSkillAdherenceFlow } from './chat/skill-adherence-flow.js';
 import {
   endStreamingPhaseForInterruptInOrder,
+  ensureStreamingPhaseInOrder,
   renderFooterChromeInOrder,
 } from './chat/terminal-streaming-boundary.js';
 import { MarkdownRenderer } from '../ui/markdown.js';
@@ -983,20 +984,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
   };
   const flushStreamingMarkdown = (): void => {
-    const renderedSegment = streamingSegmentText;
     try {
-      const flushResult = mdRenderer.flush();
       if (scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
-        if (renderedSegment) {
-          scrollRegion.syncContentCursorFromRenderedLines(MarkdownRenderer.renderToLines(renderedSegment));
-        } else if (flushResult.rows > 0) {
-          if (flushResult.renderedLine) {
-            scrollRegion.advanceContentCursorByRenderedText(flushResult.renderedLine, { finalizeLine: true });
-          } else {
-            scrollRegion.advanceContentCursor(flushResult.rows);
-          }
-        }
+        // Footer/prompt redraws (e.g. typing while the turn is busy) leave the
+        // real cursor inside the footer, so anchor back before writing the tail.
+        scrollRegion.positionCursorAtContentCursor();
       }
+      // Row/column bookkeeping already happened during the write via the
+      // newline and column-advance callbacks; recomputing it here would
+      // overwrite exact values with a second, less precise wrap model.
+      mdRenderer.flush();
     } finally {
       resetStreamingSegment();
     }
@@ -1263,27 +1260,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const ensureStreamingPhase = (): void => {
-    if (scrollRegion.isContentStreaming()) {
-      if (scrollRegion.isActive()) {
-        scrollRegion.clearActivity();
-        scrollRegion.positionCursorAtContentCursor();
-        mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
-      }
-      return;
-    }
-
-    const assistantLeadIn = turnLayout.consumeAssistantLeadIn();
-    if (assistantLeadIn) {
-      if (scrollRegion.isActive()) {
-        scrollRegion.writeAtContentCursor(assistantLeadIn);
-      } else {
-        process.stdout.write(assistantLeadIn);
-      }
-    }
-    stopLiveActivityTimer();
-    scrollRegion.beginContentStreaming();
-    runtimeState.enterStreamingContent();
-    mdRenderer.setNewlineCallback(scrollRegion.getNewlineCallback());
+    ensureStreamingPhaseInOrder({
+      scrollRegion,
+      runtimeState,
+      turnLayout,
+      mdRenderer,
+      stopLiveActivityTimer,
+      writeFallback: (text) => {
+        process.stdout.write(text);
+      },
+    });
   };
 
   const handleAssistantTextChunk = (
@@ -2702,6 +2688,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     turnHadAskUserQuestion = false;
     intentTurnState.clearTurnContext(event.turnId);
     currentTurnStageObservedSkillNames = new Map<number, Set<string>>();
+    // Flush before resetTurnChrome(), which discards the renderer buffer.
+    endStreamingPhaseForInterrupt();
     runtimeState.markInputReady();
     resetTurnChrome();
     void refreshIntentLedger().then(renderIntentSummaryLine);
@@ -2712,6 +2700,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     turnHadAskUserQuestion = false;
     intentTurnState.clearTurnContext(event.turnId);
     currentTurnStageObservedSkillNames = new Map<number, Set<string>>();
+    endStreamingPhaseForInterrupt();
     runtimeState.markInputReady();
     resetTurnChrome();
     void refreshIntentLedger().then(renderIntentSummaryLine);
@@ -3202,7 +3191,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             if (invocation.strictMode) {
               result = await maybeRunStrictCompletionLoop(result);
             }
-            mdRenderer.write(result);
+            {
+              // Not a streaming phase: render to lines and land them at the
+              // content cursor instead of feeding the streaming renderer,
+              // whose buffer would stay invisible until an unrelated flush.
+              const block = `${MarkdownRenderer.renderToLines(result).join('\n')}\n`;
+              if (scrollRegion.isActive() && !terminalUiSuspended) {
+                scrollRegion.writeAtContentCursor(block);
+              } else {
+                process.stdout.write(block);
+              }
+            }
           } else {
             const userMsg = slash.rest
               ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`

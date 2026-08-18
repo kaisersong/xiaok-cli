@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MarkdownRenderer } from '../../src/ui/markdown.js';
 import { setColorsEnabled } from '../../src/ui/render.js';
-import { getDisplayWidth, stripAnsi } from '../../src/ui/text-metrics.js';
 
 describe('MarkdownRenderer', () => {
   let output = '';
@@ -34,11 +33,13 @@ describe('MarkdownRenderer', () => {
     expect(output).toContain('• 列表项\n');
   });
 
-  it('keeps the left gutter while streaming a partial line', () => {
+  it('buffers a partial line and emits it with the left gutter once finalized', () => {
     const renderer = new MarkdownRenderer();
 
     renderer.write('streaming');
+    expect(output).toBe('');
 
+    renderer.flush();
     expect(output).toBe('● streaming');
   });
 
@@ -244,21 +245,18 @@ describe('MarkdownRenderer', () => {
     });
   });
 
-  it('clears every visual row of a soft-wrapped pending line before flushing it formatted', () => {
+  it('emits no erase sequences while streaming a soft-wrapped line', () => {
     const renderer = new MarkdownRenderer();
     process.stdout.columns = 20;
     const finalParagraph = '两个文件均为零依赖，可直接浏览器打开查看；幻灯片按 F5 进入演讲模式。';
 
-    renderer.write(finalParagraph);
-    const pendingRows = Math.ceil(getDisplayWidth(stripAnsi(output)) / process.stdout.columns);
-    expect(pendingRows).toBeGreaterThan(1);
-
-    output = '';
+    for (const char of finalParagraph) {
+      renderer.write(char);
+    }
     renderer.flush();
 
-    const clearSequences = output.match(/\x1b\[1G\x1b\[2K/g) ?? [];
-    expect(output).toContain(`\x1b[${pendingRows - 1}A`);
-    expect(clearSequences).toHaveLength(pendingRows);
+    expect(output).not.toContain('\x1b[2K');
+    expect(output).not.toContain('\x1b[1G');
     expect(output).toContain('● 两个文件均为零依赖');
   });
 });

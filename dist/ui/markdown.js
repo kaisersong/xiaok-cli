@@ -16,14 +16,14 @@ export class MarkdownRenderer {
     inCodeBlock = false;
     codeLang = "";
     mermaidBuffer = [];
-    pendingLen = 0;
-    pendingPrefix = "";
     lineCount = 0;
     termWidth = 0;
     consecutiveBlankLines = 0;
     hasRenderedLeadParagraph = false;
     /** Optional callback for newline output (e.g., scroll-region-aware). */
     newlineFn = null;
+    /** Optional callback reporting visible columns advanced within a rendered row. */
+    columnAdvanceFn = null;
     /** Get the number of content lines written (for cursor positioning). */
     getLineCount(termWidth) {
         if (termWidth)
@@ -37,6 +37,41 @@ export class MarkdownRenderer {
     setNewlineCallback(callback) {
         this.newlineFn = callback;
     }
+    /**
+     * Set a callback that receives the visible width written inside a rendered
+     * row. Without it the cursor column tracked by the caller would stay at 0 for
+     * rows that do not end in a newline, and the next absolute reposition would
+     * overwrite them from column 0.
+     */
+    setColumnAdvanceCallback(callback) {
+        this.columnAdvanceFn = callback;
+    }
+    emitNewline() {
+        if (this.newlineFn) {
+            this.newlineFn();
+        }
+        else {
+            process.stdout.write("\n");
+        }
+    }
+    /**
+     * Write already-formatted text, routing every embedded newline through the
+     * newline callback so the caller's row bookkeeping sees soft-wrapped rows.
+     * Byte output is identical to a single write of `rendered`.
+     */
+    emitRendered(rendered) {
+        const rows = rendered.split("\n");
+        rows.forEach((row, index) => {
+            if (row)
+                process.stdout.write(row);
+            if (index < rows.length - 1) {
+                this.emitNewline();
+            }
+            else if (row) {
+                this.columnAdvanceFn?.(getDisplayWidth(stripAnsi(row)));
+            }
+        });
+    }
     /** Feed a text chunk (may be partial line). */
     write(text) {
         this.buffer += text;
@@ -44,61 +79,19 @@ export class MarkdownRenderer {
         while ((nlIdx = this.buffer.indexOf("\n")) !== -1) {
             const line = this.buffer.slice(0, nlIdx);
             this.buffer = this.buffer.slice(nlIdx + 1);
-            // If there's pending partial text, incorporate it into this line.
-            // Only clear+re-render if the pending text adds NEW content beyond
-            // what renderLine already wrote (i.e., the line was updated mid-stream).
-            if (this.pendingLen > 0 && this.pendingLen < line.length) {
-                // Streaming update: new chars arrived after initial render.
-                // Clear the old render and re-render with the full line.
-                this.clearPendingRender(line.slice(0, this.pendingLen));
-                this.renderLine(line);
-            }
-            else if (this.pendingLen > 0 && this.pendingLen >= line.length) {
-                // Full line was already rendered (or over-rendered) by pending.
-                // The pending text was written raw (unformatted); re-render with formatting.
-                this.clearPendingRender(line);
-                this.renderLine(line);
-            }
-            else {
-                // No pending text — this is a fresh complete line.
-                const rendered = this.renderLine(line);
-                const renderedRows = this.countRenderedRows(rendered);
-                this.lineCount += renderedRows;
-            }
-            this.pendingLen = 0;
-            this.pendingPrefix = "";
+            const rendered = this.renderLine(line);
+            this.lineCount += this.countRenderedRows(rendered);
             const isBlank = line.trim() === "";
             if (isBlank && !this.inCodeBlock) {
                 this.consecutiveBlankLines++;
                 if (this.consecutiveBlankLines > 1) {
                     continue;
                 }
-                if (this.newlineFn) {
-                    this.newlineFn();
-                }
-                else {
-                    process.stdout.write("\n");
-                }
+                this.emitNewline();
                 continue;
             }
             this.consecutiveBlankLines = 0;
-            if (this.newlineFn) {
-                this.newlineFn();
-            }
-            else {
-                process.stdout.write("\n");
-            }
-        }
-        // Write remaining buffer as partial line (streaming text without newline).
-        // Only write new characters beyond what's already displayed.
-        if (this.buffer.length > this.pendingLen) {
-            const newChars = this.buffer.slice(this.pendingLen);
-            if (this.pendingLen === 0) {
-                this.pendingPrefix = this.getPendingPrefix();
-                process.stdout.write(this.pendingPrefix);
-            }
-            process.stdout.write(newChars);
-            this.pendingLen = this.buffer.length;
+            this.emitNewline();
         }
     }
     /** Flush remaining buffer and return the finalized row count plus rendered tail text. */
@@ -106,24 +99,13 @@ export class MarkdownRenderer {
         let flushedRows = 0;
         let renderedLine = '';
         if (this.buffer) {
-            if (this.pendingLen > 0) {
-                this.clearPendingRender(this.buffer);
-                this.pendingLen = 0;
-                this.pendingPrefix = "";
-            }
             const flushed = this.buffer;
+            this.buffer = "";
             renderedLine = this.formatLine(flushed);
-            process.stdout.write(renderedLine);
+            this.emitRendered(renderedLine);
             flushedRows = this.countRenderedRows(renderedLine);
             this.lineCount += flushedRows;
-            this.buffer = "";
         }
-        // Reset pendingLen after flush to prevent subsequent write() calls
-        // from clearing the line where the flushed content was written.
-        // This can happen if the footer has been rendered between flush()
-        // and the next write().
-        this.pendingLen = 0;
-        this.pendingPrefix = "";
         return { rows: flushedRows, renderedLine };
     }
     /** Reset state between messages. */
@@ -132,12 +114,11 @@ export class MarkdownRenderer {
         this.inCodeBlock = false;
         this.codeLang = "";
         this.mermaidBuffer = [];
-        this.pendingLen = 0;
-        this.pendingPrefix = "";
         this.lineCount = 0;
         this.consecutiveBlankLines = 0;
         this.hasRenderedLeadParagraph = false;
         this.newlineFn = null;
+        this.columnAdvanceFn = null;
     }
     /**
      * Start a fresh assistant segment inside the same turn.
@@ -147,11 +128,10 @@ export class MarkdownRenderer {
     beginNewSegment() {
         this.hasRenderedLeadParagraph = false;
         this.consecutiveBlankLines = 0;
-        this.pendingPrefix = "";
     }
     renderLine(line) {
         const rendered = this.formatLine(line);
-        process.stdout.write(rendered);
+        this.emitRendered(rendered);
         return rendered;
     }
     formatLine(line) {
@@ -260,22 +240,6 @@ export class MarkdownRenderer {
         const lines = text.split('\n');
         return lines.reduce((sum, line) => sum + this.countRows(line), 0);
     }
-    clearPendingRender(text) {
-        const rows = this.countRenderedRows(`${this.pendingPrefix}${text}`);
-        const rowsAboveCurrent = rows - 1;
-        if (rowsAboveCurrent > 0) {
-            process.stdout.write(`\x1b[${rowsAboveCurrent}A`);
-        }
-        for (let row = 0; row < rows; row += 1) {
-            process.stdout.write(`\x1b[1G\x1b[2K`);
-            if (row < rows - 1) {
-                process.stdout.write(`\x1b[1B`);
-            }
-        }
-        if (rowsAboveCurrent > 0) {
-            process.stdout.write(`\x1b[${rowsAboveCurrent}A`);
-        }
-    }
     formatLeadParagraphLine(line) {
         const renderedText = this.inlineFormat(line);
         const plainPrefix = `${BODY_GUTTER}${LEAD_PREFIX_TEXT}`;
@@ -359,15 +323,6 @@ export class MarkdownRenderer {
         text = text.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, s) => dim(s));
         text = text.replace(/~~(.+?)~~/g, (_, s) => dim(s));
         return text;
-    }
-    getPendingPrefix() {
-        if (this.inCodeBlock && getTheme() === "default") {
-            return `${BODY_GUTTER}${dim("│")} `;
-        }
-        if (!this.hasRenderedLeadParagraph) {
-            return `${BODY_GUTTER}${cyan(LEAD_BULLET)} `;
-        }
-        return BODY_GUTTER;
     }
     /**
      * Render markdown text to an array of ANSI-formatted lines.

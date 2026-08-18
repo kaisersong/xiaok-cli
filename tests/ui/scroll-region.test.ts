@@ -1969,18 +1969,15 @@ describe('Bug 11: Terminal resize handling', () => {
     const { manager } = createMock(24, 80);
     manager.begin();
 
-    // Write 90 characters on 80-col terminal — should wrap
+    // 90 characters on an 80-col terminal wrap onto a second row.
     manager.writeAtContentCursor('x'.repeat(90));
-    const rowAfter80 = (manager as any)._cursorRow;
+    expect((manager as any)._cursorRow).toBe(2);
 
-    // Reset and try on 100-col terminal
+    // The same text fits on one row once the terminal is 100 columns wide.
     const { manager: manager2 } = createMock(24, 100);
     manager2.begin();
     manager2.writeAtContentCursor('x'.repeat(90));
-    const rowAfter100 = (manager2 as any)._cursorRow;
-
-    // On wider terminal, fewer wraps should occur
-    expect(rowAfter100).toBeLessThanOrEqual(rowAfter80);
+    expect((manager2 as any)._cursorRow).toBe(1);
   });
 
   it('clears the old footer rows when a Mac terminal resize moves the footer down', () => {

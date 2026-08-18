@@ -897,6 +897,15 @@ function normalizeAssistantLine(line: string): string {
   return trimmed.startsWith('● ') ? trimmed.slice(2) : trimmed;
 }
 
+/**
+ * Assistant text is soft-wrapped with a two-space continuation indent, so a
+ * long reply spans several rendered rows. Join them back before matching the
+ * original text.
+ */
+function joinWrappedAssistantRows(text: string): string {
+  return text.replace(/\n {2}/g, '');
+}
+
 function expectSingleFooter(lines: string[]): void {
   const statusRows = lines
     .map((line, index) => ({ line, index }))
@@ -1916,7 +1925,8 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         expect(harness.output.normalized).toContain('🤝 已理解，会先提取 Markdown，再生成报告。');
-        expect(harness.output.normalized).toContain(`echo:把这篇文档生成 md，然后生成报告 ${demoFile}`);
+        expect(joinWrappedAssistantRows(harness.output.normalized))
+          .toContain(`echo:把这篇文档生成 md，然后生成报告 ${demoFile}`);
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);
@@ -4473,7 +4483,7 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         const lines = harness.screen.lines();
-        expect(harness.output.normalized).toContain(`echo:${longFollowupPrompt}`);
+        expect(joinWrappedAssistantRows(harness.output.normalized)).toContain(`echo:${longFollowupPrompt}`);
         expectSingleFooter(lines);
       }, { timeoutMs: 4_000 });
 

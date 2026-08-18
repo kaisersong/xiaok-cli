@@ -8,14 +8,14 @@ export declare class MarkdownRenderer {
     private inCodeBlock;
     private codeLang;
     private mermaidBuffer;
-    private pendingLen;
-    private pendingPrefix;
     private lineCount;
     private termWidth;
     private consecutiveBlankLines;
     private hasRenderedLeadParagraph;
     /** Optional callback for newline output (e.g., scroll-region-aware). */
     private newlineFn;
+    /** Optional callback reporting visible columns advanced within a rendered row. */
+    private columnAdvanceFn;
     /** Get the number of content lines written (for cursor positioning). */
     getLineCount(termWidth?: number): number;
     /**
@@ -23,6 +23,20 @@ export declare class MarkdownRenderer {
      * instead of writing '\n' to stdout.
      */
     setNewlineCallback(callback: (() => void) | null): void;
+    /**
+     * Set a callback that receives the visible width written inside a rendered
+     * row. Without it the cursor column tracked by the caller would stay at 0 for
+     * rows that do not end in a newline, and the next absolute reposition would
+     * overwrite them from column 0.
+     */
+    setColumnAdvanceCallback(callback: ((visibleWidth: number) => void) | null): void;
+    private emitNewline;
+    /**
+     * Write already-formatted text, routing every embedded newline through the
+     * newline callback so the caller's row bookkeeping sees soft-wrapped rows.
+     * Byte output is identical to a single write of `rendered`.
+     */
+    private emitRendered;
     /** Feed a text chunk (may be partial line). */
     write(text: string): void;
     /** Flush remaining buffer and return the finalized row count plus rendered tail text. */
@@ -42,14 +56,12 @@ export declare class MarkdownRenderer {
     private formatLine;
     private countRows;
     private countRenderedRows;
-    private clearPendingRender;
     private formatLeadParagraphLine;
     private formatWrappedListItem;
     private getWrapWidth;
     private wrapStyledText;
     /** Apply inline formatting. */
     private inlineFormat;
-    private getPendingPrefix;
     /**
      * Render markdown text to an array of ANSI-formatted lines.
      * Does not write to stdout — returns lines for embedding in other UI.

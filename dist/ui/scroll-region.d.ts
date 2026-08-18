@@ -276,6 +276,18 @@ export declare class ScrollRegionManager {
     }): void;
     writeSubmittedInput(text: string): void;
     getNewlineCallback(): (() => void);
+    /**
+     * Report visible columns written inside a rendered row that did not end in a
+     * newline. Uses the terminal's deferred-wrap rule: filling the last column
+     * leaves the cursor on the same row until one more character arrives.
+     */
+    getColumnAdvanceCallback(): ((visibleWidth: number) => void);
+    /**
+     * When content pushes past the bottom margin the region scrolls up, so every
+     * absolute row anchor recorded earlier shifts with it. `clampCursorRow` hides
+     * the overflow, hence the compensation has to be computed before clamping.
+     */
+    private absorbRegionScroll;
     syncContentCursorFromRenderedLines(lines: string[]): void;
     private padLine;
     /**
