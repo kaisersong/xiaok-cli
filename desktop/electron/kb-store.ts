@@ -39,6 +39,11 @@ export interface KbStore {
 
   // Source CRUD
   addSource(input: AddSourceInput, requestSource: RequestSource): Source;
+  claimSourceContentHash(
+    sourceId: string,
+    sha256: string,
+    requestSource: RequestSource,
+  ): { source: Source; created: boolean };
   getSource(id: string): Source | undefined;
   listSources(collectionId: string): Source[];
   deleteSource(id: string): void;

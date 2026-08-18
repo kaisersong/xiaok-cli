@@ -260,6 +260,7 @@ describe('catalog only lists models the providers actually serve', () => {
 describe('GLM catalog context windows', () => {
   // 数值来自 https://docs.bigmodel.cn/cn/guide/start/model-overview 逐个查证。
   const OFFICIAL_CONTEXT_LIMITS: Record<string, number> = {
+    'glm-5.3': 1_048_576,
     'glm-5.2': 1_000_000,
     'glm-5.1': 200_000,
     'glm-5': 200_000,
@@ -299,6 +300,33 @@ describe('GLM catalog context windows', () => {
     expect(twin).toBeDefined();
     expect(profile!.defaultModel.runtimeOptions).toEqual(twin?.runtimeOptions);
     expect(profile!.defaultModel.capabilities).toEqual(twin?.capabilities);
+  });
+
+  it('registers GLM-5.3 with mandatory thinking and no disabled reasoning tier', () => {
+    // GLM-5.3 官方文档（https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3，2026-08-16 查证）：
+    // 1M 上下文窗口、128K 最大输出，思考功能始终启用，reasoning_effort 仅支持
+    // low/high/max（无 disabled），默认 max。与 GLM-5.2 及以下版本（capabilities
+    // 只有 'tools'，无思考控制）的建模方式不同。
+    const profile = getProviderProfile('glm');
+    const variant = profile!.availableModels?.find((item) => item.modelId === 'glm-5.3');
+
+    expect(variant).toBeDefined();
+    expect(variant?.model).toBe('GLM-5.3');
+    expect(variant?.capabilities).toContain('thinking');
+    expect(variant?.capabilities).toContain('tools');
+    expect(variant?.runtimeOptions?.contextLimit).toBe(1_048_576);
+    expect(variant?.runtimeOptions?.reasoningEffort).toBe('max');
+    expect(variant?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
+  });
+
+  it('finds GLM-5.3 by its synthesized legacy modelId via the wire-model fallback', () => {
+    // 存量 config.json 里可能残留 `glm-glm-5-3` 这类合成 id（provider 前缀重复），
+    // 与 catalog 的 `glm-5.3` 不一致；findCatalogModel 的 wireModel 回退应仍能命中。
+    const profile = getProviderProfile('glm');
+    const recovered = findCatalogModel(profile, 'glm-glm-5-3', 'GLM-5.3');
+
+    expect(recovered).toBeDefined();
+    expect(recovered?.runtimeOptions?.contextLimit).toBe(1_048_576);
   });
 });
 

@@ -26,6 +26,10 @@ import type {
   UpdateSourceParseResultInput,
 } from './kb-types.js';
 import { computeKbSourceContentDigest, type KbStore } from './kb-store.js';
+import {
+  computeKnowledgeContentHash,
+  reconstructKnowledgeSourceText,
+} from './kb-source-identity.js';
 
 const SCHEMA_SQL = `
   PRAGMA journal_mode = WAL;
@@ -132,6 +136,12 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA_SQL);
   db.exec('PRAGMA foreign_keys = ON');
+  backfillCanonicalSourceHashes(db);
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sources_collection_content_hash
+    ON sources(collection_id, sha256)
+    WHERE sha256 <> ''
+  `);
 
   const now = () => Date.now();
 
@@ -247,6 +257,61 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return row ? mapSource(row) : undefined;
   }
 
+  function claimSourceContentHash(
+    sourceId: string,
+    sha256: string,
+    requestSource: RequestSource,
+  ): { source: Source; created: boolean } {
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+      throw new Error('A valid content hash is required to claim a Knowledge source');
+    }
+    const source = getSource(sourceId);
+    if (!source) throw new Error(`Source not found: ${sourceId}`);
+    if (source.kind === 'meeting') {
+      throw new Error('Meeting sources do not use content-hash claims');
+    }
+    if (source.parseStatus !== 'pending' && source.parseStatus !== 'parsing') {
+      throw new Error(`Source state does not allow content hash claim: ${source.parseStatus}`);
+    }
+    if (requestSource !== 'scheduler' && source.metadata.createdBy !== requestSource) {
+      throw new Error(`Request source ${requestSource} is not allowed to claim this source`);
+    }
+
+    const findCanonical = () => {
+      const row = db.prepare(`
+        SELECT * FROM sources
+        WHERE collection_id = ? AND sha256 = ? AND id <> ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `).get(source.collectionId, sha256, sourceId) as Record<string, unknown> | undefined;
+      return row ? mapSource(row) : undefined;
+    };
+    const removeProvisionalSource = () => {
+      const current = getSource(sourceId);
+      if (!current || current.chunkCount !== 0 || (current.parseStatus !== 'pending' && current.parseStatus !== 'parsing')) {
+        throw new Error('Only an empty pending source can be removed after a duplicate claim');
+      }
+      db.prepare('DELETE FROM sources WHERE id = ?').run(sourceId);
+    };
+
+    const existing = findCanonical();
+    if (existing) {
+      removeProvisionalSource();
+      return { source: existing, created: false };
+    }
+
+    try {
+      db.prepare('UPDATE sources SET sha256 = @sha256, updated_at = @updatedAt WHERE id = @id')
+        .run({ id: sourceId, sha256, updatedAt: now() });
+      return { source: getSource(sourceId)!, created: true };
+    } catch (error) {
+      const concurrent = findCanonical();
+      if (!concurrent) throw error;
+      removeProvisionalSource();
+      return { source: concurrent, created: false };
+    }
+  }
+
   function listSources(collectionId: string): Source[] {
     return (db.prepare('SELECT * FROM sources WHERE collection_id = ? ORDER BY created_at ASC').all(collectionId) as Record<string, unknown>[]).map(mapSource);
   }
@@ -274,6 +339,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     const createdBy = source.metadata.createdBy;
     if (requestSource !== 'scheduler' && createdBy !== requestSource) {
       throw new Error(`Request source ${requestSource} is not allowed to update this source`);
+    }
+    if (input.parseStatus === 'parsed' && source.kind !== 'meeting' && !source.sha256) {
+      throw new Error('A content hash is required before a Knowledge source can become parsed');
     }
     const metadata = {
       ...source.metadata,
@@ -487,11 +555,55 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   return {
     _db: db,
     createCollection, getCollection, listCollections, renameCollection, deleteCollection,
-    addSource, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
+    addSource, claimSourceContentHash, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
     insertChunks, listChunks, markChunkEmbedded, markChunkFailed,
     createMeeting, getMeeting, listMeetings, updateMeeting,
     getCollectionState, getSourceWithContent, close,
   };
+}
+
+function backfillCanonicalSourceHashes(db: DatabaseSync): void {
+  const claimed = new Set(
+    (db.prepare("SELECT collection_id, sha256 FROM sources WHERE sha256 <> ''").all() as Array<Record<string, unknown>>)
+      .map(row => `${row.collection_id as string}:${row.sha256 as string}`),
+  );
+  const sources = db.prepare(`
+    SELECT id, collection_id
+    FROM sources
+    WHERE parse_status = 'parsed' AND sha256 = '' AND kind <> 'meeting'
+    ORDER BY created_at ASC, id ASC
+  `).all() as Array<{ id: string; collection_id: string }>;
+  const chunksStatement = db.prepare(`
+    SELECT text, char_start, char_end
+    FROM chunks
+    WHERE source_id = ?
+    ORDER BY idx ASC
+  `);
+  const updateStatement = db.prepare('UPDATE sources SET sha256 = ? WHERE id = ? AND sha256 = ?');
+
+  for (const source of sources) {
+    const chunks = chunksStatement.all(source.id) as Array<{
+      text: string;
+      char_start: number;
+      char_end: number;
+    }>;
+    if (chunks.length === 0) continue;
+    const text = reconstructKnowledgeSourceText(chunks.map(chunk => ({
+      text: chunk.text,
+      charStart: chunk.char_start,
+      charEnd: chunk.char_end,
+    })));
+    if (!text) continue;
+    const sha256 = computeKnowledgeContentHash(text);
+    const key = `${source.collection_id}:${sha256}`;
+    if (claimed.has(key)) continue;
+    try {
+      updateStatement.run(sha256, source.id, '');
+      claimed.add(key);
+    } catch {
+      claimed.add(key);
+    }
+  }
 }
 
 function mapCollection(row: Record<string, unknown>): Collection {

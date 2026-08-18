@@ -11,6 +11,10 @@ import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
 import type { ArtifactWorkspaceErrorCode } from '../shared/artifact-workspace-types.js';
 import { OFFICE_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
+import {
+  computeKnowledgeContentHash,
+  reconstructKnowledgeSourceText,
+} from './kb-source-identity.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
@@ -1457,6 +1461,12 @@ export async function registerDesktopIpc(
     requestSource: import('./kb-types.js').RequestSource,
   ) => {
     if (result.ok && result.text) {
+      const claim = store.claimSourceContentHash(
+        sourceId,
+        computeKnowledgeContentHash(result.text),
+        requestSource,
+      );
+      if (!claim.created) return claim.source;
       const chunks = kbChunker.chunk({ text: result.text, mimeType: result.mimeType });
       store.insertChunks(sourceId, chunks);
       return store.updateSourceParseResult(sourceId, {
@@ -1493,6 +1503,12 @@ export async function registerDesktopIpc(
           for (const src of pendingSources) {
             try {
               if (store.listChunks(src.id).length > 0) {
+                const chunks = store.listChunks(src.id);
+                store.claimSourceContentHash(
+                  src.id,
+                  computeKnowledgeContentHash(reconstructKnowledgeSourceText(chunks)),
+                  'scheduler',
+                );
                 store.updateSourceParseResult(src.id, { parseStatus: 'parsed' }, 'scheduler');
                 continue;
               }
@@ -1569,11 +1585,12 @@ export async function registerDesktopIpc(
       } else if (input?.kind === 'url' && input?.uri) {
         extractResult = await kbSourceExtractor.extractFromUrl(input.uri);
       }
-      finishSourceExtraction(store, source.id, extractResult ?? {
+      const finalized = finishSourceExtraction(store, source.id, extractResult ?? {
         ok: false,
         errorCode: 'invalid_source_input',
         error: 'Source content is missing.',
       }, 'user');
+      return finalized;
     } catch (e) {
       log('error', 'kb:addSource processing failed', String(e));
       try {
