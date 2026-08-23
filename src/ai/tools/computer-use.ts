@@ -1,5 +1,10 @@
 import type { Tool } from '../../types.js';
 import type { McpRuntimeToolResult } from '../mcp/runtime/client.js';
+import {
+  CUA_ACTION_CONTRACTS,
+  InvalidComputerUseInputError,
+  translateCuaAction,
+} from '../../platform/computer-use/cua-action-contract.js';
 
 export interface ComputerUseBackend {
   getUnavailableError?(): ComputerUseUnavailableError | null;
@@ -13,21 +18,14 @@ export interface ComputerUseUnavailableError {
   userAction?: { type: string; label: string };
 }
 
-const ACTION_TO_CUA_TOOL: Record<string, string> = {
-  capture: 'get_window_state',
-  screenshot: 'screenshot',
-  list_apps: 'list_apps',
-  list_windows: 'list_windows',
-  click: 'click',
-  double_click: 'double_click',
-  right_click: 'right_click',
-  middle_click: 'middle_click',
-  drag: 'drag',
-  scroll: 'scroll',
-  type: 'type_text',
-  key: 'press_key',
-  set_value: 'set_value',
-};
+/**
+ * Design v58 §6.1: the public action list now comes from the frozen
+ * `CuaActionContract` table, which is also what activation verifies. The old map
+ * pointed `screenshot` and `middle_click` at backend operations that do not exist
+ * in cua-driver 0.19.3 (its legacy catalog has 54 tools and neither of those), so
+ * a "ready" provider failed at call time with Unknown tool.
+ */
+const PUBLIC_CUA_ACTIONS: readonly string[] = CUA_ACTION_CONTRACTS.map((c) => c.action);
 
 const DANGEROUS_KEY_PATTERNS = [
   /^cmd\+shift\+q$/i,
@@ -56,7 +54,7 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         properties: {
           action: {
             type: 'string',
-            enum: Object.keys(ACTION_TO_CUA_TOOL),
+            enum: PUBLIC_CUA_ACTIONS,
             description: 'Computer-use action to run.',
           },
           app: { type: 'string' },
@@ -110,8 +108,7 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       }
 
       const action = typeof input.action === 'string' ? input.action : '';
-      const toolName = ACTION_TO_CUA_TOOL[action];
-      if (!toolName) {
+      if (!PUBLIC_CUA_ACTIONS.includes(action)) {
         return `Error: unsupported computer-use action: ${String(input.action)}`;
       }
 
@@ -132,9 +129,19 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         return prepared;
       }
 
+      // The frozen table decides the backend operation, the allowed field set,
+      // renames and forced constants; nothing is passed through implicitly.
+      let translated: { operation: string; input: Record<string, unknown> };
+      try {
+        translated = translateCuaAction(action, prepared);
+      } catch (error) {
+        if (error instanceof InvalidComputerUseInputError) return `Error: ${error.message}`;
+        throw error;
+      }
+
       let result: McpRuntimeToolResult;
       try {
-        result = await backend.callToolResult(toolName, prepared);
+        result = await backend.callToolResult(translated.operation, translated.input);
       } catch (error) {
         const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
         if (recoverable) return returnRecoverableError(recoverable, true);
@@ -160,7 +167,14 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
           response.captureAfter = { error: captureInput };
           return JSON.stringify(response);
         }
-        const capture = await backend.callToolResult('get_window_state', captureInput);
+        // The follow-up observation goes through the same frozen translator as the
+        // public `capture` action, so both paths force include_screenshot and share
+        // one allowed-field set (design §6.1).
+        const captureTranslated = translateCuaAction('capture', captureInput);
+        const capture = await backend.callToolResult(
+          captureTranslated.operation,
+          captureTranslated.input,
+        );
         if (capture.isError) {
           const recoverable = classifyRecoverableComputerUseError(capture.summary || capture.text);
           if (recoverable) return returnRecoverableError(recoverable, true);
