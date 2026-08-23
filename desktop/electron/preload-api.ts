@@ -58,6 +58,8 @@ export const PRELOAD_API_KEYS = [
   'deleteProvider',
   'deleteModel',
   'getMobilePairingInfo',
+  'getMobileRelayStatus',
+  'openMobileRelaySignIn',
   'readClipboardFilePaths',
   'readClipboardImage',
   'selectDirectory',
@@ -106,9 +108,7 @@ export const PRELOAD_API_KEYS = [
   'updateMCPInstall',
   'deleteMCPInstall',
   'listPluginMcpServers',
-  'setPluginMcpServerEnabled',
-  'restartPluginMcpServers',
-  'restartPluginMcpServer',
+  'retryPluginComponent',
   'getComputerUseCapabilityStatus',
   'enableComputerUse',
   'reconnectComputerUse',
@@ -162,6 +162,7 @@ export const PRELOAD_API_KEYS = [
   'stopKSwarmAgent',
   'probeKSwarmAgent',
   'onKSwarmStatus',
+  'onMobileRelayStatus',
   'exportTraceBundle',
   'diagnose',
   'getLoopDefinitions',
@@ -316,6 +317,7 @@ export const EVENT_SUBSCRIPTION_KEYS = [
   'onScheduledTaskDue',
   'onLoopConstraintAdded',
   'onKSwarmStatus',
+  'onMobileRelayStatus',
   'onKSwarmWsEvent',
   'onKSwarmConnectionStatus',
   'onMeetingRecorderCloseRequested',
@@ -352,6 +354,8 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   deleteProvider: 'desktop:deleteProvider',
   deleteModel: 'desktop:deleteModel',
   getMobilePairingInfo: 'desktop:mobile:getPairingInfo',
+  getMobileRelayStatus: 'desktop:mobile:getRelayStatus',
+  openMobileRelaySignIn: 'desktop:mobile:openRelaySignIn',
   readClipboardFilePaths: 'desktop:readClipboardFilePaths',
   readClipboardImage: 'desktop:readClipboardImage',
   selectDirectory: 'desktop:selectDirectory',
@@ -398,9 +402,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   updateMCPInstall: 'desktop:updateMCPInstall',
   deleteMCPInstall: 'desktop:deleteMCPInstall',
   listPluginMcpServers: 'desktop:listPluginMcpServers',
-  setPluginMcpServerEnabled: 'desktop:setPluginMcpServerEnabled',
-  restartPluginMcpServers: 'desktop:restartPluginMcpServers',
-  restartPluginMcpServer: 'desktop:restartPluginMcpServer',
+  retryPluginComponent: 'desktop:retryPluginComponent',
   getComputerUseCapabilityStatus: 'desktop:getComputerUseCapabilityStatus',
   enableComputerUse: 'desktop:enableComputerUse',
   reconnectComputerUse: 'desktop:reconnectComputerUse',
@@ -687,6 +689,20 @@ export interface MeetingSaveAsrConfigInput {
     model?: string;
     clearApiKey?: boolean;
   };
+}
+
+export type DesktopMobileRelayCredentialState =
+  | 'ok' | 'missing' | 'expired' | 'rejected' | 'unparseable';
+
+export interface DesktopMobileRelayStatus {
+  running: boolean;
+  connected: boolean;
+  relayUrl: string;
+  roomId: string;
+  lastError: string | null;
+  credentialState: DesktopMobileRelayCredentialState;
+  credentialExpiresAt?: string;
+  requiresUserReauth: boolean;
 }
 
 export interface DesktopMobilePairingInfo {
@@ -1120,6 +1136,11 @@ export interface DesktopApi {
   deleteProvider(providerId: string): Promise<void>;
   deleteModel(modelId: string): Promise<void>;
   getMobilePairingInfo(): Promise<DesktopMobilePairingInfo>;
+  /** Typed relay credential state so the UI can tell "expired" from "offline". */
+  getMobileRelayStatus(): Promise<DesktopMobileRelayStatus>;
+  onMobileRelayStatus(handler: (status: DesktopMobileRelayStatus) => void): () => void;
+  /** Opens the relay's own sign-in page; the URL is derived in main, not passed in. */
+  openMobileRelaySignIn(): Promise<{ ok: boolean; url?: string; error?: string }>;
   readClipboardFilePaths(): Promise<string[]>;
   readClipboardImage(): Promise<string | null>;
   selectDirectory(): Promise<{ filePath: string }>;
@@ -1176,9 +1197,8 @@ export interface DesktopApi {
   updateMCPInstall(id: string, input: Partial<DesktopMCPInput>): Promise<DesktopMCPInstallView>;
   deleteMCPInstall(id: string): Promise<void>;
   listPluginMcpServers(): Promise<PluginMcpServerView[]>;
-  setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): Promise<PluginMcpServerView[]>;
-  restartPluginMcpServers(): Promise<PluginMcpServerView[]>;
-  restartPluginMcpServer(input: { name: string }): Promise<PluginMcpServerView[]>;
+  /** Design v58 §7.2: component-scoped retry; never writes persisted desired state. */
+  retryPluginComponent(input: { componentId: string }): Promise<PluginMcpServerView[]>;
   getComputerUseCapabilityStatus(): Promise<ComputerUseCapabilityStatusView>;
   enableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
   reconnectComputerUse(): Promise<ComputerUseCapabilityStatusView>;
@@ -1476,6 +1496,18 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId) as Promise<void>,
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
     getMobilePairingInfo: () => ipcRenderer.invoke('desktop:mobile:getPairingInfo') as Promise<DesktopMobilePairingInfo>,
+    getMobileRelayStatus: () => ipcRenderer.invoke('desktop:mobile:getRelayStatus') as Promise<DesktopMobileRelayStatus>,
+    openMobileRelaySignIn: () => ipcRenderer.invoke('desktop:mobile:openRelaySignIn') as Promise<{ ok: boolean; url?: string; error?: string }>,
+    onMobileRelayStatus(handler) {
+      const channel = 'desktop:mobileRelayStatus';
+      const listener = (_event: unknown, payload: unknown) => {
+        handler(payload as DesktopMobileRelayStatus);
+      };
+      ipcRenderer.on(channel, listener);
+      return () => {
+        ipcRenderer.off(channel, listener);
+      };
+    },
     readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths') as Promise<string[]>,
     readClipboardImage: () => ipcRenderer.invoke('desktop:readClipboardImage') as Promise<string | null>,
     selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory') as Promise<{ filePath: string }>,
@@ -1595,9 +1627,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     updateMCPInstall: (id, input) => ipcRenderer.invoke('desktop:updateMCPInstall', id, input) as Promise<DesktopMCPInstallView>,
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
     listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers') as Promise<PluginMcpServerView[]>,
-    setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input) as Promise<PluginMcpServerView[]>,
-    restartPluginMcpServers: () => ipcRenderer.invoke('desktop:restartPluginMcpServers') as Promise<PluginMcpServerView[]>,
-    restartPluginMcpServer: (input) => ipcRenderer.invoke('desktop:restartPluginMcpServer', input) as Promise<PluginMcpServerView[]>,
+    retryPluginComponent: (input) => ipcRenderer.invoke('desktop:retryPluginComponent', input) as Promise<PluginMcpServerView[]>,
     getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus') as Promise<ComputerUseCapabilityStatusView>,
     enableComputerUse: () => ipcRenderer.invoke('desktop:enableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
     reconnectComputerUse: () => ipcRenderer.invoke('desktop:reconnectComputerUse') as Promise<ComputerUseCapabilityStatusView>,

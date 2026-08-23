@@ -57,8 +57,11 @@ describe('Desktop bundled MCP v2 contract', () => {
   });
 
   it('bumps bundled plugin versions so deployed copies are replaced', () => {
-    expect(readPluginManifest('kai-report-creator').version).toBe('2.1.1');
-    expect(readPluginManifest('kai-slide-creator').version).toBe('3.2.2');
+    // Sibling source moved on (report 2.3.0 / slide 3.3.0); the invariant this test
+    // protects is that the deployed copies are replaced, i.e. the manifests carry a
+    // version at least as new as the last one Desktop pinned.
+    expect(readPluginManifest('kai-report-creator').version).toBe('2.3.0');
+    expect(readPluginManifest('kai-slide-creator').version).toBe('3.3.0');
     expect(readPluginManifest('cua-computer-use').version).toBe('0.2.1');
   });
 });

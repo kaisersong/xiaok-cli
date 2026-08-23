@@ -36,6 +36,10 @@ import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
 import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
 import { deployBundledPlugins } from './deploy-bundled-plugins.js';
+import { DesktopShutdownGate, ShutdownAwareIpcMain } from './shutdown-aware-ipc-main.js';
+import { DesktopShutdownCoordinator } from './desktop-shutdown-coordinator.js';
+import { PluginProviderRuntimeFacade } from './plugin-provider-runtime-facade.js';
+import { UpdaterHandoffStateMachine } from './updater-handoff.js';
 import { TimedActionStore } from './timed-action-store.js';
 import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
@@ -88,6 +92,7 @@ import {
 import {
   createMobileRelayBridge,
   loadMobileRelayConfig,
+  type MobileRelayStatus,
 } from './mobile-relay.js';
 import {
   buildMobileSnapshotFromSources,
@@ -119,6 +124,78 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const USER_DATA_DIR = app.getPath('userData');
 let mainWindow: BrowserWindow | null = null;
 let meetingRecorderController: MeetingRecorderWindowController | null = null;
+/**
+ * Design v58 §5.5: the only holder of the raw Electron `ipcMain`. Every invoke
+ * — reads included — takes a shutdown-gate token, so no hand-maintained
+ * mutation allowlist can miss an entry point.
+ */
+const desktopShutdownGate = new DesktopShutdownGate();
+const shutdownAwareIpc = new ShutdownAwareIpcMain(ipcMain, desktopShutdownGate);
+
+/**
+ * Design v58 §4: created synchronously before any service or gateway, never
+ * replaced. Static gateways capture this identity and get a structured
+ * unavailable result until `start()` runs.
+ */
+const pluginProviderRuntime = new PluginProviderRuntimeFacade();
+
+/**
+ * Design v58 §5.5: the only Xiaok-owned `before-quit` owner. Registered at module
+ * scope so a quit during startup is still ordered; the lifetime disposer is
+ * attached once `createWindow()` has built the per-process resources.
+ */
+const desktopLifetimeSteps: Array<{ name: string; run: () => Promise<void> }> = [];
+function registerLifetimeDisposerStep(name: string, run: () => Promise<void>): void {
+  desktopLifetimeSteps.push({ name, run });
+}
+const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
+  gate: desktopShutdownGate,
+  providerRuntime: pluginProviderRuntime,
+  ingressOwners: [],
+  durableStores: [],
+  destroyWindows: () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.destroy();
+    }
+  },
+  disposeLifetimeResources: async () => {
+    // Each step runs at most once, in registration order; a failing step never
+    // skips the rest (design §5.5 phase ⑥ independent cleanup).
+    for (const step of desktopLifetimeSteps.splice(0)) {
+      try {
+        await step.run();
+      } catch (error) {
+        debugMain(`lifetime disposer step failed: ${step.name}`, error instanceof Error ? error.message : String(error));
+      }
+    }
+  },
+  releaseMainSourcePin: async () => {
+    // Stage 3 wiring: the trusted source resolver installs the real release here
+    // once it owns a pin; before that there is nothing to release.
+  },
+  continuation: () => {
+    app.quit();
+  },
+});
+/**
+ * Two-phase install handoff. `platformClass` follows the real electron-updater
+ * class: darwin instantiates `MacUpdater` (sticky pending, no retry once the
+ * wrapper was entered), every other installer goes through `BaseUpdater`.
+ */
+const updaterHandoff = new UpdaterHandoffStateMachine({
+  platformClass: process.platform === 'darwin' ? 'mac' : 'base',
+  invokeWrapper: () => {
+    quitAndInstall();
+  },
+});
+
+app.on('before-quit', (event) => {
+  // A real before-quit is the only transition into irreversible cleanup.
+  updaterHandoff.commitHandoffOnBeforeQuit();
+  const { preventDefault } = desktopShutdownCoordinator.onBeforeQuit();
+  if (preventDefault) event.preventDefault();
+});
+
 let isQuitting = false;
 const MAX_MOBILE_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -434,14 +511,14 @@ async function createWindow(): Promise<BrowserWindow> {
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
-  ipcMain.handle('desktop:meetingOpenRecorderWindow', (event, input: { collectionId?: unknown }) => {
+  shutdownAwareIpc.handle('desktop:meetingOpenRecorderWindow', (event, input: { collectionId?: unknown }) => {
     if (!isMainWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     if (typeof input?.collectionId !== 'string' || !input.collectionId.trim()) {
       return { ok: false, error: 'collection_id_required' };
     }
     return meetingRecorderController!.open({ collectionId: input.collectionId });
   });
-  ipcMain.handle('desktop:meetingSetRecorderWindowMode', (event, input: { mode?: unknown }) => {
+  shutdownAwareIpc.handle('desktop:meetingSetRecorderWindowMode', (event, input: { mode?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     const mode = input?.mode;
     if (mode !== 'workbench' && mode !== 'compact' && mode !== 'summary') {
@@ -449,7 +526,7 @@ async function createWindow(): Promise<BrowserWindow> {
     }
     return meetingRecorderController!.setMode(mode as MeetingRecorderWindowMode);
   });
-  ipcMain.handle('desktop:meetingSetRecorderSessionState', (event, input: { state?: unknown }) => {
+  shutdownAwareIpc.handle('desktop:meetingSetRecorderSessionState', (event, input: { state?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     const state = input?.state;
     if (state !== 'idle' && state !== 'recording' && state !== 'processing' && state !== 'summary') {
@@ -457,20 +534,20 @@ async function createWindow(): Promise<BrowserWindow> {
     }
     return meetingRecorderController!.setSessionState(state as MeetingRecorderSessionState);
   });
-  ipcMain.handle('desktop:meetingNotifyRecorderSummaryReady', (event, input: { title?: unknown }) => {
+  shutdownAwareIpc.handle('desktop:meetingNotifyRecorderSummaryReady', (event, input: { title?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     return meetingRecorderController!.notifySummaryReady({
       title: typeof input?.title === 'string' ? input.title : '',
     });
   });
-  ipcMain.handle('desktop:meetingNotifyRecordingSaved', (event, input: { collectionId?: unknown }) => {
+  shutdownAwareIpc.handle('desktop:meetingNotifyRecordingSaved', (event, input: { collectionId?: unknown }) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     if (typeof input?.collectionId !== 'string' || !input.collectionId.trim()) {
       return { ok: false, error: 'collection_id_required' };
     }
     return meetingRecorderController!.notifySaved({ collectionId: input.collectionId });
   });
-  ipcMain.handle('desktop:meetingCloseRecorderWindow', (event) => {
+  shutdownAwareIpc.handle('desktop:meetingCloseRecorderWindow', (event) => {
     if (!isRecorderWindowSender(event.sender)) return { ok: false, error: 'unauthorized_sender' };
     return meetingRecorderController!.close();
   });
@@ -479,14 +556,14 @@ async function createWindow(): Promise<BrowserWindow> {
   const kswarmStartPromise = kswarmService.start().catch((err) => {
     console.error('[main] Failed to start kswarm service:', err);
   });
-  ipcMain.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
-  ipcMain.handle('desktop:kswarm:start', () => kswarmService.start());
-  ipcMain.handle('desktop:kswarm:stop', () => kswarmService.stop());
-  ipcMain.handle('desktop:kswarm:restart', () => kswarmService.restart());
-  ipcMain.handle('desktop:kswarm:resumeWorkflowRun', (_event, input) =>
+  shutdownAwareIpc.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
+  shutdownAwareIpc.handle('desktop:kswarm:start', () => kswarmService.start());
+  shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop());
+  shutdownAwareIpc.handle('desktop:kswarm:restart', () => kswarmService.restart());
+  shutdownAwareIpc.handle('desktop:kswarm:resumeWorkflowRun', (_event, input) =>
     resumeOneScriptWorkflow(kswarmService, input?.projectId, input?.workflowRunId));
   let restartRuntimeBridgeService: () => Promise<void> = async () => {};
-  ipcMain.handle('desktop:services:getStatus', async () => {
+  shutdownAwareIpc.handle('desktop:services:getStatus', async () => {
     const snapshot = await kswarmService.getServiceStatus();
     return {
       ...snapshot,
@@ -506,7 +583,7 @@ async function createWindow(): Promise<BrowserWindow> {
       ],
     };
   });
-  ipcMain.handle('desktop:services:restart', (_event, serviceId) => (
+  shutdownAwareIpc.handle('desktop:services:restart', (_event, serviceId) => (
     serviceId === 'runtime-bridge'
       ? restartRuntimeBridgeService()
       : kswarmService.restartRelatedService(serviceId)
@@ -517,13 +594,16 @@ async function createWindow(): Promise<BrowserWindow> {
 
   const kswarmStreamBridge = new KSwarmStreamBridge('ws://127.0.0.1:4400/ws');
   kswarmStreamBridge.start();
-  registerKSwarmProxy(ipcMain, kswarmStreamBridge, kswarmService);
+  registerKSwarmProxy(shutdownAwareIpc, kswarmStreamBridge, kswarmService);
 
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
+    // Design v58 §4/§9.3: the facade exists before services, so every static
+    // gateway captures one stable identity instead of a temporary runtime.
+    pluginProviderRuntime,
   });
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
@@ -622,7 +702,45 @@ async function createWindow(): Promise<BrowserWindow> {
     },
   });
   const mobileRelayConfig = loadMobileRelayConfig();
-  ipcMain.handle('desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
+  /**
+   * Kept so the renderer can ask for the current relay state at any time. When no
+   * credentials file exists at all, there is no bridge to report status, so we
+   * synthesise the `missing` state rather than showing nothing.
+   */
+  let latestMobileRelayStatus: MobileRelayStatus = mobileRelayConfig
+    ? {
+      running: false,
+      connected: false,
+      relayUrl: mobileRelayConfig.relayUrl,
+      roomId: '',
+      lastError: null,
+      credentialState: 'ok',
+      requiresUserReauth: false,
+    }
+    : {
+      running: false,
+      connected: false,
+      relayUrl: '',
+      roomId: '',
+      lastError: 'no relay credentials found; sign in to enable mobile access',
+      credentialState: 'missing',
+      requiresUserReauth: true,
+    };
+  shutdownAwareIpc.handle('desktop:mobile:getRelayStatus', () => latestMobileRelayStatus);
+  /**
+   * Deliberately not a generic "open any URL" bridge: the renderer can only ask
+   * for the relay's own sign-in page, and the URL is derived here from the relay
+   * config rather than accepted from the caller.
+   */
+  shutdownAwareIpc.handle('desktop:mobile:openRelaySignIn', () => {
+    const relayUrl = mobileRelayConfig?.relayUrl ?? latestMobileRelayStatus.relayUrl;
+    if (!relayUrl) return { ok: false as const, error: 'relay_url_unknown' };
+    const signInUrl = `${relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login`;
+    void shell.openExternal(signInUrl);
+    debugMain('mobile-relay:sign-in-opened', { signInUrl });
+    return { ok: true as const, url: signInUrl };
+  });
+  shutdownAwareIpc.handle('desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
     desktopName: 'Xiaok Desktop',
     identity: mobileIdentity,
     gatewayStatus: mobileGateway.getStatus(),
@@ -652,8 +770,24 @@ async function createWindow(): Promise<BrowserWindow> {
           connected: status.connected,
           relayUrl: status.relayUrl,
           roomId: status.roomId,
+          credentialState: status.credentialState,
+          ...(status.credentialExpiresAt ? { credentialExpiresAt: status.credentialExpiresAt } : {}),
+          requiresUserReauth: status.requiresUserReauth,
           lastError: status.lastError,
         });
+        // A credential problem is terminal until the user signs in again, so say
+        // exactly that once instead of repeating a bare 401 every 30 seconds.
+        if (status.requiresUserReauth) {
+          debugMain('mobile-relay:reauth-required', {
+            credentialState: status.credentialState,
+            credentialExpiresAt: status.credentialExpiresAt ?? null,
+            action: `open ${status.relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login to sign in again`,
+          });
+        }
+        latestMobileRelayStatus = status;
+        if (!window.isDestroyed()) {
+          window.webContents.send('desktop:mobileRelayStatus', status);
+        }
       },
     })
     : null;
@@ -735,40 +869,41 @@ async function createWindow(): Promise<BrowserWindow> {
     console.error('[main] reconcileArtifactWorkspace failed (startup continues):', err);
   }
 
-  ipcMain.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
-  ipcMain.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));
-  ipcMain.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
-  ipcMain.handle('desktop:testConnectorProvider', (_event, kind) => services.testConnectorProvider(kind));
+  shutdownAwareIpc.handle('desktop:getConnectorsConfig', () => services.getConnectorsConfig());
+  shutdownAwareIpc.handle('desktop:saveConnectorsConfig', (_event, input) => services.setConnectorsConfig(input));
+  shutdownAwareIpc.handle('desktop:listConnectorRuntimes', () => services.listConnectorRuntimes());
+  shutdownAwareIpc.handle('desktop:testConnectorProvider', (_event, kind) => services.testConnectorProvider(kind));
 
   // Register update IPC handlers
-  ipcMain.handle('desktop:getUpdateStatus', () => {
+  shutdownAwareIpc.handle('desktop:getUpdateStatus', () => {
     try {
       return { ...getUpdateStatus(), currentVersion: app.getVersion() };
     } catch (e) {
       return { checking: false, available: false, downloading: false, downloaded: false, progress: 0, error: (e as Error).message, currentVersion: app.getVersion() };
     }
   });
-  ipcMain.handle('desktop:checkForUpdates', async () => {
+  shutdownAwareIpc.handle('desktop:checkForUpdates', async () => {
     try {
       await checkForUpdates();
     } catch (e) {
       // Error already handled in checkForUpdates
     }
   });
-  ipcMain.handle('desktop:quitAndInstall', () => {
-    isQuitting = true;
-    try {
-      quitAndInstall();
-    } catch (e) {
-      isQuitting = false;
-      throw e;
-    }
+  /**
+   * Design v58 §5.5 / R28-05: this handler must never write `isQuitting`. On
+   * macOS the updater may only register an `update-downloaded` listener and
+   * return, and during that wait closing the window must still hide rather than
+   * quit. Only the coordinator's real `before-quit` phase ① sets the flag.
+   */
+  shutdownAwareIpc.handle('desktop:quitAndInstall', () => {
+    const outcome = updaterHandoff.begin();
+    return { ...outcome, projection: updaterHandoff.projection() };
   });
 
   let globalBackgroundAutoRunEnabled = (await loadConfig()).automations?.globalBackgroundAutoRunEnabled !== false;
   const automationsConfigSnapshot = () => ({ globalBackgroundAutoRunEnabled });
-  ipcMain.handle('desktop:automations:getConfig', () => automationsConfigSnapshot());
-  ipcMain.handle('desktop:automations:setGlobalBackgroundAutoRun', async (_event, input) => {
+  shutdownAwareIpc.handle('desktop:automations:getConfig', () => automationsConfigSnapshot());
+  shutdownAwareIpc.handle('desktop:automations:setGlobalBackgroundAutoRun', async (_event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.enabled !== 'boolean') {
       throw new Error('enabled must be a boolean');
     }
@@ -916,20 +1051,20 @@ async function createWindow(): Promise<BrowserWindow> {
     kswarmService,
     teamService: kswarmTeamService,
   });
-  registerSemanticDesktopIpc(ipcMain, {
+  registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
     kswarm: kswarmSemanticService,
   });
-  await registerDesktopIpc(ipcMain, window, services, {
+  await registerDesktopIpc(shutdownAwareIpc, window, services, {
     loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },
   });
   debugMain('createWindow:ipc-registered');
-  ipcMain.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
+  shutdownAwareIpc.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
     loopStore: loopRuntime.loopStore,
     timedActionStore,
     globalBackgroundAutoRunEnabled,
   }));
-  ipcMain.handle('desktop:automations:getRunHistory', () => buildAutomationRunHistory({
+  shutdownAwareIpc.handle('desktop:automations:getRunHistory', () => buildAutomationRunHistory({
     loopStore: loopRuntime.loopStore,
     timedActionStore,
   }));
@@ -950,7 +1085,7 @@ async function createWindow(): Promise<BrowserWindow> {
       : join(venvDir, 'bin', 'python3');
   }
 
-  // Register MCP plugin tools (connects to MCP servers declared in ~/.xiaok/plugins)
+  // Register MCP plugin tools (connects to MCP servers declared in the plugins dir)
   let mcpDispose: (() => void) | undefined;
   const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
   let runtimeBridgeStarted = false;
@@ -1061,8 +1196,16 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
-  services.registerMcpTools().then(({ dispose }) => {
+  services.registerMcpTools().then(async ({ dispose }) => {
     mcpDispose = dispose;
+    // Design v58 §9.3: start the provider runtime only after the reserved MCP
+    // connections exist, so activation can verify each server's full operation
+    // set instead of committing a half-ready slot.
+    const started = await services.startPluginProviderRuntime().catch((error) => {
+      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
+      return { started: false as const };
+    });
+    debugMain('provider-runtime:start', started);
     startRuntimeBridge();
   }).catch(() => {
     startRuntimeBridge();
@@ -1126,17 +1269,17 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   timedActionScheduler.start();
 
-  ipcMain.handle('desktop:syncScheduledTasks', (_event, tasks) => {
+  shutdownAwareIpc.handle('desktop:syncScheduledTasks', (_event, tasks) => {
     // Deprecated compatibility endpoint. Renderer must not replace main state.
     return timedActionService.listScheduledTasks();
   });
-  ipcMain.handle('desktop:getScheduledTasks', () => {
+  shutdownAwareIpc.handle('desktop:getScheduledTasks', () => {
     return timedActionService.listScheduledTasks();
   });
-  ipcMain.handle('desktop:createScheduledTask', (_event, input) => {
+  shutdownAwareIpc.handle('desktop:createScheduledTask', (_event, input) => {
     return timedActionService.createScheduledTask(input);
   });
-  ipcMain.handle('desktop:loops:createSchedule', (_event, input) => {
+  shutdownAwareIpc.handle('desktop:loops:createSchedule', (_event, input) => {
     debugMain('loops:createSchedule', { loopId: (input as any)?.loopId, title: (input as any)?.title });
     try {
       if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -1173,25 +1316,25 @@ async function createWindow(): Promise<BrowserWindow> {
       throw e;
     }
   });
-  ipcMain.handle('desktop:loops:getScheduleBindings', () => {
+  shutdownAwareIpc.handle('desktop:loops:getScheduleBindings', () => {
     return timedActionService.listLoopScheduleBindings();
   });
-  ipcMain.handle('desktop:updateScheduledTask', (_event, input) => {
+  shutdownAwareIpc.handle('desktop:updateScheduledTask', (_event, input) => {
     return timedActionService.updateScheduledTask(input);
   });
-  ipcMain.handle('desktop:setScheduledTaskStatus', (_event, id: string, status: 'active' | 'paused') => {
+  shutdownAwareIpc.handle('desktop:setScheduledTaskStatus', (_event, id: string, status: 'active' | 'paused') => {
     return timedActionService.setScheduledTaskStatus(id, status) ?? null;
   });
-  ipcMain.handle('desktop:cancelScheduledTask', (_event, id: string) => {
+  shutdownAwareIpc.handle('desktop:cancelScheduledTask', (_event, id: string) => {
     return timedActionService.cancelScheduledTask(id);
   });
-  ipcMain.handle('desktop:getTimedActions', () => {
+  shutdownAwareIpc.handle('desktop:getTimedActions', () => {
     return timedActionService.getActions();
   });
-  ipcMain.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
+  shutdownAwareIpc.handle('desktop:getTimedActionRuns', (_event, actionId: string) => {
     return timedActionService.getRuns(actionId);
   });
-  ipcMain.handle('desktop:scheduledTasks:clearRunHistory', (_event, actionId: string, statuses?: unknown) => {
+  shutdownAwareIpc.handle('desktop:scheduledTasks:clearRunHistory', (_event, actionId: string, statuses?: unknown) => {
     if (typeof actionId !== 'string' || actionId.trim().length === 0) {
       throw new Error('actionId must be a non-empty string');
     }
@@ -1201,10 +1344,10 @@ async function createWindow(): Promise<BrowserWindow> {
     const removed = timedActionStore.clearActionRunHistory(actionId, validStatuses);
     return { ok: true, removed };
   });
-  ipcMain.handle('desktop:timedAction:approveAuto', (_event, actionId: string) => {
+  shutdownAwareIpc.handle('desktop:timedAction:approveAuto', (_event, actionId: string) => {
     return timedActionService.approveAuto(actionId) ?? null;
   });
-  ipcMain.handle('desktop:timedAction:revokeAuto', (_event, actionId: string) => {
+  shutdownAwareIpc.handle('desktop:timedAction:revokeAuto', (_event, actionId: string) => {
     return timedActionService.revokeAuto(actionId) ?? null;
   });
 
@@ -1217,40 +1360,44 @@ async function createWindow(): Promise<BrowserWindow> {
     if (window.isDestroyed()) return;
     window.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());
   };
-  ipcMain.handle('desktop:getThreadLabels', () => {
+  shutdownAwareIpc.handle('desktop:getThreadLabels', () => {
     return threadMetaStore.getAll();
   });
-  ipcMain.handle('desktop:setThreadLabel', (_event, threadId: string, label: string) => {
+  shutdownAwareIpc.handle('desktop:setThreadLabel', (_event, threadId: string, label: string) => {
     const result = threadMetaStore.addThreadToLabel(threadId, label as any);
     if (result.ok) broadcastThreadMeta();
     return result;
   });
-  ipcMain.handle('desktop:unsetThreadLabel', (_event, threadId: string, label: string) => {
+  shutdownAwareIpc.handle('desktop:unsetThreadLabel', (_event, threadId: string, label: string) => {
     const result = threadMetaStore.removeThreadFromLabel(threadId, label as any);
     if (result.ok) broadcastThreadMeta();
     return result;
   });
-  ipcMain.handle('desktop:moveThreadLabel', (_event, threadId: string, from: string, to: string) => {
+  shutdownAwareIpc.handle('desktop:moveThreadLabel', (_event, threadId: string, from: string, to: string) => {
     const result = threadMetaStore.moveThread(threadId, from as any, to as any);
     if (result.ok) broadcastThreadMeta();
     return result;
   });
-  ipcMain.handle('desktop:getAppFlag', (_event, key: string) => {
+  shutdownAwareIpc.handle('desktop:getAppFlag', (_event, key: string) => {
     return threadMetaStore.getFlag(key as any);
   });
-  ipcMain.handle('desktop:setAppFlag', (_event, key: string, value: string) => {
+  shutdownAwareIpc.handle('desktop:setAppFlag', (_event, key: string, value: string) => {
     const result = threadMetaStore.setFlag(key as any, value);
     if (result.ok) broadcastThreadMeta();
     return result;
   });
-  ipcMain.handle('desktop:migrateLegacyThreadMeta', (_event, data: any) => {
+  shutdownAwareIpc.handle('desktop:migrateLegacyThreadMeta', (_event, data: any) => {
     const result = threadMetaStore.bulkImport(data);
     if (result.ok) broadcastThreadMeta();
     return result;
   });
 
-  app.on('before-quit', () => {
-    kswarmService.stop().catch((err) => {
+  // Design v58 §5.5: both former `before-quit` listeners are now steps of the
+  // single coordinator-owned lifetime disposer, so each runs at most once and
+  // provider close is actually awaited before the process exits.
+  registerLifetimeDisposerStep('provider-runtime', () => pluginProviderRuntime.dispose());
+  registerLifetimeDisposerStep('kswarm-and-bridges', async () => {
+    await kswarmService.stop().catch((err) => {
       debugMain('kswarmService.stop failed', err instanceof Error ? err.message : String(err));
     });
     kswarmStreamBridge.dispose();
@@ -1271,20 +1418,20 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   // Reminder IPC handlers
-  ipcMain.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
+  shutdownAwareIpc.handle('desktop:createReminder', (_event, input: { content: string; scheduleAt: number; timezone?: string }) => {
     return timedActionService.createReminder(input.content, input.scheduleAt, input.timezone);
   });
-  ipcMain.handle('desktop:listReminders', () => timedActionService.listReminders());
-  ipcMain.handle('desktop:cancelReminder', (_event, id: string) => timedActionService.cancelReminder(id));
-  ipcMain.handle('desktop:getReminderStatus', () => timedActionService.getReminderStatus());
+  shutdownAwareIpc.handle('desktop:listReminders', () => timedActionService.listReminders());
+  shutdownAwareIpc.handle('desktop:cancelReminder', (_event, id: string) => timedActionService.cancelReminder(id));
+  shutdownAwareIpc.handle('desktop:getReminderStatus', () => timedActionService.getReminderStatus());
 
   // Skill debug config IPC handlers
-  ipcMain.handle('desktop:getSkillDebugConfig', () => services.getSkillDebugConfig());
-  ipcMain.handle('desktop:saveSkillDebugConfig', (_event, input: { enabled: boolean }) => services.saveSkillDebugConfig(input));
+  shutdownAwareIpc.handle('desktop:getSkillDebugConfig', () => services.getSkillDebugConfig());
+  shutdownAwareIpc.handle('desktop:saveSkillDebugConfig', (_event, input: { enabled: boolean }) => services.saveSkillDebugConfig(input));
 
   // KSwarm config IPC handlers
-  ipcMain.handle('desktop:getKswarmConfig', () => services.getKswarmConfig());
-  ipcMain.handle('desktop:saveKswarmConfig', (_event, input: { maxConcurrentTasks: number }) => services.saveKswarmConfig(input));
+  shutdownAwareIpc.handle('desktop:getKswarmConfig', () => services.getKswarmConfig());
+  shutdownAwareIpc.handle('desktop:saveKswarmConfig', (_event, input: { maxConcurrentTasks: number }) => services.saveKswarmConfig(input));
 
   // Setup menubar with K icon
   setupMenuBar(window);
@@ -1419,8 +1566,9 @@ if (packagedKimiSmokeResultPath) {
     debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
     restoreOrCreateWindow();
   });
-  app.on('before-quit', () => {
-    isQuitting = true;
+  // `isQuitting` is now set by the coordinator's synchronous phase ① rather than
+  // as a listener side effect.
+  registerLifetimeDisposerStep('window-scoped', async () => {
     meetingRecorderController?.dispose();
     destroyMenuBar();
     debugMain('app:before-quit');

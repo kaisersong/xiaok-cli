@@ -57,6 +57,9 @@ describe('preload API contract', () => {
       'deleteProvider',
       'deleteModel',
       'getMobilePairingInfo',
+      // Relay credential state + the narrow sign-in opener (main derives the URL).
+      'getMobileRelayStatus',
+      'openMobileRelaySignIn',
       'readClipboardFilePaths',
       'readClipboardImage',
       'selectDirectory',
@@ -88,9 +91,7 @@ describe('preload API contract', () => {
       'updateMCPInstall',
       'deleteMCPInstall',
       'listPluginMcpServers',
-      'setPluginMcpServerEnabled',
-      'restartPluginMcpServers',
-      'restartPluginMcpServer',
+      'retryPluginComponent',
       'getComputerUseCapabilityStatus',
       'enableComputerUse',
       'reconnectComputerUse',
@@ -144,6 +145,7 @@ describe('preload API contract', () => {
       'stopKSwarmAgent',
       'probeKSwarmAgent',
       'onKSwarmStatus',
+      'onMobileRelayStatus',
       'exportTraceBundle',
       'diagnose',
       'getLoopDefinitions',
@@ -474,8 +476,7 @@ describe('preload API contract', () => {
     await api.installPluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
     await api.updatePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
     await api.diagnosePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver' });
-    await api.restartPluginMcpServers();
-    await api.restartPluginMcpServer({ name: 'cua-driver' });
+    await api.retryPluginComponent({ componentId: 'cua-driver' });
     await api.getComputerUseCapabilityStatus();
     await api.enableComputerUse();
     await api.reconnectComputerUse();
@@ -497,8 +498,7 @@ describe('preload API contract', () => {
       pluginName: 'cua-computer-use',
       dependencyId: 'cua-driver',
     });
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:restartPluginMcpServers');
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:restartPluginMcpServer', { name: 'cua-driver' });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:retryPluginComponent', { componentId: 'cua-driver' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:getComputerUseCapabilityStatus');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:enableComputerUse');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:reconnectComputerUse');
@@ -901,7 +901,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const channels = new Set<string>();
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
-    const re = /ipcMain\.handle\(\s*'([^']+)'/g;
+    const re = /(?:ipcMain|shutdownAwareIpc)\.handle\(\s*'([^']+)'/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(source)) !== null) {
       channels.add(match[1]!);

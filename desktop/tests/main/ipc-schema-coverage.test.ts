@@ -6,7 +6,7 @@ const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron'
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 
 function extractIpcChannels(source: string): string[] {
-  const matches = [...source.matchAll(/ipcMain\.handle\(\s*['"]([^'"]+)['"]/g)];
+  const matches = [...source.matchAll(/(?:ipcMain|shutdownAwareIpc)\.handle\(\s*['"]([^'"]+)['"]/g)];
   return matches.map(m => m[1]).sort();
 }
 

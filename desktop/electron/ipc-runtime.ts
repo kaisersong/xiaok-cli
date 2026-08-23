@@ -1,4 +1,5 @@
-import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import type { IpcMainInvokeEvent } from 'electron';
+import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 import type { ZodSchema } from 'zod';
 
 export type RiskTag =
@@ -29,13 +30,13 @@ export interface IpcSchemaEntry {
 
 export const IPC_SCHEMA_REGISTRY = new Map<string, IpcSchemaEntry>();
 
-let ipcMainImpl: IpcMain | null = null;
+let ipcMainImpl: IpcHandleRegistrar | null = null;
 
-export function setIpcMainImpl(impl: IpcMain): void {
+export function setIpcMainImpl(impl: IpcHandleRegistrar): void {
   ipcMainImpl = impl;
 }
 
-export function setIpcMainForTests(fake: IpcMain): void {
+export function setIpcMainForTests(fake: IpcHandleRegistrar): void {
   ipcMainImpl = fake;
 }
 

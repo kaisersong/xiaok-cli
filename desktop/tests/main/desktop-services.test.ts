@@ -1023,13 +1023,20 @@ describe('desktop services', () => {
     registration.dispose();
   });
 
-  it('starts CUA MCP through CuaDriver.app relaunch path for TCC attribution', () => {
+  it('lets the official cua-driver mcp proxy own daemon relaunch, with no second Xiaok launch owner', () => {
+    // Design v58 §6.1: the machine-readable manifest of cua-driver 0.19.3 declares
+    // `mcp_invocation = cua-driver mcp`, and on macOS that subcommand is itself the
+    // app-daemon proxy with auto-relaunch. A Xiaok-side `open -n` prelaunch was a
+    // second launch owner with a cross-process race, so it is deleted rather than
+    // locked.
     const sourceFile = readFileSync(join(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
 
     expect(sourceFile).toContain("args: ['mcp']");
-    expect(sourceFile).toContain('prelaunchCuaDriverDaemonForMcp(server.name, command)');
+    expect(sourceFile).not.toContain('prelaunchCuaDriverDaemonForMcp(');
     expect(sourceFile).not.toContain('--no-daemon-relaunch');
     expect(sourceFile).not.toContain('CUA_DRIVER_MCP_NO_RELAUNCH');
+    // The dependency gate must require the version that actually has that contract.
+    expect(sourceFile).toContain("minVersion: '0.19.3'");
   });
 
   it('does not expose CUA doctor diagnostics that would request Screen Recording from Xiaok', async () => {
@@ -1134,7 +1141,7 @@ describe('desktop services', () => {
     registration.dispose();
   });
 
-  it('can reconnect plugin MCP servers after a dependency becomes ready', async () => {
+  it('does not let a component retry activate a CUA the user never enabled', async () => {
     const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
     const pluginDir = join(pluginRootDir, 'cua-computer-use');
     const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
@@ -1202,7 +1209,16 @@ describe('desktop services', () => {
     ]);
 
     permissionsGranted = true;
-    await services.restartPluginMcpServers();
+
+    // Design v58 §7.2: a component-scoped retry must not activate a CUA the user
+    // never enabled — that is exactly what the deleted blanket restart did wrong.
+    await services.retryPluginComponent({ componentId: 'cua-driver', requestSource: 'user' });
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({ name: 'cua-driver', connected: false, toolCount: 0 }),
+    ]);
+
+    // The explicit, user-sourced enable path is what brings it up.
+    await services.enableComputerUse();
 
     expect(services.getToolDefinitions().map(tool => tool.name)).toContain('xiaok_computer_use');
     expect(services.listPluginMcpServers()).toEqual([
