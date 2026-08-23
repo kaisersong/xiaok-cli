@@ -42,6 +42,16 @@ export interface InProcessTaskRuntimeHostOptions {
         artifactEvidence?: boolean;
         recoveryContinuity?: boolean;
     };
+    /**
+     * Design v58 §5.5 / R27-02. `createTask` returns as soon as the task id
+     * exists, but `executeTask()` keeps running for up to the watchdog budget.
+     * The outer IPC token cannot cover that, so every execution takes its own
+     * `task_execution` token and holds it until the outermost `finally` has
+     * finished all store writes and event flushes.
+     */
+    acquireExecutionToken?: (taskId: string) => {
+        release(): void;
+    };
 }
 export interface BuildHistoryFromTaskSnapshotsOptions {
     currentTaskId?: string;
@@ -71,12 +81,24 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly maxToolLoopIterations;
     private readonly pendingAssistantDeltas;
     private readonly runtimeEventErrors;
+    private stoppedAcceptingReason;
     constructor(options: InProcessTaskRuntimeHostOptions);
     prepareTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;
     }>;
     startTask(taskId: string): Promise<void>;
+    /**
+     * The single production entry point that registers a background execution.
+     * Both `startTask()` and the confirm path of `answerQuestion()` go through
+     * here, so `drain()` observes a real map rather than a second counter.
+     */
+    private startTrackedExecution;
+    /** Shutdown owner API (§5.5 phase ③). */
+    stopAccepting(reason?: string): void;
+    abortAllActive(reason?: string): void;
+    drain(): Promise<void>;
+    activeExecutionCount(): number;
     createTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;
