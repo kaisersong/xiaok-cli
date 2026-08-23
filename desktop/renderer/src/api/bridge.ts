@@ -6,6 +6,7 @@ import type {
   DesktopServiceStatusSnapshot,
   DesktopModelConfigSnapshot,
   DesktopMobilePairingInfo,
+  DesktopMobileRelayStatus,
   DesktopSaveModelConfigInput,
   DesktopUpdateModelRuntimeOptionsInput,
   MaterialView,
@@ -541,6 +542,15 @@ export const api = {
     log.info('deleteModel ok');
   },
 
+  async getMobileRelayStatus(): Promise<DesktopMobileRelayStatus> {
+    return await window.xiaokDesktop.getMobileRelayStatus();
+  },
+  onMobileRelayStatus(handler: (status: DesktopMobileRelayStatus) => void): () => void {
+    return window.xiaokDesktop.onMobileRelayStatus(handler);
+  },
+  async openMobileRelaySignIn(): Promise<{ ok: boolean; url?: string; error?: string }> {
+    return await window.xiaokDesktop.openMobileRelaySignIn();
+  },
   async getMobilePairingInfo(): Promise<DesktopMobilePairingInfo> {
     return await window.xiaokDesktop.getMobilePairingInfo();
   },
@@ -747,14 +757,10 @@ export const api = {
   async listPluginMcpServers() {
     return window.xiaokDesktop.listPluginMcpServers();
   },
-  async setPluginMcpServerEnabled(input: { name: string; enabled: boolean }) {
-    return window.xiaokDesktop.setPluginMcpServerEnabled(input);
-  },
-  async restartPluginMcpServers() {
-    return window.xiaokDesktop.restartPluginMcpServers();
-  },
-  async restartPluginMcpServer(input: { name: string }) {
-    return window.xiaokDesktop.restartPluginMcpServer(input);
+  /** Design v58 §7.2: component-scoped retry replaced the blanket restart and the
+   * view-model-only enable toggle. */
+  async retryPluginComponent(input: { componentId: string }) {
+    return window.xiaokDesktop.retryPluginComponent(input);
   },
   async getComputerUseCapabilityStatus() {
     return window.xiaokDesktop.getComputerUseCapabilityStatus();

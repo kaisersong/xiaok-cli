@@ -56,6 +56,7 @@ import type {
   DesktopServiceStatusSnapshot,
   TestProviderConnectionResult,
   DesktopMobilePairingInfo,
+  DesktopMobileRelayStatus,
 } from '../../../electron/preload-api';
 import type {
   ConnectorsConfig,
@@ -807,6 +808,21 @@ function MobilePane() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  // Relay credentials expire after 7 days and there is no refresh grant, so the
+  // UI has to distinguish "offline" from "you must sign in again".
+  const [relayStatus, setRelayStatus] = useState<DesktopMobileRelayStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.getMobileRelayStatus().then((status) => {
+      if (!cancelled) setRelayStatus(status);
+    }).catch(() => undefined);
+    const off = api.onMobileRelayStatus?.((status) => setRelayStatus(status));
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, []);
 
   const loadPairingInfo = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'refresh') setRefreshing(true);
@@ -853,6 +869,37 @@ function MobilePane() {
     <div className="space-y-6">
       <Section>
         <SectionHeader icon={Smartphone}>{t.desktopSettings.mobilePairingTitle}</SectionHeader>
+        {relayStatus && relayStatus.credentialState !== 'ok' && (
+          <div
+            className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
+              relayStatus.requiresUserReauth
+                ? 'border-amber-300 bg-amber-50 text-amber-800'
+                : 'border-[var(--c-border)] bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
+            }`}
+          >
+            <div className="font-medium">
+              {relayStatus.credentialState === 'expired' && t.desktopSettings.mobileRelayStateExpired}
+              {relayStatus.credentialState === 'rejected' && t.desktopSettings.mobileRelayStateRejected}
+              {relayStatus.credentialState === 'missing' && t.desktopSettings.mobileRelayStateMissing}
+              {relayStatus.credentialState === 'unparseable' && t.desktopSettings.mobileRelayStateUnparseable}
+            </div>
+            {relayStatus.credentialExpiresAt && (
+              <div className="mt-1 text-xs opacity-80">
+                {t.desktopSettings.mobileRelayExpiredAt}: {new Date(relayStatus.credentialExpiresAt).toLocaleString()}
+              </div>
+            )}
+            <div className="mt-1 text-xs opacity-80">{t.desktopSettings.mobileRelayReauthHint}</div>
+            {relayStatus.requiresUserReauth && relayStatus.relayUrl && (
+              <button
+                type="button"
+                onClick={() => { void api.openMobileRelaySignIn(); }}
+                className="mt-2 inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white"
+              >
+                {t.desktopSettings.mobileRelaySignInAction}
+              </button>
+            )}
+          </div>
+        )}
         <Card>
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-[var(--c-text-secondary)]">
@@ -2389,11 +2436,13 @@ function McpPane() {
     }
   };
 
-  const handleRestartPluginMcpServers = async () => {
+  // Design v58 §7.2: retry is scoped to one component and never writes desired
+  // state, so a disabled CUA cannot be re-enabled by pressing reconnect.
+  const handleRetryPluginComponent = async (componentId: string) => {
     const actionKey = 'plugin-mcp:restart';
     setDependencyAction(actionKey);
     try {
-      await api.restartPluginMcpServers();
+      await api.retryPluginComponent({ componentId });
       load();
     } catch (e) {
       alert((e as Error).message);
@@ -2495,7 +2544,7 @@ function McpPane() {
                         <button
                           type="button"
                           disabled={isComputerUse ? isEnablingComputerUse : isRestartingMcp}
-                          onClick={() => void (isComputerUse ? handleEnableComputerUse() : handleRestartPluginMcpServers())}
+                          onClick={() => void (isComputerUse ? handleEnableComputerUse() : handleRetryPluginComponent(dependencyServer?.name ?? ''))}
                           className="inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
                         >
                           {(isComputerUse ? isEnablingComputerUse : isRestartingMcp) ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}

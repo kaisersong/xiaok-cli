@@ -55,12 +55,32 @@ export interface MobileRelayReplayGuard {
   accept(requestId: string, nowMs?: number): boolean;
 }
 
+/**
+ * Why this is typed rather than a bare `lastError` string: the relay JWT lives for
+ * 7 days (`intent-broker-relay/src/auth/jwt.js` signs with `setExpirationTime('7d')`)
+ * and the credentials file carries a `refreshToken` that neither side implements,
+ * so expiry is a *routine* state that only the user can clear by logging in again.
+ * Reporting it as `Unexpected server response: 401` every 30 seconds told nobody
+ * anything and kept a doomed reconnect loop alive.
+ */
+export type MobileRelayCredentialState =
+  | 'ok'
+  | 'missing'
+  | 'expired'
+  | 'rejected'
+  | 'unparseable';
+
 export interface MobileRelayStatus {
   running: boolean;
   connected: boolean;
   relayUrl: string;
   roomId: string;
   lastError: string | null;
+  credentialState: MobileRelayCredentialState;
+  /** Present when the local JWT carries a decodable `exp`. */
+  credentialExpiresAt?: string;
+  /** True when only an explicit user re-login can change the outcome. */
+  requiresUserReauth: boolean;
 }
 
 export interface MobileRelayBridge {
@@ -184,6 +204,27 @@ export function createMobileRelayReplayGuard(ttlMs = DEFAULT_REPLAY_TTL_MS): Mob
   };
 }
 
+/**
+ * Reads the `exp` claim without verifying the signature: we only need to know
+ * whether a handshake is worth attempting. Verification stays server-side.
+ */
+export function inspectRelayJwt(jwt: string, nowMs: number): {
+  state: 'ok' | 'expired' | 'unparseable';
+  expiresAt?: string;
+} {
+  const segments = jwt.split('.');
+  if (segments.length !== 3) return { state: 'unparseable' };
+  try {
+    const padded = segments[1] + '='.repeat((4 - (segments[1].length % 4)) % 4);
+    const claims = JSON.parse(Buffer.from(padded, 'base64url').toString('utf8')) as { exp?: unknown };
+    if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) return { state: 'unparseable' };
+    const expiresAt = new Date(claims.exp * 1000).toISOString();
+    return { state: claims.exp * 1000 <= nowMs ? 'expired' : 'ok', expiresAt };
+  } catch {
+    return { state: 'unparseable' };
+  }
+}
+
 export function loadMobileRelayConfig(input: {
   env?: NodeJS.ProcessEnv;
   credentialsPath?: string;
@@ -219,6 +260,8 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
   let reconnectTimer: NodeJS.Timeout | null = null;
   let reconnectAttempt = 0;
   let lastError: string | null = null;
+  let credentialState: MobileRelayCredentialState = 'ok';
+  let credentialExpiresAt: string | undefined;
 
   const status = (): MobileRelayStatus => ({
     running,
@@ -226,6 +269,9 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
     relayUrl: options.relayUrl,
     roomId,
     lastError,
+    credentialState,
+    ...(credentialExpiresAt ? { credentialExpiresAt } : {}),
+    requiresUserReauth: credentialState === 'expired' || credentialState === 'rejected',
   });
 
   function emitStatus(): void {
@@ -234,6 +280,24 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
 
   function connect(): void {
     if (!running) return;
+
+    // Fail closed before the handshake when the local token is already dead: a
+    // 7-day JWT that expired 52 days ago cannot be fixed by retrying, and there
+    // is no refresh grant on the relay to fall back to.
+    // Only *proven* expiry blocks the handshake. A token we cannot parse locally
+    // may still be one the relay accepts (e.g. an opaque token supplied through
+    // XIAOK_MOBILE_RELAY_JWT), so that case is left to the server, which answers
+    // 401 and is then classified as `rejected` below.
+    const inspected = inspectRelayJwt(options.relayJwt, now());
+    credentialExpiresAt = inspected.expiresAt;
+    if (inspected.state === 'expired') {
+      credentialState = 'expired';
+      lastError = `relay credentials expired at ${inspected.expiresAt ?? 'unknown'}; sign in again to reconnect`;
+      connected = false;
+      emitStatus();
+      return; // no reconnect scheduled: only a user action can change this
+    }
+
     const ws = new WebSocketImpl(options.relayUrl, {
       headers: {
         Authorization: `Bearer ${options.relayJwt}`,
@@ -249,6 +313,7 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
       connected = true;
       reconnectAttempt = 0;
       lastError = null;
+      credentialState = 'ok';
       emitStatus();
     });
     ws.on('message', (data) => {
@@ -261,13 +326,26 @@ export function createMobileRelayBridge(options: MobileRelayBridgeOptions): Mobi
       scheduleReconnect();
     });
     ws.on('error', (error) => {
-      lastError = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      // The relay answers an invalid/expired token with a 401 handshake response.
+      // Treat it as a terminal credential state, not a transient network error.
+      if (/\b401\b/.test(message)) {
+        credentialState = 'rejected';
+        lastError = `relay rejected the credentials (401); sign in again to reconnect`;
+      } else {
+        lastError = message;
+      }
       emitStatus();
     });
   }
 
   function scheduleReconnect(): void {
     if (!running || reconnectTimer) return;
+    // A credential problem is not retryable; stop instead of logging a 401 every
+    // 30 seconds forever.
+    if (credentialState === 'expired' || credentialState === 'rejected') {
+      return;
+    }
     const delay = Math.min(30_000, reconnectBaseDelayMs * (2 ** reconnectAttempt));
     reconnectAttempt += 1;
     reconnectTimer = setTimeout(() => {
