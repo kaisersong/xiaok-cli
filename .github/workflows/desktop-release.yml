@@ -45,6 +45,16 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
+      - name: Verify native SQLite binding loads
+        # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
+        # node-gyp source build when it does not see gypfile:false. Either path is
+        # acceptable, but a binding that cannot be loaded must fail here rather
+        # than inside the packaged app.
+        shell: bash
+        run: |
+          node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
+          cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
+
       - name: Clone desktop sidecar repositories
         run: |
           git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
@@ -218,7 +228,7 @@ jobs:
 
   build-windows:
     needs: create-release
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
@@ -233,6 +243,16 @@ jobs:
 
       - name: Install desktop dependencies
         run: cd desktop && npm ci
+
+      - name: Verify native SQLite binding loads
+        # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
+        # node-gyp source build when it does not see gypfile:false. Either path is
+        # acceptable, but a binding that cannot be loaded must fail here rather
+        # than inside the packaged app.
+        shell: bash
+        run: |
+          node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
+          cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
 
       - name: Clone desktop sidecar repositories
         run: |
