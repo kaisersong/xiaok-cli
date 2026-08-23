@@ -84,6 +84,15 @@ jobs:
         run: |
           echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
 
+      - name: Vendor self-contained provider runtimes (macOS)
+        # Materialises the pinned CPython closure from runtime-lock.json. The
+        # closure itself is not committed (~340 MB); packaging verifies its
+        # canonical-tree merkle and fails the build if it drifts.
+        run: |
+          cd ../kai-xiaok-plugins
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64 --verify
+
       - name: Build desktop
         run: cd desktop && npm run build
         env:
@@ -259,6 +268,12 @@ jobs:
               --abi abi3 `
               --abi none
           }
+
+      - name: Vendor self-contained provider runtimes (Windows)
+        run: |
+          cd ../kai-xiaok-plugins
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
 
       - name: Build desktop
         run: cd desktop && npm run build
