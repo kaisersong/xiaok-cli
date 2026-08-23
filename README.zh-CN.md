@@ -571,6 +571,11 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 
 ## 安装
 
+### 环境要求
+
+- **Node.js >= 22** —— 从 v1.4.30 起要求（内置 SQLite 引擎改用面向 Node 22+ 的 N-API 预编译包）
+- 桌面版需要 macOS（Apple Silicon 或 Intel）或 Windows x64
+
 ### npm 安装
 
 ```bash
@@ -692,9 +697,9 @@ xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界�
 
 从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 下载：
 
-- **xiaok-1.4.9-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
-- **xiaok-1.4.9-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
-- **xiaok-setup-1.4.9.exe** — Windows 安装包（x64）
+- **xiaok-1.4.30-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
+- **xiaok-1.4.30-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
+- **xiaok-setup-1.4.30.exe** — Windows 安装包（x64）
 
 ### 功能特性
 
@@ -706,6 +711,10 @@ xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界�
 - **自动化**：在同一个入口创建定时任务、绑定用户 loop、查看运行历史，并直接打开 loop 输出文件
 - **定时任务**：创建周期任务（每小时、每天、每周、cron），对话里显示计划执行和实际 claim 时间
 - **插件系统**：安装和管理 MCP Server 插件，支持启用/禁用
+- **自带运行时的插件**：需要 Python 的插件改用应用内自带的固定版本解释器，打包时用内容哈希校验，插件不再依赖机器上恰好装了什么 Python
+- **宿主能力网关**：插件 provider 通过显式声明、可单独吊销的网关访问宿主能力（文件、通知、渲染），不再拥有环境级权限
+- **组件重试**：插件组件失败后提供统一重试入口，并说明上次失败的原因
+- **远程访问优雅降级**：移动端 relay 凭据过期只会关闭远程访问，不影响本地任何功能，且只提示一次可执行的重新登录动作，不再无限重试
 - **国际化**：完整中英文支持，运行时切换语言
 - **设置界面**：配置模型提供商、技能、消息通道、MCP 服务器
 - **自动更新**：新版本发布时自动通知更新，并在设置按钮左侧显示升级提醒
@@ -740,6 +749,8 @@ xiaok --resume <session-id>
 # 单次任务
 xiaok "review the current workspace changes"
 
+# 诊断 API Key 解析（哪个环境变量或配置项生效、是否可用）
+xiaok doctor --check-keys
 # 管理本地 daemon
 xiaok daemon start
 xiaok daemon status

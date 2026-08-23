@@ -571,6 +571,11 @@ Via Intent Broker lifecycle hooks:
 
 ## Install
 
+### Requirements
+
+- **Node.js >= 22** — required since v1.4.30 (the bundled SQLite engine ships N-API prebuilds that target Node 22+)
+- macOS (Apple Silicon or Intel) or Windows x64 for the desktop app
+
 ### Install from npm
 
 ```bash
@@ -692,9 +697,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.9-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.9-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.9.exe** — Windows installer (x64)
+- **xiaok-1.4.30-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.30-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.30.exe** — Windows installer (x64)
 
 ### Features
 
@@ -706,6 +711,10 @@ Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases
 - **Automations**: Create scheduled tasks, bind schedules to user loops, inspect run history, and open loop output files from the same surface
 - **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron) with visible planned/actual execution timing in task transcripts
 - **Plugin System**: Install and manage MCP server plugins with enable/disable controls
+- **Self-Contained Plugin Runtimes**: Plugins that need Python run against a pinned interpreter shipped inside the app, verified at pack time by a content hash, so a plugin no longer depends on whatever Python the machine happens to have
+- **Host Capability Gateways**: Plugin providers reach host capabilities (files, notifications, rendering) through declared, individually revocable gateways instead of ambient access
+- **Component Retry**: Failed plugin components expose a single retry entry point that reports why the last attempt failed
+- **Graceful Remote-Access Degradation**: An expired mobile relay credential disables remote access only — it never blocks local work — and surfaces one actionable sign-in prompt instead of retrying forever
 - **i18n**: Full Chinese/English support with runtime locale switching
 - **Settings UI**: Configure model providers, skills, channels, MCP servers
 - **Auto-Update**: Automatic update notifications when new versions are released, with a sidebar upgrade reminder next to Settings
@@ -739,6 +748,9 @@ xiaok --resume <session-id>
 
 # Single task
 xiaok "review the current workspace changes"
+
+# Diagnose API key resolution (which env var or config entry wins, and whether it works)
+xiaok doctor --check-keys
 
 # Manage local daemon
 xiaok daemon start
