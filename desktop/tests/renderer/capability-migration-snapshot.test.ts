@@ -36,7 +36,7 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // Grew from 236 by fixed semantic assistant and KSwarm team/project/agent
     // operations. These APIs do not expose arbitrary paths, HTTP, credentials,
     // or caller-controlled authority fields.
-    expect(keys.length).toMatchInlineSnapshot(`254`);
+    expect(keys.length).toMatchInlineSnapshot(`256`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

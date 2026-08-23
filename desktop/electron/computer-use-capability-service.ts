@@ -26,7 +26,12 @@ export interface ComputerUsePreference {
   lastDriverVersion?: string;
   lastCuaBundleId?: string;
   lastCuaAppPath?: string;
-  launchMethod?: 'launch_services' | 'open_app' | 'direct_binary';
+  /**
+   * Removed by design v58 §6.1 (R44-03): `launchMethod` was a persisted field
+   * whose only writer was the startup path, and it never described runtime
+   * readiness. The decoder below still tolerates the three legacy values so an
+   * old config loads, but nothing reads or rewrites them.
+   */
   lastFailureCode?: ComputerUseFailureCode;
   autoConnectSuspendedReason?: ComputerUseFailureCode;
   userDeclinedUntil?: number;
@@ -80,7 +85,6 @@ export function normalizeComputerUsePreference(raw: unknown): ComputerUsePrefere
     ...(typeof value.lastDriverVersion === 'string' ? { lastDriverVersion: value.lastDriverVersion } : {}),
     ...(typeof value.lastCuaBundleId === 'string' ? { lastCuaBundleId: value.lastCuaBundleId } : {}),
     ...(typeof value.lastCuaAppPath === 'string' ? { lastCuaAppPath: value.lastCuaAppPath } : {}),
-    ...(isLaunchMethod(value.launchMethod) ? { launchMethod: value.launchMethod } : {}),
     ...(isComputerUseFailureCode(value.lastFailureCode) ? { lastFailureCode: value.lastFailureCode } : {}),
     ...(isComputerUseFailureCode(value.autoConnectSuspendedReason) ? { autoConnectSuspendedReason: value.autoConnectSuspendedReason } : {}),
     ...(typeof value.userDeclinedUntil === 'number' ? { userDeclinedUntil: value.userDeclinedUntil } : {}),
@@ -142,10 +146,6 @@ export function buildComputerUseDisabledError(code: ComputerUseFailureCode): Rec
     retryable: false,
     waitForUserAction: true,
   };
-}
-
-function isLaunchMethod(value: unknown): value is ComputerUsePreference['launchMethod'] {
-  return value === 'launch_services' || value === 'open_app' || value === 'direct_binary';
 }
 
 function isComputerUseFailureCode(value: unknown): value is ComputerUseFailureCode {

@@ -1,15 +1,16 @@
-import type { BrowserWindow, IpcMain } from 'electron';
+import type { BrowserWindow } from 'electron';
+import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 import type { createDesktopServices } from './desktop-services.js';
 import type { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 
 export type DesktopServices = Awaited<ReturnType<typeof createDesktopServices>>;
 
 export interface MainStartupDeps {
-  ipcMain: IpcMain;
+  ipcMain: IpcHandleRegistrar;
   app: Pick<Electron.App, 'getPath' | 'setName' | 'isReady' | 'getVersion'> & { dock?: Electron.Dock };
   createWindow: () => Promise<BrowserWindow>;
   createDesktopServices: (opts: { dataRoot: string; kswarmService: unknown }) => DesktopServices;
-  registerDesktopIpc: (ipcMain: IpcMain, window: BrowserWindow, services: DesktopServices) => Promise<void>;
+  registerDesktopIpc: (ipcMain: IpcHandleRegistrar, window: BrowserWindow, services: DesktopServices) => Promise<void>;
   recoverStaleTasks: (services: DesktopServices) => Promise<void>;
   registerChannelTools: (services: DesktopServices) => void;
   registerSkillTools: (services: DesktopServices) => void;
@@ -20,7 +21,7 @@ export interface MainStartupDeps {
   setupMenuBar: (window: BrowserWindow) => void;
   startRuntimeBridge: (services: DesktopServices, kswarmStartPromise: Promise<void>) => void;
   createKSwarmStreamBridge: () => KSwarmStreamBridge;
-  registerKSwarmProxy: (ipcMain: IpcMain, bridge: KSwarmStreamBridge) => void;
+  registerKSwarmProxy: (ipcMain: IpcHandleRegistrar, bridge: KSwarmStreamBridge) => void;
 }
 
 export interface MainStartupResult {

@@ -92,6 +92,7 @@ export class InProcessTaskRuntimeHost {
     maxToolLoopIterations = new Map();
     pendingAssistantDeltas = new Map();
     runtimeEventErrors = new Map();
+    stoppedAcceptingReason = null;
     constructor(options) {
         this.options = options;
     }
@@ -136,15 +137,56 @@ export class InProcessTaskRuntimeHost {
         return { taskId, understanding };
     }
     async startTask(taskId) {
+        // The duplicate guard runs inside startTrackedExecution, before its first
+        // await, so a concurrent duplicate loses deterministically instead of
+        // racing a snapshot read. This is a deliberate behaviour change (R27-02):
+        // concurrent duplicates now surface "already started" rather than a later
+        // snapshot/terminal error.
+        const tracked = this.startTrackedExecution(taskId);
         const snapshot = await this.requireSnapshot(taskId);
         if (TERMINAL_STATUSES.has(snapshot.status)) {
             throw new Error(`task is terminal: ${taskId}`);
         }
+        void tracked;
+    }
+    /**
+     * The single production entry point that registers a background execution.
+     * Both `startTask()` and the confirm path of `answerQuestion()` go through
+     * here, so `drain()` observes a real map rather than a second counter.
+     */
+    startTrackedExecution(taskId) {
         if (this.executionPromises.has(taskId) || this.activeExecutions.has(taskId)) {
             throw new Error(`task already started: ${taskId}`);
         }
-        const execPromise = this.executeTask(taskId).catch(() => undefined);
+        if (this.stoppedAcceptingReason) {
+            throw new Error(`shutting_down: ${this.stoppedAcceptingReason}`);
+        }
+        const token = this.options.acquireExecutionToken?.(taskId) ?? null;
+        const execPromise = this.executeTask(taskId)
+            .catch(() => undefined)
+            .finally(() => {
+            this.executionPromises.delete(taskId);
+            token?.release();
+        });
         this.executionPromises.set(taskId, execPromise);
+        return execPromise;
+    }
+    /** Shutdown owner API (§5.5 phase ③). */
+    stopAccepting(reason = 'app_shutdown') {
+        this.stoppedAcceptingReason = reason;
+    }
+    abortAllActive(reason = 'app_shutdown') {
+        for (const execution of this.activeExecutions.values()) {
+            abortWithReason(execution.controller, reason);
+        }
+    }
+    async drain() {
+        while (this.executionPromises.size > 0) {
+            await Promise.all([...this.executionPromises.values()]);
+        }
+    }
+    activeExecutionCount() {
+        return this.executionPromises.size;
     }
     async createTask(input) {
         const prepared = await this.prepareTask(input);
@@ -206,7 +248,9 @@ export class InProcessTaskRuntimeHost {
         if (result.question.kind === 'confirm_understanding'
             && input.answer.type === 'choice'
             && input.answer.choiceId === 'confirm') {
-            await this.executeTask(input.taskId);
+            // Tracked so a confirm-triggered execution is visible to drain(); the
+            // external timing (await until this execution finishes) is preserved.
+            await this.startTrackedExecution(input.taskId);
         }
     }
     async cancelTask(taskId, reason = 'user_cancelled') {

@@ -45,6 +45,16 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
+      - name: Verify native SQLite binding loads
+        # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
+        # node-gyp source build when it does not see gypfile:false. Either path is
+        # acceptable, but a binding that cannot be loaded must fail here rather
+        # than inside the packaged app.
+        shell: bash
+        run: |
+          node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
+          cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
+
       - name: Clone desktop sidecar repositories
         run: |
           git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
@@ -83,6 +93,15 @@ jobs:
       - name: Smoke test report-renderer
         run: |
           echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | timeout 5 node ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer/dist/server.bundle.js || true
+
+      - name: Vendor self-contained provider runtimes (macOS)
+        # Materialises the pinned CPython closure from runtime-lock.json. The
+        # closure itself is not committed (~340 MB); packaging verifies its
+        # canonical-tree merkle and fails the build if it drifts.
+        run: |
+          cd ../kai-xiaok-plugins
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target darwin-arm64 --verify
 
       - name: Build desktop
         run: cd desktop && npm run build
@@ -209,7 +228,7 @@ jobs:
 
   build-windows:
     needs: create-release
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
@@ -224,6 +243,16 @@ jobs:
 
       - name: Install desktop dependencies
         run: cd desktop && npm ci
+
+      - name: Verify native SQLite binding loads
+        # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
+        # node-gyp source build when it does not see gypfile:false. Either path is
+        # acceptable, but a binding that cannot be loaded must fail here rather
+        # than inside the packaged app.
+        shell: bash
+        run: |
+          node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('root sqlite ok', d.prepare('select sqlite_version() v').get().v)"
+          cd desktop && node -e "const d=require('better-sqlite3')(':memory:');d.exec('create table t(x)');console.log('desktop sqlite ok')"
 
       - name: Clone desktop sidecar repositories
         run: |
@@ -259,6 +288,12 @@ jobs:
               --abi abi3 `
               --abi none
           }
+
+      - name: Vendor self-contained provider runtimes (Windows)
+        run: |
+          cd ../kai-xiaok-plugins
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
 
       - name: Build desktop
         run: cd desktop && npm run build

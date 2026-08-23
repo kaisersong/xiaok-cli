@@ -15,6 +15,7 @@ import {
   computeKnowledgeContentHash,
   reconstructKnowledgeSourceText,
 } from './kb-source-identity.js';
+import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
@@ -637,7 +638,7 @@ function stableMeetingLiveError(error: unknown): string {
 }
 
 export async function registerDesktopIpc(
-  ipcMain: IpcMain,
+  ipcMain: IpcHandleRegistrar,
   window: BrowserWindow,
   services: DesktopServices,
   options: RegisterDesktopIpcOptions = {}
@@ -1044,9 +1045,13 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:deleteMCPInstall', async (_event, id) => services.deleteMCPInstall(id));
   // Plugin MCP servers
   ipcMain.handle('desktop:listPluginMcpServers', () => services.listPluginMcpServers());
-  ipcMain.handle('desktop:setPluginMcpServerEnabled', (_event, input) => services.setPluginMcpServerEnabled(input));
-  ipcMain.handle('desktop:restartPluginMcpServers', () => services.restartPluginMcpServers());
-  ipcMain.handle('desktop:restartPluginMcpServer', (_event, input) => services.restartPluginMcpServer(input));
+  // Design v58 §7.2: `setPluginMcpServerEnabled` only mutated a view model and
+  // had no durable desired-state store, and the blanket restart bypassed the CUA
+  // preference. Both are deleted; retry is component-scoped and user-sourced.
+  ipcMain.handle('desktop:retryPluginComponent', (_event, input) => services.retryPluginComponent({
+    componentId: String((input as { componentId?: unknown })?.componentId ?? ''),
+    requestSource: 'user',
+  }));
   ipcMain.handle('desktop:getComputerUseCapabilityStatus', () => services.getComputerUseCapabilityStatus());
   ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse());
   ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse());

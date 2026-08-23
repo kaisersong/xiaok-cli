@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-14]
+        os: [windows-2022, macos-14]
     steps:
       - uses: actions/checkout@v4
 
@@ -62,7 +62,7 @@ jobs:
   windows-kimi-packaged-smoke:
     name: Windows packaged Kimi K3 smoke
     if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
@@ -113,6 +113,13 @@ jobs:
               --abi abi3 `
               --abi none
           }
+
+      - name: Vendor self-contained provider runtimes (Windows)
+        shell: bash
+        run: |
+          cd ../kai-xiaok-plugins
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64
+          node scripts/vendor-runtimes.mjs --runtime slide-python --target win32-x64 --verify
 
       - name: Build desktop
         run: cd desktop && npm run build

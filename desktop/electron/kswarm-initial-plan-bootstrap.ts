@@ -158,14 +158,26 @@ export class KSwarmInitialPlanBootstrapQueue {
   private scheduledFor: number | null = null;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private stopped = false;
+  private activeController: AbortController | null = null;
+  private activeRun: Promise<void> | null = null;
 
   constructor(
     private readonly store: JsonKSwarmInitialPlanBootstrapStore,
-    private readonly execute: (job: KSwarmInitialPlanBootstrapPayload) => Promise<{ ok: true } | { ok: false; error: string }>,
+    /**
+     * Design v58 §5.5 / R44-06: the signature explicitly gains `signal` so a
+     * shutdown abort reaches the job instead of leaving a fire-and-forget run.
+     */
+    private readonly execute: (
+      job: KSwarmInitialPlanBootstrapPayload,
+      signal: AbortSignal,
+    ) => Promise<{ ok: true } | { ok: false; error: string }>,
     private readonly options: {
       now?: () => number;
       maxClaimPerRun?: number;
       setTimeoutFn?: (callback: () => void, ms: number) => NodeJS.Timeout;
+      /** Held for the duration of a run so the coordinator can drain it. */
+      acquireRunToken?: () => { release(): void };
     } = {}
   ) {}
 
@@ -183,16 +195,44 @@ export class KSwarmInitialPlanBootstrapQueue {
     this.kick();
   }
 
+  /** Shutdown owner API (§5.5 phase ③). */
+  stopAccepting(): void {
+    this.stopped = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+      this.scheduled = false;
+      this.scheduledFor = null;
+    }
+  }
+
+  abortActive(reason = 'app_shutdown'): void {
+    this.activeController?.abort(reason);
+  }
+
+  async drain(): Promise<void> {
+    while (this.activeRun) {
+      await this.activeRun;
+    }
+  }
+
   async runOnce(): Promise<void> {
     if (this.running) return;
+    if (this.stopped) return;
     this.running = true;
+    const token = this.options.acquireRunToken?.() ?? null;
+    const controller = new AbortController();
+    this.activeController = controller;
+    let settleRun: () => void = () => {};
+    this.activeRun = new Promise<void>((resolve) => { settleRun = resolve; });
     try {
       const limit = this.options.maxClaimPerRun ?? 5;
       while (true) {
         const jobs = this.store.claimDue(this.now(), limit);
         if (jobs.length === 0) break;
         for (const job of jobs) {
-          const result = await this.execute(job);
+          if (controller.signal.aborted) break;
+          const result = await this.execute(job, controller.signal);
           const now = this.now();
           if (result.ok) {
             this.store.markSucceeded(job.projectId, now);
@@ -203,15 +243,22 @@ export class KSwarmInitialPlanBootstrapQueue {
       }
     } finally {
       this.running = false;
-      const now = this.now();
-      const nextDueAt = this.store.nextDueAt(now);
-      if (nextDueAt !== null) {
-        this.kick(Math.max(0, nextDueAt - now));
+      this.activeController = null;
+      token?.release();
+      settleRun();
+      this.activeRun = null;
+      if (!this.stopped) {
+        const now = this.now();
+        const nextDueAt = this.store.nextDueAt(now);
+        if (nextDueAt !== null) {
+          this.kick(Math.max(0, nextDueAt - now));
+        }
       }
     }
   }
 
   private kick(delayMs = 0): void {
+    if (this.stopped) return;
     const targetAt = this.now() + delayMs;
     if (this.scheduled && this.scheduledFor !== null && this.scheduledFor <= targetAt) return;
     if (this.timer) {

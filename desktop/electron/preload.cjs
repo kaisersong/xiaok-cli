@@ -77,6 +77,14 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   deleteProvider: (providerId) => ipcRenderer.invoke('desktop:deleteProvider', providerId),
   deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId),
   getMobilePairingInfo: () => ipcRenderer.invoke('desktop:mobile:getPairingInfo'),
+  getMobileRelayStatus: () => ipcRenderer.invoke('desktop:mobile:getRelayStatus'),
+  openMobileRelaySignIn: () => ipcRenderer.invoke('desktop:mobile:openRelaySignIn'),
+  onMobileRelayStatus: (handler) => {
+    const channel = 'desktop:mobileRelayStatus';
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
   readClipboardFilePaths: () => ipcRenderer.invoke('desktop:readClipboardFilePaths'),
   readClipboardImage: () => ipcRenderer.invoke('desktop:readClipboardImage'),
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
@@ -114,9 +122,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   updateMCPInstall: (id, input) => ipcRenderer.invoke('desktop:updateMCPInstall', id, input),
   deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id),
   listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers'),
-  setPluginMcpServerEnabled: (input) => ipcRenderer.invoke('desktop:setPluginMcpServerEnabled', input),
-  restartPluginMcpServers: () => ipcRenderer.invoke('desktop:restartPluginMcpServers'),
-  restartPluginMcpServer: (input) => ipcRenderer.invoke('desktop:restartPluginMcpServer', input),
+  retryPluginComponent: (input) => ipcRenderer.invoke('desktop:retryPluginComponent', input),
   getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus'),
   enableComputerUse: () => ipcRenderer.invoke('desktop:enableComputerUse'),
   reconnectComputerUse: () => ipcRenderer.invoke('desktop:reconnectComputerUse'),

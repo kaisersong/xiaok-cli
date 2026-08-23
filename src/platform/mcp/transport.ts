@@ -17,6 +17,11 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import {
+  ControlledStdioClientTransport,
+  type ControlledCloseBudget,
+  type ForceKillGuard,
+} from './controlled-stdio-transport.js';
 import { WebSocket } from 'ws';
 import type {
   McpServerConfig,
@@ -35,6 +40,39 @@ export class InPlaceStdioClientTransport extends StdioClientTransport {}
 export interface McpClientConnectionOptions {
   cwd?: string;
   clientName?: string;
+  /**
+   * Design v58 §3.4. Reserved bundled providers must select `controlled` so the
+   * Xiaok-owned transport is the single owner of spawn/close/env; every other
+   * server keeps `sdk` and therefore its current behaviour, including the
+   * inherited-env merge below.
+   */
+  stdioLifecycle?: 'sdk' | 'controlled';
+  controlledClose?: {
+    forceKillGuard: ForceKillGuard;
+    closeBudget?: ControlledCloseBudget;
+  };
+  /**
+   * Complete and final child env for `controlled` transports. Required in that
+   * mode: it is passed verbatim, never merged with `process.env`.
+   */
+  finalEnv?: Readonly<Record<string, string>>;
+  /** Owns startup interruption (spawn, era probe, initialize). */
+  startupSignal?: AbortSignal;
+  /**
+   * Handed the raw close handle synchronously before `client.connect()`, with no
+   * Desktop owner attached; the adapter wraps it into an EffectHandle.
+   */
+  onCloseHandle?: (handle: McpCloseHandle) => void;
+}
+
+/** Raw, owner-less close handle (design §3.3). */
+export interface McpCloseHandle {
+  readonly kind: 'mcp-connection';
+  readonly resourceId: string;
+  /** Dynamic lookup; never a PID snapshot captured before connect. */
+  getChildPid(): number | null;
+  close(): Promise<void>;
+  readonly closed: Promise<{ expected: boolean; exitCode: number | null; signal: NodeJS.Signals | null }>;
 }
 
 /**
@@ -162,7 +200,12 @@ export async function createMcpClientConnection(
   );
 
   try {
-    await client.connect(createdTransport.transport, { timeout: startupTimeoutMs });
+    await client.connect(createdTransport.transport, {
+      timeout: startupTimeoutMs,
+      ...(options.startupSignal ? { signal: options.startupSignal } : {}),
+    });
+    // Controlled transports spawn inside start(), so stderr only exists now.
+    createdTransport.attachAfterStart?.();
   } catch (error) {
     const stderrTail = createdTransport.getStderrTail();
     const childPid = createdTransport.getChildPid();
@@ -296,6 +339,8 @@ interface CreatedTransport {
   getStderrTail(): string;
   getChildPid(): number | null;
   disposeObservability(): void;
+  /** Controlled transports spawn in start(), so stderr is only attachable after. */
+  attachAfterStart?: () => void;
 }
 
 async function createTransport(
@@ -317,12 +362,66 @@ async function createTransport(
 }
 
 /**
+ * Controlled stdio transport (design v58 §3.4): Xiaok owns spawn/close/env for
+ * reserved bundled providers. `finalEnv` is mandatory and passed verbatim, so
+ * the inherited-env merge of the `sdk` path can never apply here.
+ */
+async function createControlledStdioTransport(
+  config: McpStdioServerConfig,
+  options: McpClientConnectionOptions,
+): Promise<CreatedTransport> {
+  if (!options.finalEnv) {
+    throw new Error('controlled stdio transport requires an explicit finalEnv');
+  }
+  if (!options.controlledClose?.forceKillGuard) {
+    throw new Error('controlled stdio transport requires a ForceKillGuard frozen at construction');
+  }
+  const resourceId = `${config.command}:${(config.args ?? []).join(' ')}`;
+  const transport = new ControlledStdioClientTransport({
+    command: resolveStdioCommand(config.command),
+    args: config.args ?? [],
+    finalEnv: options.finalEnv,
+    cwd: options.cwd,
+    resourceId,
+    forceKillGuard: options.controlledClose.forceKillGuard,
+    closeBudget: options.controlledClose.closeBudget,
+    startupSignal: options.startupSignal,
+  });
+
+  // Handed over synchronously, before client.connect() can await anything.
+  options.onCloseHandle?.({
+    kind: 'mcp-connection',
+    resourceId,
+    getChildPid: () => transport.getChildPid(),
+    close: () => transport.close(),
+    closed: transport.closed,
+  });
+
+  let stderrTail = '';
+  const onStderr = (chunk: Buffer | string) => {
+    stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_TAIL_LIMIT);
+  };
+  const attachStderr = () => transport.stderr?.on('data', onStderr);
+
+  return {
+    transport,
+    getStderrTail: () => stderrTail,
+    getChildPid: () => transport.getChildPid(),
+    disposeObservability: () => transport.stderr?.off('data', onStderr),
+    attachAfterStart: attachStderr,
+  };
+}
+
+/**
  * Stdio transport: 通过子进程启动 MCP server
  */
 async function createStdioTransport(
   config: McpStdioServerConfig,
   options: McpClientConnectionOptions,
 ): Promise<CreatedTransport> {
+  if (options.stdioLifecycle === 'controlled') {
+    return createControlledStdioTransport(config, options);
+  }
   // 过滤掉 undefined 值，确保 env 是 Record<string, string>
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries({ ...process.env, ...config.env })) {

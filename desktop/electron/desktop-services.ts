@@ -84,7 +84,7 @@ import {
   type ExternalPluginDependency,
   type PluginDependencyStatusOptions,
 } from './plugin-dependency-service.js';
-import { prelaunchCuaDriverDaemonForMcp, runCuaMcpReadinessSmoke } from './cua-driver-manager.js';
+import { runCuaMcpReadinessSmoke } from './cua-driver-manager.js';
 import { UserMemoryStore } from './user-memory.js';
 import { createComputerUseTool, type ComputerUseBackend, type ComputerUseUnavailableError } from '../../src/ai/tools/computer-use.js';
 import {
@@ -112,6 +112,9 @@ import {
 } from './kswarm-dynamic-workflow-script-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
+import { createAllHostGateways, type GatewayRuntimeFacade } from './provider-gateways/create-host-gateways.js';
+import { reservedProviderSpecs, type ReservedProviderBridge } from './provider-gateways/reserved-provider-specs.js';
+import type { PluginComponentSpec } from '../../src/platform/provider-runtime/lifecycle-reconciler.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -413,6 +416,11 @@ export interface DesktopServicesOptions {
   computerUseAppIdentity?: ComputerUseAppIdentity;
   computerUsePreferencePath?: string;
   artifactWorkspaceFeatureFlags?: Partial<ArtifactWorkspaceFeatureFlags>;
+  /**
+   * Design v58 §4: the stable provider-runtime identity, created before services
+   * exist so static gateways can capture it once for the process lifetime.
+   */
+  pluginProviderRuntime?: GatewayRuntimeFacade;
 }
 
 const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
@@ -421,7 +429,10 @@ const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
   displayName: 'CUA Driver',
   envOverride: 'XIAOK_CUA_DRIVER_CMD',
   binaryCandidates: ['~/.local/bin/cua-driver', '/usr/local/bin/cua-driver', '/opt/homebrew/bin/cua-driver', 'cua-driver'],
-  minVersion: '0.1.0',
+  // Design v58 §6.1: 0.19.3 is the first version with a machine-readable
+  // `mcp_invocation` and the app-daemon auto-relaunch proxy. Older versions fail
+  // closed as dependency-update-required instead of resurrecting `open -n serve`.
+  minVersion: '0.19.3',
   install: {
     kind: 'official_installer',
     sourceUrl: 'https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.sh',
@@ -742,7 +753,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot);
   const initialPlanBootstrapQueue = new KSwarmInitialPlanBootstrapQueue(
     initialPlanBootstrapStore,
-    input => bootstrapKSwarmInitialPlan(input),
+    // Design R44-06: the producer receives the shutdown signal explicitly. The
+    // broker call itself is not yet cancellable, so we fail fast at the job
+    // boundary instead of starting work that nobody will await.
+    (input, signal) => {
+      if (signal.aborted) {
+        return Promise.resolve({ ok: false as const, error: 'app_shutdown' });
+      }
+      return bootstrapKSwarmInitialPlan(input);
+    },
     { now: options.now }
   );
   let kbStore: ReturnType<typeof createKbStoreSqlite> | undefined;
@@ -791,6 +810,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
   const pluginMcpDisposers: Array<{ name: string; pluginName: string; dispose: () => void }> = [];
+  /**
+   * Live handles for the reserved renderers, so the provider runtime's
+   * ComponentSpecs can reach the same connection the loader just established
+   * (design §4.5). Keyed by server name; replaced on every reconnect.
+   */
+  const reservedServerHandles = new Map<string, {
+    listOperations: () => Promise<readonly string[]>;
+    call: (name: string, input: Record<string, unknown>) => Promise<string>;
+    close: () => Promise<void>;
+  }>();
   const pluginDependencies = options.pluginDependencies ?? [
     { pluginName: 'cua-computer-use', dependency: CUA_DRIVER_DEPENDENCY },
   ];
@@ -891,7 +920,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       ...(computerUseAppIdentity.appPath ? { lastSuccessfulAppPath: computerUseAppIdentity.appPath } : {}),
       ...(computerUseAppIdentity.teamId ? { lastSuccessfulTeamId: computerUseAppIdentity.teamId } : {}),
       ...(computerUseAppIdentity.appAsarSha256 ? { lastSuccessfulAppAsarSha256: computerUseAppIdentity.appAsarSha256 } : {}),
-      launchMethod: 'open_app',
     };
     persistComputerUsePreference();
   };
@@ -1013,7 +1041,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                 ? (process.env.XIAOK_NODE_CMD || process.execPath)
                 : launch.command;
             resolvedCommand = command;
-            prelaunchCuaDriverDaemonForMcp(server.name, command);
+            // Design v58 §6.1: no Xiaok-owned daemon launch. The official
+            // `cua-driver mcp` proxy is the only owner of app-daemon reuse and
+            // auto-relaunch, so a second `open -n` owner is removed here.
             const baseEnv = 'env' in server ? (server as { env?: Record<string, string> }).env : undefined;
             const runtimeEnv = isPythonServer
               ? buildPythonServerEnv(baseEnv)
@@ -1045,6 +1075,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               ));
             const callTool = async (name: string, input: Record<string, unknown>) =>
               (await callToolResult(name, input)).text;
+            if (server.name === 'slide-renderer' || server.name === 'report-renderer') {
+              reservedServerHandles.set(server.name, {
+                listOperations: async () => schemas.map((schema) => schema.name),
+                call: callTool,
+                close: async () => { connection.dispose(); },
+              });
+            }
             let mcpTools: Tool[];
             let toolCount = 0;
             if (server.name === 'cua-driver') {
@@ -1203,7 +1240,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     options.kswarmService,
     materialRegistry,
     kswarmCreateProjectToolOptions,
-    { officeToMarkdown: input => officeDocumentParser.parse(input) },
+    {
+      officeToMarkdown: input => officeDocumentParser.parse(input),
+      ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
+    },
   );
   const restrictedArtifactRunner = createDesktopModelRunnerWithRegistry(
     artifactGenerationRegistry,
@@ -1278,7 +1318,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         options.kswarmService,
         materialRegistry,
         kswarmCreateProjectToolOptions,
-        { officeToMarkdown: input => officeDocumentParser.parse(input) },
+        {
+          officeToMarkdown: input => officeDocumentParser.parse(input),
+          // Each KSwarm scoped registry gets the same main-owned runtime, so the
+          // report/slide gateways are reachable there too (design §6.2/§6.3).
+          ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
+        },
       ),
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
@@ -1875,6 +1920,31 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         registry.registerTool(tool);
       }
     },
+    /**
+     * Design v58 §9.3: the single idempotent entry point that starts the provider
+     * runtime after the compatibility deployment and the MCP connections exist.
+     * `start()` is single-flight inside the facade, so calling this twice is safe.
+     */
+    async startPluginProviderRuntime(): Promise<{ started: boolean; reason?: string }> {
+      const runtime = options.pluginProviderRuntime as
+        | (GatewayRuntimeFacade & { start?: (specs: PluginComponentSpec[]) => Promise<void> })
+        | undefined;
+      if (!runtime?.start) return { started: false, reason: 'no_provider_runtime' };
+      const bridge: ReservedProviderBridge = {
+        listOperations: async (server) => reservedServerHandles.get(server)?.listOperations() ?? [],
+        call: async (server, request) => {
+          const handle = reservedServerHandles.get(server);
+          if (!handle) throw new Error(`provider_unavailable: ${server} has no live connection`);
+          return handle.call(request.operation, request.input);
+        },
+        close: async (server) => { await reservedServerHandles.get(server)?.close(); },
+      };
+      await runtime.start(reservedProviderSpecs(bridge, {
+        slide: pluginMcpServers.find((s) => s.name === 'slide-renderer')?.pluginName ?? 'kai-slide-creator',
+        report: pluginMcpServers.find((s) => s.name === 'report-renderer')?.pluginName ?? 'kai-report-creator',
+      }));
+      return { started: true };
+    },
     async registerMcpTools(): Promise<{ dispose: () => void }> {
       const autoConnectDecision = isComputerUseAutoConnectEligibleApp(computerUsePreference, computerUseAppIdentity);
       await reconnectPluginMcpServers({
@@ -1886,11 +1956,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     listPluginMcpServers(): PluginMcpServerState[] {
       return pluginMcpServers;
     },
-    async restartPluginMcpServers(): Promise<PluginMcpServerState[]> {
-      return reconnectPluginMcpServers({ userInitiated: true });
-    },
-    async restartPluginMcpServer(input: { name: string }): Promise<PluginMcpServerState[]> {
-      return reconnectPluginMcpServers({ userInitiated: true, targetServerName: input.name });
+    /**
+     * Design v58 §7.2: the blanket restart is gone. It reconnected *every* server
+     * with `userInitiated: true`, which bypassed the CUA persisted preference and
+     * could re-enable a component the user had disabled. Retry is now scoped to one
+     * component and never writes desired state.
+     */
+    async retryPluginComponent(
+      input: { componentId: string; requestSource: 'user' },
+    ): Promise<PluginMcpServerState[]> {
+      if (input.requestSource !== 'user') {
+        throw new Error('retryPluginComponent requires requestSource "user"');
+      }
+      const target = pluginMcpServers.find((server) => server.name === input.componentId);
+      if (!target) return pluginMcpServers;
+      // A disabled CUA component must not be activated by a retry.
+      if (target.name === 'cua-driver' && !computerUsePreference.enabledByUser) {
+        return pluginMcpServers;
+      }
+      return reconnectPluginMcpServers({ userInitiated: true, targetServerName: input.componentId });
     },
     async enableComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
       await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver' });
@@ -1920,11 +2004,6 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     getComputerUseCapabilityStatus(): { state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string } {
       return getComputerUseCapabilityStatus();
-    },
-    setPluginMcpServerEnabled(input: { name: string; enabled: boolean }): PluginMcpServerState[] {
-      const server = pluginMcpServers.find(s => s.name === input.name);
-      if (server) server.enabled = input.enabled;
-      return pluginMcpServers;
     },
     async installPlugin(name: string): Promise<{ success: boolean; error?: string }> {
       const pluginName = name.trim();
@@ -5722,7 +5801,9 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           if (canCreate > 0) {
             const createResults = await Promise.all(
               Array.from({ length: canCreate }, (_, i) =>
-                kswarmService.request('/agents', {
+                // Same gate as project creation: `POST /agents` is a desktop
+                // mutation and is rejected with 401 without the token.
+                kswarmService.request('/agents', withKSwarmDesktopMutationToken(kswarmService, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -5730,7 +5811,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
                     roles: ['worker'],
                     instructions: 'You are a KSwarm worker agent. Execute assigned tasks and submit results.',
                   }),
-                }).then(r => r.ok ? r.json() : null).catch(() => null)
+                })).then(r => r.ok ? r.json() : null).catch(() => null)
               )
             );
             for (const newAgent of createResults) {
@@ -5751,7 +5832,11 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           members: sanitizedMembers,
           workFolder: resolvedWorkFolder,
         });
-        const res = await kswarmService.request('/projects', {
+        // The KSwarm server gates every desktop mutation on the mutation token
+        // (`createMutationAuthority` in persistence-hub.js returns 401
+        // `mutation_credential_required` without it), so project creation must
+        // carry it exactly like activate-and-start does.
+        const res = await kswarmService.request('/projects', withKSwarmDesktopMutationToken(kswarmService, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -5773,7 +5858,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
             ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
             ...(clientRequestKey ? { clientRequestKey } : {}),
           }),
-        });
+        }));
         if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
         const { project, reused } = await res.json() as { project: { id: string; name: string; status: string; createdAt: number }; reused?: boolean };
 
@@ -6433,6 +6518,8 @@ export function createDesktopModelRunnerWithRegistry(
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
   runnerOptions: {
     restrictedArtifactGeneration?: boolean;
+    /** Stable provider-runtime identity captured before services exist (§4). */
+    pluginProviderRuntime?: GatewayRuntimeFacade;
     officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   } = {},
 ): TaskRunner {
@@ -6447,6 +6534,17 @@ export function createDesktopModelRunnerWithRegistry(
     registerKSwarmTools(registry, kswarmService, createProjectToolOptions);
     registry.registerTool(createReportArtifactTool());
     registry.registerTool(createReportProgressTool());
+
+    // Design v58 §4.4/§6.2/§6.3: the eight historical `mcp__…` canonical names the
+    // bundled report/slide Skills reference are host-owned static gateways, so the
+    // names stay reachable while the schema, permission and output-path contract
+    // belong to the host instead of the server's tool catalog. Registered once for
+    // the process lifetime; each call takes a lease from the committed generation.
+    if (runnerOptions.pluginProviderRuntime) {
+      for (const gateway of createAllHostGateways(runnerOptions.pluginProviderRuntime)) {
+        registry.registerTool(gateway);
+      }
+    }
 
     // Register notebook (memory) tools — shared LayeredMemoryStore
     for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {

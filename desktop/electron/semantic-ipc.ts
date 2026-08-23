@@ -1,5 +1,6 @@
 import type { IpcMain } from 'electron';
 import type { KSwarmSemanticService } from './kswarm-semantic-service.js';
+import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
 export interface AssistantSemanticController {
   getOverview(): unknown | Promise<unknown>;
@@ -11,7 +12,7 @@ export interface AssistantSemanticController {
 }
 
 export function registerSemanticDesktopIpc(
-  ipcMain: Pick<IpcMain, 'handle'>,
+  ipcMain: IpcHandleRegistrar,
   options: {
     assistant: AssistantSemanticController;
     kswarm: KSwarmSemanticService;

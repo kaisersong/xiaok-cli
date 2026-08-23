@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron';
 import type { KSwarmService } from './kswarm-service.js';
 import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
+import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
 type ProxyResponseKind = 'json' | 'text' | 'boolean';
 type ProxyService = Pick<KSwarmService, 'request'>
@@ -73,7 +74,7 @@ const SAFE_DELETE_PATTERNS = [
 ];
 
 export function registerKSwarmProxy(
-  ipcMain: IpcMain,
+  ipcMain: IpcHandleRegistrar,
   bridge: KSwarmStreamBridge,
   kswarmService: ProxyService | null = null,
 ): void {

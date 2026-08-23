@@ -18,8 +18,11 @@ const { dirname, join, resolve } = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const RUNTIMES = [
+  // The report renderer deliberately ships no runtime: it binds to the app's own
+  // Electron Node and freezes that interpreter's identity digest per generation
+  // (design v54 §4.4). Only the slide renderer needs a vendored closure, because
+  // its alternative is a shared mutable venv any concurrent instance can rewrite.
   { plugin: 'kai-slide-creator', destDir: 'bundled-python', runtimeKey: 'slide-python' },
-  { plugin: 'kai-report-creator', destDir: 'bundled-node', runtimeKey: 'report-node' },
 ];
 
 function pluginsRepoRoot(projectDir) {

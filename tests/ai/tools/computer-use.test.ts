@@ -114,7 +114,11 @@ describe('createComputerUseTool', () => {
 
     expect(tool.definition.name).toBe('xiaok_computer_use');
     expect(tool.permission).toBe('write');
-    expect(calls).toEqual([{ name: 'get_window_state', input: { pid: 123, window_id: 456 } }]);
+    // Design v58 §6.1: capture forces include_screenshot through the frozen
+    // translator; nothing is passed through implicitly.
+    expect(calls).toEqual([
+      { name: 'get_window_state', input: { pid: 123, window_id: 456, include_screenshot: true } },
+    ]);
     expect(result).toMatchObject({
       ok: true,
       action: 'capture',
@@ -163,7 +167,7 @@ describe('createComputerUseTool', () => {
     });
   });
 
-  it('captures a visual screenshot through the CUA screenshot tool', async () => {
+  it('captures a visual screenshot through get_window_state, since 0.19.3 has no screenshot op', async () => {
     const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
     const tool = createComputerUseTool({
       callToolResult: async (name, input) => {
@@ -180,7 +184,11 @@ describe('createComputerUseTool', () => {
 
     const result = JSON.parse(await tool.execute({ action: 'screenshot', pid: 123, window_id: '456' }));
 
-    expect(calls).toEqual([{ name: 'screenshot', input: { pid: 123, window_id: 456 } }]);
+    // cua-driver 0.19.3 has no standalone `screenshot` operation: the public
+    // action is an alias that shares capture's translator (design R25-01).
+    expect(calls).toEqual([
+      { name: 'get_window_state', input: { pid: 123, window_id: 456, include_screenshot: true } },
+    ]);
     expect(result).toMatchObject({
       ok: true,
       action: 'screenshot',
@@ -224,7 +232,7 @@ describe('createComputerUseTool', () => {
 
     expect(calls).toEqual([
       { name: 'list_windows', input: { on_screen_only: true } },
-      { name: 'get_window_state', input: { pid: 123, window_id: 456 } },
+      { name: 'get_window_state', input: { pid: 123, window_id: 456, include_screenshot: true } },
     ]);
     expect(result).toMatchObject({
       ok: true,
@@ -248,6 +256,22 @@ describe('createComputerUseTool', () => {
       .resolves.toContain('Error: blocked dangerous computer-use text input');
     await expect(tool.execute({ action: 'key', key: 'cmd+shift+q' }))
       .resolves.toContain('Error: blocked dangerous computer-use key combo');
+    expect(calls).toEqual([]);
+  });
+
+  it('rejects a bare element_index that has no snapshot identity', async () => {
+    const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const tool = createComputerUseTool({
+      callToolResult: async (name, input) => {
+        calls.push({ name, input });
+        return { text: 'ok', images: [], isError: false, summary: 'ok' };
+      },
+    });
+
+    // Design R28-03: element_index only means something together with the
+    // snapshot it came from, so a stale index can never be replayed blindly.
+    await expect(tool.execute({ action: 'click', element_index: '3' }))
+      .resolves.toContain('element_index requires a matching snapshot_id');
     expect(calls).toEqual([]);
   });
 
@@ -276,14 +300,15 @@ describe('createComputerUseTool', () => {
     const result = JSON.parse(await tool.execute({
       action: 'click',
       app: 'Safari',
-      element_index: '3',
+      element_token: 'tok-3',
       capture_after: true,
     }));
 
     expect(calls).toEqual([
-      { name: 'click', input: { app: 'Safari', element_index: '3' } },
+      // `app` is wrapper-only and must never reach the backend (design §6.1).
+      { name: 'click', input: { element_token: 'tok-3' } },
       { name: 'list_windows', input: { on_screen_only: true } },
-      { name: 'get_window_state', input: { pid: 123, window_id: 456 } },
+      { name: 'get_window_state', input: { pid: 123, window_id: 456, include_screenshot: true } },
     ]);
     expect(result.captureAfter).toMatchObject({
       text: 'get_window_state ok',

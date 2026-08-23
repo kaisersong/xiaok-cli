@@ -46,15 +46,6 @@ export function PluginsSettings() {
 
   useEffect(() => { void loadData() }, [loadData])
 
-  const handleToggle = useCallback(async (name: string, enabled: boolean) => {
-    setToggling(name)
-    try {
-      const updated = await window.xiaokDesktop.setPluginMcpServerEnabled({ name, enabled })
-      setServers(updated)
-    } catch { /* ignore */ }
-    finally { setToggling(null) }
-  }, [])
-
   const handleInstall = useCallback(async (name: string) => {
     setInstalling(name)
     setInstallError(null)
@@ -108,23 +99,20 @@ export function PluginsSettings() {
                     {server.pluginName} · {server.toolCount} tools
                   </span>
                 </div>
-                <button
-                  type="button"
+                {/* Design v58 §7.2: the old toggle only mutated a view model — there was
+                    no durable desired-state store behind it. Reserved renderers are
+                    startup-active and CUA has its own persisted preference, so this is a
+                    read-only status until a real per-server durable toggle is designed. */}
+                <span
                   aria-label={server.name}
-                  disabled={toggling === server.name}
-                  onClick={() => handleToggle(server.name, !server.enabled)}
-                  className={`relative h-5 w-9 rounded-full transition-colors ${
-                    server.enabled
-                      ? 'bg-[var(--c-accent)]'
-                      : 'bg-[var(--c-bg-deep)]'
-                  } ${toggling === server.name ? 'opacity-50' : ''}`}
+                  className={`rounded-full px-2 py-0.5 text-xs ${
+                    server.connected
+                      ? 'bg-[var(--c-accent)] text-white'
+                      : 'bg-[var(--c-bg-deep)] text-[var(--c-text-tertiary)]'
+                  }`}
                 >
-                  <span
-                    className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${
-                      server.enabled ? 'translate-x-4' : 'translate-x-0.5'
-                    }`}
-                  />
-                </button>
+                  {server.connected ? 'connected' : 'unavailable'}
+                </span>
               </div>
             ))}
           </div>

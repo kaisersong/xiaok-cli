@@ -41,7 +41,8 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
     const envHint = (providerProfile?.envPrefixes[0] ?? providerId.toUpperCase()).toUpperCase();
     throw new Error(
       `未配置 API Key。请运行: xiaok config set api-key <key> --provider ${providerId}\n` +
-      `或设置环境变量 XIAOK_${envHint}_API_KEY`
+      `或设置环境变量 XIAOK_${envHint}_API_KEY（也支持标准环境变量 ${envHint}_API_KEY）\n` +
+      `如果已设置环境变量但仍报此错，可运行: xiaok doctor --check-keys 验证候选 Key 是否可用`
     );
   }
 

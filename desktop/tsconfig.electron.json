@@ -15,6 +15,7 @@
     "../src/runtime/hooks.ts",
     "../src/ai/providers/**/*.ts",
     "../src/ai/runtime/runtime-facade.ts",
-    "../src/types.ts"
+    "../src/types.ts",
+    "../src/types/**/*.d.ts"
   ]
 }

@@ -1052,6 +1052,15 @@ export interface LocaleStrings {
     back: string;
     // mobile pairing
     mobilePairingTitle: string;
+    mobileRelayStateOk: string;
+    mobileRelayStateOffline: string;
+    mobileRelayStateExpired: string;
+    mobileRelayStateRejected: string;
+    mobileRelayStateMissing: string;
+    mobileRelayStateUnparseable: string;
+    mobileRelayExpiredAt: string;
+    mobileRelaySignInAction: string;
+    mobileRelayReauthHint: string;
     mobilePairingLoading: string;
     mobilePairingLoadFailed: string;
     mobilePairingQrAlt: string;

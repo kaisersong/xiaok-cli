@@ -1,6 +1,6 @@
 {
   "name": "xiaok-desktop",
-  "version": "1.4.28",
+  "version": "1.4.30",
   "private": true,
   "description": "xiaok Desktop Intent Cockpit",
   "author": "xiaok",
@@ -22,7 +22,6 @@
     "typecheck:update-baseline": "node scripts/typecheck-baseline.mjs --update",
     "pack:dir": "npm run build:icon && npm run build:clean && electron-builder --dir --config electron-builder.json -c.win.signAndEditExecutable=false",
     "pack:release": "npm run build:icon && npm run build:clean && electron-builder --config electron-builder.json -c.win.signAndEditExecutable=false",
-    "postinstall": "cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target $(node -e \"console.log(require('electron/package.json').version)\") || true",
     "doctor": "react-doctor",
     "doctor:json": "react-doctor --json --no-score --fail-on none",
     "doctor:staged": "react-doctor --staged --no-score --fail-on error"
@@ -32,7 +31,7 @@
     "@firecrawl/anydoc": "0.1.8",
     "@modelcontextprotocol/client": "^2.0.0",
     "@tanstack/react-query": "^5.100.10",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-updater": "^6.8.3",
