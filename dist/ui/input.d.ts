@@ -93,7 +93,19 @@ export declare class InputReader {
     private clipboardImageSaver;
     private busyCapture;
     private readActive;
+    private onToggleTranscript?;
+    private suspendHooks;
+    private suspendDepth;
     constructor(renderer?: ReplRenderer | undefined);
+    setToggleTranscriptHandler(handler: (() => void | Promise<void>) | undefined): void;
+    /**
+     * Hands fd 0 to an external process while a read loop is active. done()'s
+     * detach steps are replayed, but the draft and decoder state survive, so the
+     * user returns to the line they were typing.
+     */
+    suspendForExternalProcess(): {
+        resume(): void;
+    };
     setSkills(skills: SkillMeta[]): void;
     setModeCycleHandler(handler: () => PermissionMode): void;
     setTranscriptLogger(logger: TranscriptLogger | undefined): void;

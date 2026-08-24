@@ -274,6 +274,22 @@ export declare class ScrollRegionManager {
     writeAtContentCursor(text: string, options?: {
         clearPromptChrome?: boolean;
     }): void;
+    /**
+     * Writes terminal graphics payloads (kitty APC / iTerm2 OSC) verbatim.
+     * stripAnsi() only strips CSI, so routing these bytes through
+     * writeAtContentCursor would count the base64 payload as visible columns and
+     * inflate the row bookkeeping by thousands of phantom rows.
+     */
+    writeRawBlock(text: string, rows: number, options?: {
+        clearPromptChrome?: boolean;
+        logger?: {
+            beginSuppress(): void;
+            endSuppress(): void;
+            recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
+        };
+        placeholder?: string;
+    }): void;
+    private writeRawBytes;
     writeSubmittedInput(text: string): void;
     getNewlineCallback(): (() => void);
     /**

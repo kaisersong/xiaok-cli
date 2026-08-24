@@ -34,6 +34,10 @@ describe('identifyKey', () => {
     it('identifies delete (0x7f) as backspace', () => {
       expect(identifyKey('\x7f', 0)).toEqual({ key: 'backspace', consumed: 1 });
     });
+
+    it('identifies ctrl+o (0x0f)', () => {
+      expect(identifyKey('\x0f', 0)).toEqual({ key: 'ctrl+o', consumed: 1 });
+    });
   });
 
   describe('ANSI escape sequences', () => {
@@ -129,6 +133,10 @@ describe('resolveAction', () => {
 
   it('resolves escape to escape', () => {
     expect(resolveAction('escape')).toBe('escape');
+  });
+
+  it('resolves ctrl+o to toggle-transcript', () => {
+    expect(resolveAction('ctrl+o')).toBe('toggle-transcript');
   });
 
   it('returns undefined for unbound keys', () => {

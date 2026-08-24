@@ -11,6 +11,7 @@ export type Action =
   | 'yank' | 'undo' | 'redo'
   | 'paste-image'
   | 'search-history' | 'clear-screen'
+  | 'toggle-transcript'
   | 'cancel' | 'eof' | 'escape'
   | 'tab' | 'shift-tab';
 
@@ -43,6 +44,7 @@ const DEFAULT_BINDINGS: KeyBindingEntry[] = [
   { key: 'ctrl+v', action: 'paste-image' },
   { key: 'ctrl+r', action: 'search-history' },
   { key: 'ctrl+l', action: 'clear-screen' },
+  { key: 'ctrl+o', action: 'toggle-transcript' },
   { key: 'ctrl+c', action: 'cancel' },
   { key: 'ctrl+d', action: 'eof' },
   { key: 'escape', action: 'escape' },
@@ -185,6 +187,7 @@ export function identifyKey(data: string, offset: number): { key: string; consum
     0x0b: 'ctrl+k',
     0x0c: 'ctrl+l',
     0x0d: 'enter',
+    0x0f: 'ctrl+o',
     0x12: 'ctrl+r',
     0x16: 'ctrl+v',
     0x15: 'ctrl+u',

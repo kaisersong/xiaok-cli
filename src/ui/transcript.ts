@@ -22,6 +22,8 @@ export type TranscriptEvent =
 export interface TranscriptLogger {
   record(event: TranscriptEvent): void;
   recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
+  beginSuppress(): void;
+  endSuppress(): void;
 }
 
 export interface TranscriptAnalysis {
@@ -34,6 +36,8 @@ export function normalizeTranscriptChunk(chunk: string): string {
 }
 
 export class FileTranscriptLogger implements TranscriptLogger {
+  private suppressDepth = 0;
+
   constructor(
     private readonly sessionId: string,
     private readonly rootDir = join(getConfigDir(), 'transcripts'),
@@ -43,6 +47,14 @@ export class FileTranscriptLogger implements TranscriptLogger {
     return this.getFilePath();
   }
 
+  beginSuppress(): void {
+    this.suppressDepth += 1;
+  }
+
+  endSuppress(): void {
+    this.suppressDepth = Math.max(0, this.suppressDepth - 1);
+  }
+
   record(event: TranscriptEvent): void {
     mkdirSync(this.rootDir, { recursive: true });
     appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, 'utf8');
@@ -50,6 +62,7 @@ export class FileTranscriptLogger implements TranscriptLogger {
 
   recordOutput(stream: 'stdout' | 'stderr', chunk: string): void {
     if (!chunk) return;
+    if (this.suppressDepth > 0) return;
     this.record({
       type: 'output',
       stream,

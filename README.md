@@ -782,6 +782,16 @@ xiaok yzjchannel serve
 
 `auto` mode auto-approves low-risk tool calls. It still asks for confirmation before high-risk Bash commands such as recursive deletion, hard resets, force pushes, database drops, and screen-automation shell fallbacks. Catastrophic Bash commands remain blocked by the Bash safety classifier.
 
+### Terminal Keys & Inline Images
+
+```text
+Ctrl+O                        Open the full session transcript in $PAGER
+```
+
+`Ctrl+O` renders the whole session — user input, assistant replies, tool observations, command output — into a temporary ANSI file (mode `0600`, removed on exit) and hands it to `$PAGER` (default `less -R`). The pager owns stdin while open; the input line and footer are restored when it exits. The key is ignored while a turn is streaming or a permission prompt is waiting. On Windows, or when no usable pager exists, the transcript is printed to the scrollback instead.
+
+Submitted images are shown inline when the terminal supports it, via the kitty graphics protocol (PNG only) or the iTerm2 inline-image protocol, both detected at runtime. Terminals without support — tmux panes included — fall back to an `[Image <w>×<h>]` placeholder, and image escape sequences never reach the transcript log.
+
 ### Yunzhijia IM Commands
 
 ```text

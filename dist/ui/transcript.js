@@ -7,6 +7,7 @@ export function normalizeTranscriptChunk(chunk) {
 export class FileTranscriptLogger {
     sessionId;
     rootDir;
+    suppressDepth = 0;
     constructor(sessionId, rootDir = join(getConfigDir(), 'transcripts')) {
         this.sessionId = sessionId;
         this.rootDir = rootDir;
@@ -14,12 +15,20 @@ export class FileTranscriptLogger {
     get path() {
         return this.getFilePath();
     }
+    beginSuppress() {
+        this.suppressDepth += 1;
+    }
+    endSuppress() {
+        this.suppressDepth = Math.max(0, this.suppressDepth - 1);
+    }
     record(event) {
         mkdirSync(this.rootDir, { recursive: true });
         appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, 'utf8');
     }
     recordOutput(stream, chunk) {
         if (!chunk)
+            return;
+        if (this.suppressDepth > 0)
             return;
         this.record({
             type: 'output',

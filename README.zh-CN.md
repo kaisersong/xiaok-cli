@@ -781,6 +781,16 @@ xiaok yzjchannel serve
 
 `auto` 模式会自动批准低风险工具调用。递归删除、硬重置、强推、数据库删除、屏幕自动化 shell fallback 等高风险 Bash 命令仍会要求确认；灾难性 Bash 命令继续由 Bash 安全分类器直接阻断。
 
+### 终端按键与内联图片
+
+```text
+Ctrl+O                        用 $PAGER 打开完整会话转录
+```
+
+`Ctrl+O` 会把整个会话（用户输入、助手回复、工具观察、命令输出）渲染成临时 ANSI 文件（权限 `0600`，退出后删除），交给 `$PAGER`（默认 `less -R`）打开。pager 打开期间独占 stdin，退出后自动恢复输入行与页脚。轮次正在流式输出或有权限确认等待时，该按键会被忽略。Windows 或没有可用 pager 时，转录改为直接打印到 scrollback。
+
+提交的图片在终端支持时会内联显示：运行时探测 kitty graphics 协议（仅 PNG）与 iTerm2 inline-image 协议。不支持的终端（包括 tmux pane）降级为 `[Image <宽>×<高>]` 占位文本，图片转义序列也不会写入 transcript 日志。
+
 ### 云之家 IM 命令
 
 ```text

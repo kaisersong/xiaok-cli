@@ -2474,3 +2474,153 @@ describe('ScrollRegionManager external command handoff', () => {
     }
   });
 });
+
+
+describe('ScrollRegionManager.writeRawBlock', () => {
+  it('advances the content cursor by exactly the declared row count', () => {
+    const { manager } = createMockScrollRegion();
+    manager.begin();
+    manager.setWelcomeRows(4);
+
+    const before = manager.getContentCursor();
+    manager.writeRawBlock('\x1b_Ga=T,f=100,C=1,i=1;QUJD\x1b\\\n\n\n', 4);
+
+    expect(manager.getContentCursor()).toBe(before + 4);
+  });
+
+  it('does not measure the raw payload as visible width', () => {
+    const { manager } = createMockScrollRegion();
+    manager.begin();
+    manager.setWelcomeRows(2);
+
+    const hugePayload = 'A'.repeat(140_000);
+    const before = manager.getContentCursor();
+    manager.writeRawBlock(`\x1b_Ga=T,f=100,C=1,i=9;${hugePayload}\x1b\\\n\n`, 3);
+
+    // A width-measuring path would report ~1700 phantom rows for this payload.
+    expect(manager.getContentCursor()).toBe(before + 3);
+  });
+
+  it('zeroes the cursor column so the next text write starts at column 1', () => {
+    const { manager, getOutput, resetOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.setWelcomeRows(3);
+
+    manager.writeAtContentCursor('partial line without newline');
+    resetOutput();
+    manager.writeRawBlock('\x1b]1337;File=inline=1;size=3:QUJD\x07\n', 2);
+    resetOutput();
+    manager.writeAtContentCursor('next text line\n');
+
+    const output = getOutput();
+    expect(output).toContain('\r');
+    expect(output).toContain('next text line');
+  });
+
+  it('re-anchors the footer after writing the raw block', () => {
+    const { manager, getOutput, resetOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'MODEL_X' });
+    resetOutput();
+
+    manager.writeRawBlock('\x1b_Ga=T;QUJD\x1b\\\n\n', 2);
+
+    const output = getOutput();
+    expect(output).toContain('Type your message...');
+    expect(output).toContain('MODEL_X');
+  });
+
+  it('skips the footer re-anchor when prompt chrome restore is disabled', () => {
+    const { manager, getOutput, resetOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'MODEL_X' });
+    resetOutput();
+
+    manager.writeRawBlock('\x1b_Ga=T;QUJD\x1b\\\n', 1, { clearPromptChrome: false });
+
+    expect(getOutput()).not.toContain('MODEL_X');
+  });
+
+  it('clamps positioning at the scroll region bottom', () => {
+    const { manager, getOutput, resetOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.setContentCursor(manager.maxContentRows);
+    resetOutput();
+
+    manager.writeRawBlock('\x1b_Ga=T;QUJD\x1b\\\n\n\n\n', 5);
+    resetOutput();
+    manager.writeAtContentCursor('after clamp\n');
+
+    const rows = [...getOutput().matchAll(/\x1b\[(\d+);1H/g)].map((match) => Number(match[1]));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row).toBeLessThanOrEqual(manager.maxContentRows);
+    }
+  });
+
+  it('writes the payload verbatim to the stream', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    manager.begin();
+    const payload = '\x1b_Ga=T,f=100,C=1,i=5;QUJDRA==\x1b\\';
+
+    manager.writeRawBlock(`${payload}\n`, 1);
+
+    expect(getOutput()).toContain(payload);
+  });
+
+  it('does not render the raw payload as visible screen text', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+
+    try {
+      manager.begin();
+      manager.setWelcomeRows(3);
+      manager.writeAtContentCursor('before image\n');
+      manager.writeRawBlock('\x1b_Ga=T,f=100,C=1,i=2;QUJDRA==\x1b\\\n\n', 2);
+      manager.writeAtContentCursor('after image\n');
+
+      const screenText = harness.screen.text();
+      expect(screenText).toContain('before image');
+      expect(screenText).toContain('after image');
+      expect(screenText).not.toContain('QUJDRA==');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('suppresses raw payload logging and records only the placeholder', () => {
+    const { manager } = createMockScrollRegion();
+    manager.begin();
+
+    const recorded: string[] = [];
+    let depth = 0;
+    const logger = {
+      beginSuppress: () => {
+        depth += 1;
+      },
+      endSuppress: () => {
+        depth -= 1;
+      },
+      recordOutput: (_stream: 'stdout' | 'stderr', chunk: string) => {
+        if (depth > 0) return;
+        recorded.push(chunk);
+      },
+    };
+
+    manager.writeRawBlock('\x1b_Ga=T,f=100,C=1,i=4;QUJDRA==\x1b\\\n\n', 2, {
+      logger,
+      placeholder: '  ↳ [Image 1388×278]',
+    });
+
+    expect(depth).toBe(0);
+    const joined = recorded.join('');
+    expect(joined).toContain('[Image 1388×278]');
+    expect(joined).not.toContain('QUJDRA==');
+  });
+
+  it('falls back to a direct stream write when the scroll region is inactive', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    manager.writeRawBlock('\x1b_Ga=T;QQ==\x1b\\\n', 1);
+    expect(getOutput()).toContain('\x1b_Ga=T;QQ==\x1b\\');
+  });
+});

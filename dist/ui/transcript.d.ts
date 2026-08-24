@@ -63,6 +63,8 @@ export type TranscriptEvent = {
 export interface TranscriptLogger {
     record(event: TranscriptEvent): void;
     recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
+    beginSuppress(): void;
+    endSuppress(): void;
 }
 export interface TranscriptAnalysis {
     slashPromptGrowth: number;
@@ -72,8 +74,11 @@ export declare function normalizeTranscriptChunk(chunk: string): string;
 export declare class FileTranscriptLogger implements TranscriptLogger {
     private readonly sessionId;
     private readonly rootDir;
+    private suppressDepth;
     constructor(sessionId: string, rootDir?: string);
     get path(): string;
+    beginSuppress(): void;
+    endSuppress(): void;
     record(event: TranscriptEvent): void;
     recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
     private getFilePath;

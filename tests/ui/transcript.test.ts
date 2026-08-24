@@ -53,3 +53,67 @@ describe('transcript logger', () => {
     expect(analysis.approvalTitleRepeats).toBe(1);
   });
 });
+
+describe('transcript logger output suppression', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'xiaok-transcript-suppress-'));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('drops recordOutput calls inside a suppression window', () => {
+    const logger = new FileTranscriptLogger('sess_suppress', dir);
+
+    logger.recordOutput('stdout', 'before\n');
+    logger.beginSuppress();
+    logger.recordOutput('stdout', '\x1b_Ga=T,f=100;QUJDRA==\x1b\\');
+    logger.endSuppress();
+    logger.recordOutput('stdout', 'after\n');
+
+    const raw = readFileSync(join(dir, 'sess_suppress.jsonl'), 'utf8');
+    expect(raw).toContain('before');
+    expect(raw).toContain('after');
+    expect(raw).not.toContain('QUJDRA==');
+  });
+
+  it('nests suppression windows with a counter', () => {
+    const logger = new FileTranscriptLogger('sess_nested', dir);
+
+    logger.beginSuppress();
+    logger.beginSuppress();
+    logger.endSuppress();
+    logger.recordOutput('stdout', 'inner\n');
+    logger.endSuppress();
+    logger.recordOutput('stdout', 'outer\n');
+
+    const raw = readFileSync(join(dir, 'sess_nested.jsonl'), 'utf8');
+    expect(raw).not.toContain('inner');
+    expect(raw).toContain('outer');
+  });
+
+  it('never lets the suppression depth go negative', () => {
+    const logger = new FileTranscriptLogger('sess_unbalanced', dir);
+
+    logger.endSuppress();
+    logger.endSuppress();
+    logger.recordOutput('stdout', 'visible\n');
+
+    const raw = readFileSync(join(dir, 'sess_unbalanced.jsonl'), 'utf8');
+    expect(raw).toContain('visible');
+  });
+
+  it('still records explicit record() events while suppressed', () => {
+    const logger = new FileTranscriptLogger('sess_explicit', dir);
+
+    logger.beginSuppress();
+    logger.record({ type: 'output', stream: 'stdout', raw: '  ↳ [Image 1388×278]\n', normalized: '  ↳ [Image 1388×278]\n', timestamp: 1 });
+    logger.endSuppress();
+
+    const raw = readFileSync(join(dir, 'sess_explicit.jsonl'), 'utf8');
+    expect(raw).toContain('[Image 1388×278]');
+  });
+});

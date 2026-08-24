@@ -15,11 +15,13 @@ import os
 import re
 import shutil
 import shlex
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
@@ -476,6 +478,46 @@ def latest_intent_summary_line(content: str) -> str:
             break
         fragments.append(stripped)
     return "".join(fragments)
+
+
+def write_executable_script(path: Path, body: str) -> Path:
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def wait_for_file_contains(path: Path, needle: str, timeout: float = 20.0, interval: float = 0.1) -> str:
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        try:
+            last = path.read_text(encoding="utf-8")
+        except OSError:
+            last = ""
+        if needle in last:
+            return last
+        time.sleep(interval)
+    return last
+
+
+def write_png(path: Path, width: int, height: int) -> Path:
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload))
+            + kind
+            + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    raw = b"".join(b"\x00" + b"\x20\x60\xa0" * width for _ in range(height))
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+    return path
 
 
 def write_config(config_dir: Path, base_url: str, model_name: str = "gpt-terminal-e2e") -> None:
@@ -2910,6 +2952,140 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_footer_chrome_is_singular(long_markdown_final, allow_completed_summary=True)
         print("PASS: long markdown report-to-slides chain keeps footer during explored/finalizing pressure")
+
+        if os.name == "nt":
+            print("--- E2E 27-28: skipped on win32 (transcript pager degrades to scrollback print) ---")
+        else:
+            # Behaves like a real interactive pager: paint, then block on a key.
+            # Whatever the pager prints just before exiting is immediately scrolled
+            # out of the pane by the footer recovery path, so the line it consumed
+            # from stdin is asserted through a trace file instead of the pane.
+            pager_trace = work_root / "pager-trace.log"
+            pager_probe = write_executable_script(
+                work_root / "pager-probe.sh",
+                "#!/bin/sh\n"
+                "printf 'PAGER-OPENED\\n'\n"
+                "printf 'PAGER-MARKER-COUNT:%s\\n' \"$(grep -c 'transcript-pager-marker' \"$1\")\"\n"
+                "printf 'PAGER-WAIT\\n'\n"
+                "IFS= read -r line\n"
+                f"printf 'PAGER-GOT:[%s]\\n' \"$line\" >> {shell_quote_posix(str(pager_trace))}\n",
+            )
+
+            write_config(config_dir, server.base_url)
+            tmux.stop()
+            tmux = TmuxHarness(
+                session,
+                project_fixture,
+                config_dir,
+                home_dir,
+                cli_entry,
+                tmux_bin,
+                env_overrides={**e2e_env, "PAGER": str(pager_probe)},
+            )
+            tmux.start(cols=80, rows=18)
+            welcome = tmux.wait_for(lambda text: has_welcome_screen(text) and has_input_prompt(text), timeout=12)
+            assert_welcome_screen(welcome, "welcome screen did not render before the transcript pager flow")
+
+            print("--- E2E 27: Ctrl+O hands the rendered transcript to $PAGER and restores the footer ---")
+            tmux.send_text("transcript-pager-marker one")
+            time.sleep(0.15)
+            tmux.send_key("Enter")
+            tmux.wait_for(has_ready_input_prompt, timeout=30)
+
+            tmux.send_key("C-o")
+            pager_view = tmux.wait_for(lambda text: "PAGER-WAIT" in text, timeout=20)
+            assert_contains(
+                pager_view,
+                "PAGER-OPENED",
+                "Ctrl+O did not spawn the configured $PAGER",
+            )
+            assert_contains(
+                pager_view,
+                "PAGER-MARKER-COUNT:1",
+                "the pager did not receive a readable transcript file containing the session text",
+            )
+
+            tmux.send_text("q")
+            time.sleep(0.15)
+            tmux.send_key("Enter")
+            trace = wait_for_file_contains(pager_trace, "PAGER-GOT:[q]", timeout=20)
+            assert_contains(
+                trace,
+                "PAGER-GOT:[q]",
+                "the quit key typed while the pager was open did not reach the pager",
+            )
+            restored = tmux.wait_for(has_ready_input_prompt, timeout=20)
+            assert_footer_chrome_is_singular(restored, allow_completed_summary=True)
+            print("PASS: Ctrl+O hands the rendered transcript to $PAGER and restores the footer")
+
+            print("--- E2E 28: the pager owns stdin while open and the input reader regains it after ---")
+            tmux.send_key("C-o")
+            tmux.wait_for(lambda text: "PAGER-WAIT" in text, timeout=20)
+
+            tmux.send_text("pager-owns-stdin")
+            time.sleep(0.15)
+            tmux.send_key("Enter")
+            handed_over = wait_for_file_contains(pager_trace, "PAGER-GOT:[pager-owns-stdin]", timeout=20)
+            assert_contains(
+                handed_over,
+                "PAGER-GOT:[pager-owns-stdin]",
+                "the line typed while the pager was open did not reach the pager's stdin",
+            )
+
+            after_pager = tmux.wait_for(has_ready_input_prompt, timeout=20)
+            prompt_line = next(
+                (line for line in reversed(visible_lines(after_pager)) if is_input_prompt_line(line)),
+                "",
+            )
+            assert_true(
+                "pager-owns-stdin" not in prompt_line,
+                f"the line consumed by the pager leaked into the input draft:\n{after_pager}",
+            )
+            assert_footer_chrome_is_singular(after_pager, allow_completed_summary=True)
+
+            tmux.send_text("after-pager-input")
+            typed_back = tmux.wait_for(
+                lambda text: any(
+                    is_input_prompt_line(line) and "after-pager-input" in line
+                    for line in visible_lines(text)
+                ),
+                timeout=10,
+            )
+            assert_contains(
+                typed_back,
+                "after-pager-input",
+                "the input reader did not regain stdin after the pager exited",
+            )
+            for _ in range(len("after-pager-input")):
+                tmux.send_key("BSpace")
+            tmux.wait_for(
+                lambda text: not any(
+                    is_input_prompt_line(line) and "after-pager-input" in line
+                    for line in visible_lines(text)
+                ),
+                timeout=10,
+            )
+            print("PASS: the pager owns stdin while open and the input reader regains it after")
+
+        print("--- E2E 29: inline image submission degrades to fallback text under tmux ---")
+        image_fixture = write_png(project_fixture / "inline-image.png", 96, 48)
+        tmux.send_text(str(image_fixture))
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+        image_echo = tmux.wait_for(lambda text: "[Image 96×48]" in text, timeout=20)
+        assert_contains(
+            image_echo,
+            "[Image 96×48]",
+            "the submitted image did not render the fallback placeholder under tmux",
+        )
+        raw_pane = tmux.capture(ansi=True)
+        assert_true(
+            "\x1b_G" not in raw_pane and "1337;File=" not in raw_pane,
+            f"inline image escape sequences leaked into a tmux pane:\n{raw_pane}",
+        )
+        image_final = tmux.wait_for(has_ready_input_prompt, timeout=30)
+        assert_footer_chrome_is_singular(image_final, allow_completed_summary=True)
+        print("PASS: inline image submission degrades to fallback text under tmux")
 
         print("--- E2E Summary ---")
         print(f"Requests observed by fake OpenAI server: {len(server.requests)}")

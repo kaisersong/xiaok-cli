@@ -308,7 +308,43 @@ export class InputReader {
   private clipboardImageSaver: ClipboardImageSaver = saveClipboardImageToTemp;
   private busyCapture: BusyCaptureHandle | null = null;
   private readActive = false;
+  private onToggleTranscript?: () => void | Promise<void>;
+  private suspendHooks: { detach(): void; attach(): void } | null = null;
+  private suspendDepth = 0;
   constructor(private readonly renderer?: ReplRenderer) {}
+
+  setToggleTranscriptHandler(handler: (() => void | Promise<void>) | undefined): void {
+    this.onToggleTranscript = handler;
+  }
+
+  /**
+   * Hands fd 0 to an external process while a read loop is active. done()'s
+   * detach steps are replayed, but the draft and decoder state survive, so the
+   * user returns to the line they were typing.
+   */
+  suspendForExternalProcess(): { resume(): void } {
+    const hooks = this.suspendHooks;
+    if (!hooks) {
+      return { resume: () => {} };
+    }
+
+    this.suspendDepth += 1;
+    if (this.suspendDepth === 1) {
+      hooks.detach();
+    }
+
+    let released = false;
+    return {
+      resume: () => {
+        if (released) return;
+        released = true;
+        this.suspendDepth = Math.max(0, this.suspendDepth - 1);
+        if (this.suspendDepth === 0 && this.suspendHooks === hooks) {
+          hooks.attach();
+        }
+      },
+    };
+  }
 
   setSkills(skills: SkillMeta[]): void {
     this.skills = skills;
@@ -1004,6 +1040,8 @@ export class InputReader {
         stdin.setRawMode(false);
         stdin.pause();
         this.readActive = false;
+        this.suspendHooks = null;
+        this.suspendDepth = 0;
         this.transcriptLogger?.record({ type: 'input_read_detach', reason, timestamp: Date.now() });
 
         if (result !== null && result.length > 0 && this.history[this.history.length - 1] !== result) {
@@ -1366,6 +1404,16 @@ export class InputReader {
             return true;
           }
 
+          if (action === 'toggle-transcript') {
+            const handler = this.onToggleTranscript;
+            if (handler) {
+              void Promise.resolve()
+                .then(() => handler())
+                .catch((error) => log(`toggle-transcript handler failed: ${String(error)}`));
+            }
+            return true;
+          }
+
           return false;
         };
 
@@ -1408,6 +1456,18 @@ export class InputReader {
       };
 
       stdin.on('data', onData);
+      this.suspendHooks = {
+        detach: () => {
+          stdin.removeListener('data', onData);
+          stdin.setRawMode(false);
+          stdin.pause();
+        },
+        attach: () => {
+          stdin.on('data', onData);
+          stdin.setRawMode(true);
+          stdin.resume();
+        },
+      };
       // Disable mouse tracking sequences before entering raw mode
       // Ghostty and other terminals may have mouse tracking enabled
       stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');

@@ -212,6 +212,8 @@ describe('permission-prompt', () => {
           events.push(event as Record<string, unknown>);
         },
         recordOutput() {},
+        beginSuppress() {},
+        endSuppress() {},
       };
 
       const pending = showPermissionPrompt('bash', { command: 'ls' }, { transcriptLogger: logger });

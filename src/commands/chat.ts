@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, delimiter, join } from 'node:path';
 import type { Command } from 'commander';
 import type { ModelAdapter, MessageBlock, UsageStats } from '../types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
@@ -88,6 +88,9 @@ import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
 import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
+import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
+import { openTranscriptPager, spawnPagerProcess, type TranscriptPagerStatus } from '../ui/transcript-pager.js';
+import { detectImageProtocol, readImageDimensions, renderImageLines, formatImagePlaceholder } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { createLogger } from '../utils/logger.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
@@ -345,6 +348,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     ? 'fork'
     : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
   const transcriptLogger = new FileTranscriptLogger(sessionId);
+  const transcriptBuffer = new TranscriptBuffer({
+    onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
+  });
+  let nextInlineImageId = 1;
   let terminalUiSuspended = false;
   let terminalUiFailureNoted = false;
   let terminalUiFallbackStream: 'stdout' | 'stderr' | null = null;
@@ -804,6 +811,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
     },
     onToolObserved: async (event) => {
+      recordToolObservation(transcriptBuffer, event);
       observeSkillToolResult(event);
       observeSkillEvidence(event);
     },
@@ -2339,6 +2347,43 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (opts.dryRun) process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
 
     // 打印历史消息（session resume）- 在欢迎页之后
+    const recordHistoryBlockInBuffer = (role: 'user' | 'assistant', block: MessageBlock): void => {
+      if (block.type === 'text') {
+        if (!block.text || block.text.startsWith('<system-reminder>')) return;
+        transcriptBuffer.record({ kind: role, text: block.text });
+        return;
+      }
+      if (block.type === 'thinking') {
+        transcriptBuffer.record({ kind: 'thinking', text: block.thinking });
+        return;
+      }
+      if (block.type === 'tool_use') {
+        transcriptBuffer.record({
+          kind: 'tool_use',
+          agentId: 'main',
+          name: block.name,
+          summary: JSON.stringify(block.input),
+        });
+        return;
+      }
+      if (block.type === 'tool_result') {
+        transcriptBuffer.record({
+          kind: 'tool_result',
+          agentId: 'main',
+          name: block.tool_use_id,
+          content: block.content,
+          isError: block.is_error === true,
+        });
+        return;
+      }
+      const dims = readImageDimensions(Buffer.from(block.source.data, 'base64'));
+      transcriptBuffer.record({
+        kind: 'image',
+        mediaType: block.source.media_type,
+        ...(dims ? { width: dims.width, height: dims.height } : {}),
+      });
+    };
+
     if (historyMessages.length > 0) {
       const historyColumns = process.stdout.columns ?? 80;
       let replayedRows = 0;
@@ -2356,6 +2401,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       for (const msg of historyMessages) {
         if (msg.role === 'user') {
           for (const block of msg.content) {
+            recordHistoryBlockInBuffer('user', block);
             if (block.type === 'text') {
               const text = block.text;
               // Skip system-reminder content
@@ -2368,6 +2414,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           }
         } else if (msg.role === 'assistant') {
           for (const block of msg.content) {
+            recordHistoryBlockInBuffer('assistant', block);
             if (block.type === 'text') {
               for (const line of MarkdownRenderer.renderToLines(block.text)) {
                 writeHistoryChunk(`${line}\n`);
@@ -2393,6 +2440,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     };
 
     const writeCommandOutput = (commandText: string, output: string): void => {
+      transcriptBuffer.record({ kind: 'command_output', command: commandText, output });
       if (!scrollRegion.isActive()) {
         process.stdout.write(output);
         return;
@@ -2405,6 +2453,51 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         replRenderer.prepareForInput();
       } catch (error) {
         suspendInteractiveUi('write_command_output', error);
+      }
+    };
+
+    const renderSubmittedImageBlocks = (blocks: MessageBlock[]): void => {
+      const images = blocks.filter((block): block is Extract<MessageBlock, { type: 'image' }> => block.type === 'image');
+      if (images.length === 0) return;
+
+      const protocol = detectImageProtocol();
+      for (const block of images) {
+        const data = Buffer.from(block.source.data, 'base64');
+        const dims = readImageDimensions(data);
+        transcriptBuffer.record({
+          kind: 'image',
+          mediaType: block.source.media_type,
+          ...(dims ? { width: dims.width, height: dims.height } : {}),
+        });
+
+        if (terminalUiSuspended) continue;
+
+        const rendered = renderImageLines({
+          data,
+          mediaType: block.source.media_type,
+          protocol,
+          columns: process.stdout.columns ?? 80,
+          imageId: nextInlineImageId++,
+        });
+        const placeholder = `  ↳ ${formatImagePlaceholder(dims)}`;
+
+        try {
+          if (rendered.protocol === null) {
+            const line = `${rendered.lines[0]}\n`;
+            if (scrollRegion.isActive()) {
+              scrollRegion.writeAtContentCursor(line);
+            } else {
+              process.stdout.write(line);
+            }
+            continue;
+          }
+          scrollRegion.writeRawBlock(`${rendered.lines.join('\n')}\n`, rendered.rows, {
+            logger: transcriptLogger,
+            placeholder,
+          });
+        } catch (error) {
+          suspendInteractiveUi('render_inline_image', error);
+        }
       }
     };
 
@@ -2437,6 +2530,64 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         suspendInteractiveUi('restore_shell_escape_footer', error);
       }
     };
+
+    const lookupPagerBinary = (name: string): string | null => {
+      if (!name) {
+        return null;
+      }
+      if (name.includes('/') || name.includes('\\')) {
+        return existsSync(name) ? name : null;
+      }
+      const searchPath = process.env.PATH ?? '';
+      for (const dir of searchPath.split(delimiter)) {
+        if (!dir) {
+          continue;
+        }
+        const candidate = join(dir, name);
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+      return null;
+    };
+
+    const getTranscriptPagerStatus = (): TranscriptPagerStatus => {
+      const snapshot = runtimeState.getSnapshot();
+      switch (snapshot.turnSurfaceState) {
+        case 'streaming_content':
+        case 'compat_streaming':
+          return 'streaming';
+        case 'tool_interrupt':
+        case 'waiting_feedback':
+          return 'permission';
+        case 'busy_finishing':
+          return 'busy';
+        default:
+          return 'idle';
+      }
+    };
+
+    inputReader.setToggleTranscriptHandler(async () => {
+      await openTranscriptPager({
+        buffer: transcriptBuffer,
+        host: {
+          getStatus: getTranscriptPagerStatus,
+          getPager: () => process.env.PAGER,
+          getPlatform: () => process.platform,
+          lookupBinary: lookupPagerBinary,
+          suspendInput: () => inputReader.suspendForExternalProcess(),
+          endScrollRegion: () => {
+            scrollRegion.end();
+          },
+          resumeScrollRegion: restoreTerminalAfterShellCommand,
+          spawnPager: spawnPagerProcess,
+          writeStdout: (chunk) => {
+            process.stdout.write(chunk);
+          },
+          logDebug: (message) => log.debug('transcript_pager', message),
+        },
+      });
+    });
 
     const replayShellCommandOutput = (output: string): void => {
       if (!output) {
@@ -2530,6 +2681,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     turnHadAskUserQuestion = false;
     runtimeState.beginTurn('Thinking', { deferActivity: true });
     ensureBusyInputCapture();
+
+    if (submittedInput.length > 0) {
+      transcriptBuffer.record({ kind: 'user', text: submittedInput });
+    }
 
     if (!terminalUiSuspended) {
       scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
@@ -3292,6 +3447,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         effectiveInput,
         resolveModelCapabilities(adapter).supportsImageInput,
       );
+      renderSubmittedImageBlocks(inputBlocks);
       clearPastedImagePaths();
       await refreshIntentLedger();
       await prepareIntentReminderForInput(trimmed);
@@ -3321,6 +3477,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       lastAssistantText = turnResult.assistantText;
       flushStreamingMarkdown();
       lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
+      if (lastAssistantText.trim().length > 0) {
+        transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
+      }
       await finalizeCurrentTurnIntentIfNeeded();
       await persistSession();
       // Feedback prompt should render against a clean footer, not a completed
@@ -3409,6 +3568,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
         flushStreamingMarkdown();
         lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
+        if (lastAssistantText.trim().length > 0) {
+          transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
+        }
         await finalizeCurrentTurnIntentIfNeeded();
         await persistSession();
         clearTurnIntentContext();

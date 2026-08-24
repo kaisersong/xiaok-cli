@@ -182,6 +182,31 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
       i = j;
       continue;
     }
+    if (next === '_' || next === ']' || next === 'P' || next === '^' || next === 'X') {
+      // APC / OSC / DCS / PM / SOS string sequences: consume the whole payload.
+      // Kitty graphics (ESC _ G ... ESC \) and iTerm2 inline images
+      // (ESC ] 1337 ; ... BEL) carry base64 bytes that must never be replayed
+      // as visible characters.
+      let j = i + 2;
+      while (j < raw.length) {
+        const cur = raw[j];
+        if (cur === '\x07') {
+          j += 1;
+          break;
+        }
+        if (cur === '\x1b' && raw[j + 1] === '\\') {
+          j += 2;
+          break;
+        }
+        j += 1;
+      }
+      i = j - 1;
+      continue;
+    }
+    if (next === '\\') {
+      i += 1;
+      continue;
+    }
     if (next === '7' || next === 's') {
       savedRow = row;
       savedCol = col;

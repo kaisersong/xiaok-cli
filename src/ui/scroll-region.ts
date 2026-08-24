@@ -1501,6 +1501,77 @@ export class ScrollRegionManager {
     }
   }
 
+  /**
+   * Writes terminal graphics payloads (kitty APC / iTerm2 OSC) verbatim.
+   * stripAnsi() only strips CSI, so routing these bytes through
+   * writeAtContentCursor would count the base64 payload as visible columns and
+   * inflate the row bookkeeping by thousands of phantom rows.
+   */
+  writeRawBlock(
+    text: string,
+    rows: number,
+    options?: {
+      clearPromptChrome?: boolean;
+      logger?: {
+        beginSuppress(): void;
+        endSuppress(): void;
+        recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
+      };
+      placeholder?: string;
+    },
+  ): void {
+    const logger = options?.logger;
+    if (!this.active) {
+      this.writeRawBytes(text, logger);
+      return;
+    }
+
+    const shouldRestoreFooter = options?.clearPromptChrome !== false
+      && this._footerVisible
+      && !this._contentStreaming
+      && !this.hasActiveOverlayPrompt();
+    if (shouldRestoreFooter) {
+      this.clearSummaryChromeRows();
+    }
+    this.stream.write(RESET_ALL);
+    const targetRow = this.clampCursorRow(this._cursorRow);
+    this.clearActivityIfContentWillUseRow(targetRow);
+    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}\r`);
+
+    this.writeRawBytes(text, logger);
+    if (options?.placeholder) {
+      logger?.recordOutput('stdout', `${options.placeholder}\n`);
+    }
+
+    this._cursorCol = 0;
+    this._totalRows += rows;
+    this.absorbRegionScroll(targetRow + rows);
+    this._cursorRow = this.clampCursorRow(targetRow + rows);
+    this._contentEndRow = Math.max(this._contentEndRow, this._cursorRow);
+    this._pastWelcome = true;
+    this._cursorUncertain = false;
+
+    if (shouldRestoreFooter) {
+      this.renderFooter({
+        inputPrompt: this.lastInputPrompt || 'Type your message...',
+        summaryLine: this.lastSummaryLine || undefined,
+        statusLine: this.lastStatusLine || undefined,
+      });
+    }
+  }
+
+  private writeRawBytes(
+    text: string,
+    logger?: { beginSuppress(): void; endSuppress(): void },
+  ): void {
+    logger?.beginSuppress();
+    try {
+      this.stream.write(text);
+    } finally {
+      logger?.endSuppress();
+    }
+  }
+
   writeSubmittedInput(text: string): void {
     if (!this.active) {
       this.stream.write(text);
