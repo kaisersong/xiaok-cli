@@ -22,6 +22,9 @@ function normalizeAbortReason(reason) {
         return reason;
     return 'aborted';
 }
+function normalizeUsageValue(value) {
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
+}
 function computeRunnerDeadlineMs(watchdogMs) {
     return Math.max(1, watchdogMs - RUNNER_DEADLINE_RESERVE_MS);
 }
@@ -92,6 +95,8 @@ export class InProcessTaskRuntimeHost {
     maxToolLoopIterations = new Map();
     pendingAssistantDeltas = new Map();
     runtimeEventErrors = new Map();
+    persistedEventDispatchChains = new Map();
+    pendingTerminalPersistedEvents = new Map();
     stoppedAcceptingReason = null;
     constructor(options) {
         this.options = options;
@@ -128,6 +133,7 @@ export class InProcessTaskRuntimeHost {
             events: [],
             context: contextHistory.audit,
             executionScope: input.executionScope,
+            usage: { inputTokens: 0, outputTokens: 0, known: false },
             createdAt: this.now(),
             updatedAt: this.now(),
         };
@@ -334,6 +340,7 @@ export class InProcessTaskRuntimeHost {
                 maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                 executionScope: snapshot.executionScope,
                 emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
+                emitUsage: (usage) => this.appendUsage(taskId, usage),
             });
             await this.flushRuntimeEvents(taskId);
             const latest = await this.requireSnapshot(taskId);
@@ -355,6 +362,7 @@ export class InProcessTaskRuntimeHost {
                         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                         executionScope: snapshot.executionScope,
                         emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
+                        emitUsage: (usage) => this.appendUsage(taskId, usage),
                     });
                     await this.flushRuntimeEvents(taskId);
                 }
@@ -419,6 +427,7 @@ export class InProcessTaskRuntimeHost {
             this.cancellingTaskIds.delete(taskId);
             this.clearPendingAssistantDelta(taskId);
             this.runtimeEventErrors.delete(taskId);
+            this.flushPendingTerminalPersistedEvent(taskId);
         }
     }
     async resolveContextHistory(currentTaskId, context) {
@@ -477,6 +486,11 @@ export class InProcessTaskRuntimeHost {
             this.throwRuntimeEventError(taskId);
             await this.appendEvent(taskId, desktopEvent);
         }
+    }
+    async appendUsage(taskId, usage) {
+        const inputTokens = normalizeUsageValue(usage.inputTokens);
+        const outputTokens = normalizeUsageValue(usage.outputTokens);
+        await this.appendEvent(taskId, { type: 'usage_recorded', inputTokens, outputTokens });
     }
     bufferAssistantDelta(taskId, event) {
         let pending = this.pendingAssistantDeltas.get(taskId);
@@ -594,6 +608,7 @@ export class InProcessTaskRuntimeHost {
         return this.requireSnapshot(snapshot.taskId);
     }
     async appendEvent(taskId, event) {
+        let persisted;
         await this.enqueueMutation(taskId, async () => {
             const snapshot = await this.requireSnapshot(taskId);
             // Merge artifacts when appending artifact_recorded events
@@ -622,19 +637,29 @@ export class InProcessTaskRuntimeHost {
                 events: [...snapshot.events, event],
                 result: nextResult,
                 salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,
+                usage: event.type === 'usage_recorded'
+                    ? {
+                        inputTokens: (snapshot.usage?.inputTokens ?? 0) + event.inputTokens,
+                        outputTokens: (snapshot.usage?.outputTokens ?? 0) + event.outputTokens,
+                        known: true,
+                    }
+                    : snapshot.usage,
                 updatedAt: this.now(),
             };
             await this.saveSnapshot(next);
-            await this.options.onPersistedEvent?.({
+            persisted = {
                 taskId,
                 eventIndex: next.events.length - 1,
                 event,
                 snapshot: next,
-            });
+            };
             this.pushLiveEvent(taskId, event);
         });
+        if (persisted)
+            this.schedulePersistedEvent(persisted);
     }
     async updateSnapshot(taskId, patch) {
+        let persisted;
         await this.enqueueMutation(taskId, async () => {
             const snapshot = await this.requireSnapshot(taskId);
             const terminalStatus = patch.status !== undefined
@@ -653,15 +678,52 @@ export class InProcessTaskRuntimeHost {
             };
             await this.saveSnapshot(next);
             if (terminalEvent) {
-                await this.options.onPersistedEvent?.({
+                persisted = {
                     taskId,
                     eventIndex: next.events.length - 1,
                     event: terminalEvent,
                     snapshot: next,
-                });
+                };
                 this.pushLiveEvent(taskId, terminalEvent);
             }
         });
+        if (persisted) {
+            if (this.activeExecutions.has(taskId) || this.executionPromises.has(taskId)) {
+                this.pendingTerminalPersistedEvents.set(taskId, persisted);
+            }
+            else {
+                this.schedulePersistedEvent(persisted);
+            }
+        }
+    }
+    flushPendingTerminalPersistedEvent(taskId) {
+        const persisted = this.pendingTerminalPersistedEvents.get(taskId);
+        if (!persisted)
+            return;
+        this.pendingTerminalPersistedEvents.delete(taskId);
+        this.schedulePersistedEvent(persisted);
+    }
+    schedulePersistedEvent(input) {
+        if (!this.options.onPersistedEvent)
+            return;
+        const previous = this.persistedEventDispatchChains.get(input.taskId) ?? Promise.resolve();
+        const next = previous
+            .catch(() => undefined)
+            .then(() => new Promise(resolve => setImmediate(resolve)))
+            .then(async () => {
+            try {
+                await this.options.onPersistedEvent?.(input);
+            }
+            catch (error) {
+                console.warn('[task-host] persisted event consumer failed:', error instanceof Error ? error.message : String(error));
+            }
+        })
+            .finally(() => {
+            if (this.persistedEventDispatchChains.get(input.taskId) === next) {
+                this.persistedEventDispatchChains.delete(input.taskId);
+            }
+        });
+        this.persistedEventDispatchChains.set(input.taskId, next);
     }
     async enqueueMutation(taskId, action) {
         const previous = this.mutationChains.get(taskId) ?? Promise.resolve();

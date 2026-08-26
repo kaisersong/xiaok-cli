@@ -1,6 +1,7 @@
 import type { IpcRenderer } from 'electron';
 import type {
   DesktopTaskEvent,
+  GoalTurnExecutionScope,
   MaterialView,
   MaterialRole,
   TaskCreateContext,
@@ -8,6 +9,7 @@ import type {
   TaskUnderstanding,
   UserAnswer,
 } from '../../src/runtime/task-host/types.js';
+import type { GoalActivation, GoalInput, GoalState } from '../../src/runtime/goal/types.js';
 import type {
   ModelRuntimeConstraints,
   ModelRuntimeOptions,
@@ -68,6 +70,16 @@ export const PRELOAD_API_KEYS = [
   'createTask',
   'createTaskWithFiles',
   'subscribeTask',
+  'getGoal',
+  'createGoal',
+  'pauseGoal',
+  'resumeGoal',
+  'cancelGoal',
+  'replaceGoal',
+  'ackGoalTaskAttached',
+  'setGoalUserQueuePending',
+  'onGoalChanged',
+  'onGoalTaskPrepared',
   'answerQuestion',
   'cancelTask',
   'getActiveTask',
@@ -310,6 +322,8 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
   'subscribeTask',
+  'onGoalChanged',
+  'onGoalTaskPrepared',
   'onArtifactWorkspaceChanged',
   'onUpdateStatus',
   'onSkillsChanged',
@@ -363,6 +377,14 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   importMaterial: 'desktop:importMaterial',
   createTask: 'desktop:createTask',
   createTaskWithFiles: 'desktop:createTaskWithFiles',
+  getGoal: 'desktop:goal:get',
+  createGoal: 'desktop:goal:create',
+  pauseGoal: 'desktop:goal:pause',
+  resumeGoal: 'desktop:goal:resume',
+  cancelGoal: 'desktop:goal:cancel',
+  replaceGoal: 'desktop:goal:replace',
+  ackGoalTaskAttached: 'desktop:goal:ackTaskAttached',
+  setGoalUserQueuePending: 'desktop:goal:setUserQueuePending',
   answerQuestion: 'desktop:answerQuestion',
   cancelTask: 'desktop:cancelTask',
   getActiveTask: 'desktop:getActiveTask',
@@ -1051,6 +1073,7 @@ export function sanitizeKSwarmSemanticInput(
     instructions: candidate?.instructions,
     runtimeType: candidate?.runtimeType,
     maxConcurrentTasks: candidate?.maxConcurrentTasks,
+    fallbackToDesktopModel: typeof candidate?.fallbackToDesktopModel === 'boolean' ? candidate.fallbackToDesktopModel : undefined,
   });
   if (kind === 'agent-update') {
     const patch = input?.patch && typeof input.patch === 'object' && !Array.isArray(input.patch)
@@ -1117,6 +1140,31 @@ export interface KSwarmAgentSemanticInput {
   instructions?: string;
   runtimeType?: string;
   maxConcurrentTasks?: number;
+  fallbackToDesktopModel?: boolean;
+}
+
+export interface DesktopGoalProjection {
+  state: GoalState;
+  activation: GoalActivation;
+}
+
+export interface DesktopGoalTaskPrepared {
+  attachmentId: string;
+  threadId: string;
+  taskId: string;
+  executionScope: GoalTurnExecutionScope;
+  goalRef: { goalId: string; revision: number };
+  expiresAt: number;
+}
+
+export interface DesktopGoalMutationResult {
+  goal: DesktopGoalProjection;
+  preparedTask: DesktopGoalTaskPrepared;
+}
+
+export interface DesktopGoalChangedEvent {
+  threadId: string;
+  goal: DesktopGoalProjection;
 }
 
 export interface DesktopApi {
@@ -1156,6 +1204,16 @@ export interface DesktopApi {
     filePaths: string[];
     context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
+  getGoal(threadId: string): Promise<DesktopGoalProjection | null>;
+  createGoal(input: { threadId: string } & GoalInput): Promise<DesktopGoalMutationResult>;
+  pauseGoal(threadId: string): Promise<DesktopGoalProjection>;
+  resumeGoal(input: { threadId: string; turnLimit?: number }): Promise<DesktopGoalMutationResult>;
+  cancelGoal(threadId: string): Promise<DesktopGoalProjection>;
+  replaceGoal(input: { threadId: string } & GoalInput): Promise<DesktopGoalMutationResult>;
+  ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void>;
+  setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
+  onGoalChanged(handler: (input: DesktopGoalChangedEvent) => void): () => void;
+  onGoalTaskPrepared(handler: (input: DesktopGoalTaskPrepared) => void): () => void;
   subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void, sinceIndex?: number): () => void;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
@@ -1515,6 +1573,24 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
+    getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }) as ReturnType<DesktopApi['getGoal']>,
+    createGoal: (input) => ipcRenderer.invoke('desktop:goal:create', input) as ReturnType<DesktopApi['createGoal']>,
+    pauseGoal: (threadId) => ipcRenderer.invoke('desktop:goal:pause', { threadId }) as ReturnType<DesktopApi['pauseGoal']>,
+    resumeGoal: (input) => ipcRenderer.invoke('desktop:goal:resume', input) as ReturnType<DesktopApi['resumeGoal']>,
+    cancelGoal: (threadId) => ipcRenderer.invoke('desktop:goal:cancel', { threadId }) as ReturnType<DesktopApi['cancelGoal']>,
+    replaceGoal: (input) => ipcRenderer.invoke('desktop:goal:replace', input) as ReturnType<DesktopApi['replaceGoal']>,
+    ackGoalTaskAttached: (input) => ipcRenderer.invoke('desktop:goal:ackTaskAttached', input) as Promise<void>,
+    setGoalUserQueuePending: (input) => ipcRenderer.invoke('desktop:goal:setUserQueuePending', input) as Promise<void>,
+    onGoalChanged(handler) {
+      const listener = (_event: unknown, payload: unknown) => handler(payload as DesktopGoalChangedEvent);
+      ipcRenderer.on('desktop:goal:changed', listener);
+      return () => ipcRenderer.off('desktop:goal:changed', listener);
+    },
+    onGoalTaskPrepared(handler) {
+      const listener = (_event: unknown, payload: unknown) => handler(payload as DesktopGoalTaskPrepared);
+      ipcRenderer.on('desktop:goal:taskPrepared', listener);
+      return () => ipcRenderer.off('desktop:goal:taskPrepared', listener);
+    },
     subscribeTask(taskId, handler, sinceIndex) {
       const channel = `desktop:taskEvent:${taskId}`;
       const listener = (_event: unknown, payload: unknown) => {

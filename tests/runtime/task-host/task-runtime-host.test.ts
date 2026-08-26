@@ -127,6 +127,59 @@ describe('InProcessTaskRuntimeHost', () => {
     expect(runner).toHaveBeenCalledTimes(1);
   });
 
+  it('persists provider usage with an explicit known bit and Goal execution scope', async () => {
+    const runner = vi.fn<TaskRunner>(async ({ emitUsage }) => {
+      await emitUsage({ inputTokens: 10, outputTokens: 2 });
+      await emitUsage({ inputTokens: 3, outputTokens: 1 });
+    });
+    const host = createHost(runner);
+    const scope = {
+      kind: 'goal_turn' as const,
+      origin: 'continuation' as const,
+      goalId: 'goal_1', epoch: 1, goalTurnId: 'goal_turn_1', threadId: 'thread_1',
+    };
+
+    const prepared = await host.prepareTask({ prompt: '继续目标', materials: [], executionScope: scope });
+    expect((await host.recoverTask(prepared.taskId)).snapshot.usage).toEqual({
+      inputTokens: 0, outputTokens: 0, known: false,
+    });
+    await host.startTask(prepared.taskId);
+    await waitFor(async () => (await host.recoverTask(prepared.taskId)).snapshot.status === 'completed');
+
+    const snapshot = (await host.recoverTask(prepared.taskId)).snapshot;
+    expect(snapshot.executionScope).toEqual(scope);
+    expect(snapshot.usage).toEqual({ inputTokens: 13, outputTokens: 3, known: true });
+    expect(snapshot.events.filter(event => event.type === 'usage_recorded')).toHaveLength(2);
+  });
+
+  it('dispatches persisted events after the task mutation chain and isolates callback failures', async () => {
+    const seen: string[] = [];
+    let host!: InProcessTaskRuntimeHost;
+    let taskSequence = 0;
+    host = new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner: async () => undefined,
+      now: () => 200,
+      createTaskId: () => (++taskSequence === 1 ? 'task_post_lock' : 'task_2'),
+      createSessionId: () => 'sess_post_lock',
+      onPersistedEvent: async ({ event, snapshot }) => {
+        seen.push(event.type);
+        await host.recoverTask(snapshot.taskId);
+        if (event.type === 'task_terminal') {
+          expect(host.activeExecutionCount()).toBe(0);
+          await host.prepareTask({ prompt: 'callback follow-up', materials: [] });
+          throw new Error('consumer failure is isolated');
+        }
+      },
+    });
+
+    await host.createTask({ prompt: 'post lock', materials: [] });
+    await waitFor(() => seen.includes('task_terminal'));
+    await waitFor(async () => Boolean((await snapshotStore.recoverTask('task_2'))));
+    expect((await host.recoverTask('task_post_lock')).snapshot.status).toBe('completed');
+  });
+
   it('marks a persisted running task as failed when no execution exists after restart', async () => {
     await snapshotStore.save({
       ...makeSnapshot({ taskId: 'task_stale', status: 'running', createdAt: 100, updatedAt: 200 }),

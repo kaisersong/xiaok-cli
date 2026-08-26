@@ -134,7 +134,11 @@ export type DesktopTaskEvent =
   | { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string; eventId: string; ts?: number }
   | { type: 'canvas_file_changed'; filePath: string; change: 'add' | 'change' | 'unlink'; eventId: string }
   // TaskPanel progress (from report_progress tool)
-  | { type: 'progress_plan_reported'; steps: PlanStep[] };
+  | { type: 'progress_plan_reported'; steps: PlanStep[] }
+  // Internal durable facts; renderer may ignore these events.
+  | { type: 'usage_recorded'; inputTokens: number; outputTokens: number }
+  | { type: 'goal_tool_fact'; invocationId: string; toolName: string; factKind: 'command_result' | 'file_mutation'; exitCode?: number | null; normalizedFilePaths?: string[] }
+  | { type: 'goal_tool_finished'; invocationId: string; toolName: string; ok: boolean };
 
 export type TaskSnapshotStatus = 'understanding' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
 export type TaskPermissionMode = 'plan' | 'auto' | 'default';
@@ -150,6 +154,23 @@ export interface ArtifactWorkspaceExecutionScope {
   generationRequestId: string;
   leaseId: string;
   target?: ArtifactGenerationTarget;
+}
+
+export interface GoalTurnExecutionScope {
+  kind: 'goal_turn';
+  origin: 'user' | 'continuation';
+  goalId: string;
+  epoch: number;
+  goalTurnId: string;
+  threadId: string;
+}
+
+export type TaskExecutionScope = ArtifactWorkspaceExecutionScope | GoalTurnExecutionScope;
+
+export interface TaskUsage {
+  inputTokens: number;
+  outputTokens: number;
+  known: boolean;
 }
 
 export interface ArtifactGenerationTarget {
@@ -185,7 +206,7 @@ export interface TaskCreateInput {
   watchdogMs?: number;
   maxToolLoopIterations?: number;
   context?: TaskCreateContext;
-  executionScope?: ArtifactWorkspaceExecutionScope;
+  executionScope?: TaskExecutionScope;
 }
 
 export interface TaskSnapshot {
@@ -199,7 +220,8 @@ export interface TaskSnapshot {
   result?: TaskResult;
   salvage?: SalvageSummary;
   context?: TaskContextAudit;
-  executionScope?: ArtifactWorkspaceExecutionScope;
+  executionScope?: TaskExecutionScope;
+  usage?: TaskUsage;
   createdAt: number;
   updatedAt: number;
 }

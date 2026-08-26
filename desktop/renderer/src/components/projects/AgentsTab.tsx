@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Play, Square, Settings, Trash2, Wifi, WifiOff, Bot, Circle, Loader, Clock, AlertTriangle, XCircle, CheckCircle2, CircleOff } from 'lucide-react';
+import { Play, Square, Settings, Trash2, Wifi, WifiOff, Bot, Circle, Loader, Clock, XCircle, CircleOff, RefreshCw } from 'lucide-react';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { KSwarmAgent, AgentProbe } from '../../hooks/useKSwarmClient';
@@ -14,6 +14,8 @@ export function AgentsTab() {
   const { t } = useLocale();
   const [editingAgent, setEditingAgent] = useState<KSwarmAgent | null>(null);
   const [probes, setProbes] = useState<Record<string, AgentProbe>>({});
+  const [probeProgress, setProbeProgress] = useState<{ done: number; total: number } | null>(null);
+  const [probeSummary, setProbeSummary] = useState<{ total: number; available: number; limited: number; unavailable: number } | null>(null);
   const [confirmArchive, setConfirmArchive] = useState<string | null>(null);
 
   // Ping heartbeats for online agents periodically
@@ -26,17 +28,30 @@ export function AgentsTab() {
     return () => clearInterval(timer);
   }, [agents.map(a => `${a.id}:${a.status}`).join(','), pingHeartbeat]);
 
-  // Probe all agents on mount
-  useEffect(() => {
-    if (agents.length === 0) return;
-    agents.forEach(agent => {
-      if (agent.runtimeType) {
-        probeAgent(agent.id).then(p => {
-          if (p) setProbes(prev => ({ ...prev, [agent.id]: p }));
-        });
+  const handleProbeAll = async () => {
+    const targets = agents;
+    setProbes({});
+    setProbeSummary(null);
+    setProbeProgress({ done: 0, total: targets.length });
+    const results = await Promise.all(targets.map(async agent => {
+      let result: AgentProbe;
+      try {
+        result = await probeAgent(agent.id) ?? { healthy: false, callability: 'unavailable' };
+      } catch (error) {
+        result = { healthy: false, callability: 'unavailable', error: error instanceof Error ? error.message : String(error) };
       }
-    });
-  }, [agents, probeAgent]);
+      setProbes(previous => ({ ...previous, [agent.id]: result }));
+      setProbeProgress(previous => previous ? { ...previous, done: previous.done + 1 } : previous);
+      return result;
+    }));
+    setProbeSummary(results.reduce((summary, result) => {
+      if (result.callability === 'available') summary.available += 1;
+      else if (result.callability === 'limited') summary.limited += 1;
+      else summary.unavailable += 1;
+      return summary;
+    }, { total: results.length, available: 0, limited: 0, unavailable: 0 }));
+    setProbeProgress(null);
+  };
 
   const handleStart = async (id: string) => { await startAgent(id); await fetchAgents(); };
   const handleStop = async (id: string) => { await stopAgent(id); await fetchAgents(); };
@@ -63,6 +78,20 @@ export function AgentsTab() {
 
   return (
     <div className="p-6">
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div className="text-xs text-[var(--c-text-muted)]" role="status">
+          {probeSummary && t.projectsAgentCheckSummary(probeSummary.total, probeSummary.available, probeSummary.limited, probeSummary.unavailable)}
+        </div>
+        <button
+          type="button"
+          onClick={handleProbeAll}
+          disabled={probeProgress !== null || agents.length === 0}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--c-border-subtle)] px-3.5 py-1.5 text-sm font-medium text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={probeProgress ? 'animate-spin' : ''} />
+          <span>{probeProgress ? t.projectsAgentCheckingAll(probeProgress.done, probeProgress.total) : t.projectsAgentCheckAll}</span>
+        </button>
+      </div>
       {agents.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-4 py-16">
           <div className="flex size-16 items-center justify-center rounded-xl bg-[var(--c-bg-deep)]">
@@ -93,13 +122,18 @@ export function AgentsTab() {
                   <div className="mt-1 flex items-center gap-2">
                     <Icon size={12} className={iconClass} />
                     <span className="text-[11px] text-[var(--c-text-muted)]">{label}</span>
-                    {probe && (
+                    {probe ? (
                       <span className="flex items-center gap-1 text-[10px] text-[var(--c-text-muted)]">
-                        {probe.healthy ? <Wifi size={10} className="text-[var(--c-status-success-text)]" /> : <WifiOff size={10} className="text-[var(--c-status-error-text)]" />}
+                        {probe.callability === 'available' || (probe.healthy && !probe.callability)
+                          ? <Wifi size={10} className="text-[var(--c-status-success-text)]" />
+                          : <WifiOff size={10} className="text-[var(--c-status-error-text)]" />}
+                        <span className={probe.callability === 'unavailable' || !probe.healthy ? 'text-[var(--c-status-error-text)]' : ''}>
+                          {probe.callability === 'limited' ? t.projectsAgentProbeLimited : probe.callability === 'unavailable' || !probe.healthy ? t.projectsAgentProbeUnavailable : t.projectsAgentProbeAvailable}
+                        </span>
                         {probe.version && <span>v{probe.version}</span>}
-                        {probe.error && <span className="text-[var(--c-status-error-text)]">{probe.error}</span>}
+                        {(probe.error || probe.message) && <span className="text-[var(--c-status-error-text)]">{probe.error || probe.message}</span>}
                       </span>
-                    )}
+                    ) : <span className="text-[10px] text-[var(--c-text-muted)]">{t.projectsAgentProbeUntested}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">

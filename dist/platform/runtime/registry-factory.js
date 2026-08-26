@@ -20,6 +20,11 @@ function isCcRuntimeOnlyTool(tool) {
     const name = tool.definition.name;
     return CC_RUNTIME_ONLY_TOOLS.has(name) || /^Task(?:Create|Update|List|Get|Output|Stop)$/.test(name);
 }
+export function filterWorkflowToolsForAgent(tools, agentId) {
+    if (agentId === 'main')
+        return tools;
+    return tools.filter((tool) => !tool.definition.name.startsWith('goal_'));
+}
 export function createPlatformRegistryFactory(options) {
     const registries = new Set();
     const handleSandboxDenied = async (deniedPath, toolName) => {
@@ -73,7 +78,7 @@ export function createPlatformRegistryFactory(options) {
     }
     function createRegistryForCwd(cwd, allowedTools, agentId = 'main', opts) {
         const extraTools = [
-            ...(options.workflowTools ?? []),
+            ...filterWorkflowToolsForAgent(options.workflowTools ?? [], agentId),
             ...(reminders
                 ? createReminderTools({
                     reminders,

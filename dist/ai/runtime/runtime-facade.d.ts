@@ -17,6 +17,7 @@ export interface RuntimeFacadeOptions {
     agent: Pick<Agent, 'getSessionState' | 'setPromptSnapshot' | 'setSystemPrompt' | 'runTurn'>;
     getSkillEntries?(): SkillEntry[];
     getIntentReminderBlock?(): MessageBlock | undefined;
+    getGoalReminderBlock?(): MessageBlock | undefined;
 }
 export declare class RuntimeFacade {
     private readonly options;

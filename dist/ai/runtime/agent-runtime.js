@@ -251,7 +251,7 @@ export class AgentRuntime {
                     return;
                 }
                 toolResults = [];
-                const toolExecutionContext = this.buildToolExecutionContext(mergedSignal);
+                const baseToolExecutionContext = this.buildToolExecutionContext(mergedSignal);
                 for (const toolCall of toolCalls) {
                     this.throwIfAborted(mergedSignal, onEvent, run.runId);
                     onEvent({
@@ -260,6 +260,17 @@ export class AgentRuntime {
                         toolName: toolCall.name,
                         input: toolCall.input,
                     });
+                    const toolExecutionContext = {
+                        ...baseToolExecutionContext,
+                        toolInvocationId: toolCall.id,
+                        runtimeFactSink: {
+                            emit: (fact) => onEvent({
+                                type: 'tool_execution_fact',
+                                runId: run.runId,
+                                ...fact,
+                            }),
+                        },
+                    };
                     const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
                     const ok = isSuccessfulModelToolResult(result);
                     executedToolIds.add(toolCall.id);
@@ -276,6 +287,7 @@ export class AgentRuntime {
                     onEvent({
                         type: 'tool_finished',
                         runId: run.runId,
+                        invocationId: toolCall.id,
                         toolName: toolCall.name,
                         ok,
                     });

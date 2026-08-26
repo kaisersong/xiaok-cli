@@ -51,7 +51,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
-    expect(commands.length).toBe(15);
+    expect(commands.length).toBe(16);
   });
 
   it('should include skills in command list', () => {
@@ -67,7 +67,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(16); // 15 base + 1 skill
+    expect(commands.length).toBe(17); // 16 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -105,7 +105,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(18); // 15 base + 3 skills
+    expect(commands.length).toBe(19); // 16 base + 3 skills
   });
 
   it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
@@ -900,8 +900,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 15 base commands + 20 skills = 35 total
-      expect(commands.length).toBe(35);
+      // 16 base commands + 20 skills = 36 total
+      expect(commands.length).toBe(36);
     });
 
     it('should preserve command descriptions', () => {

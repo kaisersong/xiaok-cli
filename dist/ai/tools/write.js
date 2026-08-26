@@ -18,13 +18,21 @@ export function createWriteTool(options = {}) {
                 required: ['file_path', 'content'],
             },
         },
-        async execute(input) {
+        async execute(input, context) {
             const { file_path, content } = input;
             const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd);
             mkdirSync(dirname(resolvedPath), { recursive: true });
             const tmp = join(dirname(resolvedPath), `.xiaok-tmp-${Date.now()}`);
             writeFileSync(tmp, content, 'utf-8');
             renameSync(tmp, resolvedPath);
+            if (context?.toolInvocationId) {
+                context.runtimeFactSink?.emit({
+                    invocationId: context.toolInvocationId,
+                    toolName: 'write',
+                    factKind: 'file_mutation',
+                    normalizedFilePaths: [resolvedPath],
+                });
+            }
             return `已写入: ${resolvedPath}（${content.length} 字符）`;
         },
     };

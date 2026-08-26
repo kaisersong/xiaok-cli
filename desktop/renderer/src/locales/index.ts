@@ -2313,6 +2313,9 @@ export interface LocaleStrings {
   projectsEditAgentClose: string;
   projectsEditAgentSaving: string;
   projectsEditAgentSave: string;
+  projectsEditAgentFallbackToDesktopModel: string;
+  projectsEditAgentFallbackToDesktopModelHint: string;
+  projectsEditAgentAlreadyUsesDesktopModel: string;
 
   // projects - agents tab
   projectsAgentStatusIdle: string;
@@ -2330,6 +2333,13 @@ export interface LocaleStrings {
   projectsAgentConfig: string;
   projectsAgentConfirm: string;
   projectsAgentArchive: string;
+  projectsAgentCheckAll: string;
+  projectsAgentCheckingAll: (done: number, total: number) => string;
+  projectsAgentCheckSummary: (total: number, available: number, limited: number, unavailable: number) => string;
+  projectsAgentProbeAvailable: string;
+  projectsAgentProbeUnavailable: string;
+  projectsAgentProbeLimited: string;
+  projectsAgentProbeUntested: string;
 
   // projects - activity timeline
   projectsActivityCreated: string;
@@ -2819,6 +2829,37 @@ export interface LocaleStrings {
     a2uiLoading: string;
   };
 
+  goalBar: {
+    createGoal: string;
+    goal: string;
+    completionCriterion: string;
+    evidence: string;
+    evidenceAnswer: string;
+    evidenceFile: string;
+    evidenceCommand: string;
+    evidenceProject: string;
+    turnBudget: string;
+    confirmCreate: string;
+    close: string;
+    pause: string;
+    resume: string;
+    retry: string;
+    cancelGoal: string;
+    replaceGoal: string;
+    newTurnBudget: string;
+    increaseBudgetAndResume: string;
+    turns: (used: number, limit: number) => string;
+    tokens: (tokens: number) => string;
+    tokensUnknown: string;
+    statusActive: string;
+    statusPaused: string;
+    statusBlocked: string;
+    statusComplete: string;
+    statusCancelled: string;
+    statusDisarmed: string;
+    budgetExhausted: string;
+  };
+
   // chatInput
   chatInput: {
     replyPlaceholder: string;
@@ -3232,6 +3273,7 @@ export interface LocaleStrings {
   projectsDetailGraphDrawerCompletedAt: string;
   projectsDetailGraphDrawerDuration: string;
   projectsDetailGraphDrawerError: string;
+  projectsDetailGraphDrawerRenderError: string;
   projectsDetailGraphDrawerWorkflowMeta: string;
   projectsDetailGraphDrawerStageIndex: string;
   projectsDetailGraphDrawerParallelGroup: string;

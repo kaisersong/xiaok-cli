@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, ExternalLink, ChevronRight } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
 import type { DagGraph, DagNode, DagNodeStatus } from './dagGraphModel';
-import { PO_PLAN_NODE_ID } from './dagGraphModel';
+import { normalizeAcceptanceCriteria, PO_PLAN_NODE_ID } from './dagGraphModel';
 
 interface Props {
   node: DagNode;
@@ -124,6 +124,7 @@ export function DagNodeDetailDrawer({ node, graph, onClose, onJumpToBoard, onSel
   const wfNode = node.workflowNode;
   const taskNode = node.task;
   const poData = node.poPlan;
+  const taskAcceptanceCriteria = normalizeAcceptanceCriteria(taskNode?.acceptanceCriteria);
 
   const duration = formatDuration(node.startedAt ?? null, node.completedAt ?? null);
 
@@ -138,6 +139,8 @@ export function DagNodeDetailDrawer({ node, graph, onClose, onJumpToBoard, onSel
         className="fixed right-0 top-0 z-50 flex h-full w-[480px] max-w-[90vw] flex-col bg-[var(--c-bg-card)] shadow-2xl"
         role="dialog"
         aria-label={node.title}
+        data-app-region="no-drag"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <div className="flex items-start justify-between gap-2 border-b border-[var(--c-border-subtle)] p-4">
           <div className="min-w-0 flex-1">
@@ -227,13 +230,13 @@ export function DagNodeDetailDrawer({ node, graph, onClose, onJumpToBoard, onSel
                   {taskNode.description}
                 </div>
               )}
-              {taskNode.acceptanceCriteria && taskNode.acceptanceCriteria.length > 0 && (
+              {taskAcceptanceCriteria.length > 0 && (
                 <div>
                   <div className="mb-1 text-[11px] font-semibold text-[var(--c-text-muted)]">
                     {t.projectsDetailGraphDrawerAcceptance}
                   </div>
                   <ul className="list-disc space-y-1 pl-4 text-[12px] text-[var(--c-text-primary)]">
-                    {taskNode.acceptanceCriteria.map((c, i) => <li key={i}>{c}</li>)}
+                    {taskAcceptanceCriteria.map((c, i) => <li key={i}>{c}</li>)}
                   </ul>
                 </div>
               )}

@@ -649,7 +649,32 @@ export class OpenAIAdapter {
                 openaiMessages.push(msg);
                 continue;
             }
-            const textBlocks = m.content.filter((block) => block.type === 'text');
+            const toolResults = m.content.filter((block) => block.type === 'tool_result');
+            const previousMessage = openaiMessages[openaiMessages.length - 1];
+            const pendingToolCallIds = previousMessage?.role === 'assistant'
+                ? new Set(previousMessage.tool_calls?.map((call) => call.id) ?? [])
+                : new Set();
+            const orphanToolResults = [];
+            for (const item of toolResults) {
+                if (pendingToolCallIds.has(item.tool_use_id)) {
+                    openaiMessages.push({
+                        role: 'tool',
+                        tool_call_id: item.tool_use_id,
+                        content: item.content,
+                    });
+                    pendingToolCallIds.delete(item.tool_use_id);
+                }
+                else {
+                    orphanToolResults.push(item);
+                }
+            }
+            const textBlocks = [
+                ...m.content.filter((block) => block.type === 'text'),
+                ...orphanToolResults.map((item) => ({
+                    type: 'text',
+                    text: `[historical orphan tool result: ${item.tool_use_id}]\n${item.content}`,
+                })),
+            ];
             const imageBlocks = m.content.filter((block) => block.type === 'image');
             if (imageBlocks.length > 0) {
                 const contentParts = [
@@ -673,14 +698,6 @@ export class OpenAIAdapter {
                 openaiMessages.push({
                     role: 'user',
                     content: textBlocks.map((block) => block.text).join(''),
-                });
-            }
-            const toolResults = m.content.filter((block) => block.type === 'tool_result');
-            for (const item of toolResults) {
-                openaiMessages.push({
-                    role: 'tool',
-                    tool_call_id: item.tool_use_id,
-                    content: item.content,
                 });
             }
         }

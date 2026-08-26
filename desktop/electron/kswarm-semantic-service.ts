@@ -177,7 +177,7 @@ function pickProjectPayload(input: Record<string, unknown>): Record<string, unkn
 }
 
 function pickAgentPayload(input: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(['name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'customArgs']
+  return Object.fromEntries(['name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'customArgs', 'fallbackToDesktopModel']
     .flatMap(key => input[key] === undefined ? [] : [[key, input[key]]]));
 }
 

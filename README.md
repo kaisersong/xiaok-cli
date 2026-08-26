@@ -46,6 +46,19 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.31 makes long-running work durable and project recovery visible. Goal Mode can keep an objective active across multiple turns with explicit budgets and evidence, while project agents can be checked in one pass and optionally fall back to the current Desktop model when their configured runtime is unavailable.
+
+**Goal Mode, Agent Recovery, and Workflow Reliability:**
+
+- **Durable Goal Mode**: CLI and Desktop can create, monitor, continue, complete, or block a goal across turns. Goal state, turn accounting, evidence, leases, and continuation arbitration survive restarts and concurrent-session handoff.
+- **Honest Completion**: Goal completion requires collected evidence and atomic turn settlement. User interruption, queued input, budget exhaustion, corrupt persisted state, and superseding requests have explicit outcomes instead of silently consuming another continuation.
+- **One-Click Agent Check**: The project agent list checks every configured agent, reports progress and per-agent callability, and summarizes available, limited, and unavailable runtimes instead of stopping after the first few agents.
+- **Desktop Model Fallback**: Each external agent can opt into a controlled fallback to the model currently configured in Xiaok Desktop. Built-in agents continue to use the Desktop model directly, and failed runtimes no longer crash the project surface.
+- **Recoverable Project Workflows**: Historical failed retry attempts remain auditable without blocking a recovered parent task. Existing artifacts can be resubmitted through version-bound validation and normal PO review, and replacement runs are actually delivered after runtime failure.
+- **Safer Project UI**: Workflow node details normalize malformed acceptance criteria, drawer-level error handling prevents a bad node from blanking the whole screen, and interactive controls remain clickable in draggable Electron windows.
+- **Terminal Reliability**: OpenAI-compatible tool history is repaired before requests are sent, tool inputs serialize safely, and long direct `Ran` command groups collapse while remaining available through the transcript pager.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, download links, and the Desktop Release workflow align on `1.4.31` / `desktop-v1.4.31`.
+
 Xiaok Desktop v1.4.28 adds a proactive daily assistant and one-click project team provisioning. The assistant reviews local work in the evening, prepares morning suggestions, and stages memory or knowledge candidates without publishing them until the user explicitly approves. Project setup can now analyze capability gaps, reuse suitable agents, propose missing roles, and apply a version-bound team plan only after confirmation.
 
 **Proactive Assistance and Smart Team Provisioning:**
@@ -697,9 +710,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.30-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.30-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.30.exe** — Windows installer (x64)
+- **xiaok-1.4.31-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.31-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.31.exe** — Windows installer (x64)
 
 ### Features
 

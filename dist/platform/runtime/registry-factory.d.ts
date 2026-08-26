@@ -2,6 +2,7 @@ import type { ModelAdapter, Tool } from '../../types.js';
 import { ToolRegistry, type ToolObservation } from '../../ai/tools/index.js';
 import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
+export declare function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Tool[];
 export interface PlatformRegistryFactoryOptions {
     platform: PlatformRuntimeContext;
     source: string;

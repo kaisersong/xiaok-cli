@@ -54,7 +54,7 @@ export const bashTool: Tool = {
       required: ['command'],
     },
   },
-  async execute(input) {
+  async execute(input, context) {
     const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd(), max_chars = 12_000 } = input as {
       command: string;
       timeout_ms?: number;
@@ -74,13 +74,21 @@ export const bashTool: Tool = {
 
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const finish = (result: string) => {
+      const finish = (result: string, exitCode?: number | null) => {
         if (settled) {
           return;
         }
         settled = true;
         if (timer) {
           clearTimeout(timer);
+        }
+        if (context?.toolInvocationId) {
+          context.runtimeFactSink?.emit({
+            invocationId: context.toolInvocationId,
+            toolName: 'bash',
+            factKind: 'command_result',
+            exitCode,
+          });
         }
         resolve(result);
       };
@@ -101,7 +109,7 @@ export const bashTool: Tool = {
           finish(truncateText(
             `Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`,
             max_chars,
-          ).text);
+          ).text, null);
         }
       };
 
@@ -110,7 +118,7 @@ export const bashTool: Tool = {
 
       timer = setTimeout(() => {
         terminateChildProcessTree(child);
-        finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text);
+        finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text, null);
       }, timeout_ms);
 
       child.on('close', code => {
@@ -119,14 +127,14 @@ export const bashTool: Tool = {
         }
         const output = [stdout, stderr].filter(Boolean).join('\n').trim();
         if (code !== 0) {
-          finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text);
+          finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text, code);
         } else {
-          finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text);
+          finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text, 0);
         }
       });
 
       child.on('error', (error) => {
-        finish(`Error: ${String(error)}`);
+        finish(`Error: ${String(error)}`, null);
       });
     });
   },

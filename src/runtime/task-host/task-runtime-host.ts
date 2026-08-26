@@ -9,7 +9,6 @@ import { NeedsUserQuestionCorrelator } from './question-correlator.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
 import { buildTaskUnderstanding } from './task-understanding.js';
 import type {
-  ArtifactWorkspaceExecutionScope,
   ArtifactKind,
   ArtifactSummary,
   DesktopTaskEvent,
@@ -22,6 +21,7 @@ import type {
   TaskCreateContext,
   TaskCreateInput,
   TaskPermissionMode,
+  TaskExecutionScope,
   TaskRuntimeHost,
   TaskSnapshot,
   TaskSnapshotStatus,
@@ -45,8 +45,9 @@ export interface TaskRunnerInput {
   history: HistoryMessage[];
   permissionMode?: 'plan' | 'auto' | 'default';
   maxToolLoopIterations?: number;
-  executionScope?: ArtifactWorkspaceExecutionScope;
+  executionScope?: TaskExecutionScope;
   emitRuntimeEvent(event: RuntimeEvent): Promise<void>;
+  emitUsage(input: { inputTokens: number; outputTokens: number }): Promise<void>;
 }
 
 export interface PersistedTaskEvent {
@@ -115,6 +116,10 @@ function normalizeAbortReason(reason: unknown): string {
   if (reason instanceof Error) return reason.message;
   if (typeof reason === 'string') return reason;
   return 'aborted';
+}
+
+function normalizeUsageValue(value: number): number {
+  return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 
 function computeRunnerDeadlineMs(watchdogMs: number): number {
@@ -216,6 +221,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   private readonly maxToolLoopIterations = new Map<string, number>();
   private readonly pendingAssistantDeltas = new Map<string, PendingAssistantDelta>();
   private readonly runtimeEventErrors = new Map<string, unknown>();
+  private readonly persistedEventDispatchChains = new Map<string, Promise<void>>();
+  private readonly pendingTerminalPersistedEvents = new Map<string, PersistedTaskEvent>();
   private stoppedAcceptingReason: string | null = null;
 
   constructor(private readonly options: InProcessTaskRuntimeHostOptions) {}
@@ -252,6 +259,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       events: [],
       context: contextHistory.audit,
       executionScope: input.executionScope,
+      usage: { inputTokens: 0, outputTokens: 0, known: false },
       createdAt: this.now(),
       updatedAt: this.now(),
     };
@@ -481,6 +489,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
         executionScope: snapshot.executionScope,
         emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
+        emitUsage: (usage) => this.appendUsage(taskId, usage),
       });
       await this.flushRuntimeEvents(taskId);
       const latest = await this.requireSnapshot(taskId);
@@ -502,6 +511,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
             maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
             executionScope: snapshot.executionScope,
             emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
+            emitUsage: (usage) => this.appendUsage(taskId, usage),
           });
           await this.flushRuntimeEvents(taskId);
         }
@@ -563,6 +573,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.cancellingTaskIds.delete(taskId);
       this.clearPendingAssistantDelta(taskId);
       this.runtimeEventErrors.delete(taskId);
+      this.flushPendingTerminalPersistedEvent(taskId);
     }
   }
 
@@ -628,6 +639,15 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       this.throwRuntimeEventError(taskId);
       await this.appendEvent(taskId, desktopEvent);
     }
+  }
+
+  private async appendUsage(
+    taskId: string,
+    usage: { inputTokens: number; outputTokens: number },
+  ): Promise<void> {
+    const inputTokens = normalizeUsageValue(usage.inputTokens);
+    const outputTokens = normalizeUsageValue(usage.outputTokens);
+    await this.appendEvent(taskId, { type: 'usage_recorded', inputTokens, outputTokens });
   }
 
   private bufferAssistantDelta(
@@ -757,6 +777,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
   }
 
   private async appendEvent(taskId: string, event: DesktopTaskEvent): Promise<void> {
+    let persisted: PersistedTaskEvent | undefined;
     await this.enqueueMutation(taskId, async () => {
       const snapshot = await this.requireSnapshot(taskId);
       // Merge artifacts when appending artifact_recorded events
@@ -784,23 +805,32 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         events: [...snapshot.events, event],
         result: nextResult,
         salvage: event.type === 'salvage' ? event.salvage : snapshot.salvage,
+        usage: event.type === 'usage_recorded'
+          ? {
+              inputTokens: (snapshot.usage?.inputTokens ?? 0) + event.inputTokens,
+              outputTokens: (snapshot.usage?.outputTokens ?? 0) + event.outputTokens,
+              known: true,
+            }
+          : snapshot.usage,
         updatedAt: this.now(),
       };
       await this.saveSnapshot(next);
-      await this.options.onPersistedEvent?.({
+      persisted = {
         taskId,
         eventIndex: next.events.length - 1,
         event,
         snapshot: next,
-      });
+      };
       this.pushLiveEvent(taskId, event);
     });
+    if (persisted) this.schedulePersistedEvent(persisted);
   }
 
   private async updateSnapshot(
     taskId: string,
     patch: Partial<Pick<TaskSnapshot, 'status' | 'result' | 'salvage'>>,
   ): Promise<void> {
+    let persisted: PersistedTaskEvent | undefined;
     await this.enqueueMutation(taskId, async () => {
       const snapshot = await this.requireSnapshot(taskId);
       const terminalStatus = patch.status !== undefined
@@ -819,15 +849,50 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       };
       await this.saveSnapshot(next);
       if (terminalEvent) {
-        await this.options.onPersistedEvent?.({
+        persisted = {
           taskId,
           eventIndex: next.events.length - 1,
           event: terminalEvent,
           snapshot: next,
-        });
+        };
         this.pushLiveEvent(taskId, terminalEvent);
       }
     });
+    if (persisted) {
+      if (this.activeExecutions.has(taskId) || this.executionPromises.has(taskId)) {
+        this.pendingTerminalPersistedEvents.set(taskId, persisted);
+      } else {
+        this.schedulePersistedEvent(persisted);
+      }
+    }
+  }
+
+  private flushPendingTerminalPersistedEvent(taskId: string): void {
+    const persisted = this.pendingTerminalPersistedEvents.get(taskId);
+    if (!persisted) return;
+    this.pendingTerminalPersistedEvents.delete(taskId);
+    this.schedulePersistedEvent(persisted);
+  }
+
+  private schedulePersistedEvent(input: PersistedTaskEvent): void {
+    if (!this.options.onPersistedEvent) return;
+    const previous = this.persistedEventDispatchChains.get(input.taskId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(() => new Promise<void>(resolve => setImmediate(resolve)))
+      .then(async () => {
+        try {
+          await this.options.onPersistedEvent?.(input);
+        } catch (error) {
+          console.warn('[task-host] persisted event consumer failed:', error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (this.persistedEventDispatchChains.get(input.taskId) === next) {
+          this.persistedEventDispatchChains.delete(input.taskId);
+        }
+      });
+    this.persistedEventDispatchChains.set(input.taskId, next);
   }
 
   private async enqueueMutation(taskId: string, action: () => Promise<void>): Promise<void> {

@@ -42,6 +42,17 @@ describe('abort error discrimination', () => {
     });
   });
 
+  it('classifies provider HTTP 4xx errors as non-retryable model failures', () => {
+    const error = Object.assign(new Error(
+      "400 Messages with role 'tool' must be a response to a preceding message with 'tool_calls'",
+    ), { status: 400 });
+
+    expect(normalizeRuntimeError(error)).toMatchObject({
+      code: 'model_failed',
+      retryable: false,
+    });
+  });
+
   it('classifies K3 durable resume as a terminal non-retryable capability result', () => {
     expect(normalizeRuntimeError(
       new Error('KIMI_K3_DURABLE_RESUME_UNSUPPORTED'),

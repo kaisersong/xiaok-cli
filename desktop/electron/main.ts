@@ -54,6 +54,7 @@ import {
 } from './meeting-recorder-window.js';
 import { createDesktopLoopRuntime } from './loop-executor.js';
 import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
+import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js';
 import { AssistantService } from './assistant-service.js';
 import { AssistantController } from './assistant-controller.js';
 import { listLatestMorningSuggestions } from './assistant-morning-suggestions.js';
@@ -598,12 +599,14 @@ async function createWindow(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
+  const executionCoordinator = new DesktopExecutionCoordinator();
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
     // Design v58 §4/§9.3: the facade exists before services, so every static
     // gateway captures one stable identity instead of a temporary runtime.
     pluginProviderRuntime,
+    executionCoordinator,
   });
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
@@ -808,7 +811,7 @@ async function createWindow(): Promise<BrowserWindow> {
     debugMain('mobile-relay:disabled', 'missing relay credentials');
   }
   const loopNotificationPort = createElectronDesktopNotificationPort();
-  const loopLlmPort = createDesktopLoopLLMPort();
+  const loopLlmPort = createDesktopLoopLLMPort(executionCoordinator);
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
     taskPort: {

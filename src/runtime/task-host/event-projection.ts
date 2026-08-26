@@ -181,8 +181,31 @@ export function projectRuntimeEventsToDesktopEvents(input: ProjectRuntimeEventsI
     // Canvas events: emit alongside existing progress events (not replacing them)
     const canvasEvents = projectRuntimeEventToCanvasEvents(event);
     projected.push(...canvasEvents);
+    projected.push(...projectRuntimeEventToInternalEvents(event));
   }
   return projected;
+}
+
+function projectRuntimeEventToInternalEvents(event: RuntimeEvent): DesktopTaskEvent[] {
+  if (event.type === 'tool_execution_fact') {
+    return [{
+      type: 'goal_tool_fact',
+      invocationId: event.invocationId,
+      toolName: event.toolName,
+      factKind: event.factKind,
+      ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+      ...(event.normalizedFilePaths ? { normalizedFilePaths: event.normalizedFilePaths } : {}),
+    }];
+  }
+  if (event.type === 'tool_finished' && event.invocationId) {
+    return [{
+      type: 'goal_tool_finished',
+      invocationId: event.invocationId,
+      toolName: event.toolName,
+      ok: event.ok,
+    }];
+  }
+  return [];
 }
 
 /**

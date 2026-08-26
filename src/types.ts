@@ -8,7 +8,7 @@ import type { PromptCacheSegments, StreamOptions } from './ai/runtime/model-capa
 import type { PromptSnapshot } from './ai/prompts/types.js';
 import type { ModelConfigEntry, ProviderConfig, ProviderId } from './ai/providers/types.js';
 import type { IntentBoundaryConfig } from './ai/intent-delegation/boundary-types.js';
-import type { ArtifactWorkspaceExecutionScope } from './runtime/task-host/types.js';
+import type { TaskExecutionScope } from './runtime/task-host/types.js';
 
 export type { MessageBlock, UsageStats };
 
@@ -52,7 +52,7 @@ export interface ToolDefinition {
 
 export interface ToolExecutionContext {
   taskId: string;
-  executionScope?: ArtifactWorkspaceExecutionScope;
+  executionScope?: TaskExecutionScope;
   session: AgentSessionSnapshot;
   messages: Message[];
   systemPrompt: string;
@@ -63,6 +63,19 @@ export interface ToolExecutionContext {
     getSettings(): { modelCapabilities?: Record<string, string> };
   };
   signal?: AbortSignal;
+  /** Host-only correlation fields. They are never part of tool input/model payloads. */
+  toolInvocationId?: string;
+  runtimeFactSink?: {
+    emit(fact: ToolExecutionFact): void;
+  };
+}
+
+export interface ToolExecutionFact {
+  invocationId: string;
+  toolName: string;
+  factKind: 'command_result' | 'file_mutation';
+  exitCode?: number | null;
+  normalizedFilePaths?: string[];
 }
 
 export type PermissionClass = 'safe' | 'write' | 'bash';

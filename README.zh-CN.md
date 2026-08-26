@@ -46,6 +46,19 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.31 让长任务可以持续推进，也让项目恢复过程真正可见。Goal Mode 能跨多个轮次保持目标、预算与证据；项目智能体可以一次检测全部配置，并在自身运行时不可用时按配置降级到 Desktop 当前模型。
+
+**Goal Mode、智能体降级与工作流可靠性：**
+
+- **持久化 Goal Mode**：CLI 与 Desktop 支持创建、查看、续跑、完成或阻塞跨轮次目标。目标状态、轮次计费、证据、租约和续跑仲裁可以跨重启保存，并支持并发会话接管。
+- **诚实完成判定**：Goal 完成必须有已收集证据并原子结算轮次。用户中断、排队输入、预算耗尽、持久化状态损坏和新请求取代旧请求都有明确结果，不会静默多跑一轮。
+- **一键检测全部智能体**：项目智能体列表会检查每一个配置，展示整体进度、逐项可调用性，以及可用、受限、不可用的汇总，不再只检测前几个智能体。
+- **Desktop 当前模型降级**：每个外部智能体可独立开启受控降级；自身运行时不可用时交给 Xiaok Desktop 当前模型执行。内置智能体继续直接使用 Desktop 模型，运行时失败不会再让项目界面崩溃。
+- **可恢复的项目工作流**：历史失败 retry 继续保留审计记录，但不会阻塞已经恢复的父任务；已有产物可通过版本绑定校验重新提交并走正常 PO 审核；运行时失败后的 replacement run 会被真正投递。
+- **更稳健的项目界面**：节点详情会规范化异常验收标准，抽屉级错误处理避免单个坏节点导致整个页面空白，Electron 可拖动窗口中的交互按钮保持可点击。
+- **终端可靠性**：发送请求前修复 OpenAI-compatible tool history，安全序列化工具输入；过长的直接 `Ran` 命令组自动折叠，并仍可通过 transcript pager 查看。
+- **发布版本对齐**：根 CLI、Desktop、package lock、下载链接和 Desktop Release workflow 统一为 `1.4.31` / `desktop-v1.4.31`。
+
 Xiaok Desktop v1.4.28 新增主动型每日助理与项目一键智能组队。每日助理在用户明确启用后，晚间分析本地工作、早上给出建议，并把值得沉淀的记忆或知识作为候选交给用户确认；项目可以先分析能力缺口、复用合适的现有智能体、提议缺失角色，再在用户确认后应用与当前项目版本绑定的团队方案。
 
 **主动助理与智能组队：**
@@ -697,9 +710,9 @@ xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界�
 
 从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 下载：
 
-- **xiaok-1.4.30-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
-- **xiaok-1.4.30-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
-- **xiaok-setup-1.4.30.exe** — Windows 安装包（x64）
+- **xiaok-1.4.31-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
+- **xiaok-1.4.31-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
+- **xiaok-setup-1.4.31.exe** — Windows 安装包（x64）
 
 ### 功能特性
 

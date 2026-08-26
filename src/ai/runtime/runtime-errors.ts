@@ -18,6 +18,9 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
   }
 
   const message = error instanceof Error ? error.message : String(error);
+  const status = error && typeof error === 'object'
+    ? (error as { status?: unknown }).status
+    : undefined;
   if (message.includes('KIMI_K3_DURABLE_RESUME_UNSUPPORTED')) {
     return {
       code: 'kimi_k3_durable_resume_unsupported',
@@ -27,6 +30,9 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
   }
   if (/502|503|timeout|ECONNRESET|Bad gateway/i.test(message)) {
     return { code: 'model_failed', message, retryable: true };
+  }
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    return { code: 'model_failed', message, retryable: false };
   }
   if (/权限|denied|取消/i.test(message)) {
     return { code: 'permission_denied', message, retryable: false };

@@ -167,7 +167,7 @@ describe('Kimi K3 D9 packaged renderer automation contract', () => {
     expect(mainIpc).toContain(
       "ipcMain.handle('desktop:createTask', async (_event, input) =>",
     );
-    expect(mainIpc).toContain('services.createTask(input)');
+    expect(mainIpc).toContain('services.createTask(sanitizeTaskCreateInput(input))');
     expect(preload).toContain(
       "recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId })",
     );

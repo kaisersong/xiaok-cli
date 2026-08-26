@@ -100,8 +100,18 @@ export type RuntimeEvent = {
     type: 'tool_finished';
     sessionId: string;
     turnId: string;
+    invocationId: string;
     toolName: string;
     ok: boolean;
+} | {
+    type: 'tool_execution_fact';
+    sessionId: string;
+    turnId: string;
+    invocationId: string;
+    toolName: string;
+    factKind: 'command_result' | 'file_mutation';
+    exitCode?: number | null;
+    normalizedFilePaths?: string[];
 } | {
     type: 'compact_triggered';
     sessionId: string;

@@ -10,7 +10,7 @@ export type TuiTurnSurfaceState =
   | 'compat_streaming';
 
 export type TuiFooterMode = 'input_ready' | 'busy' | 'feedback' | 'compat';
-export type TuiSummarySource = 'none' | 'turn' | 'completed_turn' | 'waiting_user';
+export type TuiSummarySource = 'none' | 'goal' | 'turn' | 'completed_turn' | 'waiting_user';
 
 export interface TuiSurfaceSnapshot {
   turnSurfaceState: TuiTurnSurfaceState;

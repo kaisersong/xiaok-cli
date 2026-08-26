@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
-import { loadConfig, saveConfig } from '../utils/config.js';
+import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
@@ -9,6 +9,7 @@ import { PermissionManager } from '../ai/permissions/manager.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
 import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
+import { createGoalTools } from '../ai/tools/goal.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
@@ -77,7 +78,7 @@ import { wireSkillEvalToRuntimeSync } from '../runtime/intent-delegation/skill-e
 import { cloneSessionSkillEvalState, createEmptySessionSkillEvalState, inferDeliverableFamily, } from '../runtime/intent-delegation/skill-eval.js';
 import { consumeFreshContextHandoff, hasPendingFreshContextHandoff, resolveOwnedActiveIntent, } from '../runtime/intent-delegation/handoff.js';
 import { wireIntentDelegationToRuntimeSync } from '../runtime/intent-delegation/runtime-sync.js';
-import { markSessionOwned, releaseSessionOwnership, resumeSessionOwnership, takeoverSessionOwnership, } from '../runtime/intent-delegation/ownership.js';
+import { assertSessionWriteOwnership, markSessionOwned, releaseSessionOwnership, resumeSessionOwnership, takeoverSessionOwnership, } from '../runtime/intent-delegation/ownership.js';
 import { EmbeddedYZJChannel } from '../channels/embedded-yzj.js';
 import { selectYZJChannel } from '../ui/channel-selector.js';
 import { resolveYZJConfig } from '../channels/yzj.js';
@@ -89,6 +90,8 @@ import { FileSkillAdherenceStore } from '../runtime/skills/adherence-store.js';
 import { checkForUpdate } from '../update/version-check.js';
 import { buildIntentReminderBlock, formatCurrentIntentSummaryLine, formatCurrentTurnIntentSummaryLine, formatIntentCreatedTranscriptBlock, formatIntentStageSummaryTranscriptBlock, formatProgressTranscriptBlock, formatReceiptTranscriptBlock, formatSalvageTranscriptBlock, formatStageActivatedTranscriptBlock, } from '../ui/orchestration.js';
 import { createRuntimeTraceRecorderFromEnv } from '../runtime/trace/runtime-recorder.js';
+import { buildGoalContextBlock, ContinuationArbiter, FileGoalStore, GoalCompletionEvaluator, GoalEvidenceCollector, GoalSessionLease, GoalService, GoalTamperDetectedError, } from '../runtime/goal/index.js';
+import { buildGoalContinuationInput, formatGoalPreview, formatGoalStatus, formatGoalSummaryLine, GOAL_COMMAND_HELP, inferGoalInput, isUnsupportedSingleShotGoalInput, parseGoalSlashCommand, } from './chat-goal.js';
 const { version: cliVersion } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 // Completed-intent feedback currently re-enters the footer/input surface and
 // has repeatedly regressed in narrow real TTYs. Keep the data path in place,
@@ -154,6 +157,11 @@ async function runChat(initialInput, opts) {
     if ((opts.print || opts.json) && !initialInput) {
         writeError('print/json 模式需要提供单次输入');
         process.exit(1);
+    }
+    if (initialInput && isUnsupportedSingleShotGoalInput(initialInput)) {
+        writeError('Goal Mode 仅支持交互式 chat；print/json/单次输入不能创建或恢复 Goal');
+        process.exitCode = 2;
+        return;
     }
     const sessionModeFlags = [opts.continue, opts.resume, opts.takeover, opts.forkSession].filter(Boolean);
     if (sessionModeFlags.length > 1) {
@@ -266,11 +274,22 @@ async function runChat(initialInput, opts) {
     let activeBusyCapture = null;
     let stopBusyCapture = () => { };
     let currentTurnAbortController = null;
-    let skipStopHookAutoContinue = false;
+    const abortedRuntimeTurnIds = new Set();
+    let currentOuterTurnId = null;
+    const continuationArbiter = new ContinuationArbiter();
     const intentTurnState = createChatIntentTurnState();
     let preparedIntentTurnSequence = 0;
     let currentTurnStageObservedSkillNames = new Map();
     let currentIntentLedger;
+    let currentGoalState = null;
+    let goalActivation = 'disarmed';
+    let pendingGoalCompleteSummary = null;
+    let pendingGoalBlockedClaim = null;
+    const goalTurnDrafts = new Map();
+    const settledGoalTurns = [];
+    let activeRuntimeTurnId = null;
+    let goalTurnAdmissionEnabled = false;
+    let goalLeaseHeartbeat = null;
     let currentSkillEvalState = persistedSession?.skillEval
         ? cloneSessionSkillEvalState(persistedSession.skillEval)
         : createEmptySessionSkillEvalState(Date.now());
@@ -340,6 +359,75 @@ async function runChat(initialInput, opts) {
         writeError(String(error instanceof Error ? error.message : error));
         process.exit(1);
     }
+    const goalStore = new FileGoalStore(getConfigDir('goals'));
+    const goalLease = new GoalSessionLease({
+        rootDir: getConfigDir('goal-leases'),
+        sessionId,
+        instanceId,
+    });
+    const goalService = new GoalService({
+        store: goalStore,
+        ownership: {
+            async assertOwned(goalSessionId, goalInstanceId) {
+                const latestLedger = await intentLedgerStore.load(goalSessionId);
+                if (latestLedger)
+                    currentIntentLedger = latestLedger;
+                assertSessionWriteOwnership(currentIntentLedger, goalInstanceId, 'mutate Goal');
+                goalLease.assertOwned();
+            },
+        },
+    });
+    currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+    if (opts.forkSession && !currentGoalState) {
+        const sourceGoal = await goalStore.load(opts.forkSession);
+        if (sourceGoal) {
+            goalLease.acquire();
+            try {
+                currentGoalState = await goalService.fork({
+                    sessionId,
+                    instanceId,
+                    requestSource: 'user',
+                    expectedRevision: null,
+                }, sourceGoal.state);
+            }
+            finally {
+                goalLease.release();
+            }
+        }
+    }
+    const stopGoalLeaseHeartbeat = () => {
+        if (goalLeaseHeartbeat) {
+            clearInterval(goalLeaseHeartbeat);
+            goalLeaseHeartbeat = null;
+        }
+    };
+    const disarmGoal = () => {
+        goalActivation = 'disarmed';
+        stopGoalLeaseHeartbeat();
+        goalLease.release();
+    };
+    const isGoalArmed = () => goalActivation === 'armed';
+    const armGoal = (recoverExpired = false) => {
+        goalLease.acquire({ recoverExpired });
+        goalActivation = 'armed';
+        stopGoalLeaseHeartbeat();
+        goalLeaseHeartbeat = setInterval(() => {
+            try {
+                goalLease.heartbeat();
+            }
+            catch (error) {
+                log.warn('goal lease heartbeat failed', { error: String(error) });
+                disarmGoal();
+            }
+        }, 10_000);
+        goalLeaseHeartbeat.unref?.();
+    };
+    const goalMutationContext = (requestSource) => ({
+        sessionId,
+        instanceId,
+        requestSource,
+        expectedRevision: currentGoalState?.revision ?? null,
+    });
     // Resolve model capabilities early (needed for getPromptInput)
     let modelCapabilities = resolveModelCapabilities(adapter);
     const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
@@ -522,6 +610,26 @@ async function runChat(initialInput, opts) {
             sessionId,
             instanceId,
             getTurnIntentPlan: () => intentTurnState.getSnapshot().currentTurnIntentPlan,
+        }),
+        ...createGoalTools({
+            getGoal: () => ({
+                state: currentGoalState,
+                activation: goalActivation,
+            }),
+            async requestComplete(summary) {
+                if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
+                    return { accepted: false, reason: 'no armed active Goal' };
+                }
+                pendingGoalCompleteSummary = summary;
+                return { accepted: true };
+            },
+            async requestBlocked(claim) {
+                if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
+                    return { accepted: false, reason: 'no armed active Goal' };
+                }
+                pendingGoalBlockedClaim = claim;
+                return { accepted: true };
+            },
         }),
         createAskUserQuestionTool({
             onEnterInteractive: () => askUserOnEnter?.(),
@@ -719,6 +827,9 @@ async function runChat(initialInput, opts) {
         agent,
         getSkillEntries: () => toSkillEntries(skills),
         getIntentReminderBlock: () => intentTurnState.getSnapshot().activeIntentReminderBlock,
+        getGoalReminderBlock: () => (isGoalArmed() && currentGoalState?.status === 'active'
+            ? buildGoalContextBlock(currentGoalState)
+            : undefined),
     });
     skillCatalogWatcher = createSkillCatalogWatcher({
         cwd,
@@ -1120,13 +1231,24 @@ async function runChat(initialInput, opts) {
         updateUsage(usage) {
             statusBar.update(usage);
             scrollRegion.updateStatusLine(statusBar.getStatusLine());
+            if (activeRuntimeTurnId) {
+                const draft = goalTurnDrafts.get(activeRuntimeTurnId);
+                if (draft) {
+                    const typedUsage = usage;
+                    draft.usageTokens = typedUsage.inputTokens + typedUsage.outputTokens;
+                }
+            }
         },
     });
     const getCurrentIntentSummaryLine = () => {
         let source = 'none';
         let line = '';
         const intentTurnSnapshot = intentTurnState.getSnapshot();
-        if (intentTurnSnapshot.currentTurnIntentPlan) {
+        if (currentGoalState) {
+            source = 'goal';
+            line = formatGoalSummaryLine(currentGoalState);
+        }
+        else if (intentTurnSnapshot.currentTurnIntentPlan) {
             source = 'turn';
             line = getCurrentTurnSummaryLine();
         }
@@ -1597,7 +1719,128 @@ async function runChat(initialInput, opts) {
             skillExecution: currentSkillExecutionState,
         });
     };
+    const pauseCurrentGoalForInterruption = async (reason, requestSource) => {
+        try {
+            if (isGoalArmed() && currentGoalState?.status === 'active') {
+                currentGoalState = await goalService.pause(goalMutationContext(requestSource), reason);
+            }
+        }
+        catch (error) {
+            log.warn('goal pause failed', { reason, error: String(error) });
+        }
+        finally {
+            pendingGoalCompleteSummary = null;
+            pendingGoalBlockedClaim = null;
+            disarmGoal();
+        }
+    };
+    const handleGoalCommitFailure = (error) => {
+        const reason = error instanceof GoalTamperDetectedError
+            ? 'tamper_detected'
+            : 'goal_state_flush_failed';
+        if (currentGoalState?.status === 'active') {
+            currentGoalState = {
+                ...currentGoalState,
+                status: 'paused',
+                terminalReason: reason,
+            };
+        }
+        pendingGoalCompleteSummary = null;
+        pendingGoalBlockedClaim = null;
+        disarmGoal();
+        writeProgressTranscriptNote(`Goal 已暂停：${reason}`);
+    };
+    const finalizeSettledGoalTurns = async (lastAssistantText) => {
+        if (settledGoalTurns.length === 0)
+            return;
+        const drafts = settledGoalTurns.splice(0);
+        const lastCompleted = [...drafts].reverse().find(item => item.outcome === 'completed');
+        try {
+            for (const draft of drafts) {
+                if (!currentGoalState
+                    || !isGoalArmed()
+                    || currentGoalState.status !== 'active'
+                    || draft.goalId !== currentGoalState.goalId
+                    || draft.epoch !== currentGoalState.epoch) {
+                    continue;
+                }
+                if (draft.outcome !== 'completed') {
+                    await pauseCurrentGoalForInterruption(draft.outcome === 'aborted' ? 'user_aborted' : 'runtime_error', draft.outcome === 'aborted' ? 'user' : 'runtime');
+                    return;
+                }
+                const evidence = draft.collector.flush().map(item => item.record);
+                if (draft === lastCompleted && lastAssistantText.trim()) {
+                    evidence.push({
+                        ownerKind: 'goal',
+                        ownerId: currentGoalState.goalId,
+                        kind: 'answer',
+                        summary: 'Goal turn produced a non-empty final response',
+                        metadata: { responseId: draft.turnId },
+                    });
+                }
+                let terminalDecision = { kind: 'none' };
+                let missingCompletionKinds = [];
+                if (draft === lastCompleted && pendingGoalCompleteSummary) {
+                    const document = await goalService.load(sessionId);
+                    if (!document)
+                        throw new Error('Goal document disappeared before completion evaluation');
+                    const proposedEvidence = evidence.map((record, index) => ({
+                        goalId: currentGoalState.goalId,
+                        epoch: currentGoalState.epoch,
+                        goalTurnId: draft.turnId,
+                        evidenceId: `pending_${draft.turnId}_${index}`,
+                        record,
+                        recordedAt: Date.now(),
+                    }));
+                    const evaluation = new GoalCompletionEvaluator().evaluate(currentGoalState, [...document.evidence, ...proposedEvidence]);
+                    if (evaluation.ok) {
+                        terminalDecision = { kind: 'complete', reason: pendingGoalCompleteSummary };
+                    }
+                    else {
+                        missingCompletionKinds = evaluation.missingKinds;
+                    }
+                    pendingGoalCompleteSummary = null;
+                }
+                currentGoalState = await goalService.settleTurn(goalMutationContext('runtime'), {
+                    turnId: draft.turnId,
+                    tokensUsed: draft.usageTokens ?? 0,
+                    activeWallClockMs: Math.max(0, Date.now() - draft.startedAt),
+                    evidence,
+                    terminalDecision,
+                });
+                if (currentGoalState.status === 'complete') {
+                    disarmGoal();
+                    writeProgressTranscriptNote('Goal 已完成。');
+                    return;
+                }
+                if (missingCompletionKinds.length > 0) {
+                    writeProgressTranscriptNote(`Goal 尚缺完成证据：${missingCompletionKinds.join(', ')}`);
+                }
+                if (currentGoalState.status !== 'active') {
+                    disarmGoal();
+                    writeProgressTranscriptNote(`Goal 已停止：${currentGoalState.terminalReason ?? currentGoalState.status}`);
+                    return;
+                }
+            }
+            if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed())
+                return;
+            if (pendingGoalBlockedClaim) {
+                const claim = pendingGoalBlockedClaim;
+                pendingGoalBlockedClaim = null;
+                currentGoalState = await goalService.noteBlockedClaim(goalMutationContext('runtime'), claim);
+                if (currentGoalState.status === 'blocked') {
+                    disarmGoal();
+                    writeProgressTranscriptNote(`Goal blocked：${claim.reason}`);
+                    return;
+                }
+            }
+        }
+        catch (error) {
+            handleGoalCommitFailure(error);
+        }
+    };
     const releaseSessionOwnershipForExit = async () => {
+        disarmGoal();
         await refreshIntentLedger();
         const ownerInstanceId = currentIntentLedger.ownership.ownerInstanceId;
         if (ownerInstanceId !== instanceId) {
@@ -1732,6 +1975,9 @@ async function runChat(initialInput, opts) {
     if (branch)
         statusBar.updateBranch(branch);
     statusBar.update({ inputTokens: 0, outputTokens: 0 });
+    if (!initialInput && currentGoalState && ['active', 'paused', 'blocked'].includes(currentGoalState.status)) {
+        process.stdout.write(`${dim('Goal 已保留但未自动继续；输入 /goal resume 明确恢复。')}\n`);
+    }
     // 单次任务模式
     if (initialInput) {
         const inputBlocks = await parseInputBlocks(initialInput, resolveModelCapabilities(adapter).supportsImageInput);
@@ -2267,6 +2513,7 @@ async function runChat(initialInput, opts) {
         // 创建输入读取器
         inputReader.setSkills(skills);
         let deferredInput = null;
+        let deferredInputKind = 'user';
         let pendingQueuedInput = null;
         let normalTurnChromePrimed = false;
         let turnHadAskUserQuestion = false;
@@ -2300,6 +2547,24 @@ async function runChat(initialInput, opts) {
         };
         runtimeHooks.on('turn_started', (e) => {
             log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
+            activeRuntimeTurnId = e.turnId;
+            currentOuterTurnId ??= e.turnId;
+            if (goalTurnAdmissionEnabled
+                && isGoalArmed()
+                && currentGoalState?.status === 'active') {
+                goalTurnDrafts.set(e.turnId, {
+                    turnId: e.turnId,
+                    goalId: currentGoalState.goalId,
+                    epoch: currentGoalState.epoch,
+                    startedAt: Date.now(),
+                    usageTokens: null,
+                    collector: new GoalEvidenceCollector({
+                        goalId: currentGoalState.goalId,
+                        epoch: currentGoalState.epoch,
+                        goalTurnId: e.turnId,
+                    }),
+                });
+            }
             carryPreparedIntentContextToRuntimeTurn(e.turnId);
             toolExplorer.reset();
             turnLayout.reset();
@@ -2317,6 +2582,15 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('tool_started', (e) => {
             log.debug('tool_started', JSON.stringify({ tool: e?.toolName }));
+            const transcriptSummary = summarizeToolInputForTranscript(e.toolInput);
+            transcriptBuffer.record({
+                kind: 'tool_use',
+                // This hook is emitted only by the main runtime facade. Subagent tool
+                // observations use onToolObserved and retain their own agentId there.
+                agentId: 'main',
+                name: e.toolName,
+                summary: transcriptSummary,
+            });
             endStreamingPhaseForInterrupt();
             if (e.toolName === 'AskUserQuestion') {
                 turnHadAskUserQuestion = true;
@@ -2347,7 +2621,11 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('tool_finished', (_e) => {
             log.debug('tool_finished', JSON.stringify({ tool: _e?.toolName, ok: _e?.ok }));
+            goalTurnDrafts.get(_e.turnId)?.collector.accept(_e);
             scheduleActivityResume('Thinking', 160);
+        });
+        runtimeHooks.on('tool_execution_fact', (event) => {
+            goalTurnDrafts.get(event.turnId)?.collector.accept(event);
         });
         runtimeHooks.on('intent_created', async (event) => {
             await refreshIntentLedger();
@@ -2396,6 +2674,14 @@ async function runChat(initialInput, opts) {
             renderIntentSummaryLine();
         });
         runtimeHooks.on('turn_completed', (event) => {
+            activeRuntimeTurnId = null;
+            const goalDraft = goalTurnDrafts.get(event.turnId);
+            if (goalDraft) {
+                goalDraft.outcome = 'completed';
+                goalDraft.collector.settleTurn();
+                goalTurnDrafts.delete(event.turnId);
+                settledGoalTurns.push(goalDraft);
+            }
             clearLongThinkingTimer();
             stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
             turnHadAskUserQuestion = false;
@@ -2432,6 +2718,14 @@ async function runChat(initialInput, opts) {
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_failed', (event) => {
+            activeRuntimeTurnId = null;
+            const goalDraft = goalTurnDrafts.get(event.turnId);
+            if (goalDraft) {
+                goalDraft.outcome = 'failed';
+                goalDraft.collector.settleTurn();
+                goalTurnDrafts.delete(event.turnId);
+                settledGoalTurns.push(goalDraft);
+            }
             clearLongThinkingTimer();
             turnHadAskUserQuestion = false;
             intentTurnState.clearTurnContext(event.turnId);
@@ -2443,6 +2737,14 @@ async function runChat(initialInput, opts) {
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_aborted', (event) => {
+            activeRuntimeTurnId = null;
+            const goalDraft = goalTurnDrafts.get(event.turnId);
+            if (goalDraft) {
+                goalDraft.outcome = 'aborted';
+                goalDraft.collector.settleTurn();
+                goalTurnDrafts.delete(event.turnId);
+                settledGoalTurns.push(goalDraft);
+            }
             clearLongThinkingTimer();
             turnHadAskUserQuestion = false;
             intentTurnState.clearTurnContext(event.turnId);
@@ -2454,10 +2756,8 @@ async function runChat(initialInput, opts) {
         });
         runtimeHooks.on('turn_stop', (event) => {
             if (event.reason === 'user_aborted') {
-                skipStopHookAutoContinue = true;
-                return;
+                abortedRuntimeTurnIds.add(event.turnId);
             }
-            skipStopHookAutoContinue = false;
         });
         // Context 压缩通知
         runtimeHooks.on('compact_triggered', () => {
@@ -2515,6 +2815,7 @@ async function runChat(initialInput, opts) {
                 runtimeState.markInputReady();
                 renderFooterChrome();
                 deferredInput = result.deferredInput;
+                deferredInputKind = 'user';
             }
             if (!result.exitRequested) {
                 return false;
@@ -2531,10 +2832,13 @@ async function runChat(initialInput, opts) {
             await refreshSkills();
             stashQueuedInputIfAny({ stopCapture: false });
             let input;
+            let inputKind = 'user';
             if (deferredInput !== null) {
                 stopBusyCapture();
                 input = deferredInput;
+                inputKind = deferredInputKind;
                 deferredInput = null;
+                deferredInputKind = 'user';
             }
             else if (pendingQueuedInput !== null) {
                 stopBusyCapture();
@@ -2567,7 +2871,7 @@ async function runChat(initialInput, opts) {
                 renderFooterChrome();
             }
             const shellEscape = parseShellEscapeInput(trimmed);
-            const shouldPrimeNormalTurnChrome = shellEscape === null && !trimmed.startsWith('/');
+            const shouldPrimeNormalTurnChrome = inputKind !== 'goal' && shellEscape === null && !trimmed.startsWith('/');
             let normalInputTurnChromeStarted = false;
             if (shouldPrimeNormalTurnChrome) {
                 mdRenderer.reset();
@@ -2605,6 +2909,116 @@ async function runChat(initialInput, opts) {
             dismissWelcomeScreen();
             if (trimmed === '/help') {
                 writeCommandOutput(trimmed, buildChatHelpText(skills));
+                continue;
+            }
+            const goalCommand = parseGoalSlashCommand(trimmed);
+            if (goalCommand) {
+                if (goalCommand.kind === 'help') {
+                    writeCommandOutput(trimmed, `${GOAL_COMMAND_HELP}\n\n`);
+                    continue;
+                }
+                if (goalCommand.kind === 'invalid') {
+                    writeCommandOutput(trimmed, `${goalCommand.message}\n\n`);
+                    continue;
+                }
+                if (goalCommand.kind === 'status') {
+                    writeCommandOutput(trimmed, currentGoalState
+                        ? `${formatGoalStatus(currentGoalState)}\nActivation：${goalActivation}\n\n`
+                        : '当前会话没有 Goal。\n\n');
+                    continue;
+                }
+                try {
+                    if (goalCommand.kind === 'pause') {
+                        if (!currentGoalState) {
+                            writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
+                            continue;
+                        }
+                        if (currentGoalState.status === 'paused') {
+                            disarmGoal();
+                            writeCommandOutput(trimmed, 'Goal 已处于 paused。\n\n');
+                            continue;
+                        }
+                        if (currentGoalState.status !== 'active') {
+                            writeCommandOutput(trimmed, `当前 Goal 状态为 ${currentGoalState.status}，不能 pause。\n\n`);
+                            continue;
+                        }
+                        if (!isGoalArmed())
+                            armGoal(true);
+                        currentGoalState = await goalService.pause(goalMutationContext('user'), 'user_paused');
+                        disarmGoal();
+                        writeCommandOutput(trimmed, 'Goal 已暂停。\n\n');
+                        renderIntentSummaryLine();
+                        continue;
+                    }
+                    if (goalCommand.kind === 'resume') {
+                        if (!currentGoalState) {
+                            writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
+                            continue;
+                        }
+                        if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
+                            writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}，请创建或 replace。\n\n`);
+                            continue;
+                        }
+                        if (!isGoalArmed())
+                            armGoal(true);
+                        if (currentGoalState.status === 'paused' || currentGoalState.status === 'blocked') {
+                            currentGoalState = await goalService.resume(goalMutationContext('user'), { turnLimit: goalCommand.turnLimit });
+                        }
+                        deferredInput = buildGoalContinuationInput(currentGoalState).prompt;
+                        deferredInputKind = 'goal';
+                        writeCommandOutput(trimmed, 'Goal 已恢复，将继续执行。\n\n');
+                        renderIntentSummaryLine();
+                        continue;
+                    }
+                    if (goalCommand.kind === 'cancel') {
+                        if (!currentGoalState) {
+                            writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
+                            continue;
+                        }
+                        if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
+                            writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}。\n\n`);
+                            continue;
+                        }
+                        if (!isGoalArmed())
+                            armGoal(true);
+                        currentGoalState = await goalService.cancel(goalMutationContext('user'), 'user_cancelled');
+                        disarmGoal();
+                        writeCommandOutput(trimmed, 'Goal 已取消。\n\n');
+                        renderIntentSummaryLine();
+                        continue;
+                    }
+                    const replacing = goalCommand.kind === 'replace';
+                    if (!replacing && currentGoalState && !['complete', 'cancelled'].includes(currentGoalState.status)) {
+                        writeCommandOutput(trimmed, '当前会话已有 Goal；请使用 /goal replace <objective>。\n\n');
+                        continue;
+                    }
+                    if (replacing && !currentGoalState) {
+                        writeCommandOutput(trimmed, '当前会话没有可替换的 Goal。\n\n');
+                        continue;
+                    }
+                    const goalInput = inferGoalInput(goalCommand.objective);
+                    writeCommandOutput(trimmed, `${formatGoalPreview(goalInput, replacing)}\n\n`);
+                    const confirmation = await inputReader.read('确认？输入 yes：');
+                    if (confirmation?.trim().toLowerCase() !== 'yes') {
+                        writeCommandOutput(trimmed, '已取消，Goal 未变更。\n\n');
+                        continue;
+                    }
+                    if (!isGoalArmed())
+                        armGoal(replacing);
+                    currentGoalState = replacing
+                        ? await goalService.replace(goalMutationContext('user'), goalInput)
+                        : await goalService.create(goalMutationContext('user'), goalInput);
+                    pendingGoalCompleteSummary = null;
+                    pendingGoalBlockedClaim = null;
+                    deferredInput = currentGoalState.objective;
+                    deferredInputKind = 'user';
+                    writeCommandOutput(trimmed, replacing ? 'Goal 已替换并启动。\n\n' : 'Goal 已创建并启动。\n\n');
+                    renderIntentSummaryLine();
+                }
+                catch (error) {
+                    disarmGoal();
+                    writeCommandOutput(trimmed, `Goal 操作失败：${formatErrorText(String(error))}\n\n`);
+                }
                 continue;
             }
             if (reminders) {
@@ -2845,7 +3259,7 @@ async function runChat(initialInput, opts) {
             // Note: In scroll region mode, we DON'T write input here because
             // clearLastInput() will clear the screen. Instead, input is written
             // after clearLastInput() via writeSubmittedInput().
-            if (!scrollRegion.isActive()) {
+            if (!scrollRegion.isActive() && inputKind !== 'goal') {
                 process.stdout.write(formatSubmittedInput(trimmed));
             }
             // 斜杠命令：直接触发对应 skill
@@ -2977,13 +3391,13 @@ async function runChat(initialInput, opts) {
             resetStreamingSegment();
             try {
                 if (!normalInputTurnChromeStarted) {
-                    beginNormalInputTurnChrome(trimmed);
+                    beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);
                     normalTurnChromePrimed = true;
                 }
                 // UserPromptSubmit hook — broker 可在此注入额外上下文
-                const promptHookResult = await lifecycleHooks.runHooks('UserPromptSubmit', {
-                    prompt: trimmed,
-                });
+                const promptHookResult = inputKind === 'goal'
+                    ? { additionalContext: undefined }
+                    : await lifecycleHooks.runHooks('UserPromptSubmit', { prompt: trimmed });
                 let effectiveInput = trimmed;
                 if (promptHookResult.additionalContext) {
                     effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
@@ -3005,19 +3419,23 @@ async function runChat(initialInput, opts) {
                     }
                 }
                 let lastAssistantText = '';
+                currentOuterTurnId = null;
                 await primeTurnIntentPlan(true);
                 await maybePrepareFreshContextHandoff();
+                goalTurnAdmissionEnabled = isGoalArmed();
                 const turnResult = await runInteractiveRuntimeTurn(runRuntimeTurn, createInteractiveRuntimeTurnRequest(inputBlocks), createInteractiveTurnChunkHandlers((delta) => {
                     lastAssistantText += delta;
                 }));
                 lastAssistantText = turnResult.assistantText;
                 flushStreamingMarkdown();
                 lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
+                goalTurnAdmissionEnabled = false;
                 if (lastAssistantText.trim().length > 0) {
                     transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
                 }
                 await finalizeCurrentTurnIntentIfNeeded();
                 await persistSession();
+                await finalizeSettledGoalTurns(lastAssistantText);
                 // Feedback prompt should render against a clean footer, not a completed
                 // turn summary that still belongs to the previous response.
                 clearTurnIntentContext();
@@ -3031,99 +3449,52 @@ async function runChat(initialInput, opts) {
                 if (!scrollRegion.isActive()) {
                     process.stdout.write('\n');
                 }
-                // Stop hook — broker 可在此注入新任务（auto-continue）
-                let stopResult;
-                try {
-                    stopResult = await lifecycleHooks.runHooks('Stop', {
-                        stopHookActive: true,
-                        lastAssistantMessage: lastAssistantText,
-                    });
+                // Busy 时到达的用户输入先于所有自动续轮；旧 broker candidate 不缓存，
+                // 用户 turn settled 后由 Stop hook 从最新状态重新计算。
+                stashQueuedInputIfAny({ stopCapture: false });
+                if (pendingQueuedInput !== null) {
+                    continue interactiveLoop;
                 }
-                catch (stopError) {
-                    await lifecycleHooks.runHooks('StopFailure', {
-                        error: stopError instanceof Error ? stopError.message : String(stopError),
-                        lastAssistantMessage: lastAssistantText,
-                    });
-                    stopResult = { ok: false };
-                }
-                if (!skipStopHookAutoContinue && stopResult.preventContinuation && stopResult.message) {
-                    // broker 返回 block + message：把 message 作为下一轮输入自动继续
-                    if (scrollRegion.isActive() && !terminalUiSuspended) {
-                        scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-                        scrollRegion.writeSubmittedInput(formatSubmittedInput(stopResult.message));
-                        replRenderer.prepareForInput();
-                    }
-                    else {
-                        process.stdout.write(formatSubmittedInput(stopResult.message));
-                        process.stdout.write('\n');
-                    }
-                    mdRenderer.reset();
-                    resetStreamingSegment();
-                    lastAssistantText = '';
-                    const continueBlocks = await parseInputBlocks(stopResult.message, resolveModelCapabilities(adapter).supportsImageInput);
-                    clearPastedImagePaths();
-                    await refreshIntentLedger();
-                    await prepareIntentReminderForInput(stopResult.message);
-                    await primeTurnIntentPlan(true);
-                    if (!terminalUiSuspended) {
-                        scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-                    }
-                    await maybePrepareFreshContextHandoff();
-                    const previousController = currentTurnAbortController;
-                    const autoContinueController = new AbortController();
-                    currentTurnAbortController = autoContinueController;
+                let brokerContinuation = null;
+                const outerTurnWasAborted = currentOuterTurnId !== null
+                    && abortedRuntimeTurnIds.has(currentOuterTurnId);
+                if (!outerTurnWasAborted) {
                     try {
-                        await runtimeFacade.runTurn({
-                            sessionId,
-                            cwd,
-                            source: 'chat',
-                            input: continueBlocks,
-                        }, (chunk) => {
-                            if (chunk.type === 'text') {
-                                handleAssistantTextChunk(chunk.delta, (delta) => {
-                                    lastAssistantText += delta;
-                                });
-                            }
-                            if (chunk.type === 'usage') {
-                                statusBar.update(chunk.usage);
-                                scrollRegion.updateStatusLine(statusBar.getStatusLine());
-                            }
-                        }, autoContinueController.signal);
+                        const stopResult = await lifecycleHooks.runHooks('Stop', {
+                            stopHookActive: true,
+                            lastAssistantMessage: lastAssistantText,
+                        });
+                        brokerContinuation = stopResult.preventContinuation && stopResult.message
+                            ? stopResult.message
+                            : null;
                     }
-                    catch (e) {
-                        if (isAbortError(e)) {
-                            // Abort already emitted turn_aborted/turn_stop; keep the UI state from those hooks.
-                        }
-                        else {
-                            throw e;
-                        }
+                    catch (stopError) {
+                        await lifecycleHooks.runHooks('StopFailure', {
+                            error: stopError instanceof Error ? stopError.message : String(stopError),
+                            lastAssistantMessage: lastAssistantText,
+                        });
                     }
-                    finally {
-                        if (currentTurnAbortController === autoContinueController) {
-                            currentTurnAbortController = previousController;
-                        }
-                    }
-                    flushStreamingMarkdown();
-                    lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
-                    if (lastAssistantText.trim().length > 0) {
-                        transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
-                    }
-                    await finalizeCurrentTurnIntentIfNeeded();
-                    await persistSession();
-                    clearTurnIntentContext();
-                    const autoContinueFeedbackResult = await maybeCollectCompletedIntentFeedback();
-                    if (await handleCompletedIntentFeedbackResult(autoContinueFeedbackResult)) {
-                        break interactiveLoop;
-                    }
-                    if (deferredInput !== null) {
-                        continue interactiveLoop;
-                    }
-                    if (!scrollRegion.isActive()) {
-                        process.stdout.write('\n');
-                    }
+                }
+                const goalContinuation = (!outerTurnWasAborted
+                    && isGoalArmed()
+                    && currentGoalState?.status === 'active') ? buildGoalContinuationInput(currentGoalState).prompt : null;
+                const continuation = continuationArbiter.select({
+                    queuedUserInput: pendingQueuedInput,
+                    brokerContinuation,
+                    goalContinuation,
+                });
+                if (continuation) {
+                    deferredInput = continuation.input;
+                    deferredInputKind = continuation.kind;
+                    continue interactiveLoop;
                 }
             }
             catch (e) {
+                goalTurnAdmissionEnabled = false;
+                await finalizeSettledGoalTurns('');
+                if (isGoalArmed() && currentGoalState?.status === 'active') {
+                    await pauseCurrentGoalForInterruption(isAbortError(e) ? 'user_aborted' : 'runtime_error', isAbortError(e) ? 'user' : 'runtime');
+                }
                 clearTurnIntentContext();
                 if (isAbortError(e)) {
                     handleTurnAbort();
@@ -3145,6 +3516,7 @@ async function runChat(initialInput, opts) {
         }
     }
     finally {
+        disarmGoal();
         stopBusyCapture();
         stopActivity();
         if (resizeTimeout) {
@@ -3259,4 +3631,12 @@ export function registerChatCommands(program) {
             process.exit(1);
         }
     });
+}
+export function summarizeToolInputForTranscript(input) {
+    try {
+        return JSON.stringify(input) ?? String(input);
+    }
+    catch {
+        return String(input);
+    }
 }

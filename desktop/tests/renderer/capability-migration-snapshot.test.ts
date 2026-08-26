@@ -33,10 +33,10 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
   });
 
   it('tracks the current legacy flat key count for regression', () => {
-    // Grew from 236 by fixed semantic assistant and KSwarm team/project/agent
-    // operations. These APIs do not expose arbitrary paths, HTTP, credentials,
-    // or caller-controlled authority fields.
-    expect(keys.length).toMatchInlineSnapshot(`256`);
+    // Goal Mode adds only semantic lifecycle, attachment-ack, queue-priority,
+    // and event subscription operations. It does not expose store, arbitrary
+    // status mutation, task start, or caller-controlled authority fields.
+    expect(keys.length).toMatchInlineSnapshot(`268`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

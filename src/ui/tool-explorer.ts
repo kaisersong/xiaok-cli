@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { describeToolActivity, formatRailHeader, formatRailLine, formatToolActivity } from './render.js';
-import type { UiLocale } from './locale.js';
+import { getUiCopy, type UiLocale } from './locale.js';
 
 type ToolActivityFormatter = (
   toolName: string,
@@ -20,6 +20,7 @@ interface DirectActivity {
 }
 
 const MAX_DIRECT_COMMAND_PREVIEW = 160;
+const MAX_VISIBLE_RAN_ENTRIES = 3;
 
 function singleLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -147,37 +148,55 @@ function describeDirectActivity(toolName: string, input: Record<string, unknown>
 
 export class ToolExplorer {
   private activeGroup: string | null = null;
+  private activeGroupEntryCount = 0;
+  private ranCollapseNoticeWritten = false;
 
   constructor(
     private readonly formatActivity: ToolActivityFormatter = formatToolActivity,
+    private readonly locale: UiLocale = 'zh-CN',
   ) {}
 
   record(name: string, input: Record<string, unknown>): string {
     const grouped = describeGroupedActivity(name, input);
     if (grouped) {
       const lines: string[] = [];
-      if (this.activeGroup !== grouped.group) {
+      const groupChanged = this.activeGroup !== grouped.group;
+      if (groupChanged) {
         lines.push('\n\n');
-      }
-      if (this.activeGroup !== grouped.group) {
         lines.push(`${formatRailHeader(grouped.group)}\n`);
+        this.activeGroupEntryCount = 0;
+        this.ranCollapseNoticeWritten = false;
       }
       lines.push(`${formatRailLine(grouped.item)}\n`);
       this.activeGroup = grouped.group;
+      this.activeGroupEntryCount += 1;
       return lines.join('');
     }
 
     const direct = describeDirectActivity(name, input);
     if (direct) {
       const lines: string[] = [];
-      if (this.activeGroup !== direct.group) {
+      const groupChanged = this.activeGroup !== direct.group;
+      if (groupChanged) {
         lines.push('\n\n');
-      }
-      if (this.activeGroup !== direct.group) {
         lines.push(`${formatRailHeader(direct.group)}\n`);
+        this.activeGroupEntryCount = 0;
+        this.ranCollapseNoticeWritten = false;
       }
-      lines.push(`${formatRailLine(direct.item)}\n`);
+
       this.activeGroup = direct.group;
+      this.activeGroupEntryCount += 1;
+
+      if (direct.group === 'Ran' && this.activeGroupEntryCount > MAX_VISIBLE_RAN_ENTRIES) {
+        if (this.ranCollapseNoticeWritten) {
+          return '';
+        }
+        this.ranCollapseNoticeWritten = true;
+        lines.push(`${formatRailLine(getUiCopy(this.locale).ranCollapseNotice)}\n`);
+        return lines.join('');
+      }
+
+      lines.push(`${formatRailLine(direct.item)}\n`);
       return lines.join('');
     }
 
@@ -194,5 +213,7 @@ export class ToolExplorer {
 
   reset(): void {
     this.activeGroup = null;
+    this.activeGroupEntryCount = 0;
+    this.ranCollapseNoticeWritten = false;
   }
 }

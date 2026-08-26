@@ -37,6 +37,106 @@ const ARTIFACT_WORKSPACE_ERROR_CODES = new Set<ArtifactWorkspaceErrorCode>([
   'generation_conflict',
 ]);
 
+const GOAL_EVIDENCE_KINDS = new Set([
+  'answer', 'file_artifact', 'command_action', 'project_update',
+]);
+
+function parseGoalThreadId(value: unknown): string {
+  const threadId = typeof value === 'string' ? value.trim() : '';
+  if (!threadId || threadId.length > 200) throw new Error('invalid_goal_thread_id');
+  return threadId;
+}
+
+function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
+  threadId: string;
+  objective: string;
+  completionCriterion?: string;
+  expectedEvidenceKinds: Array<'answer' | 'file_artifact' | 'command_action' | 'project_update'>;
+  turnLimit?: number;
+} {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_goal_input');
+  const input = raw as Record<string, unknown>;
+  const allowed = new Set([
+    'threadId', 'objective', 'completionCriterion', 'expectedEvidenceKinds', 'turnLimit',
+  ]);
+  const unknown = Object.keys(input).find(key => !allowed.has(key));
+  if (unknown) throw new Error(`invalid_goal_field:${unknown}`);
+  const objective = typeof input.objective === 'string' ? input.objective.trim() : '';
+  if (!objective || objective.length > 4_000) throw new Error(`invalid_goal_${operation}_objective`);
+  const completionCriterion = typeof input.completionCriterion === 'string'
+    ? input.completionCriterion.trim()
+    : undefined;
+  if (completionCriterion && completionCriterion.length > 4_000) {
+    throw new Error('invalid_goal_completion_criterion');
+  }
+  if (!Array.isArray(input.expectedEvidenceKinds) || input.expectedEvidenceKinds.length === 0) {
+    throw new Error('invalid_goal_evidence_kinds');
+  }
+  const expectedEvidenceKinds = [...new Set(input.expectedEvidenceKinds)].map(value => {
+    if (typeof value !== 'string' || !GOAL_EVIDENCE_KINDS.has(value)) {
+      throw new Error('invalid_goal_evidence_kind');
+    }
+    return value as 'answer' | 'file_artifact' | 'command_action' | 'project_update';
+  });
+  const turnLimit = input.turnLimit;
+  if (turnLimit !== undefined && (!Number.isSafeInteger(turnLimit) || (turnLimit as number) < 1 || (turnLimit as number) > 50)) {
+    throw new Error('invalid_goal_turn_limit');
+  }
+  return {
+    threadId: parseGoalThreadId(input.threadId), objective,
+    ...(completionCriterion ? { completionCriterion } : {}),
+    expectedEvidenceKinds,
+    ...(turnLimit === undefined ? {} : { turnLimit: turnLimit as number }),
+  };
+}
+
+function sanitizeTaskContext(raw: unknown): { threadId?: string; taskIds?: string[] } | undefined {
+  if (raw === undefined) return undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_task_context');
+  const context = raw as Record<string, unknown>;
+  const threadId = context.threadId === undefined ? undefined : parseGoalThreadId(context.threadId);
+  let taskIds: string[] | undefined;
+  if (context.taskIds !== undefined) {
+    if (!Array.isArray(context.taskIds)) throw new Error('invalid_task_context_task_ids');
+    taskIds = context.taskIds.map(value => {
+      if (typeof value !== 'string' || !value.trim() || value.length > 200) {
+        throw new Error('invalid_task_context_task_id');
+      }
+      return value.trim();
+    });
+  }
+  return {
+    ...(threadId ? { threadId } : {}),
+    ...(taskIds ? { taskIds } : {}),
+  };
+}
+
+function sanitizeTaskCreateInput(raw: unknown): {
+  prompt: string;
+  materials: Array<{ materialId: string; role?: 'customer_material' | 'product_material' | 'template_material' | 'unknown' }>;
+  context?: { threadId?: string; taskIds?: string[] };
+} {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_task_input');
+  const input = raw as Record<string, unknown>;
+  if (typeof input.prompt !== 'string') throw new Error('invalid_task_prompt');
+  if (!Array.isArray(input.materials)) throw new Error('invalid_task_materials');
+  const roles = new Set(['customer_material', 'product_material', 'template_material', 'unknown']);
+  const materials = input.materials.map(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_task_material');
+    const material = value as Record<string, unknown>;
+    if (typeof material.materialId !== 'string' || !material.materialId.trim()) throw new Error('invalid_task_material_id');
+    if (material.role !== undefined && (typeof material.role !== 'string' || !roles.has(material.role))) {
+      throw new Error('invalid_task_material_role');
+    }
+    return {
+      materialId: material.materialId.trim(),
+      ...(material.role ? { role: material.role as 'customer_material' | 'product_material' | 'template_material' | 'unknown' } : {}),
+    };
+  });
+  const context = sanitizeTaskContext(input.context);
+  return { prompt: input.prompt, materials, ...(context ? { context } : {}) };
+}
+
 const ARTIFACT_WORKSPACE_ALLOWED_FIELDS = {
   getArtifactWorkspaceSnapshot: ['conversationId', 'workspaceRootId', 'selectedArtifact'],
   closeArtifactWorkspace: ['conversationId', 'workspaceRootId'],
@@ -672,8 +772,26 @@ export async function registerDesktopIpc(
       if (!target.isDestroyed()) target.webContents.send('desktop:artifactWorkspace:changed', change);
     }
   });
+  const unsubscribeGoalChanges = services.subscribeGoalChanged?.((change) => {
+    const targets = typeof BrowserWindow?.getAllWindows === 'function'
+      ? BrowserWindow.getAllWindows()
+      : [window];
+    for (const target of targets.length > 0 ? targets : [window]) {
+      if (!target.isDestroyed()) target.webContents.send('desktop:goal:changed', change);
+    }
+  });
+  const unsubscribeGoalTaskPrepared = services.subscribeGoalTaskPrepared?.((prepared) => {
+    const targets = typeof BrowserWindow?.getAllWindows === 'function'
+      ? BrowserWindow.getAllWindows()
+      : [window];
+    for (const target of targets.length > 0 ? targets : [window]) {
+      if (!target.isDestroyed()) target.webContents.send('desktop:goal:taskPrepared', prepared);
+    }
+  });
   const onPrimaryClosed = () => {
     unsubscribeArtifactWorkspaceChanges?.();
+    unsubscribeGoalChanges?.();
+    unsubscribeGoalTaskPrepared?.();
     artifactWorkspaceServices.closeArtifactWorkspaceViewKey?.('primary');
   };
   if (typeof window.once === 'function') window.once('closed', onPrimaryClosed);
@@ -885,9 +1003,53 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:createTask', async (_event, input) => {
     log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
-    const r = await services.createTask(input);
+    const r = await services.createTask(sanitizeTaskCreateInput(input));
     log('info', 'createTask ok', { taskId: r?.taskId });
     return r;
+  });
+  ipcMain.handle('desktop:goal:get', async (_event, input) => (
+    services.getGoal(parseGoalThreadId(input?.threadId))
+  ));
+  ipcMain.handle('desktop:goal:create', async (_event, input) => (
+    services.createGoal(parseGoalInput(input, 'create'))
+  ));
+  ipcMain.handle('desktop:goal:pause', async (_event, input) => (
+    services.pauseGoal(parseGoalThreadId(input?.threadId))
+  ));
+  ipcMain.handle('desktop:goal:resume', async (_event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_resume_input');
+    const fields = Object.keys(input).filter(key => !['threadId', 'turnLimit'].includes(key));
+    if (fields.length > 0) throw new Error(`invalid_goal_field:${fields[0]}`);
+    const turnLimit = input.turnLimit;
+    if (turnLimit !== undefined && (!Number.isSafeInteger(turnLimit) || turnLimit < 1 || turnLimit > 50)) {
+      throw new Error('invalid_goal_turn_limit');
+    }
+    return services.resumeGoal({
+      threadId: parseGoalThreadId(input.threadId),
+      ...(turnLimit === undefined ? {} : { turnLimit }),
+    });
+  });
+  ipcMain.handle('desktop:goal:cancel', async (_event, input) => (
+    services.cancelGoal(parseGoalThreadId(input?.threadId))
+  ));
+  ipcMain.handle('desktop:goal:replace', async (_event, input) => (
+    services.replaceGoal(parseGoalInput(input, 'replace'))
+  ));
+  ipcMain.handle('desktop:goal:ackTaskAttached', async (_event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_attachment');
+    const attachmentId = typeof input.attachmentId === 'string' ? input.attachmentId.trim() : '';
+    if (!attachmentId || attachmentId.length > 200) throw new Error('invalid_goal_attachment');
+    return services.ackGoalTaskAttached({
+      threadId: parseGoalThreadId(input.threadId), attachmentId,
+    });
+  });
+  ipcMain.handle('desktop:goal:setUserQueuePending', async (_event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.pending !== 'boolean') {
+      throw new Error('invalid_goal_queue_state');
+    }
+    return services.setGoalUserQueuePending({
+      threadId: parseGoalThreadId(input.threadId), pending: input.pending,
+    });
   });
   ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
     log('info', 'answerQuestion', { taskId: input?.taskId });
@@ -1071,8 +1233,17 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
-    const expanded = await expandSelectedMaterialPaths(input?.filePaths ?? []);
-    const r = await services.createTaskWithFiles({ ...input, filePaths: expanded });
+    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.prompt !== 'string' || !Array.isArray(input.filePaths)) {
+      throw new Error('invalid_task_files_input');
+    }
+    if (input.filePaths.some((value: unknown) => typeof value !== 'string')) throw new Error('invalid_task_file_path');
+    const expanded = await expandSelectedMaterialPaths(input.filePaths);
+    const context = sanitizeTaskContext(input.context);
+    const r = await services.createTaskWithFiles({
+      prompt: input.prompt,
+      filePaths: expanded,
+      ...(context ? { context } : {}),
+    });
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });

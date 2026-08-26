@@ -1,4 +1,5 @@
 import type { ProjectFullDetail, KSwarmAgent, KSwarmTask, KSwarmActivityEvent } from '../../hooks/useKSwarmClient';
+import { normalizeAcceptanceCriteria } from './dagGraphModel';
 
 interface ExportLocale {
   projectsStatusDraft: string;
@@ -147,8 +148,9 @@ export function exportProjectMarkdown(
           for (const item of phase.items) {
             const check = item.status === 'completed' ? '[x]' : '[ ]';
             lines.push(`- ${check} **${item.title}** — ${item.brief ?? ''}`);
-            if (item.acceptanceCriteria?.length) {
-              for (const ac of item.acceptanceCriteria) {
+            const acceptanceCriteria = normalizeAcceptanceCriteria(item.acceptanceCriteria);
+            if (acceptanceCriteria.length > 0) {
+              for (const ac of acceptanceCriteria) {
                 lines.push(`  - ${t.projectsExportAcceptanceCriteria}: ${ac}`);
               }
             }

@@ -49,6 +49,8 @@ import {
 } from '../../src/runtime/trace/exporter.js';
 import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition, ToolExecutionContext } from '../../src/types.js';
 import { buildToolList, isSuccessfulModelToolResult, ToolRegistry } from '../../src/ai/tools/index.js';
+import { createGoalTools } from '../../src/ai/tools/goal.js';
+import type { GoalInput } from '../../src/runtime/goal/types.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
@@ -115,6 +117,13 @@ import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runt
 import { createAllHostGateways, type GatewayRuntimeFacade } from './provider-gateways/create-host-gateways.js';
 import { reservedProviderSpecs, type ReservedProviderBridge } from './provider-gateways/reserved-provider-specs.js';
 import type { PluginComponentSpec } from '../../src/platform/provider-runtime/lifecycle-reconciler.js';
+import {
+  DesktopGoalCoordinator,
+  type DesktopGoalProjection,
+  type PreparedGoalTask,
+} from './desktop-goal-coordinator.js';
+import { SqliteGoalStore } from './goal-store-sqlite.js';
+import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -421,6 +430,8 @@ export interface DesktopServicesOptions {
    * exist so static gateways can capture it once for the process lifetime.
    */
   pluginProviderRuntime?: GatewayRuntimeFacade;
+  readinessModelProbe?: () => Promise<{ ok: boolean; error?: string }>;
+  executionCoordinator?: DesktopExecutionCoordinator;
 }
 
 const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
@@ -740,6 +751,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     now: options.now,
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
+  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator();
+  const coordinateRunner = (runner: TaskRunner): TaskRunner => input => (
+    executionCoordinator.run(input.signal, () => runner(input))
+  );
+  const goalStore = new SqliteGoalStore(join(options.dataRoot, 'goals', 'goals.sqlite'));
+  const goalChangedListeners = new Set<(input: { threadId: string; goal: DesktopGoalProjection }) => void>();
+  const goalTaskPreparedListeners = new Set<(input: PreparedGoalTask) => void>();
   const artifactWorkspaceStore = new ArtifactWorkspaceStore({
     dbPath: join(options.dataRoot, 'artifact-workspace', 'workspace.sqlite'),
     now: options.now,
@@ -748,6 +766,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     managedRoot: join(options.dataRoot, 'artifact-workspace', 'managed'),
   });
   let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
+  let goalCoordinator: DesktopGoalCoordinator | undefined;
   const tools = buildToolList();
   const registry = new ToolRegistry({ autoMode: true }, tools);
   const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot);
@@ -1260,22 +1279,46 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
+    runner: coordinateRunner(options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
       ? restrictedArtifactRunner(input)
-      : defaultDesktopRunner(input)),
+      : defaultDesktopRunner(input))),
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
     // Use timestamp + random suffix to ensure unique taskId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     onPersistedEvent: async input => {
-      if (!artifactWorkspaceService) return;
-      try {
-        await artifactWorkspaceService.handlePersistedTaskEvent(input);
-      } catch (error) {
-        console.warn('[artifact-workspace] task event projection failed:', error instanceof Error ? error.message : String(error));
+      if (artifactWorkspaceService) {
+        try {
+          await artifactWorkspaceService.handlePersistedTaskEvent(input);
+        } catch (error) {
+          console.warn('[artifact-workspace] task event projection failed:', error instanceof Error ? error.message : String(error));
+        }
+      }
+      if (goalCoordinator) {
+        try {
+          await goalCoordinator.handlePersistedTaskEvent(input);
+        } catch (error) {
+          console.warn('[goal] task event settlement failed:', error instanceof Error ? error.message : String(error));
+        }
       }
     },
   });
+
+  goalCoordinator = new DesktopGoalCoordinator({
+    store: goalStore,
+    taskHost: host,
+    instanceId: `desktop_${randomUUID()}`,
+    now: options.now,
+    publishGoalChanged: input => {
+      for (const listener of goalChangedListeners) listener(input);
+    },
+    publishGoalTaskPrepared: input => {
+      for (const listener of goalTaskPreparedListeners) listener(input);
+    },
+  });
+  for (const tool of createGoalTools(goalCoordinator.createRegistryGoalToolHost())) {
+    registry.registerTool(tool);
+  }
 
   const workspaceService = new ArtifactWorkspaceService({
     store: artifactWorkspaceStore,
@@ -1311,7 +1354,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: options.runner ?? createDesktopModelRunnerWithRegistry(
+      runner: coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
         scopedRegistry,
         scopedTools,
         options.dataRoot,
@@ -1324,7 +1367,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           // report/slide gateways are reachable there too (design §6.2/§6.3).
           ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
         },
-      ),
+      )),
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1441,6 +1484,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const provider = config.providers?.[config.defaultProvider];
       if (!config.defaultProvider || !config.defaultModelId || !model || !provider) {
         return { ...base, ok: false as const, reason: 'model_config_missing' };
+      }
+
+      if (options.readinessModelProbe) {
+        const result = await options.readinessModelProbe();
+        if (!result.ok) throw new Error(result.error || 'provider_connection_failed');
+      } else {
+        const binding = resolveRuntimeModelBinding(config, config.defaultModelId);
+        const adapter = createAdapterFromBinding(binding);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(new DOMException('agent readiness model timeout', 'TimeoutError')), 30_000);
+        let sawProtocolResponse = false;
+        try {
+          for await (const chunk of streamStatelessSideCallProviderConversation({
+            adapter,
+            messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
+            tools: [],
+            systemPrompt: 'Reply with "ok" to verify the current Desktop model connection. Do not use tools.',
+            options: { signal: controller.signal },
+            invocationId: `inv_${randomUUID()}`,
+          })) {
+            if (chunk.type !== 'usage') sawProtocolResponse = true;
+          }
+          if (controller.signal.aborted) throw controller.signal.reason;
+          if (!sawProtocolResponse) throw new Error('provider_connection_empty_stream');
+        } finally {
+          clearTimeout(timeout);
+        }
       }
 
       const toolNames = new Set(registry.getToolDefinitions().map(tool => tool.name));
@@ -2182,7 +2252,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         } catch (e) {
         }
       }
-      return host.createTask({ prompt: input.prompt, materials, context: input.context });
+      return goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context: input.context });
     },
     async getModelConfig() {
       return createModelConfigSnapshot(await loadConfig());
@@ -2421,7 +2491,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       await saveConfig(config);
     },
-    createTask: host.createTask.bind(host),
+    createTask: (input: Parameters<typeof host.createTask>[0]) => goalCoordinator.admitUserTask(input),
+    getGoal: (threadId: string) => goalCoordinator.getGoal(threadId),
+    createGoal: (input: { threadId: string } & GoalInput) => goalCoordinator.createGoal(input),
+    pauseGoal: (threadId: string) => goalCoordinator.pauseGoal({ threadId }),
+    resumeGoal: (input: { threadId: string; turnLimit?: number }) => goalCoordinator.resumeGoal(input),
+    cancelGoal: (threadId: string) => goalCoordinator.cancelGoal({ threadId }),
+    replaceGoal: (input: { threadId: string } & GoalInput) => goalCoordinator.replaceGoal(input),
+    ackGoalTaskAttached: (input: { threadId: string; attachmentId: string }) => (
+      goalCoordinator.ackGoalTaskAttached(input)
+    ),
+    setGoalUserQueuePending: (input: { threadId: string; pending: boolean }) => (
+      goalCoordinator.setUserQueuePending(input)
+    ),
+    subscribeGoalChanged(listener: (input: { threadId: string; goal: DesktopGoalProjection }) => void) {
+      goalChangedListeners.add(listener);
+      return () => goalChangedListeners.delete(listener);
+    },
+    subscribeGoalTaskPrepared(listener: (input: PreparedGoalTask) => void) {
+      goalTaskPreparedListeners.add(listener);
+      return () => goalTaskPreparedListeners.delete(listener);
+    },
     runKSwarmHandoffTask,
     runKSwarmWorkflowNode,
     runKSwarmReadinessProbe,
@@ -2431,7 +2521,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     subscribeTask: host.subscribeTask.bind(host),
     answerQuestion: host.answerQuestion.bind(host),
     cancelTask: host.cancelTask.bind(host),
-    getActiveTask: host.getActiveTask.bind(host),
+    async getActiveTask(): Promise<{ taskId: string } | null> {
+      for (const ref of await host.getActiveTasks()) {
+        const snapshot = (await host.recoverTask(ref.taskId)).snapshot;
+        if (snapshot.executionScope?.kind === 'goal_turn') {
+          const binding = goalStore.getTaskBinding(ref.taskId);
+          if (snapshot.executionScope.origin === 'continuation' || binding?.attachedAt === null) continue;
+        }
+        return ref;
+      }
+      return null;
+    },
     recoverTask: recoverTaskWithWorkflowArtifacts,
     async recoverStaleTasks(): Promise<void> {
       const active = await host.getActiveTasks();
@@ -5377,6 +5477,17 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       const toolStartedAt = Date.now();
       const rawToolContext: ToolExecutionContext = {
         taskId: ctx.taskId,
+        toolInvocationId: toolCall.id,
+        runtimeFactSink: {
+          emit(fact) {
+            void ctx.emitRuntimeEvent({
+              type: 'tool_execution_fact',
+              sessionId: ctx.sessionId,
+              turnId: ctx.turnId,
+              ...fact,
+            });
+          },
+        },
         executionScope: ctx.executionScope,
         session: {
           sessionId: ctx.sessionId,
@@ -5418,6 +5529,10 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       } else {
         await ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
       }
+      await ctx.emitRuntimeEvent({
+        type: 'tool_finished', sessionId: ctx.sessionId, turnId: ctx.turnId,
+        invocationId: toolCall.id, toolName: toolCall.name, ok,
+      });
       if (ctx.strategies.trackAutoProgress && !isInternalTool) {
         const label = toolNameToLabel(toolCall.name, toolCall.input as Record<string, unknown>);
         autoSteps.push({ id: `auto-${totalToolCalls}`, label, status: ok ? 'completed' : 'failed' });
@@ -6552,7 +6667,7 @@ export function createDesktopModelRunnerWithRegistry(
     }
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, maxToolLoopIterations, executionScope }) => {
+  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope }) => {
     const turnId = `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
@@ -6654,7 +6769,10 @@ export function createDesktopModelRunnerWithRegistry(
     const messages = buildDesktopProviderMessages(adapter, hostHistory, userContent);
     const TASK_TIMEOUT_MS = deadlineMs ?? 28 * 60_000;
 
-    const loopResult = await runDesktopToolLoop({
+    const pendingUsageWrites: Promise<void>[] = [];
+    let loopResult: Awaited<ReturnType<typeof runDesktopToolLoop>>;
+    try {
+      loopResult = await runDesktopToolLoop({
       adapter,
       systemPrompt,
       messages,
@@ -6678,6 +6796,9 @@ export function createDesktopModelRunnerWithRegistry(
       dataRoot,
       taskStartTime,
       maxIterations: maxToolLoopIterations,
+      onUsage: (inputTokens, outputTokens) => {
+        pendingUsageWrites.push(emitUsage({ inputTokens, outputTokens }));
+      },
       strategies: {
         compact: {
           enabled: false,
@@ -6690,7 +6811,12 @@ export function createDesktopModelRunnerWithRegistry(
         trackReferenceReads: false,
         emitSkillArtifactTrace: false,
       },
-    });
+      });
+    } catch (error) {
+      await Promise.allSettled(pendingUsageWrites);
+      throw error;
+    }
+    await Promise.all(pendingUsageWrites);
 
     const { reply, totalToolCalls, totalInputTokens, totalOutputTokens, referenceReads } = loopResult;
     skillNamesDetected = loopResult.skillNamesDetected.length > 0 ? loopResult.skillNamesDetected : skillNamesDetected;

@@ -37,6 +37,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   const [baseUrl, setBaseUrl] = useState(agent.baseUrl || '');
   const [apiKey, setApiKey] = useState('');
   const [instructions, setInstructions] = useState(agent.instructions || '');
+  const [fallbackToDesktopModel, setFallbackToDesktopModel] = useState(agent.fallbackToDesktopModel === true);
   const [loading, setLoading] = useState(false);
 
   const [desktopProviders, setDesktopProviders] = useState<DesktopProvider[]>([]);
@@ -76,6 +77,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
         baseUrl: baseUrl || undefined,
         apiKey: apiKey || undefined,
         instructions: instructions || undefined,
+        fallbackToDesktopModel,
       });
       onClose();
     } finally {
@@ -207,6 +209,25 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
               className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none placeholder:text-[var(--c-text-muted)] transition-colors duration-150 focus:border-[var(--c-border)] resize-none"
             />
           </div>
+
+          {agent.runtimeType === 'xiaok' ? (
+            <p className="rounded-lg bg-[var(--c-bg-sub)] px-3 py-2 text-xs text-[var(--c-text-tertiary)]">
+              {t.projectsEditAgentAlreadyUsesDesktopModel}
+            </p>
+          ) : (
+            <label className="flex items-start gap-2 rounded-lg border border-[var(--c-border-subtle)] p-3">
+              <input
+                type="checkbox"
+                checked={fallbackToDesktopModel}
+                onChange={event => setFallbackToDesktopModel(event.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block text-xs font-medium text-[var(--c-text-secondary)]">{t.projectsEditAgentFallbackToDesktopModel}</span>
+                <span className="mt-0.5 block text-[11px] text-[var(--c-text-tertiary)]">{t.projectsEditAgentFallbackToDesktopModelHint}</span>
+              </span>
+            </label>
+          )}
 
           <div className="mt-3 flex justify-end gap-2">
             <button

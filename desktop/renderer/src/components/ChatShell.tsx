@@ -3,6 +3,10 @@ import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
+import { GoalBar } from './GoalBar';
+import type { DesktopGoalProjection, DesktopGoalTaskPrepared } from '../../../electron/preload-api';
+import type { GoalInput } from '../../../../src/runtime/goal/types';
+import { attachPreparedGoalTask } from '../lib/goal-task-attachment';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
 import type { ThreadRecord } from '../api/types';
@@ -13,6 +17,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
+import { getDesktopApi } from '../shared/desktop';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
@@ -221,6 +226,21 @@ function isComputerUseSettingsAction(actionType: string | undefined): boolean {
   return actionType === 'open_system_settings';
 }
 
+async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promise<T> {
+  const delays = [50, 100, 200];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/goal_user_turn_waiting_for_preemption/.test(message) || attempt >= delays.length) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
   const location = useLocation();
@@ -235,6 +255,9 @@ export function ChatShell() {
   const [result, setResult] = useState<TaskResult | null>(null);
   const [prompt, setPrompt] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [goal, setGoal] = useState<DesktopGoalProjection | null>(null);
+  const [goalLoading, setGoalLoading] = useState(false);
+  const [goalError, setGoalError] = useState<string | null>(null);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasExpanded, setCanvasExpanded] = useState(false);
   const [canvasPreviewFile, setCanvasPreviewFile] = useState<string | undefined>();
@@ -252,7 +275,11 @@ export function ChatShell() {
   }>>(new Map());
   const prevCanvasTaskRef = useRef<string | undefined>(undefined);
   const [planSteps, setPlanSteps] = useState<Array<{ id: string; label: string; status: string }>>([]);
-  const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
+  const [queuedPrompt, setQueuedPrompt] = useState<{
+    text: string;
+    files: Array<{ filePath: string; name: string }>;
+  } | null>(null);
+  const seenGoalAttachmentsRef = useRef(new Set<string>());
   const queuedDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
@@ -575,6 +602,68 @@ export function ChatShell() {
       }
     }
   }, [taskId, t]);
+
+  const attachGoalTask = useCallback(async (prepared: DesktopGoalTaskPrepared) => {
+    if (!taskId || prepared.threadId !== taskId || seenGoalAttachmentsRef.current.has(prepared.attachmentId)) return;
+    const desktop = getDesktopApi();
+    if (!desktop) throw new Error('desktop_api_unavailable');
+    seenGoalAttachmentsRef.current.add(prepared.attachmentId);
+    try {
+      unsubRef.current?.();
+      const unsubscribe = await attachPreparedGoalTask({
+        prepared,
+        currentThreadId: taskId,
+        updateThreadTaskId: api.updateThreadTaskId,
+        subscribeTask: (newTaskId, handler) => api.subscribeTask(
+          newTaskId,
+          event => handler(event),
+        ),
+        onEvent: event => handleEvent(event as { type: string }, prepared.taskId),
+        ackGoalTaskAttached: desktop.ackGoalTaskAttached,
+      });
+      if (unsubscribe) unsubRef.current = unsubscribe;
+      setThread(previous => previous ? {
+        ...previous,
+        currentTaskId: prepared.taskId,
+        taskIds: previous.taskIds.includes(prepared.taskId)
+          ? previous.taskIds
+          : [...previous.taskIds, prepared.taskId],
+      } : previous);
+      setStatus('running');
+    } catch (error) {
+      seenGoalAttachmentsRef.current.delete(prepared.attachmentId);
+      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+      setGoal(await desktop.getGoal(taskId));
+    }
+  }, [handleEvent, taskId, t.chatShell.taskCreateFailed]);
+
+  useEffect(() => {
+    if (!taskId) return;
+    const desktop = getDesktopApi();
+    if (!desktop) return;
+    let live = true;
+    setGoalLoading(true);
+    setGoalError(null);
+    void desktop.getGoal(taskId).then(value => {
+      if (live) setGoal(value);
+    }).catch(error => {
+      if (live) setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+    }).finally(() => {
+      if (live) setGoalLoading(false);
+    });
+    const unsubscribeChanged = desktop.onGoalChanged(event => {
+      if (live && event.threadId === taskId) setGoal(event.goal);
+    });
+    const unsubscribePrepared = desktop.onGoalTaskPrepared(prepared => {
+      if (live && prepared.threadId === taskId) void attachGoalTask(prepared);
+    });
+    return () => {
+      live = false;
+      unsubscribeChanged();
+      unsubscribePrepared();
+      seenGoalAttachmentsRef.current.clear();
+    };
+  }, [attachGoalTask, taskId, t.chatShell.taskCreateFailed]);
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
@@ -957,34 +1046,38 @@ export function ChatShell() {
     };
   }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot]);
 
-  const queuePrompt = useCallback((text: string) => {
+  const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && files.length === 0) return;
     log.info(queuedPrompt ? 'queued_prompt_replace' : 'queued_prompt_submit', JSON.stringify({
       threadId: taskId,
       status,
       length: trimmed.length,
     }));
-    setQueuedPrompt(trimmed);
-  }, [queuedPrompt, status, taskId]);
+    setQueuedPrompt({ text: trimmed || t.chatInput.processFiles, files });
+    const desktop = getDesktopApi();
+    if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: true });
+  }, [queuedPrompt, status, taskId, t.chatInput.processFiles]);
 
   const cancelQueuedPrompt = useCallback(() => {
     if (queuedPrompt) {
       log.info('queued_prompt_cancel', JSON.stringify({
         threadId: taskId,
         status,
-        length: queuedPrompt.length,
+        length: queuedPrompt.text.length,
       }));
     }
     setQueuedPrompt(null);
+    const desktop = getDesktopApi();
+    if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: false });
   }, [queuedPrompt, status, taskId]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId) return;
 
     // If streaming is active, queue the message instead of interrupting
-    if (status === 'running' && (!files || files.length === 0)) {
-      queuePrompt(text);
+    if (status === 'running') {
+      queuePrompt(text, files ?? []);
       return;
     }
 
@@ -1021,23 +1114,24 @@ export function ChatShell() {
         const trimmed = id.trim();
         return trimmed ? [trimmed] : [];
       });
-    const submitContext = contextTaskIds.length > 0
-      ? { threadId: thread?.id ?? taskId, taskIds: contextTaskIds }
-      : undefined;
+    const submitContext = {
+      threadId: thread?.id ?? taskId,
+      ...(contextTaskIds.length > 0 ? { taskIds: contextTaskIds } : {}),
+    };
 
     try {
       // Send prompt plus thread task references; main rebuilds model history from persisted snapshots.
       let newTaskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
-        const result = await api.createTaskWithFiles(submitContext
-          ? { prompt: text, filePaths, context: submitContext }
-          : { prompt: text, filePaths });
+        const result = await createGoalAwareTaskWithRetry(() => api.createTaskWithFiles({
+          prompt: text, filePaths, context: submitContext,
+        }));
         newTaskId = result.taskId;
       } else {
-        const result = await api.createTask(submitContext
-          ? { prompt: text, materials: [], context: submitContext }
-          : { prompt: text, materials: [] });
+        const result = await createGoalAwareTaskWithRetry(() => api.createTask({
+          prompt: text, materials: [], context: submitContext,
+        }));
         newTaskId = result.taskId;
       }
 
@@ -1128,6 +1222,79 @@ export function ChatShell() {
     setStreamingText('');
   };
 
+  const runGoalMutation = async (action: () => Promise<DesktopGoalProjection>) => {
+    setGoalLoading(true);
+    setGoalError(null);
+    try {
+      setGoal(await action());
+    } catch (error) {
+      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+    } finally {
+      setGoalLoading(false);
+    }
+  };
+
+  const handleGoalCreate = async (input: GoalInput) => {
+    if (!taskId) return;
+    const desktop = getDesktopApi();
+    if (!desktop) return;
+    setGoalLoading(true);
+    setGoalError(null);
+    setMessages(previous => [...previous, {
+      id: `msg-${Date.now()}-goal-user`, role: 'user', content: input.objective,
+    }]);
+    setStatus('running');
+    try {
+      const result = await desktop.createGoal({ threadId: taskId, ...input });
+      setGoal(result.goal);
+      await attachGoalTask(result.preparedTask);
+    } catch (error) {
+      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+      setStatus('idle');
+    } finally {
+      setGoalLoading(false);
+    }
+  };
+
+  const handleGoalReplace = async (input: GoalInput) => {
+    if (!taskId) return;
+    const desktop = getDesktopApi();
+    if (!desktop) return;
+    setGoalLoading(true);
+    setGoalError(null);
+    try {
+      const result = await desktop.replaceGoal({ threadId: taskId, ...input });
+      setGoal(result.goal);
+      setMessages(previous => [...previous, {
+        id: `msg-${Date.now()}-goal-replace-user`, role: 'user', content: input.objective,
+      }]);
+      await attachGoalTask(result.preparedTask);
+    } catch (error) {
+      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+    } finally {
+      setGoalLoading(false);
+    }
+  };
+
+  const handleGoalResume = async (turnLimit?: number) => {
+    if (!taskId) return;
+    const desktop = getDesktopApi();
+    if (!desktop) return;
+    setGoalLoading(true);
+    setGoalError(null);
+    try {
+      const result = await desktop.resumeGoal({
+        threadId: taskId, ...(turnLimit === undefined ? {} : { turnLimit }),
+      });
+      setGoal(result.goal);
+      await attachGoalTask(result.preparedTask);
+    } catch (error) {
+      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+    } finally {
+      setGoalLoading(false);
+    }
+  };
+
   useEffect(() => {
     return () => {
       unsubRef.current?.();
@@ -1143,11 +1310,11 @@ export function ChatShell() {
   handleSubmitRef.current = handleSubmit;
   useEffect(() => {
     if (queuedPrompt && (status === 'idle' || status === 'completed')) {
-      const text = queuedPrompt;
+      const queued = queuedPrompt;
       log.info('queued_prompt_drain_start', JSON.stringify({
         threadId: taskId,
         status,
-        length: text.length,
+        length: queued.text.length,
       }));
       if (queuedDrainTimerRef.current !== null) {
         clearTimeout(queuedDrainTimerRef.current);
@@ -1160,9 +1327,9 @@ export function ChatShell() {
         log.info('queued_prompt_execute', JSON.stringify({
           threadId: taskId,
           status,
-          length: text.length,
+          length: queued.text.length,
         }));
-        void handleSubmitRef.current(text);
+        void handleSubmitRef.current(queued.text, queued.files);
       }, 100);
       queuedDrainTimerRef.current = timerId;
       return () => {
@@ -1252,7 +1419,23 @@ export function ChatShell() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="flex flex-1 min-w-0">
+      <div className="flex flex-1 min-w-0 flex-col">
+        <GoalBar
+          goal={goal}
+          loading={goalLoading}
+          error={goalError}
+          onCreate={handleGoalCreate}
+          onReplace={handleGoalReplace}
+          onPause={() => {
+            const desktop = getDesktopApi();
+            if (taskId && desktop) return runGoalMutation(() => desktop.pauseGoal(taskId));
+          }}
+          onResume={handleGoalResume}
+          onCancel={() => {
+            const desktop = getDesktopApi();
+            if (taskId && desktop) return runGoalMutation(() => desktop.cancelGoal(taskId));
+          }}
+        />
         <ChatView
           thread={thread}
           messages={messages}
@@ -1265,7 +1448,7 @@ export function ChatShell() {
           onPromptChange={setPrompt}
           onSubmit={handleSubmit}
           onQueue={queuePrompt}
-          queuedText={queuedPrompt}
+          queuedText={queuedPrompt?.text ?? null}
           onCancelQueue={cancelQueuedPrompt}
           onAnswer={handleAnswer}
           onCancel={handleCancel}

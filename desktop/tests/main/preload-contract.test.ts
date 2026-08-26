@@ -68,6 +68,16 @@ describe('preload API contract', () => {
       'createTask',
       'createTaskWithFiles',
       'subscribeTask',
+      'getGoal',
+      'createGoal',
+      'pauseGoal',
+      'resumeGoal',
+      'cancelGoal',
+      'replaceGoal',
+      'ackGoalTaskAttached',
+      'setGoalUserQueuePending',
+      'onGoalChanged',
+      'onGoalTaskPrepared',
       'answerQuestion',
       'cancelTask',
       'getActiveTask',
@@ -685,7 +695,7 @@ describe('preload API contract', () => {
     await api.updateKSwarmProjectExecutionMode({ projectId: 'project-1', executionMode: 'auto', requestSource: 'agent' } as any);
     await api.deleteKSwarmProject({ projectId: 'project-1', token: 'forbidden' } as any);
     await api.createKSwarmAgent({ name: 'Researcher', roles: ['worker'], apiKey: 'forbidden' } as any);
-    await api.updateKSwarmAgent({ agentId: 'agent-1', patch: { name: 'Updated', provider: 'forbidden' } as any });
+    await api.updateKSwarmAgent({ agentId: 'agent-1', patch: { name: 'Updated', provider: 'forbidden', fallbackToDesktopModel: true } as any });
     await api.archiveKSwarmAgent({ agentId: 'agent-1', requestSource: 'agent' } as any);
     await api.startKSwarmAgent({ agentId: 'agent-1', token: 'forbidden' } as any);
     await api.stopKSwarmAgent({ agentId: 'agent-1', token: 'forbidden' } as any);
@@ -708,7 +718,7 @@ describe('preload API contract', () => {
       name: 'Researcher', roles: ['worker'],
     });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:update', {
-      agentId: 'agent-1', patch: { name: 'Updated' },
+      agentId: 'agent-1', patch: { name: 'Updated', fallbackToDesktopModel: true },
     });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:archive', { agentId: 'agent-1' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:start', { agentId: 'agent-1' });

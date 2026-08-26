@@ -235,6 +235,7 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
         dataRoot,
         kswarmService,
         now: () => Date.now(),
+        readinessModelProbe: async () => ({ ok: true }),
         runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
           if (prompt.includes('KSwarm PO 规划任务')) {
             emitReceipt({ sessionId, emitRuntimeEvent }, JSON.stringify({

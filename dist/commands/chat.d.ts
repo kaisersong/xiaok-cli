@@ -11,4 +11,5 @@ export declare function initializeChatIntentLedger(intentLedger: PersistedSessio
     confirmHighRiskTakeover?: boolean;
 }): SessionIntentLedger;
 export declare function registerChatCommands(program: Command): void;
+export declare function summarizeToolInputForTranscript(input: unknown): string;
 export {};

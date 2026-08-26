@@ -42,7 +42,11 @@ function createStrictK3Adapter(): OpenAIAdapter {
 
 function createRegistryMock(overrides?: {
   getToolDefinitions?: () => ToolDefinition[];
-  executeTool?: (name: string, input: Record<string, unknown>) => Promise<string>;
+  executeTool?: (
+    name: string,
+    input: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ) => Promise<string>;
 }) {
   return {
     getToolDefinitions: overrides?.getToolDefinitions ?? (() => []),
@@ -624,6 +628,44 @@ describe('AgentRuntime', () => {
     expect(events).toContain('tool_started');
     expect(events).toContain('tool_finished');
     expect(events.at(-1)).toBe('run_completed');
+  });
+
+  it('binds host-only execution facts and tool_finished to the same invocation id', async () => {
+    let streamCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: () => {
+        streamCalls += 1;
+        return streamCalls === 1
+          ? mockStream([
+              { type: 'tool_use', id: 'tu_fact', name: 'bash', input: { command: 'true' } },
+              { type: 'done' },
+            ])
+          : mockStream([{ type: 'text', delta: 'done' }, { type: 'done' }]);
+      },
+    };
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({
+        executeTool: async (_name, _input, context) => {
+          context?.runtimeFactSink?.emit({
+            invocationId: context.toolInvocationId!, toolName: 'bash',
+            factKind: 'command_result', exitCode: 0,
+          });
+          return 'ok';
+        },
+      }) as never,
+      session: new AgentSessionState(),
+      controller: new AgentRunController(),
+      systemPrompt: 'system',
+    });
+    const events: Array<{ type: string; invocationId?: string }> = [];
+    await runtime.run('run', event => events.push(event));
+    expect(events.filter(event => event.type === 'tool_execution_fact' || event.type === 'tool_finished'))
+      .toEqual([
+        expect.objectContaining({ type: 'tool_execution_fact', invocationId: 'tu_fact' }),
+        expect.objectContaining({ type: 'tool_finished', invocationId: 'tu_fact' }),
+      ]);
   });
 
   it('emits usage_updated and compact_triggered when applicable', async () => {

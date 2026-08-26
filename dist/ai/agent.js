@@ -150,8 +150,22 @@ export class Agent {
                 type: 'tool_finished',
                 sessionId: this.sessionId,
                 turnId,
+                invocationId: event.invocationId,
                 toolName: event.toolName,
                 ok: event.ok,
+            });
+            return;
+        }
+        if (event.type === 'tool_execution_fact') {
+            this.options.hooks.emit({
+                type: 'tool_execution_fact',
+                sessionId: this.sessionId,
+                turnId,
+                invocationId: event.invocationId,
+                toolName: event.toolName,
+                factKind: event.factKind,
+                exitCode: event.exitCode,
+                normalizedFilePaths: event.normalizedFilePaths,
             });
             return;
         }

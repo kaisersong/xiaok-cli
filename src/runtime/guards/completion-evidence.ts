@@ -11,10 +11,10 @@ export type CompletionKind =
   | 'blocked';
 
 export interface CompletionExpectation {
-  ownerKind: 'task' | 'loop_stage' | 'loop_run' | 'project';
+  ownerKind: 'task' | 'loop_stage' | 'loop_run' | 'project' | 'goal';
   ownerId: string;
   expectedKinds: CompletionKind[];
-  source: 'task_spec' | 'tool_schema' | 'scheduler_executor_contract' | 'loop_stage_contract' | 'kswarm_deliverable_type' | 'legacy_classifier';
+  source: 'task_spec' | 'tool_schema' | 'scheduler_executor_contract' | 'loop_stage_contract' | 'kswarm_deliverable_type' | 'goal_criterion' | 'legacy_classifier';
   confidence: 'explicit' | 'inferred' | 'legacy';
 }
 

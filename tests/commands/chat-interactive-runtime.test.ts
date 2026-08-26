@@ -2604,7 +2604,7 @@ describe('chat interactive runtime', () => {
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
     const { registerChatCommands } = await import('../../src/commands/chat.js');
-    const harness = createTtyHarness(120, 30);
+    const harness = createTtyHarness(120, 32);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
 
@@ -2630,6 +2630,7 @@ describe('chat interactive runtime', () => {
         expect(lines.some((line) => line.includes('可用命令'))).toBe(true);
         expect(lines.some((line) => line.includes('/clear') && line.includes('清屏'))).toBe(true);
         expect(lines.some((line) => line.includes('/compact') && line.includes('压缩上下文'))).toBe(true);
+        expect(lines.some((line) => line.includes('/goal') && line.includes('管理持续执行 Goal'))).toBe(true);
         expect(lines.some((line) => line.includes('/context') && line.includes('查看当前仓库上下文'))).toBe(true);
         expect(lines.some((line) => line.includes('/reminder') && line.includes('list') && line.includes('cancel <id>'))).toBe(true);
         expect(lines.some((line) => line.includes('/settings') && line.includes('查看当前生效配置'))).toBe(true);
@@ -4115,8 +4116,9 @@ describe('chat interactive runtime', () => {
         const lines = harness.screen.lines();
         expect(lines.some((line) => line.includes('› 很多命令后慢命令'))).toBe(true);
         expect(harness.output.normalized).toContain('我先顺着引用把命令跑一遍。');
-        expect(harness.output.normalized).toContain('cd /Users/song/.xiaok/skills/kai-report-creator/assets');
-        expect(harness.output.normalized).toContain(denseSlowCommand);
+        expect(harness.output.normalized).toContain('更多命令已折叠');
+        expect(countOccurrences(harness.output.normalized, '更多命令已折叠')).toBe(1);
+        expect(denseCommandPhase).toBe(denseCommandSequence.length);
         expect(lines.some((line) => /Running command|Executing command/u.test(line))).toBe(true);
       }, { timeoutMs: 2_500 });
 

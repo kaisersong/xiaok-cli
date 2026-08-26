@@ -9,6 +9,7 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly path: "路径";
         readonly pattern: "模式";
     };
+    readonly ranCollapseNotice: "… 更多命令已折叠（完成后按 Ctrl+O 查看）";
     readonly hint: "数字直选  ↑↓ 切换  Enter 确认  Esc 取消";
 } | {
     readonly approvalTitle: "xiaok wants to run";
@@ -19,5 +20,6 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly path: "Path";
         readonly pattern: "Pattern";
     };
+    readonly ranCollapseNotice: "… More commands collapsed (press Ctrl+O after completion to view)";
     readonly hint: "1-5 select  Up/Down navigate  Enter confirm  Esc cancel";
 };

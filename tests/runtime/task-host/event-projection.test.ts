@@ -196,6 +196,30 @@ describe('DesktopTaskEvent projection', () => {
     expect((desktopEvent! as any).message).toBe('✗ Bash: Permission denied');
   });
 
+  it('preserves Goal tool facts and matching finished facts as internal durable events', () => {
+    const events = projectRuntimeEventsToDesktopEvents({
+      taskId: 'task_goal',
+      events: [
+        {
+          type: 'tool_execution_fact', sessionId: 'sess_1', turnId: 'turn_1',
+          invocationId: 'tool_1', toolName: 'bash', factKind: 'command_result', exitCode: 0,
+        },
+        {
+          type: 'tool_finished', sessionId: 'sess_1', turnId: 'turn_1',
+          invocationId: 'tool_1', toolName: 'bash', ok: true,
+        },
+      ],
+    });
+
+    expect(events).toEqual(expect.arrayContaining([
+      {
+        type: 'goal_tool_fact', invocationId: 'tool_1', toolName: 'bash',
+        factKind: 'command_result', exitCode: 0,
+      },
+      { type: 'goal_tool_finished', invocationId: 'tool_1', toolName: 'bash', ok: true },
+    ]));
+  });
+
   it('summarizes a JSON failure payload instead of dumping truncated JSON', () => {
     // Desktop tools serialise failures as JSON, so slicing the raw error would
     // put a cut-off `{"ok":false,...` object in the user-visible progress row.

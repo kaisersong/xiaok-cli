@@ -4,7 +4,8 @@ export type AgentRuntimeEvent =
   | { type: 'run_started'; runId: string }
   | { type: 'assistant_text'; runId: string; delta: string }
   | { type: 'tool_started'; runId: string; toolName: string; input: Record<string, unknown> }
-  | { type: 'tool_finished'; runId: string; toolName: string; ok: boolean }
+  | { type: 'tool_finished'; runId: string; invocationId: string; toolName: string; ok: boolean }
+  | { type: 'tool_execution_fact'; runId: string; invocationId: string; toolName: string; factKind: 'command_result' | 'file_mutation'; exitCode?: number | null; normalizedFilePaths?: string[] }
   | { type: 'usage_updated'; runId: string; usage: UsageStats }
   | { type: 'compact_triggered'; runId: string; summary: string; compactionId?: string }
   | { type: 'compact_failed'; runId: string; error: string }

@@ -66,7 +66,7 @@ export interface KSwarmTask {
   phase?: number;
   priority?: number;
   planItemId?: string;
-  acceptanceCriteria?: string[];
+  acceptanceCriteria?: string | string[];
   result?: KSwarmTaskResult | string | null;
   artifacts?: KSwarmArtifact[];
   blockedReason?: string;
@@ -193,6 +193,7 @@ export interface KSwarmAgent {
   runtimeMode?: 'local' | 'cloud';
   maxConcurrentTasks?: number;
   currentTask?: string;
+  fallbackToDesktopModel?: boolean;
 }
 
 export interface KSwarmActivityEvent {
@@ -256,12 +257,16 @@ export interface CreateAgentInput {
   instructions?: string;
   runtimeType?: string;
   maxConcurrentTasks?: number;
+  fallbackToDesktopModel?: boolean;
 }
 
 export interface AgentProbe {
   healthy: boolean;
+  callability?: 'available' | 'limited' | 'unavailable';
   version?: string;
   error?: string;
+  message?: string;
+  durationMs?: number;
 }
 
 export type KSwarmAgentSelectionSource = 'default_seed' | 'explicit_user' | 'system_migration';
@@ -799,6 +804,7 @@ function toSemanticAgentInput(input: Partial<CreateAgentInput>): Partial<KSwarmA
     instructions: input.instructions,
     runtimeType: input.runtimeType,
     maxConcurrentTasks: input.maxConcurrentTasks,
+    fallbackToDesktopModel: input.fallbackToDesktopModel,
   }).filter(([, value]) => value !== undefined));
 }
 

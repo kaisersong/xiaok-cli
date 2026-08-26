@@ -813,7 +813,7 @@ describe('desktop services', () => {
     expect(runner).toHaveBeenCalledTimes(1);
   });
 
-  it('runs a side-effect-free kswarm readiness probe', async () => {
+  it('probes the current model without running a user task', async () => {
     const runner = vi.fn(async () => {
       throw new Error('probe_must_not_run_user_task');
     });
@@ -822,6 +822,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
       runner,
+      readinessModelProbe: vi.fn().mockResolvedValue({ ok: true }),
     });
 
     const result = await services.runKSwarmReadinessProbe({ targetParticipantId: 'xiaok-po' });
@@ -4769,6 +4770,38 @@ describe('desktop services', () => {
       loadedTaskIds: [task1.taskId],
       skipped: [],
     });
+  });
+
+  it('wires Goal lifecycle through the desktop service and keeps continuation tasks internal', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      runner: async ({ sessionId, emitRuntimeEvent, emitUsage }) => {
+        await emitUsage({ inputTokens: 2, outputTokens: 3 });
+        await emitRuntimeEvent({
+          type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1',
+          stepId: 'step_1', note: '继续工作',
+        });
+      },
+    });
+    const prepared: Array<{ threadId: string; attachmentId: string; taskId: string }> = [];
+    services.subscribeGoalTaskPrepared(event => prepared.push(event));
+
+    const created = await services.createGoal({
+      threadId: 'thread-goal', objective: '持续工作', expectedEvidenceKinds: ['answer'], turnLimit: 3,
+    });
+    expect(await services.getActiveTask()).toBeNull();
+    await services.ackGoalTaskAttached({
+      threadId: 'thread-goal', attachmentId: created.preparedTask.attachmentId,
+    });
+    await waitFor(async () => (await services.getGoal('thread-goal'))?.state.turnsUsed === 1, 5000);
+    await waitFor(async () => prepared.length === 2, 5000);
+    expect(prepared).toHaveLength(2);
+    expect(await services.getActiveTask()).toBeNull();
+    expect(await services.getGoal('thread-goal')).toMatchObject({
+      activation: 'armed', state: { status: 'active', tokensUsed: 5 },
+    });
+    await services.pauseGoal('thread-goal');
   });
 });
 

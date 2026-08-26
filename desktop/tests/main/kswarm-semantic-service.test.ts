@@ -77,6 +77,9 @@ describe('KSwarm semantic service', () => {
     });
     await expect(service.createKSwarmAgent({ name: 'Writer', apiKey: 'secret' } as never))
       .rejects.toThrow('agent_payload_forbidden');
+    await expect(service.updateKSwarmAgent({ id: 'a1', changes: { fallbackToDesktopModel: true } }))
+      .resolves.toEqual({ id: 'a1', name: 'Writer' });
+    expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ fallbackToDesktopModel: true });
   });
 
   it('routes project execution mode and delete through main-owned credentials', async () => {

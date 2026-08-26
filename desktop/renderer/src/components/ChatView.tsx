@@ -255,7 +255,7 @@ interface ChatViewProps {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void;
-  onQueue?: (text: string) => void;
+  onQueue?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   queuedText?: string | null;
   onCancelQueue?: () => void;
   onAnswer: (choiceId: string) => void;
@@ -341,7 +341,7 @@ export function ChatView({
                 <div key={msg.id} className={msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''}>
                 {msg.role === 'user' ? (
                   <>
-                    <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text" style={{ background: 'rgb(235,235,235)' }}>
+                    <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm bg-[var(--c-bg-deep)] px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text">
                       {msg.content}
                     </div>
                     <div className="mt-0.5 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover/usermsg:opacity-100">

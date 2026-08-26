@@ -14,8 +14,17 @@ export type AgentRuntimeEvent = {
 } | {
     type: 'tool_finished';
     runId: string;
+    invocationId: string;
     toolName: string;
     ok: boolean;
+} | {
+    type: 'tool_execution_fact';
+    runId: string;
+    invocationId: string;
+    toolName: string;
+    factKind: 'command_result' | 'file_mutation';
+    exitCode?: number | null;
+    normalizedFilePaths?: string[];
 } | {
     type: 'usage_updated';
     runId: string;

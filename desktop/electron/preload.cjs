@@ -56,6 +56,7 @@ function sanitizeKSwarmSemanticInput(kind, input) {
     instructions: candidate?.instructions,
     runtimeType: candidate?.runtimeType,
     maxConcurrentTasks: candidate?.maxConcurrentTasks,
+    fallbackToDesktopModel: typeof candidate?.fallbackToDesktopModel === 'boolean' ? candidate.fallbackToDesktopModel : undefined,
   });
   if (kind === 'agent-update') {
     const patch = input?.patch && typeof input.patch === 'object' && !Array.isArray(input.patch)
@@ -95,6 +96,26 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   uninstallSkill: (skillName) => ipcRenderer.invoke('desktop:uninstallSkill', skillName),
   createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input),
   createTask: (input) => ipcRenderer.invoke('desktop:createTask', input),
+  getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }),
+  createGoal: (input) => ipcRenderer.invoke('desktop:goal:create', input),
+  pauseGoal: (threadId) => ipcRenderer.invoke('desktop:goal:pause', { threadId }),
+  resumeGoal: (input) => ipcRenderer.invoke('desktop:goal:resume', input),
+  cancelGoal: (threadId) => ipcRenderer.invoke('desktop:goal:cancel', { threadId }),
+  replaceGoal: (input) => ipcRenderer.invoke('desktop:goal:replace', input),
+  ackGoalTaskAttached: (input) => ipcRenderer.invoke('desktop:goal:ackTaskAttached', input),
+  setGoalUserQueuePending: (input) => ipcRenderer.invoke('desktop:goal:setUserQueuePending', input),
+  onGoalChanged: (handler) => {
+    const channel = 'desktop:goal:changed';
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
+  onGoalTaskPrepared: (handler) => {
+    const channel = 'desktop:goal:taskPrepared';
+    const listener = (_event, payload) => handler(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.off(channel, listener);
+  },
   subscribeTask(taskId, handler, sinceIndex) {
     const channel = `desktop:taskEvent:${taskId}`;
     const listener = (_event, payload) => {

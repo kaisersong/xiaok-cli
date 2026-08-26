@@ -49,7 +49,7 @@ export const bashTool = {
             required: ['command'],
         },
     },
-    async execute(input) {
+    async execute(input, context) {
         const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd(), max_chars = 12_000 } = input;
         const risk = classifyBashCommand(command);
         if (risk.level === 'block') {
@@ -61,13 +61,21 @@ export const bashTool = {
             const child = spawn(shell, shellArgs, { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'] });
             let settled = false;
             let timer;
-            const finish = (result) => {
+            const finish = (result, exitCode) => {
                 if (settled) {
                     return;
                 }
                 settled = true;
                 if (timer) {
                     clearTimeout(timer);
+                }
+                if (context?.toolInvocationId) {
+                    context.runtimeFactSink?.emit({
+                        invocationId: context.toolInvocationId,
+                        toolName: 'bash',
+                        factKind: 'command_result',
+                        exitCode,
+                    });
                 }
                 resolve(result);
             };
@@ -84,14 +92,14 @@ export const bashTool = {
                 const output = `${stdout}\n${stderr}`;
                 if (process.platform === 'win32' && outputRequestsWindowsElevation(output)) {
                     terminateChildProcessTree(child);
-                    finish(truncateText(`Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`, max_chars).text);
+                    finish(truncateText(`Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`, max_chars).text, null);
                 }
             };
             child.stdout?.on('data', (d) => handleOutput('stdout', d));
             child.stderr?.on('data', (d) => handleOutput('stderr', d));
             timer = setTimeout(() => {
                 terminateChildProcessTree(child);
-                finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text);
+                finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text, null);
             }, timeout_ms);
             child.on('close', code => {
                 if (settled) {
@@ -99,14 +107,14 @@ export const bashTool = {
                 }
                 const output = [stdout, stderr].filter(Boolean).join('\n').trim();
                 if (code !== 0) {
-                    finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text);
+                    finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text, code);
                 }
                 else {
-                    finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text);
+                    finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text, 0);
                 }
             });
             child.on('error', (error) => {
-                finish(`Error: ${String(error)}`);
+                finish(`Error: ${String(error)}`, null);
             });
         });
     },

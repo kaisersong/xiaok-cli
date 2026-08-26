@@ -54,6 +54,14 @@ export interface DagGraph {
 export const GRAPH_NODE_LIMIT = 200;
 export const PO_PLAN_NODE_ID = '__po_plan__';
 
+export function normalizeAcceptanceCriteria(value: unknown): string[] {
+  const candidates = Array.isArray(value) ? value : [value];
+  return candidates
+    .filter((candidate): candidate is string => typeof candidate === 'string')
+    .map(candidate => candidate.trim())
+    .filter(Boolean);
+}
+
 export const STATUS_STYLE: Record<DagNodeStatus, { bg: string; border: string }> = {
   pending: { bg: 'var(--c-graph-node-pending-bg)', border: 'var(--c-graph-node-pending-border)' },
   ready: { bg: 'var(--c-bg-card)', border: 'var(--c-graph-node-ready-border)' },

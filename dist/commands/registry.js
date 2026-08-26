@@ -25,6 +25,14 @@ const BASE_CHAT_COMMANDS = [
         showInHelp: true,
     },
     {
+        id: 'goal',
+        cmd: '/goal',
+        slashDesc: '创建、查看、暂停、恢复、取消或替换当前 Goal',
+        helpLine: '  /goal <objective>|status|pause|resume|cancel|replace - 管理持续执行 Goal',
+        showInSlash: true,
+        showInHelp: true,
+    },
+    {
         id: 'context',
         cmd: '/context',
         slashDesc: '查看当前自动加载的仓库上下文',

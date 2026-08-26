@@ -26,6 +26,11 @@ function isCcRuntimeOnlyTool(tool: Tool): boolean {
   return CC_RUNTIME_ONLY_TOOLS.has(name) || /^Task(?:Create|Update|List|Get|Output|Stop)$/.test(name);
 }
 
+export function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Tool[] {
+  if (agentId === 'main') return tools;
+  return tools.filter((tool) => !tool.definition.name.startsWith('goal_'));
+}
+
 export interface PlatformRegistryFactoryOptions {
   platform: PlatformRuntimeContext;
   source: string;
@@ -128,7 +133,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     opts?: { parentDepth?: number },
   ): ToolRegistry {
     const extraTools = [
-      ...(options.workflowTools ?? []),
+      ...filterWorkflowToolsForAgent(options.workflowTools ?? [], agentId),
       ...(reminders
         ? createReminderTools({
           reminders,

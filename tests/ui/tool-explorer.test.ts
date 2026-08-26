@@ -50,6 +50,55 @@ describe('ToolExplorer', () => {
     expect(output).not.toContain('执行本地命令');
   });
 
+  it('collapses a continuous Ran group after three command entries', () => {
+    const explorer = new ToolExplorer();
+
+    const outputs = Array.from({ length: 6 }, (_, index) => strip(explorer.record('bash', {
+      command: `printf "command-${index + 1}"`,
+    })));
+
+    expect(outputs[0]).toContain('command-1');
+    expect(outputs[1]).toContain('command-2');
+    expect(outputs[2]).toContain('command-3');
+    expect(outputs[3]).toContain('更多命令已折叠');
+    expect(outputs[3]).toContain('Ctrl+O');
+    expect(outputs[3]).not.toContain('command-4');
+    expect(outputs[4]).toBe('');
+    expect(outputs[5]).toBe('');
+  });
+
+  it('localizes the Ran collapse notice for English UI', () => {
+    const explorer = new ToolExplorer(undefined, 'en');
+
+    const outputs = Array.from({ length: 4 }, (_, index) => strip(explorer.record('bash', {
+      command: `printf "command-${index + 1}"`,
+    })));
+
+    expect(outputs[3]).toContain('More commands collapsed');
+    expect(outputs[3]).toContain('Ctrl+O');
+    expect(outputs[3]).not.toContain('更多命令已折叠');
+  });
+
+  it('starts a fresh Ran collapse budget after another group or a reset', () => {
+    const explorer = new ToolExplorer();
+
+    for (let index = 0; index < 4; index += 1) {
+      explorer.record('bash', { command: `printf "first-${index + 1}"` });
+    }
+    explorer.record('read', { file_path: '/tmp/demo/notes.txt' });
+
+    expect(strip(explorer.record('bash', { command: 'printf "after-group-switch"' })))
+      .toContain('after-group-switch');
+
+    for (let index = 0; index < 3; index += 1) {
+      explorer.record('bash', { command: `printf "second-${index + 1}"` });
+    }
+    explorer.reset();
+
+    expect(strip(explorer.record('bash', { command: 'printf "after-reset"' })))
+      .toContain('after-reset');
+  });
+
   it('wraps long rail content with an aligned "│ " prefix instead of overflowing the border', () => {
     const explorer = new ToolExplorer();
 

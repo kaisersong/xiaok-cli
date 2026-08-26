@@ -2001,6 +2001,52 @@ describe('OpenAIAdapter', () => {
     expect((toolMessages[1] as { tool_call_id: string }).tool_call_id).toBe('tu_2');
   });
 
+  it('keeps a paired tool result adjacent when the same internal message also has user text', async () => {
+    const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
+    const request = await captureChatCompletionRequest(adapter, [], [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'tu_mixed', name: 'search', input: { q: 'agent' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '同时补充：只看开源项目' },
+          { type: 'tool_result', tool_use_id: 'tu_mixed', content: 'search result' },
+        ],
+      },
+    ]);
+
+    expect(request.messages.slice(1).map((message) => message.role)).toEqual([
+      'assistant',
+      'tool',
+      'user',
+    ]);
+    expect(request.messages[2]).toMatchObject({
+      role: 'tool',
+      tool_call_id: 'tu_mixed',
+      content: 'search result',
+    });
+  });
+
+  it('projects an orphan tool result as user history instead of an invalid tool message', async () => {
+    const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
+    const request = await captureChatCompletionRequest(adapter, [], [{
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'tu_orphan', content: 'preserved output' },
+      ],
+    }]);
+
+    expect(request.messages).toHaveLength(2);
+    expect(request.messages[1]).toEqual({
+      role: 'user',
+      content: '[historical orphan tool result: tu_orphan]\npreserved output',
+    });
+  });
+
   it('preserves assistant thinking as reasoning_content on tool-call replay', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 

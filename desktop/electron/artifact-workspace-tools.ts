@@ -118,7 +118,9 @@ export function createArtifactWorkspacePluginProducerTool(options: {
     async execute(input, context) {
       const taskRoot = generationTaskRoot(options.generationRoot, context);
       const scope = context?.executionScope;
-      if (!taskRoot || !scope) return 'Error: permission_denied: artifact workspace execution scope is missing';
+      if (!taskRoot || scope?.kind !== 'artifact_workspace_generation') {
+        return 'Error: permission_denied: artifact workspace execution scope is missing';
+      }
       if (options.resolveRequestedKind(scope.leaseId) !== options.requestedKind) {
         return `Error: ${JSON.stringify({ ok: false, error: { code: 'artifact_kind_mismatch' } })}`;
       }
@@ -204,7 +206,9 @@ function createScopedOutputTool(
     async execute(input, context) {
       const taskRoot = generationTaskRoot(generationRoot, context);
       const scope = context?.executionScope;
-      if (!taskRoot || !scope) return 'Error: permission_denied: artifact workspace execution scope is missing';
+      if (!taskRoot || scope?.kind !== 'artifact_workspace_generation') {
+        return 'Error: permission_denied: artifact workspace execution scope is missing';
+      }
       const outputPath = assertWritableGenerationPath(taskRoot, input.file_path);
       const requestedKind = resolveRequestedKind(scope.leaseId);
       if (!['.draft', '.tmp'].includes(extname(outputPath).toLowerCase())) {
@@ -278,7 +282,12 @@ export function createArtifactWorkspaceTools(service: ClaimService): Tool[] {
     async execute(input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string> {
       const leaseId = typeof input.leaseId === 'string' ? input.leaseId.trim() : '';
       const producedArtifactId = typeof input.producedArtifactId === 'string' ? input.producedArtifactId.trim() : '';
-      if (!context?.taskId || !context.executionScope || !leaseId || !producedArtifactId) {
+      if (
+        !context?.taskId
+        || context.executionScope?.kind !== 'artifact_workspace_generation'
+        || !leaseId
+        || !producedArtifactId
+      ) {
         return `Error: ${JSON.stringify({ ok: false, error: { code: 'permission_denied' } })}`;
       }
       try {

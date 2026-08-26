@@ -93,7 +93,7 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
         required: ['file_path', 'old_string', 'new_string'],
       },
     },
-    async execute(input) {
+    async execute(input, context) {
       const { file_path, old_string, new_string } = input as {
         file_path: string
         old_string: string
@@ -120,6 +120,15 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
       const tmp = join(dirname(resolvedPath), `.xiaok-tmp-${Date.now()}`)
       writeFileSync(tmp, updated, 'utf-8')
       renameSync(tmp, resolvedPath)
+
+      if (context?.toolInvocationId) {
+        context.runtimeFactSink?.emit({
+          invocationId: context.toolInvocationId,
+          toolName: 'edit',
+          factKind: 'file_mutation',
+          normalizedFilePaths: [resolvedPath],
+        })
+      }
 
       // Return diff + success message (DiffView can parse the diff header)
       return `${diff}\n\n已编辑: ${resolvedPath}`

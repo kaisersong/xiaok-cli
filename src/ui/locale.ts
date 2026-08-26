@@ -41,6 +41,7 @@ const UI_COPY = {
       path: '路径',
       pattern: '模式',
     },
+    ranCollapseNotice: '… 更多命令已折叠（完成后按 Ctrl+O 查看）',
     hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
   },
   en: {
@@ -52,6 +53,7 @@ const UI_COPY = {
       path: 'Path',
       pattern: 'Pattern',
     },
+    ranCollapseNotice: '… More commands collapsed (press Ctrl+O after completion to view)',
     hint: '1-5 select  Up/Down navigate  Enter confirm  Esc cancel',
   },
 } as const;

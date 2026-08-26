@@ -1,0 +1,248 @@
+import { randomUUID } from 'node:crypto';
+import {
+  DEFAULT_GOAL_TURN_LIMIT,
+  MAX_GOAL_TURN_LIMIT,
+  type GoalEvidenceKind,
+  type GoalInput,
+  type GoalState,
+} from './types.js';
+
+export type GoalAction =
+  | { type: 'pause'; reason: string; now: number }
+  | { type: 'resume'; turnLimit?: number; now: number }
+  | { type: 'cancel'; reason: string; now: number }
+  | { type: 'complete'; reason: string; now: number }
+  | { type: 'block'; reason: string; fingerprint?: string; now: number }
+  | { type: 'note_blocker'; reason: string; fingerprint: string; threshold?: number; now: number }
+  | ({ type: 'replace'; now: number } & GoalInput)
+  | {
+      type: 'record_turn';
+      turnId: string;
+      tokensUsed: number;
+      activeWallClockMs: number;
+      now: number;
+    }
+  | {
+      type: 'settle_turn';
+      turnId: string;
+      tokensUsed: number;
+      activeWallClockMs: number;
+      terminalDecision:
+        | { kind: 'none' }
+        | { kind: 'complete'; reason: string }
+        | { kind: 'blocked'; reason: string; fingerprint?: string }
+        | { kind: 'blocker'; reason: string; fingerprint: string; threshold?: number }
+        | { kind: 'paused'; reason: string };
+      now: number;
+    };
+
+export function createGoalState(input: GoalInput & {
+  sessionId: string;
+  now: number;
+  goalId?: string;
+  forkedFromGoalId?: string;
+}): GoalState {
+  const normalized = normalizeInput(input);
+  return {
+    goalId: input.goalId ?? `goal_${randomUUID()}`,
+    revision: 1,
+    epoch: 1,
+    sessionId: input.sessionId,
+    forkedFromGoalId: input.forkedFromGoalId,
+    objective: normalized.objective,
+    completionCriterion: normalized.completionCriterion,
+    expectedEvidenceKinds: normalized.expectedEvidenceKinds,
+    status: 'active',
+    turnsUsed: 0,
+    tokensUsed: 0,
+    activeWallClockMs: 0,
+    budgetLimits: { turnLimit: normalized.turnLimit },
+    consecutiveBlockedTurns: 0,
+    createdAt: input.now,
+    updatedAt: input.now,
+  };
+}
+
+export function reduceGoal(state: GoalState, action: GoalAction): GoalState {
+  switch (action.type) {
+    case 'pause':
+      assertStatus(state, ['active'], 'pause');
+      return mutate(state, action.now, { status: 'paused', terminalReason: action.reason });
+    case 'resume':
+      assertStatus(state, ['paused', 'blocked'], 'resume');
+      if (state.status === 'blocked' && state.terminalReason === 'turn_budget_exhausted') {
+        if (action.turnLimit === undefined) {
+          throw new Error('A larger turn limit is required to resume a budget-blocked Goal');
+        }
+        validateTurnLimit(action.turnLimit);
+        if (action.turnLimit <= state.budgetLimits.turnLimit || action.turnLimit <= state.turnsUsed) {
+          throw new Error('Goal resume turn limit must be larger than the previous limit and turns used');
+        }
+      } else if (action.turnLimit !== undefined) {
+        validateTurnLimit(action.turnLimit);
+        if (action.turnLimit < state.turnsUsed) {
+          throw new Error('Goal resume turn limit cannot be lower than turns used');
+        }
+      }
+      return mutate(state, action.now, {
+        status: 'active', terminalReason: undefined, blockerFingerprint: undefined,
+        consecutiveBlockedTurns: 0,
+        budgetLimits: action.turnLimit === undefined
+          ? state.budgetLimits
+          : { ...state.budgetLimits, turnLimit: action.turnLimit },
+      });
+    case 'cancel':
+      assertStatus(state, ['active', 'paused', 'blocked'], 'cancel');
+      return mutate(state, action.now, { status: 'cancelled', terminalReason: action.reason });
+    case 'complete':
+      assertStatus(state, ['active'], 'complete');
+      return mutate(state, action.now, { status: 'complete', terminalReason: action.reason });
+    case 'block': {
+      assertStatus(state, ['active'], 'block');
+      const consecutive = action.fingerprint && action.fingerprint === state.blockerFingerprint
+        ? state.consecutiveBlockedTurns + 1
+        : 1;
+      return mutate(state, action.now, {
+        status: 'blocked', terminalReason: action.reason,
+        blockerFingerprint: action.fingerprint,
+        consecutiveBlockedTurns: consecutive,
+      });
+    }
+    case 'note_blocker': {
+      assertStatus(state, ['active'], 'note blocker');
+      const consecutive = action.fingerprint === state.blockerFingerprint
+        ? state.consecutiveBlockedTurns + 1
+        : 1;
+      const blocked = consecutive >= (action.threshold ?? 3);
+      return mutate(state, action.now, {
+        status: blocked ? 'blocked' : 'active',
+        terminalReason: blocked ? action.reason : undefined,
+        blockerFingerprint: action.fingerprint,
+        consecutiveBlockedTurns: consecutive,
+      });
+    }
+    case 'replace': {
+      assertStatus(state, ['active', 'paused', 'blocked', 'complete', 'cancelled'], 'replace');
+      const input = normalizeInput(action);
+      return {
+        ...state,
+        revision: state.revision + 1,
+        epoch: state.epoch + 1,
+        objective: input.objective,
+        completionCriterion: input.completionCriterion,
+        expectedEvidenceKinds: input.expectedEvidenceKinds,
+        budgetLimits: { turnLimit: input.turnLimit },
+        status: 'active',
+        turnsUsed: 0,
+        tokensUsed: 0,
+        activeWallClockMs: 0,
+        terminalReason: undefined,
+        blockerFingerprint: undefined,
+        consecutiveBlockedTurns: 0,
+        updatedAt: action.now,
+      };
+    }
+    case 'record_turn': {
+      assertStatus(state, ['active'], 'record turn');
+      const turnsUsed = state.turnsUsed + 1;
+      const budgetReached = turnsUsed >= state.budgetLimits.turnLimit;
+      return mutate(state, action.now, {
+        turnsUsed,
+        tokensUsed: state.tokensUsed + nonNegative(action.tokensUsed, 'tokensUsed'),
+        activeWallClockMs: state.activeWallClockMs
+          + nonNegative(action.activeWallClockMs, 'activeWallClockMs'),
+        status: budgetReached ? 'blocked' : state.status,
+        terminalReason: budgetReached ? 'turn_budget_exhausted' : state.terminalReason,
+      });
+    }
+    case 'settle_turn': {
+      assertStatus(state, ['active'], 'settle turn');
+      const turnsUsed = state.turnsUsed + 1;
+      const tokensUsed = state.tokensUsed + nonNegative(action.tokensUsed, 'tokensUsed');
+      const activeWallClockMs = state.activeWallClockMs
+        + nonNegative(action.activeWallClockMs, 'activeWallClockMs');
+      if (action.terminalDecision.kind === 'complete') {
+        return mutate(state, action.now, {
+          turnsUsed, tokensUsed, activeWallClockMs,
+          status: 'complete', terminalReason: action.terminalDecision.reason,
+        });
+      }
+      if (action.terminalDecision.kind === 'blocked') {
+        return mutate(state, action.now, {
+          turnsUsed, tokensUsed, activeWallClockMs,
+          status: 'blocked', terminalReason: action.terminalDecision.reason,
+          blockerFingerprint: action.terminalDecision.fingerprint,
+        });
+      }
+      if (action.terminalDecision.kind === 'paused') {
+        return mutate(state, action.now, {
+          turnsUsed, tokensUsed, activeWallClockMs,
+          status: 'paused', terminalReason: action.terminalDecision.reason,
+        });
+      }
+      if (action.terminalDecision.kind === 'blocker') {
+        const consecutive = action.terminalDecision.fingerprint === state.blockerFingerprint
+          ? state.consecutiveBlockedTurns + 1
+          : 1;
+        const blocked = consecutive >= (action.terminalDecision.threshold ?? 3);
+        return mutate(state, action.now, {
+          turnsUsed, tokensUsed, activeWallClockMs,
+          status: blocked ? 'blocked' : 'active',
+          terminalReason: blocked ? action.terminalDecision.reason : undefined,
+          blockerFingerprint: action.terminalDecision.fingerprint,
+          consecutiveBlockedTurns: consecutive,
+        });
+      }
+      const budgetReached = turnsUsed >= state.budgetLimits.turnLimit;
+      return mutate(state, action.now, {
+        turnsUsed, tokensUsed, activeWallClockMs,
+        status: budgetReached ? 'blocked' : 'active',
+        terminalReason: budgetReached ? 'turn_budget_exhausted' : undefined,
+      });
+    }
+  }
+}
+
+function normalizeInput(input: GoalInput): {
+  objective: string;
+  completionCriterion?: string;
+  expectedEvidenceKinds: GoalEvidenceKind[];
+  turnLimit: number;
+} {
+  const objective = input.objective.trim();
+  if (!objective || objective.length > 4_000) {
+    throw new Error('Goal objective must contain 1..4000 characters');
+  }
+  const completionCriterion = input.completionCriterion?.trim() || undefined;
+  if (completionCriterion && completionCriterion.length > 4_000) {
+    throw new Error('Goal completion criterion must be at most 4000 characters');
+  }
+  const expectedEvidenceKinds = [...new Set(input.expectedEvidenceKinds)];
+  if (expectedEvidenceKinds.length === 0) {
+    throw new Error('Goal requires at least one expected evidence kind');
+  }
+  const turnLimit = input.turnLimit ?? DEFAULT_GOAL_TURN_LIMIT;
+  validateTurnLimit(turnLimit);
+  return { objective, completionCriterion, expectedEvidenceKinds, turnLimit };
+}
+
+function validateTurnLimit(turnLimit: number): void {
+  if (!Number.isSafeInteger(turnLimit) || turnLimit < 1 || turnLimit > MAX_GOAL_TURN_LIMIT) {
+    throw new Error(`Goal turn limit must be an integer between 1 and ${MAX_GOAL_TURN_LIMIT}`);
+  }
+}
+
+function assertStatus(state: GoalState, allowed: GoalState['status'][], action: string): void {
+  if (!allowed.includes(state.status)) {
+    throw new Error(`Cannot ${action} goal while status is ${state.status}`);
+  }
+}
+
+function mutate(state: GoalState, now: number, patch: Partial<GoalState>): GoalState {
+  return { ...state, ...patch, revision: state.revision + 1, updatedAt: now };
+}
+
+function nonNegative(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be non-negative`);
+  return value;
+}

@@ -34,7 +34,7 @@ describe('Windows packaged Kimi release gate', () => {
     expect(workflow).toContain('workflow_dispatch: {}');
     expect(jobIndex).toBeGreaterThan(-1);
     expect(workflow.slice(jobIndex)).toContain("if: github.event_name == 'workflow_dispatch'");
-    expect(workflow.slice(jobIndex)).toContain('runs-on: windows-latest');
+    expect(workflow.slice(jobIndex)).toContain('runs-on: windows-2022');
     expect(packageIndex).toBeGreaterThan(jobIndex);
     expect(smokeIndex).toBeGreaterThan(packageIndex);
     expect(workflow.slice(jobIndex)).toContain('desktop/release/win-unpacked/xiaok.exe');

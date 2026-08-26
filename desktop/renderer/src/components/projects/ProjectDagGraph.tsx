@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { Component, useMemo, useState, useEffect, useCallback, type ErrorInfo, type ReactNode } from 'react';
 import { ReactFlow, Background, Controls, MiniMap, Handle, Position, type NodeProps, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ExternalLink, Workflow, SkipForward, RefreshCw, ArrowLeft, ClipboardList } from 'lucide-react';
@@ -67,6 +67,52 @@ function DagNodeCard({ data }: NodeProps) {
 }
 
 const NODE_TYPES = { dag: DagNodeCard };
+
+interface DetailBoundaryProps {
+  resetKey: string;
+  errorMessage: string;
+  closeLabel: string;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+export class DagNodeDetailErrorBoundary extends Component<DetailBoundaryProps, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[ProjectDagGraph] node detail render failed', error, info);
+  }
+
+  componentDidUpdate(previousProps: DetailBoundaryProps) {
+    if (this.state.failed && previousProps.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <>
+        <div className="fixed inset-0 z-40 bg-black/10" aria-hidden="true" />
+        <aside
+          className="fixed right-0 top-0 z-50 flex h-full w-[480px] max-w-[90vw] flex-col bg-[var(--c-bg-card)] p-4 shadow-2xl"
+          role="alert"
+          data-app-region="no-drag"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <p className="text-sm text-[var(--c-status-error-text)]">{this.props.errorMessage}</p>
+          <button type="button" onClick={this.props.onClose} className="mt-4 self-start rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-primary)]">
+            {this.props.closeLabel}
+          </button>
+        </aside>
+      </>
+    );
+  }
+}
 
 function EmptyState({ reason, count, onReturn }: { reason: string; count?: number; onReturn?: () => void }) {
   const { t } = useLocale();
@@ -242,13 +288,20 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
         {graph.nodes.length > 30 && <MiniMap pannable zoomable />}
       </ReactFlow>
       {selectedNode && (
-        <DagNodeDetailDrawer
-          node={selectedNode}
-          graph={graph}
+        <DagNodeDetailErrorBoundary
+          resetKey={selectedNode.id}
+          errorMessage={t.projectsDetailGraphDrawerRenderError}
+          closeLabel={t.projectsDetailGraphDrawerClose}
           onClose={() => setSelectedNodeId(null)}
-          onJumpToBoard={(taskId) => { setSelectedNodeId(null); onJumpToBoard(taskId); }}
-          onSelectNode={(id) => { if (id !== PO_PLAN_NODE_ID || graph.nodes.some(n => n.id === id)) setSelectedNodeId(id); }}
-        />
+        >
+          <DagNodeDetailDrawer
+            node={selectedNode}
+            graph={graph}
+            onClose={() => setSelectedNodeId(null)}
+            onJumpToBoard={(taskId) => { setSelectedNodeId(null); onJumpToBoard(taskId); }}
+            onSelectNode={(id) => { if (id !== PO_PLAN_NODE_ID || graph.nodes.some(n => n.id === id)) setSelectedNodeId(id); }}
+          />
+        </DagNodeDetailErrorBoundary>
       )}
     </div>
   );

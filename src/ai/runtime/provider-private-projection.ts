@@ -7,7 +7,7 @@ import type {
 import type { PromptSnapshot } from '../prompts/types.js';
 import type {
   ArtifactGenerationTarget,
-  ArtifactWorkspaceExecutionScope,
+  TaskExecutionScope,
 } from '../../runtime/task-host/types.js';
 import { resolveRegisteredStrictKimiK3Profile } from './model-harness-identity.js';
 
@@ -119,6 +119,8 @@ export function projectStrictToolExecutionContext(
     'executionScope',
     'promptSnapshot',
     'signal',
+    'toolInvocationId',
+    'runtimeFactSink',
   ]);
   if (
     typeof context.taskId !== 'string'
@@ -197,7 +199,11 @@ export function projectStrictToolExecutionContext(
     ...(context.signal ? { signal: context.signal } : {}),
   };
   deepFreezePlainData(projected);
-  return projected;
+  return Object.freeze({
+    ...projected,
+    ...(context.toolInvocationId ? { toolInvocationId: context.toolInvocationId } : {}),
+    ...(context.runtimeFactSink ? { runtimeFactSink: context.runtimeFactSink } : {}),
+  });
 }
 
 function projectBlockForSynthesizedContext(
@@ -479,9 +485,18 @@ function validatePromptSnapshotSchema(snapshot: PromptSnapshot): void {
   assertStringArray(snapshot.memoryRefs);
 }
 
-function validateExecutionScopeSchema(
-  scope: ArtifactWorkspaceExecutionScope,
-): void {
+function validateExecutionScopeSchema(scope: TaskExecutionScope): void {
+  if (scope.kind === 'goal_turn') {
+    assertExactOwnKeys(scope, [
+      'kind', 'origin', 'goalId', 'epoch', 'goalTurnId', 'threadId',
+    ]);
+    assertEnumValue(scope.origin, ['user', 'continuation'] as const);
+    assertStringValue(scope.goalId);
+    assertFiniteNumber(scope.epoch);
+    assertStringValue(scope.goalTurnId);
+    assertStringValue(scope.threadId);
+    return;
+  }
   assertExactOwnKeys(
     scope,
     ['kind', 'generationRequestId', 'leaseId'],

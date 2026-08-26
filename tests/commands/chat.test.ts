@@ -156,7 +156,7 @@ describe('chat terminal layout', () => {
     expect(failureHandlerUses).toBeGreaterThanOrEqual(2);
   });
 
-  it('wires ESC abort controllers through chat runtime turns and auto-continue', () => {
+  it('wires ESC abort controllers through the shared turn runner and records abort by turn id', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
     expect(source).toContain("import { isAbortError } from '../ai/runtime/abort-utils.js';");
@@ -166,7 +166,8 @@ describe('chat terminal layout', () => {
     expect(source).toContain('controller.signal');
     expect(source).toContain("runtimeHooks.on('turn_stop'");
     expect(source).toContain("event.reason === 'user_aborted'");
-    expect(source).toContain('autoContinueController.signal');
+    expect(source).toContain('abortedRuntimeTurnIds.add(event.turnId);');
+    expect(source).not.toContain('autoContinueController');
     expect(source).toContain('isAbortError(e)');
   });
 
@@ -316,6 +317,18 @@ describe('chat terminal layout', () => {
     expect(turnStartedSource).toContain('if (!normalTurnChromePrimed) {');
     expect(turnStartedSource).toContain("beginNormalInputTurnChrome('');");
 
+    const toolStartedStart = source.indexOf("runtimeHooks.on('tool_started'");
+    const toolStartedEnd = source.indexOf("runtimeHooks.on('tool_finished'", toolStartedStart);
+    const toolStartedSource = source.slice(toolStartedStart, toolStartedEnd);
+
+    expect(toolStartedStart).toBeGreaterThan(-1);
+    expect(toolStartedEnd).toBeGreaterThan(toolStartedStart);
+    expect(toolStartedSource).toContain('summarizeToolInputForTranscript(e.toolInput)');
+    expect(toolStartedSource).toContain("kind: 'tool_use'");
+    expect(toolStartedSource).toContain("agentId: 'main'");
+    expect(toolStartedSource).toContain('name: e.toolName');
+    expect(toolStartedSource).toContain('summary: transcriptSummary');
+
     const askExitStart = source.indexOf('const exitAskUserQuestionPrompt = (): void => {');
     const askExitEnd = source.indexOf('// Wire up lazy callbacks for AskUserQuestion interactive prompt.', askExitStart);
     const askExitSource = source.slice(askExitStart, askExitEnd);
@@ -334,7 +347,14 @@ describe('chat terminal layout', () => {
 
     expect(normalInputStart).toBeGreaterThan(-1);
     expect(normalInputEnd).toBeGreaterThan(normalInputStart);
-    expect(normalInputSource).toContain('beginNormalInputTurnChrome(trimmed);');
+    expect(normalInputSource).toContain("beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);");
+  });
+
+  it('keeps tool input transcript summaries string-valued for undefined input', async () => {
+    const { summarizeToolInputForTranscript } = await import('../../src/commands/chat.js');
+
+    expect(summarizeToolInputForTranscript(undefined)).toBe('undefined');
+    expect(summarizeToolInputForTranscript({ path: '/tmp/a' })).toBe('{"path":"/tmp/a"}');
   });
 
   it('should construct a dedicated tui runtime-state owner instead of keeping timer ownership inside chat.ts', () => {
@@ -374,7 +394,7 @@ describe('chat terminal layout', () => {
   it('should render submitted input before the intent orchestration block in interactive chat', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    const inputWrite = source.indexOf('beginNormalInputTurnChrome(trimmed);');
+    const inputWrite = source.indexOf("beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);");
     const intentPrime = source.indexOf('await primeTurnIntentPlan(true);');
 
     expect(inputWrite).toBeGreaterThan(-1);
@@ -383,11 +403,12 @@ describe('chat terminal layout', () => {
     expect(source).toContain('scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));');
   });
 
-  it('should route resume replay and stop-hook auto-continue transcript writes through the scroll region instead of raw stdout', () => {
+  it('should route replay writes through the scroll region and broker continuation through the arbiter', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
     expect(source).toContain('scrollRegion.writeAtContentCursor(chunk);');
-    expect(source).toContain('scrollRegion.writeSubmittedInput(formatSubmittedInput(stopResult.message));');
+    expect(source).toContain('brokerContinuation = stopResult.preventContinuation && stopResult.message');
+    expect(source).toContain('continuationArbiter.select({');
     expect(source).toContain("if (scrollRegion.isActive() && !terminalUiSuspended) {");
   });
 
@@ -403,7 +424,7 @@ describe('chat terminal layout', () => {
     expect(helperSource).toContain('writeAssistantTextChunkInOrder(delta, {');
     expect(helperSource.match(/writeAssistantTextChunkInOrder\(/g) ?? []).toHaveLength(1);
     expect(source).not.toMatch(/if \(\/\\S\/\.test\(chunk\.delta\)\) \{\s*runtimeState\.noteResponseStarted\(\);\s*ensureStreamingPhase\(\);\s*\}/);
-    expect(source.match(/handleAssistantTextChunk\(chunk\.delta,/g) ?? []).toHaveLength(2);
+    expect(source.match(/handleAssistantTextChunk\(chunk\.delta,/g) ?? []).toHaveLength(1);
     expect(source).toContain('handleAssistantTextChunk(delta, appendAssistantText);');
   });
 
@@ -496,7 +517,7 @@ describe('chat terminal layout', () => {
     expect(orchestrationSource).not.toContain('endStreamingPhaseForInterruptInOrder(');
   });
 
-  it('should route only strict continuation and ordinary turns through the runtime turn runner', () => {
+  it('should route strict, broker, and Goal continuation through the shared runtime turn runner', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
     const strictStart = source.indexOf('const runStrictContinuationTurn = async');
     const strictEnd = source.indexOf('const strictSkillAdherenceFlow = createStrictSkillAdherenceFlow', strictStart);
@@ -505,11 +526,8 @@ describe('chat terminal layout', () => {
     const slashEnd = source.indexOf('slashAssistantText = await maybeRunStrictCompletionLoop', slashStart);
     const slashSource = source.slice(slashStart, slashEnd);
     const ordinaryStart = source.indexOf('let lastAssistantText = \'\';');
-    const ordinaryEnd = source.indexOf('// Stop hook', ordinaryStart);
+    const ordinaryEnd = source.indexOf('// Busy 时到达的用户输入', ordinaryStart);
     const ordinarySource = source.slice(ordinaryStart, ordinaryEnd);
-    const stopStart = ordinaryEnd;
-    const stopEnd = source.indexOf('lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);', stopStart);
-    const stopSource = source.slice(stopStart, stopEnd);
 
     expect(source).toContain("from './chat/runtime-turn-runner.js';");
     expect(strictSource).toContain('runInteractiveRuntimeTurn(');
@@ -518,8 +536,8 @@ describe('chat terminal layout', () => {
 
     expect(slashSource).toContain('await runRuntimeTurn({');
     expect(slashSource).not.toContain('runInteractiveRuntimeTurn(');
-    expect(stopSource).toContain('await runtimeFacade.runTurn({');
-    expect(stopSource).not.toContain('runInteractiveRuntimeTurn(');
+    expect(source).toContain('continuationArbiter.select({');
+    expect(source).not.toContain('autoContinueController');
   });
 
   it('should keep runtime turn runner and handler adapter out of permission and tool-explorer state', () => {

@@ -23,6 +23,7 @@ export interface RuntimeFacadeOptions {
   agent: Pick<Agent, 'getSessionState' | 'setPromptSnapshot' | 'setSystemPrompt' | 'runTurn'>;
   getSkillEntries?(): SkillEntry[];
   getIntentReminderBlock?(): MessageBlock | undefined;
+  getGoalReminderBlock?(): MessageBlock | undefined;
 }
 
 export class RuntimeFacade {
@@ -106,6 +107,7 @@ export class RuntimeFacade {
 
   private buildInput(input: string | MessageBlock[], newSkillsThisTurn: string[]): string | MessageBlock[] {
     const reminderBlock = this.options.getIntentReminderBlock?.();
+    const goalBlock = this.options.getGoalReminderBlock?.();
 
     // Compute new skills not yet seen by the agent (CC dedup: only send new ones).
     const allEntries = this.options.getSkillEntries?.() ?? [];
@@ -114,6 +116,9 @@ export class RuntimeFacade {
     const prefixBlocks: MessageBlock[] = [];
     if (reminderBlock) {
       prefixBlocks.push(reminderBlock);
+    }
+    if (goalBlock) {
+      prefixBlocks.push(goalBlock);
     }
 
     if (newEntries.length > 0) {

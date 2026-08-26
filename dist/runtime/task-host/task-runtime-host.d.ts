@@ -2,7 +2,7 @@ import type { RuntimeEvent } from '../events.js';
 import { type DeliverableGateFunction } from './deliverable-gate.js';
 import type { MaterialRegistry } from './material-registry.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
-import type { ArtifactWorkspaceExecutionScope, DesktopTaskEvent, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskRuntimeHost, TaskSnapshot, TaskUnderstanding, UserAnswer } from './types.js';
+import type { DesktopTaskEvent, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskExecutionScope, TaskRuntimeHost, TaskSnapshot, TaskUnderstanding, UserAnswer } from './types.js';
 export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -18,8 +18,12 @@ export interface TaskRunnerInput {
     history: HistoryMessage[];
     permissionMode?: 'plan' | 'auto' | 'default';
     maxToolLoopIterations?: number;
-    executionScope?: ArtifactWorkspaceExecutionScope;
+    executionScope?: TaskExecutionScope;
     emitRuntimeEvent(event: RuntimeEvent): Promise<void>;
+    emitUsage(input: {
+        inputTokens: number;
+        outputTokens: number;
+    }): Promise<void>;
 }
 export interface PersistedTaskEvent {
     taskId: string;
@@ -81,6 +85,8 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly maxToolLoopIterations;
     private readonly pendingAssistantDeltas;
     private readonly runtimeEventErrors;
+    private readonly persistedEventDispatchChains;
+    private readonly pendingTerminalPersistedEvents;
     private stoppedAcceptingReason;
     constructor(options: InProcessTaskRuntimeHostOptions);
     prepareTask(input: TaskCreateInput): Promise<{
@@ -125,6 +131,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private resolveContextHistory;
     private isEmptyDelivery;
     private appendRuntimeEvent;
+    private appendUsage;
     private bufferAssistantDelta;
     private flushPendingAssistantDelta;
     private flushRuntimeEvents;
@@ -134,6 +141,8 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private recoverStaleRunningTask;
     private appendEvent;
     private updateSnapshot;
+    private flushPendingTerminalPersistedEvent;
+    private schedulePersistedEvent;
     private enqueueMutation;
     private flushMutations;
     private saveSnapshot;

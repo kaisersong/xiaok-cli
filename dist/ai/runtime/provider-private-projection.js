@@ -99,6 +99,8 @@ export function projectStrictToolExecutionContext(context) {
         'executionScope',
         'promptSnapshot',
         'signal',
+        'toolInvocationId',
+        'runtimeFactSink',
     ]);
     if (typeof context.taskId !== 'string'
         || typeof context.systemPrompt !== 'string'
@@ -166,7 +168,11 @@ export function projectStrictToolExecutionContext(context) {
         ...(context.signal ? { signal: context.signal } : {}),
     };
     deepFreezePlainData(projected);
-    return projected;
+    return Object.freeze({
+        ...projected,
+        ...(context.toolInvocationId ? { toolInvocationId: context.toolInvocationId } : {}),
+        ...(context.runtimeFactSink ? { runtimeFactSink: context.runtimeFactSink } : {}),
+    });
 }
 function projectBlockForSynthesizedContext(block) {
     validateMessageBlockSchema(block);
@@ -378,6 +384,17 @@ function validatePromptSnapshotSchema(snapshot) {
     assertStringArray(snapshot.memoryRefs);
 }
 function validateExecutionScopeSchema(scope) {
+    if (scope.kind === 'goal_turn') {
+        assertExactOwnKeys(scope, [
+            'kind', 'origin', 'goalId', 'epoch', 'goalTurnId', 'threadId',
+        ]);
+        assertEnumValue(scope.origin, ['user', 'continuation']);
+        assertStringValue(scope.goalId);
+        assertFiniteNumber(scope.epoch);
+        assertStringValue(scope.goalTurnId);
+        assertStringValue(scope.threadId);
+        return;
+    }
     assertExactOwnKeys(scope, ['kind', 'generationRequestId', 'leaseId'], ['target']);
     if (scope.kind !== 'artifact_workspace_generation') {
         rejectToolContext();

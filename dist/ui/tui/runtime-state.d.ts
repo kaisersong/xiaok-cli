@@ -1,7 +1,7 @@
 import type { ActivitySnapshot } from '../statusbar.js';
 export type TuiTurnSurfaceState = 'input_ready' | 'streaming_content' | 'tool_interrupt' | 'waiting_feedback' | 'busy_finishing' | 'compat_input_ready' | 'compat_streaming';
 export type TuiFooterMode = 'input_ready' | 'busy' | 'feedback' | 'compat';
-export type TuiSummarySource = 'none' | 'turn' | 'completed_turn' | 'waiting_user';
+export type TuiSummarySource = 'none' | 'goal' | 'turn' | 'completed_turn' | 'waiting_user';
 export interface TuiSurfaceSnapshot {
     turnSurfaceState: TuiTurnSurfaceState;
     footerMode: TuiFooterMode;

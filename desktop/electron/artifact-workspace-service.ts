@@ -1087,7 +1087,12 @@ export class ArtifactWorkspaceService {
     }
     const snapshot = await this.snapshotStore.recoverTask(input.taskId);
     const artifact = snapshot ? this.findArtifact(snapshot, input.producedArtifactId) : undefined;
-    if (!snapshot || !artifact?.filePath || snapshot.executionScope?.leaseId !== lease.id) {
+    if (
+      !snapshot
+      || !artifact?.filePath
+      || snapshot.executionScope?.kind !== 'artifact_workspace_generation'
+      || snapshot.executionScope.leaseId !== lease.id
+    ) {
       throw new ArtifactWorkspaceError('invalid_target', 'artifact is not recorded by the bound task');
     }
     const kind = normalizeKind(artifact.kind, artifact.mimeType, artifact.filePath);

@@ -62,12 +62,16 @@ export class RuntimeFacade {
     }
     buildInput(input, newSkillsThisTurn) {
         const reminderBlock = this.options.getIntentReminderBlock?.();
+        const goalBlock = this.options.getGoalReminderBlock?.();
         // Compute new skills not yet seen by the agent (CC dedup: only send new ones).
         const allEntries = this.options.getSkillEntries?.() ?? [];
         const newEntries = allEntries.filter((e) => !this.sentSkillNames.has(e.name));
         const prefixBlocks = [];
         if (reminderBlock) {
             prefixBlocks.push(reminderBlock);
+        }
+        if (goalBlock) {
+            prefixBlocks.push(goalBlock);
         }
         if (newEntries.length > 0) {
             // Mark as sent before running (mirrors CC's O.add loop).

@@ -5,7 +5,7 @@ import { useLocale } from '../contexts/LocaleContext';
 import { ChatModelPicker } from './ChatModelPicker';
 import { toFileUrl } from '../lib/file-path';
 
-interface AttachedFile {
+export interface AttachedFile {
   filePath: string;
   name: string;
   isImage?: boolean;
@@ -23,7 +23,7 @@ interface ChatInputProps {
   value?: string;
   onChange?: (value: string) => void;
   onSubmit: (text: string, files: AttachedFile[]) => void;
-  onQueue?: (text: string) => void;
+  onQueue?: (text: string, files: AttachedFile[]) => void;
   queuedText?: string | null;
   onCancelQueue?: () => void;
   placeholder?: string;
@@ -313,10 +313,11 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (isRunning && onQueue && internalValue.trim()) {
-        onQueue(internalValue.trim());
+      if (isRunning && onQueue && (internalValue.trim() || files.length > 0)) {
+        onQueue(internalValue.trim() || t.chatInput.processFiles, files);
         setInternalValue('');
         onChange?.('');
+        setFiles([]);
         return;
       }
       // Allow submit with text OR files
