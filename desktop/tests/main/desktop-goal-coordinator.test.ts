@@ -212,6 +212,25 @@ describe('DesktopGoalCoordinator', () => {
     });
   });
 
+  it('lets the hard turn budget outrank a runtime pause on the final admitted turn', async () => {
+    const { coordinator } = setup();
+    const created = await coordinator.createGoal({
+      threadId: 'thread_1', objective: '持续调查', expectedEvidenceKinds: ['answer'], turnLimit: 1,
+    });
+    await coordinator.ackGoalTaskAttached({
+      threadId: 'thread_1', attachmentId: created.preparedTask.attachmentId,
+    });
+    await coordinator.handlePersistedTaskEvent(persistedTerminal(
+      created.preparedTask.taskId, created.preparedTask.executionScope, 'failed',
+    ));
+
+    expect(await coordinator.getGoal('thread_1')).toMatchObject({
+      activation: 'disarmed',
+      state: { status: 'blocked', terminalReason: 'turn_budget_exhausted', turnsUsed: 1 },
+    });
+    await expect(coordinator.resumeGoal({ threadId: 'thread_1' })).rejects.toThrow(/turn limit/i);
+  });
+
   it('cancels the running Goal task before a user pause disarms the Goal', async () => {
     const { coordinator, host } = setup();
     const created = await coordinator.createGoal({
@@ -225,6 +244,44 @@ describe('DesktopGoalCoordinator', () => {
     expect(await coordinator.getGoal('thread_1')).toMatchObject({
       activation: 'disarmed', state: { status: 'paused' },
     });
+  });
+
+  it('keeps a paused ordinary user task as context for the next explicit Goal resume', async () => {
+    const { coordinator, host, store } = setup();
+    const created = await coordinator.createGoal({
+      threadId: 'thread_1', objective: '等待口令', expectedEvidenceKinds: ['answer'], turnLimit: 3,
+    });
+    await coordinator.ackGoalTaskAttached({
+      threadId: 'thread_1', attachmentId: created.preparedTask.attachmentId,
+    });
+    await coordinator.pauseGoal({ threadId: 'thread_1' });
+
+    const ordinary = await coordinator.admitUserTask({
+      prompt: 'RESUME_OK', materials: [], context: { threadId: 'thread_1' },
+    });
+    expect(store.getTaskBinding(ordinary.taskId)).toBeNull();
+    expect((await coordinator.getGoal('thread_1'))?.state.turnsUsed).toBe(0);
+
+    await expect(coordinator.resumeGoal({ threadId: 'thread_1' })).rejects.toThrow(/user task/i);
+    await coordinator.handlePersistedTaskEvent(persistedTerminal(
+      ordinary.taskId, undefined, 'completed', undefined, '收到 RESUME_OK',
+    ));
+
+    const resumed = await coordinator.resumeGoal({ threadId: 'thread_1' });
+    expect(host.prepared.at(-1)?.taskId).toBe(resumed.preparedTask.taskId);
+    expect(host.prepared.at(-1)?.input.context?.taskIds).toEqual([
+      created.preparedTask.taskId,
+      ordinary.taskId,
+    ]);
+
+    await coordinator.handlePersistedTaskEvent(persistedTerminal(
+      created.preparedTask.taskId, created.preparedTask.executionScope, 'cancelled', 'goal_paused',
+    ));
+    expect(await coordinator.getGoal('thread_1')).toMatchObject({
+      activation: 'armed', state: { status: 'active', turnsUsed: 0 },
+    });
+    expect(coordinator.getPendingAttachmentForTest('thread_1')?.taskId)
+      .toBe(resumed.preparedTask.taskId);
   });
 
   it('requires three consecutive admitted blocker claims before blocking', async () => {
@@ -254,7 +311,7 @@ describe('DesktopGoalCoordinator', () => {
 
 function persistedTerminal(
   taskId: string,
-  executionScope: NonNullable<TaskCreateInput['executionScope']>,
+  executionScope: TaskCreateInput['executionScope'],
   status: 'completed' | 'failed' | 'cancelled',
   cancelReason?: string,
   answer = '',

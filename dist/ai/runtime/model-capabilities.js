@@ -25,7 +25,7 @@ function inferModelCapabilities(modelName) {
             supportsImageInput: true,
         };
     }
-    if (/^deepseek-v4/i.test(modelName)) {
+    if (/^deepseek-v4-flash-vision-exp$/i.test(modelName)) {
         return {
             supportsImageInput: true,
         };

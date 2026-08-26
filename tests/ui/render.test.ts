@@ -266,6 +266,21 @@ describe('renderWelcomeScreen', () => {
     // Skip logo assertion in test environment
   });
 
+  it('shows the Goal command in the quick-start splash list', () => {
+    process.stdout.columns = 100;
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => {
+      lines.push(args.join(' '));
+    }) as typeof console.log;
+
+    renderWelcomeScreen({
+      model: 'gpt-5.4', cwd: '/workspace', sessionId: 'session-goal',
+      mode: 'default', version: '0.1.4',
+    });
+
+    expect(lines.some((line) => line.includes('/goal <目标>'))).toBe(true);
+  });
+
   it('does not emit carriage returns when loading the logo from a Windows CRLF file', () => {
     process.stdout.columns = 100;
 

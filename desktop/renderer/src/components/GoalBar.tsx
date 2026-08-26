@@ -7,6 +7,7 @@ export interface GoalBarProps {
   goal: DesktopGoalProjection | null;
   loading?: boolean;
   error?: string | null;
+  initialEditing?: boolean;
   onCreate: (input: GoalInput) => void | Promise<void>;
   onReplace?: (input: GoalInput) => void | Promise<void>;
   onPause?: () => void | Promise<void>;
@@ -14,14 +15,15 @@ export interface GoalBarProps {
   onCancel?: () => void | Promise<void>;
 }
 
-export function GoalBar({ goal, loading, error, onCreate, onReplace, onPause, onResume, onCancel }: GoalBarProps) {
+export function GoalBar({ goal, loading, error, initialEditing = false, onCreate, onReplace, onPause, onResume, onCancel }: GoalBarProps) {
   const { t } = useLocale();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initialEditing);
   const [replaceMode, setReplaceMode] = useState(false);
   const [objective, setObjective] = useState('');
   const [criterion, setCriterion] = useState('');
   const [turnLimit, setTurnLimit] = useState(20);
   const [evidence, setEvidence] = useState<GoalEvidenceKind[]>(['answer']);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const state = goal?.state;
   const budgetBlocked = state?.status === 'blocked' && state.terminalReason === 'turn_budget_exhausted';
   const [resumeLimit, setResumeLimit] = useState(state ? Math.min(50, state.turnsUsed + 1) : 1);
@@ -46,7 +48,7 @@ export function GoalBar({ goal, loading, error, onCreate, onReplace, onPause, on
 
   if (!state || editing) {
     if (!editing) {
-      return <div className="border-b border-[var(--c-border)] px-4 py-2"><button type="button" onClick={() => { setReplaceMode(false); setEditing(true); }} className="text-xs font-medium text-[var(--c-accent)]">{t.goalBar.createGoal}</button></div>;
+      return <div className="goal-panel goal-panel--empty"><button type="button" onClick={() => { setReplaceMode(false); setEditing(true); }} className="text-xs font-medium text-[var(--c-accent)]">{t.goalBar.createGoal}</button></div>;
     }
     const evidenceOptions: Array<[GoalEvidenceKind, string]> = [
       ['answer', t.goalBar.evidenceAnswer],
@@ -55,8 +57,8 @@ export function GoalBar({ goal, loading, error, onCreate, onReplace, onPause, on
       ['project_update', t.goalBar.evidenceProject],
     ];
     return (
-      <div className="border-b border-[var(--c-border)] bg-[var(--c-bg-card)] px-4 py-3 text-xs">
-        <div className="grid gap-2 sm:grid-cols-2">
+      <div className="goal-panel goal-panel--editing is-expanded text-xs">
+        <div className="grid gap-2">
           <label className="grid gap-1"><span>{t.goalBar.goal}</span><input aria-label={t.goalBar.goal} value={objective} onChange={event => setObjective(event.target.value)} className="rounded border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1.5" /></label>
           <label className="grid gap-1"><span>{t.goalBar.completionCriterion}</span><input aria-label={t.goalBar.completionCriterion} value={criterion} onChange={event => setCriterion(event.target.value)} className="rounded border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1.5" /></label>
           <fieldset className="flex flex-wrap gap-2"><legend className="mb-1">{t.goalBar.evidence}</legend>{evidenceOptions.map(([kind, label]) => <label key={kind} className="flex items-center gap-1"><input type="checkbox" checked={evidence.includes(kind)} onChange={() => toggleEvidence(kind)} />{label}</label>)}</fieldset>
@@ -74,19 +76,31 @@ export function GoalBar({ goal, loading, error, onCreate, onReplace, onPause, on
       : state.status === 'blocked' ? t.goalBar.statusBlocked
         : state.status === 'complete' ? t.goalBar.statusComplete : t.goalBar.statusCancelled;
   return (
-    <div className="border-b border-[var(--c-border)] bg-[var(--c-bg-card)] px-4 py-2 text-xs">
-      <div className="flex items-center gap-3">
-        <span className="rounded bg-[var(--c-bg-deep)] px-2 py-1 font-medium">{statusLabel}</span>
-        <span className="min-w-0 flex-1 truncate font-medium text-[var(--c-text-heading)]">{state.objective}</span>
-        <span>{t.goalBar.turns(state.turnsUsed, state.budgetLimits.turnLimit)}</span>
-        <span>{state.tokensUsed > 0 ? t.goalBar.tokens(state.tokensUsed) : t.goalBar.tokensUnknown}</span>
+    <div className={`goal-panel text-xs${detailsExpanded ? ' is-expanded' : ''}`}>
+      <div className="goal-panel__summary" role="status" aria-live="polite" aria-atomic="true">
+        <span className="goal-panel__status">{statusLabel}</span>
+        <span className="goal-panel__turns">{t.goalBar.turns(state.turnsUsed, state.budgetLimits.turnLimit)}</span>
         {state.status === 'active' && goal.activation === 'armed' ? <button type="button" onClick={() => void onPause?.()}>{t.goalBar.pause}</button> : null}
         {(state.status === 'paused' || (state.status === 'active' && goal.activation === 'disarmed')) ? <button type="button" onClick={() => void onResume?.()}>{t.goalBar.resume}</button> : null}
         {state.status === 'blocked' && !budgetBlocked ? <button type="button" onClick={() => void onResume?.()}>{t.goalBar.retry}</button> : null}
-        {!['complete', 'cancelled'].includes(state.status) ? <button type="button" onClick={() => void onCancel?.()}>{t.goalBar.cancelGoal}</button> : null}
-        <button type="button" onClick={() => { setReplaceMode(!['complete', 'cancelled'].includes(state.status)); setEditing(true); }}>{t.goalBar.replaceGoal}</button>
+        <button
+          type="button"
+          className="goal-panel__details-toggle"
+          aria-expanded={detailsExpanded}
+          onClick={() => setDetailsExpanded(value => !value)}
+        >
+          {detailsExpanded ? t.goalBar.hideDetails : t.goalBar.showDetails}
+        </button>
       </div>
-      {budgetBlocked ? <div className="mt-2 flex items-center gap-2"><span>{t.goalBar.budgetExhausted}</span>{state.turnsUsed < 50 ? <><label><span className="sr-only">{t.goalBar.newTurnBudget}</span><input aria-label={t.goalBar.newTurnBudget} type="number" min={state.turnsUsed + 1} max={50} value={resumeLimit} onChange={event => setResumeLimit(Number(event.target.value))} className="w-20 rounded border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1" /></label><button type="button" onClick={() => void onResume?.(resumeLimit)}>{t.goalBar.increaseBudgetAndResume}</button></> : null}</div> : null}
+      <div className="goal-panel__details">
+        <p className="goal-panel__objective">{state.objective}</p>
+        <p className="goal-panel__tokens">{state.tokensUsed > 0 ? t.goalBar.tokens(state.tokensUsed) : t.goalBar.tokensUnknown}</p>
+        <div className="goal-panel__actions">
+          {!['complete', 'cancelled'].includes(state.status) ? <button type="button" onClick={() => void onCancel?.()}>{t.goalBar.cancelGoal}</button> : null}
+          <button type="button" onClick={() => { setReplaceMode(!['complete', 'cancelled'].includes(state.status)); setEditing(true); }}>{t.goalBar.replaceGoal}</button>
+        </div>
+        {budgetBlocked ? <div className="mt-2 flex flex-wrap items-center gap-2"><span>{t.goalBar.budgetExhausted}</span>{state.turnsUsed < 50 ? <><label><span className="sr-only">{t.goalBar.newTurnBudget}</span><input aria-label={t.goalBar.newTurnBudget} type="number" min={state.turnsUsed + 1} max={50} value={resumeLimit} onChange={event => setResumeLimit(Number(event.target.value))} className="w-20 rounded border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1" /></label><button type="button" onClick={() => void onResume?.(resumeLimit)}>{t.goalBar.increaseBudgetAndResume}</button></> : null}</div> : null}
+      </div>
       {error ? <p role="alert" className="mt-2 text-[var(--c-danger)]">{error}</p> : null}
     </div>
   );

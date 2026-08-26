@@ -61,6 +61,9 @@ export class DesktopGoalCoordinator {
   private readonly activation = new Map<string, { goalId: string; armed: boolean }>();
   private readonly pendingByThread = new Map<string, PendingAttachment>();
   private readonly runningByThread = new Map<string, string>();
+  private readonly contextRunningByThread = new Map<string, string>();
+  private readonly contextTaskThread = new Map<string, string>();
+  private readonly discardedGoalTaskIds = new Set<string>();
   private readonly userQueuePending = new Set<string>();
   private readonly pendingComplete = new Map<string, string>();
   private readonly pendingBlocked = new Map<string, { reason: string; fingerprint: string }>();
@@ -105,8 +108,7 @@ export class DesktopGoalCoordinator {
     return this.withThread(input.threadId, async () => {
       const document = await this.requireDocument(input.threadId);
       await this.cancelPending(input.threadId, 'goal_paused');
-      const running = this.runningByThread.get(input.threadId);
-      if (running) await this.options.taskHost.cancelTask(running, 'goal_paused');
+      await this.cancelRunningGoalTask(input.threadId, 'goal_paused');
       const state = await this.service.pause(
         this.context(input.threadId, 'user', document.state.revision),
         'user_paused',
@@ -121,6 +123,9 @@ export class DesktopGoalCoordinator {
     preparedTask: PreparedGoalTask;
   }> {
     return this.withThread(input.threadId, async () => {
+      if (this.contextRunningByThread.has(input.threadId)) {
+        throw new Error('Cannot resume a Goal while a paused user task is still running');
+      }
       const document = await this.requireDocument(input.threadId);
       const state = await this.service.resume(
         this.context(input.threadId, 'user', document.state.revision),
@@ -136,8 +141,7 @@ export class DesktopGoalCoordinator {
     return this.withThread(input.threadId, async () => {
       const document = await this.requireDocument(input.threadId);
       await this.cancelPending(input.threadId, 'goal_cancelled');
-      const running = this.runningByThread.get(input.threadId);
-      if (running) await this.options.taskHost.cancelTask(running, 'goal_cancelled');
+      await this.cancelRunningGoalTask(input.threadId, 'goal_cancelled');
       const state = await this.service.cancel(
         this.context(input.threadId, 'user', document.state.revision),
         'user_cancelled',
@@ -174,6 +178,28 @@ export class DesktopGoalCoordinator {
       if (!document || !this.isArmed(threadId, document.state.goalId) || document.state.status !== 'active') {
         if (!document) this.activation.delete(threadId);
         this.userQueuePending.delete(threadId);
+        if (document && document.state.status !== 'complete' && document.state.status !== 'cancelled') {
+          const prepared = await this.options.taskHost.prepareTask({
+            ...input,
+            context: this.mainOwnedContext(threadId),
+          });
+          this.options.store.recordContextTask({
+            goalId: document.state.goalId,
+            threadId,
+            taskId: prepared.taskId,
+            recordedAt: this.now(),
+          });
+          this.contextRunningByThread.set(threadId, prepared.taskId);
+          this.contextTaskThread.set(prepared.taskId, threadId);
+          try {
+            await this.options.taskHost.startTask(prepared.taskId);
+          } catch (error) {
+            this.contextRunningByThread.delete(threadId);
+            this.contextTaskThread.delete(prepared.taskId);
+            throw error;
+          }
+          return prepared;
+        }
         return this.prepareBindStart(input);
       }
       await this.cancelPending(threadId, 'superseded_by_user');
@@ -275,16 +301,39 @@ export class DesktopGoalCoordinator {
     if (input.event.type !== 'task_terminal') return;
     const terminalEvent = input.event;
     const binding = this.options.store.getTaskBinding(input.taskId);
-    if (!binding) return;
+    if (!binding) {
+      const contextThreadId = this.contextTaskThread.get(input.taskId);
+      if (!contextThreadId) return;
+      await this.withThread(contextThreadId, async () => {
+        if (this.contextRunningByThread.get(contextThreadId) === input.taskId) {
+          this.contextRunningByThread.delete(contextThreadId);
+        }
+        this.contextTaskThread.delete(input.taskId);
+      });
+      return;
+    }
     await this.withThread(binding.threadId, async () => {
+      if (this.discardedGoalTaskIds.delete(input.taskId)) {
+        if (this.runningByThread.get(binding.threadId) === input.taskId) {
+          this.runningByThread.delete(binding.threadId);
+        }
+        this.pendingComplete.delete(input.taskId);
+        this.pendingBlocked.delete(input.taskId);
+        return;
+      }
       const document = await this.requireDocument(binding.threadId);
+      if (document.state.goalId !== binding.goalId || document.state.epoch !== binding.epoch) {
+        return;
+      }
       if (document.turns.some(turn => turn.turnId === binding.goalTurnId)) return;
       const cancelReason = findCancellationReason(input.snapshot);
       const completeSummary = this.pendingComplete.get(input.taskId);
       this.pendingComplete.delete(input.taskId);
       const blockerClaim = this.pendingBlocked.get(input.taskId);
       this.pendingBlocked.delete(input.taskId);
-      this.runningByThread.delete(binding.threadId);
+      if (this.runningByThread.get(binding.threadId) === input.taskId) {
+        this.runningByThread.delete(binding.threadId);
+      }
       if (document.state.status !== 'active' || !this.isArmed(binding.threadId, document.state.goalId)) {
         return;
       }
@@ -346,6 +395,9 @@ export class DesktopGoalCoordinator {
     this.activation.clear();
     for (const pending of this.pendingByThread.values()) clearTimeout(pending.timeout);
     this.pendingByThread.clear();
+    this.contextRunningByThread.clear();
+    this.contextTaskThread.clear();
+    this.discardedGoalTaskIds.clear();
   }
 
   private async prepareGoalTask(
@@ -396,7 +448,7 @@ export class DesktopGoalCoordinator {
       const pending = this.pendingByThread.get(threadId);
       if (!pending || pending.attachmentId !== attachmentId) return;
       this.pendingByThread.delete(threadId);
-      await this.options.taskHost.cancelTask(pending.taskId, 'thread_attachment_timeout');
+      await this.cancelDiscardedGoalTask(pending.taskId, 'thread_attachment_timeout');
       const document = await this.requireDocument(threadId);
       if (document.state.status === 'active') {
         const state = await this.service.pause(
@@ -414,7 +466,26 @@ export class DesktopGoalCoordinator {
     if (!pending) return;
     clearTimeout(pending.timeout);
     this.pendingByThread.delete(threadId);
-    await this.options.taskHost.cancelTask(pending.taskId, reason);
+    await this.cancelDiscardedGoalTask(pending.taskId, reason);
+  }
+
+  private async cancelRunningGoalTask(threadId: string, reason: string): Promise<void> {
+    const taskId = this.runningByThread.get(threadId);
+    if (!taskId) return;
+    await this.cancelDiscardedGoalTask(taskId, reason);
+    if (this.runningByThread.get(threadId) === taskId) {
+      this.runningByThread.delete(threadId);
+    }
+  }
+
+  private async cancelDiscardedGoalTask(taskId: string, reason: string): Promise<void> {
+    this.discardedGoalTaskIds.add(taskId);
+    try {
+      await this.options.taskHost.cancelTask(taskId, reason);
+    } catch (error) {
+      this.discardedGoalTaskIds.delete(taskId);
+      throw error;
+    }
   }
 
   private async prepareBindStart(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
@@ -437,7 +508,7 @@ export class DesktopGoalCoordinator {
   private mainOwnedContext(threadId: string): TaskCreateInput['context'] {
     return {
       threadId,
-      taskIds: this.options.store.listTaskBindings(threadId).map(binding => binding.taskId),
+      taskIds: this.options.store.listThreadTaskIds(threadId),
     };
   }
 

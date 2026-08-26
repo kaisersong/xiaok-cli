@@ -68,6 +68,7 @@ describe('AppLayout', () => {
   it('renders a sidebar-colored titlebar fill while the sidebar is expanded', () => {
     renderLayout()
 
+    expect(screen.getByTestId('app-layout')).toHaveStyle({ '--app-sidebar-width': '15rem' })
     expect(screen.getByTestId('desktop-titlebar')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-titlebar-fill')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-component')).toBeInTheDocument()
@@ -86,6 +87,7 @@ describe('AppLayout', () => {
 
     fireEvent.click(screen.getByTitle('收起侧边栏'))
 
+    expect(screen.getByTestId('app-layout')).toHaveStyle({ '--app-sidebar-width': '0px' })
     expect(screen.queryByTestId('sidebar-titlebar-fill')).toBeNull()
     expect(screen.queryByTestId('sidebar-component')).toBeNull()
     expect(screen.getByTitle('展开侧边栏')).toBeInTheDocument()

@@ -2513,6 +2513,7 @@ export const zh: LocaleStrings = {
     statusFailed: "异常",
     openAttentionItem: (title: string, status: string, reason?: string, nextStep?: string) =>
       `打开关注事项：${title}；状态：${status}${reason ? `；原因：${reason}` : ''}${nextStep ? `；下一步：${nextStep}` : ''}`,
+    goalQuickPrompt: "/goal 创建 Goal",
     quickPrompts: [
       "帮我写一篇产品调研报告",
       "生成一份竞品对比分析",
@@ -2900,6 +2901,9 @@ export const zh: LocaleStrings = {
     cuDismiss: "暂不启用",
     taskFailed: "任务未完成，请检查模型配置或稍后重试。",
     scrollToBottom: "跳到最新",
+    conversationIndexLabel: "提示词索引",
+    conversationIndexItem: (index, preview) => `跳到提示词 ${index}：${preview}`,
+    conversationIndexUntitled: "未命名提示词",
     inputPlaceholder: "输入消息...",
     replyPlaceholder: "回复...",
     artifact: "产物",
@@ -2940,6 +2944,8 @@ export const zh: LocaleStrings = {
     statusCancelled: "已取消",
     statusDisarmed: "待恢复",
     budgetExhausted: "轮次预算已用完",
+    showDetails: "展开目标详情",
+    hideDetails: "收起目标详情",
   },
 
   // chatInput

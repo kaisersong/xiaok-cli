@@ -244,22 +244,41 @@ describe('catalog only lists models the providers actually serve', () => {
     expect(getProviderProfile('minimax')?.baseUrl).toBe('https://api.minimax.io/v1');
   });
 
-  it('does not claim image input for DeepSeek, which officially rejects it', () => {
+  it('claims image input only for the official DeepSeek Vision Exp model', () => {
     const profile = getProviderProfile('deepseek');
     const variants = [profile!.defaultModel, ...(profile!.availableModels ?? [])];
 
     for (const variant of variants) {
-      // 官方三处独立说明不支持图片输入（Anthropic 兼容表 / Responses API / chat 参考）
-      expect(variant.capabilities, variant.modelId).not.toContain('image_in');
-      // 官方为默认开启思考模式
+      if (variant.modelId === 'deepseek-v4-flash-vision-exp') {
+        expect(variant.capabilities, variant.modelId).toContain('image_in');
+      } else {
+        expect(variant.capabilities, variant.modelId).not.toContain('image_in');
+      }
       expect(variant.capabilities, variant.modelId).toContain('thinking');
     }
+  });
+
+  it('registers the exact DeepSeek V4 Flash Vision Exp model metadata', () => {
+    const profile = getProviderProfile('deepseek');
+    const variant = profile?.availableModels?.find(
+      (candidate) => candidate.modelId === 'deepseek-v4-flash-vision-exp',
+    );
+
+    expect(variant).toEqual({
+      modelId: 'deepseek-v4-flash-vision-exp',
+      model: 'deepseek-v4-flash-vision-exp',
+      label: 'DeepSeek V4 Flash Vision Exp',
+      capabilities: ['tools', 'thinking', 'image_in'],
+      runtimeOptions: { contextLimit: 1_000_000 },
+    });
   });
 });
 
 describe('GLM catalog context windows', () => {
-  // 数值来自 https://docs.bigmodel.cn/cn/guide/start/model-overview 逐个查证。
+  // 既有模型数值来自 https://docs.bigmodel.cn/cn/guide/start/model-overview；
+  // GLM-5.3-Flash 来自 https://docs.z.ai/guides/vlm/glm-5.3-flash。
   const OFFICIAL_CONTEXT_LIMITS: Record<string, number> = {
+    'glm-5.3-flash': 1_048_576,
     'glm-5.3': 1_048_576,
     'glm-5.2': 1_000_000,
     'glm-5.1': 200_000,
@@ -319,6 +338,23 @@ describe('GLM catalog context windows', () => {
     expect(variant?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
   });
 
+  it('registers GLM-5.3-Flash with the exact official wire model and multimodal metadata', () => {
+    const profile = getProviderProfile('glm');
+    const variant = profile!.availableModels?.find(
+      (item) => item.modelId === 'glm-5.3-flash',
+    );
+
+    expect(variant).toBeDefined();
+    expect(variant?.model).toBe('glm-5.3-flash');
+    expect(variant?.label).toBe('GLM 5.3 Flash');
+    expect(variant?.capabilities).toEqual(['tools', 'thinking', 'image_in']);
+    expect(variant?.runtimeOptions).toEqual({
+      contextLimit: 1_048_576,
+      reasoningEffort: 'max',
+    });
+    expect(variant?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
+  });
+
   it('finds GLM-5.3 by its synthesized legacy modelId via the wire-model fallback', () => {
     // 存量 config.json 里可能残留 `glm-glm-5-3` 这类合成 id（provider 前缀重复），
     // 与 catalog 的 `glm-5.3` 不一致；findCatalogModel 的 wireModel 回退应仍能命中。
@@ -327,6 +363,18 @@ describe('GLM catalog context windows', () => {
 
     expect(recovered).toBeDefined();
     expect(recovered?.runtimeOptions?.contextLimit).toBe(1_048_576);
+  });
+
+  it('finds GLM-5.3-Flash by a synthesized config id via the wire-model fallback', () => {
+    const profile = getProviderProfile('glm');
+    const recovered = findCatalogModel(
+      profile,
+      'glm-glm-5-3-flash',
+      'glm-5.3-flash',
+    );
+
+    expect(recovered?.modelId).toBe('glm-5.3-flash');
+    expect(recovered?.capabilities).toContain('image_in');
   });
 });
 
@@ -478,6 +526,7 @@ describe('official context windows per provider', () => {
     deepseek: {
       'deepseek-v4-pro': 1_000_000,
       'deepseek-v4-flash': 1_000_000,
+      'deepseek-v4-flash-vision-exp': 1_000_000,
     },
     // https://platform.minimax.io/docs/guides/text-generation
     minimax: {

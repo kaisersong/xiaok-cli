@@ -89,6 +89,32 @@ describe('SqliteGoalStore', () => {
     store.close();
   });
 
+  it('orders Goal turns and context-only tasks in one main-owned thread history', () => {
+    const { store } = setup();
+    store.bindTask({
+      goalId: 'goal_1', epoch: 1, goalTurnId: 'turn_1', threadId: 'thread_1',
+      taskId: 'task_1', origin: 'user', attachedAt: 100,
+    });
+    store.recordContextTask({
+      goalId: 'goal_1', threadId: 'thread_1', taskId: 'task_2', recordedAt: 110,
+    });
+    store.bindTask({
+      goalId: 'goal_1', epoch: 1, goalTurnId: 'turn_2', threadId: 'thread_1',
+      taskId: 'task_3', origin: 'continuation', attachedAt: null,
+    });
+
+    expect(store.listThreadTaskIds('thread_1')).toEqual(['task_1', 'task_2', 'task_3']);
+    expect(store.getTaskBinding('task_2')).toBeNull();
+    expect(() => store.bindTask({
+      goalId: 'goal_1', epoch: 1, goalTurnId: 'turn_duplicate', threadId: 'thread_1',
+      taskId: 'task_2', origin: 'user', attachedAt: null,
+    })).toThrow(/task id/i);
+    expect(() => store.recordContextTask({
+      goalId: 'goal_1', threadId: 'thread_1', taskId: 'task_1', recordedAt: 120,
+    })).toThrow(/task id/i);
+    store.close();
+  });
+
   it('isolates a corrupt Goal row as unavailable without overwriting it', async () => {
     const { dbPath, store, service, context } = setup();
     const created = await service.create(context(null), {

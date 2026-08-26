@@ -127,7 +127,11 @@ export function AppLayout() {
 
   return (
     <SidebarContext.Provider value={{ collapsed: sidebarCollapsed, setCollapsed: setSidebarCollapsed }}>
-      <div className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]">
+      <div
+        data-testid="app-layout"
+        className="flex h-screen flex-col overflow-hidden bg-[var(--c-bg-page)]"
+        style={{ '--app-sidebar-width': sidebarCollapsed ? '0px' : '15rem' } as React.CSSProperties}
+      >
         {/* Draggable title bar */}
         <div
           data-testid="desktop-titlebar"

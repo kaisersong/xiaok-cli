@@ -308,7 +308,7 @@ export function ChatShell() {
   const lastLiveErrorRef = useRef<{ taskKey: string; rawMessage: string } | null>(null);
 
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
-  const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string } | undefined;
+  const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string; createGoal?: boolean } | undefined;
   const initialPrompt = state?.initialPrompt;
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
@@ -1213,20 +1213,29 @@ export function ChatShell() {
     updateComputerUseActionMessage(messageId, { status: 'dismissed', detail: t.chatShell.cuDismissed });
   };
 
-  const handleCancel = async () => {
-    if (!thread?.currentTaskId) return;
-    await api.cancelTask(thread.currentTaskId);
+  const clearCancelledTaskPresentation = () => {
     setStatus('idle');
     streamRef.current = '';
     cancelStreamingFlush();
     setStreamingText('');
   };
 
-  const runGoalMutation = async (action: () => Promise<DesktopGoalProjection>) => {
+  const handleCancel = async () => {
+    if (!thread?.currentTaskId) return;
+    await api.cancelTask(thread.currentTaskId);
+    clearCancelledTaskPresentation();
+  };
+
+  const runGoalMutation = async (
+    action: () => Promise<DesktopGoalProjection>,
+    clearTaskPresentation = false,
+  ) => {
     setGoalLoading(true);
     setGoalError(null);
     try {
-      setGoal(await action());
+      const next = await action();
+      setGoal(next);
+      if (clearTaskPresentation) clearCancelledTaskPresentation();
     } catch (error) {
       setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
     } finally {
@@ -1415,27 +1424,31 @@ export function ChatShell() {
     return collectGeneratedFilesForTurn(currentTaskEventsRef.current, textsToScan);
   })();
 
-  const showTaskPanel = planSteps.length > 0 && !canvasOpen;
+  const showGoalPanel = goal !== null || state?.createGoal === true;
+  const showTaskPanel = !canvasOpen && (planSteps.length > 0 || showGoalPanel);
+  const goalContent = showGoalPanel ? (
+    <GoalBar
+      goal={goal}
+      initialEditing={state?.createGoal === true}
+      loading={goalLoading}
+      error={goalError}
+      onCreate={handleGoalCreate}
+      onReplace={handleGoalReplace}
+      onPause={() => {
+        const desktop = getDesktopApi();
+        if (taskId && desktop) return runGoalMutation(() => desktop.pauseGoal(taskId), true);
+      }}
+      onResume={handleGoalResume}
+      onCancel={() => {
+        const desktop = getDesktopApi();
+        if (taskId && desktop) return runGoalMutation(() => desktop.cancelGoal(taskId), true);
+      }}
+    />
+  ) : undefined;
 
   return (
     <div className="flex h-full overflow-hidden">
       <div className="flex flex-1 min-w-0 flex-col">
-        <GoalBar
-          goal={goal}
-          loading={goalLoading}
-          error={goalError}
-          onCreate={handleGoalCreate}
-          onReplace={handleGoalReplace}
-          onPause={() => {
-            const desktop = getDesktopApi();
-            if (taskId && desktop) return runGoalMutation(() => desktop.pauseGoal(taskId));
-          }}
-          onResume={handleGoalResume}
-          onCancel={() => {
-            const desktop = getDesktopApi();
-            if (taskId && desktop) return runGoalMutation(() => desktop.cancelGoal(taskId));
-          }}
-        />
         <ChatView
           thread={thread}
           messages={messages}
@@ -1471,6 +1484,7 @@ export function ChatShell() {
           status={status}
           result={result}
           generatedFiles={generatedFiles}
+          goalContent={goalContent}
           onFileClick={async (file) => {
             let content = '';
             try {

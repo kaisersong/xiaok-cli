@@ -46,6 +46,18 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+Xiaok Desktop v1.4.32 让长对话更容易定位，也让 Goal Mode 更容易发现、恢复和监控，同时不再切割主工作区。本版还把最新 GLM 与 DeepSeek Flash 模型加入 CLI/Desktop 共用目录，并加强超时分类与产物证据恢复。
+
+**Goal Mode 体验、对话导航与 Flash 模型：**
+
+- **Splash 与右侧栏中的 Goal Mode**：Desktop Splash 把 Goal 作为一级命令展示。活动 Goal 复用现有右侧任务面板，不再从顶部切开对话；Goal 详情与 Artifact 工作区保持互斥，避免右侧界面重叠。
+- **可靠的 Goal 恢复**：恢复时带回所属会话上下文，保留暂停期间提供的唯一 token；预算耗尽会明确进入 blocked，成功文件写入也会作为 artifact evidence 留存，不在换轮时丢失。
+- **提示词索引导航**：多轮对话新增贴近分隔线的紧凑索引。静止刻度全部等长，当前项只改变亮度；悬停产生局部波动，摘要窗跟随所选刻度，展示一行提示词与最多两行回答摘要，点击可平滑跳到对应提示词。
+- **GLM 5.3 Flash**：CLI 与 Desktop 新增 `glm-5.3-flash`，包含已核验的百万级上下文、图片输入、工具调用、始终开启的思考模式及受支持的 reasoning effort 档位。
+- **DeepSeek V4 Flash Vision Exp**：共用模型目录新增 `deepseek-v4-flash-vision-exp` 图片输入能力，同时保持非视觉 V4 型号为纯文本。
+- **可重试的 Provider 超时**：`ETIMEDOUT`、流提前关闭、socket 中断等传输失败统一归类为可重试模型失败，同时不削弱用户主动中断语义。
+- **发布版本对齐**：根 CLI、Desktop、package lock、下载链接和 Desktop Release workflow 统一为 `1.4.32` / `desktop-v1.4.32`。
+
 Xiaok Desktop v1.4.31 让长任务可以持续推进，也让项目恢复过程真正可见。Goal Mode 能跨多个轮次保持目标、预算与证据；项目智能体可以一次检测全部配置，并在自身运行时不可用时按配置降级到 Desktop 当前模型。
 
 **Goal Mode、智能体降级与工作流可靠性：**
@@ -710,9 +722,9 @@ xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界�
 
 从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 下载：
 
-- **xiaok-1.4.31-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
-- **xiaok-1.4.31-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
-- **xiaok-setup-1.4.31.exe** — Windows 安装包（x64）
+- **xiaok-1.4.32-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
+- **xiaok-1.4.32-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
+- **xiaok-setup-1.4.32.exe** — Windows 安装包（x64）
 
 ### 功能特性
 

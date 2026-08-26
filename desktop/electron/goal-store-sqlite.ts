@@ -27,6 +27,14 @@ export interface GoalTaskBinding {
   attachedAt: number | null;
 }
 
+export interface GoalContextTask {
+  goalId: string;
+  threadId: string;
+  taskId: string;
+  ordinal: number;
+  recordedAt: number;
+}
+
 export class SqliteGoalStore implements GoalStore {
   private readonly db: DatabaseSync;
 
@@ -160,10 +168,8 @@ export class SqliteGoalStore implements GoalStore {
 
   bindTask(input: Omit<GoalTaskBinding, 'ordinal'>): GoalTaskBinding {
     return this.transaction(() => {
-      const next = this.db.prepare(
-        'select coalesce(max(ordinal), 0) + 1 as ordinal from goal_thread_tasks where thread_id = ?',
-      ).get(input.threadId) as { ordinal: number };
-      const record = { ...input, ordinal: next.ordinal };
+      this.assertTaskIdAvailable(input.taskId);
+      const record = { ...input, ordinal: this.nextThreadOrdinal(input.threadId) };
       this.db.prepare(`
         insert into goal_thread_tasks(
           binding_id, goal_id, epoch, goal_turn_id, thread_id, task_id, origin, ordinal, attached_at
@@ -171,6 +177,22 @@ export class SqliteGoalStore implements GoalStore {
       `).run(
         randomUUID(), record.goalId, record.epoch, record.goalTurnId, record.threadId,
         record.taskId, record.origin, record.ordinal, record.attachedAt,
+      );
+      return record;
+    });
+  }
+
+  recordContextTask(input: Omit<GoalContextTask, 'ordinal'>): GoalContextTask {
+    return this.transaction(() => {
+      this.assertTaskIdAvailable(input.taskId);
+      const record = { ...input, ordinal: this.nextThreadOrdinal(input.threadId) };
+      this.db.prepare(`
+        insert into goal_thread_context_tasks(
+          context_id, goal_id, thread_id, task_id, ordinal, recorded_at
+        ) values (?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(), record.goalId, record.threadId, record.taskId,
+        record.ordinal, record.recordedAt,
       );
       return record;
     });
@@ -197,6 +219,16 @@ export class SqliteGoalStore implements GoalStore {
     }));
   }
 
+  listThreadTaskIds(threadId: string): string[] {
+    return (this.db.prepare(`
+      select task_id, ordinal from goal_thread_tasks where thread_id = ?
+      union all
+      select task_id, ordinal from goal_thread_context_tasks where thread_id = ?
+      order by ordinal
+    `).all(threadId, threadId) as Array<{ task_id: string; ordinal: number }>)
+      .map(row => row.task_id);
+  }
+
   getTaskBinding(taskId: string): GoalTaskBinding | null {
     const row = this.db.prepare(`
       select goal_id, epoch, goal_turn_id, thread_id, task_id, origin, ordinal, attached_at
@@ -220,6 +252,27 @@ export class SqliteGoalStore implements GoalStore {
       state.goalId, state.sessionId, state.revision, state.epoch,
       JSON.stringify(state), state.createdAt, state.updatedAt,
     );
+  }
+
+  private nextThreadOrdinal(threadId: string): number {
+    const row = this.db.prepare(`
+      select coalesce(max(ordinal), 0) + 1 as ordinal from (
+        select ordinal from goal_thread_tasks where thread_id = ?
+        union all
+        select ordinal from goal_thread_context_tasks where thread_id = ?
+      )
+    `).get(threadId, threadId) as { ordinal: number };
+    return row.ordinal;
+  }
+
+  private assertTaskIdAvailable(taskId: string): void {
+    const existing = this.db.prepare(`
+      select task_id from goal_thread_tasks where task_id = ?
+      union all
+      select task_id from goal_thread_context_tasks where task_id = ?
+      limit 1
+    `).get(taskId, taskId);
+    if (existing) throw new Error(`Goal thread task id is already recorded: ${taskId}`);
   }
 
   private requireState(goalId: string): GoalState {
@@ -302,6 +355,16 @@ export class SqliteGoalStore implements GoalStore {
         unique(goal_id, epoch, goal_turn_id)
       );
       create index if not exists goal_thread_tasks_thread on goal_thread_tasks(thread_id, ordinal);
+      create table if not exists goal_thread_context_tasks (
+        context_id text primary key,
+        goal_id text not null,
+        thread_id text not null,
+        task_id text not null unique,
+        ordinal integer not null,
+        recorded_at integer not null
+      );
+      create index if not exists goal_thread_context_tasks_thread
+        on goal_thread_context_tasks(thread_id, ordinal);
     `);
   }
 }

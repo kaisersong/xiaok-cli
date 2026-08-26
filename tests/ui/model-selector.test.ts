@@ -84,6 +84,52 @@ describe('buildModelOptions', () => {
     }
   });
 
+  it('lists GLM-5.3-Flash when the first-party GLM provider is configured', () => {
+    const options = buildModelOptions({
+      ...configFixture,
+      providers: {
+        ...configFixture.providers,
+        glm: {
+          type: 'first_party' as const,
+          protocol: 'openai_legacy' as const,
+          apiKey: 'sk-glm',
+          baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        },
+      },
+    });
+
+    expect(options).toContainEqual({
+      id: 'glm-5.3-flash',
+      provider: 'glm',
+      model: 'glm-5.3-flash',
+      label: 'GLM 5.3 Flash',
+      desc: 'GLM',
+    });
+  });
+
+  it('lists DeepSeek V4 Flash Vision Exp when the first-party provider is configured', () => {
+    const options = buildModelOptions({
+      ...configFixture,
+      providers: {
+        ...configFixture.providers,
+        deepseek: {
+          type: 'first_party' as const,
+          protocol: 'openai_legacy' as const,
+          apiKey: 'sk-deepseek',
+          baseUrl: 'https://api.deepseek.com/v1',
+        },
+      },
+    });
+
+    expect(options).toContainEqual({
+      id: 'deepseek-v4-flash-vision-exp',
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash-vision-exp',
+      label: 'DeepSeek V4 Flash Vision Exp',
+      desc: 'DeepSeek',
+    });
+  });
+
   it('renders the model selector as a multi-line overlay above the footer when a repl renderer is active', async () => {
     const harness = createTtyHarness(60, 24);
     const renderer = new ReplRenderer(process.stdout);

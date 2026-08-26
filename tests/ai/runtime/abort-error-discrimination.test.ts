@@ -42,6 +42,26 @@ describe('abort error discrimination', () => {
     });
   });
 
+  it('classifies provider transport read failures as retryable model failures', () => {
+    expect(normalizeRuntimeError(new Error('read ETIMEDOUT'))).toEqual({
+      code: 'model_failed',
+      message: 'read ETIMEDOUT',
+      retryable: true,
+    });
+    expect(normalizeRuntimeError(Object.assign(new Error('read failed'), {
+      code: 'ETIMEDOUT',
+    }))).toMatchObject({
+      code: 'model_failed',
+      retryable: true,
+    });
+    expect(normalizeRuntimeError(Object.assign(new Error('Premature close'), {
+      code: 'ERR_STREAM_PREMATURE_CLOSE',
+    }))).toMatchObject({
+      code: 'model_failed',
+      retryable: true,
+    });
+  });
+
   it('classifies provider HTTP 4xx errors as non-retryable model failures', () => {
     const error = Object.assign(new Error(
       "400 Messages with role 'tool' must be a response to a preceding message with 'tool_calls'",

@@ -157,4 +157,15 @@ describe('goal reducer', () => {
       consecutiveBlockedTurns: 0,
     });
   });
+
+  it('blocks on the hard turn budget instead of leaving the final failed turn resumable', () => {
+    const finalTurn = reduceGoal({ ...createActiveGoal(), turnsUsed: 19 }, {
+      type: 'settle_turn', turnId: 'turn_20', tokensUsed: 2,
+      activeWallClockMs: 3, now: 200,
+      terminalDecision: { kind: 'paused', reason: 'runtime_error' },
+    });
+    expect(finalTurn).toMatchObject({
+      status: 'blocked', terminalReason: 'turn_budget_exhausted', turnsUsed: 20,
+    });
+  });
 });

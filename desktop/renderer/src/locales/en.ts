@@ -2533,6 +2533,7 @@ export const en: LocaleStrings = {
     statusFailed: "Issue",
     openAttentionItem: (title: string, status: string, reason?: string, nextStep?: string) =>
       `Open item to watch: ${title}; status: ${status}${reason ? `; reason: ${reason}` : ''}${nextStep ? `; next step: ${nextStep}` : ''}`,
+    goalQuickPrompt: "/goal Create Goal",
     quickPrompts: [
       "Write a product research report",
       "Generate a competitive analysis",
@@ -2920,6 +2921,9 @@ export const en: LocaleStrings = {
     cuDismiss: "Not now",
     taskFailed: "Task incomplete. Please check model configuration or try again later.",
     scrollToBottom: "Jump to latest",
+    conversationIndexLabel: "Prompt index",
+    conversationIndexItem: (index, preview) => `Jump to prompt ${index}: ${preview}`,
+    conversationIndexUntitled: "Untitled prompt",
     inputPlaceholder: "Type a message\u2026",
     replyPlaceholder: "Reply\u2026",
     artifact: "Artifact",
@@ -2960,6 +2964,8 @@ export const en: LocaleStrings = {
     statusCancelled: "Cancelled",
     statusDisarmed: "Resume required",
     budgetExhausted: "Turn budget exhausted",
+    showDetails: "Show Goal details",
+    hideDetails: "Hide Goal details",
   },
 
   // chatInput

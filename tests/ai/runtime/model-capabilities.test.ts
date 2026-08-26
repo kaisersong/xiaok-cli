@@ -20,9 +20,10 @@ describe('model capabilities', () => {
     expect(resolveModelCapabilities('claude-3-5-haiku-latest').contextLimit).toBe(200_000);
   });
 
-  it('supports image input for DeepSeek V4 models', () => {
-    expect(resolveModelCapabilities('deepseek-v4-pro').supportsImageInput).toBe(true);
-    expect(resolveModelCapabilities('deepseek-v4-flash').supportsImageInput).toBe(true);
+  it('supports image input only for DeepSeek V4 Flash Vision Exp', () => {
+    expect(resolveModelCapabilities('deepseek-v4-pro').supportsImageInput).toBe(false);
+    expect(resolveModelCapabilities('deepseek-v4-flash').supportsImageInput).toBe(false);
+    expect(resolveModelCapabilities('deepseek-v4-flash-vision-exp').supportsImageInput).toBe(true);
   });
 
   it('falls back to conservative defaults for unknown models', () => {

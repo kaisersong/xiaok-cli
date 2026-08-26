@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import type { ReactNode } from 'react';
 
 const { mockCreateTask, mockCreateTaskWithFiles, mockGetThread, mockRecoverTask, mockSubscribeTask, mockUpdateThreadTaskId, mockUpdateThreadTitle } = vi.hoisted(() => ({
   mockCreateTask: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     messages,
     generatedFiles,
     result,
+    onToggleCanvas,
   }: {
     prompt: string;
     queuedText?: string | null;
@@ -51,6 +53,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     }>;
     generatedFiles?: Array<{ filePath: string; name: string }>;
     result?: { artifacts?: Array<{ title: string; kind: string; mimeType?: string }> } | null;
+    onToggleCanvas?: () => void;
   }) => (
     <div>
       <textarea aria-label="chat-input" readOnly value={prompt} />
@@ -80,14 +83,21 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
       <button type="button" onClick={() => onSubmit?.('触发提交')}>submit-now</button>
       <button type="button" onClick={() => onSubmit?.('带附件提交', [{ filePath: '/tmp/context.md', name: 'context.md' }])}>submit-files</button>
       <button type="button" onClick={() => onQueue?.('第二条输入')}>queue-second</button>
+      <button type="button" onClick={onToggleCanvas}>open-canvas</button>
     </div>
   ),
 }));
 vi.mock('../../renderer/src/components/CanvasPanel', () => ({
-  CanvasPanel: () => null,
+  CanvasPanel: ({ onClose }: { onClose: () => void }) => (
+    <section data-testid="canvas-panel">
+      <button type="button" onClick={onClose}>close-canvas</button>
+    </section>
+  ),
 }));
 vi.mock('../../renderer/src/components/TaskPanel', () => ({
-  TaskPanel: () => null,
+  TaskPanel: ({ goalContent }: { goalContent?: ReactNode }) => (
+    <aside data-testid="task-panel">{goalContent}</aside>
+  ),
 }));
 
 vi.mock('../../renderer/src/layouts/AppLayout', () => ({
@@ -97,15 +107,114 @@ vi.mock('../../renderer/src/layouts/AppLayout', () => ({
 
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ChatShell } from '../../renderer/src/components/ChatShell';
+import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   window.localStorage.clear();
   window.sessionStorage.clear();
+  delete window.xiaokDesktop;
+  _resetDesktopApiCache();
 });
 
 describe('ChatShell draft prompt navigation state', () => {
+  it('hides the Goal task panel while Artifact canvas owns the right side and restores it after close', async () => {
+    window.xiaokDesktop = {
+      getGoal: vi.fn().mockResolvedValue({
+        activation: 'disarmed',
+        state: {
+          goalId: 'goal-artifact', sessionId: 'thread-goal-artifact', revision: 1, epoch: 1,
+          objective: '生成并核对复杂报告', expectedEvidenceKinds: ['file_artifact'], status: 'completed',
+          turnsUsed: 2, tokensUsed: 128465, activeWallClockMs: 1000,
+          budgetLimits: { turnLimit: 12 }, consecutiveBlockedTurns: 0,
+          terminalReason: 'verified_complete', createdAt: 1, updatedAt: 2,
+        },
+      }),
+      onGoalChanged: vi.fn(() => () => {}),
+      onGoalTaskPrepared: vi.fn(() => () => {}),
+    } as unknown as typeof window.xiaokDesktop;
+    _resetDesktopApiCache();
+    mockGetThread.mockResolvedValue({
+      id: 'thread-goal-artifact', title: 'Goal artifact', status: 'idle', mode: 'work',
+      createdAt: 1, updatedAt: 2, starred: false, gtdBucket: 'inbox', pinnedAt: null,
+      currentTaskId: null, taskIds: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-goal-artifact']}>
+        <LocaleProvider>
+          <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByTestId('task-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'open-canvas' }));
+    expect(await screen.findByTestId('canvas-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-panel')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'close-canvas' }));
+    expect(await screen.findByTestId('task-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('canvas-panel')).not.toBeInTheDocument();
+  });
+
+  it('clears local streaming state after Goal pause succeeds', async () => {
+    const pauseGoal = vi.fn().mockResolvedValue({
+      activation: 'disarmed',
+      state: {
+        goalId: 'goal-pause', sessionId: 'thread-goal-pause', revision: 2, epoch: 1,
+        objective: '等待用户证据', expectedEvidenceKinds: ['answer'], status: 'paused',
+        turnsUsed: 0, tokensUsed: 0, activeWallClockMs: 0,
+        budgetLimits: { turnLimit: 5 }, consecutiveBlockedTurns: 0,
+        terminalReason: 'user_paused', createdAt: 1, updatedAt: 2,
+      },
+    });
+    window.xiaokDesktop = {
+      getGoal: vi.fn().mockResolvedValue({
+        activation: 'armed',
+        state: {
+          goalId: 'goal-pause', sessionId: 'thread-goal-pause', revision: 1, epoch: 1,
+          objective: '等待用户证据', expectedEvidenceKinds: ['answer'], status: 'active',
+          turnsUsed: 0, tokensUsed: 0, activeWallClockMs: 0,
+          budgetLimits: { turnLimit: 5 }, consecutiveBlockedTurns: 0,
+          createdAt: 1, updatedAt: 1,
+        },
+      }),
+      pauseGoal,
+      onGoalChanged: vi.fn(() => () => {}),
+      onGoalTaskPrepared: vi.fn(() => () => {}),
+    } as unknown as typeof window.xiaokDesktop;
+    _resetDesktopApiCache();
+    mockGetThread.mockResolvedValue({
+      id: 'thread-goal-pause', title: 'Goal pause', status: 'idle', mode: 'work',
+      createdAt: 1, updatedAt: 1, starred: false, gtdBucket: 'inbox', pinnedAt: null,
+      currentTaskId: 'task-goal-pause', taskIds: ['task-goal-pause'],
+    });
+    mockRecoverTask.mockResolvedValue({
+      snapshot: {
+        taskId: 'task-goal-pause', sessionId: 'session-goal-pause', status: 'running',
+        prompt: '等待用户证据', materials: [], events: [
+          { type: 'assistant_delta', delta: '仍在运行' },
+        ], createdAt: 1, updatedAt: 2,
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-goal-pause']}>
+        <LocaleProvider>
+          <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('running'));
+    expect(within(screen.getByTestId('task-panel')).getByRole('button', { name: '暂停' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '暂停' }));
+    await waitFor(() => expect(pauseGoal).toHaveBeenCalledWith('thread-goal-pause'));
+    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+  });
+
   it('loads draftPrompt into the chat input without creating a task', async () => {
     mockGetThread.mockResolvedValue({
       id: 'thread-draft',

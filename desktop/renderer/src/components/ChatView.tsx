@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
 import { ChatInput } from './ChatInput';
@@ -6,6 +6,7 @@ import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { A2uiArtifactBlock } from './a2ui/A2uiArtifactBlock';
+import { ConversationIndexRail } from './ConversationIndexRail';
 import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
 import { getDesktopDocumentMimeType } from '../shared/document-formats';
@@ -203,6 +204,16 @@ function normalizeResultComparableText(text: string): string {
   return text.replace(/\r\n?/g, '\n').trim();
 }
 
+function compactConversationPreview(text: string): string {
+  return text
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)/gm, '')
+    .replace(/[*_~`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function findAssistantTextInCurrentTurn(messages: ChatMessage[], endIndex: number): string {
   for (let index = endIndex - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -279,15 +290,82 @@ export function ChatView({
   const { t } = useLocale();
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
+  const activeIndexFrameRef = useRef<number | null>(null);
   const isAtBottomRef = useRef(true);
   const lastScrollTimeRef = useRef(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const promptIndexEntries = useMemo(() => {
+    const userMessageIndexes = messages
+      .map((message, index) => message.role === 'user' ? index : -1)
+      .filter((index) => index >= 0);
+
+    return userMessageIndexes.map((messageIndex, userIndex) => {
+      const message = messages[messageIndex];
+      const nextUserIndex = userMessageIndexes[userIndex + 1] ?? messages.length;
+      const assistantMessage = messages
+        .slice(messageIndex + 1, nextUserIndex)
+        .find((candidate) => candidate.role === 'assistant' && candidate.content.trim());
+      const responseContent = assistantMessage?.content
+        || (userIndex === userMessageIndexes.length - 1 ? streamingText : '');
+      return {
+        id: message.id,
+        preview: message.content
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find(Boolean)
+          ?.slice(0, 72) || t.chatView.conversationIndexUntitled,
+        responsePreview: compactConversationPreview(responseContent).slice(0, 240) || undefined,
+      };
+    });
+  }, [messages, streamingText, t.chatView.conversationIndexUntitled]);
+  const [activePromptId, setActivePromptId] = useState<string | null>(
+    () => promptIndexEntries[0]?.id ?? null,
+  );
   const currentTurnAssistantText = findAssistantTextInCurrentTurn(messages, messages.length) || streamingText;
   const standaloneDisplayResult = projectResultForDisplay(result, currentTurnAssistantText);
   const standaloneResultEligible = Boolean(result && (status === 'completed' || status === 'idle')) || generatedFiles.length > 0;
   const showStandaloneResult = !hasResultCardInCurrentTurn(messages)
     && standaloneResultEligible
     && hasResultCardContent(standaloneDisplayResult, generatedFiles);
+
+  useEffect(() => {
+    setActivePromptId((current) => (
+      current && promptIndexEntries.some((entry) => entry.id === current)
+        ? current
+        : promptIndexEntries[0]?.id ?? null
+    ));
+  }, [promptIndexEntries]);
+
+  const updateActivePrompt = useCallback(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement || promptIndexEntries.length === 0) return;
+    const scrollRect = scrollElement.getBoundingClientRect();
+    const readingLine = scrollRect.top + Math.min(140, scrollElement.clientHeight * 0.25);
+    let nextId = promptIndexEntries[0]?.id ?? null;
+    for (const entry of promptIndexEntries) {
+      const anchor = messageAnchorRefs.current.get(entry.id);
+      if (!anchor) continue;
+      if (anchor.getBoundingClientRect().top <= readingLine) nextId = entry.id;
+      else break;
+    }
+    setActivePromptId((current) => current === nextId ? current : nextId);
+  }, [promptIndexEntries]);
+
+  const scheduleActivePromptUpdate = useCallback(() => {
+    if (activeIndexFrameRef.current !== null) return;
+    activeIndexFrameRef.current = window.requestAnimationFrame(() => {
+      activeIndexFrameRef.current = null;
+      updateActivePrompt();
+    });
+  }, [updateActivePrompt]);
+
+  const handlePromptIndexSelect = useCallback((id: string) => {
+    const anchor = messageAnchorRefs.current.get(id);
+    if (!anchor) return;
+    setActivePromptId(id);
+    anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   // Track whether user manually scrolled away from bottom
   useEffect(() => {
@@ -298,10 +376,17 @@ export function ChatView({
       const atBottom = scrollHeight - scrollTop - clientHeight < 50;
       isAtBottomRef.current = atBottom;
       setShowScrollToBottom(!atBottom);
+      scheduleActivePromptUpdate();
     };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (activeIndexFrameRef.current !== null) {
+        window.cancelAnimationFrame(activeIndexFrameRef.current);
+        activeIndexFrameRef.current = null;
+      }
+    };
+  }, [scheduleActivePromptUpdate]);
 
   // Throttled auto-scroll: only when at bottom, max once per 100ms
   useEffect(() => {
@@ -326,9 +411,21 @@ export function ChatView({
   }, [onToggleCanvas]);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+    <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--c-bg-page)]">
+      <ConversationIndexRail
+        entries={promptIndexEntries}
+        activeId={activePromptId}
+        ariaLabel={t.chatView.conversationIndexLabel}
+        itemLabel={t.chatView.conversationIndexItem}
+        onSelect={handlePromptIndexSelect}
+      />
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-x-hidden overflow-y-auto" style={{ userSelect: 'text' }}>
+      <div
+        ref={scrollRef}
+        data-testid="chat-scroll-container"
+        className="flex-1 overflow-x-hidden overflow-y-auto"
+        style={{ userSelect: 'text' }}
+      >
         <div className="mx-auto max-w-[800px] px-14 py-6">
           <div className="space-y-6">
             {messages.map((msg, index) => {
@@ -338,7 +435,15 @@ export function ChatView({
               const resultGeneratedFiles = msg.generatedFiles ?? [];
               if (msg.role === 'result_card' && !hasResultCardContent(displayResult, resultGeneratedFiles)) return null;
               return (
-                <div key={msg.id} className={msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''}>
+                <div
+                  key={msg.id}
+                  ref={msg.role === 'user' ? (node) => {
+                    if (node) messageAnchorRefs.current.set(msg.id, node);
+                    else messageAnchorRefs.current.delete(msg.id);
+                  } : undefined}
+                  data-message-anchor={msg.role === 'user' ? msg.id : undefined}
+                  className={`${msg.role === 'user' ? 'group/usermsg flex flex-col items-end' : msg.role === 'assistant' ? 'group/assistantmsg' : ''} ${msg.role === 'user' ? 'scroll-mt-6' : ''}`}
+                >
                 {msg.role === 'user' ? (
                   <>
                     <div data-role="user" className="max-w-[85%] rounded-2xl rounded-br-sm bg-[var(--c-bg-deep)] px-4 py-3 text-sm text-[var(--c-text-primary)] whitespace-pre-wrap break-words select-text">

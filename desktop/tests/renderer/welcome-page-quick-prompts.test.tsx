@@ -66,17 +66,48 @@ describe('WelcomePage quick prompts', () => {
     const scheduledPrompt = '创建定时任务：每天早上9点生成AI日报';
     const workflowPrompt = '设计一个工作流：资料收集、撰写、评审后交付报告';
     const loopPrompt = '创建Loop：每周自动检查项目状态并输出Markdown报告';
+    const goalPrompt = '/goal 创建 Goal';
     const promptGrid = screen.getByTestId('quick-prompts');
     const projectButton = screen.getByRole('button', { name: projectPrompt });
 
     expect(screen.queryByRole('button', { name: oldProjectPrompt })).not.toBeInTheDocument();
     expect(promptGrid).toHaveClass('flex', 'flex-wrap', 'justify-center');
-    expect(promptGrid.querySelectorAll('button')).toHaveLength(10);
+    expect(promptGrid.querySelectorAll('button')).toHaveLength(11);
+    expect(screen.getByRole('button', { name: goalPrompt })).toHaveAttribute('title', goalPrompt);
     expect(screen.getByRole('button', { name: scheduledPrompt })).toHaveAttribute('title', scheduledPrompt);
     expect(screen.getByRole('button', { name: workflowPrompt })).toHaveAttribute('title', workflowPrompt);
     expect(screen.getByRole('button', { name: loopPrompt })).toHaveAttribute('title', loopPrompt);
     expect(projectButton).toHaveClass('whitespace-nowrap');
     expect(projectButton).toHaveAttribute('title', projectPrompt);
+  });
+
+  it('opens an empty thread with the Goal form requested instead of creating an ordinary task', async () => {
+    mockCreateThread.mockResolvedValue({
+      id: 'thread-goal', title: '创建目标', status: 'idle', mode: 'work',
+      createdAt: 1, updatedAt: 1, starred: false, gtdBucket: 'inbox',
+      pinnedAt: null, currentTaskId: null, taskIds: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <LocaleProvider>
+          <Routes>
+            <Route path="/" element={<WelcomePage />} />
+            <Route path="/t/:threadId" element={<RouteStateDump />} />
+          </Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '/goal 创建 Goal' }));
+
+    await waitFor(() => {
+      expect(mockCreateThread).toHaveBeenCalledWith({ title: '创建目标' });
+      expect(screen.getByTestId('route-state')).toHaveTextContent('"createGoal":true');
+    });
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
+    expect(mockUpdateThreadTaskId).not.toHaveBeenCalled();
   });
 
   it('passes selected file names to the new thread route for visible attachment context', async () => {

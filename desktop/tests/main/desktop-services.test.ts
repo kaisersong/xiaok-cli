@@ -2834,6 +2834,49 @@ describe('desktop services', () => {
     }
   });
 
+  it('projects GLM-5.3-Flash into the Desktop provider profile', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    const snapshot = await services.getModelConfig();
+    const glmProfile = snapshot.providerProfiles.find(profile => profile.id === 'glm');
+    const flash = glmProfile?.availableModels?.find(model => model.modelId === 'glm-5.3-flash');
+
+    expect(flash).toMatchObject({
+      model: 'glm-5.3-flash',
+      label: 'GLM 5.3 Flash',
+      capabilities: ['tools', 'thinking', 'image_in'],
+      runtimeOptions: {
+        contextLimit: 1_048_576,
+        reasoningEffort: 'max',
+      },
+    });
+  });
+
+  it('projects DeepSeek V4 Flash Vision Exp into the Desktop provider profile', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    const snapshot = await services.getModelConfig();
+    const profile = snapshot.providerProfiles.find(candidate => candidate.id === 'deepseek');
+    const vision = profile?.availableModels?.find(
+      model => model.modelId === 'deepseek-v4-flash-vision-exp',
+    );
+
+    expect(vision).toMatchObject({
+      model: 'deepseek-v4-flash-vision-exp',
+      label: 'DeepSeek V4 Flash Vision Exp',
+      capabilities: ['tools', 'thinking', 'image_in'],
+      runtimeOptions: { contextLimit: 1_000_000 },
+    });
+  });
+
   it('provider profiles include baseUrl for all first-party providers', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),

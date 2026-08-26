@@ -133,12 +133,7 @@ export function reduceGoal(state, action) {
                     blockerFingerprint: action.terminalDecision.fingerprint,
                 });
             }
-            if (action.terminalDecision.kind === 'paused') {
-                return mutate(state, action.now, {
-                    turnsUsed, tokensUsed, activeWallClockMs,
-                    status: 'paused', terminalReason: action.terminalDecision.reason,
-                });
-            }
+            const budgetReached = turnsUsed >= state.budgetLimits.turnLimit;
             if (action.terminalDecision.kind === 'blocker') {
                 const consecutive = action.terminalDecision.fingerprint === state.blockerFingerprint
                     ? state.consecutiveBlockedTurns + 1
@@ -146,17 +141,29 @@ export function reduceGoal(state, action) {
                 const blocked = consecutive >= (action.terminalDecision.threshold ?? 3);
                 return mutate(state, action.now, {
                     turnsUsed, tokensUsed, activeWallClockMs,
-                    status: blocked ? 'blocked' : 'active',
-                    terminalReason: blocked ? action.terminalDecision.reason : undefined,
+                    status: blocked || budgetReached ? 'blocked' : 'active',
+                    terminalReason: blocked
+                        ? action.terminalDecision.reason
+                        : budgetReached ? 'turn_budget_exhausted' : undefined,
                     blockerFingerprint: action.terminalDecision.fingerprint,
                     consecutiveBlockedTurns: consecutive,
                 });
             }
-            const budgetReached = turnsUsed >= state.budgetLimits.turnLimit;
+            if (budgetReached) {
+                return mutate(state, action.now, {
+                    turnsUsed, tokensUsed, activeWallClockMs,
+                    status: 'blocked', terminalReason: 'turn_budget_exhausted',
+                });
+            }
+            if (action.terminalDecision.kind === 'paused') {
+                return mutate(state, action.now, {
+                    turnsUsed, tokensUsed, activeWallClockMs,
+                    status: 'paused', terminalReason: action.terminalDecision.reason,
+                });
+            }
             return mutate(state, action.now, {
                 turnsUsed, tokensUsed, activeWallClockMs,
-                status: budgetReached ? 'blocked' : 'active',
-                terminalReason: budgetReached ? 'turn_budget_exhausted' : undefined,
+                status: 'active', terminalReason: undefined,
             });
         }
     }

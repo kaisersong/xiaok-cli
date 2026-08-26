@@ -89,8 +89,8 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     protocol: 'openai_legacy',
     baseUrl: 'https://api.deepseek.com/v1',
     envPrefixes: ['DEEPSEEK'],
-    // 官方明确不支持图片输入（Anthropic 兼容表 / Responses API / chat 参考三处一致），
-     // 且默认开启思考模式。contextLimit 来自 https://api-docs.deepseek.com/quick_start/pricing/
+    // V4 Pro / Flash 为纯文本；只有实验型号 V4 Flash Vision Exp 接受图片输入。
+    // 三者默认开启思考模式。contextLimit 来自 https://api-docs.deepseek.com/quick_start/pricing/
     defaultModel: {
       modelId: 'deepseek-default',
       model: 'deepseek-v4-pro',
@@ -99,6 +99,10 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
+      // https://api-docs.deepseek.com/news/news260821 与 /guides/vision：
+      // 官方 wire model 为 deepseek-v4-flash-vision-exp，使用现有 API 端点，
+      // 通过 OpenAI-compatible image_url 接受图片；1M 上下文，支持工具与思考。
+      { modelId: 'deepseek-v4-flash-vision-exp', model: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision Exp', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
     ],
@@ -118,6 +122,10 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 1_000_000 },
     },
     availableModels: [
+      // GLM-5.3-Flash（https://docs.z.ai/guides/vlm/glm-5.3-flash，2026-08-26 查证）：
+      // 官方 wire model 为全小写 `glm-5.3-flash`；1M 上下文，原生多模态，
+      // 支持工具调用且思考始终开启。reasoning_effort 支持 low/high/max，推荐 max。
+      { modelId: 'glm-5.3-flash', model: 'glm-5.3-flash', label: 'GLM 5.3 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
       // GLM-5.3（https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3，2026-08-16 查证）：
       // 与 GLM-5.2 同底座，纯 post-training 提升。1M 上下文窗口，128K 最大输出。
       // 思考功能始终启用，不支持 thinking.type: disabled；reasoning_effort 仅

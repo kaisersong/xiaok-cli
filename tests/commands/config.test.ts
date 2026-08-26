@@ -171,6 +171,59 @@ describe('config commands', () => {
       expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
     });
 
+    it('copies GLM-5.3-Flash catalog metadata for an explicit glm/model value', async () => {
+      const profile = getProviderProfile('glm');
+      const variant = profile?.availableModels?.find(
+        (candidate) => candidate.modelId === 'glm-5.3-flash',
+      );
+
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'model', 'glm/glm-5.3-flash',
+      ]);
+
+      const updated = await loadConfig();
+      const entry = updated.models['glm-glm-5-3-flash'];
+      expect(updated.defaultProvider).toBe('glm');
+      expect(updated.defaultModelId).toBe('glm-glm-5-3-flash');
+      expect(entry).toMatchObject({
+        provider: 'glm',
+        model: 'glm-5.3-flash',
+        label: 'GLM 5.3 Flash',
+        capabilities: ['tools', 'thinking', 'image_in'],
+        runtimeOptions: {
+          contextLimit: 1_048_576,
+          reasoningEffort: 'max',
+        },
+      });
+      expect(entry.capabilities).not.toBe(variant?.capabilities);
+      expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
+    });
+
+    it('copies DeepSeek Vision Exp catalog metadata for an explicit deepseek/model value', async () => {
+      const profile = getProviderProfile('deepseek');
+      const variant = profile?.availableModels?.find(
+        (candidate) => candidate.modelId === 'deepseek-v4-flash-vision-exp',
+      );
+
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'model', 'deepseek/deepseek-v4-flash-vision-exp',
+      ]);
+
+      const updated = await loadConfig();
+      const entry = updated.models['deepseek-deepseek-v4-flash-vision-exp'];
+      expect(updated.defaultProvider).toBe('deepseek');
+      expect(updated.defaultModelId).toBe('deepseek-deepseek-v4-flash-vision-exp');
+      expect(entry).toMatchObject({
+        provider: 'deepseek',
+        model: 'deepseek-v4-flash-vision-exp',
+        label: 'DeepSeek V4 Flash Vision Exp',
+        capabilities: ['tools', 'thinking', 'image_in'],
+        runtimeOptions: { contextLimit: 1_000_000 },
+      });
+      expect(entry.capabilities).not.toBe(variant?.capabilities);
+      expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
+    });
+
     it.each(['kimi', 'kimi/k3'])(
       'does not persist K3 runtime policy for %s on a custom endpoint',
       async (modelValue) => {

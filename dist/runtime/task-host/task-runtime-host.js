@@ -1002,6 +1002,31 @@ function collectFileArtifactCompletionEvidence(taskId, snapshot) {
             continue;
         }
     }
+    const fileMutationFacts = new Map();
+    const finishedTools = new Map();
+    for (const event of snapshot.events) {
+        if (event.type === 'goal_tool_fact' && event.factKind === 'file_mutation') {
+            fileMutationFacts.set(event.invocationId, event);
+        }
+        else if (event.type === 'goal_tool_finished') {
+            finishedTools.set(event.invocationId, event);
+        }
+    }
+    for (const [invocationId, fact] of fileMutationFacts) {
+        if (!finishedTools.get(invocationId)?.ok)
+            continue;
+        const paths = (fact.normalizedFilePaths ?? []).map(path => path.trim()).filter(Boolean);
+        if (paths.length === 0)
+            continue;
+        records.push({
+            ownerKind: 'task',
+            ownerId: taskId,
+            kind: 'file_artifact',
+            summary: paths.join(', '),
+            uri: paths[0],
+            metadata: { paths },
+        });
+    }
     return dedupeEvidenceRecords(records);
 }
 function collectProjectUpdateEvidence(taskId, snapshot) {

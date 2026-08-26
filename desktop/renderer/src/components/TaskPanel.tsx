@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type ReactNode } from 'react';
 import type { TaskResult, ArtifactSummary } from '../../../shared/task-types';
 import { useLocale } from '../contexts/LocaleContext';
 
@@ -15,6 +15,7 @@ interface TaskPanelProps {
   generatedFiles: Array<{ filePath: string; name: string }>;
   onFileClick: (file: { filePath: string; name: string }) => void;
   onArtifactClick: (artifact: ArtifactSummary) => void;
+  goalContent?: ReactNode;
 }
 
 function StepIcon({ status }: { status: string }) {
@@ -32,16 +33,17 @@ function StepIcon({ status }: { status: string }) {
   }
 }
 
-export function TaskPanel({ planSteps, status, result, generatedFiles, onFileClick, onArtifactClick }: TaskPanelProps) {
+export function TaskPanel({ planSteps, status, result, generatedFiles, onFileClick, onArtifactClick, goalContent }: TaskPanelProps) {
   const { t } = useLocale();
-  if (planSteps.length === 0) return null;
+  if (planSteps.length === 0 && !goalContent) return null;
 
   const hasResults = (result?.artifacts && result.artifacts.length > 0) || generatedFiles.length > 0;
   const showResults = hasResults && (status === 'completed' || status === 'idle');
 
   return (
-    <div className="task-panel">
-      <div className="task-panel__section">
+    <aside className={`task-panel${goalContent ? ' task-panel--with-goal' : ''}${goalContent && planSteps.length === 0 ? ' task-panel--goal-only' : ''}`}>
+      {goalContent ? <div className="task-panel__goal">{goalContent}</div> : null}
+      {planSteps.length > 0 ? <div className="task-panel__section">
         <div className="task-panel__heading">{t.taskPanelProgress}</div>
         <ul className="task-panel__steps">
           {planSteps.map((step) => (
@@ -51,7 +53,7 @@ export function TaskPanel({ planSteps, status, result, generatedFiles, onFileCli
             </li>
           ))}
         </ul>
-      </div>
+      </div> : null}
 
       {showResults && (
         <div className="task-panel__section">
@@ -88,6 +90,6 @@ export function TaskPanel({ planSteps, status, result, generatedFiles, onFileCli
           </ul>
         </div>
       )}
-    </div>
+    </aside>
   );
 }

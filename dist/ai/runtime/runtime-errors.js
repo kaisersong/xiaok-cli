@@ -8,6 +8,9 @@ export function normalizeRuntimeError(error) {
     const status = error && typeof error === 'object'
         ? error.status
         : undefined;
+    const errorCode = error && typeof error === 'object'
+        ? error.code
+        : undefined;
     if (message.includes('KIMI_K3_DURABLE_RESUME_UNSUPPORTED')) {
         return {
             code: 'kimi_k3_durable_resume_unsupported',
@@ -15,7 +18,9 @@ export function normalizeRuntimeError(error) {
             retryable: false,
         };
     }
-    if (/502|503|timeout|ECONNRESET|Bad gateway/i.test(message)) {
+    const transportCode = typeof errorCode === 'string' ? errorCode : '';
+    if (/ERR_STREAM_PREMATURE_CLOSE|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR/i.test(transportCode)
+        || /502|503|timeout|ECONNRESET|ETIMEDOUT|EPIPE|Bad gateway|Premature close|terminated|socket hang up|network|fetch failed/i.test(message)) {
         return { code: 'model_failed', message, retryable: true };
     }
     if (typeof status === 'number' && status >= 400 && status < 500) {

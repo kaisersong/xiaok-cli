@@ -229,6 +229,11 @@ export function WelcomePage() {
     setPrompt(p);
   };
 
+  const handleGoalQuickPrompt = async () => {
+    const thread = await api.createThread({ title: t.goalBar.createGoal });
+    navigate(`/t/${thread.id}`, { state: { createGoal: true } });
+  };
+
   const openAttentionItem = (item: WelcomeAttentionItem) => {
     navigate(item.kind === 'project' ? `/projects/${item.id}` : automationFailureRoute(item.failure));
   };
@@ -241,6 +246,7 @@ export function WelcomePage() {
         setPrompt={setPrompt}
         onSubmit={handleSubmit}
         onQuickPrompt={handleQuickPrompt}
+        onGoalQuickPrompt={handleGoalQuickPrompt}
         projection={projection}
         onOpenItem={openAttentionItem}
         automationLoading={automationLoading}
@@ -316,7 +322,8 @@ function ConversationFirstHome({
   onCloseAssistantDetails,
   onAcceptAssistantCandidate,
   onRejectAssistantCandidate,
-}: HomeContentProps & { onQuickPrompt: (prompt: string) => void }) {
+  onGoalQuickPrompt,
+}: HomeContentProps & { onQuickPrompt: (prompt: string) => void; onGoalQuickPrompt: () => Promise<void> }) {
   const { t } = useLocale();
   const attentionUnavailable = projectsUnavailable || automationLoading || automationUnavailable;
   const availabilityMessages = [
@@ -332,7 +339,7 @@ function ConversationFirstHome({
       <div className="mt-6 w-full max-w-2xl">
         <ChatInput value={prompt} onChange={setPrompt} onSubmit={onSubmit} placeholder={t.welcome.inputPlaceholder} autoFocus />
       </div>
-      <QuickPrompts onSelect={onQuickPrompt} />
+      <QuickPrompts onSelect={onQuickPrompt} onGoalSelect={onGoalQuickPrompt} />
       <div className="mt-[clamp(4.5rem,14vh,8rem)] w-full">
         <AssistantHomeCard
           snapshot={assistantSnapshot}
@@ -385,18 +392,27 @@ function ConversationFirstHome({
   );
 }
 
-function QuickPrompts({ onSelect }: { onSelect: (prompt: string) => void }) {
+function QuickPrompts({ onSelect, onGoalSelect }: { onSelect: (prompt: string) => void; onGoalSelect: () => Promise<void> }) {
   const { t } = useLocale();
+  const buttonClassName = 'whitespace-nowrap rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:bg-[var(--c-bg-card)] hover:text-[var(--c-accent)]';
   return (
     <div className="mt-4 w-full max-w-3xl">
       <div data-testid="quick-prompts" className="flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => void onGoalSelect()}
+          title={t.welcome.goalQuickPrompt}
+          className={buttonClassName}
+        >
+          {t.welcome.goalQuickPrompt}
+        </button>
         {t.welcome.quickPrompts.map(prompt => (
           <button
             key={prompt}
             type="button"
             onClick={() => onSelect(prompt)}
             title={prompt}
-            className="whitespace-nowrap rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:border-[var(--c-accent)] hover:bg-[var(--c-bg-card)] hover:text-[var(--c-accent)]"
+            className={buttonClassName}
           >
             {prompt}
           </button>

@@ -46,6 +46,18 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.4.32 makes long conversations easier to navigate and Goal Mode easier to discover, resume, and monitor without blocking the workspace. It also adds the latest GLM and DeepSeek Flash models to the shared CLI/Desktop catalog and hardens timeout and artifact evidence handling.
+
+**Goal Mode UX, Conversation Navigation, and Flash Models:**
+
+- **Goal Mode in Splash and the Right Rail**: The Desktop splash now exposes Goal as a first-class command. Active goals share the existing right-side task panel instead of splitting the conversation from the top, and Goal details stay mutually exclusive with Artifact workspace content.
+- **Reliable Goal Resume**: Resume restores the owning conversation context, preserves the only token supplied while paused, settles exhausted budgets as blocked, and records successful file mutations as artifact evidence rather than losing them between turns.
+- **Prompt Index Navigation**: Multi-turn chats gain a compact divider-aligned prompt rail. Static ticks stay equal length with color-only active state; hover creates a local wave, follows the selected tick with a one-line prompt plus a two-line response summary, and click smoothly jumps to the matching prompt.
+- **GLM 5.3 Flash**: CLI and Desktop now expose `glm-5.3-flash` with its verified 1M-class context window, image input, tool use, always-on thinking, and supported reasoning-effort choices.
+- **DeepSeek V4 Flash Vision Exp**: The shared model registry adds `deepseek-v4-flash-vision-exp` with image input while keeping the non-vision V4 models text-only.
+- **Retryable Provider Timeouts**: `ETIMEDOUT`, premature stream close, socket termination, and related transport failures normalize to retryable model failures without weakening user-abort handling.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, download links, and the Desktop Release workflow align on `1.4.32` / `desktop-v1.4.32`.
+
 Xiaok Desktop v1.4.31 makes long-running work durable and project recovery visible. Goal Mode can keep an objective active across multiple turns with explicit budgets and evidence, while project agents can be checked in one pass and optionally fall back to the current Desktop model when their configured runtime is unavailable.
 
 **Goal Mode, Agent Recovery, and Workflow Reliability:**
@@ -710,9 +722,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.31-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.31-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.31.exe** — Windows installer (x64)
+- **xiaok-1.4.32-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.4.32-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.4.32.exe** — Windows installer (x64)
 
 ### Features
 

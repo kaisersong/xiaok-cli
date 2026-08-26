@@ -83,7 +83,7 @@ function inferModelCapabilities(modelName: string): Partial<ModelCapabilities> {
     };
   }
 
-  if (/^deepseek-v4/i.test(modelName)) {
+  if (/^deepseek-v4-flash-vision-exp$/i.test(modelName)) {
     return {
       supportsImageInput: true,
     };

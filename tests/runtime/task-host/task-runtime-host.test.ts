@@ -825,6 +825,55 @@ describe('InProcessTaskRuntimeHost', () => {
   });
 
   describe('deliverable gate integration', () => {
+    it('accepts a successful paired file mutation fact as current-task artifact evidence', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'tool_execution_fact', sessionId: 'sess_1', turnId: 'turn_1',
+          invocationId: 'write_1', toolName: 'write', factKind: 'file_mutation',
+          normalizedFilePaths: ['/tmp/goal-report.md'],
+        });
+        await emitRuntimeEvent({
+          type: 'tool_finished', sessionId: 'sess_1', turnId: 'turn_1',
+          invocationId: 'write_1', toolName: 'write', ok: true,
+        });
+      });
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry, snapshotStore, runner,
+        aheGuards: { artifactEvidence: true }, now: () => 200,
+        createTaskId: () => 'task_fact', createSessionId: () => 'sess_1',
+      });
+
+      await host.createTask({ prompt: '生成并保存一份 Goal 验证报告文件', materials: [] });
+
+      await waitFor(async () => (await host.recoverTask('task_fact')).snapshot.status === 'completed', 3000);
+      const recovered = await host.recoverTask('task_fact');
+      expect(recovered.snapshot.events).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
+    it('rejects an unpaired file mutation fact as artifact evidence', async () => {
+      const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: 'tool_execution_fact', sessionId: 'sess_1', turnId: 'turn_1',
+          invocationId: 'write_1', toolName: 'write', factKind: 'file_mutation',
+          normalizedFilePaths: ['/tmp/goal-report.md'],
+        });
+      });
+      const host = new InProcessTaskRuntimeHost({
+        materialRegistry, snapshotStore, runner,
+        aheGuards: { artifactEvidence: true }, now: () => 200,
+        createTaskId: () => 'task_fact', createSessionId: () => 'sess_1',
+      });
+
+      await host.createTask({ prompt: '生成并保存一份 Goal 验证报告文件', materials: [] });
+
+      await waitFor(async () => (await host.recoverTask('task_fact')).snapshot.status === 'failed', 3000);
+      expect((await host.recoverTask('task_fact')).snapshot.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', message: 'Task is being completed without artifact evidence.' }),
+      ]));
+    });
+
     it.skip('blocks completion when the AHE artifact evidence guard sees no delivered artifact', async () => {
       const runner = vi.fn<TaskRunner>(async ({ emitRuntimeEvent }) => {
         emitRuntimeEvent({

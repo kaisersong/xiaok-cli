@@ -240,7 +240,7 @@ export function renderWelcomeScreen(opts: {
     dim("• 输入问题开始对话"),
     dim("• 使用 /exit 退出"),
     dim("• 支持 Markdown 和代码高亮"),
-    "",
+    dim("• /goal <目标> 持续推进任务"),
     ""
   ];
 

@@ -2441,6 +2441,7 @@ export interface LocaleStrings {
   welcome: {
     greetingSuffix: string;
     inputPlaceholder: string;
+    goalQuickPrompt: string;
     quickPrompts: readonly string[];
     conversationSubtitle: string;
     overviewTitle: string;
@@ -2818,6 +2819,9 @@ export interface LocaleStrings {
     cuDismiss: string;
     taskFailed: string;
     scrollToBottom: string;
+    conversationIndexLabel: string;
+    conversationIndexItem: (index: number, preview: string) => string;
+    conversationIndexUntitled: string;
     inputPlaceholder: string;
     replyPlaceholder: string;
     artifact: string;
@@ -2858,6 +2862,8 @@ export interface LocaleStrings {
     statusCancelled: string;
     statusDisarmed: string;
     budgetExhausted: string;
+    showDetails: string;
+    hideDetails: string;
   };
 
   // chatInput

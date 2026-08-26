@@ -156,7 +156,7 @@ export function registerConfigCommands(program: Command): void {
           cfg.providers[providerId].apiKey = opts.apiKey;
         }
         const modelId = `${providerId}-${sanitizeModelIdPart(modelName)}`;
-        const catalogVariant = providerId === 'kimi'
+        const catalogVariant = providerId === 'kimi' || providerId === 'glm' || providerId === 'deepseek'
           ? getProviderModelVariant(providerId, modelName)
           : undefined;
         cfg.models[modelId] = catalogVariant

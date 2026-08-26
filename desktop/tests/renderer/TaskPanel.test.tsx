@@ -1,8 +1,10 @@
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent, within } from '@testing-library/react';
 import { TaskPanel } from '../../renderer/src/components/TaskPanel';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
+
+afterEach(cleanup);
 
 describe('TaskPanel', () => {
   const defaultProps = {
@@ -25,6 +27,27 @@ describe('TaskPanel', () => {
       </LocaleProvider>
     );
     expect(container.innerHTML).toBe('');
+  });
+
+  it('renders a Goal slot even when there are no plan steps', () => {
+    const { container } = render(
+      <LocaleProvider>
+        <TaskPanel
+          {...defaultProps}
+          planSteps={[]}
+          goalContent={<div data-testid="goal-slot">Goal state</div>}
+        />
+      </LocaleProvider>
+    );
+    expect(screen.getByTestId('goal-slot')).toBeInTheDocument();
+    expect(container.querySelector('.task-panel--with-goal')).toBeTruthy();
+    expect(container.querySelector('.task-panel__steps')).toBeNull();
+  });
+
+  it('does not add Goal styling to an ordinary plan-only panel', () => {
+    const { container } = render(<LocaleProvider><TaskPanel {...defaultProps} /></LocaleProvider>);
+    expect(container.querySelector('.task-panel--with-goal')).toBeNull();
+    expect(screen.queryByText('创建目标')).toBeNull();
   });
 
   it('renders plan steps with correct labels', () => {
