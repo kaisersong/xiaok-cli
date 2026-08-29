@@ -3544,6 +3544,8 @@ export const zh: LocaleStrings = {
   projectsAgentXiaokBuiltin: "xiaok 内置智能体",
   projectsAgentRecommended: "推荐",
   projectsAgentNotInstalled: "未安装",
+  projectsAgentNotSupported: "不支持",
+  projectsAgentUsesPlatformConfig: (platform: string) => `使用 ${platform} 自身的登录、模型与提供商配置。`,
   projectsAgentXiaokRunDesc: "将直接使用 xiaok 当前桌面环境运行",
   projectsAgentXiaokRunSubDesc: "provider、模型和本地 runtime 由桌面端自动绑定，无需手动填写。",
   projectsAgentProviderLabel: "LLM 提供商",

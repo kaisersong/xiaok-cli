@@ -3460,6 +3460,8 @@ export interface LocaleStrings {
   projectsAgentXiaokBuiltin: string;
   projectsAgentRecommended: string;
   projectsAgentNotInstalled: string;
+  projectsAgentNotSupported: string;
+  projectsAgentUsesPlatformConfig: (platform: string) => string;
   projectsAgentXiaokRunDesc: string;
   projectsAgentXiaokRunSubDesc: string;
   projectsAgentProviderLabel: string;

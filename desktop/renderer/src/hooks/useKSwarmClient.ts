@@ -357,7 +357,7 @@ export interface KSwarmClientActions {
   fetchLiveness(): Promise<Record<string, { lastSeen: number | null; online: boolean; status: string }>>;
   pingHeartbeat(agentId: string): Promise<boolean>;
   // Runtime & provider discovery
-  fetchRuntimes(): Promise<Array<{ type: string; displayName: string; description: string; detected: boolean; path: string | null }>>;
+  fetchRuntimes(): Promise<Array<{ type: string; displayName: string; description: string; detected: boolean; supported?: boolean; path: string | null }>>;
   fetchLlmProviders(): Promise<string[]>;
 }
 
@@ -1403,7 +1403,7 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
   }, []);
 
   const fetchRuntimes = useCallback(async () => {
-    const data = await httpGet<{ runtimes: Array<{ type: string; displayName: string; description: string; detected: boolean; path: string | null }> }>('/runtimes');
+    const data = await httpGet<{ runtimes: Array<{ type: string; displayName: string; description: string; detected: boolean; supported?: boolean; path: string | null }> }>('/runtimes');
     return data?.runtimes || [];
   }, []);
 

@@ -70,12 +70,14 @@ describe('KSwarm semantic service', () => {
       teamService: {} as never,
     });
 
-    await expect(service.createKSwarmAgent({ name: 'Writer', description: 'Draft', instructions: 'Write' }))
+    await expect(service.createKSwarmAgent({ name: 'Writer', description: 'Draft', instructions: 'Write', runtimeType: 'kimi' }))
       .resolves.toEqual({ id: 'a1', name: 'Writer' });
     expect(JSON.parse(String(request.mock.calls[0][1]?.body))).toEqual({
-      name: 'Writer', description: 'Draft', instructions: 'Write', runtimeType: 'xiaok', runtimeSource: 'desktop-agent-runtime', roles: ['worker'], capabilities: [], taskCapabilities: [],
+      name: 'Writer', description: 'Draft', instructions: 'Write', runtimeType: 'kimi', roles: ['worker'], capabilities: [], taskCapabilities: [],
     });
     await expect(service.createKSwarmAgent({ name: 'Writer', apiKey: 'secret' } as never))
+      .rejects.toThrow('agent_payload_forbidden');
+    await expect(service.createKSwarmAgent({ name: 'Writer', runtimePath: '/tmp/evil' } as never))
       .rejects.toThrow('agent_payload_forbidden');
     await expect(service.updateKSwarmAgent({ id: 'a1', changes: { fallbackToDesktopModel: true } }))
       .resolves.toEqual({ id: 'a1', name: 'Writer' });

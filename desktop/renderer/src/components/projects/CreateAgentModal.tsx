@@ -10,14 +10,6 @@ import { useKSwarm } from '../../contexts/KSwarmContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { api } from '../../api';
 import type { CreateAgentInput } from '../../hooks/useKSwarmClient';
-import { getDesktopApi } from '../../shared/desktop';
-
-interface ModelInfo {
-  id: string;
-  label: string;
-  provider: string;
-  default: boolean;
-}
 
 interface CreateAgentModalProps {
   open: boolean;
@@ -31,10 +23,11 @@ interface RuntimeOption {
   displayName: string;
   description: string;
   detected: boolean;
+  supported?: boolean;
 }
 
 export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
-  const { createAgent, fetchRuntimes, fetchLlmProviders } = useKSwarm();
+  const { createAgent, fetchRuntimes } = useKSwarm();
   const { t } = useLocale();
   const [step, setStep] = useState<1 | 2>(1);
 
@@ -47,42 +40,22 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const [name, setName] = useState('');
   const [runtimeType, setRuntimeType] = useState('xiaok');
   const [runtimes, setRuntimes] = useState<RuntimeOption[]>([]);
-  const [llmProviders, setLlmProviders] = useState<string[]>([]);
-  const [kswarmModels, setKswarmModels] = useState<ModelInfo[]>([]);
-  const [provider, setProvider] = useState('');
-  const [model, setModel] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [apiKey, setApiKey] = useState('');
   const [instructions, setInstructions] = useState('');
   const [loading, setLoading] = useState(false);
 
   const isXiaok = runtimeType === 'xiaok';
 
-  // Fetch runtimes and kswarm providers on open.
+  // Fetch server-validated native runtimes on open.
   useEffect(() => {
     if (!open) return;
     fetchRuntimes().then(r => setRuntimes(r));
-    fetchLlmProviders().then(p => setLlmProviders(p));
-  }, [open, fetchRuntimes, fetchLlmProviders]);
-
-  // Fetch kswarm model catalog when a non-xiaok provider is selected
-  useEffect(() => {
-    if (isXiaok || !provider) { setKswarmModels([]); return; }
-    const api = getDesktopApi();
-    if (api?.kswarmProxyGet) {
-      api.kswarmProxyGet(`/llm/models?provider=${provider}`)
-        .then((d: any) => setKswarmModels(d?.models ?? []))
-        .catch(() => setKswarmModels([]));
-    } else {
-      setKswarmModels([]);
-    }
-  }, [isXiaok, provider]);
+  }, [open, fetchRuntimes]);
 
   if (!open) return null;
 
   const reset = () => {
     setStep(1); setAgentType('worker'); setName(''); setRuntimeType('xiaok');
-    setProvider(''); setModel(''); setBaseUrl(''); setApiKey(''); setInstructions('');
+    setInstructions('');
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -102,10 +75,6 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             name: name.trim(),
             roles,
             runtimeType: runtimeType || undefined,
-            provider: provider || undefined,
-            model: model || undefined,
-            baseUrl: baseUrl || undefined,
-            apiKey: apiKey || undefined,
             instructions: instructions || undefined,
           } satisfies CreateAgentInput);
       if (result) {
@@ -123,15 +92,12 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   // Build runtime options: xiaok always first, then detected, then rest
   const runtimeOptions = runtimes.length > 0
     ? [
-        { type: 'xiaok', displayName: 'xiaok', description: t.projectsAgentXiaokBuiltin, detected: true },
+        { type: 'xiaok', displayName: 'xiaok', description: t.projectsAgentXiaokBuiltin, detected: true, supported: true },
         ...runtimes.filter(r => r.type !== 'xiaok'),
       ]
-    : [{ type: 'xiaok', displayName: 'xiaok', description: t.projectsAgentXiaokBuiltin, detected: true }];
+    : [{ type: 'xiaok', displayName: 'xiaok', description: t.projectsAgentXiaokBuiltin, detected: true, supported: true }];
 
-  const providerOptions = [
-    { value: '', label: t.projectsAgentFollowPlatform },
-    ...llmProviders.map(p => ({ value: p, label: p === 'openai' ? 'OpenAI' : p === 'anthropic' ? 'Anthropic (Claude)' : p === 'ollama' ? 'Ollama (本地)' : p })),
-  ];
+  const selectedRuntime = runtimeOptions.find(runtime => runtime.type === runtimeType);
 
   return (
     <div
@@ -190,18 +156,24 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
             <div className="flex flex-col gap-1.5">
               <div className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentRuntimeTitle}</div>
               <div className="flex flex-wrap gap-1.5">
-                {runtimeOptions.map(rt => (
-                  <button key={rt.type} type="button" onClick={() => { setRuntimeType(rt.type); setProvider(''); setModel(''); }}
+                {runtimeOptions.map(rt => {
+                  const unavailable = rt.type !== 'xiaok' && (!rt.detected || rt.supported === false);
+                  return (
+                  <button key={rt.type} type="button" disabled={unavailable} onClick={() => setRuntimeType(rt.type)}
                     className={`rounded-lg px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-150 ${
                       runtimeType === rt.type
                         ? 'bg-[var(--c-btn-bg)] text-[var(--c-btn-text)]'
-                        : 'bg-[var(--c-bg-sub)] text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]'
+                        : unavailable
+                          ? 'cursor-not-allowed bg-[var(--c-bg-sub)] text-[var(--c-text-muted)] opacity-60'
+                          : 'bg-[var(--c-bg-sub)] text-[var(--c-text-secondary)] hover:text-[var(--c-text-primary)]'
                     }`}>
                     {rt.displayName}
                     {rt.type === 'xiaok' && <span className="ml-1 text-[10px] opacity-70">{t.projectsAgentRecommended}</span>}
                     {!rt.detected && rt.type !== 'xiaok' && <span className="ml-1 text-[10px] opacity-50">{t.projectsAgentNotInstalled}</span>}
+                    {rt.detected && rt.supported === false && <span className="ml-1 text-[10px] opacity-50">{t.projectsAgentNotSupported}</span>}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -213,48 +185,11 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                 </p>
               </div>
             ) : (
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="agent-provider" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentProviderLabel}</label>
-                <select id="agent-provider" data-testid="provider-select" value={provider} onChange={e => { setProvider(e.target.value); setModel(''); if (!e.target.value) { setBaseUrl(''); setApiKey(''); } }}
-                  className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
-                  {providerOptions.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                </select>
-                <p className="text-[10px] text-[var(--c-text-muted)]">{t.projectsAgentFollowPlatformHint}</p>
+              <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] p-3">
+                <p className="text-[12px] text-[var(--c-text-secondary)]">
+                  {t.projectsAgentUsesPlatformConfig(selectedRuntime?.displayName || runtimeType)}
+                </p>
               </div>
-            )}
-
-            {!isXiaok && provider && (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="agent-model" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.projectsAgentModelLabel}</label>
-                  {kswarmModels.length > 0 ? (
-                    <select id="agent-model" data-testid="model-select" value={model} onChange={e => setModel(e.target.value)}
-                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]">
-                      <option value="">{t.projectsAgentSelectModel}</option>
-                      {kswarmModels.map(m => <option key={m.id} value={m.id}>{m.label}{m.default ? ` (${t.projectsAgentModelDefault})` : ''}</option>)}
-                    </select>
-                  ) : (
-                    <input id="agent-model" data-testid="model-input" type="text" value={model} onChange={e => setModel(e.target.value)}
-                      placeholder={provider === 'anthropic' ? 'claude-sonnet-4-20250514' : provider === 'openai' ? 'gpt-4o' : 'llama3'}
-                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
-                  )}
-                </div>
-                {(provider === 'openai' || provider === 'ollama') && (
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="agent-baseurl" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonBaseUrl}</label>
-                    <input id="agent-baseurl" data-testid="baseurl-input" type="text" value={baseUrl} onChange={e => setBaseUrl(e.target.value)}
-                      placeholder={provider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com/v1'}
-                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
-                  </div>
-                )}
-                {provider !== 'ollama' && (
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="agent-apikey" className="text-[12px] font-medium text-[var(--c-text-secondary)]">{t.commonApiKey}</label>
-                    <input id="agent-apikey" data-testid="apikey-input" type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..."
-                      className="w-full rounded-lg border border-[var(--c-border-subtle)] bg-[var(--c-bg-input)] px-3 py-2 text-sm text-[var(--c-text-primary)] placeholder:text-[var(--c-text-muted)] outline-none transition-colors duration-150 focus:border-[var(--c-border)]" />
-                  </div>
-                )}
-              </>
             )}
 
             <div className="flex flex-col gap-1.5">

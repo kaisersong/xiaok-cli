@@ -3564,6 +3564,8 @@ export const en: LocaleStrings = {
   projectsAgentXiaokBuiltin: "xiaok built-in agent",
   projectsAgentRecommended: "Recommended",
   projectsAgentNotInstalled: "Not Installed",
+  projectsAgentNotSupported: "Not Supported",
+  projectsAgentUsesPlatformConfig: (platform: string) => `Uses ${platform}'s own login, model, and provider configuration.`,
   projectsAgentXiaokRunDesc: "Runs directly using xiaok desktop environment",
   projectsAgentXiaokRunSubDesc: "Provider, model, and local runtime are auto-configured by the desktop app.",
   projectsAgentProviderLabel: "LLM Provider",

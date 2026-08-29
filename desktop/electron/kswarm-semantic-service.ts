@@ -106,14 +106,17 @@ export function createKSwarmSemanticService(options: {
     },
     async createKSwarmAgent(input) {
       assertAgentPayload(input);
-      const payload = {
+      const runtimeType = typeof input.runtimeType === 'string' && input.runtimeType.trim()
+        ? input.runtimeType.trim()
+        : 'xiaok';
+      const payload: Record<string, unknown> = {
         ...pickAgentPayload(input),
-        runtimeType: 'xiaok',
-        runtimeSource: 'desktop-agent-runtime',
+        runtimeType,
         roles: readStringArray(input.roles, ['worker']),
         capabilities: readStringArray(input.capabilities),
         taskCapabilities: readStringArray(input.taskCapabilities),
       };
+      if (runtimeType === 'xiaok') payload.runtimeSource = 'desktop-agent-runtime';
       return unwrapRecord(await request('/agents', 'POST', payload), 'agent');
     },
     async updateKSwarmAgent(input) {
@@ -177,7 +180,7 @@ function pickProjectPayload(input: Record<string, unknown>): Record<string, unkn
 }
 
 function pickAgentPayload(input: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(['name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'customArgs', 'fallbackToDesktopModel']
+  return Object.fromEntries(['name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'runtimeType', 'customArgs', 'fallbackToDesktopModel']
     .flatMap(key => input[key] === undefined ? [] : [[key, input[key]]]));
 }
 

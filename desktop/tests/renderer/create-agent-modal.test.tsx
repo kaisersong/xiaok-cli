@@ -9,8 +9,10 @@ const {
 } = vi.hoisted(() => ({
   mockCreateAgent: vi.fn().mockResolvedValue({ id: 'test-agent' }),
   mockFetchRuntimes: vi.fn().mockResolvedValue([
-    { type: 'xiaok', displayName: 'xiaok', description: 'xiaok 内置智能体', detected: true },
-    { type: 'claude', displayName: 'Claude', description: 'Anthropic Claude CLI', detected: true },
+    { type: 'xiaok', displayName: 'xiaok', description: 'xiaok 内置智能体', detected: true, supported: true },
+    { type: 'claude', displayName: 'Claude', description: 'Anthropic Claude CLI', detected: true, supported: true },
+    { type: 'kimi', displayName: 'Kimi', description: 'Kimi Agent CLI', detected: true, supported: true },
+    { type: 'kiro', displayName: 'Kiro', description: 'Kiro CLI', detected: true, supported: false },
   ]),
   mockFetchLlmProviders: vi.fn().mockResolvedValue(['openai', 'anthropic', 'ollama']),
   mockCreateManagedXiaokAgent: vi.fn().mockResolvedValue({ id: 'managed-xiaok-agent' }),
@@ -112,7 +114,7 @@ describe('CreateAgentModal: xiaok runtime uses managed local runtime', () => {
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
-  it('uses kswarm providers and text input for non-xiaok runtime', async () => {
+  it('uses the selected native CLI own configuration instead of the fixed KSwarm provider list', async () => {
     renderModal();
     goToStep2();
 
@@ -120,25 +122,36 @@ describe('CreateAgentModal: xiaok runtime uses managed local runtime', () => {
       expect(screen.getByText('Claude')).toBeInTheDocument();
     });
 
-    // Switch to claude runtime
-    fireEvent.click(screen.getByText('Claude'));
+    fireEvent.click(screen.getByText('Kimi'));
 
     await waitFor(() => {
-      const select = screen.getByTestId('provider-select') as HTMLSelectElement;
-      // Non-xiaok should use kswarm providers (openai/anthropic/ollama)
-      const labels = Array.from(select.options).map(o => o.textContent);
-      expect(labels.some(l => l?.includes('Ollama'))).toBe(true);
+      expect(screen.getByText('使用 Kimi 自身的登录、模型与提供商配置。')).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('provider-select')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-select')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('apikey-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('baseurl-input')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByTestId('provider-select'), { target: { value: 'anthropic' } });
+    fireEvent.change(screen.getByPlaceholderText('例：研究员、编码专家'), { target: { value: 'Kimi 研究员' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建智能体' }));
 
     await waitFor(() => {
-      // Non-xiaok should have text input for model
-      expect(screen.getByTestId('model-input')).toBeInTheDocument();
-      expect(screen.queryByTestId('model-select')).not.toBeInTheDocument();
-      // Should show API key field
-      expect(screen.getByTestId('apikey-input')).toBeInTheDocument();
+      expect(mockCreateAgent).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'Kimi 研究员',
+        runtimeType: 'kimi',
+      }));
     });
+    expect(mockCreateManagedXiaokAgent).not.toHaveBeenCalled();
+  });
+
+  it('does not allow selecting an installed runtime without an execution harness', async () => {
+    renderModal();
+    goToStep2();
+
+    const kiro = await screen.findByRole('button', { name: /Kiro/ });
+    expect(kiro).toBeDisabled();
+    expect(kiro).toHaveTextContent('不支持');
   });
 
   it('resets provider and model when switching runtime', async () => {
@@ -151,10 +164,9 @@ describe('CreateAgentModal: xiaok runtime uses managed local runtime', () => {
 
     fireEvent.click(screen.getByText('Claude'));
 
-    // Provider should be reset
     await waitFor(() => {
-      const select = screen.getByTestId('provider-select') as HTMLSelectElement;
-      expect(select.value).toBe('');
+      expect(screen.getByText('使用 Claude 自身的登录、模型与提供商配置。')).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('provider-select')).not.toBeInTheDocument();
   });
 });
