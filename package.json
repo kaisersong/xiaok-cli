@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.4.32",
+  "version": "1.5.0",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -76,7 +76,7 @@
     "worktree:new": "node scripts/new-worktree.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.121.0",
     "@huggingface/tokenizers": "^0.1.3",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -86,7 +86,7 @@
     "fast-glob": "^3.3.2",
     "lodash-es": "^4.17.21",
     "onnxruntime-node": "^1.26.0",
-    "openai": "^4.77.0",
+    "openai": "^7.7.0",
     "ws": "^8.21.0"
   },
   "optionalDependencies": {
@@ -100,6 +100,13 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true,
+    "esbuild@0.27.4": true,
+    "fsevents@2.3.3": true,
+    "nodejieba@3.5.8": true,
+    "onnxruntime-node@1.26.0": true
   },
   "engines": {
     "node": ">=22"

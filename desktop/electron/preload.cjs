@@ -365,6 +365,21 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input),
   meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input),
   meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input),
+  listCollaborationRooms: () => ipcRenderer.invoke('desktop:collaborationRoom:listRooms'),
+  getCollaborationRoom: (roomId) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId),
+  createCollaborationRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input),
+  archiveCollaborationRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input),
+  updateCollaborationRoomMembers: (input) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input),
+  sendCollaborationRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input),
+  markCollaborationRoomSeen: (input) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input),
+  cancelRoomDiscussion: (input) => ipcRenderer.invoke('desktop:collaborationRoom:cancelDiscussion', input),
+  createProjectFromRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:createProjectFromRoom', input),
+  createTaskFromRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:createTaskFromRoomMessage', input),
+  onCollaborationRoomEvent: (listener) => {
+    const handler = (_event, payload) => listener(payload);
+    ipcRenderer.on('desktop:collaborationRoom:event', handler);
+    return () => ipcRenderer.removeListener('desktop:collaborationRoom:event', handler);
+  },
   meetingOpenRecorderWindow: (input) => ipcRenderer.invoke('desktop:meetingOpenRecorderWindow', input),
   meetingSetRecorderWindowMode: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderWindowMode', input),
   meetingSetRecorderSessionState: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderSessionState', input),

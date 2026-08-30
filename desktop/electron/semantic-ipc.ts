@@ -2,6 +2,24 @@ import type { IpcMain } from 'electron';
 import type { KSwarmSemanticService } from './kswarm-semantic-service.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
+/**
+ * CollaborationRoom semantic controller (design §12, §16.3). Null until the
+ * broker/KSwarm service adapters are wired in main — renderer calls then get
+ * the stable broker_unavailable degraded code instead of a raw crash.
+ */
+export interface CollaborationRoomSemanticController {
+  listRooms(): unknown | Promise<unknown>;
+  getRoom(roomId: string): unknown | Promise<unknown>;
+  createRoom(input: unknown): unknown | Promise<unknown>;
+  archiveRoom(input: unknown): unknown | Promise<unknown>;
+  updateRoomMembers(input: unknown): unknown | Promise<unknown>;
+  sendMessage(input: unknown): unknown | Promise<unknown>;
+  markRoomSeen(input: unknown): unknown | Promise<unknown>;
+  cancelDiscussion(input: unknown): unknown | Promise<unknown>;
+  createProjectFromRoom(input: unknown): unknown | Promise<unknown>;
+  createTaskFromRoomMessage(input: unknown): unknown | Promise<unknown>;
+}
+
 export interface AssistantSemanticController {
   getOverview(): unknown | Promise<unknown>;
   activate(input: { requestSource: 'user' }): unknown | Promise<unknown>;
@@ -16,9 +34,14 @@ export function registerSemanticDesktopIpc(
   options: {
     assistant: AssistantSemanticController;
     kswarm: KSwarmSemanticService;
+    collaborationRooms?: CollaborationRoomSemanticController | null;
   },
 ): void {
   const { assistant, kswarm } = options;
+  const rooms = options.collaborationRooms ?? null;
+  const unavailable = () => ({ ok: false, code: 'broker_unavailable' });
+  const roomHandler = <T,>(fn: (controller: CollaborationRoomSemanticController, input: T) => unknown | Promise<unknown>) =>
+    (input: T) => (rooms ? fn(rooms, input) : unavailable());
   ipcMain.handle('desktop:assistant:getOverview', () => assistant.getOverview());
   ipcMain.handle('desktop:assistant:activate', () => assistant.activate({ requestSource: 'user' }));
   ipcMain.handle('desktop:assistant:pause', () => assistant.pause({ requestSource: 'user' }));
@@ -34,6 +57,19 @@ export function registerSemanticDesktopIpc(
   }));
 
   ipcMain.handle('desktop:kswarm:team:plan', (_event, input) => kswarm.planProjectTeam({ projectId: readId(input?.projectId) }));
+
+  // CollaborationRoom semantic channels: room mutations are ONLY reachable
+  // here — the kswarmProxy* routes deny every room/link path (design §9.3).
+  ipcMain.handle('desktop:collaborationRoom:listRooms', () => roomHandler((controller) => controller.listRooms())(undefined));
+  ipcMain.handle('desktop:collaborationRoom:getRoom', (_event, roomId: string) => roomHandler((controller) => controller.getRoom(roomId))(roomId));
+  ipcMain.handle('desktop:collaborationRoom:createRoom', (_event, input: unknown) => roomHandler((controller) => controller.createRoom(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:archiveRoom', (_event, input: unknown) => roomHandler((controller) => controller.archiveRoom(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:updateMembers', (_event, input: unknown) => roomHandler((controller) => controller.updateRoomMembers(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:sendMessage', (_event, input: unknown) => roomHandler((controller) => controller.sendMessage(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:markSeen', (_event, input: unknown) => roomHandler((controller) => controller.markRoomSeen(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:cancelDiscussion', (_event, input: unknown) => roomHandler((controller) => controller.cancelDiscussion(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:createProjectFromRoom', (_event, input: unknown) => roomHandler((controller) => controller.createProjectFromRoom(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:createTaskFromRoomMessage', (_event, input: unknown) => roomHandler((controller) => controller.createTaskFromRoomMessage(input))(input));
   ipcMain.handle('desktop:kswarm:team:apply', (_event, input) => kswarm.applyProjectTeamPlan({
     projectId: readId(input?.projectId),
     planId: readId(input?.planId),

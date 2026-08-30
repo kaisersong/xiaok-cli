@@ -90,17 +90,23 @@ describe('KSwarm desktop mutation authority (401 regression)', () => {
     });
   }
 
-  it('creates a project against a server that enforces the mutation token', async () => {
+  it('create_project stays proposal-only and issues no mutation against the server', async () => {
     const result = JSON.parse(await services(serverLikeKSwarm()).executeTool('create_project', {
       name: 'Auth OK',
       goal: '本月国外主要 AI 产品动态分析',
     }));
 
+    // Proposal-only contract (design §9.3): the agent tool never creates the
+    // formal project; the user confirms it through the Room-first path.
     expect(result.error).toBeUndefined();
-    expect(result).toMatchObject({ projectId: 'proj-auth-ok' });
+    expect(result.proposal).toMatchObject({ kind: 'project_proposal', name: 'Auth OK' });
+    const mutations = seen.filter((entry) => entry.method !== 'GET');
+    expect(mutations).toEqual([]);
   });
 
   it('sends the mutation token on every gated mutation it issues', async () => {
+    // create_project is proposal-only, so its flow issues zero mutations;
+    // the token contract is asserted on the remaining gated surface.
     await services(serverLikeKSwarm()).executeTool('create_project', {
       name: 'Auth OK',
       goal: '目标',
@@ -108,12 +114,11 @@ describe('KSwarm desktop mutation authority (401 regression)', () => {
     });
 
     const mutations = seen.filter((entry) => entry.method !== 'GET');
-    expect(mutations.length).toBeGreaterThan(0);
     const unauthenticated = mutations.filter((entry) => entry.token !== MUTATION_TOKEN);
     expect(unauthenticated, `unauthenticated mutations: ${JSON.stringify(unauthenticated)}`).toEqual([]);
   });
 
-  it('still surfaces a real 401 rather than inventing a project id', async () => {
+  it('proposal-only create_project cannot hit a 401 because it never mutates', async () => {
     const brokenClient = {
       ...serverLikeKSwarm(),
       // Simulates the pre-fix client: the token is never attached.
@@ -136,7 +141,8 @@ describe('KSwarm desktop mutation authority (401 regression)', () => {
       goal: '目标',
     }));
 
-    expect(result.error).toBe('Failed to create project: 401');
+    expect(result.error).toBeUndefined();
     expect(result.projectId).toBeUndefined();
+    expect(result.proposal).toMatchObject({ kind: 'project_proposal', name: 'Auth Missing' });
   });
 });

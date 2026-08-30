@@ -239,6 +239,20 @@ export function isKSwarmProxyRequestAllowed(
   return false;
 }
 
+/**
+ * Semantic guard used by contract tests (design §9.3, §16.3): every proxy
+ * method must keep denying Room/link routes — room mutations are only
+ * reachable through the semantic collaboration-room channels.
+ */
+export function isSafeKswarmProxyPath(method: string, path: string): boolean {
+  const normalized = normalizeKSwarmProxyPath(path);
+  if (!normalized) return false;
+  const responseKind: ProxyResponseKind =
+    method.toLowerCase() === 'gettext' ? 'text' : 'json';
+  const normalizedMethod = method.toLowerCase() === 'gettext' ? 'GET' : method;
+  return isKSwarmProxyRequestAllowed(normalizedMethod, normalized.pathname, responseKind);
+}
+
 export function redactKSwarmPayload(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => redactKSwarmPayload(item));
   if (!isRecord(value)) return value;

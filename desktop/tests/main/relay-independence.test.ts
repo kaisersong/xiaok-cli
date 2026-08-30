@@ -95,7 +95,8 @@ describe('project creation does not depend on the mobile relay', () => {
     }));
 
     expect(result.error).toBeUndefined();
-    expect(result).toMatchObject({ projectId: 'proj-relay-independent' });
+    // proposal-only: no project is created, and none is needed from the relay
+    expect(result.proposal).toMatchObject({ kind: 'project_proposal' });
   });
 
   it('creates a project when no relay credentials exist at all', async () => {
@@ -111,7 +112,8 @@ describe('project creation does not depend on the mobile relay', () => {
     }));
 
     expect(result.error).toBeUndefined();
-    expect(result).toMatchObject({ projectId: 'proj-relay-independent' });
+    // proposal-only: no project is created, and none is needed from the relay
+    expect(result.proposal).toMatchObject({ kind: 'project_proposal' });
   });
 
   it('creates a project when the relay is explicitly disabled', async () => {
@@ -122,7 +124,10 @@ describe('project creation does not depend on the mobile relay', () => {
       goal: '目标',
     }));
 
-    expect(result).toMatchObject({ projectId: 'proj-relay-independent' });
+    expect(result.error).toBeUndefined();
+    // proposal-only: the agent tool path never needs the relay or the network
+    // beyond the read-only agent listing
+    expect(result.proposal).toMatchObject({ kind: 'project_proposal', name: 'Relay Disabled' });
   });
 
   it('keeps the relay out of the project code path entirely', async () => {

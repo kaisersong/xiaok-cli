@@ -8,7 +8,6 @@ export declare class OpenAIAdapter implements ModelAdapter {
     private readonly resolvedHeaders?;
     private readonly kimiCodingHeadersApplied;
     private readonly onUsageDiagnostic;
-    private readonly httpAgent;
     readonly harnessContext: OpenAIAdapterInit['harnessContext'];
     private reasoningDialectState;
     constructor(init: OpenAIAdapterInit);

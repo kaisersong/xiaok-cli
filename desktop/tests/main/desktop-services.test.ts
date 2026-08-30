@@ -3215,11 +3215,19 @@ describe('desktop services', () => {
       },
     });
 
-    const executePromise = services.executeTool('create_project', {
-      name: '海外AI产品五月动态分析',
+    // The project itself is now created through the trusted user Room-first
+    // path after the agent's proposal-only tool (design §9.3); this test
+    // drives the planning bootstrap directly from the semantic service.
+    const executePromise = Promise.resolve(JSON.stringify(services.startProjectPlanning({
+      projectId: 'proj-bootstrap',
+      projectName: '海外AI产品五月动态分析',
       goal: '完成2026年5月国外主要AI产品动态分析',
       requirements: '覆盖OpenAI、Google、Anthropic、Meta、Microsoft，包含来源。',
-    });
+      planningGuidance: '',
+      poAgent: 'xiaok-po',
+      members: ['xiaok-worker'],
+      startPolicy: 'activate_and_dispatch_after_plan',
+    })));
 
     const immediateResult = await Promise.race([
       executePromise.then((value) => ({ kind: 'returned' as const, value })),
@@ -3233,24 +3241,7 @@ describe('desktop services', () => {
     expect(immediateResult.kind).toBe('returned');
     const result = JSON.parse(immediateResult.kind === 'returned' ? immediateResult.value : '{}');
 
-    expect(result).toMatchObject({
-      type: 'project_card',
-      projectId: 'proj-bootstrap',
-      status: 'planning',
-      planningStatus: 'queued',
-    });
-    expect(result.planBootstrapped).toBeUndefined();
-    expect(requests.map(request => request.path)).toEqual([
-      '/agents',
-      '/projects',
-    ]);
-    expect(requests.find(request => request.path === '/projects')?.body).toMatchObject({
-      name: '海外AI产品五月动态分析',
-      autoStartPlanning: false,
-      startPolicy: 'activate_and_dispatch_after_plan',
-      poAgent: 'xiaok-po',
-      members: ['xiaok-worker'],
-    });
+    expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
     expect(existsSync(jobsFile)).toBe(true);
@@ -3267,8 +3258,6 @@ describe('desktop services', () => {
     await waitFor(() => requests.some(request => request.path === '/projects/proj-bootstrap/activate-and-start'));
 
     expect(requests.map(request => request.path)).toEqual([
-      '/agents',
-      '/projects',
       '/projects/proj-bootstrap/plan',
       '/projects/proj-bootstrap/tasks',
       '/projects/proj-bootstrap/activate-and-start',
@@ -3326,17 +3315,18 @@ describe('desktop services', () => {
       },
     });
 
-    const result = JSON.parse(await services.executeTool('create_project', {
-      name: 'No Plan',
-      goal: 'Create project but fail planning',
-    }));
-
-    expect(result).toMatchObject({
-      type: 'project_card',
+    const result = services.startProjectPlanning({
       projectId: 'proj-no-plan',
-      status: 'planning',
-      planningStatus: 'queued',
+      projectName: 'No Plan',
+      goal: 'Create project but fail planning',
+      requirements: '',
+      planningGuidance: '',
+      poAgent: 'xiaok-po',
+      members: [],
+      startPolicy: 'auto_activate_after_plan',
     });
+
+    expect(result).toMatchObject({ ok: true, status: 'queued' });
     await waitFor(() => {
       const jobsFile = join(rootDir, 'data', 'kswarm-initial-plan-bootstrap-jobs.json');
       if (!existsSync(jobsFile)) return false;
@@ -3494,11 +3484,17 @@ describe('desktop services', () => {
       },
     });
 
-    const result = JSON.parse(await services.executeTool('create_project', {
-      name: 'Dispatch Fail',
+    const result = services.startProjectPlanning({
+      projectId: 'proj-dispatch-fail',
+      projectName: 'Dispatch Fail',
       goal: 'Plan succeeds but dispatch fails',
-    }));
-    expect(result).toMatchObject({ projectId: 'proj-dispatch-fail', planningStatus: 'queued' });
+      requirements: '',
+      planningGuidance: '',
+      poAgent: 'xiaok-po',
+      members: [],
+      startPolicy: 'activate_and_dispatch_after_plan',
+    });
+    expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-dispatch-fail/activate-and-start'));
     await waitFor(() => {
@@ -3576,11 +3572,17 @@ describe('desktop services', () => {
       },
     });
 
-    const result = JSON.parse(await services.executeTool('create_project', {
-      name: 'Replan',
+    const result = services.startProjectPlanning({
+      projectId: 'proj-replan',
+      projectName: 'Replan',
       goal: 'Plan already exists path',
-    }));
-    expect(result).toMatchObject({ projectId: 'proj-replan', planningStatus: 'queued' });
+      requirements: '',
+      planningGuidance: '',
+      poAgent: 'xiaok-po',
+      members: [],
+      startPolicy: 'activate_and_dispatch_after_plan',
+    });
+    expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-replan/activate-and-start'));
     await waitFor(() => {
@@ -3625,16 +3627,16 @@ describe('desktop services', () => {
       workFolder: '  /tmp/kswarm-demo  ',
     });
 
-    expect(JSON.parse(result)).toMatchObject({ type: 'project_card', projectId: 'proj-1' });
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+    const parsed = JSON.parse(result);
+    expect(parsed).toMatchObject({ ok: true, proposal: { kind: 'project_proposal' } });
+    expect(parsed.proposal).toMatchObject({
       name: 'Demo',
       goal: 'Ship a report',
       poAgent: 'po-agent',
       members: ['worker-agent'],
       workFolder: '/tmp/kswarm-demo',
     });
+    expect(requests.filter(request => (request.init?.method ?? 'GET').toUpperCase() !== 'GET')).toEqual([]);
   });
 
   it('maps explicit workflow execution mode from chat create_project tool to kswarm workflow_preferred mode', async () => {
@@ -3670,14 +3672,12 @@ describe('desktop services', () => {
     }));
 
     expect(result).toMatchObject({
-      type: 'project_card',
-      projectId: 'proj-workflow',
-      executionMode: 'workflow_preferred',
-    });
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
-      name: 'Workflow Demo',
-      executionMode: 'workflow_preferred',
+      ok: true,
+      proposal: {
+        kind: 'project_proposal',
+        name: 'Workflow Demo',
+        executionMode: 'workflow_preferred',
+      },
     });
   });
 
@@ -3713,14 +3713,12 @@ describe('desktop services', () => {
     }));
 
     expect(result).toMatchObject({
-      type: 'project_card',
-      projectId: 'proj-inferred-workflow',
-      executionMode: 'workflow_preferred',
-    });
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
-      name: 'dynamic workflow smoke 2026-06-02',
-      executionMode: 'workflow_preferred',
+      ok: true,
+      proposal: {
+        kind: 'project_proposal',
+        name: 'dynamic workflow smoke 2026-06-02',
+        executionMode: 'workflow_preferred',
+      },
     });
   });
 
@@ -3770,14 +3768,13 @@ describe('desktop services', () => {
     const first = JSON.parse(await tool.execute(input));
     const second = JSON.parse(await tool.execute(input));
 
-    expect(first.projectId).toBe('proj-1');
-    expect(second.projectId).toBe('proj-1');
-    expect(createdProjects).toHaveLength(1);
-    const createBodies = requests.filter(request => request.path === '/projects').map(request => request.body);
-    expect(createBodies).toHaveLength(2);
-    expect(createBodies[0]?.clientRequestKey).toEqual(createBodies[1]?.clientRequestKey);
-    expect(createBodies[0]).not.toHaveProperty('reuseExistingLiveProject');
-    expect(createBodies[1]).not.toHaveProperty('reuseExistingLiveProject');
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(createdProjects).toHaveLength(0);
+    // proposal-only: repeated proposals assemble the same stable key that
+    // the Room-first create will deduplicate on
+    expect(first.proposal.clientRequestKey).toEqual(second.proposal.clientRequestKey);
+    expect(first.proposal).not.toHaveProperty('reuseExistingLiveProject');
   });
 
   it('injects the runtime session id as create_project request scope', () => {
@@ -3820,19 +3817,17 @@ describe('desktop services', () => {
     };
 
     const tool = createKSwarmCreateProjectTool(kswarmService);
-    expect(tool.definition.description).toMatch(/报告.*report renderer.*HTML/i);
-    expect(tool.definition.description).toMatch(/演示文稿|幻灯片/);
-    expect(tool.definition.description).toMatch(/slide renderer.*HTML/i);
+    // proposal-only boundary wording (design §9.3); renderer planning guidance
+    // now lives in the assembled proposal payload below
+    expect(tool.definition.description).toMatch(/严禁直接创建正式项目/);
+    expect(tool.definition.description).not.toMatch(/必须调用|应该调用/);
 
-    await tool.execute({
+    const raw = await tool.execute({
       name: 'OpenAI本月分析',
       goal: '输出OpenAI本月分析报告',
       requirements: '使用中文，保留来源。',
     });
-
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    const body = JSON.parse(String(createRequest?.init?.body));
+    const body = JSON.parse(raw).proposal;
     expect(body.goal).toBe('输出OpenAI本月分析报告');
     expect(body.requirements).toBe('使用中文，保留来源。');
     expect(body.planningGuidance).toMatch(/report renderer/i);
@@ -3865,15 +3860,13 @@ describe('desktop services', () => {
     };
 
     const tool = createKSwarmCreateProjectTool(kswarmService);
-    await tool.execute({
+    const raw = await tool.execute({
       name: 'PDF Report',
       goal: '输出 PDF 报告',
       requirements: '先做分析，再交付 PDF 文件。',
     });
 
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    const body = JSON.parse(String(createRequest?.init?.body));
+    const body = JSON.parse(raw).proposal;
     expect(body.planningGuidance).toMatch(/report renderer/i);
     expect(body.planningGuidance).toContain('浏览器打印/print-to-pdf');
     expect(body.planningGuidance).toContain('不要用 make-pdf');
@@ -3904,15 +3897,13 @@ describe('desktop services', () => {
     };
 
     const tool = createKSwarmCreateProjectTool(kswarmService);
-    await tool.execute({
+    const raw = await tool.execute({
       name: '金蝶AI产品分析',
       goal: '金蝶今年AI产品分析',
       requirements: '要进行2轮分析，是提供给研发高层看的内容，要有高度',
     });
 
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    const body = JSON.parse(String(createRequest?.init?.body));
+    const body = JSON.parse(raw).proposal;
     expect(body.goal).toBe('金蝶今年AI产品分析');
     expect(body.requirements).toBe('要进行2轮分析，是提供给研发高层看的内容，要有高度');
     expect(body.planningGuidance).toMatch(/report renderer/i);
@@ -3946,15 +3937,13 @@ describe('desktop services', () => {
     };
 
     const tool = createKSwarmCreateProjectTool(kswarmService);
-    await tool.execute({
+    const raw = await tool.execute({
       name: 'OpenAI本月分析',
       goal: '输出OpenAI本月分析报告，最终用 Markdown 交付',
       requirements: '不要改写我的目标和要求。',
     });
 
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    const body = JSON.parse(String(createRequest?.init?.body));
+    const body = JSON.parse(raw).proposal;
     expect(body.goal).toBe('输出OpenAI本月分析报告，最终用 Markdown 交付');
     expect(body.requirements).toBe('不要改写我的目标和要求。');
     expect(body.planningGuidance).toMatch(/Markdown/i);
@@ -3995,10 +3984,10 @@ describe('desktop services', () => {
       goal: 'Verify seed routing',
     });
 
-    expect(JSON.parse(result)).toMatchObject({ type: 'project_card', projectId: 'proj-seed', memberCount: 1 });
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+    const parsed = JSON.parse(result);
+    expect(parsed).toMatchObject({ ok: true });
+    expect(parsed.proposal).toMatchObject({
+      kind: 'project_proposal',
       name: 'Seed Demo',
       goal: 'Verify seed routing',
       poAgent: 'xiaok-po',
@@ -4035,15 +4024,13 @@ describe('desktop services', () => {
     };
 
     const tool = createKSwarmCreateProjectTool(kswarmService);
-    await tool.execute({
+    const raw = await tool.execute({
       name: 'Explicit Member',
       goal: 'Use selected member',
       memberNames: ['Qoder'],
     });
 
-    const createRequest = requests.find(request => request.path === '/projects');
-    expect(createRequest).toBeTruthy();
-    expect(JSON.parse(String(createRequest?.init?.body))).toMatchObject({
+    expect(JSON.parse(raw).proposal).toMatchObject({
       poAgent: 'xiaok-po',
       members: ['cli-qoder'],
       agentSelection: {

@@ -69,6 +69,10 @@ import {
   createProjectCapabilityNeedsProposalPort,
 } from './kswarm-semantic-service.js';
 import { registerSemanticDesktopIpc } from './semantic-ipc.js';
+import { createCollaborationRoomService } from './collaboration-room-service.js';
+import { createCollaborationRoomBrokerClient } from './collaboration-room-broker-client.js';
+import { createRoomProjectSagaJournal } from './collaboration-room-saga-journal.js';
+import { createCollaborationRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -1054,9 +1058,50 @@ async function createWindow(): Promise<BrowserWindow> {
     kswarmService,
     teamService: kswarmTeamService,
   });
+  const collaborationRoomBrokerClient = createCollaborationRoomBrokerClient({
+    token: kswarmService.getIntentBrokerRoomToken(),
+  });
+  const collaborationRoomWakeDispatcher = createCollaborationRoomWakeDispatcher({
+    brokerClient: collaborationRoomBrokerClient,
+    canExecute: async logicalAgentId => {
+      if (logicalAgentId === 'xiaok-po' || logicalAgentId === XIAOK_WORKER_SEED_ID) return true;
+      try {
+        const response = await kswarmService.request('/agents');
+        if (!response.ok) return false;
+        const body = await response.json() as { agents?: Array<Record<string, unknown>> };
+        const agent = body.agents?.find(candidate => candidate.id === logicalAgentId);
+        if (!agent) return false;
+        const execution = agent.execution && typeof agent.execution === 'object'
+          ? agent.execution as { mode?: unknown; hostParticipantId?: unknown }
+          : null;
+        return agent.runtimeSource === 'desktop-agent-runtime'
+          || (execution?.mode === 'hosted' && execution.hostParticipantId === XIAOK_DESKTOP_HOST_PARTICIPANT_ID);
+      } catch {
+        return false;
+      }
+    },
+    execute: input => services.runCollaborationRoomAgentTask(input),
+  });
+  const collaborationRoomService = createCollaborationRoomService({
+    brokerClient: collaborationRoomBrokerClient,
+    kswarmClient: {
+      request: (path, init) => kswarmService.request(path, {
+        ...(init as RequestInit | undefined),
+        headers: {
+          'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken(),
+          ...((init as RequestInit | undefined)?.headers ?? {}),
+        },
+      }),
+    },
+    sagaJournal: createRoomProjectSagaJournal({
+      dbPath: join(USER_DATA_DIR, 'room-project-saga.sqlite'),
+    }),
+    wakeDispatcher: collaborationRoomWakeDispatcher,
+  });
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
     kswarm: kswarmSemanticService,
+    collaborationRooms: collaborationRoomService,
   });
   await registerDesktopIpc(shutdownAwareIpc, window, services, {
     loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },

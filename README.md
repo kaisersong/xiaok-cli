@@ -46,6 +46,19 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Xiaok Desktop v1.5.0 introduces a Room-first collaboration surface: users can discuss work with multiple agents before creating a project, promote selected Room messages into a KSwarm project only after explicit confirmation, and keep the resulting project linked to the conversation that created it.
+
+**Room-First Collaboration and Runtime Harnesses:**
+
+- **Collaboration Spaces**: The Desktop sidebar now opens durable Rooms with explicit membership, message history, project links, archive state, and restart-safe recovery backed by Intent Broker rather than renderer-local state.
+- **Source-Grounded Project Creation**: Users select the exact Room messages that define a project. Desktop creates the KSwarm project through the user-authorized Room path and posts a system message plus linked project card back into the Room.
+- **Isolated Agent Replies**: Mentioned hosted agents receive only the current Room transcript and explicitly selected project scope. Durable wakes are claimed and completed once, while unhosted or identity-conflicting routes fail closed instead of impersonating another runtime.
+- **Proposal-Only Agent Tooling**: The agent-facing `create_project` tool can prepare a proposal but cannot create projects or mutate project state. Formal creation remains a user-confirmed Desktop action.
+- **Pi Harness Support**: KSwarm can discover, probe, configure, and execute Pi through a bounded one-shot harness with controlled arguments, environment, working directory, timeout, and output size.
+- **DeepSeek Harness Safety Gate**: The DeepSeek harness route and capability registry are present, but creation stays disabled until a pinned real `dsh --profile headless` probe proves the preview CLI contract. The UI does not advertise an unverified runtime as ready.
+- **Dependency and Packaging Maintenance**: Root and Desktop SDK/lockfile ownership are aligned, deprecated dependency drift is guarded, and release builds pin the matching KSwarm and Intent Broker snapshots.
+- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, download links, and the Desktop Release workflow align on `1.5.0` / `desktop-v1.5.0`.
+
 Xiaok Desktop v1.4.32 makes long conversations easier to navigate and Goal Mode easier to discover, resume, and monitor without blocking the workspace. It also adds the latest GLM and DeepSeek Flash models to the shared CLI/Desktop catalog and hardens timeout and artifact evidence handling.
 
 **Goal Mode UX, Conversation Navigation, and Flash Models:**
@@ -722,9 +735,9 @@ xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. I
 
 Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
 
-- **xiaok-1.4.32-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.4.32-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.4.32.exe** — Windows installer (x64)
+- **xiaok-1.5.0-arm64.dmg** — macOS DMG installer (Apple Silicon)
+- **xiaok-1.5.0-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
+- **xiaok-setup-1.5.0.exe** — Windows installer (x64)
 
 ### Features
 

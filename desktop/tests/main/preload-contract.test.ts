@@ -248,6 +248,17 @@ describe('preload API contract', () => {
       'onMeetingRecorderCloseRequested',
       'onMeetingRecordingSaved',
       'onMeetingLiveTranscriptionUpdate',
+      'listCollaborationRooms',
+      'getCollaborationRoom',
+      'createCollaborationRoom',
+      'archiveCollaborationRoom',
+      'updateCollaborationRoomMembers',
+      'sendCollaborationRoomMessage',
+      'markCollaborationRoomSeen',
+      'cancelRoomDiscussion',
+      'createProjectFromRoom',
+      'createTaskFromRoomMessage',
+      'onCollaborationRoomEvent',
     ]);
   });
 

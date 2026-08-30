@@ -114,6 +114,7 @@ import {
 } from './kswarm-dynamic-workflow-script-tool.js';
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
+import type { CollaborationRoomTurnEnvelope } from './collaboration-room-wake-dispatcher.js';
 import { createAllHostGateways, type GatewayRuntimeFacade } from './provider-gateways/create-host-gateways.js';
 import { reservedProviderSpecs, type ReservedProviderBridge } from './provider-gateways/reserved-provider-specs.js';
 import type { PluginComponentSpec } from '../../src/platform/provider-runtime/lifecycle-reconciler.js';
@@ -1374,6 +1375,54 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     });
   };
 
+  const createCollaborationRoomTaskHost = () => {
+    const roomTools: Tool[] = [];
+    const roomRegistry = new ToolRegistry({ autoMode: true }, roomTools);
+    return new InProcessTaskRuntimeHost({
+      materialRegistry,
+      snapshotStore,
+      runner: coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
+        roomRegistry,
+        roomTools,
+        options.dataRoot,
+        options.kswarmService,
+        materialRegistry,
+        kswarmCreateProjectToolOptions,
+        {
+          restrictedArtifactGeneration: true,
+          officeToMarkdown: input => officeDocumentParser.parse(input),
+        },
+      )),
+      now: options.now,
+      aheGuards: { artifactEvidence: false, recoveryContinuity: false },
+      createTaskId: () => `room_turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    });
+  };
+
+  async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope): Promise<{ text: string }> {
+    const transcript = envelope.messages.map(message => {
+      const sender = message.sender && typeof message.sender === 'object'
+        ? ((message.sender as { kind?: string; logicalAgentId?: string; userId?: string }).logicalAgentId
+          || (message.sender as { userId?: string }).userId
+          || (message.sender as { kind?: string }).kind
+          || 'unknown')
+        : 'unknown';
+      return `[${sender}] ${message.text || `[${message.kind}]`}`;
+    }).join('\n');
+    const prompt = [
+      '你正在一个独立的 Xiaok 协作空间中回复用户。',
+      `协作空间：${envelope.roomTitle} (${envelope.roomId})`,
+      `你的逻辑智能体身份：${envelope.logicalAgentId}`,
+      `上下文范围：${JSON.stringify(envelope.contextScope)}`,
+      '只使用下方当前协作空间的消息作为上下文。严禁推测、读取或引用私聊、其他协作空间或未显式选择的项目。',
+      '本轮没有任何工具。直接给出一条有帮助、具体、简洁的回复；不要输出 JSON，不要声称执行了未执行的操作。',
+      '',
+      transcript,
+    ].join('\n');
+    const result = await runKSwarmRuntimeTextTask(createCollaborationRoomTaskHost(), prompt);
+    return { text: result.summary.trim() };
+  }
+
   const connectorsService = new ConnectorsService({
     store: new ConnectorsStore({ dataRoot: options.dataRoot }),
     toolRegistry: registry,
@@ -2513,6 +2562,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return () => goalTaskPreparedListeners.delete(listener);
     },
     runKSwarmHandoffTask,
+    runCollaborationRoomAgentTask,
     runKSwarmWorkflowNode,
     runKSwarmReadinessProbe,
     runKSwarmAssignPo,
@@ -5830,7 +5880,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '创建一个多智能体协作项目（KSwarm）。仅当用户明确说"创建项目""建项目""用工作流""多智能体协作"时调用。单人可完成的任务（写报告、写调研、生成文档、分析材料等）不要调用此工具，直接执行即可。用户可能同时指定智能体数量、名称和交付物要求。报告默认作为 report renderer HTML 规划；演示文稿/幻灯片默认作为 slide renderer HTML 规划，除非用户明确要求 Markdown 或 PPTX。',
+      description: '生成一份多智能体协作项目提案（ProjectProposal）。此工具只能产出提案：严禁直接创建正式项目、严禁修改任何项目状态；正式项目必须由用户在桌面端确认后通过协作空间（Room-first）路径创建。当用户表达想要多智能体协作/工作流时调用此工具生成提案；单人可完成的任务（写报告、写调研、生成文档、分析材料等）严禁调用，直接执行。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -5865,6 +5915,13 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
       },
     },
     async execute(input) {
+      // Proposal-only contract (design §9.3, §10.1, §16.3): this tool must
+      // never perform KSwarm mutations (no POST /projects, no agent
+      // auto-creation). It assembles the exact create request the user will
+      // confirm, and returns it as a ProjectProposal. Formal creation runs
+      // through the trusted user Room-first path after confirmation.
+      // Identity fields (requestSource/actor) are transport facts and are
+      // dropped from the proposal payload.
       const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder, executionMode, startPolicy, _xiaokRequestScope } = input as {
         name: string; goal: string; requirements?: string;
         memberNames?: string[]; memberCount?: number; workFolder?: string; executionMode?: string; startPolicy?: string;
@@ -5884,19 +5941,14 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
         requirements: requirements || '',
       });
 
-      const MAX_TOTAL_AGENTS = 10;
-
       try {
-        // 1. 获取现有 agents
         const agentsRes = await kswarmService.request('/agents');
         if (!agentsRes.ok) return JSON.stringify({ error: 'Cannot fetch agents from kswarm' });
         const { agents } = await agentsRes.json() as { agents: Array<{ id: string; name: string; runtimeType?: string; roles?: string[]; status: string; archivedAt?: number | null }> };
 
-        // 2. 选 PO agent（优先 dedicated xiaok-po，兼容旧 xiaok）
         const poAgent = getPreferredPoAgentId(agents);
         if (!poAgent) return JSON.stringify({ error: 'No agents available. Create an agent in kswarm first.' });
 
-        // 3. 解析智能体需求
         const resolvedMembers = resolveCreateProjectMembers({
           agents,
           poAgent,
@@ -5905,39 +5957,13 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
         }).members;
         const explicitlyNamedMemberIds = new Set(
           (Array.isArray(memberNames) ? memberNames : [])
-            .map(name => agents.find(agent => agent.id === name || agent.name === name)?.id)
+            .map(memberName => agents.find(agent => agent.id === memberName || agent.name === memberName)?.id)
             .filter((id): id is string => Boolean(id))
         );
+        // proposal-only: no agent auto-creation mutation; report the gap instead
+        const memberGap = memberCount > 0 ? Math.max(0, memberCount - resolvedMembers.length) : 0;
+        const sanitizedMembers = resolvedMembers.slice(0, 10);
 
-        // 3a. 自动创建 agent（如果用户明确指定数量且不够，并发创建）
-        if (memberCount > 0) {
-          const stillNeeded = memberCount - resolvedMembers.length;
-          const canCreate = Math.min(stillNeeded, MAX_TOTAL_AGENTS - agents.length);
-          if (canCreate > 0) {
-            const createResults = await Promise.all(
-              Array.from({ length: canCreate }, (_, i) =>
-                // Same gate as project creation: `POST /agents` is a desktop
-                // mutation and is rejected with 401 without the token.
-                kswarmService.request('/agents', withKSwarmDesktopMutationToken(kswarmService, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    name: `Worker-${agents.length + i + 1}`,
-                    roles: ['worker'],
-                    instructions: 'You are a KSwarm worker agent. Execute assigned tasks and submit results.',
-                  }),
-                })).then(r => r.ok ? r.json() : null).catch(() => null)
-              )
-            );
-            for (const newAgent of createResults) {
-              const newAgentId = extractCreatedAgentId(newAgent);
-              if (newAgentId && !resolvedMembers.includes(newAgentId)) resolvedMembers.push(newAgentId);
-            }
-          }
-        }
-        const sanitizedMembers = sanitizeCreateProjectMembers(resolvedMembers, poAgent);
-
-        // 4. 创建项目
         const planningGuidance = buildCreateProjectPlanningGuidanceForTool({ goal, requirements: requirements || '' });
         const clientRequestKey = buildCreateProjectClientRequestKey({
           requestScope: _xiaokRequestScope,
@@ -5947,73 +5973,33 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           members: sanitizedMembers,
           workFolder: resolvedWorkFolder,
         });
-        // The KSwarm server gates every desktop mutation on the mutation token
-        // (`createMutationAuthority` in persistence-hub.js returns 401
-        // `mutation_credential_required` without it), so project creation must
-        // carry it exactly like activate-and-start does.
-        const res = await kswarmService.request('/projects', withKSwarmDesktopMutationToken(kswarmService, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name, goal,
-            requirements: requirements || '',
-            ...(planningGuidance ? { planningGuidance } : {}),
-            poAgent,
-            members: sanitizedMembers,
-            agentSelection: {
-              poAgent: { agentId: poAgent, source: 'default_seed' },
-              members: sanitizedMembers.map(agentId => ({
-                agentId,
-                source: explicitlyNamedMemberIds.has(agentId) ? 'explicit_user' : 'default_seed',
-              })),
-            },
-            startPolicy: resolvedStartPolicy,
-            ...(resolvedExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
-            ...(options.enqueuePlanBootstrap ? { autoStartPlanning: false } : {}),
-            ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
-            ...(clientRequestKey ? { clientRequestKey } : {}),
-          }),
-        }));
-        if (!res.ok) return JSON.stringify({ error: `Failed to create project: ${res.status}` });
-        const { project, reused } = await res.json() as { project: { id: string; name: string; status: string; createdAt: number }; reused?: boolean };
 
-        let planningStatus: 'queued' | undefined;
-        if (options.enqueuePlanBootstrap && !reused) {
-          const enqueueResult = options.enqueuePlanBootstrap({
-            projectId: project.id,
-            projectName: project.name,
-            goal,
-            requirements: requirements || '',
-            planningGuidance,
-            poAgent,
-            members: sanitizedMembers,
-            startPolicy: resolvedStartPolicy,
-          });
-          if (!enqueueResult.ok) {
-            return JSON.stringify({
-              error: 'project_created_but_planning_enqueue_failed',
-              projectId: project.id,
-              name: project.name,
-              reason: enqueueResult.error,
-            });
-          }
-          planningStatus = enqueueResult.status;
-        }
-
-        // 5. 返回 project_card 标记
-        return JSON.stringify({
-          type: 'project_card',
-          projectId: project.id,
-          name: project.name,
+        const proposal = {
+          kind: 'project_proposal' as const,
+          name,
           goal,
-          status: options.enqueuePlanBootstrap && !reused ? 'planning' : project.status,
-          createdAt: project.createdAt,
-          memberCount: sanitizedMembers.length,
-          ...(resolvedExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
+          requirements: requirements || '',
+          ...(planningGuidance ? { planningGuidance } : {}),
+          poAgent,
+          members: sanitizedMembers,
+          agentSelection: {
+            poAgent: { agentId: poAgent, source: 'default_seed' },
+            members: sanitizedMembers.map(agentId => ({
+              agentId,
+              source: explicitlyNamedMemberIds.has(agentId) ? 'explicit_user' : 'default_seed',
+            })),
+          },
+          memberNames,
+          memberCount,
+          ...(memberGap > 0 ? { memberGap } : {}),
           startPolicy: resolvedStartPolicy,
-          ...(reused ? { reused: true } : {}),
-          ...(planningStatus ? { planningStatus } : {}),
-        });
+          ...(resolvedExecutionMode ? { executionMode: resolvedExecutionMode } : {}),
+          ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
+          ...(clientRequestKey ? { clientRequestKey } : {}),
+          createdAt: new Date().toISOString(),
+          note: '提案未执行：正式项目需要用户在桌面端确认后，经协作空间（Room-first）路径创建。',
+        };
+        return JSON.stringify({ ok: true, proposal });
       } catch (err) {
         return JSON.stringify({ error: `KSwarm service unavailable: ${(err as Error).message}` });
       }

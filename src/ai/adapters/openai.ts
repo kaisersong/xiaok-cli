@@ -1,7 +1,4 @@
-import { Agent as HttpAgent } from 'node:http';
-import { Agent as HttpsAgent } from 'node:https';
 import OpenAI from 'openai';
-import type { Fetch as OpenAIFetch } from 'openai/core';
 import type {
   ModelAdapter,
   Message,
@@ -96,11 +93,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 const RAW_THINK_OPEN_TAG = '<think>';
 const RAW_THINK_CLOSE_TAG = '</think>';
-const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
 const MAX_OPENAI_STREAM_TEXT_CHARS = 2 * 1024 * 1024;
 const MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS = 2 * 1024 * 1024;
-
-type OpenAIHttpAgent = HttpAgent | HttpsAgent;
 
 interface KimiReasoningEffortRequestExtension {
   reasoning_effort: ModelReasoningEffort;
@@ -157,14 +151,7 @@ function drainBufferedToolCalls(
   return calls;
 }
 
-function createOpenAIHttpAgent(baseUrl?: string): OpenAIHttpAgent {
-  const protocol = new URL(baseUrl ?? DEFAULT_OPENAI_BASE_URL).protocol;
-  return protocol === 'http:'
-    ? new HttpAgent({ keepAlive: true })
-    : new HttpsAgent({ keepAlive: true });
-}
-
-function createStrictKimiNoRedirectFetch(): OpenAIFetch {
+function createStrictKimiNoRedirectFetch(): typeof globalThis.fetch {
   const fetchImpl = globalThis.fetch.bind(globalThis);
   const fetchWithoutRedirect: typeof fetch = async (input, init) => {
     const response = await fetchImpl(input, {
@@ -176,10 +163,7 @@ function createStrictKimiNoRedirectFetch(): OpenAIFetch {
     }
     return response;
   };
-  // The SDK's Fetch response is typed through its node-fetch compatibility
-  // shim, while Electron provides the WHATWG-compatible global fetch at
-  // runtime. The callable contract used here is the same.
-  return fetchWithoutRedirect as unknown as OpenAIFetch;
+  return fetchWithoutRedirect;
 }
 
 function collectReasoningText(blocks: Message['content']): string | undefined {
@@ -420,7 +404,6 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly resolvedHeaders?: Readonly<Record<string, string | null>>;
   private readonly kimiCodingHeadersApplied: boolean;
   private readonly onUsageDiagnostic: KimiUsageDiagnosticSink;
-  private readonly httpAgent: OpenAIHttpAgent;
   readonly harnessContext: OpenAIAdapterInit['harnessContext'];
   private reasoningDialectState: ReasoningDialectState = {
     current: 'reasoning_content',
@@ -442,12 +425,10 @@ export class OpenAIAdapter implements ModelAdapter {
     this.onUsageDiagnostic = init.onUsageDiagnostic ?? recordUsageDiagnostic;
     this.harnessContext = init.harnessContext;
     ownedHarnessProfiles.set(this, init.harnessContext.profile.id);
-    this.httpAgent = createOpenAIHttpAgent(init.harnessContext.identity.canonicalBaseUrl);
     this.client = new OpenAI({
       apiKey: init.apiKey,
       baseURL: init.harnessContext.identity.canonicalBaseUrl,
       maxRetries: strictKimiK3 ? 0 : MAX_RETRIES,
-      httpAgent: this.httpAgent,
       defaultHeaders: init.resolvedHeaders,
       ...(strictKimiK3
         ? { fetch: createStrictKimiNoRedirectFetch() }
@@ -476,7 +457,8 @@ export class OpenAIAdapter implements ModelAdapter {
   }
 
   dispose(): void {
-    this.httpAgent.destroy();
+    // OpenAI SDK v7 uses the platform fetch transport and owns its connection
+    // pooling. There is no per-client Agent handle to destroy.
   }
 
   cloneWithModel(newWireModel: string): OpenAIAdapter {

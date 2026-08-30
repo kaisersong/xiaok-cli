@@ -6,6 +6,8 @@ import { AutomationsPage } from './components/automations/AutomationsPage';
 import { ProjectsPage } from './components/projects/ProjectsPage';
 import { ProjectDetailPage } from './components/projects/ProjectDetailPage';
 import { KnowledgePage } from './components/KnowledgePage';
+import { CollaborationRoomsPage } from './components/collaboration/CollaborationRoomsPage';
+import { CollaborationRoomPage } from './components/collaboration/CollaborationRoomPage';
 import { ScheduledTaskToast } from './components/ScheduledTaskToast';
 import { useScheduledTaskBootstrap } from './hooks/useScheduledTaskBootstrap';
 
@@ -25,6 +27,8 @@ export function App() {
           <Route path="automations/:tab" element={<AutomationsPage />} />
           <Route path="projects" element={<ProjectsPage />} />
           <Route path="projects/:projectId" element={<ProjectDetailPage />} />
+          <Route path="collaboration" element={<CollaborationRoomsPage />} />
+          <Route path="collaboration/:roomId" element={<CollaborationRoomPage />} />
           <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="knowledge/:collectionId" element={<KnowledgePage />} />
         </Route>

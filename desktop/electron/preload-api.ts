@@ -267,6 +267,7 @@ export const PRELOAD_API_KEYS = [
   'onMeetingRecorderCloseRequested',
   'onMeetingRecordingSaved',
   'onMeetingLiveTranscriptionUpdate',
+  ...["listCollaborationRooms", "getCollaborationRoom", "createCollaborationRoom", "archiveCollaborationRoom", "updateCollaborationRoomMembers", "sendCollaborationRoomMessage", "markCollaborationRoomSeen", "cancelRoomDiscussion", "createProjectFromRoom", "createTaskFromRoomMessage", "onCollaborationRoomEvent"]
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -322,6 +323,7 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
   'subscribeTask',
+  'onCollaborationRoomEvent',
   'onGoalChanged',
   'onGoalTaskPrepared',
   'onArtifactWorkspaceChanged',
@@ -555,6 +557,16 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   meetingDraftRecording: 'desktop:meeting:draftRecording',
   meetingProcessRecording: 'desktop:meeting:processRecording',
   meetingSaveTranscript: 'desktop:meeting:saveTranscript',
+  listCollaborationRooms: 'desktop:collaborationRoom:listRooms',
+  getCollaborationRoom: 'desktop:collaborationRoom:getRoom',
+  createCollaborationRoom: 'desktop:collaborationRoom:createRoom',
+  archiveCollaborationRoom: 'desktop:collaborationRoom:archiveRoom',
+  updateCollaborationRoomMembers: 'desktop:collaborationRoom:updateMembers',
+  sendCollaborationRoomMessage: 'desktop:collaborationRoom:sendMessage',
+  markCollaborationRoomSeen: 'desktop:collaborationRoom:markSeen',
+  cancelRoomDiscussion: 'desktop:collaborationRoom:cancelDiscussion',
+  createProjectFromRoom: 'desktop:collaborationRoom:createProjectFromRoom',
+  createTaskFromRoomMessage: 'desktop:collaborationRoom:createTaskFromRoomMessage',
   meetingOpenRecorderWindow: 'desktop:meetingOpenRecorderWindow',
   meetingSetRecorderWindowMode: 'desktop:meetingSetRecorderWindowMode',
   meetingSetRecorderSessionState: 'desktop:meetingSetRecorderSessionState',
@@ -1410,6 +1422,17 @@ export interface DesktopApi {
   meetingDraftRecording(input: unknown): Promise<unknown>;
   meetingProcessRecording(input: unknown): Promise<unknown>;
   meetingSaveTranscript(input: unknown): Promise<unknown>;
+  listCollaborationRooms(): Promise<unknown>;
+  getCollaborationRoom(roomId: string): Promise<unknown>;
+  createCollaborationRoom(input: unknown): Promise<unknown>;
+  archiveCollaborationRoom(input: unknown): Promise<unknown>;
+  updateCollaborationRoomMembers(input: unknown): Promise<unknown>;
+  sendCollaborationRoomMessage(input: unknown): Promise<unknown>;
+  markCollaborationRoomSeen(input: unknown): Promise<unknown>;
+  cancelRoomDiscussion(input: unknown): Promise<unknown>;
+  createProjectFromRoom(input: unknown): Promise<unknown>;
+  createTaskFromRoomMessage(input: unknown): Promise<unknown>;
+  onCollaborationRoomEvent(listener: (event: unknown) => void): () => void;
   meetingOpenRecorderWindow(input: { collectionId: string }): Promise<{ ok: boolean; error?: string }>;
   meetingSetRecorderWindowMode(input: { mode: 'workbench' | 'compact' | 'summary' }): Promise<{ ok: boolean }>;
   meetingSetRecorderSessionState(input: { state: 'idle' | 'recording' | 'processing' | 'summary' }): Promise<{ ok: boolean }>;
@@ -1930,6 +1953,23 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<unknown>,
     meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<unknown>,
     meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<unknown>,
+    listCollaborationRooms: () => ipcRenderer.invoke('desktop:collaborationRoom:listRooms') as Promise<unknown>,
+    getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as Promise<unknown>,
+    createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,
+    archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,
+    updateCollaborationRoomMembers: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input) as Promise<unknown>,
+    sendCollaborationRoomMessage: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as Promise<unknown>,
+    markCollaborationRoomSeen: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input) as Promise<unknown>,
+    cancelRoomDiscussion: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:cancelDiscussion', input) as Promise<unknown>,
+    createProjectFromRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createProjectFromRoom', input) as Promise<unknown>,
+    createTaskFromRoomMessage: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createTaskFromRoomMessage', input) as Promise<unknown>,
+    onCollaborationRoomEvent: (listener: (event: unknown) => void) => {
+      const handler = (_event: unknown, payload: unknown) => listener(payload);
+      ipcRenderer.on('desktop:collaborationRoom:event', handler as never);
+      return () => {
+        ipcRenderer.off?.('desktop:collaborationRoom:event', handler as never);
+      };
+    },
     meetingOpenRecorderWindow: (input) => ipcRenderer.invoke('desktop:meetingOpenRecorderWindow', input) as Promise<{ ok: boolean; error?: string }>,
     meetingSetRecorderWindowMode: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderWindowMode', input) as Promise<{ ok: boolean }>,
     meetingSetRecorderSessionState: (input) => ipcRenderer.invoke('desktop:meetingSetRecorderSessionState', input) as Promise<{ ok: boolean }>,

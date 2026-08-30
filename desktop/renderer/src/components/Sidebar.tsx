@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { createLogger } from '../lib/logger';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal, Workflow } from 'lucide-react';
+import { Plus, Search, X, Bolt, Pencil, RefreshCw, FolderKanban, ExternalLink, BookOpen, MoreHorizontal, Workflow, MessagesSquare } from 'lucide-react';
 import { api, type ThreadResponse } from '../api';
 import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
@@ -46,7 +46,7 @@ interface SidebarScheduledTask {
   runtimeTaskId?: string;
 }
 
-type NavSection = 'new' | 'automations' | 'projects' | 'knowledge';
+type NavSection = 'new' | 'automations' | 'projects' | 'collaboration' | 'knowledge';
 
 interface SidebarProps {
   onOpenSettings?: () => void;
@@ -208,6 +208,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       setActiveNav('automations');
     } else if (routerLocation.pathname.startsWith('/projects')) {
       setActiveNav('projects');
+    } else if (routerLocation.pathname.startsWith('/collaboration')) {
+      setActiveNav('collaboration');
     } else if (routerLocation.pathname.startsWith('/knowledge')) {
       setActiveNav('knowledge');
     } else {
@@ -269,7 +271,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   };
 
   const isOnScheduled = activeNav === 'automations';
-  const hideThreadList = activeNav === 'automations' || activeNav === 'projects' || activeNav === 'knowledge';
+  const hideThreadList = activeNav === 'automations' || activeNav === 'projects' || activeNav === 'collaboration' || activeNav === 'knowledge';
   const updateVersion = updateStatus?.version || t.sidebarUpdateNewVersion;
   const currentVersion = updateStatus?.currentVersion;
   const updateError = updateStatus?.error;
@@ -364,6 +366,19 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
           >
             <FolderKanban size={16} className="shrink-0" />
             <span>{t.sidebarProjects}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/collaboration')}
+            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
+              activeNav === 'collaboration'
+                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
+                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
+            }`}
+            title={t.sidebarCollaboration}
+          >
+            <MessagesSquare size={16} className="shrink-0" />
+            <span>{t.sidebarCollaboration}</span>
           </button>
           <button
             type="button"

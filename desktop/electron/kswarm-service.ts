@@ -202,8 +202,12 @@ export function buildIntentBrokerServiceEnv(options: {
   cwd: string;
   port: number;
   repoRoot?: string;
+  desktopRoomToken?: string;
+  kswarmRoomToken?: string;
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(options.baseEnv ?? process.env), PORT: String(options.port) };
+  if (options.desktopRoomToken) env.INTENT_BROKER_DESKTOP_TOKEN = options.desktopRoomToken;
+  if (options.kswarmRoomToken) env.INTENT_BROKER_KSWARM_TOKEN = options.kswarmRoomToken;
   const repoRoot = options.repoRoot || options.cwd;
 
   if (repoRoot !== options.cwd) {
@@ -542,6 +546,7 @@ export interface KSwarmService {
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
   onStatusChange(cb: (status: KSwarmServiceStatus) => void): () => void;
   getDesktopMutationToken(): string;
+  getIntentBrokerRoomToken(): string;
   /** Make an HTTP request to the KSwarm service. Auto-starts if not running. */
   request(path: string, init?: RequestInit): Promise<Response>;
 }
@@ -620,6 +625,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   let lastPersistenceFailStop: string | null = null;
   const suppressedServerExits = new WeakSet<ChildProcess>();
   const desktopMutationToken = `xiaok-desktop-${randomBytes(32).toString('base64url')}`;
+  const desktopRoomToken = `xiaok-room-user-${randomBytes(32).toString('base64url')}`;
+  const kswarmRoomToken = `xiaok-room-system-${randomBytes(32).toString('base64url')}`;
   const listeners = new Set<(status: KSwarmServiceStatus) => void>();
 
   function getStatus(): KSwarmServiceStatus {
@@ -904,6 +911,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       cwd: brokerLaunch.cwd,
       port: BROKER_PORT,
       repoRoot: brokerLaunch.repoRoot,
+      desktopRoomToken,
+      kswarmRoomToken,
     });
     const nodeRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
     console.log(`[kswarm-service] Spawning broker: ${brokerLaunch.entryPath}`);
@@ -1074,6 +1083,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
         KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
+        INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken,
         ...(await (async () => {
           try {
             const cfg = await loadConfig();
@@ -1220,6 +1230,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
   function getDesktopMutationToken(): string {
     return desktopMutationToken;
+  }
+
+  function getIntentBrokerRoomToken(): string {
+    return desktopRoomToken;
   }
 
   async function start(): Promise<void> {
@@ -1384,5 +1398,5 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     notifyListeners();
   }
 
-  return { start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, request };
+  return { start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, getIntentBrokerRoomToken, request };
 }
