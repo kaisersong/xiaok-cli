@@ -146,7 +146,6 @@ function createHarness(cols: number, rows: number): Harness {
       writeAssistantTextChunkInOrder(delta, {
         noteVisibleAssistantText: () => {},
         appendAssistantText: () => {},
-        noteResponseStarted: () => {},
         appendStreamingSegment: () => {},
         ensureStreamingPhase: () => ensureStreamingPhaseInOrder(phaseDeps),
         writeMarkdown: (text) => md.write(text),

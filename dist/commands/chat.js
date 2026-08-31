@@ -21,6 +21,7 @@ import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-r
 import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
 import { writeError, formatErrorText, isTTY } from '../utils/ui.js';
 import { showPermissionPrompt } from '../ui/permission-prompt.js';
+import { askQuestion } from '../ui/ask-question.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
 import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand, toSkillEntries, findSkillByCommandName } from '../ai/skills/loader.js';
@@ -62,7 +63,7 @@ import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
 import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
 import { openTranscriptPager, spawnPagerProcess } from '../ui/transcript-pager.js';
-import { detectImageProtocol, readImageDimensions, renderImageLines, formatImagePlaceholder } from '../ui/image-renderer.js';
+import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { createLogger } from '../utils/logger.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
@@ -85,7 +86,8 @@ import { resolveYZJConfig } from '../channels/yzj.js';
 import { YZJTransport } from '../channels/yzj-transport.js';
 import { InMemoryApprovalStore } from '../channels/approval-store.js';
 import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions, } from '../ai/providers/model-runtime-options.js';
-import { getProviderProfile } from '../ai/providers/registry.js';
+import { getProviderProfile, listProviderProfiles } from '../ai/providers/registry.js';
+import { resolveProviderApiKey } from '../ai/providers/auth-resolver.js';
 import { FileSkillAdherenceStore } from '../runtime/skills/adherence-store.js';
 import { checkForUpdate } from '../update/version-check.js';
 import { buildIntentReminderBlock, formatCurrentIntentSummaryLine, formatCurrentTurnIntentSummaryLine, formatIntentCreatedTranscriptBlock, formatIntentStageSummaryTranscriptBlock, formatProgressTranscriptBlock, formatReceiptTranscriptBlock, formatSalvageTranscriptBlock, formatStageActivatedTranscriptBlock, } from '../ui/orchestration.js';
@@ -587,22 +589,40 @@ async function runChat(initialInput, opts) {
     let askUserClearFrame = null;
     const workflowTools = [
         createAskUserTool({
-            ask: async (question, placeholder) => {
+            ask: async (question, placeholder, interaction) => {
                 if (!isTTY()) {
                     throw new Error('当前运行模式不支持 ask_user 交互');
                 }
-                const promptText = `\n${dim('Agent question:')} ${question}\n`;
-                if (replRenderer.hasActiveScrollRegion()) {
-                    scrollRegion.writeAtContentCursor(promptText);
+                askUserOnEnter?.();
+                try {
+                    if (interaction?.options.length) {
+                        const result = await askQuestion({
+                            question,
+                            options: interaction.options,
+                            multiSelect: interaction.multiSelect ?? false,
+                            renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
+                            clearFrame: () => askUserClearFrame?.(),
+                        });
+                        return [...result.labels, result.otherText]
+                            .filter((value) => Boolean(value))
+                            .join(', ');
+                    }
+                    const promptText = `\n${dim('Agent question:')} ${question}\n`;
+                    if (replRenderer.hasActiveScrollRegion()) {
+                        scrollRegion.writeAtContentCursor(promptText);
+                    }
+                    else {
+                        process.stdout.write(promptText);
+                    }
+                    const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ');
+                    if (answer === null) {
+                        throw new Error('用户取消了问题输入');
+                    }
+                    return answer;
                 }
-                else {
-                    process.stdout.write(promptText);
+                finally {
+                    askUserOnExit?.();
                 }
-                const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ');
-                if (answer === null) {
-                    throw new Error('用户取消了问题输入');
-                }
-                return answer;
             },
         }),
         ...createIntentDelegationTools({
@@ -902,34 +922,12 @@ async function runChat(initialInput, opts) {
     let turnVisibleAssistantTextSeen = false;
     let turnThinkingOnlyToolNoticeWritten = false;
     let thinkingOnlyToolNoticeTimer = null;
-    let longThinkingTimer = null;
-    let turnStartedAt = 0;
-    const LONG_THINKING_THRESHOLD_MS = 10_000;
-    const clearLongThinkingTimer = () => {
-        if (longThinkingTimer) {
-            clearInterval(longThinkingTimer);
-            longThinkingTimer = null;
-        }
-    };
-    const startLongThinkingTimer = () => {
-        clearLongThinkingTimer();
-        turnStartedAt = Date.now();
-        longThinkingTimer = setInterval(() => {
-            if (turnVisibleAssistantTextSeen) {
-                clearLongThinkingTimer();
-                return;
-            }
-            const elapsed = Math.round((Date.now() - turnStartedAt) / 1000);
-            beginActivity(`Thinking (${elapsed}s)`);
-        }, LONG_THINKING_THRESHOLD_MS);
-    };
     const resetStreamingSegment = () => {
         streamingSegmentText = '';
     };
     const noteVisibleAssistantText = (delta) => {
         if (/\S/.test(delta)) {
             turnVisibleAssistantTextSeen = true;
-            clearLongThinkingTimer();
         }
     };
     const flushStreamingMarkdown = () => {
@@ -1001,10 +999,6 @@ async function runChat(initialInput, opts) {
     const runtimeState = new TuiRuntimeState({
         statusBar,
         scrollRegion,
-        onWriteProgressNote: (note) => {
-            turnLayout.noteProgressNote();
-            writeProgressTranscriptNote(note);
-        },
         onSuspendInteractiveUi: (context, error) => {
             suspendInteractiveUi(context, error);
         },
@@ -1104,7 +1098,6 @@ async function runChat(initialInput, opts) {
         resetStreamingSegment();
     };
     const handleTurnFailure = (error) => {
-        clearLongThinkingTimer();
         endStreamingPhaseForInterrupt();
         runtimeState.markInputReady();
         resetTurnChrome();
@@ -1124,7 +1117,6 @@ async function runChat(initialInput, opts) {
         renderFooterChrome();
     };
     const handleTurnAbort = () => {
-        clearLongThinkingTimer();
         endStreamingPhaseForInterrupt();
         runtimeState.markInputReady();
         resetTurnChrome();
@@ -1203,9 +1195,6 @@ async function runChat(initialInput, opts) {
         writeAssistantTextChunkInOrder(delta, {
             noteVisibleAssistantText,
             appendAssistantText: appendText,
-            noteResponseStarted: () => {
-                runtimeState.noteResponseStarted();
-            },
             appendStreamingSegment: (text) => {
                 streamingSegmentText += text;
             },
@@ -2022,7 +2011,7 @@ async function runChat(initialInput, opts) {
                     }
                     if (chunk.type === 'tool_use') {
                         toolCallsList.push(chunk.name);
-                        if (chunk.name === 'AskUserQuestion') {
+                        if (chunk.name === 'AskUserQuestion' || chunk.name === 'ask_user') {
                             askUserCalls += 1;
                         }
                     }
@@ -2101,6 +2090,8 @@ async function runChat(initialInput, opts) {
         const profile = getProviderProfile(providerId);
         return (profile?.label ?? providerId).toLowerCase();
     };
+    // 首次使用引导：没有任何可用 provider key 时，在欢迎页下方提示 xiaok login
+    const hasAnyProviderKey = listProviderProfiles().some((profile) => resolveProviderApiKey(config, profile.id) !== '');
     inputReader.setTranscriptLogger(transcriptLogger);
     const originalStdoutWrite = process.stdout.write.bind(process.stdout);
     const originalStderrWrite = process.stderr.write.bind(process.stderr);
@@ -2196,6 +2187,16 @@ async function runChat(initialInput, opts) {
         // setWelcomeRows updates both _totalRows and _cursorRow based on
         // the row count returned by renderWelcomeScreen (console.log calls).
         scrollRegion.setWelcomeRows(contentRows);
+        // First-run guidance: no provider key at all -> point at `xiaok login`
+        if (!hasAnyProviderKey) {
+            const loginHint = `${boldCyan('🔑')} ${dim('尚未配置任何 AI provider 的 API key，运行')} ${boldCyan('xiaok login')} ${dim('完成配置')}`;
+            if (scrollRegion.isActive()) {
+                scrollRegion.writeAtContentCursor(`  ${loginHint}\n`);
+            }
+            else {
+                process.stdout.write(`  ${loginHint}\n`);
+            }
+        }
         // Async update check — show hint below welcome if newer version exists
         checkForUpdate(cliVersion).then((result) => {
             if (result?.hasUpdate && !terminalUiSuspended) {
@@ -2345,7 +2346,7 @@ async function runChat(initialInput, opts) {
                     columns: process.stdout.columns ?? 80,
                     imageId: nextInlineImageId++,
                 });
-                const placeholder = `  ↳ ${formatImagePlaceholder(dims)}`;
+                const placeholder = formatImageFallbackLine(dims);
                 try {
                     if (rendered.protocol === null) {
                         const line = `${rendered.lines[0]}\n`;
@@ -2575,7 +2576,6 @@ async function runChat(initialInput, opts) {
                 clearTimeout(thinkingOnlyToolNoticeTimer);
                 thinkingOnlyToolNoticeTimer = null;
             }
-            startLongThinkingTimer();
             if (!normalTurnChromePrimed) {
                 beginNormalInputTurnChrome('');
             }
@@ -2592,7 +2592,7 @@ async function runChat(initialInput, opts) {
                 summary: transcriptSummary,
             });
             endStreamingPhaseForInterrupt();
-            if (e.toolName === 'AskUserQuestion') {
+            if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
                 turnHadAskUserQuestion = true;
                 enterAskUserQuestionPrompt();
                 maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
@@ -2682,7 +2682,6 @@ async function runChat(initialInput, opts) {
                 goalTurnDrafts.delete(event.turnId);
                 settledGoalTurns.push(goalDraft);
             }
-            clearLongThinkingTimer();
             stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
             turnHadAskUserQuestion = false;
             toolExplorer.reset();
@@ -2726,7 +2725,6 @@ async function runChat(initialInput, opts) {
                 goalTurnDrafts.delete(event.turnId);
                 settledGoalTurns.push(goalDraft);
             }
-            clearLongThinkingTimer();
             turnHadAskUserQuestion = false;
             intentTurnState.clearTurnContext(event.turnId);
             currentTurnStageObservedSkillNames = new Map();
@@ -2745,7 +2743,6 @@ async function runChat(initialInput, opts) {
                 goalTurnDrafts.delete(event.turnId);
                 settledGoalTurns.push(goalDraft);
             }
-            clearLongThinkingTimer();
             turnHadAskUserQuestion = false;
             intentTurnState.clearTurnContext(event.turnId);
             currentTurnStageObservedSkillNames = new Map();
@@ -2892,8 +2889,20 @@ async function runChat(initialInput, opts) {
             }
             // 处理内置命令
             if (trimmed === '/clear') {
+                // /clear clears the conversation context, not just the screen: the
+                // agent session history, usage counters and the persisted snapshot for
+                // this session are reset so the status bar context reflects reality.
+                // Goal state and the transcript audit file are intentionally kept.
+                agent.clearHistory();
+                runtimeFacade?.resetSkillTracking();
+                statusBar.update({ inputTokens: 0, outputTokens: 0 });
+                await persistSession();
                 scrollRegion.end();
-                process.stdout.write('\x1b[2J\x1b[H');
+                // Mirror the startup sequence exactly: begin() performs its own
+                // \x1b[2J\x1b[H full clear, so the welcome screen MUST be rendered
+                // AFTER begin() — rendering it before (with a manual clear) gets the
+                // card immediately wiped by begin()'s own clear.
+                scrollRegion.begin();
                 contentRows = renderWelcomeScreen({
                     model: getActiveProviderLabel(),
                     cwd: process.cwd(),
@@ -2901,7 +2910,6 @@ async function runChat(initialInput, opts) {
                     mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
                     version: cliVersion,
                 });
-                scrollRegion.begin();
                 scrollRegion.setWelcomeRows(contentRows);
                 welcomeVisible = true;
                 continue;

@@ -32,30 +32,36 @@ Your job is not just to write files. Your job is to help the user end up with a
 skill that is narrow enough to trigger well, explicit enough to execute
 reliably, and concrete enough to validate.
 
-If the user tries to pack multiple independent jobs into one skill, stop and
-propose a split before you write anything.
+If the user tries to pack multiple independent jobs into one skill, recommend a
+split and explain the routing tradeoff, but follow the user's scope choice.
 
 ## Core Principles
 
 1. Single-goal principle
-   One skill should own one primary job. If the user wants multiple deliverables
-   or multiple unrelated triggers, split the idea into multiple skills.
+   Prefer one primary job because it usually routes more clearly. If the user
+   wants multiple deliverables or unrelated triggers, recommend a split, but do
+   not reject the user's chosen shape.
 
 2. Progressive disclosure
    Keep `SKILL.md` focused on routing, workflow, and success criteria. Move long
    detail into `references/`, `scripts/`, or `assets/` when the skill grows.
 
 3. Validation before trust
-   Do not present a generated skill as complete until you run `validate_skill`
-   on the saved draft and either fix blocking issues or explain the remaining
-   warnings.
+   Run `validate_skill` on the saved draft. Fix errors before presenting it as
+   complete. Report warnings as optional improvements; warnings do not make a
+   runnable skill invalid.
 
 4. Verifiability
-   Every generated skill must include:
+   Recommend these fields and sections when they materially improve the skill:
    - clear `when-to-use`
-   - exactly one primary `task-goals` entry by default
+   - one primary `task-goals` entry by default
    - at least one `examples` entry
    - explicit success criteria in the body
+
+   They are authoring guidance, not execution permissions. A non-strict skill
+   may remain valid without them. Only describe a check as mandatory when the
+   user explicitly chooses `strict: true` and the check is encoded in the
+   structured contract.
 
 Read `references/principles.md` if you need the longer rubric, and
 `references/template.md` if you need a starter template.
@@ -69,11 +75,11 @@ Read `references/principles.md` if you need the longer rubric, and
    - `audit`: explain why a skill is weak and how to fix it
 
 2. Shape the scope before writing
-   Collect only the minimum information needed:
+   Infer what you safely can and collect only the minimum information needed:
    - primary job
-   - trigger / when-to-use
-   - success artifact
-   - non-goals
+   - optional trigger / when-to-use guidance
+   - optional success artifact or observable outcome
+   - relevant non-goals
    - project or global scope
 
 3. Default save location
@@ -85,28 +91,31 @@ Read `references/principles.md` if you need the longer rubric, and
    directory so references can be added later without migration.
 
 5. Quality gate
-   After saving, run `validate_skill` on the generated file. Fix blocking issues
-   immediately. If warnings remain, explain them briefly and say why you kept
-   the draft as-is.
+   After saving, run `validate_skill` on the generated file. Fix errors
+   immediately. If warnings remain, explain them briefly as recommendations and
+   allow the draft to complete unless the user asks for a warning-free result.
 
 ## Authoring Rules
 
-- Prefer one primary `task-goals` entry. Only add more if the user insists and
-  understands the routing tradeoff.
-- Put routing signals in frontmatter, not buried in prose.
+- Prefer one primary `task-goals` entry when structured routing will help.
+- Put optional routing signals in frontmatter, not buried in prose.
 - Keep `description` short and trigger-oriented.
-- Use `when-to-use` to state when the skill should fire.
+- Recommend `when-to-use` when the description alone is ambiguous.
 - Add `Non-Goals` when the skill could be confused with adjacent workflows.
 - If the body becomes long, create `references/` and move detail there.
 
-## Output Contract
+## Recommended Output Shape
 
-When you save a new skill, produce a draft that includes:
+When useful, produce a draft that includes:
 
 - frontmatter with `name`, `description`, `when-to-use`, `task-goals`, and `examples`
 - a `# Goal` section
 - a workflow section
 - a `## Success Criteria` section
+
+Only `name` and `description` are required for a non-strict skill to load. Do
+not add placeholder metadata merely to silence warnings; omit it when it does
+not add useful routing or evaluation information.
 
 Do not leave the user with only advice if they clearly asked you to create or
 refine the skill. Finish the draft, validate it, and report the result.

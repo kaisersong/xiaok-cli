@@ -10,12 +10,15 @@
     {
       "id": "missing-verifiability",
       "fixture": "missing-verifiability",
-      "expectOk": false,
-      "expectErrors": [
+      "expectOk": true,
+      "expectErrors": [],
+      "expectWarnings": [
         "missing_when_to_use",
         "missing_task_goals",
         "missing_examples",
-        "missing_success_criteria"
+        "missing_goal_section",
+        "missing_success_criteria",
+        "missing_non_goals"
       ]
     },
     {

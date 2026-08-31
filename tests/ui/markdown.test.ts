@@ -79,6 +79,44 @@ describe('MarkdownRenderer', () => {
     expect(lines[1]).toBe('● 第二段');
   });
 
+  it('keeps headings inside the assistant continuation indent after lead content', () => {
+    const renderer = new MarkdownRenderer();
+
+    renderer.write('修好了，真实终端验证通过。\n\n## 根因\n说明。\n\n## 修复\n完成。\n\n## 验证\n通过。\n');
+
+    const lines = output.split('\n').filter(Boolean);
+    expect(lines).toContain('  根因');
+    expect(lines).toContain('  修复');
+    expect(lines).toContain('  验证');
+    expect(lines).not.toContain('根因');
+    expect(lines).not.toContain('修复');
+    expect(lines).not.toContain('验证');
+  });
+
+  it('uses the single assistant lead marker when a heading starts the segment', () => {
+    const renderer = new MarkdownRenderer();
+
+    renderer.write('## 根因\n正文。\n');
+
+    const lines = output.split('\n').filter(Boolean);
+    expect(lines[0]).toBe('● 根因');
+    expect(lines[1]).toBe('  正文。');
+  });
+
+  it('uses distinct truecolor semantic hues for markdown structure', () => {
+    setColorsEnabled(true);
+    const renderer = new MarkdownRenderer();
+
+    renderer.write('## Root cause\n- list item\n> quoted detail\n**strong** plus *emphasis* and `inline code`\n');
+
+    expect(output).toContain('\x1b[1;38;2;97;175;239mRoot cause\x1b[0m');
+    expect(output).toContain('\x1b[38;2;198;120;221m•\x1b[0m');
+    expect(output).toContain('\x1b[38;2;229;192;123m│\x1b[0m');
+    expect(output).toContain('\x1b[1;38;2;229;192;123mstrong\x1b[0m');
+    expect(output).toContain('\x1b[38;2;198;120;221memphasis\x1b[0m');
+    expect(output).toContain('\x1b[38;2;152;195;121minline code\x1b[0m');
+  });
+
   it('wraps ordered list items with a hanging indent aligned under the item text', () => {
     const renderer = new MarkdownRenderer();
     process.stdout.columns = 12;

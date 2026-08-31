@@ -623,7 +623,7 @@ npm install -g xiaokcode
 更新到最新版本：
 
 ```bash
-npm update -g xiaokcode
+xiaok update
 ```
 
 安装后直接运行：
@@ -789,6 +789,10 @@ xiaok "review the current workspace changes"
 
 # 诊断 API Key 解析（哪个环境变量或配置项生效、是否可用）
 xiaok doctor --check-keys
+
+# 将 CLI 更新到 npm 最新版本
+xiaok update
+
 # 管理本地 daemon
 xiaok daemon start
 xiaok daemon status

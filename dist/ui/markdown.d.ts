@@ -57,6 +57,7 @@ export declare class MarkdownRenderer {
     private countRows;
     private countRenderedRows;
     private formatLeadParagraphLine;
+    private formatMessageText;
     private formatWrappedListItem;
     private getWrapWidth;
     private wrapStyledText;

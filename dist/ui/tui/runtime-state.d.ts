@@ -8,10 +8,6 @@ export interface TuiSurfaceSnapshot {
     activityVisible: boolean;
     summarySource: TuiSummarySource;
 }
-interface ReassuranceTick {
-    bucket: number;
-    line: string;
-}
 export interface TuiRuntimeStatusBar {
     beginActivity(label: string, startedAt?: number): void;
     updateActivity(label: string): void;
@@ -20,7 +16,6 @@ export interface TuiRuntimeStatusBar {
     getActivityLabel(): string;
     getActivitySnapshot(): ActivitySnapshot | null;
     getActivityLine(now?: number, frameIndex?: number): string;
-    getReassuranceTick(now?: number, lastBucket?: number): ReassuranceTick | null;
 }
 export interface TuiRuntimeScrollRegion {
     isContentStreaming(): boolean;
@@ -30,7 +25,6 @@ export interface TuiRuntimeScrollRegion {
 export interface TuiRuntimeStateOptions {
     statusBar: TuiRuntimeStatusBar;
     scrollRegion: TuiRuntimeScrollRegion;
-    onWriteProgressNote: (note: string) => void;
     onSuspendInteractiveUi: (context: string, error: unknown) => void;
     isTerminalUiSuspended: () => boolean;
 }
@@ -41,13 +35,10 @@ export declare class TuiRuntimeState {
     private readonly options;
     private liveActivityTimer;
     private resumeActivityTimer;
-    private reassuranceTimer;
     private pauseActivityTimer;
     private interactivePromptDepth;
     private liveActivityFrame;
     private liveActivityVisible;
-    private responseStarted;
-    private lastReassuranceBucket;
     private turnActive;
     private snapshot;
     constructor(options: TuiRuntimeStateOptions);
@@ -55,7 +46,6 @@ export declare class TuiRuntimeState {
     setSummarySource(summarySource: TuiSummarySource): void;
     getFooterInputPrompt(): string;
     beginTurn(activityLabel?: string, options?: TuiBeginTurnOptions): void;
-    noteResponseStarted(): void;
     enterStreamingContent(): void;
     enterToolInterrupt(): void;
     enterWaitingFeedback(): void;
@@ -66,7 +56,6 @@ export declare class TuiRuntimeState {
     beginActivity(label: string, restart?: boolean, startedAt?: number): void;
     scheduleActivityResume(label: string, delayMs?: number): void;
     scheduleActivityPause(delayMs?: number): void;
-    ensureReassuranceTimer(): void;
     pauseActivity(): void;
     stopLiveActivityTimer(): void;
     withPausedLiveActivity<T>(action: () => Promise<T>): Promise<T>;
@@ -78,4 +67,3 @@ export declare class TuiRuntimeState {
     private clearResumeTimer;
     private clearPauseTimer;
 }
-export {};

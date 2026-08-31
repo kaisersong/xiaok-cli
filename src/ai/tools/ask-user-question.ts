@@ -96,9 +96,9 @@ IMPORTANT: Do NOT use this tool as a first response to friction or minor obstacl
           options.onExitInteractive?.();
         }
 
-        const answerText = result.otherText
-          ? result.otherText
-          : result.labels.join(', ');
+        const answerText = [...result.labels, result.otherText]
+          .filter((value): value is string => Boolean(value))
+          .join(', ');
 
         answers[q.question] = answerText;
       }

@@ -1,4 +1,4 @@
-import { bold, cyan, dim, red } from './render.js';
+import { bold, cyan, dim, formatRailLine } from './render.js';
 import { formatImagePlaceholder } from './image-renderer.js';
 
 export type TranscriptBufferEntry =
@@ -204,21 +204,25 @@ export function renderTranscriptText(entries: TranscriptBufferEntry[]): string {
         lines.push(dim(`* thinking`), dim(indent(entry.text)), '');
         break;
       case 'tool_use':
-        lines.push(dim(`● ${agentPrefix(entry.agentId)}${entry.name}: ${entry.summary}`));
+        lines.push(formatRailLine(`${agentPrefix(entry.agentId)}${entry.name}: ${entry.summary}`));
         break;
       case 'tool_result': {
-        const marker = entry.isError ? red('(error)') : dim('(ok)');
-        lines.push(dim(`  ↳ ${agentPrefix(entry.agentId)}${entry.name} `) + marker);
-        lines.push(indent(entry.content), '');
+        const tone = entry.isError ? 'error' : 'result';
+        const marker = entry.isError ? '(error)' : '(ok)';
+        lines.push(formatRailLine(`${agentPrefix(entry.agentId)}${entry.name} ${marker}`, tone));
+        for (const contentLine of entry.content.split('\n')) {
+          lines.push(formatRailLine(contentLine, tone));
+        }
+        lines.push('');
         break;
       }
       case 'command_output':
         lines.push(bold(entry.command), indent(entry.output), '');
         break;
       case 'image':
-        lines.push(dim(`  ↳ ${formatImagePlaceholder(
+        lines.push(formatRailLine(formatImagePlaceholder(
           entry.width && entry.height ? { width: entry.width, height: entry.height } : null,
-        )}`), '');
+        ), 'result'), '');
         break;
       case 'system':
         lines.push(dim(entry.text), '');

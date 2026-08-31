@@ -30,7 +30,22 @@ export interface RoomUiSnapshot {
     kind: string;
     sender?: { kind: string; userId?: string; logicalAgentId?: string; service?: string };
     roomSequence?: number;
-    sourceRef?: { projectId?: string; eventType?: string };
+    sourceRef?: {
+      kind?: string;
+      attachments?: Array<{ filePath: string; name: string }>;
+      projectId?: string;
+      projectRevision?: number;
+      eventType?: string;
+      projectionEventId?: string;
+      taskId?: string;
+      artifactId?: string;
+      artifact?: {
+        projectId?: string;
+        filename?: string;
+        kind?: string;
+        mimeType?: string;
+      };
+    };
   }>;
   projects?: Array<{ id: string; name?: string; status?: string }>;
 }
@@ -41,6 +56,23 @@ export interface RoomListResult {
   rooms?: Array<{ roomId: string; title: string; description?: string; status: string; updatedAt?: string }>;
 }
 
+export type CollaborationRoomEvent =
+  | {
+      type: 'wake_settled';
+      roomId: string;
+      roomMessageId: string;
+      logicalAgentId: string;
+      outcome: 'completed' | 'failed';
+      remaining: number;
+    }
+  | {
+      type: 'discussion_settled';
+      roomId: string;
+      roomMessageId: string;
+      completed: string[];
+      failed: string[];
+    };
+
 export const desktop = {
   async listCollaborationRooms(): Promise<RoomListResult> {
     return requireDesktopApi().listCollaborationRooms() as Promise<RoomListResult>;
@@ -48,8 +80,18 @@ export const desktop = {
   async getCollaborationRoom(roomId: string): Promise<RoomUiSnapshot> {
     return requireDesktopApi().getCollaborationRoom(roomId) as Promise<RoomUiSnapshot>;
   },
-  async sendCollaborationRoomMessage(input: unknown): Promise<unknown> {
+  async sendCollaborationRoomMessage(input: {
+    roomId: string;
+    text: string;
+    filePaths: string[];
+    idempotencyKey: string;
+    replyToMessageId?: string;
+    contextScope?: { kind: string; projectId?: string };
+  }): Promise<unknown> {
     return requireDesktopApi().sendCollaborationRoomMessage(input);
+  },
+  onCollaborationRoomEvent(listener: (event: CollaborationRoomEvent) => void): () => void {
+    return requireDesktopApi().onCollaborationRoomEvent(listener as (event: unknown) => void);
   },
   async createCollaborationRoom(input: unknown): Promise<unknown> {
     return requireDesktopApi().createCollaborationRoom(input);

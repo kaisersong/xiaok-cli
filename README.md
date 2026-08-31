@@ -623,7 +623,7 @@ npm install -g xiaokcode
 Update to latest version:
 
 ```bash
-npm update -g xiaokcode
+xiaok update
 ```
 
 After installation, run:
@@ -789,6 +789,9 @@ xiaok "review the current workspace changes"
 
 # Diagnose API key resolution (which env var or config entry wins, and whether it works)
 xiaok doctor --check-keys
+
+# Update the CLI to the latest npm release
+xiaok update
 
 # Manage local daemon
 xiaok daemon start

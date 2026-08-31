@@ -119,6 +119,7 @@ describe('terminal streaming boundary ordering', () => {
         isActive: () => true,
         isContentStreaming: () => true,
         endContentStreaming: (options) => {
+          expect(options.reserveActivityRow).toBe(true);
           calls.push(`endContentStreaming:${options.summaryLine}`);
         },
       },

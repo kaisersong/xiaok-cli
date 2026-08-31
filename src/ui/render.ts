@@ -56,6 +56,9 @@ const esc = (code: string) => (s: string) =>
 const rgb = (r: number, g: number, b: number) => (s: string) =>
   colorsEnabled ? `\x1b[38;2;${r};${g};${b}m${s}\x1b[0m` : s;
 
+const boldRgb = (r: number, g: number, b: number) => (s: string) =>
+  colorsEnabled ? `\x1b[1;38;2;${r};${g};${b}m${s}\x1b[0m` : s;
+
 export const dim = esc("2");
 export const bold = esc("1");
 export const red = esc("31");
@@ -84,6 +87,20 @@ export const bgInputGray = (s: string) =>
   colorsEnabled ? `\x1b[48;5;238m${s}\x1b[0m` : s;
 export const intentHint = rgb(142, 142, 142);
 export const intentHintDot = rgb(122, 168, 255);
+
+// High-contrast semantic accents. Explicit 24-bit values keep the hues
+// distinct even when a terminal theme maps the legacy ANSI 16-color palette
+// to similarly muted shades.
+export const accentBlue = rgb(97, 175, 239);
+export const boldAccentBlue = boldRgb(97, 175, 239);
+export const accentPurple = rgb(198, 120, 221);
+export const boldAccentPurple = boldRgb(198, 120, 221);
+export const accentGreen = rgb(152, 195, 121);
+export const boldAccentGreen = boldRgb(152, 195, 121);
+export const accentAmber = rgb(229, 192, 123);
+export const boldAccentAmber = boldRgb(229, 192, 123);
+export const accentCyan = rgb(86, 182, 194);
+export const boldAccentCyan = boldRgb(86, 182, 194);
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const RAIL_INDENT = "  ";
@@ -140,26 +157,51 @@ export function startSpinner(message: string): () => void {
 
 // ── Box drawing ──
 
-export function formatRailHeader(label: string, detail?: string): string {
-  const detailStr = detail ? ` ${dim(detail)}` : "";
-  return `${RAIL_INDENT}${dimCyan("╭─")} ${boldCyan(label)}${detailStr}`;
+export type RailTone = 'explore' | 'run' | 'change' | 'skill' | 'result' | 'error' | 'neutral';
+
+function railColor(tone: RailTone): (text: string) => string {
+  if (tone === 'explore') return accentBlue;
+  if (tone === 'run') return accentPurple;
+  if (tone === 'change') return accentGreen;
+  if (tone === 'skill') return accentAmber;
+  if (tone === 'result') return dim;
+  if (tone === 'error') return red;
+  return accentCyan;
 }
 
-export function formatRailLine(content: string): string {
-  const prefix = `${RAIL_INDENT}${dimCyan("│")} `;
+function railBoldColor(tone: RailTone): (text: string) => string {
+  if (tone === 'explore') return boldAccentBlue;
+  if (tone === 'run') return boldAccentPurple;
+  if (tone === 'change') return boldAccentGreen;
+  if (tone === 'skill') return boldAccentAmber;
+  if (tone === 'result') return dim;
+  if (tone === 'error') return red;
+  return boldAccentCyan;
+}
+
+export function formatRailHeader(label: string, detail?: string, tone: RailTone = 'neutral'): string {
+  const color = railColor(tone);
+  const strongColor = railBoldColor(tone);
+  const detailStr = detail ? ` ${dim(detail)}` : "";
+  return `${RAIL_INDENT}${color("╭─")} ${strongColor(label)}${detailStr}`;
+}
+
+export function formatRailLine(content: string, tone: RailTone = 'neutral'): string {
+  const color = railColor(tone);
+  const prefix = `${RAIL_INDENT}${color("│")} `;
   // Visible columns consumed by the rail prefix: indent + "│" + trailing space.
   const prefixWidth = RAIL_INDENT.length + 2;
   const cols = process.stdout.columns ?? 80;
   const available = cols - prefixWidth;
 
   if (available <= 0 || getDisplayWidth(content) <= available) {
-    return `${prefix}${content}`;
+    return `${prefix}${color(content)}`;
   }
 
   // Wrap long content so continuation lines stay aligned under the first line
   // and keep the rail border instead of overflowing to the terminal edge.
   return wrapDisplayLine(content, available)
-    .map((segment) => `${prefix}${segment}`)
+    .map((segment) => `${prefix}${color(segment)}`)
     .join("\n");
 }
 
@@ -489,22 +531,31 @@ export function formatHistoryBlock(block: HistoryMessageBlock): string {
   }
 
   if (block.type === 'tool_use') {
-    // Tool use shown as activity summary
-    const activity = formatToolActivity(block.name, block.input as Record<string, unknown>);
-    return activity ? `${dim('  ↳')} ${activity}\n` : '';
+    // Resume history uses the same rail grammar as live tool activity. Use the
+    // description without formatToolActivity's bullet to avoid "│ • ...".
+    const activity = describeToolActivity(block.name, block.input as Record<string, unknown>);
+    if (!activity) return '';
+
+    let tone: RailTone = 'neutral';
+    if (block.name === 'write' || block.name === 'edit') tone = 'change';
+    else if (block.name === 'bash') tone = 'run';
+    else if (block.name === 'install_skill' || block.name === 'uninstall_skill') tone = 'skill';
+    else if (['read', 'glob', 'grep', 'tool_search', 'web_search', 'web_fetch'].includes(block.name)) tone = 'explore';
+
+    return `${formatRailLine(activity, tone)}\n`;
   }
 
   if (block.type === 'tool_result') {
-    // Tool result shown as dim summary, truncated to 100 chars
-    const summary = block.content.length > 100
-      ? block.content.slice(0, 100) + '...'
-      : block.content;
-    const errorPrefix = block.is_error ? red(' (error)') : '';
-    return `${dim('  ↳ Tool result')}${errorPrefix}: ${dim(summary)}\n`;
+    // Persisted results may contain raw multi-line diffs. Normalize before
+    // truncation, then let the rail wrapper prefix every visual line.
+    const normalized = singleLine(block.content);
+    const summary = truncatePlain(normalized, 100);
+    const label = block.is_error ? 'Tool result (error)' : 'Tool result';
+    return `${formatRailLine(`${label}: ${summary}`, block.is_error ? 'error' : 'result')}\n`;
   }
 
   if (block.type === 'image') {
-    return `${dim('  ↳ [Image]')}\n`;
+    return `${formatRailLine('[Image]', 'result')}\n`;
   }
 
   // Unknown block type - skip

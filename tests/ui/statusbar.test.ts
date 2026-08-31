@@ -230,7 +230,7 @@ describe('StatusBar', () => {
 
       const line = statusBar.getLiveStatusLine(24_000, 1);
 
-      expect(line).toContain('Digging through repo');
+      expect(line).toContain('Exploring codebase');
       expect(line).toContain('24s');
       expect(line).toContain('xiaok-cli');
       expect(line).toContain('claude-opus-4-6');
@@ -241,7 +241,7 @@ describe('StatusBar', () => {
 
       const line = statusBar.getActivityLine(24_000, 1);
 
-      expect(line).toContain('Digging through repo');
+      expect(line).toContain('Exploring codebase');
       expect(line).toContain('24s');
       expect(line).not.toContain('xiaok-cli');
       expect(line).not.toContain('claude-opus-4-6');
@@ -254,68 +254,52 @@ describe('StatusBar', () => {
       expect(statusBar.getLiveStatusLine(800, 0)).toContain('Thinking');
     });
 
-    it('upgrades generic thinking copy during long waits', () => {
+    it('keeps generic thinking copy factual during long waits', () => {
       statusBar.beginActivity('Thinking', 0);
 
       const line = statusBar.getLiveStatusLine(16_000, 0);
 
-      expect(line).toContain('Still working');
+      expect(line).toContain('Thinking');
+      expect(line).not.toContain('Still working');
       expect(line).toContain('16s');
     });
 
-    it('reaches a finalizing stage for very long generic waits', () => {
+    it('does not guess a finalizing stage for very long generic waits', () => {
       statusBar.beginActivity('Thinking', 0);
 
-      const line = statusBar.getLiveStatusLine(95_000, 0);
+      const line = statusBar.getLiveStatusLine(7 * 60_000, 0);
 
-      expect(line).toContain('Finalizing response');
-      expect(line).toContain('1m 35s');
+      expect(line).toContain('Thinking');
+      expect(line).not.toContain('Finalizing response');
+      expect(line).not.toContain('Still working');
+      expect(line).toContain('7m 00s');
     });
 
-    it('can shorten activity label thresholds for terminal e2e without speeding timers', () => {
-      const previousFactor = process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR;
-      process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR = '120';
-
-      try {
-        statusBar.beginActivity('Thinking', 0);
-
-        const line = statusBar.getLiveStatusLine(900, 0);
-
-        expect(line).toContain('Finalizing response');
-        expect(line).toContain('0s');
-      } finally {
-        if (previousFactor === undefined) {
-          delete process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR;
-        } else {
-          process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR = previousFactor;
-        }
-      }
-    });
-
-    it('adds a deeper long-wait stage for repo exploration', () => {
+    it('keeps the actual repo exploration label instead of inventing a timed stage', () => {
       statusBar.beginActivity('Exploring codebase', 0);
 
       const line = statusBar.getLiveStatusLine(48_000, 0);
 
-      expect(line).toContain('Tracing references');
+      expect(line).toContain('Exploring codebase');
+      expect(line).not.toContain('Tracing references');
       expect(line).toContain('48s');
     });
 
-    it('adds a deeper long-wait stage for file updates', () => {
+    it('keeps the actual file update label', () => {
       statusBar.beginActivity('Updating files', 0);
 
       const line = statusBar.getLiveStatusLine(41_000, 0);
 
-      expect(line).toContain('Finishing edits');
+      expect(line).toContain('Updating files');
       expect(line).toContain('41s');
     });
 
-    it('adds a deeper long-wait stage for verification', () => {
+    it('keeps the actual verification label', () => {
       statusBar.beginActivity('Running verification', 0);
 
       const line = statusBar.getLiveStatusLine(52_000, 0);
 
-      expect(line).toContain('Checking for regressions');
+      expect(line).toContain('Running verification');
       expect(line).toContain('52s');
     });
 
@@ -324,7 +308,7 @@ describe('StatusBar', () => {
 
       const line = statusBar.getLiveStatusLine(34_000, 0);
 
-      expect(line).toContain('Refreshing skill catalog');
+      expect(line).toContain('Updating skills');
       expect(line).toContain('34s');
     });
 
@@ -333,7 +317,7 @@ describe('StatusBar', () => {
 
       const line = statusBar.getLiveStatusLine(22_000, 0);
 
-      expect(line).toContain('Packaging slides');
+      expect(line).toContain('Exporting presentation');
       expect(line).toContain('22s');
     });
 
@@ -342,7 +326,7 @@ describe('StatusBar', () => {
 
       const line = statusBar.getLiveStatusLine(37_000, 0);
 
-      expect(line).toContain('Reviewing findings');
+      expect(line).toContain('Inspecting workspace');
       expect(line).toContain('37s');
     });
 
@@ -351,7 +335,7 @@ describe('StatusBar', () => {
 
       const line = statusBar.getLiveStatusLine(24_000, 0);
 
-      expect(line).toContain('Waiting for command output');
+      expect(line).toContain('Running command');
       expect(line).toContain('24s');
     });
 
@@ -360,36 +344,8 @@ describe('StatusBar', () => {
 
       const line = statusBar.getLiveStatusLine(33_000, 0);
 
-      expect(line).toContain('Making progress');
+      expect(line).toContain('Working');
       expect(line).toContain('33s');
-    });
-
-    it('emits low-frequency reassurance copy for long-running exploration', () => {
-      statusBar.beginActivity('Exploring codebase', 0);
-
-      const tick = statusBar.getReassuranceTick(48_000, -1);
-
-      expect(tick?.bucket).toBe(2);
-      expect(tick?.line).toContain('Still working');
-      expect(tick?.line).toContain('tracing code paths and references');
-      expect(tick?.line).toContain('48s');
-    });
-
-    it('emits targeted reassurance copy for command execution', () => {
-      statusBar.beginActivity('Running command', 0);
-
-      const tick = statusBar.getReassuranceTick(44_000, -1);
-
-      expect(tick?.bucket).toBe(2);
-      expect(tick?.line).toContain('Still working');
-      expect(tick?.line).toContain('waiting for command output');
-      expect(tick?.line).toContain('44s');
-    });
-
-    it('does not emit duplicate reassurance for the same time bucket', () => {
-      statusBar.beginActivity('Thinking', 0);
-
-      expect(statusBar.getReassuranceTick(25_000, 1)).toBeNull();
     });
 
     it('stops rendering live activity after the run ends', () => {

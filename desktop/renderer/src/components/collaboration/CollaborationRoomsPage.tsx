@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useKSwarm } from '../../contexts/KSwarmContext';
 import { desktop, type RoomListResult } from '../../lib/desktop';
+import { XIAOK_WORKER_SEED_ID } from '../../../../shared/kswarm-seed-contract';
 
 export function CollaborationRoomsPage() {
   const { t } = useLocale();
@@ -110,7 +111,12 @@ export function CollaborationRoomsPage() {
               <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--c-border)] p-2">
                 {agents.map((agent) => (
                   <label key={agent.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-[var(--c-bg-deep)]">
-                    <input type="checkbox" checked={memberAgentIds.includes(agent.id)} onChange={(event) => setMemberAgentIds((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id))} />
+                    <input
+                      type="checkbox"
+                      checked={agent.id === XIAOK_WORKER_SEED_ID || memberAgentIds.includes(agent.id)}
+                      disabled={agent.id === XIAOK_WORKER_SEED_ID}
+                      onChange={(event) => setMemberAgentIds((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id))}
+                    />
                     <span className="text-sm text-[var(--c-text-primary)]">{agent.name}</span>
                     <span className="ml-auto text-xs text-[var(--c-text-tertiary)]">{agent.id}</span>
                   </label>

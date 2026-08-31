@@ -49,6 +49,6 @@ export function endStreamingPhaseForInterruptInOrder(deps, footerState) {
         return;
     }
     deps.runtimeState.enterToolInterrupt();
-    deps.scrollRegion.endContentStreaming(footerState);
+    deps.scrollRegion.endContentStreaming({ ...footerState, reserveActivityRow: true });
     deps.mdRenderer.beginNewSegment();
 }

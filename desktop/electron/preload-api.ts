@@ -1427,7 +1427,14 @@ export interface DesktopApi {
   createCollaborationRoom(input: unknown): Promise<unknown>;
   archiveCollaborationRoom(input: unknown): Promise<unknown>;
   updateCollaborationRoomMembers(input: unknown): Promise<unknown>;
-  sendCollaborationRoomMessage(input: unknown): Promise<unknown>;
+  sendCollaborationRoomMessage(input: {
+    roomId: string;
+    text: string;
+    filePaths: string[];
+    idempotencyKey: string;
+    replyToMessageId?: string;
+    contextScope?: { kind: string; projectId?: string };
+  }): Promise<unknown>;
   markCollaborationRoomSeen(input: unknown): Promise<unknown>;
   cancelRoomDiscussion(input: unknown): Promise<unknown>;
   createProjectFromRoom(input: unknown): Promise<unknown>;
@@ -1958,7 +1965,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,
     archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,
     updateCollaborationRoomMembers: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input) as Promise<unknown>,
-    sendCollaborationRoomMessage: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as Promise<unknown>,
+    sendCollaborationRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as ReturnType<DesktopApi['sendCollaborationRoomMessage']>,
     markCollaborationRoomSeen: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input) as Promise<unknown>,
     cancelRoomDiscussion: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:cancelDiscussion', input) as Promise<unknown>,
     createProjectFromRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createProjectFromRoom', input) as Promise<unknown>,

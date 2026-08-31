@@ -140,11 +140,13 @@ describe('readImageDimensions', () => {
 describe('formatImageFallbackLine', () => {
   it('includes the parsed pixel dimensions', () => {
     const line = formatImageFallbackLine({ width: 1388, height: 278 });
-    expect(line).toContain('↳ [Image 1388×278]');
+    expect(line).toContain('│ [Image 1388×278]');
+    expect(line).not.toContain('↳');
   });
 
   it('omits dimensions when the header could not be parsed', () => {
-    expect(formatImageFallbackLine(null)).toContain('↳ [Image]');
+    expect(formatImageFallbackLine(null)).toContain('│ [Image]');
+    expect(formatImageFallbackLine(null)).not.toContain('↳');
   });
 });
 

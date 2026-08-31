@@ -18,9 +18,6 @@ const createDeps = (): { calls: Call[]; deps: AssistantTextChunkOrderDeps } => {
     appendAssistantText: (delta) => {
       calls.push({ op: 'appendAssistantText', delta });
     },
-    noteResponseStarted: () => {
-      calls.push({ op: 'noteResponseStarted' });
-    },
     appendStreamingSegment: (delta) => {
       calls.push({ op: 'appendStreamingSegment', delta });
     },
@@ -48,7 +45,6 @@ describe('writeAssistantTextChunkInOrder', () => {
       { op: 'ensureStreamingPhase' },
       { op: 'writeMarkdown', delta: '  \n' },
     ]);
-    expect(calls).not.toContainEqual({ op: 'noteResponseStarted' });
   });
 
   it('records visible text before writing markdown', () => {
@@ -59,7 +55,6 @@ describe('writeAssistantTextChunkInOrder', () => {
     expect(calls).toEqual([
       { op: 'noteVisibleAssistantText', delta: 'hello' },
       { op: 'appendAssistantText', delta: 'hello' },
-      { op: 'noteResponseStarted' },
       { op: 'appendStreamingSegment', delta: 'hello' },
       { op: 'ensureStreamingPhase' },
       { op: 'writeMarkdown', delta: 'hello' },
@@ -77,7 +72,6 @@ describe('writeAssistantTextChunkInOrder', () => {
       { op: 'appendStreamingSegment', delta: '' },
       { op: 'writeMarkdown', delta: '' },
     ]);
-    expect(calls).not.toContainEqual({ op: 'noteResponseStarted' });
     expect(calls).not.toContainEqual({ op: 'ensureStreamingPhase' });
   });
 });

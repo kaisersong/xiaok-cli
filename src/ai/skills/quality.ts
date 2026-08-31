@@ -110,17 +110,17 @@ function validateParsedFrontmatter(
   }
 
   if (!parsed.whenToUse?.trim()) {
-    issues.push(issue('error', 'missing_when_to_use', 'Add when-to-use so the skill has a clear trigger contract.'));
+    issues.push(issue('warning', 'missing_when_to_use', 'Consider adding when-to-use to improve automatic routing.'));
   }
 
   if (parsed.taskGoals.length === 0) {
-    issues.push(issue('error', 'missing_task_goals', 'Add at least one task-goals entry for the primary job.'));
+    issues.push(issue('warning', 'missing_task_goals', 'Consider adding a task-goals entry to make the primary job easier to match.'));
   } else if (parsed.taskGoals.length > MULTI_GOAL_WARNING_THRESHOLD) {
     issues.push(issue('warning', 'multiple_primary_goals', 'This skill lists multiple primary jobs and should probably be split.'));
   }
 
   if (parsed.examples.length === 0) {
-    issues.push(issue('error', 'missing_examples', 'Add examples so the skill can be routed and evaluated.'));
+    issues.push(issue('warning', 'missing_examples', 'Consider adding examples to improve routing and evaluation quality.'));
   }
 
   for (const relativePath of parsed.requiredReferences) {
@@ -142,11 +142,11 @@ function validateParsedFrontmatter(
   }
 
   if (bodyMentionsReferences(parsed.content) && parsed.requiredReferences.length === 0) {
-    issues.push(issue('error', 'body_mentions_references_without_contract', 'Body mentions reference reading but required-references is empty.'));
+    issues.push(issue('warning', 'body_mentions_references_without_contract', 'Body mentions reference reading; declare required-references if those files are mandatory.'));
   }
 
   if (bodyMentionsScripts(parsed.content) && parsed.requiredScripts.length === 0) {
-    issues.push(issue('error', 'body_mentions_scripts_without_contract', 'Body mentions script execution but required-scripts is empty.'));
+    issues.push(issue('warning', 'body_mentions_scripts_without_contract', 'Body mentions script execution; declare required-scripts if those commands are mandatory.'));
   }
 
   if (parsed.successCheckErrors.length > 0) {
@@ -162,7 +162,7 @@ function validateParsedFrontmatter(
   }
 
   if (!hasSuccessCriteria(parsed.content)) {
-    issues.push(issue('error', 'missing_success_criteria', 'Add Success Criteria so completion is observable.'));
+    issues.push(issue('warning', 'missing_success_criteria', 'Consider adding Success Criteria so completion is easier to evaluate.'));
   }
 
   if (!hasNonGoals(parsed.content)) {

@@ -1246,6 +1246,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     feedback_resume_ctrlc_session_id = "sess_feedback_footer_ctrlc_e2e"
     feedback_resume_long_response = "\n".join([f"line {index + 1}" for index in range(30)])
     ask_user_question_prompt = "请用 AskUserQuestion 问我怎么处理这份报告"
+    legacy_ask_user_prompt = "请用 ask_user 给我四个复现场景选项"
     report_slide_write_path = project_fixture / "salesforce-ai-evolution-slides.html"
     long_markdown_report_write_path = project_fixture / "kingdee-lingji-long-source-report.html"
     long_markdown_slide_write_path = project_fixture / "kingdee-lingji-long-source-slides.html"
@@ -1420,6 +1421,21 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         ),
         text_response_events("已记录你的处理偏好。"),
         text_then_tool_call_events(
+            "我需要你选择复现场景。",
+            "ask_user",
+            {
+                "question": "请选择复现场景",
+                "options": [
+                    {"label": "X 桌面客户端/网页", "description": "桌面环境"},
+                    {"label": "图片也挂了", "description": "图片资源失败"},
+                    {"label": "手机端 X", "description": "移动网络"},
+                    {"label": "其它", "description": "补充说明"},
+                ],
+            },
+            "call_legacy_ask_user_options",
+        ),
+        text_response_events("已记录 legacy ask_user 选项：手机端 X。"),
+        text_then_tool_call_events(
             "我会先生成报告，再生成幻灯片。",
             "skill",
             {"name": "kai-report-creator", "task": "生成报告"},
@@ -1519,6 +1535,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
     session = f"xiaok-e2e-{os.getpid()}"
     e2e_env = {
         "XIAOK_DISABLE_GLOBAL_PLUGINS": "1",
+        # The parent Codex environment may set NO_COLOR=1. This suite has
+        # explicit real-TTY semantic-color assertions, so opt the fixture back
+        # into color while unit tests continue to cover NO_COLOR/plain output.
+        "NO_COLOR": "",
     }
     tmux = TmuxHarness(
         session,
@@ -1681,7 +1701,16 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(first, first_response_tail, "assistant response tail did not render")
         assert_true(activity_line_count(first) <= 2, f"too many activity lines after first response:\n{first}")
         assert_true(any(is_input_prompt_line(line) for line in visible_lines(first)[-4:]), f"footer prompt missing after first response:\n{first}")
-        print("PASS: first streamed response and footer are stable")
+        first_ansi = tmux.capture(ansi=True)
+        assert_true(
+            "\x1b[38;2;97;175;239m" in first_ansi,
+            f"assistant lead/heading blue was not emitted in the real TTY:\n{first_ansi!r}",
+        )
+        assert_true(
+            "\x1b[38;2;198;120;221m" in first_ansi,
+            f"markdown list purple was not emitted in the real TTY:\n{first_ansi!r}",
+        )
+        print("PASS: first streamed response, semantic colors, and footer are stable")
 
         print("--- E2E 7: second turn does not eat previous output ---")
         time.sleep(0.2)
@@ -1936,6 +1965,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(tool_pending, "Read notes.txt", "tool activity block did not render during interrupted turn")
         assert_activity_above_prompt_with_gap(tool_pending)
+        tool_pending_ansi = tmux.capture(ansi=True)
+        assert_true(
+            "\x1b[38;2;97;175;239mExplored" in tool_pending_ansi,
+            f"Explored rail did not use its blue semantic tone in the real TTY:\n{tool_pending_ansi}",
+        )
         assert_true(
             "gpt-terminal-e2e" in tool_pending and "project" in tool_pending,
             f"footer status was not visible during the tool interruption:\n{tool_pending}",
@@ -2725,6 +2759,10 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             "Still working:" not in ask_user_waiting,
             f"reassurance notes kept printing while AskUserQuestion was waiting for the user:\n{ask_user_waiting}",
         )
+        assert_true(
+            "Finalizing response" not in ask_user_waiting,
+            f"a guessed finalizing stage appeared while AskUserQuestion was waiting for the user:\n{ask_user_waiting}",
+        )
 
         tmux.send_key("Enter")
         ask_user_result = tmux.wait_for(
@@ -2733,6 +2771,39 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_contains(ask_user_result, "已记录你的处理偏好。", "AskUserQuestion follow-up response did not render")
         print("PASS: AskUserQuestion waiting state stays quiet without reassurance spam")
+
+        print("--- E2E 22b: legacy ask_user renders structured options and resumes after selection ---")
+        tmux.send_text(legacy_ask_user_prompt)
+        time.sleep(0.15)
+        tmux.send_key("Enter")
+
+        legacy_ask_user_menu = tmux.wait_for(
+            lambda text: "请选择复现场景" in text and "X 桌面客户端/网页" in text and "手机端 X" in text,
+            timeout=20,
+        )
+        assert_contains(legacy_ask_user_menu, "其它", "legacy ask_user did not preserve the caller-provided Other option")
+        assert_true(
+            "Enter custom text" not in legacy_ask_user_menu,
+            f"legacy ask_user appended a duplicate fallback Other option:\n{legacy_ask_user_menu}",
+        )
+        assert_true(
+            "• ask_user" not in legacy_ask_user_menu,
+            f"legacy ask_user leaked a normal tool activity row instead of owning the prompt:\n{legacy_ask_user_menu}",
+        )
+
+        tmux.send_key("Down")
+        tmux.send_key("Down")
+        tmux.send_key("Enter")
+        legacy_ask_user_result = tmux.wait_for(
+            lambda text: "已记录 legacy ask_user 选项：手机端 X。" in text and has_ready_input_prompt(text),
+            timeout=20,
+        )
+        assert_contains(
+            legacy_ask_user_result,
+            "已记录 legacy ask_user 选项：手机端 X。",
+            "legacy ask_user did not resume after the selected option",
+        )
+        print("PASS: legacy ask_user options render once, accept selection, and resume")
 
         tmux.stop()
         tmux.start()
@@ -2872,16 +2943,13 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             home_dir,
             cli_entry,
             tmux_bin,
-            env_overrides={
-                **e2e_env,
-                "XIAOK_E2E_ACTIVITY_LABEL_FACTOR": "120",
-            },
+            env_overrides=e2e_env,
         )
         tmux.start(cols=80, rows=18)
         welcome = tmux.wait_for(lambda text: has_welcome_screen(text) and has_input_prompt(text), timeout=12)
         assert_welcome_screen(welcome, "welcome screen did not render before the long markdown flow")
 
-        print("--- E2E 26: long markdown report-to-slides chain keeps footer during explored/finalizing pressure ---")
+        print("--- E2E 26: long markdown report-to-slides chain keeps footer without guessed progress stages ---")
         tmux.send_text(long_markdown_report_slide_prompt)
         time.sleep(0.15)
         tmux.send_key("Enter")
@@ -2910,6 +2978,11 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             long_markdown_checkpoint,
             allow_completed_summary=has_long_markdown_completed(long_markdown_checkpoint),
         )
+        assert_true(
+            "Still working:" not in long_markdown_checkpoint
+            and "Finalizing response" not in long_markdown_checkpoint,
+            f"long markdown flow emitted guessed progress copy:\n{long_markdown_checkpoint}",
+        )
         if not has_long_markdown_completed(long_markdown_checkpoint):
             assert_true(
                 "Read brief-template.json" in long_markdown_checkpoint
@@ -2919,22 +2992,6 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
                 or "Read base-css.md" in long_markdown_checkpoint
                 or "Read js-engine.md" in long_markdown_checkpoint,
                 f"long markdown slide skill exploration did not render template reads:\n{long_markdown_checkpoint}",
-            )
-
-            long_markdown_finalizing = tmux.wait_for_checked(
-                lambda text: (
-                    (
-                        "Finalizing response" in text
-                        and has_input_prompt(text)
-                    )
-                    or has_long_markdown_completed(text)
-                ),
-                assert_activity_frame_keeps_footer,
-                timeout=20,
-            )
-            assert_footer_chrome_is_singular(
-                long_markdown_finalizing,
-                allow_completed_summary=has_long_markdown_completed(long_markdown_finalizing),
             )
 
         long_markdown_final = tmux.wait_for_checked(
@@ -2950,8 +3007,13 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
             "Stage 2/2 生成幻灯片" in latest_intent_summary_line(long_markdown_final),
             f"long markdown completed summary did not show the final slide stage:\n{long_markdown_final}",
         )
+        assert_true(
+            "Still working:" not in long_markdown_final
+            and "Finalizing response" not in long_markdown_final,
+            f"long markdown completion left guessed progress copy in the transcript:\n{long_markdown_final}",
+        )
         assert_footer_chrome_is_singular(long_markdown_final, allow_completed_summary=True)
-        print("PASS: long markdown report-to-slides chain keeps footer during explored/finalizing pressure")
+        print("PASS: long markdown report-to-slides chain keeps footer without guessed progress stages")
 
         if os.name == "nt":
             print("--- E2E 27-28: skipped on win32 (transcript pager degrades to scrollback print) ---")

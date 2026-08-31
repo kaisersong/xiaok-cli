@@ -488,7 +488,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         runId,
         failureReason: 'handoff_missing',
         errorMessage: 'request_task_missing_file_handoff',
-      });
+      }, targetParticipantId);
       return;
     }
 
@@ -499,7 +499,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         runId,
         failureReason: 'desktop_capacity_full',
         errorMessage: `desktop runtime at capacity (${maxConcurrentTasks} concurrent tasks)`,
-      });
+      }, targetParticipantId);
       return;
     }
 
@@ -526,7 +526,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
             taskId,
             runId,
             reason: getTaskCancelledReason(result.error),
-          });
+          }, targetParticipantId);
         } else {
           await sendTaskFailed(event, {
             projectId,
@@ -534,7 +534,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
             runId,
             failureReason: result.error || 'desktop_runtime_failed',
             errorMessage: result.error || 'desktop_runtime_failed',
-          });
+          }, targetParticipantId);
         }
       }
     } catch (error) {
@@ -544,7 +544,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
           taskId,
           runId,
           reason: 'user_aborted',
-        });
+        }, targetParticipantId);
         return;
       }
       await sendTaskFailed(event, {
@@ -553,7 +553,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         runId,
         failureReason: 'desktop_runtime_error',
         errorMessage: error instanceof Error ? error.message : String(error),
-      });
+      }, targetParticipantId);
     } finally {
       activeTaskCount--;
       activeTaskControllers.delete(taskId);
@@ -665,12 +665,20 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     return () => clearInterval(timer);
   }
 
-  async function sendTaskFailed(event: BrokerEvent, payload: Record<string, unknown>): Promise<void> {
-    await sendIntent('task_failed', event, payload);
+  async function sendTaskFailed(
+    event: BrokerEvent,
+    payload: Record<string, unknown>,
+    targetParticipantId: string,
+  ): Promise<void> {
+    await sendIntent('task_failed', event, payload, targetParticipantId);
   }
 
-  async function sendTaskCancelled(event: BrokerEvent, payload: Record<string, unknown>): Promise<void> {
-    await sendIntent('task_cancelled', event, payload);
+  async function sendTaskCancelled(
+    event: BrokerEvent,
+    payload: Record<string, unknown>,
+    targetParticipantId: string,
+  ): Promise<void> {
+    await sendIntent('task_cancelled', event, payload, targetParticipantId);
   }
 
   async function sendIntent(

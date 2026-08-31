@@ -1061,6 +1061,11 @@ async function createWindow(): Promise<BrowserWindow> {
   const collaborationRoomBrokerClient = createCollaborationRoomBrokerClient({
     token: kswarmService.getIntentBrokerRoomToken(),
   });
+  const emitCollaborationRoomEvent = (event: unknown) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('desktop:collaborationRoom:event', event);
+    }
+  };
   const collaborationRoomWakeDispatcher = createCollaborationRoomWakeDispatcher({
     brokerClient: collaborationRoomBrokerClient,
     canExecute: async logicalAgentId => {
@@ -1081,6 +1086,7 @@ async function createWindow(): Promise<BrowserWindow> {
       }
     },
     execute: input => services.runCollaborationRoomAgentTask(input),
+    onEvent: emitCollaborationRoomEvent,
   });
   const collaborationRoomService = createCollaborationRoomService({
     brokerClient: collaborationRoomBrokerClient,
@@ -1097,6 +1103,7 @@ async function createWindow(): Promise<BrowserWindow> {
       dbPath: join(USER_DATA_DIR, 'room-project-saga.sqlite'),
     }),
     wakeDispatcher: collaborationRoomWakeDispatcher,
+    emitRoomEvent: emitCollaborationRoomEvent,
   });
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,

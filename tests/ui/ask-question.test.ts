@@ -71,7 +71,7 @@ describe('ask-question', () => {
         expect((screen.match(/↑↓ navigate   Enter select/g) ?? []).length).toBe(1);
       });
 
-      for (let i = 0; i < 10; i += 1) {
+      for (let i = 0; i < 9; i += 1) {
         sendKey('\x1b[B');
       }
 
@@ -96,6 +96,56 @@ describe('ask-question', () => {
         expect(screen).not.toContain('1. 中餐炒菜（如宫保鸡丁、番茄炒蛋）');
       });
 
+      harness.restore();
+    });
+
+    it('does not append a duplicate fallback when the caller already supplies 其它', async () => {
+      const harness = createTtyHarness(80, 24);
+      const pending = askQuestion({
+        question: '请选择环境',
+        options: [
+          { label: '桌面端' },
+          { label: '手机端' },
+          { label: '其它', description: '补充说明' },
+        ],
+      });
+
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(screen).toContain('其它');
+        expect(screen).not.toContain('Other');
+      });
+
+      harness.emitter.emit('data', '\x1b');
+      await expect(pending).resolves.toEqual({ selected: [], labels: [] });
+      harness.restore();
+    });
+
+    it('keeps regular selections when multi-select also includes Other text', async () => {
+      const harness = createTtyHarness(80, 24);
+      const pending = askQuestion({
+        question: '请选择复现场景',
+        multiSelect: true,
+        options: [
+          { label: '桌面端' },
+          { label: '手机端' },
+        ],
+      });
+
+      await waitFor(() => expect(harness.screen.text()).toContain('Space select'));
+      harness.emitter.emit('data', ' ');
+      harness.emitter.emit('data', '\x1b[B');
+      harness.emitter.emit('data', '\x1b[B');
+      harness.emitter.emit('data', ' ');
+      harness.emitter.emit('data', '\r');
+      await waitFor(() => expect(harness.screen.text()).toContain('Enter your answer:'));
+      harness.emitter.emit('data', '代理节点\r');
+
+      await expect(pending).resolves.toEqual({
+        selected: [0],
+        labels: ['桌面端'],
+        otherText: '代理节点',
+      });
       harness.restore();
     });
   });

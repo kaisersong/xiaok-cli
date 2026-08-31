@@ -3,11 +3,14 @@ export interface TerminalStreamingFooterState {
     summaryLine: string;
     statusLine: string;
 }
+type TerminalStreamingEndState = TerminalStreamingFooterState & {
+    reserveActivityRow?: boolean;
+};
 export interface TerminalStreamingBoundaryDeps {
     scrollRegion: {
         isActive(): boolean;
         isContentStreaming(): boolean;
-        endContentStreaming(options: TerminalStreamingFooterState): void;
+        endContentStreaming(options: TerminalStreamingEndState): void;
         renderFooter(options: TerminalStreamingFooterState): void;
     };
     replRenderer: {
@@ -21,7 +24,7 @@ export interface TerminalStreamingInterruptDeps {
     scrollRegion: {
         isActive(): boolean;
         isContentStreaming(): boolean;
-        endContentStreaming(options: TerminalStreamingFooterState): void;
+        endContentStreaming(options: TerminalStreamingEndState): void;
     };
     runtimeState: {
         enterToolInterrupt(): void;
@@ -63,3 +66,4 @@ export interface TerminalStreamingPhaseDeps {
  */
 export declare function ensureStreamingPhaseInOrder(deps: TerminalStreamingPhaseDeps): void;
 export declare function endStreamingPhaseForInterruptInOrder(deps: TerminalStreamingInterruptDeps, footerState: TerminalStreamingFooterState): void;
+export {};

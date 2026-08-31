@@ -343,6 +343,107 @@ describe('kswarm runtime bridge', () => {
     });
   });
 
+  it('preserves the hosted logical agent identity when desktop execution fails', async () => {
+    const posts: Array<{ body: Record<string, any> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-desktop',
+      participantKind: 'service',
+      bridge: {
+        handleTaskHandoff: vi.fn().mockRejectedValue(new Error('desktop_task_timeout')),
+      },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({
+      type: 'new_intent',
+      event: {
+        kind: 'request_task',
+        fromParticipantId: 'kswarm-hub',
+        taskId: 'task-hosted-error',
+        payload: {
+          projectId: 'proj-1',
+          taskId: 'task-hosted-error',
+          runId: 'run-hosted-error',
+          handoffPath: join(rootDir, 'request.json'),
+          targetAgentId: 'codex1',
+          participantId: 'kswarm-hub',
+        },
+      },
+    });
+    await nextTick();
+
+    expect(posts.find(post => post.body.kind === 'task_failed')?.body).toMatchObject({
+      fromParticipantId: 'xiaok-desktop',
+      payload: expect.objectContaining({
+        participantId: 'codex1',
+        hostParticipantId: 'xiaok-desktop',
+        errorMessage: 'desktop_task_timeout',
+      }),
+    });
+    client.stop();
+  });
+
+  it('preserves the hosted logical agent identity when desktop capacity is full', async () => {
+    const firstTask = deferred<{ ok: true }>();
+    const posts: Array<{ body: Record<string, any> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-desktop',
+      participantKind: 'service',
+      maxConcurrentTasks: 1,
+      bridge: { handleTaskHandoff: vi.fn(() => firstTask.promise) },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    const request = (taskId: string, targetAgentId: string) => ({
+      type: 'new_intent',
+      event: {
+        kind: 'request_task',
+        fromParticipantId: 'kswarm-hub',
+        taskId,
+        payload: {
+          projectId: 'proj-1',
+          taskId,
+          runId: `run-${taskId}`,
+          handoffPath: join(rootDir, `${taskId}.json`),
+          targetAgentId,
+          participantId: 'kswarm-hub',
+        },
+      },
+    });
+    FakeWebSocket.instances[0].emitMessage(request('task-running', 'xiaok-worker'));
+    await nextTick();
+    FakeWebSocket.instances[0].emitMessage(request('task-capacity', 'codex1'));
+    await nextTick();
+
+    expect(posts.find(post => post.body.kind === 'task_failed' && post.body.taskId === 'task-capacity')?.body)
+      .toMatchObject({
+        fromParticipantId: 'xiaok-desktop',
+        payload: expect.objectContaining({
+          participantId: 'codex1',
+          hostParticipantId: 'xiaok-desktop',
+          failureReason: 'desktop_capacity_full',
+        }),
+      });
+
+    firstTask.resolve({ ok: true });
+    await nextTick();
+    client.stop();
+  });
+
   it('reports task_cancelled when the desktop handoff is aborted', async () => {
     const handled = vi.fn().mockResolvedValue({ ok: false, error: 'task_cancelled:user_aborted' });
     const posts: Array<{ body: Record<string, unknown> }> = [];
@@ -388,6 +489,52 @@ describe('kswarm runtime bridge', () => {
       }),
     });
     expect(posts.some(post => post.body.kind === 'task_failed')).toBe(false);
+  });
+
+  it('preserves the hosted logical agent identity when a desktop handoff is cancelled', async () => {
+    const handled = vi.fn().mockResolvedValue({ ok: false, error: 'task_cancelled:user_aborted' });
+    const posts: Array<{ body: Record<string, any> }> = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      posts.push({ body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response(JSON.stringify({ ok: true, deliveredCount: 1 }), { status: 200 });
+    });
+    const FakeWebSocket = createFakeWebSocket();
+    const client = createKSwarmRuntimeBridgeBrokerClient({
+      participantId: 'xiaok-desktop',
+      participantKind: 'service',
+      bridge: { handleTaskHandoff: handled },
+      fetchImpl: fetchImpl as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({
+      type: 'new_intent',
+      event: {
+        kind: 'request_task',
+        fromParticipantId: 'kswarm-hub',
+        taskId: 'task-hosted-cancel',
+        payload: {
+          projectId: 'proj-1',
+          taskId: 'task-hosted-cancel',
+          runId: 'run-hosted-cancel',
+          handoffPath: join(rootDir, 'request.json'),
+          targetAgentId: 'xiaok-worker',
+          participantId: 'kswarm-hub',
+        },
+      },
+    });
+    await nextTick();
+
+    expect(posts.find(post => post.body.kind === 'task_cancelled')?.body).toMatchObject({
+      fromParticipantId: 'xiaok-desktop',
+      payload: expect.objectContaining({
+        participantId: 'xiaok-worker',
+        hostParticipantId: 'xiaok-desktop',
+        reason: 'user_aborted',
+      }),
+    });
+    client.stop();
   });
 
   it('routes cancel_task broker intents to the bridge cancellation hook', async () => {

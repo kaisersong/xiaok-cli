@@ -1,4 +1,4 @@
-import { dim } from './render.js';
+import { formatRailLine } from './render.js';
 const CELL_PIXEL_WIDTH = 9;
 const CELL_PIXEL_HEIGHT = 18;
 const DEFAULT_MAX_ROWS = 12;
@@ -94,7 +94,7 @@ export function formatImagePlaceholder(dims) {
     return dims ? `[Image ${dims.width}×${dims.height}]` : '[Image]';
 }
 export function formatImageFallbackLine(dims) {
-    return dim(`  ↳ ${formatImagePlaceholder(dims)}`);
+    return formatRailLine(formatImagePlaceholder(dims), 'result');
 }
 function computeCellBox(dims, maxCols, maxRows) {
     let cols = Math.max(1, Math.ceil(dims.width / CELL_PIXEL_WIDTH));

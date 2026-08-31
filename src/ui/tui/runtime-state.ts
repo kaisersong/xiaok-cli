@@ -19,11 +19,6 @@ export interface TuiSurfaceSnapshot {
   summarySource: TuiSummarySource;
 }
 
-interface ReassuranceTick {
-  bucket: number;
-  line: string;
-}
-
 export interface TuiRuntimeStatusBar {
   beginActivity(label: string, startedAt?: number): void;
   updateActivity(label: string): void;
@@ -32,7 +27,6 @@ export interface TuiRuntimeStatusBar {
   getActivityLabel(): string;
   getActivitySnapshot(): ActivitySnapshot | null;
   getActivityLine(now?: number, frameIndex?: number): string;
-  getReassuranceTick(now?: number, lastBucket?: number): ReassuranceTick | null;
 }
 
 export interface TuiRuntimeScrollRegion {
@@ -44,7 +38,6 @@ export interface TuiRuntimeScrollRegion {
 export interface TuiRuntimeStateOptions {
   statusBar: TuiRuntimeStatusBar;
   scrollRegion: TuiRuntimeScrollRegion;
-  onWriteProgressNote: (note: string) => void;
   onSuspendInteractiveUi: (context: string, error: unknown) => void;
   isTerminalUiSuspended: () => boolean;
 }
@@ -56,13 +49,10 @@ export interface TuiBeginTurnOptions {
 export class TuiRuntimeState {
   private liveActivityTimer: NodeJS.Timeout | null = null;
   private resumeActivityTimer: NodeJS.Timeout | null = null;
-  private reassuranceTimer: NodeJS.Timeout | null = null;
   private pauseActivityTimer: NodeJS.Timeout | null = null;
   private interactivePromptDepth = 0;
   private liveActivityFrame = 0;
   private liveActivityVisible = false;
-  private responseStarted = false;
-  private lastReassuranceBucket = -1;
   private turnActive = false;
 
   private snapshot: TuiSurfaceSnapshot = {
@@ -88,18 +78,11 @@ export class TuiRuntimeState {
 
   beginTurn(activityLabel = 'Thinking', options: TuiBeginTurnOptions = {}): void {
     this.turnActive = true;
-    this.responseStarted = false;
-    this.lastReassuranceBucket = -1;
     this.liveActivityFrame = 0;
     this.markBusyFinishing();
     if (!options.deferActivity) {
       this.beginActivity(activityLabel, true);
     }
-    this.ensureReassuranceTimer();
-  }
-
-  noteResponseStarted(): void {
-    this.responseStarted = true;
   }
 
   enterStreamingContent(): void {
@@ -182,34 +165,6 @@ export class TuiRuntimeState {
     }, delayMs);
   }
 
-  ensureReassuranceTimer(): void {
-    if (this.reassuranceTimer) {
-      return;
-    }
-    this.reassuranceTimer = setInterval(() => {
-      if (this.interactivePromptDepth > 0) {
-        return;
-      }
-      if (this.options.scrollRegion.isContentStreaming()) {
-        return;
-      }
-      if (!this.responseStarted) {
-        return;
-      }
-      const tick = this.options.statusBar.getReassuranceTick(Date.now(), this.lastReassuranceBucket);
-      if (!tick) {
-        return;
-      }
-      this.lastReassuranceBucket = tick.bucket;
-      this.pauseActivity();
-      this.options.onWriteProgressNote(tick.line);
-      const label = this.options.statusBar.getActivityLabel();
-      if (this.liveActivityTimer && label) {
-        this.scheduleActivityResume(label, 240);
-      }
-    }, 1000);
-  }
-
   pauseActivity(): void {
     if (!this.liveActivityTimer || !this.liveActivityVisible) {
       return;
@@ -273,14 +228,8 @@ export class TuiRuntimeState {
 
   stopActivity(): void {
     this.options.statusBar.endActivity();
-    if (this.reassuranceTimer) {
-      clearInterval(this.reassuranceTimer);
-      this.reassuranceTimer = null;
-    }
     this.stopLiveActivityTimer();
     this.liveActivityFrame = 0;
-    this.responseStarted = false;
-    this.lastReassuranceBucket = -1;
     this.interactivePromptDepth = 0;
   }
 

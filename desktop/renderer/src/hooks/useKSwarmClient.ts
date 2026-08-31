@@ -339,7 +339,7 @@ export interface KSwarmClientActions {
   startWorkflowRunFromProposal(projectId: string, workflowId: string, proposalId: string, options?: { taskId?: string }): Promise<KSwarmWorkflowRun | null>;
   cancelWorkflowRun(projectId: string, workflowRunId: string): Promise<KSwarmWorkflowRun | null>;
   // Task actions
-  humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean>;
+  humanAddTasks(projectId: string, tasks: Array<{ title: string; description?: string; assignedAgent?: string }>): Promise<boolean>;
   createTasks(projectId: string, tasks: Array<{ title: string; description?: string; phase?: number }>): Promise<boolean>;
   dispatchTasks(projectId: string, fromAgent?: string): Promise<DispatchTasksResult | null>;
   markTaskDone(projectId: string, taskId: string, fromAgent?: string): Promise<boolean>;
@@ -1264,8 +1264,8 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
 
   // ─── Task Actions ─────────────────────────────────────────────
 
-  const humanAddTasks = useCallback(async (projectId: string, tasks: Array<{ title: string; description?: string }>): Promise<boolean> => {
-    const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/tasks`, { tasks });
+  const humanAddTasks = useCallback(async (projectId: string, tasks: Array<{ title: string; description?: string; assignedAgent?: string }>): Promise<boolean> => {
+    const result = await httpPost<{ ok: boolean }>(`/projects/${projectId}/tasks/human`, { tasks });
     return !!result?.ok;
   }, []);
 

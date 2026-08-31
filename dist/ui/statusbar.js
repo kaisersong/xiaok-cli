@@ -7,7 +7,6 @@ const DEFAULT_FIELDS = ["model", "mode", "tokens", "session"];
 const VALID_FIELDS = new Set(DEFAULT_FIELDS);
 const LIVE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const LIVE_RENDER_DELAY_MS = 600;
-const REASSURANCE_INTERVAL_MS = 20_000;
 /**
  * Inline status bar — prints a status line after input prompt.
  * No ANSI scroll regions, no absolute cursor positioning.
@@ -103,7 +102,7 @@ export class StatusBar {
         const frame = LIVE_FRAMES[frameIndex % LIVE_FRAMES.length] ?? LIVE_FRAMES[0];
         const elapsed = formatElapsed(elapsedMs);
         const statusText = this.getStatusText();
-        const label = resolveActivityLabel(this.activity.label, elapsedMs);
+        const label = this.activity.label;
         const parts = [`${dimCyan(frame)} ${boldCyan(label)}`, dim(elapsed)];
         if (statusText) {
             parts.push(dim(statusText));
@@ -116,24 +115,8 @@ export class StatusBar {
         const elapsedMs = Math.max(0, now - this.activity.startedAt);
         const frame = LIVE_FRAMES[frameIndex % LIVE_FRAMES.length] ?? LIVE_FRAMES[0];
         const elapsed = formatElapsed(elapsedMs);
-        const label = resolveActivityLabel(this.activity.label, elapsedMs);
+        const label = this.activity.label;
         return [`${dimCyan(frame)} ${boldCyan(label)}`, dim(elapsed)].join(dim(' · '));
-    }
-    getReassuranceTick(now = Date.now(), lastBucket = -1) {
-        if (!this.enabled || !this.activity)
-            return null;
-        const elapsedMs = Math.max(0, now - this.activity.startedAt);
-        if (elapsedMs < REASSURANCE_INTERVAL_MS) {
-            return null;
-        }
-        const bucket = Math.floor(elapsedMs / REASSURANCE_INTERVAL_MS);
-        if (bucket <= lastBucket) {
-            return null;
-        }
-        return {
-            bucket,
-            line: `Still working: ${resolveReassuranceDetail(this.activity.label, elapsedMs)} (${formatElapsed(elapsedMs)})`,
-        };
     }
     renderLive(now = Date.now(), frameIndex = 0) {
         const line = this.getLiveStatusLine(now, frameIndex);
@@ -223,153 +206,6 @@ function inferContextLimitFromModel(modelName) {
         return 128_000; // GPT-4 family has 128K context
     }
     return 200_000; // Default fallback
-}
-function resolveActivityLabel(label, elapsedMs) {
-    if (label === 'Thinking') {
-        if (elapsedMs >= activityLabelThresholdMs(90_000)) {
-            return 'Finalizing response';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(45_000)) {
-            return 'Working through details';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(15_000)) {
-            return 'Still working';
-        }
-    }
-    if (label === 'Exploring codebase') {
-        if (elapsedMs >= activityLabelThresholdMs(45_000)) {
-            return 'Tracing references';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(20_000)) {
-            return 'Digging through repo';
-        }
-    }
-    if (label === 'Updating files') {
-        if (elapsedMs >= activityLabelThresholdMs(40_000)) {
-            return 'Finishing edits';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(15_000)) {
-            return 'Applying changes';
-        }
-    }
-    if (label === 'Running verification') {
-        if (elapsedMs >= activityLabelThresholdMs(45_000)) {
-            return 'Checking for regressions';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(20_000)) {
-            return 'Verifying changes';
-        }
-    }
-    if (label === 'Updating skills') {
-        if (elapsedMs >= activityLabelThresholdMs(30_000)) {
-            return 'Refreshing skill catalog';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(12_000)) {
-            return 'Installing skill updates';
-        }
-    }
-    if (label === 'Exporting presentation') {
-        if (elapsedMs >= activityLabelThresholdMs(40_000)) {
-            return 'Writing presentation file';
-        }
-        if (elapsedMs >= activityLabelThresholdMs(15_000)) {
-            return 'Packaging slides';
-        }
-    }
-    if (label === 'Inspecting workspace') {
-        if (elapsedMs >= 30_000) {
-            return 'Reviewing findings';
-        }
-        if (elapsedMs >= 12_000) {
-            return 'Scanning workspace';
-        }
-    }
-    if (label === 'Running command') {
-        if (elapsedMs >= 20_000) {
-            return 'Waiting for command output';
-        }
-        if (elapsedMs >= 8_000) {
-            return 'Executing command';
-        }
-    }
-    if (label === 'Working') {
-        if (elapsedMs >= 30_000) {
-            return 'Making progress';
-        }
-        if (elapsedMs >= 12_000) {
-            return 'Still working';
-        }
-    }
-    return label;
-}
-function activityLabelThresholdMs(defaultThresholdMs) {
-    const factor = Number(process.env.XIAOK_E2E_ACTIVITY_LABEL_FACTOR || '1');
-    if (!Number.isFinite(factor) || factor <= 1) {
-        return defaultThresholdMs;
-    }
-    return Math.max(LIVE_RENDER_DELAY_MS, Math.floor(defaultThresholdMs / factor));
-}
-function resolveReassuranceDetail(label, elapsedMs) {
-    if (label === 'Thinking') {
-        if (elapsedMs >= 90_000)
-            return 'finalizing the response';
-        if (elapsedMs >= 45_000)
-            return 'working through the remaining details';
-        return 'thinking through the answer';
-    }
-    if (label === 'Exploring codebase') {
-        if (elapsedMs >= 45_000)
-            return 'tracing code paths and references';
-        return 'exploring the codebase';
-    }
-    if (label === 'Updating files') {
-        if (elapsedMs >= 40_000)
-            return 'finishing the edits and checks';
-        return 'applying file changes';
-    }
-    if (label === 'Running verification') {
-        if (elapsedMs >= 45_000)
-            return 'checking for regressions';
-        return 'running verification';
-    }
-    if (label === 'Exporting presentation') {
-        if (elapsedMs >= 40_000)
-            return 'writing the presentation file';
-        if (elapsedMs >= 15_000)
-            return 'packaging slides for export';
-        return 'exporting the presentation';
-    }
-    if (label === 'Updating skills') {
-        if (elapsedMs >= 30_000)
-            return 'refreshing the installed skill catalog';
-        if (elapsedMs >= 12_000)
-            return 'installing skill updates';
-        return 'updating installed skills';
-    }
-    if (label === 'Inspecting workspace') {
-        if (elapsedMs >= 30_000)
-            return 'reviewing the workspace findings';
-        if (elapsedMs >= 12_000)
-            return 'scanning the workspace';
-        return 'inspecting the workspace';
-    }
-    if (label === 'Running command') {
-        if (elapsedMs >= 20_000)
-            return 'waiting for command output';
-        if (elapsedMs >= 8_000)
-            return 'running the command';
-        return 'running a local command';
-    }
-    if (label === 'Working') {
-        if (elapsedMs >= 30_000)
-            return 'making steady progress';
-        if (elapsedMs >= 12_000)
-            return 'working through the request';
-        return 'working on your request';
-    }
-    if (label === 'Answering')
-        return 'streaming the response';
-    return 'working on your request';
 }
 function loadConfiguredFields(cwd) {
     const configDir = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');

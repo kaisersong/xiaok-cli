@@ -1,4 +1,15 @@
-import { bold, dim, cyan, yellow, green, magenta, getTheme } from "./render.js";
+import {
+  accentAmber,
+  accentBlue,
+  accentGreen,
+  accentPurple,
+  boldAccentAmber,
+  boldAccentBlue,
+  dim,
+  green,
+  magenta,
+  getTheme,
+} from "./render.js";
 import { highlightLine } from "./highlight.js";
 import { getDisplayWidth, isFullWidthCodePoint, stripAnsi } from "./text-metrics.js";
 import { renderMermaidASCII } from "beautiful-mermaid";
@@ -200,12 +211,14 @@ export class MarkdownRenderer {
     // Headings
     const headerMatch = line.match(/^(#{1,6})\s+(.*)/);
     if (headerMatch) {
-      return `${BODY_GUTTER}${bold(headerMatch[2])}`;
+      const useLeadMarker = !this.hasRenderedLeadParagraph;
+      this.hasRenderedLeadParagraph = true;
+      return this.formatMessageText(boldAccentBlue(headerMatch[2]), useLeadMarker);
     }
 
     // Blockquotes
     if (line.startsWith("> ")) {
-      return `${BODY_GUTTER}${dim("│")} ${dim(this.inlineFormat(line.slice(2)))}`;
+      return `${BODY_GUTTER}${accentAmber("│")} ${accentAmber(this.inlineFormat(line.slice(2)))}`;
     }
 
     // Horizontal rule
@@ -220,7 +233,7 @@ export class MarkdownRenderer {
       return this.formatWrappedListItem({
         indent: ulMatch[1],
         markerText: '• ',
-        markerRendered: `${dim('•')} `,
+        markerRendered: `${accentPurple('•')} `,
         content: ulMatch[2],
       });
     }
@@ -231,7 +244,7 @@ export class MarkdownRenderer {
       return this.formatWrappedListItem({
         indent: olMatch[1],
         markerText: `${olMatch[2]}. `,
-        markerRendered: `${dim(olMatch[2] + '.')} `,
+        markerRendered: `${accentPurple(olMatch[2] + '.')} `,
         content: olMatch[3],
       });
     }
@@ -270,17 +283,23 @@ export class MarkdownRenderer {
 
   private formatLeadParagraphLine(line: string): string {
     const renderedText = this.inlineFormat(line);
-    const plainPrefix = `${BODY_GUTTER}${LEAD_PREFIX_TEXT}`;
+    return this.formatMessageText(renderedText, true);
+  }
+
+  private formatMessageText(renderedText: string, useLeadMarker: boolean): string {
+    const plainPrefix = useLeadMarker
+      ? `${BODY_GUTTER}${LEAD_PREFIX_TEXT}`
+      : `${BODY_GUTTER}${LEAD_CONTINUATION_PREFIX}`;
     const plainContinuationPrefix = `${BODY_GUTTER}${LEAD_CONTINUATION_PREFIX}`;
     const firstLineWidth = this.getWrapWidth(plainPrefix);
     const continuationWidth = this.getWrapWidth(plainContinuationPrefix);
     const wrappedLines = this.wrapStyledText(renderedText, firstLineWidth, continuationWidth);
 
-    const bullet = cyan(LEAD_BULLET);
+    const bullet = accentBlue(LEAD_BULLET);
 
     return wrappedLines
       .map((wrappedLine, index) => {
-        const prefix = index === 0
+        const prefix = index === 0 && useLeadMarker
           ? `${BODY_GUTTER}${bullet} `
           : plainContinuationPrefix;
         return `${prefix}${wrappedLine}`;
@@ -361,10 +380,10 @@ export class MarkdownRenderer {
 
   /** Apply inline formatting. */
   private inlineFormat(text: string): string {
-    text = text.replace(/`([^`]+)`/g, (_, code: string) => cyan(code));
-    text = text.replace(/\*\*\*(.+?)\*\*\*/g, (_, s: string) => bold(s));
-    text = text.replace(/\*\*(.+?)\*\*/g, (_, s: string) => bold(s));
-    text = text.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, s: string) => dim(s));
+    text = text.replace(/`([^`]+)`/g, (_, code: string) => accentGreen(code));
+    text = text.replace(/\*\*\*(.+?)\*\*\*/g, (_, s: string) => boldAccentAmber(s));
+    text = text.replace(/\*\*(.+?)\*\*/g, (_, s: string) => boldAccentAmber(s));
+    text = text.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, s: string) => accentPurple(s));
     text = text.replace(/~~(.+?)~~/g, (_, s: string) => dim(s));
     return text;
   }

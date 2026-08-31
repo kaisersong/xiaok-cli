@@ -38,7 +38,6 @@ describe('TuiRuntimeState', () => {
       getActivityLine: vi.fn((_now = Date.now(), _frameIndex = 0) => (
         activityLabel ? `⠋ ${activityLabel} · 1s` : ''
       )),
-      getReassuranceTick: vi.fn(() => null),
     };
 
     let contentStreaming = false;
@@ -48,13 +47,11 @@ describe('TuiRuntimeState', () => {
       clearActivity: vi.fn(),
     };
 
-    const writeProgressNote = vi.fn();
     const suspendInteractiveUi = vi.fn();
 
     const runtimeState = new TuiRuntimeState({
       statusBar,
       scrollRegion,
-      onWriteProgressNote: writeProgressNote,
       onSuspendInteractiveUi: suspendInteractiveUi,
       isTerminalUiSuspended: () => false,
     });
@@ -66,7 +63,6 @@ describe('TuiRuntimeState', () => {
       setContentStreaming(next: boolean) {
         contentStreaming = next;
       },
-      writeProgressNote,
       suspendInteractiveUi,
     };
   }
@@ -91,7 +87,6 @@ describe('TuiRuntimeState', () => {
     });
     expect(runtimeState.getFooterInputPrompt()).toBe('Finishing response...');
 
-    runtimeState.noteResponseStarted();
     runtimeState.enterStreamingContent();
     expect(runtimeState.getSnapshot()).toMatchObject({
       turnSurfaceState: 'streaming_content',
@@ -188,20 +183,11 @@ describe('TuiRuntimeState', () => {
     expect(scrollRegion.renderActivity).toHaveBeenCalledTimes(1);
   });
 
-  it('does not emit reassurance notes while a blocking interactive prompt is active', async () => {
-    const { runtimeState, statusBar, writeProgressNote } = createRuntimeState();
-    vi.mocked(statusBar.getReassuranceTick).mockReturnValue({
-      bucket: 1,
-      line: 'Still working: making steady progress (6m 40s)',
-    });
-
+  it('uses only the live activity timer and no transcript reassurance timer', () => {
+    const { runtimeState, scrollRegion } = createRuntimeState();
     runtimeState.beginTurn('Thinking');
-    runtimeState.noteResponseStarted();
 
-    await runtimeState.withPausedLiveActivity(async () => {
-      await vi.advanceTimersByTimeAsync(21_000);
-    });
-
-    expect(writeProgressNote).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+    expect(scrollRegion.renderActivity).toHaveBeenCalledWith('⠋ Thinking · 1s');
   });
 });

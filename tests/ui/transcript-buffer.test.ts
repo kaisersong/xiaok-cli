@@ -186,8 +186,32 @@ describe('renderTranscriptText', () => {
       { kind: 'tool_result', agentId: 'main', name: 'bash', content, isError: false },
     ]);
 
-    expect(text).toContain(content.slice(0, 600));
+    const reconstructed = text
+      .split('\n')
+      .filter((line) => line.startsWith('  │ ') && !line.includes('bash (ok)'))
+      .map((line) => line.slice('  │ '.length))
+      .join('');
+    expect(reconstructed).toContain(content.slice(0, 600));
     expect(text).not.toContain('...');
+  });
+
+  it('keeps multiline tool history inside rails without the legacy arrow', () => {
+    const text = renderTranscriptText([
+      { kind: 'tool_use', agentId: 'main', name: 'edit', summary: '修改文件 cli.py' },
+      {
+        kind: 'tool_result',
+        agentId: 'main',
+        name: 'edit',
+        content: 'diff --git a/cli.py b/cli.py\n--- a/cli.py\n+++ b/cli.py\n@@ -1 +1 @@',
+        isError: false,
+      },
+    ]);
+    const toolLines = text.split('\n').filter((line) => line.trim().length > 0);
+
+    expect(text).not.toContain('↳');
+    expect(text).not.toContain('\n---');
+    expect(text).not.toContain('\n+++');
+    expect(toolLines.every((line) => line.startsWith('  │ '))).toBe(true);
   });
 
   it('prefixes subagent entries with the agent name', () => {
@@ -225,6 +249,9 @@ describe('renderTranscriptText', () => {
 
     expect(text).toContain('[Image 1388×278]');
     expect(text).toContain('[Image]');
+    expect(text).not.toContain('↳');
+    expect(text.split('\n').filter((line) => line.includes('[Image]') || line.includes('[Image 1388×278]'))
+      .every((line) => line.startsWith('  │ '))).toBe(true);
   });
 
   it('renders thinking entries', () => {

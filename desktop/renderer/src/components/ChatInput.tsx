@@ -11,6 +11,11 @@ export interface AttachedFile {
   isImage?: boolean;
 }
 
+export interface MentionItem {
+  id: string;
+  label: string;
+}
+
 interface SkillItem {
   name: string;
   aliases: string[];
@@ -22,7 +27,7 @@ interface SkillItem {
 interface ChatInputProps {
   value?: string;
   onChange?: (value: string) => void;
-  onSubmit: (text: string, files: AttachedFile[]) => void;
+  onSubmit: (text: string, files: AttachedFile[]) => void | boolean | Promise<void | boolean>;
   onQueue?: (text: string, files: AttachedFile[]) => void;
   queuedText?: string | null;
   onCancelQueue?: () => void;
@@ -32,6 +37,8 @@ interface ChatInputProps {
   onStop?: () => void;
   autoFocus?: boolean;
   initialFiles?: AttachedFile[];
+  mentionItems?: MentionItem[];
+  mentionAllLabel?: string;
 }
 
 const TEXTAREA_MAX_HEIGHT = 220;
@@ -50,7 +57,22 @@ function appendUniqueFiles(prev: AttachedFile[], next: AttachedFile[]): Attached
   return added.length > 0 ? [...prev, ...added] : prev;
 }
 
-export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles }: ChatInputProps) {
+interface MentionTrigger {
+  start: number;
+  end: number;
+  query: string;
+}
+
+function resolveMentionTrigger(value: string, caret: number, enabled: boolean): MentionTrigger | null {
+  if (!enabled) return null;
+  const prefix = value.slice(0, caret);
+  const match = prefix.match(/(?:^|\s)@([^\s@]*)$/u);
+  if (!match) return null;
+  const tokenLength = match[1].length + 1;
+  return { start: caret - tokenLength, end: caret, query: match[1].toLowerCase() };
+}
+
+export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCancelQueue, placeholder, disabled, isRunning, onStop, autoFocus, initialFiles, mentionItems = [], mentionAllLabel }: ChatInputProps) {
   const { t } = useLocale();
   const resolvedPlaceholder = placeholder ?? t.chatInput.replyPlaceholder;
   const [internalValue, setInternalValue] = useState(value ?? '');
@@ -58,8 +80,10 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const [focused, setFocused] = useState(false);
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [mentionTrigger, setMentionTrigger] = useState<MentionTrigger | null>(null);
   const [slashQuery, setSlashQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const pastePathsRef = useRef<string[] | null>(null);
@@ -199,9 +223,9 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     }
   }, [internalValue]);
 
-  // Show slash menu when input starts with /
+  // Show slash menu when input starts with /. Mention selection takes priority.
   useEffect(() => {
-    if (internalValue.startsWith('/')) {
+    if (!mentionTrigger && internalValue.startsWith('/')) {
       const query = internalValue.slice(1).toLowerCase();
       setSlashQuery(query);
       setShowSlashMenu(true);
@@ -209,12 +233,22 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     } else {
       setShowSlashMenu(false);
     }
-  }, [internalValue]);
+  }, [internalValue, mentionTrigger]);
 
   const matchedSkills = skills.filter(s =>
     s.name.toLowerCase().includes(slashQuery) ||
     s.aliases.some(a => a.toLowerCase().includes(slashQuery))
   );
+
+  const matchedMentions = mentionTrigger
+    ? [
+        { id: 'all', label: mentionAllLabel ?? 'all' },
+        ...mentionItems,
+      ].filter(item => (
+        item.id.toLowerCase().includes(mentionTrigger.query)
+        || item.label.toLowerCase().includes(mentionTrigger.query)
+      ))
+    : [];
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
@@ -234,6 +268,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       setFiles(prev => appendUniqueFiles(prev, newFiles));
       setInternalValue(stripped);
       onChange?.(stripped);
+      setMentionTrigger(resolveMentionTrigger(stripped, stripped.length, mentionItems.length > 0));
       // Try NSFilenamesPboardType to get canonical paths
       if (window.xiaokDesktop?.readClipboardFilePaths) {
         window.xiaokDesktop.readClipboardFilePaths().then(fp => {
@@ -254,6 +289,12 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     }
     setInternalValue(v);
     onChange?.(v);
+    const trigger = resolveMentionTrigger(v, e.target.selectionStart ?? v.length, mentionItems.length > 0);
+    setMentionTrigger(trigger);
+    if (trigger) {
+      setShowSlashMenu(false);
+      setSelectedIndex(0);
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -289,6 +330,28 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         }
       }).catch(() => { finderFilesPendingRef.current = false; });
     }
+    if (mentionTrigger && matchedMentions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex(i => Math.min(i + 1, matchedMentions.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex(i => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Tab' || e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        selectMention(matchedMentions[selectedIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionTrigger(null);
+        return;
+      }
+    }
     if (showSlashMenu && matchedSkills.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -322,7 +385,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       }
       // Allow submit with text OR files
       if (internalValue.trim() || files.length > 0) {
-        submit();
+        void submit();
       }
     }
   };
@@ -335,14 +398,37 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     textareaRef.current?.focus();
   };
 
-  const submit = () => {
+  const selectMention = (mention: MentionItem) => {
+    if (!mentionTrigger) return;
+    const newValue = `${internalValue.slice(0, mentionTrigger.start)}@${mention.id} ${internalValue.slice(mentionTrigger.end)}`;
+    setInternalValue(newValue);
+    onChange?.(newValue);
+    setMentionTrigger(null);
+    setSelectedIndex(0);
+    queueMicrotask(() => textareaRef.current?.focus());
+  };
+
+  const submit = async () => {
     const hasText = internalValue.trim();
     const hasFiles = files.length > 0;
-    if (hasText || hasFiles) {
-      onSubmit(internalValue.trim() || t.chatInput.processFiles, files);
+    if ((hasText || hasFiles) && !submitting) {
+      try {
+        const outcome = onSubmit(internalValue.trim() || t.chatInput.processFiles, files);
+        if (outcome && typeof (outcome as Promise<void | boolean>).then === 'function') {
+          setSubmitting(true);
+          if (await outcome === false) return;
+        } else if (outcome === false) {
+          return;
+        }
+      } catch {
+        return;
+      } finally {
+        setSubmitting(false);
+      }
       setInternalValue('');
       onChange?.('');
       setFiles([]);
+      setMentionTrigger(null);
     }
   };
 
@@ -368,6 +454,27 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
   return (
     <div className="w-full relative">
+      {mentionTrigger && matchedMentions.length > 0 && (
+        <div className="absolute bottom-full left-0 right-0 z-50 mb-2 overflow-hidden rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] shadow-lg">
+          <div className="border-b border-[var(--c-border)] p-2 text-xs text-[var(--c-text-secondary)]">
+            {t.chatInput.mentionHint}
+          </div>
+          <div className="max-h-[220px] overflow-y-auto">
+            {matchedMentions.map((mention, index) => (
+              <button
+                key={mention.id}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectMention(mention)}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${index === selectedIndex ? 'bg-[var(--c-accent)]/10' : 'hover:bg-[var(--c-bg-deep)]'}`}
+              >
+                <span className="shrink-0 font-mono text-[var(--c-accent)]">@{mention.id}</span>
+                <span className="truncate text-[var(--c-text-secondary)]">{mention.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Slash command menu */}
       {showSlashMenu && matchedSkills.length > 0 && (
         <div
@@ -521,7 +628,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
         onKeyDown={(e) => { if (e.key === 'Enter') textareaRef.current?.focus(); }}
       >
         <form
-          onSubmit={(e) => { e.preventDefault(); submit(); }}
+          onSubmit={(e) => { e.preventDefault(); void submit(); }}
           style={{ padding: '10px 12px 8px' }}
         >
           {/* Textarea */}
@@ -558,6 +665,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
             {!isRunning && (
               <button
                 type="button"
+                aria-label={t.chatInput.attachFiles}
                 onClick={handleAttach}
                 className="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)] transition-[opacity,background] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:opacity-100 opacity-70"
               >
@@ -578,7 +686,8 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
             ) : (
               <button
                 type="submit"
-                disabled={disabled || (!internalValue.trim() && files.length === 0)}
+                aria-label={t.chatInput.send}
+                disabled={disabled || submitting || (!internalValue.trim() && files.length === 0)}
                 className="flex size-[33.5px] flex-shrink-0 items-center justify-center rounded-lg bg-[var(--c-accent-send)] text-[var(--c-accent-send-text)] transition-[background-color,opacity] duration-[60ms] hover:bg-[var(--c-accent-send-hover)] active:opacity-[0.75] active:scale-[0.93] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Send size={18} />

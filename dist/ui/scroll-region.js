@@ -925,6 +925,18 @@ export class ScrollRegionManager {
     beginContentStreaming() {
         if (!this.active)
             return;
+        // A tool interrupt may end a partial assistant row without rendering a
+        // visible tool block. Finalize it only when another assistant segment
+        // actually starts: visible tool blocks already advance the cursor and must
+        // not receive a second spacer row here.
+        if (!this._contentStreaming && this._cursorCol > 0) {
+            const nextRow = this._cursorRow + 1;
+            this._totalRows++;
+            this.absorbRegionScroll(nextRow);
+            this._cursorRow = this.clampCursorRow(nextRow);
+            this._cursorCol = 0;
+            this._cursorUncertain = false;
+        }
         this._contentStreaming = true;
         this.clearSummaryChromeRows();
         this.clearActivity();
@@ -947,6 +959,13 @@ export class ScrollRegionManager {
     endContentStreaming(options) {
         if (!this.active)
             return;
+        // The activity overlay owns the last scroll-region row. If assistant text
+        // currently ends there without a newline, rendering activity would clear
+        // that text. Emit the newline only at this boundary so the terminal scrolls
+        // the content up before the overlay takes ownership.
+        if (options?.reserveActivityRow === true && this._cursorCol > 0 && this._cursorRow >= this.getScrollBottom()) {
+            this.getNewlineCallback()();
+        }
         this._contentStreaming = false;
         this.lastInputValue = '';
         this.lastInputCursor = 0;

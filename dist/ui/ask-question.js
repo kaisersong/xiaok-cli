@@ -6,7 +6,7 @@
  *   - Numbered option list with ❯ highlight (left column)
  *   - Optional preview panel (right column, shown when focused option has preview)
  *   - Multi-select support (Space to toggle, Enter to confirm)
- *   - "Other" free-text input option always appended
+ *   - "Other" free-text input option appended unless the caller supplied one
  *
  * Usage:
  *   const answer = await askQuestion({
@@ -39,9 +39,22 @@ function truncatePlainLine(text, width) {
     }
     return `${sliceByDisplayColumns(text, 0, Math.max(0, width - 1))}…`;
 }
+function isOtherOption(option) {
+    return /^(?:other|其他|其它)(?:\b|[（(]|$)/iu.test(option.label.trim());
+}
+function withFallbackOther(options) {
+    const explicitOtherIdx = options.findIndex(isOtherOption);
+    if (explicitOtherIdx >= 0) {
+        return { allOptions: [...options], otherIdx: explicitOtherIdx };
+    }
+    return {
+        allOptions: [...options, { label: 'Other', description: 'Enter custom text' }],
+        otherIdx: options.length,
+    };
+}
 // ─── Renderer ────────────────────────────────────────────────────────────────
 function renderFrame(params, selectedIdx, checked, cols) {
-    const allOptions = [...params.options, { label: 'Other', description: 'Enter custom text' }];
+    const { allOptions } = withFallbackOther(params.options);
     const hasPreview = allOptions.some((o) => o.preview);
     const leftWidth = hasPreview ? Math.floor(cols * 0.45) : cols - 2;
     const rightWidth = hasPreview ? cols - leftWidth - 3 : 0;
@@ -131,8 +144,7 @@ function countRenderedTerminalRows(lines, cols) {
 }
 // ─── Main function ────────────────────────────────────────────────────────────
 export async function askQuestion(params) {
-    const allOptions = [...params.options, { label: 'Other', description: 'Enter custom text' }];
-    const otherIdx = allOptions.length - 1;
+    const { allOptions, otherIdx } = withFallbackOther(params.options);
     return new Promise((resolve) => {
         const stdout = process.stdout;
         const cols = stdout.columns ?? 80;
@@ -192,7 +204,12 @@ export async function askQuestion(params) {
             process.stdin.removeListener('data', onKey);
             rl.close();
             clearFrame();
-            if (selectedIdx === otherIdx) {
+            const wantsOther = selectedIdx === otherIdx || (params.multiSelect === true && checked.has(otherIdx));
+            const finalSelected = params.multiSelect
+                ? [...checked].filter((i) => i !== otherIdx)
+                : [];
+            const labels = finalSelected.map((i) => allOptions[i].label);
+            if (wantsOther) {
                 // "Other" — prompt for free text
                 stdout.write(`${boldCyan('❯')} ${bold(params.question)}\n`);
                 stdout.write(`${dim('Enter your answer:')} `);
@@ -206,20 +223,18 @@ export async function askQuestion(params) {
                     });
                 });
                 stdout.write('\n');
-                resolve({ selected: [], labels: [], otherText: text });
+                resolve({ selected: finalSelected, labels, otherText: text });
             }
             else {
-                const finalSelected = params.multiSelect
-                    ? [...checked].filter((i) => i !== otherIdx)
-                    : [selectedIdx];
-                const labels = finalSelected.map((i) => allOptions[i].label);
+                const selected = params.multiSelect ? finalSelected : [selectedIdx];
+                const selectedLabels = selected.map((i) => allOptions[i].label);
                 // Print confirmation
                 stdout.write(`${boldCyan('❯')} ${bold(params.question)}\n`);
-                for (const label of labels) {
+                for (const label of selectedLabels) {
                     stdout.write(`  ${dim('·')} ${cyan(label)}\n`);
                 }
                 stdout.write('\n');
-                resolve({ selected: finalSelected, labels });
+                resolve({ selected, labels: selectedLabels });
             }
         }
         function onKey(key) {

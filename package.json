@@ -93,6 +93,8 @@
     "nodejieba": "^3.5.8"
   },
   "devDependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^22.0.0",

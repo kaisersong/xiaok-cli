@@ -13,4 +13,11 @@ describe('top-level command registration', () => {
     expect(source).toContain('registerReviewCommands(program);');
     expect(source).toContain('registerPrCommands(program);');
   });
+
+  it('registers the self-update command with the package version', () => {
+    const source = readFileSync(join(process.cwd(), 'src', 'main.ts'), 'utf8');
+
+    expect(source).toContain("from './commands/update.js'");
+    expect(source).toContain('registerUpdateCommand(program, version);');
+  });
 });

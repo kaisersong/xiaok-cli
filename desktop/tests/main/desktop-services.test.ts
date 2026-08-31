@@ -4833,6 +4833,50 @@ describe('desktop services', () => {
     });
     await services.pauseGoal('thread-goal');
   });
+
+  it('imports persisted Room attachments as materials and does not advertise a tool-less runtime', async () => {
+    const attachmentPath = join(rootDir, 'room-brief.md');
+    writeFileSync(attachmentPath, '# Room brief\n请核对附件。');
+    let capturedPrompt = '';
+    let capturedMaterials: Array<{ originalName: string; role: string }> = [];
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      runner: async ({ sessionId, prompt, materials, emitRuntimeEvent }) => {
+        capturedPrompt = prompt;
+        capturedMaterials = materials.map(material => ({ originalName: material.originalName, role: material.role }));
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn-room', intentId: 'intent-room',
+          stepId: 'step-room', delta: 'ROOM-MATERIAL-OK',
+        });
+        await emitRuntimeEvent({
+          type: 'receipt_emitted', sessionId, turnId: 'turn-room', intentId: 'intent-room',
+          stepId: 'step-room', note: 'ROOM-MATERIAL-OK',
+        });
+      },
+    });
+
+    const result = await services.runCollaborationRoomAgentTask({
+      roomId: 'room-1',
+      roomTitle: '统一输入框',
+      roomRevision: 2,
+      roomMessageId: 'msg-1',
+      logicalAgentId: 'xiaok-worker',
+      contextScope: { kind: 'room_only' },
+      attachmentPaths: [attachmentPath],
+      messages: [{
+        messageId: 'msg-1',
+        sender: { kind: 'user', userId: 'user.local' },
+        kind: 'text',
+        text: '/report 请读取附件',
+      }],
+    });
+
+    expect(result.text).toContain('ROOM-MATERIAL-OK');
+    expect(capturedMaterials).toEqual([{ originalName: 'room-brief.md', role: 'customer_material' }]);
+    expect(capturedPrompt).toContain('/report 请读取附件');
+    expect(capturedPrompt).not.toContain('本轮没有任何工具');
+  });
 });
 
 async function collectFirst<T>(events: AsyncIterable<T>, count: number): Promise<T[]> {

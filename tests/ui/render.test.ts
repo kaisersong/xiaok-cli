@@ -151,8 +151,8 @@ describe('formatSubmittedInput', () => {
 describe('formatProgressNote', () => {
   it('renders subtle secondary status lines with a consistent gutter', () => {
     setColorsEnabled(false);
-    expect(formatProgressNote('Still working: tracing code paths and references (48s)'))
-      .toContain('  · Still working: tracing code paths and references (48s)\n');
+    expect(formatProgressNote('Goal 已完成。'))
+      .toContain('  · Goal 已完成。\n');
     setColorsEnabled(true);
   });
 });
@@ -374,7 +374,7 @@ describe('formatHistoryBlock', () => {
     expect(formatHistoryBlock(longThinking)).toBe('');
   });
 
-  it('formats tool_use blocks as activity summary', () => {
+  it('formats tool_use blocks with the shared rail instead of the legacy arrow', () => {
     const block: HistoryMessageBlock = {
       type: 'tool_use',
       id: 'tool-123',
@@ -383,8 +383,9 @@ describe('formatHistoryBlock', () => {
     };
     const output = formatHistoryBlock(block);
 
-    // Should show the tool activity summary
-    expect(output).toContain('↳');
+    expect(output).toMatch(/^  │ /);
+    expect(output).not.toContain('↳');
+    expect(output).not.toContain('│ •');
     expect(output).toContain('test.md');
   });
 
@@ -417,9 +418,32 @@ describe('formatHistoryBlock', () => {
     };
     const longOutput = formatHistoryBlock(longResult);
 
-    expect(longOutput).toContain('...');
+    expect(longOutput.replace(/\n  │ /g, '')).toContain('...');
     // Should be truncated around 100 chars + prefix
     expect(longOutput.length).toBeLessThan(200);
+  });
+
+  it('keeps every visual line of a multiline tool result inside the rail', () => {
+    const originalColumns = process.stdout.columns;
+    process.stdout.columns = 42;
+
+    try {
+      const block: HistoryMessageBlock = {
+        type: 'tool_result',
+        tool_use_id: 'tool-diff',
+        content: 'diff --git a/cli.py b/cli.py\n--- a/cli.py\n+++ b/cli.py\n@@ -8,2 +8,3 @@\n-old\n+new',
+      };
+      const output = formatHistoryBlock(block);
+      const visualLines = output.trimEnd().split('\n');
+
+      expect(output).not.toContain('↳');
+      expect(output).not.toContain('\n---');
+      expect(output).not.toContain('\n+++');
+      expect(visualLines.length).toBeGreaterThan(1);
+      expect(visualLines.every((line) => line.startsWith('  │ '))).toBe(true);
+    } finally {
+      process.stdout.columns = originalColumns;
+    }
   });
 
   it('formats image blocks as placeholder', () => {
@@ -430,7 +454,8 @@ describe('formatHistoryBlock', () => {
     const output = formatHistoryBlock(block);
 
     expect(output).toContain('[Image]');
-    expect(output).toContain('↳');
+    expect(output).toMatch(/^  │ /);
+    expect(output).not.toContain('↳');
   });
 
   it('returns empty string for unknown block types', () => {

@@ -227,6 +227,7 @@ export declare class ScrollRegionManager {
         inputPrompt?: string;
         summaryLine?: string;
         statusLine?: string;
+        reserveActivityRow?: boolean;
     }): void;
     /**
      * Prepare for content output.

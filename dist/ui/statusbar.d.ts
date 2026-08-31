@@ -12,10 +12,6 @@ export interface ActivitySnapshot {
     label: string;
     startedAt: number;
 }
-interface ReassuranceTick {
-    bucket: number;
-    line: string;
-}
 /**
  * Inline status bar — prints a status line after input prompt.
  * No ANSI scroll regions, no absolute cursor positioning.
@@ -47,7 +43,6 @@ export declare class StatusBar {
     getStatusLine(): string;
     getLiveStatusLine(now?: number, frameIndex?: number): string;
     getActivityLine(now?: number, frameIndex?: number): string;
-    getReassuranceTick(now?: number, lastBucket?: number): ReassuranceTick | null;
     renderLive(now?: number, frameIndex?: number): void;
     clearLive(): void;
     private getStatusText;
@@ -56,4 +51,3 @@ export declare class StatusBar {
     /** No-op — no terminal state to restore in inline mode. */
     destroy(): void;
 }
-export {};

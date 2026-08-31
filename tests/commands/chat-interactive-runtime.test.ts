@@ -151,6 +151,12 @@ function createFakeAdapter(
         return;
       }
 
+      if (lastToolResult.includes('手机端 X')) {
+        yield { type: 'text', delta: '收到选项: 手机端 X' };
+        yield { type: 'done' };
+        return;
+      }
+
       if (lastToolResult.includes('"这个 skill 的单一目标是什么？"')) {
         yield {
           type: 'tool_use',
@@ -328,6 +334,25 @@ Run a single release-readiness pass for one code change.
           input: {
             question: '确认目标？',
             placeholder: '答案',
+          },
+        };
+        yield { type: 'done' };
+        return;
+      }
+
+      if (lastUserText.includes('请用 ask_user 给我选项')) {
+        yield {
+          type: 'tool_use',
+          id: 'tu_ask_user_options_1',
+          name: 'ask_user',
+          input: {
+            question: '请选择复现场景',
+            options: [
+              { label: 'X 桌面客户端/网页', description: '桌面环境' },
+              { label: '图片也挂了', description: '图片资源失败' },
+              { label: '手机端 X', description: '移动网络' },
+              { label: '其它', description: '补充说明' },
+            ],
           },
         };
         yield { type: 'done' };
@@ -1452,6 +1477,7 @@ describe('chat interactive runtime', () => {
       expect(toolLineIndex).toBeGreaterThan(firstSegmentIndex);
       expect(secondSegmentIndex).toBeGreaterThan(firstSegmentIndex);
       expect(secondSegmentIndex).toBeGreaterThan(toolLineIndex);
+      expect(finalLines[secondSegmentIndex]).toBe('● 继续总结如下：');
       expect(finalLines.slice(toolLineIndex + 1, secondSegmentIndex).some((line) => line.trim() === '')).toBe(true);
       expect(finalPromptIndex).toBeGreaterThanOrEqual(secondSegmentIndex + 3);
       expect(finalLines.slice(secondSegmentIndex + 1, finalPromptIndex).filter((line) => line === '').length).toBeGreaterThanOrEqual(2);
@@ -3583,6 +3609,24 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         expect(harness.output.normalized).toContain('收到回答: 已确认');
       }, { timeoutMs: 3_000 });
+
+      harness.send('请用 ask_user 给我选项');
+      harness.send('\r');
+      await waitFor(() => {
+        const screen = harness.screen.text();
+        expect(screen).toContain('请选择复现场景');
+        expect(screen).toContain('X 桌面客户端/网页');
+        expect(screen).toContain('手机端 X');
+        expect(screen).not.toContain('Other');
+      }, { timeoutMs: 3_000 });
+
+      harness.emitter.emit('data', '\x1b[B');
+      harness.emitter.emit('data', '\x1b[B');
+      harness.emitter.emit('data', '\r');
+      await waitFor(() => {
+        expect(harness.output.normalized).toContain('收到选项: 手机端 X');
+      }, { timeoutMs: 3_000 });
+      expect(harness.output.normalized).not.toContain('• ask_user');
 
       await waitForInputTurnReady(harness);
       harness.send('/exit');

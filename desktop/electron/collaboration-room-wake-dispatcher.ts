@@ -11,6 +11,7 @@ export interface CollaborationRoomTurnEnvelope {
   roomMessageId: string;
   logicalAgentId: string;
   contextScope: { kind: string; projectId?: string };
+  attachmentPaths: string[];
   messages: Array<{
     messageId: string;
     sender: unknown;
@@ -20,6 +21,23 @@ export interface CollaborationRoomTurnEnvelope {
     contextScope?: { kind: string; projectId?: string };
   }>;
 }
+
+export type CollaborationRoomDispatchEvent =
+  | {
+      type: 'wake_settled';
+      roomId: string;
+      roomMessageId: string;
+      logicalAgentId: string;
+      outcome: 'completed' | 'failed';
+      remaining: number;
+    }
+  | {
+      type: 'discussion_settled';
+      roomId: string;
+      roomMessageId: string;
+      completed: string[];
+      failed: string[];
+    };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -33,18 +51,54 @@ export function createCollaborationRoomWakeDispatcher({
   brokerClient,
   execute,
   canExecute = async () => true,
+  onEvent,
 }: {
   brokerClient: RoomWakeBrokerPort;
   execute(input: CollaborationRoomTurnEnvelope): Promise<{ text: string }>;
   canExecute?(logicalAgentId: string): Promise<boolean>;
+  onEvent?(event: CollaborationRoomDispatchEvent): void | Promise<void>;
 }) {
+  async function emit(event: CollaborationRoomDispatchEvent): Promise<void> {
+    try {
+      await onEvent?.(event);
+    } catch {
+      // UI notification is best-effort and must not change durable wake state.
+    }
+  }
+
   async function dispatchMessage(input: {
     roomId: string;
     roomMessageId: string;
     logicalAgentIds: string[];
   }) {
+    const logicalAgentIds = [...new Set(input.logicalAgentIds)].sort();
+    const completed: string[] = [];
+    const failed: string[] = [];
+    const settleAgent = async (logicalAgentId: string, outcome: 'completed' | 'failed') => {
+      (outcome === 'completed' ? completed : failed).push(logicalAgentId);
+      await emit({
+        type: 'wake_settled',
+        roomId: input.roomId,
+        roomMessageId: input.roomMessageId,
+        logicalAgentId,
+        outcome,
+        remaining: Math.max(0, logicalAgentIds.length - completed.length - failed.length),
+      });
+    };
+    const finish = async () => {
+      await emit({
+        type: 'discussion_settled',
+        roomId: input.roomId,
+        roomMessageId: input.roomMessageId,
+        completed: [...completed],
+        failed: [...failed],
+      });
+    };
+
     const snapshot = await brokerClient.getRoomSnapshot(input.roomId);
     if (!isRecord(snapshot) || snapshot.ok === false || !isRecord(snapshot.room)) {
+      failed.push(...logicalAgentIds);
+      await finish();
       return { ok: false, code: asString(snapshot && isRecord(snapshot) ? snapshot.code : '') || 'broker_unavailable' };
     }
     const room = snapshot.room;
@@ -54,13 +108,23 @@ export function createCollaborationRoomWakeDispatcher({
         ))
       : [];
     const source = roomMessages.find(message => message.messageId === input.roomMessageId);
-    if (!source) return { ok: false, code: 'room_message_not_found' };
+    if (!source) {
+      failed.push(...logicalAgentIds);
+      await finish();
+      return { ok: false, code: 'room_message_not_found' };
+    }
+    const sourceRef = isRecord(source.sourceRef) ? source.sourceRef : null;
+    const attachmentPaths = sourceRef?.kind === 'user_attachments' && Array.isArray(sourceRef.attachments)
+      ? sourceRef.attachments.flatMap((attachment) => (
+          isRecord(attachment) && asString(attachment.filePath)
+            ? [asString(attachment.filePath)]
+            : []
+        ))
+      : [];
 
-    const completed: string[] = [];
-    const failed: string[] = [];
-    for (const logicalAgentId of [...new Set(input.logicalAgentIds)].sort()) {
+    for (const logicalAgentId of logicalAgentIds) {
       if (!(await canExecute(logicalAgentId))) {
-        failed.push(logicalAgentId);
+        await settleAgent(logicalAgentId, 'failed');
         continue;
       }
       const claim = await brokerClient.claimWake({
@@ -69,7 +133,7 @@ export function createCollaborationRoomWakeDispatcher({
         hostParticipantId: 'xiaok-desktop',
       });
       if (!isRecord(claim) || claim.ok === false || !asString(claim.claimToken)) {
-        failed.push(logicalAgentId);
+        await settleAgent(logicalAgentId, 'failed');
         continue;
       }
       try {
@@ -79,6 +143,7 @@ export function createCollaborationRoomWakeDispatcher({
           roomRevision: Number(room.revision || 0),
           roomMessageId: input.roomMessageId,
           logicalAgentId,
+          attachmentPaths,
           contextScope: isRecord(source.contextScope)
             ? source.contextScope as { kind: string; projectId?: string }
             : { kind: 'room_only' },
@@ -99,14 +164,15 @@ export function createCollaborationRoomWakeDispatcher({
           reply: text ? { kind: 'text', text } : { kind: 'pass' },
         });
         if (!isRecord(settled) || settled.ok === false) {
-          failed.push(logicalAgentId);
+          await settleAgent(logicalAgentId, 'failed');
           continue;
         }
-        completed.push(logicalAgentId);
+        await settleAgent(logicalAgentId, 'completed');
       } catch {
-        failed.push(logicalAgentId);
+        await settleAgent(logicalAgentId, 'failed');
       }
     }
+    await finish();
     return { ok: true, completed, failed };
   }
 

@@ -6,6 +6,7 @@ import { registerChatCommands } from './commands/chat.js';
 import { registerCommitCommands } from './commands/commit.js';
 import { registerDoctorCommands } from './commands/doctor.js';
 import { registerInitCommands } from './commands/init.js';
+import { registerLoginCommand } from './commands/login.js';
 import { registerPrCommands } from './commands/pr.js';
 import { registerDaemonCommands } from './commands/reminder.js';
 import { registerReviewCommands } from './commands/review.js';
@@ -15,6 +16,7 @@ import { registerPluginCommands } from './commands/plugin.js';
 import { registerMemoryCommands } from './commands/memory.js';
 import { registerDiagnoseCommands } from './commands/diagnose.js';
 import { registerTraceCommands } from './commands/trace-export.js';
+import { registerUpdateCommand } from './commands/update.js';
 import { installGlobalCrashHandlers, reportCrash, setCrashContext } from './utils/crash-reporter.js';
 
 installGlobalCrashHandlers();
@@ -36,6 +38,7 @@ registerCommitCommands(program);
 registerDaemonCommands(program);
 registerDoctorCommands(program);
 registerInitCommands(program);
+registerLoginCommand(program);
 registerPrCommands(program);
 registerReviewCommands(program);
 registerTranscriptCommands(program);
@@ -45,6 +48,7 @@ registerPluginCommands(program);
 registerMemoryCommands(program);
 registerTraceCommands(program);
 registerDiagnoseCommands(program);
+registerUpdateCommand(program, version);
 
 program.hook('preAction', (_thisCommand, actionCommand) => {
   setCrashContext({

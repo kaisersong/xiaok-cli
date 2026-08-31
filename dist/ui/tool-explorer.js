@@ -1,8 +1,19 @@
 import { basename } from 'node:path';
-import { describeToolActivity, formatRailHeader, formatRailLine, formatToolActivity } from './render.js';
+import { describeToolActivity, formatRailHeader, formatRailLine, formatToolActivity, } from './render.js';
 import { getUiCopy } from './locale.js';
 const MAX_DIRECT_COMMAND_PREVIEW = 160;
 const MAX_VISIBLE_RAN_ENTRIES = 3;
+function railToneForGroup(group) {
+    if (group === 'Explored')
+        return 'explore';
+    if (group === 'Ran')
+        return 'run';
+    if (group === 'Changed')
+        return 'change';
+    if (group === 'Skills')
+        return 'skill';
+    return 'neutral';
+}
 function singleLine(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
@@ -123,13 +134,14 @@ export class ToolExplorer {
         if (grouped) {
             const lines = [];
             const groupChanged = this.activeGroup !== grouped.group;
+            const tone = railToneForGroup(grouped.group);
             if (groupChanged) {
                 lines.push('\n\n');
-                lines.push(`${formatRailHeader(grouped.group)}\n`);
+                lines.push(`${formatRailHeader(grouped.group, undefined, tone)}\n`);
                 this.activeGroupEntryCount = 0;
                 this.ranCollapseNoticeWritten = false;
             }
-            lines.push(`${formatRailLine(grouped.item)}\n`);
+            lines.push(`${formatRailLine(grouped.item, tone)}\n`);
             this.activeGroup = grouped.group;
             this.activeGroupEntryCount += 1;
             return lines.join('');
@@ -138,9 +150,10 @@ export class ToolExplorer {
         if (direct) {
             const lines = [];
             const groupChanged = this.activeGroup !== direct.group;
+            const tone = railToneForGroup(direct.group);
             if (groupChanged) {
                 lines.push('\n\n');
-                lines.push(`${formatRailHeader(direct.group)}\n`);
+                lines.push(`${formatRailHeader(direct.group, undefined, tone)}\n`);
                 this.activeGroupEntryCount = 0;
                 this.ranCollapseNoticeWritten = false;
             }
@@ -151,10 +164,10 @@ export class ToolExplorer {
                     return '';
                 }
                 this.ranCollapseNoticeWritten = true;
-                lines.push(`${formatRailLine(getUiCopy(this.locale).ranCollapseNotice)}\n`);
+                lines.push(`${formatRailLine(getUiCopy(this.locale).ranCollapseNotice, tone)}\n`);
                 return lines.join('');
             }
-            lines.push(`${formatRailLine(direct.item)}\n`);
+            lines.push(`${formatRailLine(direct.item, tone)}\n`);
             return lines.join('');
         }
         const previousGroup = this.activeGroup;

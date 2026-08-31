@@ -1,4 +1,4 @@
-import { dim } from './render.js';
+import { formatRailLine } from './render.js';
 
 export type ImageProtocol = 'kitty' | 'iterm2' | null;
 
@@ -98,7 +98,7 @@ export function formatImagePlaceholder(dims: ImageDimensions | null): string {
 }
 
 export function formatImageFallbackLine(dims: ImageDimensions | null): string {
-  return dim(`  ↳ ${formatImagePlaceholder(dims)}`);
+  return formatRailLine(formatImagePlaceholder(dims), 'result');
 }
 
 function computeCellBox(

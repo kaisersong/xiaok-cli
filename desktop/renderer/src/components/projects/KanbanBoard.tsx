@@ -365,6 +365,7 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
   const { t } = useLocale();
   const [rows, setRows] = useState([{ title: '', assignedAgent: '' }]);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
 
   const updateRow = (idx: number, field: string, value: string) => {
     setRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r));
@@ -381,9 +382,16 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
     const tasks = rows.filter(r => r.title.trim()).map(r => ({ title: r.title.trim(), description: '', assignedAgent: r.assignedAgent || undefined }));
     if (tasks.length === 0) return;
     setSaving(true);
-    await humanAddTasks(projectId, tasks);
-    setSaving(false);
-    onDone();
+    setSaveError(false);
+    try {
+      const saved = await humanAddTasks(projectId, tasks);
+      if (saved) onDone();
+      else setSaveError(true);
+    } catch {
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const managedAgents = agents.filter(a => a.roles?.includes('worker') || !a.roles?.length);
@@ -430,6 +438,7 @@ function AddTaskForm({ projectId, onDone }: { projectId: string; onDone(): void 
           </button>
         </div>
       </div>
+      {saveError && <p role="alert" className="mt-2 text-[11px] text-[var(--c-status-error-text)]">{t.projectsKanbanAddTaskFailed}</p>}
     </div>
   );
 }

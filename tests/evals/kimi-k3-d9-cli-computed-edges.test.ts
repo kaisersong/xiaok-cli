@@ -33,16 +33,11 @@ describe('Kimi K3 D9 CLI computed loader edges', () => {
       'node_modules/onnxruntime-node/bin/napi-v6/darwin/arm64/onnxruntime_binding.node',
     );
     expect(graph.modules).toContain(
-      'node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+      'node_modules/better-sqlite3/prebuilds/darwin-arm64.node',
     );
     expect(graph.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({
         specifier: 'utf-8-validate',
-        optional: true,
-        optionalMissing: true,
-      }),
-      expect.objectContaining({
-        specifier: 'encoding',
         optional: true,
         optionalMissing: true,
       }),

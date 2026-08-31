@@ -72,7 +72,7 @@ Run a single release-readiness pass for one code change.
     expect(result.issues.filter((issue) => issue.severity === 'warning')).toHaveLength(0);
   });
 
-  it('fails skills that are missing trigger guidance, examples, and completion criteria', async () => {
+  it('accepts runnable minimal skills while warning about advisory authoring metadata', async () => {
     const configDir = createTempDir('xiaok-skill-quality-config');
     const projectDir = createTempDir('xiaok-skill-quality-project');
     const skillDir = join(projectDir, '.xiaok', 'skills', 'bad-skill');
@@ -95,14 +95,17 @@ Do a bunch of useful things for the team.
     });
 
     const codes = result.issues
-      .filter((issue) => issue.severity === 'error')
+      .filter((issue) => issue.severity === 'warning')
       .map((issue) => issue.code);
 
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(result.summary.errors).toBe(0);
     expect(codes).toContain('missing_when_to_use');
     expect(codes).toContain('missing_task_goals');
     expect(codes).toContain('missing_examples');
+    expect(codes).toContain('missing_goal_section');
     expect(codes).toContain('missing_success_criteria');
+    expect(codes).toContain('missing_non_goals');
   });
 
   it('warns when a skill tries to own multiple primary jobs without progressive disclosure', async () => {
@@ -246,7 +249,7 @@ Read references and run scripts before answering.
     expect(errorCodes).toContain('scripts_declared_but_missing');
   });
 
-  it('fails invalid strict success checks and undeclared body requirements', async () => {
+  it('fails invalid strict success checks while warning about undeclared body hints', async () => {
     const configDir = createTempDir('xiaok-skill-quality-config');
     const projectDir = createTempDir('xiaok-skill-quality-project');
     const skillDir = join(projectDir, '.xiaok', 'skills', 'strict-invalid');
@@ -283,11 +286,14 @@ Read references/ and run scripts/ before answering.
     const errorCodes = result.issues
       .filter((issue) => issue.severity === 'error')
       .map((issue) => issue.code);
+    const warningCodes = result.issues
+      .filter((issue) => issue.severity === 'warning')
+      .map((issue) => issue.code);
 
     expect(result.ok).toBe(false);
     expect(errorCodes).toContain('invalid_success_check');
     expect(errorCodes).toContain('strict_skill_missing_success_checks');
-    expect(errorCodes).toContain('body_mentions_references_without_contract');
-    expect(errorCodes).toContain('body_mentions_scripts_without_contract');
+    expect(warningCodes).toContain('body_mentions_references_without_contract');
+    expect(warningCodes).toContain('body_mentions_scripts_without_contract');
   });
 });

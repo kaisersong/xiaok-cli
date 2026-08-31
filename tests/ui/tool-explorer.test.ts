@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ToolExplorer } from '../../src/ui/tool-explorer.js';
+import { setColorsEnabled } from '../../src/ui/render.js';
 
 // Strip ANSI escape codes for plain-text assertions.
 function strip(s: string): string {
@@ -16,6 +17,24 @@ function joinRailContent(s: string): string {
 }
 
 describe('ToolExplorer', () => {
+  it('uses distinct truecolor hues for exploration, execution, changes, and skills', () => {
+    setColorsEnabled(true);
+    try {
+      const explored = new ToolExplorer().record('read', { file_path: '/tmp/demo/README.md' });
+      const ran = new ToolExplorer().record('bash', { command: 'npm test' });
+      const changed = new ToolExplorer().record('write', { file_path: '/tmp/demo/report.md' });
+      const skills = new ToolExplorer().record('install_skill', { path: '/tmp/demo/my-skill' });
+
+      expect(explored).toContain('\x1b[1;38;2;97;175;239mExplored\x1b[0m');
+      expect(explored).toContain('\x1b[38;2;97;175;239mRead README.md\x1b[0m');
+      expect(ran).toContain('\x1b[1;38;2;198;120;221mRan\x1b[0m');
+      expect(changed).toContain('\x1b[1;38;2;152;195;121mChanged\x1b[0m');
+      expect(skills).toContain('\x1b[1;38;2;229;192;123mSkills\x1b[0m');
+    } finally {
+      setColorsEnabled(false);
+    }
+  });
+
   it('groups exploration activity under an indented Explored block', () => {
     const explorer = new ToolExplorer();
 
@@ -100,17 +119,22 @@ describe('ToolExplorer', () => {
   });
 
   it('wraps long rail content with an aligned "│ " prefix instead of overflowing the border', () => {
-    const explorer = new ToolExplorer();
+    setColorsEnabled(true);
+    try {
+      const explorer = new ToolExplorer();
 
-    const longCommand = 'cd /Users/song/projects/kai-xiaok-plugins/plugins/kai-infinity-canvas && echo "verify selection API and SSE work" && node server/index.mjs --check';
-    const output = strip(explorer.record('bash', { command: longCommand }));
+      const longCommand = 'cd /Users/song/projects/kai-xiaok-plugins/plugins/kai-infinity-canvas && echo "verify selection API and SSE work" && node server/index.mjs --check';
+      const output = strip(explorer.record('bash', { command: longCommand }));
 
-    const contentLines = output.split('\n').filter((line) => line.includes('│'));
-    // The command is long enough to wrap into more than one rail line.
-    expect(contentLines.length).toBeGreaterThan(1);
-    // Every wrapped continuation keeps the aligned rail prefix, never the bare left edge.
-    for (const line of contentLines) {
-      expect(line.startsWith('  │ ')).toBe(true);
+      const contentLines = output.split('\n').filter((line) => line.includes('│'));
+      // The command is long enough to wrap into more than one rail line.
+      expect(contentLines.length).toBeGreaterThan(1);
+      // Every wrapped continuation keeps the aligned rail prefix, never the bare left edge.
+      for (const line of contentLines) {
+        expect(line.startsWith('  │ ')).toBe(true);
+      }
+    } finally {
+      setColorsEnabled(false);
     }
   });
 

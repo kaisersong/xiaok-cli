@@ -42,7 +42,10 @@ function createBrokerFake(overrides: Record<string, unknown> = {}) {
         status: 'active',
         revision: 4,
       },
-      members: [],
+      members: [
+        { status: 'active', subject: { kind: 'agent', logicalAgentId: 'agent-a' } },
+        { status: 'active', subject: { kind: 'agent', logicalAgentId: 'xiaok-worker' } },
+      ],
       messages: [
         {
           messageId: 'msg-1',
@@ -167,7 +170,159 @@ describe('collaboration room semantic service', () => {
     expect(result).toMatchObject({ ok: false, code: 'room_revision_conflict' });
   });
 
-  it('dispatches persisted mention wakes before returning the refreshed room snapshot', async () => {
+  it('adds the default Xiaok agent to new rooms and removes duplicates', async () => {
+    const broker = createBrokerFake();
+    const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: createKSwarmFake() });
+
+    await service.createRoom({
+      title: 'Room',
+      memberAgentIds: ['agent-a', 'xiaok-worker', 'agent-a'],
+    });
+
+    const createCall = broker.calls.find((call) => call.method === 'createRoom');
+    expect((createCall?.args as { input?: { memberAgentIds?: string[] } }).input?.memberAgentIds)
+      .toEqual(['agent-a', 'xiaok-worker']);
+  });
+
+  it('does not allow the renderer to remove the default Xiaok agent from a room', async () => {
+    const broker = createBrokerFake();
+    const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: createKSwarmFake() });
+
+    await service.updateRoomMembers({
+      roomId: 'room-1',
+      expectedRoomRevision: 4,
+      addAgentIds: ['agent-b'],
+      removeAgentIds: ['xiaok-worker', 'agent-a'],
+      requestSource: 'system',
+    });
+
+    const updateCall = broker.calls.find((call) => call.method === 'updateRoomMembers');
+    expect((updateCall?.args as { input?: Record<string, unknown> }).input).toEqual({
+      roomId: 'room-1',
+      expectedRoomRevision: 4,
+      addAgentIds: ['agent-b'],
+      removeAgentIds: ['agent-a'],
+    });
+  });
+
+  it('derives canonical mentions from text and ignores forged renderer routing fields', async () => {
+    const sendRoomMessage = vi.fn(async (input: Record<string, unknown>) => ({
+      ok: true,
+      message: { messageId: 'msg-canonical', roomId: 'room-1', ...input },
+    }));
+    const broker = createBrokerFake({
+      sendRoomMessage,
+      getRoomSnapshot: vi.fn(async () => ({
+        ok: true,
+        room: { roomId: 'room-1', title: 'R', status: 'active', revision: 4 },
+        members: [
+          { status: 'active', subject: { kind: 'agent', logicalAgentId: 'agent-a' } },
+          { status: 'active', subject: { kind: 'agent', logicalAgentId: 'agent-a-extra' } },
+          { status: 'active', subject: { kind: 'agent', logicalAgentId: 'xiaok-worker' } },
+        ],
+        messages: [],
+      })),
+    });
+    const dispatchMessage = vi.fn(async () => ({ ok: true, completed: [], failed: [] }));
+    const service = createCollaborationRoomService({
+      brokerClient: broker,
+      kswarmClient: createKSwarmFake(),
+      wakeDispatcher: { dispatchMessage },
+    });
+
+    await service.sendMessage({
+      roomId: 'room-1',
+      text: '邮箱 a@agent-a.com 不算；请 @agent-a 检查，别误选 @agent-a-extra-suffix',
+      responsePolicy: 'team_once',
+      mentions: [{ kind: 'agent', logicalAgentId: 'agent-a-extra' }],
+      idempotencyKey: 'canonical-1',
+      filePaths: ['/tmp/a/report.md', '/tmp/a/report.md', ''],
+    });
+
+    expect(sendRoomMessage).toHaveBeenCalledWith(expect.objectContaining({
+      roomId: 'room-1',
+      responsePolicy: 'mentioned',
+      mentions: [{ kind: 'agent', logicalAgentId: 'agent-a' }],
+      sourceRef: {
+        kind: 'user_attachments',
+        attachments: [{ filePath: '/tmp/a/report.md', name: 'report.md' }],
+      },
+    }), expect.objectContaining({ requestSource: 'user' }));
+    await vi.waitFor(() => expect(dispatchMessage).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      roomMessageId: 'msg-canonical',
+      logicalAgentIds: ['agent-a'],
+    }));
+  });
+
+  it('routes @all to every active agent but not removed members', async () => {
+    const sendRoomMessage = vi.fn(async (input: Record<string, unknown>) => ({
+      ok: true,
+      message: { messageId: 'msg-all', roomId: 'room-1', ...input },
+    }));
+    const broker = createBrokerFake({
+      sendRoomMessage,
+      getRoomSnapshot: vi.fn(async () => ({
+        ok: true,
+        room: { roomId: 'room-1', title: 'R', status: 'active', revision: 4 },
+        members: [
+          { status: 'active', subject: { kind: 'agent', logicalAgentId: 'agent-a' } },
+          { status: 'active', subject: { kind: 'agent', logicalAgentId: 'xiaok-worker' } },
+          { status: 'removed', subject: { kind: 'agent', logicalAgentId: 'agent-old' } },
+        ],
+        messages: [],
+      })),
+    });
+    const dispatchMessage = vi.fn(async () => ({ ok: true, completed: [], failed: [] }));
+    const service = createCollaborationRoomService({
+      brokerClient: broker,
+      kswarmClient: createKSwarmFake(),
+      wakeDispatcher: { dispatchMessage },
+    });
+
+    await service.sendMessage({ roomId: 'room-1', text: '@all 请一起评审', idempotencyKey: 'all-1' });
+
+    expect(sendRoomMessage).toHaveBeenCalledWith(expect.objectContaining({
+      responsePolicy: 'mentioned',
+      mentions: [{ kind: 'all' }],
+    }), expect.anything());
+    await vi.waitFor(() => expect(dispatchMessage).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      roomMessageId: 'msg-all',
+      logicalAgentIds: ['agent-a', 'xiaok-worker'],
+    }));
+  });
+
+  it('backfills xiaok-worker before a no-mention send and does not persist when backfill fails', async () => {
+    const sendRoomMessage = vi.fn(async (input: Record<string, unknown>) => ({
+      ok: true,
+      message: { messageId: 'msg-default', roomId: 'room-1', ...input },
+    }));
+    const updateRoomMembers = vi.fn(async () => ({ ok: false, code: 'room_member_limit_exceeded' }));
+    const broker = createBrokerFake({
+      sendRoomMessage,
+      updateRoomMembers,
+      getRoomSnapshot: vi.fn(async () => ({
+        ok: true,
+        room: { roomId: 'room-1', title: 'R', status: 'active', revision: 4 },
+        members: [{ status: 'active', subject: { kind: 'agent', logicalAgentId: 'agent-a' } }],
+        messages: [],
+      })),
+    });
+    const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: createKSwarmFake() });
+
+    const result = await service.sendMessage({ roomId: 'room-1', text: '请默认小 K 回复', idempotencyKey: 'default-1' });
+
+    expect(updateRoomMembers).toHaveBeenCalledWith(expect.objectContaining({
+      roomId: 'room-1',
+      expectedRoomRevision: 4,
+      addAgentIds: ['xiaok-worker'],
+    }), expect.objectContaining({ requestSource: 'user' }));
+    expect(result).toMatchObject({ ok: false, code: 'room_default_agent_unavailable' });
+    expect(sendRoomMessage).not.toHaveBeenCalled();
+  });
+
+  it('returns after persistence without waiting for a slow mention wake', async () => {
     const broker = createBrokerFake({
       sendRoomMessage: vi.fn(async () => ({
         ok: true,
@@ -179,11 +334,68 @@ describe('collaboration room semantic service', () => {
         },
       })),
     });
-    const dispatchMessage = vi.fn(async () => ({ ok: true, completed: ['agent-a'] }));
+    let resolveDispatch!: (value: { ok: true; completed: string[]; failed: string[] }) => void;
+    const dispatchPending = new Promise<{ ok: true; completed: string[]; failed: string[] }>((resolve) => {
+      resolveDispatch = resolve;
+    });
+    const dispatchMessage = vi.fn(() => dispatchPending);
     const service = createCollaborationRoomService({
       brokerClient: broker,
       kswarmClient: createKSwarmFake(),
       wakeDispatcher: { dispatchMessage },
+    });
+
+    let sendSettled = false;
+    const sendPromise = service.sendMessage({
+      roomId: 'room-1',
+      text: '@agent-a inspect this',
+      responsePolicy: 'mentioned',
+      mentions: [{ kind: 'agent', logicalAgentId: 'agent-a' }],
+      idempotencyKey: 'msg-client-1',
+    });
+    void sendPromise.then(() => { sendSettled = true; });
+
+    await vi.waitFor(() => expect(dispatchMessage).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    expect(sendSettled).toBe(true);
+    const result = await sendPromise;
+    expect(result).toMatchObject({
+      ok: true,
+      wake: {
+        status: 'queued',
+        roomMessageId: 'msg-user-1',
+        logicalAgentIds: ['agent-a'],
+      },
+    });
+    expect(dispatchMessage).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      roomMessageId: 'msg-user-1',
+      logicalAgentIds: ['agent-a'],
+    });
+
+    resolveDispatch({ ok: true, completed: ['agent-a'], failed: [] });
+    await dispatchPending;
+  });
+
+  it('contains a background dispatch rejection and reports a settled failure event', async () => {
+    const broker = createBrokerFake({
+      sendRoomMessage: vi.fn(async () => ({
+        ok: true,
+        message: {
+          messageId: 'msg-user-failed',
+          roomId: 'room-1',
+          responsePolicy: 'mentioned',
+          mentions: [{ kind: 'agent', logicalAgentId: 'agent-a' }],
+        },
+      })),
+    });
+    const emitRoomEvent = vi.fn();
+    const service = createCollaborationRoomService({
+      brokerClient: broker,
+      kswarmClient: createKSwarmFake(),
+      wakeDispatcher: { dispatchMessage: vi.fn(async () => { throw new Error('executor_crashed'); }) },
+      emitRoomEvent,
     });
 
     const result = await service.sendMessage({
@@ -191,14 +403,16 @@ describe('collaboration room semantic service', () => {
       text: '@agent-a inspect this',
       responsePolicy: 'mentioned',
       mentions: [{ kind: 'agent', logicalAgentId: 'agent-a' }],
-      idempotencyKey: 'msg-client-1',
+      idempotencyKey: 'msg-client-failed',
     });
 
     expect(result.ok).toBe(true);
-    expect(dispatchMessage).toHaveBeenCalledWith({
+    await vi.waitFor(() => expect(emitRoomEvent).toHaveBeenCalledWith({
+      type: 'discussion_settled',
       roomId: 'room-1',
-      roomMessageId: 'msg-user-1',
-      logicalAgentIds: ['agent-a'],
-    });
+      roomMessageId: 'msg-user-failed',
+      completed: [],
+      failed: ['agent-a'],
+    }));
   });
 });

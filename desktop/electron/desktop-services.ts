@@ -1376,23 +1376,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   const createCollaborationRoomTaskHost = () => {
-    const roomTools: Tool[] = [];
-    const roomRegistry = new ToolRegistry({ autoMode: true }, roomTools);
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
-        roomRegistry,
-        roomTools,
-        options.dataRoot,
-        options.kswarmService,
-        materialRegistry,
-        kswarmCreateProjectToolOptions,
-        {
-          restrictedArtifactGeneration: true,
-          officeToMarkdown: input => officeDocumentParser.parse(input),
-        },
-      )),
+      runner: coordinateRunner(options.runner ?? defaultDesktopRunner),
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: false },
       createTaskId: () => `room_turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -1415,11 +1402,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       `你的逻辑智能体身份：${envelope.logicalAgentId}`,
       `上下文范围：${JSON.stringify(envelope.contextScope)}`,
       '只使用下方当前协作空间的消息作为上下文。严禁推测、读取或引用私聊、其他协作空间或未显式选择的项目。',
-      '本轮没有任何工具。直接给出一条有帮助、具体、简洁的回复；不要输出 JSON，不要声称执行了未执行的操作。',
+      '你可以使用默认小 K 任务可用的 Skill、工具和本轮用户附件。直接给出一条有帮助、具体的回复；不要声称执行了未执行的操作。',
       '',
       transcript,
     ].join('\n');
-    const result = await runKSwarmRuntimeTextTask(createCollaborationRoomTaskHost(), prompt);
+    const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
+    for (const filePath of envelope.attachmentPaths ?? []) {
+      try {
+        const record = await materialRegistry.importMaterial({
+          taskId: `room-material-${envelope.roomMessageId}`,
+          sourcePath: filePath,
+          role: 'customer_material',
+          roleSource: 'user',
+        });
+        materials.push({ materialId: record.materialId, role: record.role });
+      } catch {
+        // A missing attachment is represented by the persisted message metadata;
+        // other valid materials still reach the agent.
+      }
+    }
+    const result = await runKSwarmRuntimeTextTask(createCollaborationRoomTaskHost(), prompt, { materials });
     return { text: result.summary.trim() };
   }
 
@@ -3068,13 +3070,17 @@ function kindFromFilename(filename: string): string {
 async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
   prompt: string,
-  options: { artifactsDir?: string; runStartedAt?: number } = {},
+  options: {
+    artifactsDir?: string;
+    runStartedAt?: number;
+    materials?: Array<{ materialId: string; role?: MaterialRole }>;
+  } = {},
 ): Promise<{ taskId: string; summary: string; structuredOutput?: Record<string, unknown>; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
   const runStartedAt = options.runStartedAt || Date.now();
   const maxAttempts = 2;
   let lastFailure: string | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const created = await host.createTask({ prompt, materials: [] });
+    const created = await host.createTask({ prompt, materials: options.materials ?? [] });
     const deadline = Date.now() + 10 * 60 * 1000;
     while (Date.now() < deadline) {
       const recovered = await host.recoverTask(created.taskId);

@@ -68,7 +68,9 @@ describe('chat terminal layout', () => {
     expect(
       readFileSync(join(process.cwd(), 'src', 'commands', 'chat', 'terminal-streaming-boundary.ts'), 'utf8'),
     ).toContain('consumeAssistantLeadIn');
-    expect(runtimeStateSource).toContain('getReassuranceTick');
+    expect(runtimeStateSource).not.toContain('getReassuranceTick');
+    expect(runtimeStateSource).not.toContain('reassuranceTimer');
+    expect(source).not.toContain('startLongThinkingTimer');
   });
 
   it('should let InputReader own the prompt rendering to avoid slash-menu redraw corruption', () => {

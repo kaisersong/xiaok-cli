@@ -78,4 +78,33 @@ Run a single release-readiness pass for one code change.
     expect(parsed.valid).toBe(true);
     expect(isSuccessfulModelToolResult(raw)).toBe(true);
   });
+
+  it('reports advisory metadata gaps without making a runnable skill invalid', async () => {
+    const { skillPath, configDir, projectDir } = writeSkill(`---
+name: broken-skill
+description: A runnable helper with only the loader-required metadata
+---
+# Notes
+
+Help with the requested task.
+`);
+    const tool = createValidateSkillTool({ cwd: projectDir, configDir });
+
+    const raw = await tool.execute({ path: skillPath });
+
+    const parsed = JSON.parse(raw) as {
+      valid: boolean;
+      summary: { errors: number; warnings: number };
+      issues: Array<{ severity: string; code: string }>;
+    };
+    expect(parsed.valid).toBe(true);
+    expect(parsed.summary.errors).toBe(0);
+    expect(parsed.summary.warnings).toBeGreaterThan(0);
+    expect(parsed.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: 'warning', code: 'missing_when_to_use' }),
+      expect.objectContaining({ severity: 'warning', code: 'missing_task_goals' }),
+      expect.objectContaining({ severity: 'warning', code: 'missing_success_criteria' }),
+    ]));
+    expect(isSuccessfulModelToolResult(raw)).toBe(true);
+  });
 });

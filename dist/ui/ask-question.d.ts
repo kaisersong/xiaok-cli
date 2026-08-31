@@ -6,7 +6,7 @@
  *   - Numbered option list with ❯ highlight (left column)
  *   - Optional preview panel (right column, shown when focused option has preview)
  *   - Multi-select support (Space to toggle, Enter to confirm)
- *   - "Other" free-text input option always appended
+ *   - "Other" free-text input option appended unless the caller supplied one
  *
  * Usage:
  *   const answer = await askQuestion({

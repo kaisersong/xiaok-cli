@@ -161,6 +161,37 @@ describe('ScrollRegionManager activity rendering', () => {
       expect(output).toContain('gpt-5.4 · 5%');
     });
 
+    it('finalizes an unterminated content row before the next streaming segment', () => {
+      const { manager, getOutput, resetOutput } = createMockScrollRegion();
+      manager.begin();
+      manager.beginContentStreaming();
+      manager.getColumnAdvanceCallback()(17);
+
+      manager.endContentStreaming({ inputPrompt: 'waiting...', statusLine: 'gpt-5.4' });
+      resetOutput();
+      manager.beginContentStreaming();
+      expect((manager as any)._cursorCol).toBe(0);
+      expect(getOutput()).not.toContain('\x1b[18G');
+    });
+
+    it('scrolls an unterminated bottom-row segment before activity can clear it', () => {
+      const { manager, getOutput, resetOutput } = createMockScrollRegion();
+      manager.begin();
+      manager.setContentCursor(manager.maxContentRows);
+      manager.beginContentStreaming();
+      manager.getColumnAdvanceCallback()(17);
+      resetOutput();
+
+      manager.endContentStreaming({
+        inputPrompt: 'waiting...',
+        statusLine: 'gpt-5.4',
+        reserveActivityRow: true,
+      });
+
+      expect((manager as any)._cursorCol).toBe(0);
+      expect(getOutput()).toContain('\n');
+    });
+
     it('pads placeholder input with footer background across the row', () => {
       const { manager, getOutput } = createMockScrollRegion();
       manager.begin();
@@ -1908,7 +1939,7 @@ describe('Bug 10: Content exceeding maxContentRows', () => {
 
       manager.renderActivity('⠋ Waiting for command output · 46s');
       manager.clearActivity();
-      process.stdout.write(formatProgressNote('Still working: waiting for command output (46s)'));
+      process.stdout.write(formatProgressNote('Goal 已完成。'));
 
       const lines = harness.screen.lines();
       const promptRows = lines.filter((line) => line.includes('❯'));

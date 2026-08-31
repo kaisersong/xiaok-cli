@@ -4,11 +4,15 @@ export interface TerminalStreamingFooterState {
   statusLine: string;
 }
 
+type TerminalStreamingEndState = TerminalStreamingFooterState & {
+  reserveActivityRow?: boolean;
+};
+
 export interface TerminalStreamingBoundaryDeps {
   scrollRegion: {
     isActive(): boolean;
     isContentStreaming(): boolean;
-    endContentStreaming(options: TerminalStreamingFooterState): void;
+    endContentStreaming(options: TerminalStreamingEndState): void;
     renderFooter(options: TerminalStreamingFooterState): void;
   };
   replRenderer: { prepareForInput(): void };
@@ -19,7 +23,7 @@ export interface TerminalStreamingInterruptDeps {
   scrollRegion: {
     isActive(): boolean;
     isContentStreaming(): boolean;
-    endContentStreaming(options: TerminalStreamingFooterState): void;
+    endContentStreaming(options: TerminalStreamingEndState): void;
   };
   runtimeState: { enterToolInterrupt(): void };
   mdRenderer: { beginNewSegment(): void };
@@ -107,6 +111,6 @@ export function endStreamingPhaseForInterruptInOrder(
   }
 
   deps.runtimeState.enterToolInterrupt();
-  deps.scrollRegion.endContentStreaming(footerState);
+  deps.scrollRegion.endContentStreaming({ ...footerState, reserveActivityRow: true });
   deps.mdRenderer.beginNewSegment();
 }

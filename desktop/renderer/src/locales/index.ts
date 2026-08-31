@@ -25,6 +25,7 @@ export interface LocaleStrings {
   collaborationRoomArchived: string;
   collaborationRoomEmpty: string;
   collaborationRoomComposerPlaceholder: string;
+  collaborationRoomMentionAll: string;
   collaborationRoomsTitle: string;
   collaborationRoomsSubtitle: string;
   collaborationRoomsCreate: string;
@@ -38,13 +39,27 @@ export interface LocaleStrings {
   collaborationRoomCancel: string;
   collaborationRoomSend: string;
   collaborationRoomSending: string;
+  collaborationRoomWaitingForReplies: (count: number) => string;
+  collaborationRoomRepliesPartiallyFailed: (count: number) => string;
   collaborationRoomRefresh: string;
   collaborationRoomArchive: string;
   collaborationRoomTeamDiscussion: string;
   collaborationRoomNormalReply: string;
   collaborationRoomMentionReply: string;
   collaborationRoomSelectForProject: string;
+  collaborationRoomAddToProjectBackground: string;
+  collaborationRoomRemoveFromProjectBackground: string;
   collaborationRoomCreateProject: string;
+  collaborationRoomCopyMessage: string;
+  collaborationRoomCopiedMessage: string;
+  collaborationRoomCopyFailed: string;
+  collaborationRoomSaveToKnowledge: string;
+  collaborationRoomSavedToKnowledge: string;
+  collaborationRoomKnowledgeSaving: string;
+  collaborationRoomKnowledgeNoCollections: string;
+  collaborationRoomKnowledgeSaveFailed: string;
+  collaborationRoomKnowledgeTitle: (sender: string, excerpt: string) => string;
+  collaborationRoomMessageExcerpt: string;
   collaborationRoomProjectName: string;
   collaborationRoomProjectGoal: string;
   collaborationRoomProjectOwner: string;
@@ -2222,6 +2237,7 @@ export interface LocaleStrings {
   projectsKanbanMarkDone: string;
   projectsKanbanCancel: string;
   projectsKanbanSave: string;
+  projectsKanbanAddTaskFailed: string;
 
   // projects - detail page
   projectsDetailPlan: string;
@@ -2911,6 +2927,9 @@ export interface LocaleStrings {
     processFiles: string;
     skillCommandHint: string;
     queued: string;
+    attachFiles: string;
+    send: string;
+    mentionHint: string;
     modelPicker: {
       empty: string;
       tooltip: string;
