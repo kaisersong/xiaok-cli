@@ -51,7 +51,7 @@ export interface ScrollPromptRenderFrame {
   summaryLine: string;
   statusLine: string;
   overlayLines: string[];
-  overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued';
+  overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued' | 'question';
 }
 
 export interface InputReadOptions {

@@ -40,7 +40,7 @@ export interface ScrollPromptFrame {
   summaryLine?: string;
   statusLine: string;
   overlayLines?: string[];
-  overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued';
+  overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued' | 'question';
   owner?: 'input' | 'renderer';
 }
 
@@ -260,6 +260,12 @@ export class ScrollRegionManager {
         const compactText = lines.slice(1).join(' ').trim();
         return [`${lines[0]} ${compactText}`.trim()];
       }
+      return lines.slice(0, maxOverlayRows);
+    }
+    // Question/choice overlays (AskUserQuestion / ask_user) put the question at
+    // the top and the options below it. Truncate from the bottom so the question
+    // and the leading options stay visible; the footer hint is the least important.
+    if (overlayKind === 'question') {
       return lines.slice(0, maxOverlayRows);
     }
     return lines.slice(-maxOverlayRows);

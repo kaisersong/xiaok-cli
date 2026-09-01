@@ -1067,7 +1067,7 @@ async function runChat(initialInput, opts) {
             summaryLine: getCurrentIntentSummaryLine(),
             statusLine: statusBar.getStatusLine(),
             overlayLines: lines,
-            overlayKind: 'generic',
+            overlayKind: 'question',
             owner: 'renderer',
         });
         return true;

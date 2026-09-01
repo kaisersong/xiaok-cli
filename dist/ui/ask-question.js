@@ -59,13 +59,12 @@ function renderFrame(params, selectedIdx, checked, cols) {
     const leftWidth = hasPreview ? Math.floor(cols * 0.45) : cols - 2;
     const rightWidth = hasPreview ? cols - leftWidth - 3 : 0;
     const lines = [];
-    // Header chip
+    // Header chip (no blank spacer so short terminals keep the options visible)
     if (params.header) {
         lines.push(chip(params.header));
-        lines.push('');
     }
-    // Question
-    lines.push(bold(params.question));
+    // Question (indent to align with the option list)
+    lines.push(`  ${bold(params.question)}`);
     // If has preview, add boxTop as a separate line above options
     if (hasPreview) {
         const innerWidth = rightWidth - 2;

@@ -998,6 +998,38 @@ describe('scroll-region prompt frame ownership', () => {
     }
   });
 
+  it('keeps the question and leading options visible when a question overlay is taller than the viewport', () => {
+    const harness = createTtyHarness(80, 10);
+    const manager = new ScrollRegionManager(process.stdout);
+    const overlayLines = [
+      '想吃什么类型的？',
+      '  ❯ 1. 中餐炒菜  经典家常',
+      '    2. 面食/粉类  面条',
+      '    3. 轻食/沙拉  低卡',
+      '    4. Other  Enter custom text',
+      '  ↑↓ navigate   Enter select',
+    ];
+
+    try {
+      manager.begin();
+      manager.renderPromptFrame({
+        inputValue: '',
+        cursor: 0,
+        placeholder: 'AskUserQuestion',
+        statusLine: 'status',
+        overlayLines,
+        overlayKind: 'question',
+      });
+
+      const text = harness.screen.lines().join('\n');
+      expect(text).toContain('想吃什么类型的？');
+      expect(text).toContain('1. 中餐炒菜');
+      // The footer hint is the least important and may be trimmed on short terminals.
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('clears stale overlay rows when the input shrinks while the overlay stays open', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);

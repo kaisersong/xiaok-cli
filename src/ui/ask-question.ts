@@ -96,14 +96,13 @@ function renderFrame(
 
   const lines: string[] = [];
 
-  // Header chip
+  // Header chip (no blank spacer so short terminals keep the options visible)
   if (params.header) {
     lines.push(chip(params.header));
-    lines.push('');
   }
 
-  // Question
-  lines.push(bold(params.question));
+  // Question (indent to align with the option list)
+  lines.push(`  ${bold(params.question)}`);
 
   // If has preview, add boxTop as a separate line above options
   if (hasPreview) {

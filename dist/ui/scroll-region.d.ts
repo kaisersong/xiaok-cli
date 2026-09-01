@@ -36,7 +36,7 @@ export interface ScrollPromptFrame {
     summaryLine?: string;
     statusLine: string;
     overlayLines?: string[];
-    overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued';
+    overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued' | 'question';
     owner?: 'input' | 'renderer';
 }
 export declare class ScrollRegionManager {
