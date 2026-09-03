@@ -67,7 +67,7 @@ Xiaok Desktop v1.5.0 introduces a Room-first collaboration surface: users can di
 - **Pi Harness Support**: KSwarm can discover, probe, configure, and execute Pi through a bounded one-shot harness with controlled arguments, environment, working directory, timeout, and output size.
 - **DeepSeek Harness Safety Gate**: The DeepSeek harness route and capability registry are present, but creation stays disabled until a pinned real `dsh --profile headless` probe proves the preview CLI contract. The UI does not advertise an unverified runtime as ready.
 - **Dependency and Packaging Maintenance**: Root and Desktop SDK/lockfile ownership are aligned, deprecated dependency drift is guarded, and release builds pin the matching KSwarm and Intent Broker snapshots.
-- **Release Versioning**: The root CLI patch release is `1.5.1`. Desktop package metadata, download links, and the Desktop Release workflow remain on `1.5.0` / `desktop-v1.5.0`.
+- **Release Versioning**: Root CLI and Desktop package metadata are `1.5.1`. The download links below continue to point at the currently published `desktop-v1.5.0` assets until a new Desktop GitHub release is published.
 
 Xiaok Desktop v1.4.32 makes long conversations easier to navigate and Goal Mode easier to discover, resume, and monitor without blocking the workspace. It also adds the latest GLM and DeepSeek Flash models to the shared CLI/Desktop catalog and hardens timeout and artifact evidence handling.
 
