@@ -27,6 +27,7 @@ vi.mock('electron', () => ({
 import { registerDesktopIpc } from '../../electron/ipc.js';
 import { CompletionEvidenceStore } from '../../electron/completion-evidence-store.js';
 import { LoopStore } from '../../electron/loop-store.js';
+import { recoverTaskSnapshotSync } from '../../../src/runtime/task-host/snapshot-store.js';
 
 describe('desktop loop output action IPC', () => {
   let rootDir: string;
@@ -50,6 +51,15 @@ describe('desktop loop output action IPC', () => {
     const window = { isDestroyed: () => false, webContents: { send: vi.fn() } };
     const services = {
       getDataRoot: () => join(rootDir, 'data'),
+      recoverTask: async (taskId: string) => {
+        const snapshot = recoverTaskSnapshotSync(join(rootDir, 'data', 'tasks'), taskId);
+        if (!snapshot) {
+          const error = new Error(`task snapshot not found: ${taskId}`) as NodeJS.ErrnoException;
+          error.code = 'ENOENT';
+          throw error;
+        }
+        return { snapshot };
+      },
     };
     const loopRuntime = {
       loopStore,
@@ -179,8 +189,14 @@ describe('desktop loop output action IPC', () => {
     mkdirSync(snapshotDir, { recursive: true });
     writeFileSync(join(snapshotDir, 'task-ai-daily.json'), JSON.stringify({
       taskId: 'task-ai-daily',
+      sessionId: 'session-ai-daily',
       status: 'completed',
+      prompt: 'Generate today AI briefing.',
+      materials: [],
+      events: [],
       result: { summary: '# AI 日报\n\n今日要点。', artifacts: [] },
+      createdAt: 2_000,
+      updatedAt: 3_000,
     }), 'utf8');
 
     const handler = handlers.get('desktop:loops:readTaskResult');

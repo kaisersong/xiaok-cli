@@ -110,7 +110,7 @@ export function CollaborationRoomsPage() {
               <legend className="mb-2 flex items-center gap-2 text-sm text-[var(--c-text-secondary)]"><Users size={15} />{t.collaborationRoomMembersLabel}</legend>
               <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-[var(--c-border)] p-2">
                 {agents.map((agent) => (
-                  <label key={agent.id} className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-[var(--c-bg-deep)]">
+                  <label key={agent.id} className="flex cursor-pointer items-center gap-3 rounded-md p-2 hover:bg-[var(--c-bg-deep)]">
                     <input
                       type="checkbox"
                       checked={agent.id === XIAOK_WORKER_SEED_ID || memberAgentIds.includes(agent.id)}
