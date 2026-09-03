@@ -46,7 +46,7 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
-v1.5.0 之后的未发布改动新增了 `xiaok login` 首次运行凭据配置流程，并继续完善 Room-first 协作界面：新增 Gate Snapshot 面板，以及供托管智能体使用的持久化 Room 历史读取能力。
+Xiaok CLI v1.5.1 收录了 v1.5.0 之后新增的 `xiaok login` 首次运行凭据配置流程，并继续完善 Room-first 协作界面：新增 Gate Snapshot 面板，以及供托管智能体使用的持久化 Room 历史读取能力。
 
 **登录引导流程与 Room/Gate 协作后续工作：**
 
@@ -67,7 +67,7 @@ Xiaok Desktop v1.5.0 新增 Room-first 协作入口：用户可以先与多个�
 - **Pi Harness 支持**：KSwarm 可以发现、探测、配置并通过受限的一次性 harness 执行 Pi，对参数、环境、工作目录、超时与输出大小设有明确边界。
 - **DeepSeek Harness 安全门**：DeepSeek harness 路由和能力注册已经接线，但在固定版本的真实 `dsh --profile headless` 探针证明 preview CLI 合同前，创建入口保持关闭，界面不会把未验证 runtime 标成可用。
 - **依赖与打包维护**：根 CLI 与 Desktop 的 SDK/lockfile owner 已对齐，deprecated dependency 漂移有回归守卫，Release 构建会锁定匹配的 KSwarm 与 Intent Broker 快照。
-- **发布版本对齐**：根 CLI、Desktop、package lock、下载链接和 Desktop Release workflow 统一为 `1.5.0` / `desktop-v1.5.0`。
+- **发布版本说明**：根 CLI 补丁版本升级为 `1.5.1`；Desktop package metadata、下载链接和 Desktop Release workflow 仍保持 `1.5.0` / `desktop-v1.5.0`。
 
 Xiaok Desktop v1.4.32 让长对话更容易定位，也让 Goal Mode 更容易发现、恢复和监控，同时不再切割主工作区。本版还把最新 GLM 与 DeepSeek Flash 模型加入 CLI/Desktop 共用目录，并加强超时分类与产物证据恢复。
 

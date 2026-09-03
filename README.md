@@ -46,7 +46,7 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
-Unreleased work on top of v1.5.0 adds a `xiaok login` first-run credential setup flow and continues the Room-first collaboration surface with a Gate Snapshot panel and durable Room-history capability plumbing for hosted agents.
+Xiaok CLI v1.5.1 packages the post-v1.5.0 `xiaok login` first-run credential setup flow and continues the Room-first collaboration surface with a Gate Snapshot panel and durable Room-history capability plumbing for hosted agents.
 
 **Login Bootstrap and Room/Gate Collaboration Follow-up:**
 
@@ -67,7 +67,7 @@ Xiaok Desktop v1.5.0 introduces a Room-first collaboration surface: users can di
 - **Pi Harness Support**: KSwarm can discover, probe, configure, and execute Pi through a bounded one-shot harness with controlled arguments, environment, working directory, timeout, and output size.
 - **DeepSeek Harness Safety Gate**: The DeepSeek harness route and capability registry are present, but creation stays disabled until a pinned real `dsh --profile headless` probe proves the preview CLI contract. The UI does not advertise an unverified runtime as ready.
 - **Dependency and Packaging Maintenance**: Root and Desktop SDK/lockfile ownership are aligned, deprecated dependency drift is guarded, and release builds pin the matching KSwarm and Intent Broker snapshots.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, download links, and the Desktop Release workflow align on `1.5.0` / `desktop-v1.5.0`.
+- **Release Versioning**: The root CLI patch release is `1.5.1`. Desktop package metadata, download links, and the Desktop Release workflow remain on `1.5.0` / `desktop-v1.5.0`.
 
 Xiaok Desktop v1.4.32 makes long conversations easier to navigate and Goal Mode easier to discover, resume, and monitor without blocking the workspace. It also adds the latest GLM and DeepSeek Flash models to the shared CLI/Desktop catalog and hardens timeout and artifact evidence handling.
 
