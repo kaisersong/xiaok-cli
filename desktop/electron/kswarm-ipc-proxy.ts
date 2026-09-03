@@ -35,6 +35,10 @@ const SAFE_GET_PATTERNS = [
   /^\/projects$/,
   /^\/projects\/[^/]+$/,
   /^\/projects\/[^/]+\/artifacts\/[^/]+$/,
+  // design §9.1/§9.3：getProjectGateSnapshot 只读 DTO 端点，返回值本身在
+  // hub.js 层面已经是 allowlist（不含绝对路径/raw evidence body），这里
+  // 只需要放行路径本身，不需要额外的响应字段过滤。
+  /^\/projects\/[^/]+\/gate-snapshot$/,
   /^\/agents$/,
   /^\/agents\/liveness$/,
   /^\/agents\/capability-catalog$/,
@@ -50,6 +54,11 @@ const SAFE_GET_PATTERNS = [
 
 const SAFE_POST_PATTERNS = [
   /^\/projects\/[^/]+\/(approve|retry-plan|continue|close|deliver|dispatch)$/,
+  // design §9.1/§9.3：submitUserGateAction 的第一个真实映射——用户批准候选
+  // FinalDeliverable。已经用 resolveDesktopMutationContext 鉴权
+  // （server/index.js 第 3127 行附近），只接受 Desktop mutation token，
+  // 符合"user-only final approval/supersede 只接受 Desktop mutation token"。
+  /^\/projects\/[^/]+\/final-deliverables\/[^/]+\/approve$/,
   /^\/projects\/[^/]+\/tasks$/,
   /^\/projects\/[^/]+\/tasks\/[^/]+\/(done|cancel|fail)$/,
   /^\/projects\/[^/]+\/workflows\/[^/]+$/,

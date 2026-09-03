@@ -14,6 +14,7 @@ import {
   createKSwarmService,
   KSWARM_EXIT_LOAD_UNRECOVERABLE,
   KSWARM_EXIT_SAVE_FAILED,
+  loadOrCreateRoomSecrets,
   shouldStopAfterPersistenceFailStops,
   transitionKSwarmTerminalDegraded,
   doesKSwarmHealthMatchExpectedService,
@@ -1456,5 +1457,47 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     });
     await service.stop();
     rmSync(serviceRoot, { recursive: true, force: true });
+  });
+});
+
+describe('kswarm room auth secrets persistence', () => {
+  it('persists stable room auth tokens across launches', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-secrets-'));
+    try {
+      const first = loadOrCreateRoomSecrets(root);
+      const second = loadOrCreateRoomSecrets(root);
+
+      // Tokens must be identical across "restarts" so a long-lived broker and a
+      // freshly re-launched desktop always agree (the desync root cause).
+      expect(second).toEqual({
+        desktopRoomToken: first.desktopRoomToken,
+        kswarmRoomToken: first.kswarmRoomToken,
+        desktopMutationToken: first.desktopMutationToken,
+      });
+
+      // The secret file reflects the persisted values.
+      const onDisk = JSON.parse(readFileSync(join(root, 'room-auth-secrets.json'), 'utf8')) as Record<string, string>;
+      expect(onDisk.desktopRoomToken).toBe(first.desktopRoomToken);
+      expect(onDisk.kswarmRoomToken).toBe(first.kswarmRoomToken);
+      expect(onDisk.desktopMutationToken).toBe(first.desktopMutationToken);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('regenerates secrets after a corrupt secret file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-secrets-corrupt-'));
+    try {
+      writeFileSync(join(root, 'room-auth-secrets.json'), '{not-valid-json', 'utf8');
+      const secrets = loadOrCreateRoomSecrets(root);
+      expect(secrets.desktopRoomToken).toContain('xiaok-room-user-');
+      expect(secrets.kswarmRoomToken).toContain('xiaok-room-system-');
+      expect(secrets.desktopMutationToken).toContain('xiaok-desktop-');
+      // And the regenerated values are written back.
+      const onDisk = JSON.parse(readFileSync(join(root, 'room-auth-secrets.json'), 'utf8')) as Record<string, string>;
+      expect(onDisk.desktopRoomToken).toBe(secrets.desktopRoomToken);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { attachRuntimeToolRequestScope, createDesktopServices, createKSwarmContinueProjectTool, createKSwarmCreateProjectTool, createKSwarmInspectProjectTool, createKSwarmRepairProjectTaskFromFileTool, createKSwarmRepairProjectTaskTool, createReportArtifactTool, createTimedActionTools, recoverInterruptedScriptWorkflows, resolveAppAsarSha256, resolveToolOutputArtifactPath, resolveWriteToolArtifactPath, resumeOneScriptWorkflow } from '../../electron/desktop-services.js';
+import { createGetRoomMessagesPageTool, setRoomHistoryBrokerClient } from '../../electron/room-history-page-tool.js';
+import { getRoomHistoryCapability } from '../../electron/room-history-capability-registry.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
@@ -4864,18 +4866,83 @@ describe('desktop services', () => {
       logicalAgentId: 'xiaok-worker',
       contextScope: { kind: 'room_only' },
       attachmentPaths: [attachmentPath],
+      contextWindow: {
+        fromSequence: 1,
+        toSequence: 1,
+        totalMessages: 1,
+        isComplete: true,
+        snapshotAt: new Date().toISOString(),
+      },
       messages: [{
         messageId: 'msg-1',
         sender: { kind: 'user', userId: 'user.local' },
         kind: 'text',
         text: '/report 请读取附件',
       }],
-    });
+    }, 'msg-1|xiaok-worker|0|2026-01-01T00:00:00.000Z');
 
     expect(result.text).toContain('ROOM-MATERIAL-OK');
     expect(capturedMaterials).toEqual([{ originalName: 'room-brief.md', role: 'customer_material' }]);
     expect(capturedPrompt).toContain('/report 请读取附件');
     expect(capturedPrompt).not.toContain('本轮没有任何工具');
+  });
+
+  // design §6.2 RoomHistoryReadCapability：端到端验证 registerRoomHistoryCapability
+  // 真的在 agent 执行期间生效（不只是单元测试里孤立验证），且任务结束后被
+  // 释放——不是"接线正确但从未真正跑过一次"的孤岛能力。
+  it('binds a Room task capability during execution, makes getRoomMessagesPage resolve it via context.taskId, and releases it after completion', async () => {
+    let observedTaskId: string | null = null;
+    let capabilityDuringExecution: unknown = null;
+    const listRoomMessagesPage = vi.fn().mockResolvedValue({ ok: true, messages: [{ text: 'older message' }] });
+    setRoomHistoryBrokerClient({ listRoomMessagesPage });
+
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      runner: async ({ taskId, sessionId, emitRuntimeEvent }) => {
+        observedTaskId = taskId;
+        capabilityDuringExecution = getRoomHistoryCapability(taskId);
+        // 真实调用工具本身（不只是查表），证明整条链路——从
+        // registerRoomHistoryCapability 到 getRoomMessagesPage.execute 到
+        // 真实调用绑定的 broker client——完全打通。
+        const tool = createGetRoomMessagesPageTool();
+        const toolResult = await tool.execute({ limit: 5 }, { taskId } as any);
+        await emitRuntimeEvent({
+          type: 'assistant_delta', sessionId, turnId: 'turn-cap', intentId: 'intent-cap',
+          stepId: 'step-cap', delta: toolResult.includes('older message') ? 'TOOL-CALL-OK' : 'TOOL-CALL-FAILED',
+        });
+        await emitRuntimeEvent({
+          type: 'receipt_emitted', sessionId, turnId: 'turn-cap', intentId: 'intent-cap',
+          stepId: 'step-cap', note: toolResult.includes('older message') ? 'TOOL-CALL-OK' : 'TOOL-CALL-FAILED',
+        });
+      },
+    });
+
+    const result = await services.runCollaborationRoomAgentTask({
+      roomId: 'room-cap-1',
+      roomTitle: '能力绑定验证',
+      roomRevision: 1,
+      roomMessageId: 'msg-cap-1',
+      logicalAgentId: 'xiaok-worker',
+      contextScope: { kind: 'room_only' },
+      attachmentPaths: [],
+      contextWindow: {
+        fromSequence: 1, toSequence: 1, totalMessages: 1, isComplete: true,
+        snapshotAt: new Date().toISOString(),
+      },
+      messages: [{ messageId: 'msg-cap-1', sender: { kind: 'user', userId: 'user.local' }, kind: 'text', text: '请核对历史' }],
+    }, 'msg-cap-1|xiaok-worker|0|2026-01-01T00:00:00.000Z');
+
+    expect(result.text).toContain('TOOL-CALL-OK');
+    expect(capabilityDuringExecution).toEqual({ roomId: 'room-cap-1', claimToken: 'msg-cap-1|xiaok-worker|0|2026-01-01T00:00:00.000Z' });
+    expect(listRoomMessagesPage).toHaveBeenCalledWith({
+      roomId: 'room-cap-1',
+      claimToken: 'msg-cap-1|xiaok-worker|0|2026-01-01T00:00:00.000Z',
+      limit: 5,
+    });
+    // 任务结束后必须释放绑定，防止 taskId 复用/绑定残留。
+    expect(observedTaskId).toBeTruthy();
+    expect(getRoomHistoryCapability(observedTaskId as string)).toBeUndefined();
   });
 });
 

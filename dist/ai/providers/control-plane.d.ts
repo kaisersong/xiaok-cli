@@ -12,4 +12,9 @@ export interface ResolvedModelBinding {
     capabilities: string[];
     runtimeOptions?: ModelRuntimeOptions;
 }
+export declare class MissingProviderApiKeyError extends Error {
+    readonly providerId: string;
+    readonly code = "missing_provider_api_key";
+    constructor(providerId: string, envHint: string);
+}
 export declare function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, requestedModelId?: string): ResolvedModelBinding;

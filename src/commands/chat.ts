@@ -8,6 +8,7 @@ import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
+import { createChatAdapterWithLoginBootstrap } from './chat-login-bootstrap.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry, type ToolObservation } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
@@ -305,17 +306,21 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 加载配置和凭据
   log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
   let config = await loadConfig();
-  const memoryStore: MemoryStore = await createMemoryStoreAsync(
-    config.memory as Record<string, unknown> | undefined,
-  );
-
   let adapter: ModelAdapter;
   try {
-    adapter = createAdapter(config);
+    const bootstrap = await createChatAdapterWithLoginBootstrap(config, {
+      interactive: isTTY(),
+      hasInitialInput: initialInput !== undefined,
+    });
+    config = bootstrap.config;
+    adapter = bootstrap.adapter;
   } catch (e) {
     writeError(String(e));
     process.exit(1);
   }
+  const memoryStore: MemoryStore = await createMemoryStoreAsync(
+    config.memory as Record<string, unknown> | undefined,
+  );
   memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
 
   const creds = await loadCredentials();

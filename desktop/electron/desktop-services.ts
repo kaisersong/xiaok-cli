@@ -115,6 +115,9 @@ import {
 import { XIAOK_PO_SEED_ID, getPreferredPoAgentId } from '../shared/kswarm-seed-contract.js';
 import type { KSwarmTaskHandoff, KSwarmWorkflowNodeHandoff } from './kswarm-runtime-bridge.js';
 import type { CollaborationRoomTurnEnvelope } from './collaboration-room-wake-dispatcher.js';
+import { parseCollaborationRoomTurnEnvelope } from './collaboration-room-wake-dispatcher.js';
+import { registerRoomHistoryCapability, releaseRoomHistoryCapability } from './room-history-capability-registry.js';
+import { createGetRoomMessagesPageTool, setRoomHistoryBrokerClient } from './room-history-page-tool.js';
 import { createAllHostGateways, type GatewayRuntimeFacade } from './provider-gateways/create-host-gateways.js';
 import { reservedProviderSpecs, type ReservedProviderBridge } from './provider-gateways/reserved-provider-specs.js';
 import type { PluginComponentSpec } from '../../src/platform/provider-runtime/lifecycle-reconciler.js';
@@ -1386,7 +1389,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     });
   };
 
-  async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope): Promise<{ text: string }> {
+  async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string): Promise<{ text: string }> {
+    // design §6.2：consumer boundary runtime schema 校验。contextWindow
+    // 缺失、sequence 不连续、或 message 边界/total/isComplete 不一致时
+    // 拒绝执行，不退回"默认完整"——防止一个绕过 buildRoomContextWindow 的
+    // 手写 producer 静默注入一个看似完整、实则残缺的上下文。
+    const parsed = parseCollaborationRoomTurnEnvelope(envelope);
+    if (!parsed.ok) {
+      throw new Error(`collaboration_room_envelope_invalid: ${parsed.error}`);
+    }
     const transcript = envelope.messages.map(message => {
       const sender = message.sender && typeof message.sender === 'object'
         ? ((message.sender as { kind?: string; logicalAgentId?: string; userId?: string }).logicalAgentId
@@ -1402,6 +1413,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       `你的逻辑智能体身份：${envelope.logicalAgentId}`,
       `上下文范围：${JSON.stringify(envelope.contextScope)}`,
       '只使用下方当前协作空间的消息作为上下文。严禁推测、读取或引用私聊、其他协作空间或未显式选择的项目。',
+      // design §6.3：缺席断言规则。isComplete=false 时明确禁止"从未发言"
+      // "没发生"类断言；只能表述"截至 sequence N 的当前快照未见"。
+      envelope.contextWindow.isComplete
+        ? `当前上下文窗口完整：覆盖 sequence ${envelope.contextWindow.fromSequence} 到 ${envelope.contextWindow.toSequence}（共 ${envelope.contextWindow.totalMessages} 条消息中的全部）。`
+        : `注意：当前上下文窗口不完整，只覆盖 sequence ${envelope.contextWindow.fromSequence} 到 ${envelope.contextWindow.toSequence}（该协作空间共有 ${envelope.contextWindow.totalMessages} 条消息，本次只看到其中一部分）。严禁断言"某人从未发言""某事没发生"这类需要完整历史才能确认的结论；如需这类结论，只能表述为"截至 sequence ${envelope.contextWindow.toSequence} 的当前快照未见"。`,
       '你可以使用默认小 K 任务可用的 Skill、工具和本轮用户附件。直接给出一条有帮助、具体的回复；不要声称执行了未执行的操作。',
       '',
       transcript,
@@ -1421,8 +1437,22 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         // other valid materials still reach the agent.
       }
     }
-    const result = await runKSwarmRuntimeTextTask(createCollaborationRoomTaskHost(), prompt, { materials });
-    return { text: result.summary.trim() };
+    let registeredTaskId: string | null = null;
+    try {
+      const result = await runKSwarmRuntimeTextTask(createCollaborationRoomTaskHost(), prompt, {
+        materials,
+        onTaskCreated: taskId => {
+          registeredTaskId = taskId;
+          registerRoomHistoryCapability(taskId, { roomId: envelope.roomId, claimToken });
+        },
+      });
+      return { text: result.summary.trim() };
+    } finally {
+      // design §6.2 RoomHistoryReadCapability：任务结束（无论成功/失败/
+      // 异常）后立即释放绑定，防止 taskId 被复用或绑定残留导致陈旧
+      // capability 被误用。
+      if (registeredTaskId) releaseRoomHistoryCapability(registeredTaskId);
+    }
   }
 
   const connectorsService = new ConnectorsService({
@@ -3074,6 +3104,11 @@ async function runKSwarmRuntimeTextTask(
     artifactsDir?: string;
     runStartedAt?: number;
     materials?: Array<{ materialId: string; role?: MaterialRole }>;
+    // design §6.2 RoomHistoryReadCapability：可选钩子，在 host.createTask
+    // 成功产出真实 taskId 后立即调用（不等到任务完成）。通用签名，不专属
+    // Room——其它调用方可以忽略它；Room 任务用它在 agent 真正开始执行前
+    // 注册 per-task 的历史补取能力绑定，任务结束后在 finally 里释放。
+    onTaskCreated?: (taskId: string) => void;
   } = {},
 ): Promise<{ taskId: string; summary: string; structuredOutput?: Record<string, unknown>; artifacts: Array<{ path: string; kind: string; label?: string }> }> {
   const runStartedAt = options.runStartedAt || Date.now();
@@ -3081,6 +3116,7 @@ async function runKSwarmRuntimeTextTask(
   let lastFailure: string | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const created = await host.createTask({ prompt, materials: options.materials ?? [] });
+    options.onTaskCreated?.(created.taskId);
     const deadline = Date.now() + 10 * 60 * 1000;
     while (Date.now() < deadline) {
       const recovered = await host.recoverTask(created.taskId);
@@ -6657,6 +6693,12 @@ export function createDesktopModelRunnerWithRegistry(
     for (const tool of createNotebookTools(getDesktopMemoryStore(dataRoot))) {
       registry.registerTool(tool);
     }
+
+    // design §6.2 RoomHistoryReadCapability：全局仅注册一次，execute 时用
+    // ToolExecutionContext.taskId 查 room-history-capability-registry.ts
+    // 维护的绑定表——只在协作空间任务执行期间生效，见该模块顶部注释的
+    // 完整架构说明。
+    registry.registerTool(createGetRoomMessagesPageTool());
   }
 
   return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope }) => {

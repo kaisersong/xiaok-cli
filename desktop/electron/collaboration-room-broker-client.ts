@@ -49,5 +49,30 @@ export function createCollaborationRoomBrokerClient(options: {
     completeWake: (input: unknown) => json('POST', '/room-wakes/complete', input),
     getRoomSnapshot: (roomId: string) => request(`/rooms/${encodeURIComponent(roomId)}`),
     listRooms: () => request('/rooms'),
+    // design §6.2：agent-internal 语义 wrapper，供
+    // collaboration-room-wake-dispatcher.ts 在唤醒执行期间按需补取历史使用。
+    // 不暴露给 renderer preload（renderer 走既有的 getRoomSnapshot/getRoom
+    // 全量 UI 快照路径）。
+    //
+    // design §6.2 RoomHistoryReadCapability：调用专用的 claim-token-bound
+    // POST /room-wakes/history-page 端点（intent-broker 侧新增，2026-09-02），
+    // 不调用宽松鉴权的 GET /rooms/:roomId/messages——那条路径走的是
+    // desktop-main-user/kswarm-system ctx，与 agent 的 wake claim 身份完全
+    // 无关，不满足"claim token 派生 roomId 并与请求绑定 roomId 比较，再核对
+    // exact delivery token、wakeStatus='claimed'、active member/room 和
+    // current discussion epoch"的要求。
+    listRoomMessagesPage: (input: {
+      roomId: string;
+      claimToken: string;
+      afterSequence?: number;
+      beforeSequence?: number;
+      limit?: number;
+    }) => json('POST', '/room-wakes/history-page', {
+      claimToken: input.claimToken,
+      roomId: input.roomId,
+      ...(input.afterSequence !== undefined ? { afterSequence: input.afterSequence } : {}),
+      ...(input.beforeSequence !== undefined ? { beforeSequence: input.beforeSequence } : {}),
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    }),
   };
 }

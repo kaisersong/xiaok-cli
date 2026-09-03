@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config, LegacyConfig } from '../../../src/types.js';
 import type { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
-import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
+import {
+  MissingProviderApiKeyError,
+  resolveRuntimeModelBinding,
+} from '../../../src/ai/providers/control-plane.js';
 import { resolveModelCapabilities } from '../../../src/ai/runtime/model-capabilities.js';
 
 describe('resolveRuntimeModelBinding', () => {
@@ -51,6 +54,30 @@ describe('resolveRuntimeModelBinding', () => {
 
   afterEach(() => {
     process.env = OLD_ENV;
+  });
+
+  it('throws a typed missing-key error whose primary recovery is xiaok login', () => {
+    const config = createOpenAICompatibleConfig({
+      providerId: 'deepseek',
+      modelId: 'deepseek-default',
+      wireModel: 'deepseek-chat',
+      baseUrl: 'https://api.deepseek.com/v1',
+      providerType: 'first_party',
+    });
+    delete config.providers.deepseek.apiKey;
+
+    try {
+      resolveRuntimeModelBinding(config);
+      expect.fail('expected a missing provider API key error');
+    } catch (error) {
+      expect(error).toBeInstanceOf(MissingProviderApiKeyError);
+      expect(error).toMatchObject({
+        code: 'missing_provider_api_key',
+        providerId: 'deepseek',
+      });
+      expect(String(error)).toContain('xiaok login');
+      expect(String(error)).toContain('xiaok config set api-key <key> --provider deepseek');
+    }
   });
 
   it('resolves one configured model id into one runtime binding with merged transport settings', () => {

@@ -21,12 +21,29 @@
  *   xiaok login --provider deepseek --api-key sk-... --set-default
  */
 import type { Command } from 'commander';
-interface LoginOptions {
+export interface LoginOptions {
     provider?: string;
     apiKey?: string;
     setDefault?: boolean;
     skipVerify?: boolean;
 }
-export declare function runLoginCommand(options: LoginOptions): Promise<void>;
+export type LoginCommandResult = {
+    status: 'saved';
+    providerId: string;
+} | {
+    status: 'cancelled';
+};
+export type SecretInputChunkResult = {
+    action: 'continue';
+    value: string;
+} | {
+    action: 'submit';
+    value: string;
+} | {
+    action: 'abort';
+    value: string;
+};
+/** Consume every character because terminals may coalesce paste + Enter. */
+export declare function consumeSecretInputChunk(value: string, chunk: Buffer): SecretInputChunkResult;
+export declare function runLoginCommand(options: LoginOptions): Promise<LoginCommandResult>;
 export declare function registerLoginCommand(program: Command): void;
-export {};
