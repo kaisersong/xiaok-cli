@@ -46,6 +46,16 @@ The smallest useful Xiaok loop is intentionally simple:
 4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
 5. Make failure visible through diagnostics, changelogs, or notifications.
 
+Unreleased work on top of v1.5.0 adds a `xiaok login` first-run credential setup flow and continues the Room-first collaboration surface with a Gate Snapshot panel and durable Room-history capability plumbing for hosted agents.
+
+**Login Bootstrap and Room/Gate Collaboration Follow-up:**
+
+- **`xiaok login`**: A new first-run-friendly command lets users pick a first-party provider, reuse an API key already detected in the environment, enter a key with hidden input (never echoed or logged), optionally verify it live through the same read-only probe used by `xiaok doctor --check-keys`, persist it to `providers.<id>.apiKey`, and optionally switch the default model. Non-interactive flags (`--provider`, `--api-key`, `--set-default`, `--skip-verify`) support scripting.
+- **Chat Login Bootstrap**: `runChat` now resolves the model adapter through a bootstrap step that can prompt the login flow when no provider is configured yet, instead of failing straight to an adapter-construction error.
+- **Gate Snapshot Panel**: The Desktop project view gained a `GateSnapshotPanel` renderer component surfacing KSwarm's project gate-evaluation state directly in the UI.
+- **Room History Capability for Hosted Agents**: A new Electron main-process `room-history-capability-registry` and `room-history-page-tool` expose claim-token-bound, paginated Room transcript reads to hosted agents, continuing the Room-first collaboration groundwork from v1.5.0.
+- **Release Validation**: Root CLI 392/394 test files pass (3367/3383 tests, 14 platform-gated skips); the one pre-existing `image-renderer.test.js` ANSI-formatting failure was confirmed unrelated to this change by reproducing it with the change stashed out. Desktop 296/298 test files pass (2334/2337 tests); the one pre-existing `react-doctor-low-risk-optimization.test.ts` failure is untouched by this change.
+
 Xiaok Desktop v1.5.0 introduces a Room-first collaboration surface: users can discuss work with multiple agents before creating a project, promote selected Room messages into a KSwarm project only after explicit confirmation, and keep the resulting project linked to the conversation that created it.
 
 **Room-First Collaboration and Runtime Harnesses:**

@@ -46,6 +46,16 @@ Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent
 4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
 5. 让失败可见，例如 diagnostics、changelog 或通知。
 
+v1.5.0 之后的未发布改动新增了 `xiaok login` 首次运行凭据配置流程，并继续完善 Room-first 协作界面：新增 Gate Snapshot 面板，以及供托管智能体使用的持久化 Room 历史读取能力。
+
+**登录引导流程与 Room/Gate 协作后续工作：**
+
+- **`xiaok login`**：新增一个首次运行友好的命令，用户可以选择首选提供商，复用环境中已检测到的 API key，用隐藏输入方式输入 key（永不回显或记录日志），可选通过 `xiaok doctor --check-keys` 使用的同一只读探测方式实时验证，持久化到 `providers.<id>.apiKey`，并可选切换默认模型。非交互式参数（`--provider`、`--api-key`、`--set-default`、`--skip-verify`）支持脚本化使用。
+- **Chat 登录引导**：`runChat` 现在通过一个引导步骤来解析模型 adapter，当尚未配置任何 provider 时可以主动触发登录流程，而不是直接抛出 adapter 构造失败的错误。
+- **Gate Snapshot 面板**：Desktop 项目详情页新增 `GateSnapshotPanel` 渲染组件，直接在界面上展示 KSwarm 的项目 gate 评估状态。
+- **托管智能体的 Room 历史读取能力**：新增 Electron 主进程 `room-history-capability-registry` 和 `room-history-page-tool`，为托管智能体提供绑定 claim token、支持分页的 Room 转录读取能力，延续 v1.5.0 的 Room-first 协作基础工作。
+- **发布验证**：根目录 CLI 392/394 个测试文件通过（3367/3383 个测试，14 个平台限定跳过）；唯一失败的 `image-renderer.test.js` ANSI 格式问题，通过 stash 掉本次改动复现同样失败，确认与本次改动无关，是既有问题。Desktop 296/298 个测试文件通过（2334/2337 个测试）；唯一失败的 `react-doctor-low-risk-optimization.test.ts` 未被本次改动触及。
+
 Xiaok Desktop v1.5.0 新增 Room-first 协作入口：用户可以先与多个智能体讨论，再从明确选中的 Room 消息创建 KSwarm 项目；正式创建必须由用户确认，项目也会持续关联回发起它的协作空间。
 
 **Room-first 协作与 Runtime Harness：**
