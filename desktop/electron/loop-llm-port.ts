@@ -5,6 +5,9 @@ export interface LoopLLMPort {
     userMessage: string;
     maxTokens: number;
     temperature: number;
+    queueTimeoutMs?: number;
+    completionTimeoutMs?: number;
+    signal?: AbortSignal;
   }): Promise<{ text: string }>;
 }
 

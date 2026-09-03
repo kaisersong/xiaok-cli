@@ -1,5 +1,5 @@
 /**
- * KanbanBoard — 4-column kanban view with full task detail, artifact links,
+ * KanbanBoard — status kanban view with full task detail, artifact links,
  * review results, and agent assignment in add-task form.
  */
 
@@ -462,7 +462,8 @@ export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsP
     { id: 'pending', label: t.projectsKanbanPending, color: 'border-t-[var(--c-text-muted)]', icon: Circle, statuses: ['pending'] },
     { id: 'active', label: t.projectsKanbanActive, color: 'border-t-[var(--c-status-warning-text)]', icon: Loader2, statuses: ['dispatched', 'accepted', 'in_progress'] },
     { id: 'review', label: t.projectsKanbanReview, color: 'border-t-[var(--c-status-success-text)]', icon: Eye, statuses: ['submitted', 'review'] },
-    { id: 'done', label: t.projectsKanbanDone, color: 'border-t-[var(--c-status-success-text)]', icon: CheckCircle2, statuses: ['done', 'failed', 'blocked', 'cancelled'] },
+    { id: 'done', label: t.projectsKanbanDone, color: 'border-t-[var(--c-status-success-text)]', icon: CheckCircle2, statuses: ['done'] },
+    { id: 'stopped', label: t.projectsKanbanStopped, color: 'border-t-[var(--c-status-error-text)]', icon: AlertCircle, statuses: ['failed', 'blocked', 'cancelled'] },
   ], [t]);
 
   if (tasks.length === 0 && !showAddForm) {
@@ -503,16 +504,7 @@ export function KanbanBoard({ project, onStartTaskWorkflow, workflowRunningOwnsP
             }
             return col.statuses.includes(task.status);
           };
-          const colTasks = tasks.filter(matchesColumn)
-            .sort((a, b) => {
-              // In done column: done first, stopped statuses after
-              if (col.id === 'done') {
-                const aIsDone = a.status === 'done' ? 0 : 1;
-                const bIsDone = b.status === 'done' ? 0 : 1;
-                return aIsDone - bIsDone;
-              }
-              return 0;
-            });
+          const colTasks = tasks.filter(matchesColumn);
           return (
             <div key={col.id} data-testid={`kanban-column-${col.id}`} className="flex min-w-[200px] flex-1 flex-col">
               <div className={`mb-3 flex items-center gap-2 border-t-2 ${col.color} pt-2`}>

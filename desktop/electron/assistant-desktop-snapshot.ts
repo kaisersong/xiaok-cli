@@ -14,6 +14,9 @@ export type AssistantDesktopSnapshotSource =
   | 'meeting_metadata'
   | 'knowledge_source_metadata';
 
+const TASK_TITLE_MAX_CHARS = 160;
+const TASK_RESULT_SUMMARY_MAX_CHARS = 800;
+
 export interface AssistantSnapshotQuery {
   from: number;
   to: number;
@@ -126,7 +129,7 @@ export function createAssistantDesktopSnapshotReader(
                 id: snapshot.id,
                 scope: 'tasks',
                 updatedAt: snapshot.updatedAt,
-                summary: summarize(snapshot.title, snapshot.status, snapshot.summary),
+                summary: summarizeTaskSnapshot(snapshot),
                 referenceKind: 'task_snapshot',
                 referenceId: snapshot.id,
                 priority: snapshot.priority ?? 70,
@@ -141,7 +144,7 @@ export function createAssistantDesktopSnapshotReader(
                   id: snapshot.threadId,
                   scope: 'threads',
                   updatedAt: snapshot.updatedAt,
-                  summary: summarize(snapshot.title, snapshot.status, snapshot.summary),
+                  summary: summarizeTaskSnapshot(snapshot),
                   referenceKind: 'thread',
                   referenceId: snapshot.threadId,
                   priority: snapshot.priority ?? 50,
@@ -306,6 +309,20 @@ function activity(input: {
 
 function summarize(...parts: Array<string | undefined>): string {
   return parts.map(part => part?.trim()).filter(Boolean).join(' · ');
+}
+
+function summarizeTaskSnapshot(snapshot: AssistantTaskSnapshotMetadata): string {
+  return summarize(
+    truncateField(snapshot.title, TASK_TITLE_MAX_CHARS),
+    snapshot.status,
+    truncateField(snapshot.summary, TASK_RESULT_SUMMARY_MAX_CHARS),
+  );
+}
+
+function truncateField(value: string | undefined, maxChars: number): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized || normalized.length <= maxChars) return normalized;
+  return normalized.slice(0, maxChars);
 }
 
 function hasAnyScope(scopes: Set<AssistantActivityScope>, candidates: AssistantActivityScope[]): boolean {

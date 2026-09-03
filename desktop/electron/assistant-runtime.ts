@@ -27,6 +27,9 @@ const MORNING_SYSTEM_PROMPT = `你是小K的晨间建议助理。只根据输入
 
 type AssistantKind = 'evening' | 'morning';
 
+const ASSISTANT_LLM_QUEUE_TIMEOUT_MS = 5 * 60_000;
+const ASSISTANT_LLM_COMPLETION_TIMEOUT_MS = 60_000;
+
 export interface CreateAssistantRuntimeOptions {
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
@@ -44,13 +47,16 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
   const executor = createAssistantLoopExecutor({
     getProfile: () => options.loopStore.getAssistantProfile(DEFAULT_PERSONAL_ASSISTANT_ID),
     collect: options.collect,
-    complete: async ({ kind, snapshot }) => kind === 'evening'
+    complete: async ({ kind, snapshot, signal }) => kind === 'evening'
       ? completeAssistantJson({
         port: options.llmPort,
         systemPrompt: EVENING_SYSTEM_PROMPT,
         snapshot,
         validate: validateEveningReflection,
         maxTokens: 3_000,
+        queueTimeoutMs: ASSISTANT_LLM_QUEUE_TIMEOUT_MS,
+        completionTimeoutMs: ASSISTANT_LLM_COMPLETION_TIMEOUT_MS,
+        signal,
       })
       : completeAssistantJson({
         port: options.llmPort,
@@ -58,6 +64,9 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
         snapshot,
         validate: validateMorningBriefing,
         maxTokens: 1_200,
+        queueTimeoutMs: ASSISTANT_LLM_QUEUE_TIMEOUT_MS,
+        completionTimeoutMs: ASSISTANT_LLM_COMPLETION_TIMEOUT_MS,
+        signal,
       }),
     stageCandidates: ({ runId, candidates, now: stagedAt }) => {
       options.loopStore.stageAssistantCandidates(runId, candidates, stagedAt);
@@ -99,7 +108,7 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
   });
 
   return {
-    async runLoopNow(loopId, trigger) {
+    async runLoopNow(loopId, trigger, signal) {
       const assistantKind = assistantKindForLoop(loopId);
       if (!assistantKind) return { status: 'skipped', reason: 'missing_loop' };
       const startedAt = now();
@@ -121,6 +130,7 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
         kind: assistantKind,
         runId: begin.run.id,
         now: startedAt,
+        signal,
       });
       const persisted = options.loopStore.getLoopRun(begin.run.id) ?? begin.run;
       return resultFromRun(persisted);

@@ -48,18 +48,22 @@ describe('KSwarm kanban failure visibility', () => {
     expect(within(done).getByText('完成时间 05/19 12:13')).toBeInTheDocument();
   });
 
-  it('shows failed and blocked tasks in the done column with distinct styling', () => {
+  it('separates completed tasks from failed, blocked, and cancelled tasks', () => {
     renderKanban([
       { id: 'done-task', title: '完成任务', status: 'done', assignedAgent: 'worker' },
       { id: 'failed-task', title: '失败任务', status: 'failed', assignedAgent: 'worker', failureReason: 'agent_error' },
       { id: 'blocked-task', title: '阻塞任务', status: 'blocked', assignedAgent: 'worker', blockedReason: '缺少实际内容' },
+      { id: 'cancelled-task', title: '取消任务', status: 'cancelled', assignedAgent: 'worker' },
     ]);
 
     const done = screen.getByTestId('kanban-column-done');
+    const stopped = screen.getByTestId('kanban-column-stopped');
     expect(within(done).getByText('完成任务')).toBeInTheDocument();
-    expect(within(done).getByText('失败任务')).toBeInTheDocument();
-    expect(within(done).getByText('阻塞任务')).toBeInTheDocument();
-    expect(screen.queryByTestId('kanban-column-stopped')).not.toBeInTheDocument();
+    expect(within(done).queryByText('失败任务')).not.toBeInTheDocument();
+    expect(within(done).queryByText('阻塞任务')).not.toBeInTheDocument();
+    expect(within(stopped).getByText('失败任务')).toBeInTheDocument();
+    expect(within(stopped).getByText('阻塞任务')).toBeInTheDocument();
+    expect(within(stopped).getByText('取消任务')).toBeInTheDocument();
   });
 
   it('shows a readable failure reason on stopped task cards', () => {
@@ -73,9 +77,9 @@ describe('KSwarm kanban failure visibility', () => {
       },
     ]);
 
-    const done = screen.getByTestId('kanban-column-done');
-    expect(within(done).getByText('阻塞')).toBeInTheDocument();
-    expect(within(done).getByText(/产出物缺少实际内容/)).toBeInTheDocument();
+    const stopped = screen.getByTestId('kanban-column-stopped');
+    expect(within(stopped).getByText('阻塞')).toBeInTheDocument();
+    expect(within(stopped).getByText(/产出物缺少实际内容/)).toBeInTheDocument();
   });
 
   it('does not expose advanced manual intervention actions on failed task cards', () => {
@@ -212,7 +216,8 @@ describe('KSwarm kanban dynamic workflow progress display', () => {
 
     const active = screen.getByTestId('kanban-column-active');
     const done = screen.getByTestId('kanban-column-done');
-    expect(within(done).getByText('阻塞任务')).toBeInTheDocument();
+    const stopped = screen.getByTestId('kanban-column-stopped');
+    expect(within(stopped).getByText('阻塞任务')).toBeInTheDocument();
     expect(within(done).getByText('完成任务')).toBeInTheDocument();
     expect(within(active).queryByText('阻塞任务')).not.toBeInTheDocument();
   });

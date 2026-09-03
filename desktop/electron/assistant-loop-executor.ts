@@ -25,6 +25,7 @@ export interface AssistantLoopExecutorDependencies {
     kind: 'evening' | 'morning';
     profile: AssistantLoopProfile;
     snapshot: unknown;
+    signal?: AbortSignal;
   }): EveningReflectionOutput | MorningBriefingOutput | Promise<EveningReflectionOutput | MorningBriefingOutput>;
   stageCandidates(input: {
     runId: string;
@@ -63,6 +64,7 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
       kind: 'evening' | 'morning';
       runId: string;
       now: number;
+      signal?: AbortSignal;
     }): Promise<AssistantLoopExecutionResult> {
       const profile = await dependencies.getProfile();
       if (!profile) return { status: 'skipped', reason: 'missing_profile' };
@@ -70,7 +72,7 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
 
       try {
         const snapshot = await dependencies.collect({ kind: input.kind, profile, now: input.now });
-        const output = await dependencies.complete({ kind: input.kind, profile, snapshot });
+        const output = await dependencies.complete({ kind: input.kind, profile, snapshot, signal: input.signal });
         let summary: string;
         let candidateCount = 0;
         if (input.kind === 'evening') {

@@ -54,6 +54,7 @@ Xiaok CLI v1.5.1 收录了 v1.5.0 之后新增的 `xiaok login` 首次运行凭�
 - **Chat 登录引导**：`runChat` 现在通过一个引导步骤来解析模型 adapter，当尚未配置任何 provider 时可以主动触发登录流程，而不是直接抛出 adapter 构造失败的错误。
 - **Gate Snapshot 面板**：Desktop 项目详情页新增 `GateSnapshotPanel` 渲染组件，直接在界面上展示 KSwarm 的项目 gate 评估状态。
 - **托管智能体的 Room 历史读取能力**：新增 Electron 主进程 `room-history-capability-registry` 和 `room-history-page-tool`，为托管智能体提供绑定 claim token、支持分页的 Room 转录读取能力，延续 v1.5.0 的 Room-first 协作基础工作。
+- **Desktop 自动化与项目状态修复**：个人助理的共享执行排队与模型生成改为分段计时，调度取消信号贯穿到 provider stream；自动化总览只展示每个 owner 最新的决定性关注结果，已恢复的历史失败仍保留在运行记录中但不再长期占用“待处理”。任务快照按字段限长，在保留状态、结果摘要与引用的前提下显著缩小输入；项目看板把 `done` 与 `failed` / `blocked` / `cancelled` 分别放入“已完成”和“已停止”。
 - **发布验证**：根目录 CLI 392/394 个测试文件通过（3367/3383 个测试，14 个平台限定跳过）；唯一失败的 `image-renderer.test.js` ANSI 格式问题，通过 stash 掉本次改动复现同样失败，确认与本次改动无关，是既有问题。Desktop 296/298 个测试文件通过（2334/2337 个测试）；唯一失败的 `react-doctor-low-risk-optimization.test.ts` 未被本次改动触及。
 
 Xiaok Desktop v1.5.0 新增 Room-first 协作入口：用户可以先与多个智能体讨论，再从明确选中的 Room 消息创建 KSwarm 项目；正式创建必须由用户确认，项目也会持续关联回发起它的协作空间。

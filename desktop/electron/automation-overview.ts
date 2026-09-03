@@ -72,6 +72,9 @@ export interface BuildAutomationRunHistoryInput {
 const FAILURE_LOOP_STATUSES = new Set(['failed', 'blocked']);
 const FAILURE_TIMED_ACTION_STATUSES = new Set(['failed', 'failed_stale', 'pause']);
 const ATTENTION_SKIP_REASONS = new Set([
+  'loop missing_loop',
+  'loop deleted_loop',
+  'loop paused',
   'skipped_missing_loop',
   'skipped_loop_deleted',
   'skipped_overdue_desktop_closed',
@@ -88,15 +91,27 @@ export function buildAutomationOverviewSnapshot(input: BuildAutomationOverviewSn
   const actions = input.timedActionStore.listActions({ includeInactive: true });
   const scheduleActions = actions.filter(isAutomationScheduleAction);
   const actionById = new Map(scheduleActions.map(action => [action.id, action]));
+  const runsByActionId = new Map(scheduleActions.map(action => [
+    action.id,
+    input.timedActionStore.listRuns(action.id),
+  ]));
+  const scheduledActionByRunId = new Map<string, TimedActionRecord>();
+  for (const action of scheduleActions) {
+    for (const run of runsByActionId.get(action.id) ?? []) {
+      scheduledActionByRunId.set(run.runId, action);
+    }
+  }
 
   const loopFailureRuns = definitions
     .filter(definition => definition.status !== 'deleted')
-    .flatMap(definition =>
-      input.loopStore
-        .listLoopRuns(definition.id, recentLimit)
-        .filter(run => FAILURE_LOOP_STATUSES.has(run.status))
-        .map(run => ({ run, definition }))
-    );
+    .flatMap(definition => {
+      const latestDecisiveRun = input.loopStore
+        .listLoopRuns(definition.id, recentLimit + 1)
+        .find(run => run.status !== 'running');
+      return latestDecisiveRun && FAILURE_LOOP_STATUSES.has(latestDecisiveRun.status)
+        ? [{ run: latestDecisiveRun, definition }]
+        : [];
+    });
   const loopFailureById = new Map(loopFailureRuns.map(item => [item.run.id, item]));
   const loopFailureByTimedActionRunId = new Map<string, (typeof loopFailureRuns)[number]>();
   for (const item of loopFailureRuns) {
@@ -108,8 +123,9 @@ export function buildAutomationOverviewSnapshot(input: BuildAutomationOverviewSn
 
   const linkedLoopRunIds = new Set<string>();
   const timedActionFailures = scheduleActions.flatMap(action =>
-    input.timedActionStore
-      .listRuns(action.id)
+    (runsByActionId.get(action.id) ?? [])
+      .filter(run => !isNonDecisiveTimedActionRun(run))
+      .slice(0, 1)
       .filter(isAttentionTimedActionRun)
       .map(run => {
         const linkedLoopRunId = readLoopRunId(run.decision);
@@ -120,7 +136,13 @@ export function buildAutomationOverviewSnapshot(input: BuildAutomationOverviewSn
       })
   );
   const loopFailures = loopFailureRuns
-    .filter(item => !linkedLoopRunIds.has(item.run.id))
+    .filter(item => {
+      if (linkedLoopRunIds.has(item.run.id)) return false;
+      const timedActionRunId = typeof item.run.trigger.timedActionRunId === 'string'
+        ? item.run.trigger.timedActionRunId
+        : undefined;
+      return !timedActionRunId || !scheduledActionByRunId.has(timedActionRunId);
+    })
     .map(item => loopFailureItem(item.run, item.definition));
 
   const recentFailures = [...loopFailures, ...timedActionFailures]
@@ -310,6 +332,13 @@ function isAttentionTimedActionRun(run: TimedActionRunRecord): boolean {
     return reason ? ATTENTION_SKIP_REASONS.has(reason) : false;
   }
   return false;
+}
+
+function isNonDecisiveTimedActionRun(run: TimedActionRunRecord): boolean {
+  if (run.status === 'claimed' || run.status === 'running') return true;
+  if (run.status !== 'skip') return false;
+  const reason = readRecoveryReason(run.decision) ?? run.error;
+  return reason?.startsWith('loop already running:') ?? false;
 }
 
 function readRecoveryReason(decision: Record<string, unknown> | undefined): string | undefined {

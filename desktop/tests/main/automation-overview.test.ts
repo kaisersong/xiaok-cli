@@ -175,6 +175,162 @@ describe('automation overview snapshot', () => {
     ]);
   });
 
+  it('clears a linked loop failure when the owning schedule has a newer benign result', () => {
+    loopStore.createUserLoopTemplate({
+      loopId: 'linked-recovery-loop',
+      title: 'Linked Recovery Loop',
+      description: 'Recover through a later schedule decision.',
+      kind: 'markdown_file',
+      prompt: 'Write output',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'linked-recovery.md',
+      now: 1_000,
+    });
+    const action = timedActionStore.createAction({
+      id: 'linked-recovery-schedule',
+      title: 'Linked Recovery Schedule',
+      trigger: { kind: 'interval', intervalMinutes: 1 },
+      executor: { kind: 'loop', loopId: 'linked-recovery-loop' },
+      source: 'user',
+      now: 1_500,
+      nextDueAt: 2_000,
+    });
+    const [failedClaim] = timedActionStore.claimDueActions(2_000, 1);
+    const loopRun = loopStore.beginLoopRun('linked-recovery-loop', {
+      kind: 'scheduled',
+      timedActionId: action.id,
+      timedActionRunId: failedClaim.runId,
+    }, 2_050, 60_000);
+    if (loopRun.status !== 'started') throw new Error('expected linked loop run to start');
+    loopStore.finishLoopRunFailure(loopRun.run.id, 'executor_failed', 'temporary provider outage', [], 2_100);
+    timedActionStore.finishRunFailure(action.id, failedClaim.runId, 2_120, `loop failed: ${loopRun.run.id}`);
+
+    const dueAt = timedActionStore.getAction(action.id)?.nextDueAt;
+    if (!dueAt) throw new Error('expected retry due time');
+    const [benignClaim] = timedActionStore.claimDueActions(dueAt, 1);
+    timedActionStore.finishRunSkipped(action.id, benignClaim.runId, dueAt + 100, {
+      action: 'skip',
+      reason: 'logical_run_already_completed: recovered-run',
+    });
+
+    const snapshot = buildAutomationOverviewSnapshot({
+      loopStore,
+      timedActionStore,
+      globalBackgroundAutoRunEnabled: true,
+      now: dueAt + 200,
+    });
+
+    expect(snapshot.recentFailures).toEqual([]);
+  });
+
+  it('removes recovered failures from attention while retaining complete run history', () => {
+    loopStore.createUserLoopTemplate({
+      loopId: 'recovered-loop',
+      title: 'Recovered Loop',
+      description: 'Recover after one failure.',
+      kind: 'markdown_file',
+      prompt: 'Write output',
+      outputDirectory: join(rootDir, 'outputs'),
+      outputFileName: 'recovered.md',
+      now: 1_000,
+    });
+    const failed = loopStore.beginLoopRun('recovered-loop', { kind: 'manual' }, 2_000, 60_000);
+    if (failed.status !== 'started') throw new Error('expected failed run to start');
+    loopStore.finishLoopRunFailure(failed.run.id, 'executor_failed', 'temporary outage', [], 2_100);
+    const success = loopStore.beginLoopRun('recovered-loop', { kind: 'manual' }, 3_000, 60_000);
+    if (success.status !== 'started') throw new Error('expected success run to start');
+    loopStore.finishLoopRunSuccess(success.run.id, ['evidence-1'], 3_100, 'recovered');
+
+    const snapshot = buildAutomationOverviewSnapshot({
+      loopStore,
+      timedActionStore,
+      globalBackgroundAutoRunEnabled: true,
+      now: 4_000,
+    });
+    const history = buildAutomationRunHistory({ loopStore, timedActionStore, limit: 10 });
+
+    expect(snapshot.recentFailures).toEqual([]);
+    expect(history.map(item => item.status)).toEqual(['success', 'failed']);
+  });
+
+  it('uses the latest decisive schedule result for running, attention skip, and benign skip', () => {
+    const createIntervalAction = (id: string) => timedActionStore.createAction({
+      id,
+      title: id,
+      trigger: { kind: 'interval', intervalMinutes: 1 },
+      executor: { kind: 'loop', loopId: `${id}-loop` },
+      source: 'user',
+      now: 1_000,
+      nextDueAt: 2_000,
+    });
+    const failThen = (
+      id: string,
+      finish: (actionId: string, runId: string, at: number) => void,
+    ) => {
+      const action = createIntervalAction(id);
+      const [failed] = timedActionStore.claimDueActions(2_000, 1, { executorKinds: ['loop'] });
+      timedActionStore.finishRunFailure(action.id, failed.runId, 2_100, `${id}-failed`);
+      const dueAt = timedActionStore.getAction(action.id)?.nextDueAt;
+      if (!dueAt) throw new Error('expected next due time');
+      const [next] = timedActionStore.claimDueActions(dueAt, 1, { executorKinds: ['loop'] });
+      finish(action.id, next.runId, dueAt + 100);
+      return { action, failed, next };
+    };
+
+    const running = failThen('running-owner', (actionId, runId, at) => {
+      timedActionStore.markRunRunning(actionId, runId, at);
+    });
+    const attention = failThen('attention-owner', (actionId, runId, at) => {
+      timedActionStore.finishRunSkipped(actionId, runId, at, { action: 'skip', reason: 'loop missing_loop' });
+    });
+    failThen('benign-owner', (actionId, runId, at) => {
+      timedActionStore.finishRunSkipped(actionId, runId, at, { action: 'skip', reason: 'logical_run_already_completed: run-ok' });
+    });
+
+    const snapshot = buildAutomationOverviewSnapshot({
+      loopStore,
+      timedActionStore,
+      globalBackgroundAutoRunEnabled: true,
+      now: 10_000,
+    });
+
+    expect(snapshot.recentFailures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: `timed-action:${running.failed.runId}`, message: 'running-owner-failed' }),
+      expect.objectContaining({ id: `timed-action:${attention.next.runId}`, message: 'loop missing_loop' }),
+    ]));
+    expect(snapshot.recentFailures).toHaveLength(2);
+  });
+
+  it.each([
+    'assistant_evening_overdue_cutoff',
+    'assistant_morning_overdue_cutoff',
+  ])('treats the production overdue reason %s as a benign decisive result', reason => {
+    const action = timedActionStore.createAction({
+      id: `overdue-${reason}`,
+      title: reason,
+      trigger: { kind: 'interval', intervalMinutes: 1 },
+      executor: { kind: 'loop', loopId: `loop-${reason}` },
+      source: 'user',
+      now: 1_000,
+      nextDueAt: 2_000,
+    });
+    const [failed] = timedActionStore.claimDueActions(2_000, 1, { executorKinds: ['loop'] });
+    timedActionStore.finishRunFailure(action.id, failed.runId, 2_100, 'old failure');
+    const dueAt = timedActionStore.getAction(action.id)?.nextDueAt;
+    if (!dueAt) throw new Error('expected next due time');
+    const [skipped] = timedActionStore.claimDueActions(dueAt, 1, { executorKinds: ['loop'] });
+    timedActionStore.finishRunSkipped(action.id, skipped.runId, dueAt + 100, { action: 'skip', reason });
+
+    const snapshot = buildAutomationOverviewSnapshot({
+      loopStore,
+      timedActionStore,
+      globalBackgroundAutoRunEnabled: true,
+      now: dueAt + 200,
+    });
+
+    expect(snapshot.recentFailures).toEqual([]);
+  });
+
   it('marks inactive schedules as unavailable for schedule-list deep links', () => {
     const action = timedActionStore.createAction({
       id: 'cancelled-schedule',

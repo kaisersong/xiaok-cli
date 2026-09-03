@@ -197,4 +197,37 @@ describe('assistant Desktop snapshot', () => {
     expect(snapshot.dropped.perScopeLimit).toBe(1);
     expect(Buffer.byteLength(JSON.stringify(snapshot), 'utf8')).toBeLessThanOrEqual(650);
   });
+
+  it('bounds long task titles by field while preserving status, result summary, and both references', async () => {
+    const dependencies = ports({
+      listTaskSnapshots: vi.fn().mockResolvedValue([{
+        id: 'task-long-goal',
+        threadId: 'thread-long-goal',
+        title: `GOAL:${'x'.repeat(4_400)}`,
+        status: 'completed',
+        summary: `RESULT:${'y'.repeat(1_200)}`,
+        updatedAt: local('2026-08-14T14:00:00'),
+      }]),
+    });
+
+    const snapshot = await createAssistantDesktopSnapshotReader(dependencies).collect({
+      kind: 'evening',
+      profile: { ...profile, dataScopes: ['tasks', 'threads'] },
+      now: local('2026-08-14T22:30:00'),
+    });
+
+    expect(snapshot.items).toHaveLength(2);
+    expect(snapshot.items.map(item => item.reference)).toEqual(expect.arrayContaining([
+      { kind: 'task_snapshot', id: 'task-long-goal' },
+      { kind: 'thread', id: 'thread-long-goal' },
+    ]));
+    for (const item of snapshot.items) {
+      expect(item.summary).toContain('completed');
+      expect(item.summary).toContain('RESULT:');
+      expect(item.summary).toContain('y'.repeat(793));
+      expect(item.summary).not.toContain('y'.repeat(794));
+      expect(item.summary.indexOf('completed')).toBeLessThan(200);
+      expect(item.summary.length).toBeLessThanOrEqual(1_000);
+    }
+  });
 });

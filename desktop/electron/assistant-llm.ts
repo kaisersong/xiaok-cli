@@ -37,6 +37,9 @@ export async function completeAssistantJson<T>(input: {
   snapshot: unknown;
   validate: (value: unknown) => T;
   maxTokens: number;
+  queueTimeoutMs?: number;
+  completionTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<T> {
   const response = await input.port.complete({
     model: 'fast',
@@ -44,6 +47,9 @@ export async function completeAssistantJson<T>(input: {
     userMessage: JSON.stringify(input.snapshot),
     maxTokens: input.maxTokens,
     temperature: 0,
+    queueTimeoutMs: input.queueTimeoutMs,
+    completionTimeoutMs: input.completionTimeoutMs,
+    signal: input.signal,
   });
   let parsed: unknown;
   try {

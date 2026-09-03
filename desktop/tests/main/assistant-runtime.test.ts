@@ -161,6 +161,34 @@ describe('assistant runtime wiring', () => {
     expect(evidenceStore.listEvidenceForOwner('loop_run', result.status === 'failed' ? result.run.id : 'missing')).toEqual([]);
   });
 
+  it('propagates the scheduler signal into assistant completion', async () => {
+    const now = Date.UTC(2026, 7, 14, 14, 30);
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    const complete = vi.fn((input: { signal?: AbortSignal }) => {
+      capturedSignal = input.signal;
+      return new Promise<{ text: string }>((_resolve, reject) => {
+        input.signal?.addEventListener('abort', () => reject(input.signal?.reason), { once: true });
+      });
+    });
+    const assistantRuntime = createRuntime({ now, complete });
+
+    const running = assistantRuntime.runLoopNow(ASSISTANT_EVENING_LOOP_ID, undefined, controller.signal);
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+    controller.abort(new Error('executor_timeout'));
+
+    await expect(running).resolves.toMatchObject({
+      status: 'failed',
+      run: expect.objectContaining({ message: 'runtime_unavailable: executor_timeout' }),
+    });
+    expect(capturedSignal).toBe(controller.signal);
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+      queueTimeoutMs: 5 * 60_000,
+      completionTimeoutMs: 60_000,
+      signal: controller.signal,
+    }));
+  });
+
   it('delegates non-assistant loops to the existing generic runner', async () => {
     const genericResult = { status: 'skipped' as const, reason: 'missing_loop' as const };
     const genericRunner = { runLoopNow: vi.fn().mockResolvedValue(genericResult) };
