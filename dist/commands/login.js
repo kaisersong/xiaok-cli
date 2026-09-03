@@ -20,6 +20,25 @@ function prompt(rl, question) {
         rl.question(question, (answer) => resolve(answer.trim()));
     });
 }
+/** Consume every character because terminals may coalesce paste + Enter. */
+export function consumeSecretInputChunk(value, chunk) {
+    let nextValue = value;
+    for (const character of Array.from(chunk.toString('utf8'))) {
+        if (character === '\r' || character === '\n') {
+            return { action: 'submit', value: nextValue };
+        }
+        if (character === '\u0003') {
+            return { action: 'abort', value: nextValue };
+        }
+        if (character === '\u007f' || character === '\b') {
+            if (nextValue.length > 0)
+                nextValue = nextValue.slice(0, -1);
+            continue;
+        }
+        nextValue += character;
+    }
+    return { action: 'continue', value: nextValue };
+}
 /** Hidden input: raw-mode char capture so the key is never echoed. */
 function promptSecret(rl, question) {
     return new Promise((resolve) => {
@@ -35,25 +54,19 @@ function promptSecret(rl, question) {
         stdin.setRawMode(true);
         stdin.resume();
         const onData = (ch) => {
-            const s = ch.toString('utf8');
-            if (s === '\r' || s === '\n') {
+            const result = consumeSecretInputChunk(value, ch);
+            value = result.value;
+            if (result.action === 'submit') {
                 stdin.setRawMode(wasRaw ?? false);
                 stdin.removeListener('data', onData);
                 process.stdout.write('\n');
                 resolve(value.trim());
             }
-            else if (s === '\u0003') {
+            else if (result.action === 'abort') {
                 stdin.setRawMode(wasRaw ?? false);
                 stdin.removeListener('data', onData);
                 process.stdout.write('\n');
                 process.exit(130);
-            }
-            else if (s === '\u007f' || s === '\b') {
-                if (value.length > 0)
-                    value = value.slice(0, -1);
-            }
-            else {
-                value += s;
             }
         };
         stdin.on('data', onData);
@@ -75,12 +88,12 @@ export async function runLoginCommand(options) {
         if (!profile) {
             if (providerId) {
                 writeLine(`未知 provider：${providerId}。可用：${profiles.map((item) => item.id).join(', ')}`);
-                return;
+                return { status: 'cancelled' };
             }
             if (!interactive) {
                 writeLine('非交互模式需要 --provider <id>（可用：'
                     + profiles.map((item) => item.id).join(', ') + '）与 --api-key <key>。');
-                return;
+                return { status: 'cancelled' };
             }
             writeLine('选择要配置的 AI provider：');
             profiles.forEach((item, index) => {
@@ -93,7 +106,7 @@ export async function runLoginCommand(options) {
                 : profiles.find((item) => item.id === answer.toLowerCase());
             if (!selected) {
                 writeLine('已取消。');
-                return;
+                return { status: 'cancelled' };
             }
             providerId = selected.id;
         }
@@ -118,7 +131,7 @@ export async function runLoginCommand(options) {
             }
             else {
                 writeLine('非交互模式需要 --api-key <key>（或先设置对应环境变量）。');
-                return;
+                return { status: 'cancelled' };
             }
         }
         if (!apiKey) {
@@ -129,7 +142,7 @@ export async function runLoginCommand(options) {
         }
         if (!apiKey) {
             writeLine('未输入 key，已取消。');
-            return;
+            return { status: 'cancelled' };
         }
         // 4. optional live verification (explicit opt-out only skips network)
         if (!options.skipVerify) {
@@ -187,6 +200,7 @@ export async function runLoginCommand(options) {
             writeLine(`默认模型已切换为 [${chosen.id}] ${chosen.defaultModel.label}。`);
         }
         writeLine('完成。运行 xiaok chat 开始使用。');
+        return { status: 'saved', providerId: chosen.id };
     }
     finally {
         rl.close();

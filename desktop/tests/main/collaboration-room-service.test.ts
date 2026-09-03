@@ -416,3 +416,67 @@ describe('collaboration room semantic service', () => {
     }));
   });
 });
+
+// design §7.2（FIXED）：Desktop createTaskFromRoomMessage 之前向
+// /projects/:id/tasks（要求 {tasks, fromAgent} 的 agent/planner 路由）发送
+// 单任务对象 {title, brief, ...}，与真实 KSwarm 契约不符。现在必须调用
+// /projects/:id/tasks/human（真实用户任务入口），body 为 {tasks:[...]}，
+// 且不再把 requestSource 塞进 body（KSwarm 侧 resolveDesktopMutationContext
+// 从 mutation token 解析可信身份，body 字段不被信任）。
+describe('createTaskFromRoomMessage (design §7.2)', () => {
+  function createRoomSnapshotFake() {
+    return {
+      getRoomSnapshot: vi.fn(async () => ({
+        ok: true,
+        room: { roomId: 'room-1', title: 'R', status: 'active', revision: 1 },
+        messages: [
+          {
+            messageId: 'msg-source-1',
+            roomId: 'room-1',
+            kind: 'text',
+            text: 'please track this',
+            sourceRef: null,
+          },
+        ],
+      })),
+    };
+  }
+
+  it('calls POST /projects/:id/tasks/human with a {tasks:[...]} body, not the legacy single-object /tasks route', async () => {
+    const kswarmRequest = vi.fn(async (path: string) => {
+      if (path === '/projects/proj-1/tasks/human') {
+        return { ok: true, json: async () => ({ ok: true, taskIds: ['task-1'] }) };
+      }
+      return { ok: false };
+    });
+    const service = createCollaborationRoomService({
+      brokerClient: createRoomSnapshotFake(),
+      kswarmClient: { request: kswarmRequest },
+    });
+
+    const result = await service.createTaskFromRoomMessage({
+      roomId: 'room-1',
+      messageId: 'msg-source-1',
+      projectId: 'proj-1',
+      title: 'Track this follow-up',
+      brief: 'please track this',
+    });
+
+    expect(kswarmRequest).toHaveBeenCalledTimes(1);
+    const [calledPath, calledInit] = kswarmRequest.mock.calls[0];
+    expect(calledPath).toBe('/projects/proj-1/tasks/human');
+    expect(calledInit.method).toBe('POST');
+    const body = JSON.parse(calledInit.body as string);
+    expect(Array.isArray(body.tasks)).toBe(true);
+    expect(body.tasks).toHaveLength(1);
+    expect(body.tasks[0].title).toBe('Track this follow-up');
+    expect(body.tasks[0].sourceRoomId).toBe('room-1');
+    expect(body.tasks[0].sourceMessageId).toBe('msg-source-1');
+    // requestSource must never be sent in the body — KSwarm derives it from
+    // the mutation token via resolveDesktopMutationContext, not from renderer
+    // or caller-supplied payload fields.
+    expect('requestSource' in body).toBe(false);
+    expect('requestSource' in body.tasks[0]).toBe(false);
+    expect(result.ok).toBe(true);
+  });
+});

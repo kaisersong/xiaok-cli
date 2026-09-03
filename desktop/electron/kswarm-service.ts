@@ -13,7 +13,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { app } from 'electron';
 import {
   buildSeedAgentReconciliationPlan,
@@ -195,6 +195,79 @@ function joinServicePath(basePath: string, ...segments: string[]): string {
     return posix.join(basePath, ...segments);
   }
   return join(basePath, ...segments);
+}
+
+/**
+ * Shared auth secrets between the desktop main process and its long-lived
+ * children (kswarm server, intent-broker).
+ *
+ * These were previously generated fresh per app launch. That is the root of a
+ * token desync bug: the broker is a persistent process holding the token it was
+ * first spawned with, so a later desktop launch that merely *reuses* the healthy
+ * broker (see ensureBroker) was silently authenticated with a brand-new token the
+ * broker does not know → all room calls returned `room_authentication_required`.
+ *
+ * Persisting the secrets makes them stable across launches, so a reused broker and
+ * a restarted desktop always agree. If the file is absent (first run after upgrade
+ * or migration) we regenerate and write it; persist failure is treated as
+ * non-fatal and falls back to session-scoped secrets (matching prior behaviour)
+ * so tests and unusual environments still work.
+ */
+interface RoomAuthSecrets {
+  desktopRoomToken: string;
+  kswarmRoomToken: string;
+  desktopMutationToken: string;
+}
+
+const ROOM_SECRETS_FILE_NAME = 'room-auth-secrets.json';
+
+function appUserDataPath(): string | null {
+  try {
+    return app.getPath('userData');
+  } catch {
+    return null;
+  }
+}
+
+function generateRoomSecrets(): RoomAuthSecrets {
+  return {
+    desktopRoomToken: `xiaok-room-user-${randomBytes(32).toString('base64url')}`,
+    kswarmRoomToken: `xiaok-room-system-${randomBytes(32).toString('base64url')}`,
+    desktopMutationToken: `xiaok-desktop-${randomBytes(32).toString('base64url')}`,
+  };
+}
+
+export function loadOrCreateRoomSecrets(explicitUserDataPath?: string): RoomAuthSecrets {
+  const userDataPath = explicitUserDataPath ?? appUserDataPath();
+  if (!userDataPath) return generateRoomSecrets();
+
+  const secretsPath = join(userDataPath, ROOM_SECRETS_FILE_NAME);
+  try {
+    const raw = readFileSync(secretsPath, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<RoomAuthSecrets>;
+    const secrets: RoomAuthSecrets = {
+      desktopRoomToken: nonEmptyString(parsed.desktopRoomToken) ?? '',
+      kswarmRoomToken: nonEmptyString(parsed.kswarmRoomToken) ?? '',
+      desktopMutationToken: nonEmptyString(parsed.desktopMutationToken) ?? '',
+    };
+    if (secrets.desktopRoomToken && secrets.kswarmRoomToken && secrets.desktopMutationToken) {
+      return secrets;
+    }
+  } catch {
+    // missing/corrupt file → regenerate below
+  }
+
+  const secrets = generateRoomSecrets();
+  try {
+    writeFileSync(secretsPath, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+  } catch {
+    // non-fatal: session-scoped secrets keep things working
+  }
+  return secrets;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
 export function buildIntentBrokerServiceEnv(options: {
@@ -596,7 +669,12 @@ export function findPidOnPort(port: number): Promise<number | null> {
         resolve(null);
       });
     } else {
-      execFile('lsof', ['-ti', `:${port}`], (err, stdout) => {
+      // Filter to the LISTENING socket only. `lsof -ti :port` also returns every
+      // process that merely *connects* to that port (clients), so taking the first
+      // line can target a client instead of the real listener and miss the kill.
+      // NOTE: `-iTCP:port` must be a single argument; splitting it into `-iTCP`
+      // and `:port` makes lsof 4.x reject `:port` and exit with a usage error.
+      execFile('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], (err, stdout) => {
         if (err) return resolve(null);
         const pid = parseInt(stdout.trim().split('\n')[0], 10);
         resolve(pid > 0 ? pid : null);
@@ -624,9 +702,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   let persistenceFailStopCount = 0;
   let lastPersistenceFailStop: string | null = null;
   const suppressedServerExits = new WeakSet<ChildProcess>();
-  const desktopMutationToken = `xiaok-desktop-${randomBytes(32).toString('base64url')}`;
-  const desktopRoomToken = `xiaok-room-user-${randomBytes(32).toString('base64url')}`;
-  const kswarmRoomToken = `xiaok-room-system-${randomBytes(32).toString('base64url')}`;
+  const roomSecrets = loadOrCreateRoomSecrets();
+  const desktopMutationToken = roomSecrets.desktopMutationToken;
+  const desktopRoomToken = roomSecrets.desktopRoomToken;
+  const kswarmRoomToken = roomSecrets.kswarmRoomToken;
   const listeners = new Set<(status: KSwarmServiceStatus) => void>();
 
   function getStatus(): KSwarmServiceStatus {
@@ -732,6 +811,37 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   async function brokerHealthCheck(): Promise<boolean> {
     const result = await fetchHealthJsonFromUrls(BROKER_HEALTH_URLS);
     return result.ok;
+  }
+
+  /**
+   * Probe an authenticated room endpoint to confirm the desktop token is
+   * accepted by the running broker. A healthy broker that was spawned by an
+   * older desktop session holds a different token; probing here lets
+   * ensureBroker detect the stale-token state and respawn the broker under the
+   * current (persisted) token instead of silently returning `room_authentication_required`.
+   *
+   * Returns false only on an explicit 401 (stale token). Any other reachable
+   * status is treated as "token fine" so transient broker errors do not trigger
+   * a live-respawn loop; unreachable brokers are left to the health check.
+   */
+  async function brokerDesktopTokenAccepted(): Promise<boolean> {
+    const baseUrls = uniqueServiceUrls(BROKER_HEALTH_URLS.map(url => url.replace(/\/health$/, '')));
+    for (const baseUrl of baseUrls) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+        const res = await fetch(`${baseUrl}/rooms`, {
+          signal: controller.signal,
+          headers: { 'x-intent-broker-room-token': desktopRoomToken },
+        });
+        clearTimeout(timer);
+        if (res.status === 401) return false;
+        return true;
+      } catch {
+        // fall through to next base URL; unreachable is handled by the health check
+      }
+    }
+    return true;
   }
 
   function startHealthCheck() {
@@ -897,8 +1007,40 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
   async function ensureBroker(): Promise<boolean> {
     // Check if broker is already running
-    if (await brokerHealthCheck()) return true;
-    if (stopping) return false;
+    if (await brokerHealthCheck()) {
+      // A healthy broker may still be running with a *stale* auth token from an
+      // earlier launch that we merely reused. Verify the desktop token is accepted;
+      // if not, kill the stale broker and respawn it under the persisted token.
+      // Otherwise every room call would return `room_authentication_required`.
+      if (stopping) return false;
+      let brokerLaunch: ServiceLaunchSpec | null;
+      try {
+        brokerLaunch = resolveBrokerLaunchSpec();
+      } catch {
+        // Cannot determine whether we own/provision this broker (e.g. headless
+        // test env where `app` is unavailable) — treat it as externally managed
+        // rather than force a respawn.
+        brokerLaunch = null;
+      }
+      if (!brokerLaunch) {
+        // Externally-managed broker — assume it is configured correctly.
+        return true;
+      }
+      if (await brokerDesktopTokenAccepted()) return true;
+      logKSwarmServiceLine('broker', 'lifecycle', 'stale broker auth token detected; respawning broker');
+      const killed = await killStaleServiceOnPort(BROKER_PORT);
+      if (stopping) return false;
+      if (!killed && await brokerHealthCheck()) {
+        // Could not reclaim the port and the broker is still healthy — reuse to
+        // avoid a live-respawn loop.
+        console.warn('[kswarm-service] Could not reclaim broker port; reusing existing broker');
+        return true;
+      }
+      // Fall through to spawn below so the broker is (re)started with the
+      // current, persisted token.
+    } else if (stopping) {
+      return false;
+    }
 
     const brokerLaunch = resolveBrokerLaunchSpec();
     if (!brokerLaunch) {
@@ -922,29 +1064,30 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       `spawn command=${nodeRuntime.command} entryPath=${brokerLaunch.entryPath} cwd=${brokerLaunch.cwd}`,
     );
     mkdirSync(brokerLaunch.cwd, { recursive: true });
-    brokerChild = spawnProcess(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
+    const spawnedBroker = spawnProcess(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
       cwd: brokerLaunch.cwd,
       env: nodeRuntime.env,
     }));
-    brokerChild.stdout?.on('data', (d: Buffer) => {
+    brokerChild = spawnedBroker;
+    spawnedBroker.stdout?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
       if (msg) {
         console.log(`[broker] ${msg}`);
         logKSwarmServiceLine('broker', 'stdout', msg);
       }
     });
-    brokerChild.stderr?.on('data', (d: Buffer) => {
+    spawnedBroker.stderr?.on('data', (d: Buffer) => {
       const msg = d.toString().trim();
       if (msg) {
         console.error(`[broker:err] ${msg}`);
         logKSwarmServiceLine('broker', 'stderr', msg);
       }
     });
-    brokerChild.on('exit', (code) => {
+    spawnedBroker.on('exit', (code) => {
       const message = `Broker exited: code=${code}`;
       console.log(`[kswarm-service] ${message}`);
       logKSwarmServiceLine('broker', 'lifecycle', message);
-      brokerChild = null;
+      if (brokerChild === spawnedBroker) brokerChild = null;
     });
 
     // Wait briefly for broker to be ready

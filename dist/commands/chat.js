@@ -5,6 +5,7 @@ import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getDevAppIdentity } from '../auth/identity.js';
 import { createAdapter } from '../ai/models.js';
+import { createChatAdapterWithLoginBootstrap } from './chat-login-bootstrap.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
@@ -182,15 +183,20 @@ async function runChat(initialInput, opts) {
     // 加载配置和凭据
     log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
     let config = await loadConfig();
-    const memoryStore = await createMemoryStoreAsync(config.memory);
     let adapter;
     try {
-        adapter = createAdapter(config);
+        const bootstrap = await createChatAdapterWithLoginBootstrap(config, {
+            interactive: isTTY(),
+            hasInitialInput: initialInput !== undefined,
+        });
+        config = bootstrap.config;
+        adapter = bootstrap.adapter;
     }
     catch (e) {
         writeError(String(e));
         process.exit(1);
     }
+    const memoryStore = await createMemoryStoreAsync(config.memory);
     memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();

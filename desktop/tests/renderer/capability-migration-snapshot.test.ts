@@ -36,7 +36,7 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // Goal Mode adds only semantic lifecycle, attachment-ack, queue-priority,
     // and event subscription operations. It does not expose store, arbitrary
     // status mutation, task start, or caller-controlled authority fields.
-    expect(keys.length).toMatchInlineSnapshot(`268`);
+    expect(keys.length).toMatchInlineSnapshot(`280`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

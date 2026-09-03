@@ -63,7 +63,7 @@ export function CollaborationRoomsPage() {
 
         {!result ? (
           <div className="py-16 text-center text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomLoading}</div>
-        ) : result.ok === false ? (
+        ) : !result.ok ? (
           <div className="rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-8 text-center">
             <p className="text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomError}</p>
             <button type="button" onClick={() => void load()} className="mt-4 text-sm text-[var(--c-accent)]">{t.retryConnection}</button>

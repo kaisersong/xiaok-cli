@@ -15,6 +15,7 @@ import { PlanView } from './PlanView';
 import { KanbanBoard } from './KanbanBoard';
 import { ActivityTimeline } from './ActivityTimeline';
 import { DeliverableView } from './DeliverableView';
+import { GateSnapshotPanel } from './GateSnapshotPanel';
 import { ProjectInterventionBanner } from './ProjectInterventionBanner';
 import { WorkflowStatusStrip } from './WorkflowStatusStrip';
 import { ProjectSmartTeamPanel } from './ProjectSmartTeamPanel';
@@ -1335,6 +1336,7 @@ export function ProjectDetailPage() {
             {project.summary && (
               <SummaryCollapsible summary={project.summary} score={project.summaryScore} taskScores={project.taskScores} />
             )}
+            {projectId && <GateSnapshotPanel projectId={projectId} />}
             <DeliverableView project={project} tasks={tasks} workspaceArtifacts={workspace?.artifacts || []} />
           </div>
         )}

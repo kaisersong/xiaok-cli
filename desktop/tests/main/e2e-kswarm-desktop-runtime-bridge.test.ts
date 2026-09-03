@@ -390,6 +390,30 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
         body: JSON.stringify({}),
       });
 
+      // design §8.2/§8.3：handleDeliver（走 /synthesize 触发）现在只注册一个
+      // FinalDeliverable candidate，返回 awaiting_user_approval，不再直接
+      // delivered。真实的最终交付必须经过显式的用户批准
+      // (POST /projects/:id/final-deliverables/:id/approve，requestSource=user)。
+      const candidateRegistered = await waitForCondition(
+        () => fetchJson<{
+          project: { status: string };
+          deliverables?: Array<{ deliverableId: string; status: string }>;
+        }>(`${kswarmUrl}/projects/${created.project.id}`),
+        (value) => Array.isArray(value.deliverables) && value.deliverables.some(fd => fd.status === 'candidate'),
+        30_000,
+      );
+      const candidate = candidateRegistered.deliverables!.find(fd => fd.status === 'candidate')!;
+
+      const approved = await fetchJson<{ ok: boolean }>(
+        `${kswarmUrl}/projects/${created.project.id}/final-deliverables/${candidate.deliverableId}/approve`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-kswarm-mutation-token': mutationToken },
+          body: JSON.stringify({ approvalIdempotencyKey: 'e2e-desktop-runtime-bridge-approve-1' }),
+        },
+      );
+      expect(approved.ok).toBe(true);
+
       const delivered = await waitForCondition(
         () => fetchJson<{
           project: { status: string; summary?: string | null };

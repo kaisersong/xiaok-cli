@@ -22,7 +22,7 @@ vi.mock('../../src/ai/providers/key-probe.js', () => ({
   probeApiKey: probeMock,
 }));
 
-const { runLoginCommand } = await import('../../src/commands/login.js');
+const { consumeSecretInputChunk, runLoginCommand } = await import('../../src/commands/login.js');
 const { loadConfig } = await import('../../src/utils/config.js');
 
 describe('xiaok login command', () => {
@@ -64,8 +64,15 @@ describe('xiaok login command', () => {
     return JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8'));
   }
 
+  it('submits a pasted secret when the key and carriage return share one input chunk', () => {
+    expect(consumeSecretInputChunk('', Buffer.from('sk-pasted-key\r'))).toEqual({
+      action: 'submit',
+      value: 'sk-pasted-key',
+    });
+  });
+
   it('persists the api key and switches the default model when requested', async () => {
-    await runLoginCommand({
+    const result = await runLoginCommand({
       provider: 'deepseek',
       apiKey: 'sk-test-deepseek',
       setDefault: true,
@@ -84,6 +91,7 @@ describe('xiaok login command', () => {
       provider: 'deepseek',
       model: 'deepseek-v4-pro',
     });
+    expect(result).toEqual({ status: 'saved', providerId: 'deepseek' });
     expect(probeMock).toHaveBeenCalledOnce();
   });
 
@@ -123,7 +131,8 @@ describe('xiaok login command', () => {
       logged.push(String(line));
     });
     try {
-      await runLoginCommand({ provider: 'not-a-provider', apiKey: 'sk-x', skipVerify: true });
+      const result = await runLoginCommand({ provider: 'not-a-provider', apiKey: 'sk-x', skipVerify: true });
+      expect(result).toEqual({ status: 'cancelled' });
     } finally {
       consoleSpy.mockRestore();
     }

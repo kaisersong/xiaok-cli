@@ -449,14 +449,15 @@ export function createCollaborationRoomService({
       return { ok: false, code: 'room_scope_mismatch' };
     }
 
-    const response = await kswarmClient.request(`/projects/${input.projectId}/tasks`, {
+    const response = await kswarmClient.request(`/projects/${input.projectId}/tasks/human`, {
       method: 'POST',
       body: JSON.stringify({
-        title: input.title,
-        brief: input.brief,
-        sourceRoomId: roomId,
-        sourceMessageId: input.messageId,
-        requestSource: 'user',
+        tasks: [{
+          title: input.title,
+          brief: input.brief,
+          sourceRoomId: roomId,
+          sourceMessageId: input.messageId,
+        }],
       }),
     });
     if (!response || response.ok !== true) {

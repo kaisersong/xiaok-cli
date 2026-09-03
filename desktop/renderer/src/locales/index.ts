@@ -11,6 +11,19 @@ export interface LocaleStrings {
   searchChats: string;
   searchTasks: string;
   projects: string;
+  // design §12：失败路径与用户文案原则——协作空间 gate 相关扁平 key（沿用
+  // 该功能既有的扁平命名风格，不引入新命名空间，避免把顶层 projects: string
+  // 改成 object 引发类型/运行时冲突）。
+  collaborationRoomStartExecution: string;
+  collaborationRoomContextIncomplete: string;
+  projectExecutionCompleted: string;
+  projectVerificationPassed: string;
+  projectVerificationBlocked: string;
+  projectVerificationWaitingEvidence: string;
+  projectLegacyGateRules: string;
+  projectWaitingIndependentReviewer: string;
+  projectFinalApprovalRequired: string;
+  projectOpenConditionsCount: (count: number) => string;
   retrieve: string;
   legal: string;
   recents: string;

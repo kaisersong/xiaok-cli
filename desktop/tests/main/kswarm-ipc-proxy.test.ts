@@ -80,6 +80,51 @@ describe('kswarm ipc proxy', () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  // design §9.1/§9.3：getProjectGateSnapshot(projectId) 通过通用 GET 代理暴露
+  // 给 renderer，不需要新增专用 IPC channel——但必须先加入 SAFE_GET_PATTERNS
+  // 白名单，否则会被 default-deny 拒绝。
+  it('allows GET /projects/:id/gate-snapshot through the safe GET allowlist (design §9.1/§9.3)', async () => {
+    const { ipcMain, handlers } = createIpcMainMock();
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      snapshot: { projectId: 'proj-1', phase: 'active', counts: {}, conditionSummaries: [], artifacts: [], userActions: [] },
+    }), { status: 200 }));
+    registerKSwarmProxy(
+      ipcMain as never,
+      { subscribe: vi.fn(), unsubscribe: vi.fn(), getConnectionStatus: vi.fn(() => 'connected') } as never,
+      { request, getDesktopMutationToken: () => 'desktop-token' },
+    );
+
+    const result = await handlers.get('desktop:kswarm:proxy:get')?.({}, '/projects/proj-1/gate-snapshot');
+    expect(request).toHaveBeenCalledWith('/projects/proj-1/gate-snapshot', expect.objectContaining({ method: 'GET' }));
+    expect(result).toEqual({
+      ok: true,
+      snapshot: { projectId: 'proj-1', phase: 'active', counts: {}, conditionSummaries: [], artifacts: [], userActions: [] },
+    });
+  });
+
+  // design §9.1/§9.3：submitUserGateAction 的第一个真实映射——用户批准候选
+  // FinalDeliverable，通过通用 POST 代理暴露。
+  it('allows POST /projects/:id/final-deliverables/:id/approve through the safe POST allowlist (design §9.1/§9.3)', async () => {
+    const { ipcMain, handlers } = createIpcMainMock();
+    const request = vi.fn(async () => new Response(JSON.stringify({ ok: true, finalDeliverable: { deliverableId: 'fd-1', status: 'approved' } }), { status: 200 }));
+    registerKSwarmProxy(
+      ipcMain as never,
+      { subscribe: vi.fn(), unsubscribe: vi.fn(), getConnectionStatus: vi.fn(() => 'connected') } as never,
+      { request, getDesktopMutationToken: () => 'desktop-token' },
+    );
+
+    const handler = handlers.get('desktop:kswarm:proxy:post');
+    const result = await handler?.({}, '/projects/proj-1/final-deliverables/fd-1/approve', { approvalIdempotencyKey: 'k1' });
+
+    expect(request).toHaveBeenCalledWith('/projects/proj-1/final-deliverables/fd-1/approve', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({ 'x-kswarm-mutation-token': 'desktop-token' }),
+      body: JSON.stringify({ approvalIdempotencyKey: 'k1' }),
+    }));
+    expect(result).toEqual({ ok: true, finalDeliverable: { deliverableId: 'fd-1', status: 'approved' } });
+  });
+
   it('redacts agent credentials from JSON and JSON-shaped text responses', async () => {
     const { ipcMain, handlers } = createIpcMainMock();
     const secretAgent = {

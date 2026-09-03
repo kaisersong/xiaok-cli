@@ -65,9 +65,10 @@ describe('collaboration room wake dispatcher', () => {
 
     await dispatcher.dispatchMessage({ roomId: 'room-a', roomMessageId: 'msg-1', logicalAgentIds: ['agent-a'] });
 
-    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      attachmentPaths: ['/tmp/brief.md'],
-    }));
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentPaths: ['/tmp/brief.md'] }),
+      'claim-1',
+    );
   });
 
   it('does not execute when the broker refuses the claim', async () => {

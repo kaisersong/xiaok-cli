@@ -74,6 +74,7 @@ import {
 import { registerSemanticDesktopIpc } from './semantic-ipc.js';
 import { createCollaborationRoomService } from './collaboration-room-service.js';
 import { createCollaborationRoomBrokerClient } from './collaboration-room-broker-client.js';
+import { setRoomHistoryBrokerClient } from './room-history-page-tool.js';
 import { createRoomProjectSagaJournal } from './collaboration-room-saga-journal.js';
 import { createCollaborationRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
@@ -1069,6 +1070,10 @@ async function createWindow(): Promise<BrowserWindow> {
   const collaborationRoomBrokerClient = createCollaborationRoomBrokerClient({
     token: kswarmService.getIntentBrokerRoomToken(),
   });
+  // design §6.2 RoomHistoryReadCapability：getRoomMessagesPage 工具（进程级
+  // 单例，desktop-services.ts 创建时已注册）需要延迟绑定这个 broker
+  // client——它在 createDesktopServices 之后才创建，不能作为构造参数传入。
+  setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
   const emitCollaborationRoomEvent = (event: unknown) => {
     if (!window.isDestroyed()) {
       window.webContents.send('desktop:collaborationRoom:event', event);
@@ -1093,7 +1098,7 @@ async function createWindow(): Promise<BrowserWindow> {
         return false;
       }
     },
-    execute: input => services.runCollaborationRoomAgentTask(input),
+    execute: (input, claimToken) => services.runCollaborationRoomAgentTask(input, claimToken),
     onEvent: emitCollaborationRoomEvent,
   });
   const collaborationRoomService = createCollaborationRoomService({
