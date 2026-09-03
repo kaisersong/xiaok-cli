@@ -927,6 +927,14 @@ Built-in `lsp` tool:
 - **Resume** — `xiaok -c` for last, `xiaok --resume <id>` for specific
 - **Session ID** — Shown on exit for traceability
 
+### Performance & Large-Workload Reliability
+
+- **Streaming transcript analysis** — CLI transcript inspection parses JSONL incrementally instead of materializing the whole file. On a real 182 MB / 170,488-event transcript, peak RSS fell from about 1.29 GB to 108 MB (-91.6%) while wall time improved from about 0.51s to 0.40s.
+- **Safe transcript archival** — Inactive transcripts can be compressed explicitly with `xiaok transcript <sessionId> --gzip [--older-than-days N]`. Archival uses writer claims, immutable content-addressed gzip segments, validated manifests, transparent reads, and crash recovery; the same 182 MB transcript compressed to 2.56 MB (-98.60%).
+- **Incremental task snapshots** — Runtime task persistence appends checksummed journal records and creates geometric checkpoints instead of rewriting the complete snapshot for every event. Terminal snapshots remain compatible with legacy readers, and corrupt or divergent histories fail closed.
+- **Responsive Desktop startup** — Static bundled resources are deployed early, while managed Python discovery, environment preparation, and Python MCP connection are deferred until after the main window becomes interactive. Python tools remain unavailable until readiness is proven.
+- **Coalesced streaming rendering** — The first assistant delta renders immediately; later updates are coalesced to at most once every 80 ms and aligned with animation frames, reducing repeated React and Markdown work without dropping the terminal delta.
+
 ### Local Daemon & Reminders
 
 - **`xiaok daemon` host** — `start/status/stop/restart/update/serve`

@@ -35,7 +35,10 @@ import {
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
 import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
-import { deployBundledPlugins } from './deploy-bundled-plugins.js';
+import {
+  deployBundledPluginFiles,
+  prepareBundledPluginPythonRuntime,
+} from './deploy-bundled-plugins.js';
 import { DesktopShutdownGate, ShutdownAwareIpcMain } from './shutdown-aware-ipc-main.js';
 import { DesktopShutdownCoordinator } from './desktop-shutdown-coordinator.js';
 import { PluginProviderRuntimeFacade } from './plugin-provider-runtime-facade.js';
@@ -107,6 +110,7 @@ import {
   type MobileProjectArtifactRecord,
 } from './mobile-snapshot.js';
 import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
+import { recoverTaskSnapshotSync } from '../../src/runtime/task-host/snapshot-store.js';
 import { configureSafeCrashCapture } from '../../src/utils/crash-reporter.js';
 
 // K3 reasoning is task-local heap state. Disable Electron Crashpad before
@@ -254,7 +258,9 @@ function readRecentTaskSnapshots(dataRoot: string, limit = 20): TaskSnapshot[] {
     .slice(0, limit)
     .flatMap(({ filePath }) => {
       try {
-        return [JSON.parse(readFileSync(filePath, 'utf8')) as TaskSnapshot];
+        const taskId = basename(filePath, '.json');
+        const snapshot = recoverTaskSnapshotSync(join(dataRoot, 'tasks'), taskId);
+        return snapshot ? [snapshot] : [];
       } catch {
         return [];
       }
@@ -604,6 +610,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const executionCoordinator = new DesktopExecutionCoordinator();
+  let managedPythonCommand: string | undefined;
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
@@ -611,6 +618,7 @@ async function createWindow(): Promise<BrowserWindow> {
     // gateway captures one stable identity instead of a temporary runtime.
     pluginProviderRuntime,
     executionCoordinator,
+    getManagedPythonCommand: () => managedPythonCommand,
   });
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
@@ -1131,14 +1139,11 @@ async function createWindow(): Promise<BrowserWindow> {
   services.registerSkillTools();
 
   // Deploy bundled plugins (report-creator, slide-creator) to ~/.xiaok/plugins/
-  const deployResult = await deployBundledPlugins();
-  debugMain('createWindow:plugins-deployed', deployResult);
-  if (deployResult.venvReady) {
-    const venvDir = getConfigDir(join('runtime', 'python-env'));
-    process.env.XIAOK_PYTHON_CMD = process.platform === 'win32'
-      ? join(venvDir, 'Scripts', 'python.exe')
-      : join(venvDir, 'bin', 'python3');
-  }
+  const pluginDeployment = deployBundledPluginFiles();
+  debugMain('createWindow:plugins-deployed', {
+    deployed: pluginDeployment.deployed,
+    pythonState: pluginDeployment.pythonState,
+  });
 
   // Register MCP plugin tools (connects to MCP servers declared in the plugins dir)
   let mcpDispose: (() => void) | undefined;
@@ -1251,19 +1256,14 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
-  services.registerMcpTools().then(async ({ dispose }) => {
+  const mcpRegistrationPromise = services.registerMcpTools().then(({ dispose }) => {
     mcpDispose = dispose;
-    // Design v58 §9.3: start the provider runtime only after the reserved MCP
-    // connections exist, so activation can verify each server's full operation
-    // set instead of committing a half-ready slot.
-    const started = await services.startPluginProviderRuntime().catch((error) => {
-      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
-      return { started: false as const };
-    });
-    debugMain('provider-runtime:start', started);
     startRuntimeBridge();
-  }).catch(() => {
+    return true;
+  }).catch((error) => {
+    debugMain('createWindow:mcp-registration-failed', error instanceof Error ? error.message : String(error));
     startRuntimeBridge();
+    return false;
   });
   debugMain('createWindow:mcp-registration-started');
 
@@ -1564,6 +1564,36 @@ async function createWindow(): Promise<BrowserWindow> {
     await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
+  // Python discovery, venv creation and dependency checks are intentionally
+  // post-interactive. Static plugin files are already available, while Python
+  // MCP servers remain fail-closed until this main-process-owned command exists.
+  void prepareBundledPluginPythonRuntime(pluginDeployment).then(async (pythonResult) => {
+    managedPythonCommand = pythonResult.pythonCommand;
+    debugMain('createWindow:python-runtime-ready', pythonResult);
+    const mcpRegistered = await mcpRegistrationPromise;
+    if (!mcpRegistered) {
+      services.markDeferredPythonMcpToolsUnavailable();
+      return;
+    }
+    if (managedPythonCommand) {
+      await services.registerDeferredPythonMcpTools();
+    } else {
+      services.markDeferredPythonMcpToolsUnavailable();
+    }
+    const started = await services.startPluginProviderRuntime().catch((error) => {
+      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
+      return { started: false as const };
+    });
+    debugMain('provider-runtime:start', started);
+  }).catch((error) => {
+    debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
+    void mcpRegistrationPromise.then(async (mcpRegistered) => {
+      services.markDeferredPythonMcpToolsUnavailable();
+      if (!mcpRegistered) return;
+      const started = await services.startPluginProviderRuntime().catch(() => ({ started: false as const }));
+      debugMain('provider-runtime:start-after-python-failure', started);
+    });
+  });
   return window;
 }
 

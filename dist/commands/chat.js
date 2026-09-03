@@ -247,7 +247,7 @@ async function runChat(initialInput, opts) {
     const ownershipMode = opts.forkSession
         ? 'fork'
         : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
-    const transcriptLogger = new FileTranscriptLogger(sessionId);
+    const transcriptLogger = await FileTranscriptLogger.open(sessionId);
     const transcriptBuffer = new TranscriptBuffer({
         onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
     });
@@ -794,6 +794,7 @@ async function runChat(initialInput, opts) {
         },
     });
     const buildCleanupSteps = () => [
+        () => transcriptLogger.close(),
         () => platform.dispose(),
         () => disposeModelAdapter(adapter),
         () => memoryStore.close?.(),
@@ -2797,6 +2798,9 @@ async function runChat(initialInput, opts) {
                 clearTurnIntentContext();
                 await releaseSessionOwnershipForExit();
                 await lifecycleHooks.runHooks('SessionEnd', { reason: 'sigint' });
+                setStreamErrorHandler(null);
+                process.stdout.write = originalStdoutWrite;
+                process.stderr.write = originalStderrWrite;
                 await cleanupRuntimeResourcesWithTimeout();
                 statusBar.destroy();
                 process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);

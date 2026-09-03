@@ -1,6 +1,30 @@
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { getConfigDir } from '../utils/config.js';
+import { appendFileSync } from 'node:fs';
+import {
+  acquireTranscriptLease,
+  archiveTranscript,
+  defaultTranscriptRoot,
+  isIncompleteJsonTail,
+  iterateTranscriptLines,
+  prepareTranscriptWriter,
+  readTranscriptJsonValues,
+  sealTranscriptWriter,
+  transcriptPaths,
+  TranscriptStorageError,
+  type TranscriptArchiveOptions,
+  type TranscriptArchivePhase,
+  type TranscriptArchiveResult,
+  type TranscriptReadOptions,
+  type TranscriptSessionLease,
+} from './transcript-storage.js';
+
+export {
+  archiveTranscript,
+  TranscriptStorageError,
+  type TranscriptArchiveOptions,
+  type TranscriptArchivePhase,
+  type TranscriptArchiveResult,
+  type TranscriptReadOptions,
+};
 
 export type TranscriptEvent =
   | { type: 'input_key'; key: string; timestamp: number }
@@ -24,11 +48,19 @@ export interface TranscriptLogger {
   recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
   beginSuppress(): void;
   endSuppress(): void;
+  close(): void;
 }
 
 export interface TranscriptAnalysis {
+  eventCount: number;
   slashPromptGrowth: number;
   approvalTitleRepeats: number;
+  warnings: TranscriptAnalysisWarning[];
+}
+
+export interface TranscriptAnalysisWarning {
+  code: 'truncatedTail';
+  line: number;
 }
 
 export function normalizeTranscriptChunk(chunk: string): string {
@@ -37,11 +69,33 @@ export function normalizeTranscriptChunk(chunk: string): string {
 
 export class FileTranscriptLogger implements TranscriptLogger {
   private suppressDepth = 0;
+  private closed = false;
+  private readonly exitHandler: () => void;
 
-  constructor(
+  private constructor(
     private readonly sessionId: string,
-    private readonly rootDir = join(getConfigDir(), 'transcripts'),
-  ) {}
+    private readonly rootDir: string,
+    private readonly lease: TranscriptSessionLease,
+  ) {
+    this.exitHandler = () => {
+      try { this.close(); } catch {}
+    };
+    process.once('exit', this.exitHandler);
+  }
+
+  static async open(
+    sessionId: string,
+    rootDir = defaultTranscriptRoot(),
+  ): Promise<FileTranscriptLogger> {
+    const lease = await acquireTranscriptLease(sessionId, rootDir);
+    try {
+      await prepareTranscriptWriter(sessionId, rootDir);
+      return new FileTranscriptLogger(sessionId, rootDir, lease);
+    } catch (error) {
+      lease.close();
+      throw error;
+    }
+  }
 
   get path(): string {
     return this.getFilePath();
@@ -56,8 +110,8 @@ export class FileTranscriptLogger implements TranscriptLogger {
   }
 
   record(event: TranscriptEvent): void {
-    mkdirSync(this.rootDir, { recursive: true });
-    appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, 'utf8');
+    if (this.closed) throw new TranscriptStorageError('transcript_writer_closed', `writer is closed: ${this.sessionId}`);
+    appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
   }
 
   recordOutput(stream: 'stdout' | 'stderr', chunk: string): void {
@@ -72,49 +126,86 @@ export class FileTranscriptLogger implements TranscriptLogger {
     });
   }
 
+  close(): void {
+    if (this.closed) return;
+    sealTranscriptWriter(this.sessionId, this.rootDir);
+    this.lease.close();
+    this.closed = true;
+    process.removeListener('exit', this.exitHandler);
+  }
+
   private getFilePath(): string {
-    return join(this.rootDir, `${this.sessionId}.jsonl`);
+    return transcriptPaths(this.sessionId, this.rootDir).raw;
   }
 }
 
 export function loadTranscriptEvents(
   sessionId: string,
-  rootDir = join(getConfigDir(), 'transcripts'),
+  rootDir = defaultTranscriptRoot(),
 ): TranscriptEvent[] {
-  const filePath = join(rootDir, `${sessionId}.jsonl`);
-  if (!existsSync(filePath)) {
-    throw new Error(`transcript not found: ${sessionId}`);
-  }
-
-  return readFileSync(filePath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as TranscriptEvent);
+  return readTranscriptJsonValues(sessionId, rootDir) as TranscriptEvent[];
 }
 
 export function analyzeTranscriptEvents(events: TranscriptEvent[]): TranscriptAnalysis {
-  const stdoutLines = events
-    .filter((event): event is Extract<TranscriptEvent, { type: 'output' }> => event.type === 'output' && event.stream === 'stdout')
-    .flatMap((event) => event.normalized.split('\n').filter(Boolean));
+  const accumulator = new TranscriptAnalysisAccumulator();
+  for (const event of events) {
+    accumulator.consume(event);
+  }
+  return accumulator.finalize();
+}
 
-  let slashPromptGrowth = 0;
-  let approvalTitleRepeats = 0;
-  let previousLine = '';
-
-  for (const line of stdoutLines) {
-    if (previousLine.startsWith('> /') && line.startsWith('> /') && line.startsWith(previousLine) && line.length > previousLine.length) {
-      slashPromptGrowth += 1;
+export async function analyzeTranscriptFileStreaming(
+  sessionId: string,
+  rootDir = defaultTranscriptRoot(),
+  options: TranscriptReadOptions = {},
+): Promise<TranscriptAnalysis> {
+  const accumulator = new TranscriptAnalysisAccumulator();
+  const warnings: TranscriptAnalysisWarning[] = [];
+  for await (const entry of iterateTranscriptLines(sessionId, rootDir, options)) {
+    if (!entry.line) continue;
+    try {
+      accumulator.consume(JSON.parse(entry.line) as TranscriptEvent);
+    } catch (error) {
+      if (!entry.terminated && isIncompleteJsonTail(entry.line)) {
+        warnings.push({ code: 'truncatedTail', line: entry.lineNumber });
+        continue;
+      }
+      throw new Error(`invalid transcript JSON at line ${entry.lineNumber}`, { cause: error });
     }
-
-    if (line.includes('xiaok 想要执行以下操作') && previousLine.includes('xiaok 想要执行以下操作')) {
-      approvalTitleRepeats += 1;
-    }
-
-    previousLine = line;
   }
 
-  return {
-    slashPromptGrowth,
-    approvalTitleRepeats,
-  };
+  return accumulator.finalize(warnings);
+}
+
+class TranscriptAnalysisAccumulator {
+  private eventCount = 0;
+  private slashPromptGrowth = 0;
+  private approvalTitleRepeats = 0;
+  private previousLine = '';
+
+  consume(event: TranscriptEvent): void {
+    this.eventCount += 1;
+    if (event.type !== 'output' || event.stream !== 'stdout') return;
+
+    for (const line of event.normalized.split('\n').filter(Boolean)) {
+      if (this.previousLine.startsWith('> /') && line.startsWith('> /') && line.startsWith(this.previousLine) && line.length > this.previousLine.length) {
+        this.slashPromptGrowth += 1;
+      }
+
+      if (line.includes('xiaok 想要执行以下操作') && this.previousLine.includes('xiaok 想要执行以下操作')) {
+        this.approvalTitleRepeats += 1;
+      }
+
+      this.previousLine = line;
+    }
+  }
+
+  finalize(warnings: TranscriptAnalysisWarning[] = []): TranscriptAnalysis {
+    return {
+      eventCount: this.eventCount,
+      slashPromptGrowth: this.slashPromptGrowth,
+      approvalTitleRepeats: this.approvalTitleRepeats,
+      warnings,
+    };
+  }
 }

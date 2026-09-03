@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, afterEach } from 'vitest';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { beforeEach, describe, expect, it, afterEach, vi } from 'vitest';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { Command } from 'commander';
@@ -83,5 +83,50 @@ describe('operator commands', () => {
     expect(result).toContain('Transcript Analysis');
     expect(result).toContain('slashPromptGrowth=2');
     expect(result).toContain('approvalTitleRepeats=1');
+  });
+
+  it('runTranscriptCommand explicitly archives one session and reports net savings', async () => {
+    const transcriptDir = join(process.env.XIAOK_CONFIG_DIR!, 'transcripts');
+    mkdirSync(transcriptDir, { recursive: true });
+    writeFileSync(
+      join(transcriptDir, 'sess_archive.jsonl'),
+      `${JSON.stringify({ type: 'output', stream: 'stdout', raw: 'a'.repeat(4096), normalized: 'a'.repeat(4096), timestamp: 1 })}\n`,
+    );
+
+    const result = await runTranscriptCommand('sess_archive', { gzip: true, olderThanDays: 0 });
+
+    expect(result).toContain('Transcript Archived');
+    expect(result).toContain('sourceBytes=');
+    expect(result).toContain('compressedBytes=');
+    expect(result).toContain('bytesFreed=');
+  });
+
+  it('executes the production Commander gzip action with an explicit age override', async () => {
+    const transcriptDir = join(process.env.XIAOK_CONFIG_DIR!, 'transcripts');
+    mkdirSync(transcriptDir, { recursive: true });
+    const raw = join(transcriptDir, 'sess_commander_archive.jsonl');
+    writeFileSync(
+      raw,
+      `${JSON.stringify({ type: 'output', stream: 'stdout', raw: 'z'.repeat(4096), normalized: 'z'.repeat(4096), timestamp: 1 })}\n`,
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      registerTranscriptCommands(program);
+      await program.parseAsync([
+        'node',
+        'xiaok',
+        'transcript',
+        'sess_commander_archive',
+        '--gzip',
+        '--older-than-days',
+        '0',
+      ]);
+
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Transcript Archived'));
+      expect(existsSync(raw)).toBe(false);
+    } finally {
+      log.mockRestore();
+    }
   });
 });

@@ -18,6 +18,7 @@ import { sanitizeUserFacingErrorMessage } from '../lib/error-display';
 import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-display';
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
+import { getStreamingRenderDelay } from '../lib/streaming-render-policy';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
@@ -284,10 +285,21 @@ export function ChatShell() {
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
   const streamRafRef = useRef<number | null>(null);
+  const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamLastRenderedAtRef = useRef<number | null>(null);
   const flushStreamingText = () => {
-    if (streamRafRef.current !== null) return;
-    streamRafRef.current = requestAnimationFrame(() => {
+    if (streamRafRef.current !== null || streamTimerRef.current !== null) return;
+    const delay = getStreamingRenderDelay(streamLastRenderedAtRef.current, performance.now());
+    if (delay > 0) {
+      streamTimerRef.current = setTimeout(() => {
+        streamTimerRef.current = null;
+        flushStreamingText();
+      }, delay);
+      return;
+    }
+    streamRafRef.current = requestAnimationFrame((renderedAt) => {
       streamRafRef.current = null;
+      streamLastRenderedAtRef.current = renderedAt;
       setStreamingText(streamRef.current);
     });
   };
@@ -296,6 +308,11 @@ export function ChatShell() {
       cancelAnimationFrame(streamRafRef.current);
       streamRafRef.current = null;
     }
+    if (streamTimerRef.current !== null) {
+      clearTimeout(streamTimerRef.current);
+      streamTimerRef.current = null;
+    }
+    streamLastRenderedAtRef.current = null;
   };
   const currentLoadIdRef = useRef<string | null>(null);
   const mountGenRef = useRef(0);
@@ -306,7 +323,6 @@ export function ChatShell() {
   const computerUseActionCodesRef = useRef<Set<string>>(new Set());
   const titleLockedRef = useRef(false);
   const lastLiveErrorRef = useRef<{ taskKey: string; rawMessage: string } | null>(null);
-
   // Read prompt state from navigation (WelcomePage initial submit or project help draft)
   const state = location.state as { initialPrompt?: string; initialFiles?: DisplayFileRef[]; draftPrompt?: string; createGoal?: boolean } | undefined;
   const initialPrompt = state?.initialPrompt;
@@ -914,7 +930,6 @@ export function ChatShell() {
       if (mountGenRef.current !== gen) return;
 
       if (threadData) {
-        // Replay all tasks in the thread to show full conversation history
         const allTaskIds = (threadData.taskIds && threadData.taskIds.length > 0) ? threadData.taskIds
           : threadData.currentTaskId ? [threadData.currentTaskId] : [];
         const isEmptyHelpThread = allTaskIds.length === 0 && !initialPrompt;
@@ -938,7 +953,6 @@ export function ChatShell() {
         let lastTaskIdForSub: string | null = null;
         let lastSubSinceIndex = 0;
         let lastSubToolStepsMsgId: string | null = null;
-
         for (const tid of allTaskIds) {
           // Check again after each async operation
           if (mountGenRef.current !== gen) return;

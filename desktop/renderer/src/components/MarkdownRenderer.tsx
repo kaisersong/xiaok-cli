@@ -5,6 +5,7 @@ import { MermaidBlock } from './MermaidBlock';
 import { toFileUrl } from '../lib/file-path';
 
 const FILE_PATH_RE = /(\/(?:Users|home|tmp|var|etc|opt|mnt|srv)\/[\w./ -]+|[A-Z]:\\[\w.\\ -]+)/g;
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm];
 
 function linkifyFilePaths(children: ReactNode): ReactNode {
   return Children.map(children, child => {
@@ -75,7 +76,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, stream
   return (
     <div className="prose prose-sm max-w-none">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
         components={{
           code({ className, children, ...props }) {
             const lang = className?.replace('language-', '') || '';

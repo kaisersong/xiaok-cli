@@ -433,6 +433,8 @@ export interface DesktopServicesOptions {
   pluginProviderRuntime?: GatewayRuntimeFacade;
   readinessModelProbe?: () => Promise<{ ok: boolean; error?: string }>;
   executionCoordinator?: DesktopExecutionCoordinator;
+  /** Main-process-owned managed Python readiness; undefined means still preparing/unavailable. */
+  getManagedPythonCommand?: () => string | undefined;
 }
 
 const CUA_DRIVER_DEPENDENCY: ExternalPluginDependency = {
@@ -743,6 +745,7 @@ export interface DesktopUpdateModelRuntimeOptionsInput {
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
+  const getManagedPythonCommand = options.getManagedPythonCommand;
   const officeDocumentParser = createOfficeDocumentParser({
     onDiagnostic: diagnostic => console.info('[office-parser]', JSON.stringify(diagnostic)),
   });
@@ -830,6 +833,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
   const pluginMcpDisposers: Array<{ name: string; pluginName: string; dispose: () => void }> = [];
+  const deferredPythonServerNames = new Set<string>();
   /**
    * Live handles for the reserved renderers, so the provider runtime's
    * ComponentSpecs can reach the same connection the loader just established
@@ -1055,8 +1059,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             // Use managed venv python if available for Python MCP servers
             const isPythonServer = launch.command === 'python3' || launch.command === 'python';
             const isNodeServer = launch.command === 'node' || launch.command === 'nodejs';
+            const managedPythonCommand = isPythonServer ? getManagedPythonCommand?.() : undefined;
+            if (isPythonServer && getManagedPythonCommand && !managedPythonCommand) {
+              deferredPythonServerNames.add(server.name);
+              pluginMcpServers.push({
+                name: server.name,
+                pluginName: plugin.name,
+                toolCount: 0,
+                connected: false,
+                enabled: true,
+                lastError: 'managed_python_preparing',
+              });
+              continue;
+            }
             const command = isPythonServer
-              ? normalizePythonServerCommand(launch.command, process.platform, process.env.XIAOK_PYTHON_CMD)
+              ? normalizePythonServerCommand(launch.command, process.platform, managedPythonCommand)
               : isNodeServer
                 ? (process.env.XIAOK_NODE_CMD || process.execPath)
                 : launch.command;
@@ -2073,6 +2090,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         autoConnectComputerUse: autoConnectDecision.eligible,
       });
       return { dispose: disposePluginMcpServers };
+    },
+    async registerDeferredPythonMcpTools(): Promise<PluginMcpServerState[]> {
+      const names = [...deferredPythonServerNames];
+      deferredPythonServerNames.clear();
+      for (const targetServerName of names) {
+        await reconnectPluginMcpServers({ userInitiated: false, targetServerName });
+      }
+      return pluginMcpServers;
+    },
+    markDeferredPythonMcpToolsUnavailable(): void {
+      for (let index = 0; index < pluginMcpServers.length; index += 1) {
+        const server = pluginMcpServers[index];
+        if (!deferredPythonServerNames.has(server.name)) continue;
+        pluginMcpServers[index] = {
+          ...server,
+          connected: false,
+          lastError: 'managed_python_unavailable',
+        };
+      }
+      deferredPythonServerNames.clear();
     },
     listPluginMcpServers(): PluginMcpServerState[] {
       return pluginMcpServers;

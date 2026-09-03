@@ -1,17 +1,18 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { normalizeKSwarmProjectDetail } from './normalizer.js';
 import { redactString, redactTraceValue } from './redactor.js';
 import { validateTraceBundle } from './schema.js';
+import { recoverTaskSnapshotSync } from '../task-host/snapshot-store.js';
 export function loadTaskSnapshotsForSession(input) {
     const snapshotDir = join(input.dataRoot, 'tasks', 'snapshots');
     if (!existsSync(snapshotDir))
         return [];
     return readdirSync(snapshotDir)
         .filter((name) => name.endsWith('.json'))
-        .map((name) => join(snapshotDir, name))
-        .map((filePath) => JSON.parse(readFileSync(filePath, 'utf8')))
+        .map((name) => recoverTaskSnapshotSync(join(input.dataRoot, 'tasks'), name.slice(0, -'.json'.length)))
+        .filter((snapshot) => snapshot !== null)
         .filter((snapshot) => snapshot.sessionId === input.sessionId);
 }
 export function buildSessionTraceBundleFromSnapshots(snapshots, input) {

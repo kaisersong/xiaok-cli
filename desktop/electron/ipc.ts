@@ -1323,7 +1323,7 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:loops:readTaskResult', async (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
     const id = readLoopId(loopId);
-    return readLoopTaskResult(id, loopRuntime, services.getDataRoot());
+    return readLoopTaskResult(id, loopRuntime, services);
   });
   ipcMain.handle('desktop:loops:listRuns', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
@@ -2249,7 +2249,7 @@ async function readLoopOutputPreview(loopId: string, template: UserLoopTemplate 
 async function readLoopTaskResult(
   loopId: string,
   loopRuntime: NonNullable<RegisterDesktopIpcOptions['loopRuntime']>,
-  dataRoot: string,
+  services: DesktopServices,
 ): Promise<Record<string, unknown>> {
   const latestRun = loopRuntime.loopStore.listLoopRuns(loopId, 1)[0];
   if (!latestRun) return { ok: false, loopId, error: 'missing_loop_run' };
@@ -2263,10 +2263,8 @@ async function readLoopTaskResult(
     return { ok: false, loopId, runId: latestRun.id, error: 'missing_task_result_evidence' };
   }
 
-  const snapshotPath = join(dataRoot, 'tasks', 'snapshots', `${taskId}.json`);
   try {
-    const raw = await readFile(snapshotPath, 'utf8');
-    const snapshot = JSON.parse(raw) as unknown;
+    const snapshot = (await services.recoverTask(taskId)).snapshot;
     const content = readTaskSnapshotResultSummary(snapshot);
     if (!content) {
       const fallback = evidence.find(record => record.summary.trim().length > 0)?.summary.trim();

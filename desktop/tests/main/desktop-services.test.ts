@@ -1024,6 +1024,94 @@ describe('desktop services', () => {
     registration.dispose();
   });
 
+  it('defers Python MCP servers until the injected managed runtime is ready', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'python-test-plugin');
+    const serverPath = join(process.cwd(), '..', 'tests', 'support', 'cua-mcp-stdio-server.js');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      name: 'python-test-plugin',
+      version: '1.0.0',
+      mcpServers: [{
+        name: 'python-test-server',
+        type: 'stdio',
+        command: 'python3',
+        args: [serverPath],
+      }],
+    }));
+    const previousPythonCommand = process.env.XIAOK_PYTHON_CMD;
+    process.env.XIAOK_PYTHON_CMD = process.execPath;
+    let managedPythonCommand: string | undefined;
+    try {
+      const services = createDesktopServices({
+        dataRoot: join(rootDir, 'data'),
+        kswarmService: mockKSwarmService(),
+        now: () => 300,
+        pluginRootDir,
+        pluginDependencies: [],
+        getManagedPythonCommand: () => managedPythonCommand,
+      });
+
+      const registration = await services.registerMcpTools();
+      expect(services.listPluginMcpServers()).toEqual([
+        expect.objectContaining({
+          name: 'python-test-server',
+          connected: false,
+          lastError: 'managed_python_preparing',
+        }),
+      ]);
+
+      managedPythonCommand = process.execPath;
+      await services.registerDeferredPythonMcpTools();
+      expect(services.listPluginMcpServers()).toEqual([
+        expect.objectContaining({
+          name: 'python-test-server',
+          connected: true,
+        }),
+      ]);
+
+      registration.dispose();
+    } finally {
+      if (previousPythonCommand === undefined) delete process.env.XIAOK_PYTHON_CMD;
+      else process.env.XIAOK_PYTHON_CMD = previousPythonCommand;
+    }
+  });
+
+  it('marks deferred Python MCP servers unavailable when background preparation finishes without a runtime', async () => {
+    const pluginRootDir = join(rootDir, '.xiaok', 'plugins');
+    const pluginDir = join(pluginRootDir, 'python-unavailable-plugin');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      name: 'python-unavailable-plugin',
+      version: '1.0.0',
+      mcpServers: [{
+        name: 'python-unavailable-server',
+        type: 'stdio',
+        command: 'python3',
+        args: ['server.py'],
+      }],
+    }));
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      pluginRootDir,
+      pluginDependencies: [],
+      getManagedPythonCommand: () => undefined,
+    });
+
+    const registration = await services.registerMcpTools();
+    services.markDeferredPythonMcpToolsUnavailable();
+
+    expect(services.listPluginMcpServers()).toEqual([
+      expect.objectContaining({
+        name: 'python-unavailable-server',
+        connected: false,
+        lastError: 'managed_python_unavailable',
+      }),
+    ]);
+    registration.dispose();
+  });
+
   it('lets the official cua-driver mcp proxy own daemon relaunch, with no second Xiaok launch owner', () => {
     // Design v58 §6.1: the machine-readable manifest of cua-driver 0.19.3 declares
     // `mcp_invocation = cua-driver mcp`, and on macOS that subcommand is itself the

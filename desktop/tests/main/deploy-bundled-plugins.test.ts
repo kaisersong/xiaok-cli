@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   deployBundledPlugins,
+  deployBundledPluginFiles,
+  prepareBundledPluginPythonRuntime,
   ensureManagedPythonVenv,
   ensureReportRendererDistCompat,
   ensureReportRendererCssCompat,
@@ -726,6 +728,49 @@ describe('deploy-bundled-plugins', () => {
       expect(manifest.toolPolicy.safeTools).toContain('list_windows');
       expect(manifest.toolPolicy.safeTools).not.toContain('get_app_state');
       expect(skill).toContain('xiaok_computer_use');
+    });
+  });
+
+  describe('deferred Python readiness', () => {
+    it('copies bundled files without probing or creating a Python runtime', () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, 'isolated-config');
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = join(rootDir, 'missing-bin');
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      const bundledSlideDir = join(bundledDir, 'kai-slide-creator');
+      mkdirSync(join(bundledSlideDir, 'mcp-servers', 'slide-renderer'), { recursive: true });
+      writeFileSync(join(bundledSlideDir, 'plugin.json'), JSON.stringify({
+        name: 'kai-slide-creator',
+        version: '3.2.1',
+      }));
+      writeFileSync(join(bundledSlideDir, 'mcp-servers', 'slide-renderer', 'server.py'), '# packaged slide renderer');
+
+      const deployment = deployBundledPluginFiles();
+
+      expect(deployment.deployed).toContain('kai-slide-creator');
+      expect(existsSync(join(rootDir, 'isolated-config', 'runtime', 'python-env'))).toBe(false);
+      expect(deployment.pythonState).toBe('not_started');
+    });
+
+    it('performs Python readiness only when the background phase is explicitly started', async () => {
+      process.env.XIAOK_CONFIG_DIR = join(rootDir, 'isolated-config');
+      process.env.HOME = rootDir;
+      process.env.USERPROFILE = rootDir;
+      process.env.PATH = '';
+      mockIsPackaged.mockReturnValue(true);
+      mockResourcesPath.mockReturnValue(rootDir);
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = rootDir;
+
+      const deployment = deployBundledPluginFiles();
+      const result = await prepareBundledPluginPythonRuntime(deployment);
+
+      expect(result.pythonAvailable).toBe(false);
+      expect(result.venvReady).toBe(false);
+      expect(result.pythonCommand).toBeUndefined();
     });
   });
 

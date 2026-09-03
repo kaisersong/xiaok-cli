@@ -5,6 +5,7 @@ import { normalizeKSwarmProjectDetail } from './normalizer.js';
 import { redactString, redactTraceValue } from './redactor.js';
 import { validateTraceBundle, type TraceArtifact, type TraceBundleV1, type TraceEvent, type TraceRedaction, type TraceTask, type TraceToolCall } from './schema.js';
 import type { DesktopTaskEvent, TaskSnapshot, TaskSnapshotStatus } from '../task-host/types.js';
+import { recoverTaskSnapshotSync } from '../task-host/snapshot-store.js';
 
 export interface TraceExportOptions {
   now?: () => Date;
@@ -17,8 +18,8 @@ export function loadTaskSnapshotsForSession(input: { dataRoot: string; sessionId
   if (!existsSync(snapshotDir)) return [];
   return readdirSync(snapshotDir)
     .filter((name) => name.endsWith('.json'))
-    .map((name) => join(snapshotDir, name))
-    .map((filePath) => JSON.parse(readFileSync(filePath, 'utf8')) as TaskSnapshot)
+    .map((name) => recoverTaskSnapshotSync(join(input.dataRoot, 'tasks'), name.slice(0, -'.json'.length)))
+    .filter((snapshot): snapshot is TaskSnapshot => snapshot !== null)
     .filter((snapshot) => snapshot.sessionId === input.sessionId);
 }
 

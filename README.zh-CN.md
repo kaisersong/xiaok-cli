@@ -927,6 +927,14 @@ xiaok yzjchannel serve
 - **恢复会话** — `xiaok -c` 恢复上次，`xiaok --resume <id>` 恢复指定
 - **Session ID** — 退出时显示，方便追溯
 
+### 性能与大负载可靠性
+
+- **转录流式分析** — CLI 检查 transcript 时逐行解析 JSONL，不再把完整文件物化到内存。真实 182 MB、170,488 事件转录的峰值 RSS 从约 1.29 GB 降至 108 MB（-91.6%），耗时从约 0.51s 降至 0.40s。
+- **安全转录归档** — 使用 `xiaok transcript <sessionId> --gzip [--older-than-days N]` 显式压缩非活动转录。归档使用 writer claim、不可变内容寻址 gzip segment、完整 manifest 校验、透明读取和崩溃恢复；同一份 182 MB 转录压缩至 2.56 MB（-98.60%）。
+- **增量任务快照** — Runtime 持久化改为追加带校验和的 journal，并按几何阈值生成 checkpoint，不再随每个事件重写完整快照。终态快照仍兼容旧读取器，损坏或分叉历史默认拒绝。
+- **Desktop 启动关键路径收窄** — 静态内置资源保持早期部署，managed Python 探测、环境准备和 Python MCP 连接延迟到主窗口可交互之后；未证明 ready 前，Python 工具保持不可用。
+- **流式渲染合并** — 首个 assistant delta 立即显示，后续更新最多每 80 ms 合并一次并与浏览器绘制帧对齐，在不丢失最终 delta 的前提下减少 React 更新和 Markdown 重解析。
+
 ### 本地 Daemon 与提醒
 
 - **`xiaok daemon` 宿主** — `start/status/stop/restart/update/serve`

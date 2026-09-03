@@ -814,7 +814,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
           : snapshot.usage,
         updatedAt: this.now(),
       };
-      await this.saveSnapshot(next);
+      await this.saveSnapshot(next, snapshot);
       persisted = {
         taskId,
         eventIndex: next.events.length - 1,
@@ -847,7 +847,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         events: terminalEvent ? [...snapshot.events, terminalEvent] : snapshot.events,
         updatedAt: this.now(),
       };
-      await this.saveSnapshot(next);
+      await this.saveSnapshot(next, snapshot);
       if (terminalEvent) {
         persisted = {
           taskId,
@@ -916,8 +916,8 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     }
   }
 
-  private async saveSnapshot(snapshot: TaskSnapshot): Promise<void> {
-    await this.options.snapshotStore.save(snapshot);
+  private async saveSnapshot(snapshot: TaskSnapshot, expectedPrevious?: TaskSnapshot): Promise<void> {
+    await this.options.snapshotStore.save(snapshot, expectedPrevious);
   }
 
   private async requireSnapshot(taskId: string): Promise<TaskSnapshot> {

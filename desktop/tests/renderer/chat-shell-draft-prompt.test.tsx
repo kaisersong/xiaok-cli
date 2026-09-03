@@ -37,6 +37,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     messages,
     generatedFiles,
     result,
+    streamingText,
     onToggleCanvas,
   }: {
     prompt: string;
@@ -53,6 +54,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     }>;
     generatedFiles?: Array<{ filePath: string; name: string }>;
     result?: { artifacts?: Array<{ title: string; kind: string; mimeType?: string }> } | null;
+    streamingText?: string;
     onToggleCanvas?: () => void;
   }) => (
     <div>
@@ -72,6 +74,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
           ))}
         </div>
       ))}</div>
+      <div data-testid="streaming-text">{streamingText ?? ''}</div>
       <div data-testid="current-result-artifacts">{result?.artifacts?.map((artifact) => (
         <span key={`${artifact.kind}:${artifact.title}`}>
           {artifact.kind}:{artifact.title}:{artifact.mimeType}
@@ -1031,5 +1034,58 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('429');
     expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('每周/每月');
     expect(screen.getByTestId('chat-messages')).not.toHaveTextContent('Error: 429');
+  });
+
+  it('coalesces rapid assistant deltas while terminal result preserves the complete text', async () => {
+    let subscribedHandler: ((event: { type: string; delta?: string; result?: { summary: string; artifacts: [] } }) => void) | null = null;
+    let pendingFrame: FrameRequestCallback | null = null;
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      pendingFrame = callback;
+      return 17;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {
+      pendingFrame = null;
+    });
+    mockGetThread.mockResolvedValue({
+      id: 'thread-stream-coalesce', title: 'Stream', status: 'idle', mode: 'work',
+      createdAt: 1, updatedAt: 1, starred: false, gtdBucket: 'inbox', pinnedAt: null,
+      currentTaskId: null, taskIds: [],
+    });
+    mockCreateTask.mockResolvedValue({ taskId: 'task-stream-coalesce' });
+    mockUpdateThreadTaskId.mockResolvedValue(undefined);
+    mockSubscribeTask.mockImplementation((_taskId, handler) => {
+      subscribedHandler = handler as typeof subscribedHandler;
+      return () => {};
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/t/thread-stream-coalesce']}>
+        <LocaleProvider>
+          <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+        </LocaleProvider>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('chat-status')).toHaveTextContent('idle'));
+    fireEvent.click(screen.getByRole('button', { name: 'submit-now' }));
+    await waitFor(() => expect(mockSubscribeTask).toHaveBeenCalled());
+
+    act(() => subscribedHandler?.({ type: 'assistant_delta', delta: '第一段' }));
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    act(() => pendingFrame?.(performance.now()));
+    expect(screen.getByTestId('streaming-text')).toHaveTextContent('第一段');
+
+    act(() => {
+      subscribedHandler?.({ type: 'assistant_delta', delta: '第二段' });
+      subscribedHandler?.({ type: 'assistant_delta', delta: '第三段' });
+    });
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+
+    act(() => subscribedHandler?.({
+      type: 'result',
+      result: { summary: 'fallback', artifacts: [] },
+    }));
+    expect(screen.getByTestId('streaming-text')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('chat-messages')).toHaveTextContent('第一段第二段第三段');
   });
 });

@@ -68,8 +68,16 @@ export interface DeployResult {
   deployed: string[];
   pythonAvailable: boolean;
   venvReady: boolean;
+  pythonCommand?: string;
   dependencyInstallMode?: string;
   bundledWheelsUsable?: boolean;
+}
+
+export interface BundledPluginFileDeployment {
+  deployed: string[];
+  pythonState: 'not_started';
+  bundledDir: string | null;
+  slideWheelhouseCompatTargets: Array<{ dest: string; src: string }>;
 }
 
 export interface ManagedPythonVenvOptions {
@@ -227,11 +235,15 @@ function backupExistingPlugin(pluginPath: string, pluginName: string): void {
   renameSync(pluginPath, backupPath);
 }
 
-export async function deployBundledPlugins(): Promise<DeployResult> {
-  const result: DeployResult = { deployed: [], pythonAvailable: false, venvReady: false };
+export function deployBundledPluginFiles(): BundledPluginFileDeployment {
+  const result: BundledPluginFileDeployment = {
+    deployed: [],
+    pythonState: 'not_started',
+    bundledDir: null,
+    slideWheelhouseCompatTargets: [],
+  };
   const pluginsDir = getConfigDir('plugins');
   mkdirSync(pluginsDir, { recursive: true });
-  const slideWheelhouseCompatTargets: Array<{ dest: string; src: string }> = [];
 
   // Legacy migration: kai-canvas-creator → kai-infinity-canvas (renamed in v1.4.15).
   // Move the old folder aside so it does not load alongside the new plugin.
@@ -247,6 +259,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
   }
 
   const bundledDir = resolveBundledPluginsDir();
+  result.bundledDir = bundledDir;
 
   if (!bundledDir) return result;
 
@@ -281,7 +294,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
             ensureMeetingTranscriberCompat(dest, src);
           }
           if (name === 'kai-slide-creator') {
-            slideWheelhouseCompatTargets.push({ dest, src });
+            result.slideWheelhouseCompatTargets.push({ dest, src });
           }
           continue;
         }
@@ -302,7 +315,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
       ensureMeetingTranscriberCompat(dest, src);
     }
     if (name === 'kai-slide-creator') {
-      slideWheelhouseCompatTargets.push({ dest, src });
+      result.slideWheelhouseCompatTargets.push({ dest, src });
     }
     // Mark as bundled-managed
     try {
@@ -314,6 +327,20 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
     }
     result.deployed.push(name);
   }
+
+  return result;
+}
+
+export async function prepareBundledPluginPythonRuntime(
+  deployment: BundledPluginFileDeployment,
+): Promise<DeployResult> {
+  const result: DeployResult = {
+    deployed: deployment.deployed,
+    pythonAvailable: false,
+    venvReady: false,
+  };
+  const bundledDir = deployment.bundledDir;
+  if (!bundledDir) return result;
 
   // 2. Setup Python venv for slide-renderer.
   // Prefer an existing managed venv even when the launched app cannot see a
@@ -337,7 +364,7 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
 
   if (existsSync(venvPython)) {
     const pythonTag = await detectPythonCompatibilityTag(venvPython);
-    for (const target of slideWheelhouseCompatTargets) {
+    for (const target of deployment.slideWheelhouseCompatTargets) {
       ensureSlideRendererWheelhouseCompat(target.dest, target.src, pythonTag ?? undefined);
     }
 
@@ -366,7 +393,13 @@ export async function deployBundledPlugins(): Promise<DeployResult> {
     });
     result.venvReady = runtimeReady.ready;
     result.dependencyInstallMode = runtimeReady.mode;
+    if (runtimeReady.ready) result.pythonCommand = venvPython;
   }
 
   return result;
+}
+
+/** Compatibility entry point for callers that explicitly need eager readiness. */
+export async function deployBundledPlugins(): Promise<DeployResult> {
+  return prepareBundledPluginPythonRuntime(deployBundledPluginFiles());
 }
