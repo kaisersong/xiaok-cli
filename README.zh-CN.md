@@ -68,7 +68,7 @@ Xiaok Desktop v1.5.0 新增 Room-first 协作入口：用户可以先与多个�
 - **Pi Harness 支持**：KSwarm 可以发现、探测、配置并通过受限的一次性 harness 执行 Pi，对参数、环境、工作目录、超时与输出大小设有明确边界。
 - **DeepSeek Harness 安全门**：DeepSeek harness 路由和能力注册已经接线，但在固定版本的真实 `dsh --profile headless` 探针证明 preview CLI 合同前，创建入口保持关闭，界面不会把未验证 runtime 标成可用。
 - **依赖与打包维护**：根 CLI 与 Desktop 的 SDK/lockfile owner 已对齐，deprecated dependency 漂移有回归守卫，Release 构建会锁定匹配的 KSwarm 与 Intent Broker 快照。
-- **发布版本说明**：根 CLI 与 Desktop package metadata 均升级为 `1.5.1`；下方下载链接在新的 Desktop GitHub Release 发布前，仍指向当前已发布的 `desktop-v1.5.0` 产物。
+- **发布版本说明**：根 CLI 与 Desktop package metadata 均为 `1.5.1`。Desktop release 构建会固定 checkout KSwarm、Intent Broker 与 kai-xiaok-plugins 各自的 `desktop-v1.5.1` 快照，确保 macOS 与 Windows 安装包使用同一套可复现依赖基线。
 
 Xiaok Desktop v1.4.32 让长对话更容易定位，也让 Goal Mode 更容易发现、恢复和监控，同时不再切割主工作区。本版还把最新 GLM 与 DeepSeek Flash 模型加入 CLI/Desktop 共用目录，并加强超时分类与产物证据恢复。
 
@@ -746,9 +746,9 @@ xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界�
 
 从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 下载：
 
-- **xiaok-1.5.0-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
-- **xiaok-1.5.0-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
-- **xiaok-setup-1.5.0.exe** — Windows 安装包（x64）
+- **xiaok-1.5.1-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
+- **xiaok-1.5.1-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
+- **xiaok-setup-1.5.1.exe** — Windows 安装包（x64）
 
 ### 功能特性
 

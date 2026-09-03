@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.5.0)'
+        description: 'Tag to release (e.g. desktop-v1.5.1)'
         required: true
-        default: 'desktop-v1.5.0'
+        default: 'desktop-v1.5.1'
 
 permissions:
   contents: write
@@ -57,9 +57,9 @@ jobs:
 
       - name: Clone desktop sidecar repositories
         run: |
-          git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git clone --depth 1 --branch desktop-v1.5.0 https://github.com/kaisersong/kswarm.git ../kswarm
-          git clone --depth 1 --branch desktop-v1.5.0 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git clone --depth 1 --branch desktop-v1.5.1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 --branch desktop-v1.5.1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 --branch desktop-v1.5.1 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
       - name: Install sidecar dependencies
         run: |
@@ -256,9 +256,9 @@ jobs:
 
       - name: Clone desktop sidecar repositories
         run: |
-          git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git clone --depth 1 --branch desktop-v1.5.0 https://github.com/kaisersong/kswarm.git ../kswarm
-          git clone --depth 1 --branch desktop-v1.5.0 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git clone --depth 1 --branch desktop-v1.5.1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 --branch desktop-v1.5.1 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 --branch desktop-v1.5.1 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
       - name: Install sidecar dependencies
         run: |
