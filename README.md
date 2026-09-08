@@ -453,7 +453,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) currently pins all three siblings to `desktop-v1.5.1`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
+Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins all three siblings to `desktop-v1.5.2`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
 
 ---
 
@@ -554,6 +554,7 @@ CLI and Desktop package metadata are **1.5.2**. This release prepares the follow
 - Independent foreground/background execution lanes and explicit queued, approval, and execution status.
 - One bounded, tool-free summary continuation after an eligible stream disconnect, preserving completed child results without replaying tools. Already-failed historical tasks are not automatically rerun.
 - Registry/background-task lifecycle fixes and simplified system prompts. Non-cooperative in-process work remains visibly pending until resources actually settle.
+- CUA session recovery preserves per-call cancellation and requires a fresh observation before retrying mutations; bundled Fantasy Rainbow slide layouts are refined.
 
 Build, signing, notarization, and release-asset verification are separate gates. See [GitHub Actions](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) for the actual build result.
 

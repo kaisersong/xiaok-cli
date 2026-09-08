@@ -453,7 +453,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 当前将三个关联仓库固定到 `desktop-v1.5.1`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
+在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 将三个关联仓库固定到 `desktop-v1.5.2`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
 
 ---
 
@@ -554,6 +554,7 @@ CLI 与 Desktop 的 package metadata 均为 **1.5.2**。本次准备发布以下
 - 前后台独立执行槽位，明确展示排队、等待授权与执行状态。
 - 符合条件的汇总断流可进行一次有界、禁用工具的续接，保留子任务结果，不重放工具；已失败的历史任务不会自动重跑。
 - registry 与后台任务生命周期修复、系统提示词精简。不响应取消的进程内任务仍须如实显示待清理，直到资源真正结束。
+- CUA 会话恢复保留逐调用取消能力，重试点击/输入前必须重新观察；更新内置 Fantasy Rainbow 幻灯片布局。
 
 构建、签名、公证与发布产物校验分别验收，实际构建结果见 [GitHub Actions](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml)。
 
