@@ -15,9 +15,14 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const roots: string[] = [];
+const launchControllers = new Set<AbortController>();
+const pendingLaunches = new Set<Promise<unknown>>();
 const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
+  for (const controller of launchControllers) controller.abort();
+  await Promise.allSettled([...pendingLaunches]);
+  launchControllers.clear();
   await Promise.all(roots.splice(0).map(root =>
     rm(root, { recursive: true, force: true, maxRetries: 3 })));
 });
@@ -237,6 +242,23 @@ describe('Kimi K3 D9 CLI black-box product contract', () => {
       ...paths,
       preservedThinking: true,
     });
+    // This synthetic closure uses a newly created shell launcher, not the
+    // packaged Node binary. Its first OS execution is preparation, not guard
+    // latency. Do not preload the guard or the forbidden module here. The
+    // existing outer test deadline still bounds preparation; teardown cancels
+    // its process if readiness never arrives.
+    const readinessController = new AbortController();
+    launchControllers.add(readinessController);
+    const readinessStarted = performance.now();
+    const readiness = execFileAsync(launch.command, ['--version'], {
+      cwd: launch.cwd, env: launch.env, signal: readinessController.signal,
+    });
+    pendingLaunches.add(readiness);
+    try {
+      const ready = await readiness;
+      expect(ready.stdout.trim()).toBe(process.version);
+      console.info('KIMI_D9_SYNTHETIC_LAUNCHER_READY', { elapsedMs: performance.now() - readinessStarted });
+    } finally { launchControllers.delete(readinessController); pendingLaunches.delete(readiness); }
     const outcome = await execFileAsync(
       launch.command,
       launch.args,
