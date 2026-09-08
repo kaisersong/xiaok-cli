@@ -42,6 +42,7 @@ export function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Too
 }
 
 export interface PlatformRegistryFactoryOptions {
+  notifyReminder?: (message: string) => void;
   onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
   onMultiAgentEvent?: (event: MultiAgentEvent) => void;
   platform: PlatformRuntimeContext;
@@ -169,7 +170,8 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
   if (reminders) {
     void reminders.start();
     reminders.registerInChatSink(options.sessionId, (message) => {
-      process.stdout.write(`\n[reminder] ${message}\n`);
+      if (options.notifyReminder) options.notifyReminder(message);
+      else process.stdout.write(`\n[reminder] ${message}\n`);
     });
   }
 

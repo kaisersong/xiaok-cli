@@ -392,6 +392,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const multiAgentProgress = new MultiAgentProgressView();
   const subAgentNotices = new SubAgentNoticeQueue();
   let flushSubAgentNotices = (): void => {};
+  let interactiveNotificationsReady = false;
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
@@ -915,6 +916,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const embeddedApprovalStore = new InMemoryApprovalStore();
 
   const registryFactory = createPlatformRegistryFactory({
+    notifyReminder: (message) => {
+      const block = `\n[reminder] ${message}\n`;
+      if (opts.print || opts.json) { process.stdout.write(block); return; }
+      transcriptBuffer.record({ kind: 'command_output', command: '[reminder]', output: block });
+      subAgentNotices.push(block);
+      flushSubAgentNotices();
+    },
     platform,
     source: 'chat',
     sessionId,
@@ -2080,7 +2088,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   flushSubAgentNotices = (): void => {
-    subAgentNotices.flush(!runtimeState.isInteractivePromptActive()
+    subAgentNotices.flush(interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
+      && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
       && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
   };
 
@@ -3370,9 +3379,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
         runtimeState.markInputReady();
         const busyDraft = takeBusyDraft();
-        input = await inputReader.read('> ', busyDraft?.draft
+        const pendingInput = inputReader.read('> ', busyDraft?.draft
           ? { initialInput: { input: busyDraft.draft, cursor: busyDraft.cursor } }
           : undefined);
+        interactiveNotificationsReady = true;
+        flushSubAgentNotices();
+        input = await pendingInput;
       }
 
     if (input === null || input.trim() === '/exit') {

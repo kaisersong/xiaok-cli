@@ -436,3 +436,21 @@ describe('registry-factory multi-agent surface', () => {
     }
   });
 });
+
+it('routes reminder delivery through the frontend sink instead of raw stdout', async () => {
+  const platform = makeMockPlatform();
+  let sink!: (message: string) => void;
+  vi.mocked(platform.createReminderApi).mockReturnValue({
+    start: vi.fn(async () => {}),
+    registerInChatSink: vi.fn((_sessionId, callback) => { sink = callback; return () => {}; }),
+  } as any);
+  const notifyReminder = vi.fn();
+  const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'reminder-test',
+    adapter: () => ({} as ModelAdapter), buildSystemPrompt: async () => '', notifyReminder });
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    sink('download complete');
+    expect(notifyReminder).toHaveBeenCalledWith('download complete');
+    expect(stdout).not.toHaveBeenCalled();
+  } finally { stdout.mockRestore(); await factory.dispose(); }
+});

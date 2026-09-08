@@ -262,6 +262,7 @@ async function runChat(initialInput, opts) {
     const multiAgentProgress = new MultiAgentProgressView();
     const subAgentNotices = new SubAgentNoticeQueue();
     let flushSubAgentNotices = () => { };
+    let interactiveNotificationsReady = false;
     const transcriptBuffer = new TranscriptBuffer({
         onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
     });
@@ -713,6 +714,16 @@ async function runChat(initialInput, opts) {
     const embeddedChannels = [];
     const embeddedApprovalStore = new InMemoryApprovalStore();
     const registryFactory = createPlatformRegistryFactory({
+        notifyReminder: (message) => {
+            const block = `\n[reminder] ${message}\n`;
+            if (opts.print || opts.json) {
+                process.stdout.write(block);
+                return;
+            }
+            transcriptBuffer.record({ kind: 'command_output', command: '[reminder]', output: block });
+            subAgentNotices.push(block);
+            flushSubAgentNotices();
+        },
         platform,
         source: 'chat',
         sessionId,
@@ -1735,7 +1746,8 @@ async function runChat(initialInput, opts) {
         resetStreamingSegment();
     };
     flushSubAgentNotices = () => {
-        subAgentNotices.flush(!runtimeState.isInteractivePromptActive()
+        subAgentNotices.flush(interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
+            && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
             && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
     };
     const persistSession = async (options = {}) => {
@@ -2911,9 +2923,12 @@ async function runChat(initialInput, opts) {
                 }
                 runtimeState.markInputReady();
                 const busyDraft = takeBusyDraft();
-                input = await inputReader.read('> ', busyDraft?.draft
+                const pendingInput = inputReader.read('> ', busyDraft?.draft
                     ? { initialInput: { input: busyDraft.draft, cursor: busyDraft.cursor } }
                     : undefined);
+                interactiveNotificationsReady = true;
+                flushSubAgentNotices();
+                input = await pendingInput;
             }
             if (input === null || input.trim() === '/exit') {
                 stopBusyCapture();

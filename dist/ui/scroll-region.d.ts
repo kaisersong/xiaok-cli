@@ -112,7 +112,7 @@ export declare class ScrollRegionManager {
      */
     private getStatusBarRow;
     private getOverlayVisibleLines;
-    private hasActiveOverlayPrompt;
+    hasActiveOverlayPrompt(): boolean;
     private isRendererPermissionOverlayActive;
     private clearActiveOverlayPrompt;
     private clearScreenRow;

@@ -272,7 +272,7 @@ export class ScrollRegionManager {
     return lines.slice(-maxOverlayRows);
   }
 
-  private hasActiveOverlayPrompt(): boolean {
+  hasActiveOverlayPrompt(): boolean {
     return this.lastOverlayRenderRows > 0 && this._activeOverlayKind !== null;
   }
 

@@ -111,7 +111,10 @@ export function createPlatformRegistryFactory(options) {
     if (reminders) {
         void reminders.start();
         reminders.registerInChatSink(options.sessionId, (message) => {
-            process.stdout.write(`\n[reminder] ${message}\n`);
+            if (options.notifyReminder)
+                options.notifyReminder(message);
+            else
+                process.stdout.write(`\n[reminder] ${message}\n`);
         });
     }
     function createRegistryForCwd(cwd, allowedTools, agentId = 'main', opts) {

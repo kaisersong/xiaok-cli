@@ -6,6 +6,7 @@ import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 export declare function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Tool[];
 export interface PlatformRegistryFactoryOptions {
+    notifyReminder?: (message: string) => void;
     onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
     onMultiAgentEvent?: (event: MultiAgentEvent) => void;
     platform: PlatformRuntimeContext;
