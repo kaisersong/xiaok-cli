@@ -9,6 +9,7 @@ export interface OnnxEmbeddingFail {
 export type OnnxStatus = OnnxEmbeddingResult | OnnxEmbeddingFail;
 export declare class OnnxEmbeddingEngine {
     private session;
+    private ort;
     private tokenizer;
     private readonly modelDir;
     private initPromise;
