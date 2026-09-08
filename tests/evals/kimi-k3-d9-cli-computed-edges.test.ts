@@ -20,7 +20,11 @@ describe('Kimi K3 D9 CLI computed loader edges', () => {
       process.cwd(),
     );
 
-    expect(allowlist).toHaveLength(5);
+    expect(allowlist).toHaveLength(6);
+    expect(allowlist).toContainEqual(expect.objectContaining({
+      pattern: 'require(dir + "/" + name + ".node")',
+      targets: ['../prebuilds/darwin-arm64/pty.node'],
+    }));
     const graph = await buildReachableResolutionGraph({
       closureRoot: process.cwd(),
       entryRelativePath: 'dist/index.js',

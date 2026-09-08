@@ -3,6 +3,12 @@ import { inspectModuleEdges } from './resolution-graph.mjs';
 
 const DARWIN_ARM64_EDGE_SPECIFICATIONS = Object.freeze([
   Object.freeze({
+    importerRelativePath: 'node_modules/node-pty/lib/utils.js',
+    astLocation: '29:44',
+    pattern: 'require(dir + "/" + name + ".node")',
+    targets: Object.freeze(['../prebuilds/darwin-arm64/pty.node']),
+  }),
+  Object.freeze({
     importerRelativePath: 'node_modules/nodejieba/index.js',
     astLocation: '14:17',
     pattern: 'require(BINARY_PATH)',

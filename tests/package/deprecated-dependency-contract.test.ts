@@ -73,6 +73,7 @@ describe('deprecated npm dependency contract', () => {
     ) as ProjectPackage;
 
     expect(rootPackage.allowScripts).toEqual({
+      'node-pty@1.1.0': true,
       'better-sqlite3@13.0.3': true,
       'esbuild@0.27.4': true,
       'fsevents@2.3.3': true,

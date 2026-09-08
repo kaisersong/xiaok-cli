@@ -76,13 +76,14 @@ describe('chat terminal layout', () => {
   it('should let InputReader own the prompt rendering to avoid slash-menu redraw corruption', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
-    expect(source).toContain("input = await inputReader.read('> ', busyDraft?.draft");
+    expect(source).toContain("const pendingInput = inputReader.read('> ', busyDraft?.draft");
+    expect(source).toContain('input = await pendingInput;');
     expect(source).not.toContain('renderInputPrompt();');
   });
 
   it('should not show an input-ready footer before stdin is owned by the next read', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
-    const readIndex = source.indexOf("input = await inputReader.read('> ', busyDraft?.draft");
+    const readIndex = source.indexOf("const pendingInput = inputReader.read('> ', busyDraft?.draft");
     expect(readIndex).toBeGreaterThan(-1);
 
     const beforeRead = source.slice(Math.max(0, readIndex - 320), readIndex);
@@ -113,14 +114,14 @@ describe('chat terminal layout', () => {
     expect(source).toContain('stashQueuedInputIfAny({ stopCapture: false });');
     expect(source).toContain('stashQueuedInputIfAny({ stopCapture: result.deferredInput !== null || result.exitRequested });');
     expect(source).toContain([
-      "        input = await inputReader.read('> ', busyDraft?.draft",
+      "        const pendingInput = inputReader.read('> ', busyDraft?.draft",
     ].join('\n'));
     const loopStart = source.indexOf('interactiveLoop: while (true) {');
     const refreshIndex = source.indexOf('await refreshSkills();', loopStart);
     const stashIndex = source.indexOf('stashQueuedInputIfAny({ stopCapture: false });', refreshIndex);
     const inputDeclIndex = source.indexOf('let input: string | null;', stashIndex);
     const markReadyIndex = source.indexOf('runtimeState.markInputReady();', inputDeclIndex);
-    const readStart = source.indexOf("        input = await inputReader.read('> ', busyDraft?.draft", markReadyIndex);
+    const readStart = source.indexOf("        const pendingInput = inputReader.read('> ', busyDraft?.draft", markReadyIndex);
     expect(loopStart).toBeGreaterThan(-1);
     expect(refreshIndex).toBeGreaterThan(loopStart);
     expect(stashIndex).toBeGreaterThan(refreshIndex);

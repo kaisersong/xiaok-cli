@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { join } from 'node:path';
 import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
@@ -28,6 +28,8 @@ describe('BDD: real main watchdog and lease expiry keep whichever legal terminal
     vi.restoreAllMocks(); vi.unstubAllEnvs();
   });
   it.each(['watchdog-terminal', 'watchdog-signal', 'lease'] as const)('C20 %s wins without inventing a cancellation writer for signal-only abort', async first => {
+    let stage = 'factory initialization';
+    onTestFailed(() => console.error('CANCELLATION_WATCHDOG_FAILED_STAGE', { first, stage }));
     const f = await authorizationFixture(cleanup);
     const host = (f.boundary.service as unknown as { host: InProcessTaskRuntimeHost }).host;
     const entered = deferred(), release = deferred(); cleanup.push(async () => { release.resolve(); await host.drain(); });
@@ -37,8 +39,10 @@ describe('BDD: real main watchdog and lease expiry keep whichever legal terminal
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       models++; entered.resolve(); await release.promise; yield { type: 'text', delta: 'Late model output must not revive execution.' };
     });
+    stage = 'task creation';
     const task = await f.services.createTask({ prompt: 'Wait for explicit cancellation.', materials: [], watchdogMs: 60_000,
       context: { threadId: `watchdog-lease-${first}` }, permissionMode: 'auto' });
+    stage = 'provider entry';
     await entered.promise;
     const binding = f.store.getRootBinding(task.taskId)!;
     const groups = (f.boundary.service as unknown as { groups: Map<string, { root?: { context?: DesktopAgentExecutionContext } }> }).groups;
@@ -54,19 +58,26 @@ describe('BDD: real main watchdog and lease expiry keep whichever legal terminal
       finally { clock.mockRestore(); }
     };
     if (first !== 'lease') {
+      stage = 'watchdog timer advancement';
       await vi.advanceTimersByTimeAsync(60_000);
+      stage = 'watchdog abort authorization';
       while (!context.signal.aborted) await turn();
-      if (first === 'watchdog-terminal') { release.resolve(); await host.drain(); expect((await cold())?.status).toBe('failed'); }
+      if (first === 'watchdog-terminal') { stage = 'watchdog terminal physical drain'; release.resolve(); await host.drain(); expect((await cold())?.status).toBe('failed'); }
+      stage = 'late lease expiry';
       await expire();
     } else {
+      stage = 'initial lease expiry';
       await expire();
       expect((await cold())?.status).toBe('cancelled');
+      stage = 'late watchdog timer advancement';
       await vi.advanceTimersByTimeAsync(60_000);
     }
     expect(decide.mock.calls.some(([, reason]) => reason === 'task_watchdog_timeout')).toBe(true);
     expect(aborts).toBe(1);
     if (first !== 'watchdog-terminal') { expect(host.inFlightTaskIds()).toContain(task.taskId); expect(ticket.released).toBe(false); }
+    stage = 'final physical drain';
     release.resolve(); await host.drain();
+    stage = 'cold terminal verification';
     const snapshot = (await cold())!;
     console.log('CANCELLATION_REAL_WATCHDOG_LEASE_ORDER', { first, status: snapshot.status, events: snapshot.events.map(event => event.type),
       decisions: await Promise.all(decide.mock.results.map(result => result.value)), aborts, models, released: ticket.released });
