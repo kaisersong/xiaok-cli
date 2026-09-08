@@ -1,0 +1,9 @@
+{
+  "driverVersion": "0.23.2",
+  "capturedAt": "2026-09-04",
+  "sessionEndedResult": "session 'mcp-59792-9c0e1f' has ended; Call start_session with this id to revive it before issuing further actions, or use a new session id.",
+  "sessionEndedException": "MCP error -32603: session 'mcp-59792-9c0e1f' has ended; Call start_session with this id to revive it before issuing further actions, or use a new session id.",
+  "transportClosedException": "Transport closed",
+  "daemonUnreachableResult": "Internal error: cua-driver daemon not reachable on /Users/example/Library/Caches/cua-driver/cua-driver.sock.",
+  "authorizationBeforeSession": "Permission denied: authorization policy revoked; session 'mcp-59792-9c0e1f' has ended."
+}

@@ -1,14 +1,20 @@
+import { classifyCuaRuntimeFailure, isReplaySafeCuaCall, } from './cua-runtime-failure.js';
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 export class CuaConnectionManager {
     _state = 'idle';
     _connection = null;
     _connectPromise = null;
-    _cancelled = false;
+    _epoch = 0;
+    _revivePromises = new Map();
     _factory;
     _connectTimeoutMs;
     constructor(factory, options = {}) {
         this._factory = factory;
         this._connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+        if (options.initialConnection) {
+            this._connection = options.initialConnection;
+            this._state = 'connected';
+        }
     }
     get state() {
         return this._state;
@@ -16,14 +22,46 @@ export class CuaConnectionManager {
     async callToolResult(name, input, options) {
         options?.signal?.throwIfAborted();
         try {
-            // Initialization is shared. A caller must not cancel a sibling's startup.
-            const connection = await this._ensureConnected();
+            const epoch = this._epoch;
+            const connection = await this._ensureConnected(epoch);
             options?.signal?.throwIfAborted();
-            const result = await (options
-                ? connection.callToolResult(name, input, options)
-                : connection.callToolResult(name, input));
+            this._assertEpoch(epoch);
+            const first = await invoke(connection, name, input, options);
             options?.signal?.throwIfAborted();
-            return result;
+            const failure = classifyCuaRuntimeFailure(first.ok ? first.result : first.error);
+            if (!failure || failure.kind === 'authorization_denied') {
+                return unwrap(first);
+            }
+            let recoveredConnection = connection;
+            if (failure.kind === 'session_ended') {
+                const revive = await this._reviveSession(connection, input, epoch);
+                options?.signal?.throwIfAborted();
+                this._assertEpoch(epoch);
+                const reviveFailure = classifyCuaRuntimeFailure(revive.ok ? revive.result : revive.error);
+                if (reviveFailure?.kind === 'authorization_denied')
+                    return unwrap(revive);
+                if (!revive.ok || revive.result.isError) {
+                    recoveredConnection = await this._replaceConnection(connection, epoch);
+                }
+                else if (this._connection !== connection) {
+                    recoveredConnection = await this._ensureConnected(epoch);
+                }
+            }
+            else {
+                recoveredConnection = await this._replaceConnection(connection, epoch);
+            }
+            options?.signal?.throwIfAborted();
+            this._assertEpoch(epoch);
+            if (!isReplaySafeCuaCall(name, input)) {
+                throw new CuaConnectionReobserveRequiredError();
+            }
+            const retry = await invoke(recoveredConnection, name, input, options);
+            options?.signal?.throwIfAborted();
+            const retryFailure = classifyCuaRuntimeFailure(retry.ok ? retry.result : retry.error);
+            if (retryFailure && retryFailure.kind !== 'authorization_denied') {
+                this._invalidateConnection(recoveredConnection);
+            }
+            return unwrap(retry);
         }
         catch (error) {
             options?.signal?.throwIfAborted();
@@ -31,10 +69,11 @@ export class CuaConnectionManager {
         }
     }
     async dispose() {
+        this._epoch += 1;
         if (this._state === 'idle')
             return;
         if (this._state === 'connecting') {
-            this._cancelled = true;
+            this._state = 'closing';
             try {
                 await this._connectPromise;
             }
@@ -63,10 +102,11 @@ export class CuaConnectionManager {
             this._connection = null;
         }
         this._connectPromise = null;
-        this._cancelled = false;
+        this._revivePromises.clear();
         this._state = 'idle';
     }
-    async _ensureConnected() {
+    async _ensureConnected(epoch) {
+        this._assertEpoch(epoch);
         if (this._state === 'connected' && this._connection) {
             return this._connection;
         }
@@ -74,11 +114,10 @@ export class CuaConnectionManager {
             return this._connectPromise;
         }
         this._state = 'connecting';
-        this._cancelled = false;
         this._connectPromise = this._doConnect();
         try {
             const connection = await this._connectPromise;
-            if (this._cancelled) {
+            if (epoch !== this._epoch) {
                 connection.dispose();
                 throw new Error('CUA connection cancelled during dispose');
             }
@@ -87,7 +126,7 @@ export class CuaConnectionManager {
             return connection;
         }
         catch (error) {
-            if (this._cancelled) {
+            if (epoch !== this._epoch) {
                 this._state = 'idle';
             }
             else {
@@ -99,18 +138,112 @@ export class CuaConnectionManager {
     }
     async _doConnect() {
         return new Promise((resolve, reject) => {
+            let settled = false;
             const timer = setTimeout(() => {
+                settled = true;
                 reject(new Error(`CUA connection timeout after ${this._connectTimeoutMs}ms`));
             }, this._connectTimeoutMs);
             this._factory()
                 .then((connection) => {
+                if (settled) {
+                    connection.dispose();
+                    return;
+                }
+                settled = true;
                 clearTimeout(timer);
                 resolve(connection);
             })
                 .catch((error) => {
+                if (settled)
+                    return;
+                settled = true;
                 clearTimeout(timer);
                 reject(error);
             });
         });
+    }
+    async _reviveSession(connection, originalInput, epoch) {
+        this._assertEpoch(epoch);
+        const session = normalizeSessionLabel(originalInput.session);
+        const key = session ?? '<implicit>';
+        const existing = this._revivePromises.get(key);
+        if (existing)
+            return existing;
+        const promise = invoke(connection, 'start_session', session ? { session } : {});
+        this._revivePromises.set(key, promise);
+        try {
+            return await promise;
+        }
+        finally {
+            if (this._revivePromises.get(key) === promise)
+                this._revivePromises.delete(key);
+        }
+    }
+    async _replaceConnection(connection, epoch) {
+        this._assertEpoch(epoch);
+        this._invalidateConnection(connection);
+        try {
+            return await this._ensureConnected(epoch);
+        }
+        catch (error) {
+            if (epoch !== this._epoch)
+                throw error;
+            throw new CuaConnectionRecoveryFailedError(error);
+        }
+    }
+    _invalidateConnection(connection) {
+        if (this._connection !== connection)
+            return false;
+        try {
+            connection.dispose();
+        }
+        catch {
+            // Best effort; the replacement must not retain the dead generation.
+        }
+        this._connection = null;
+        this._connectPromise = null;
+        this._revivePromises.clear();
+        this._state = 'idle';
+        return true;
+    }
+    _assertEpoch(epoch) {
+        if (epoch !== this._epoch) {
+            throw new Error('CUA connection recovery cancelled because the manager was disposed');
+        }
+    }
+}
+async function invoke(connection, name, input, options) {
+    try {
+        return { ok: true, result: await (options ? connection.callToolResult(name, input, options) : connection.callToolResult(name, input)) };
+    }
+    catch (error) {
+        return { ok: false, error };
+    }
+}
+function unwrap(outcome) {
+    if (outcome.ok)
+        return outcome.result;
+    throw outcome.error;
+}
+function normalizeSessionLabel(value) {
+    if (typeof value !== 'string')
+        return null;
+    const session = value.trim();
+    if (!session || session.length > 128 || /[\u0000-\u001f\u007f]/.test(session))
+        return null;
+    return session;
+}
+export class CuaConnectionReobserveRequiredError extends Error {
+    code = 'COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED';
+    constructor() {
+        super('Computer Use connection recovered; re-observe before retrying the action');
+        this.name = 'CuaConnectionReobserveRequiredError';
+    }
+}
+export class CuaConnectionRecoveryFailedError extends Error {
+    code = 'COMPUTER_USE_CONNECTION_RECOVERY_FAILED';
+    constructor(cause) {
+        super('Computer Use connection recovery failed', { cause });
+        this.name = 'CuaConnectionRecoveryFailedError';
     }
 }

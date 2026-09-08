@@ -908,28 +908,40 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let computerUsePreference = loadComputerUsePreference(computerUsePreferencePath);
   const computerUseAppIdentity = options.computerUseAppIdentity ?? resolveComputerUseAppIdentity();
   let computerUseBackend: ComputerUseBackend | null = null;
-  let computerUseUnavailableError: ComputerUseUnavailableError = computerUsePreference.lastFailureCode === 'COMPUTER_USE_DISABLED_BY_USER'
-    ? buildComputerUseDisabledUnavailableError()
-    : buildComputerUseNeedsEnablementError();
-
-  registry.registerTool(createComputerUseTool({
-    getUnavailableError: () => computerUseBackend ? null : computerUseUnavailableError,
-    onRecoverableError: (error) => {
-      markComputerUseRecoverableFailure(error);
-    },
-    callToolResult: (name, input, options) => {
-      options?.signal?.throwIfAborted();
-      if (!computerUseBackend) {
-        return Promise.resolve({
-          text: computerUseUnavailableError.message,
-          images: [],
-          isError: true,
-          summary: computerUseUnavailableError.code,
-        });
+  let computerUseLifecycleEpoch = 0;
+  let computerUseActivation: {
+    key: string;
+    promise: Promise<PluginMcpServerState[]>;
+  } | null = null;
+  let computerUseUnavailableError: ComputerUseUnavailableError = process.platform !== 'darwin'
+    ? {
+        code: 'COMPUTER_USE_WRAPPER_NOT_READY',
+        message: 'Computer Use / CUA 仅支持 macOS。',
       }
-      return computerUseBackend.callToolResult(name, input, options);
-    },
-  }));
+    : computerUsePreference.lastFailureCode === 'COMPUTER_USE_DISABLED_BY_USER'
+      ? buildComputerUseDisabledUnavailableError()
+      : buildComputerUseNeedsEnablementError();
+
+  if (process.platform === 'darwin') {
+    registry.registerTool(createComputerUseTool({
+      getUnavailableError: () => computerUseBackend ? null : computerUseUnavailableError,
+      onRecoverableError: (error) => {
+        markComputerUseRecoverableFailure(error);
+      },
+      callToolResult: (name, input, options) => {
+        options?.signal?.throwIfAborted();
+        if (!computerUseBackend) {
+          return Promise.resolve({
+            text: computerUseUnavailableError.message,
+            images: [],
+            isError: true,
+            summary: computerUseUnavailableError.code,
+          });
+        }
+        return computerUseBackend.callToolResult(name, input, options);
+      },
+    }));
+  }
 
   const findPluginDependency = (pluginName: string, dependencyId: string) =>
     pluginDependencies.find((entry) => entry.pluginName === pluginName && entry.dependency.id === dependencyId);
@@ -1033,6 +1045,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   function markComputerUseRecoverableFailure(error: ComputerUseUnavailableError): void {
+    computerUseLifecycleEpoch += 1;
     disposePluginMcpServers((server) => server.name === 'cua-driver' && server.pluginName === 'cua-computer-use');
     computerUseBackend = null;
     computerUseUnavailableError = error;
@@ -1057,8 +1070,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     });
   }
 
-  const reconnectPluginMcpServers = async (
+  const performReconnectPluginMcpServers = async (
     options: { userInitiated?: boolean; targetServerName?: string; autoConnectComputerUse?: boolean } = {},
+    computerUseActivationEpoch?: number,
   ): Promise<PluginMcpServerState[]> => {
     const matchesTarget = (server: { name: string; pluginName: string }) =>
       !options.targetServerName || server.name === options.targetServerName;
@@ -1106,6 +1120,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               connected: false,
               enabled: false,
               lastError: '等待用户点击连接，避免自动触发 macOS 权限弹窗',
+            });
+            continue;
+          }
+          if (server.name === 'cua-driver' && process.platform !== 'darwin') {
+            computerUseUnavailableError = {
+              code: 'COMPUTER_USE_WRAPPER_NOT_READY',
+              message: 'Computer Use / CUA 仅支持 macOS。',
+            };
+            pluginMcpServers.push({
+              name: server.name,
+              pluginName: plugin.name,
+              toolCount: 0,
+              connected: false,
+              enabled: false,
+              lastError: computerUseUnavailableError.message,
             });
             continue;
           }
@@ -1175,6 +1204,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               options?.signal?.throwIfAborted();
               return result.text;
             };
+            let disposeConnectedServer = () => connection.dispose();
             if (server.name === 'slide-renderer' || server.name === 'report-renderer') {
               reservedServerHandles.set(server.name, {
                 listOperations: async () => schemas.map((schema) => schema.name),
@@ -1193,7 +1223,69 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                 connection.dispose();
                 throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
               }
-              computerUseBackend = { callToolResult };
+              if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
+                connection.dispose();
+                connectionRef = null;
+                continue;
+              }
+
+              const createReplacementConnection = async () => {
+                const replacement = await createMcpClientConnection(server.name, {
+                  type: 'stdio',
+                  command,
+                  args: launch.args,
+                  env: runtimeEnv,
+                  timeout: server.timeout,
+                  protocol: server.protocol,
+                }, {
+                  cwd: plugin.rootDir,
+                  clientName: 'xiaok-desktop',
+                });
+                try {
+                  const replacementSchemas = (await replacement.client.listTools(
+                    undefined,
+                    { timeout: catalogTimeout },
+                  )).tools as McpToolSchema[];
+                  const replacementCallToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) =>
+                    normalizeMcpRuntimeToolResult(await callMcpToolWithSignal(replacement.client,
+                      { name, arguments: input },
+                      { timeout: callTimeout, signal: options?.signal },
+                    ));
+                  const replacementReadiness = await runCuaMcpReadinessSmoke({
+                    schemas: replacementSchemas,
+                    callToolResult: replacementCallToolResult,
+                  });
+                  if (!replacementReadiness.ready) {
+                    throw new Error(`CUA MCP readiness failed: ${replacementReadiness.code}`);
+                  }
+                  return {
+                    callToolResult: replacementCallToolResult,
+                    dispose: () => replacement.dispose(),
+                  };
+                } catch (error) {
+                  replacement.dispose();
+                  throw error;
+                }
+              };
+
+              const { CuaConnectionManager } = await import('../../src/platform/mcp/cua-connection-manager.js');
+              const manager = new CuaConnectionManager(createReplacementConnection, {
+                initialConnection: {
+                  callToolResult,
+                  dispose: () => connection.dispose(),
+                },
+              });
+              if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
+                await manager.dispose();
+                connectionRef = null;
+                continue;
+              }
+
+              computerUseBackend = {
+                callToolResult: (name, input, options) => manager.callToolResult(name, input, options),
+              };
+              disposeConnectedServer = () => { void manager.dispose(); };
+              connectionRef = null;
               if (options.userInitiated || options.autoConnectComputerUse) {
                 recordComputerUseReady(options.userInitiated ? 'user_enable' : 'auto_recovery');
               }
@@ -1248,7 +1340,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                   computerUseBackend = null;
                   computerUseUnavailableError = buildComputerUseNeedsEnablementError();
                 }
-                connection.dispose();
+                disposeConnectedServer();
               },
             });
             pluginMcpServers.push({
@@ -1265,6 +1357,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             const combinedDetail = stderrTail ? `${baseMessage}\n${stderrTail}` : baseMessage;
             const errorDetail = classifyMcpStartupError(combinedDetail, resolvedCommand);
             if (server.name === 'cua-driver') {
+              if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
+                continue;
+              }
               computerUseBackend = null;
               computerUseUnavailableError = mapComputerUseStartupError(e);
               if (options.userInitiated || options.autoConnectComputerUse) {
@@ -1288,6 +1383,28 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       // Plugin loading failed — non-fatal
     }
     return pluginMcpServers;
+  };
+
+  const reconnectPluginMcpServers = (
+    options: { userInitiated?: boolean; targetServerName?: string; autoConnectComputerUse?: boolean } = {},
+  ): Promise<PluginMcpServerState[]> => {
+    const includesComputerUse = !options.targetServerName || options.targetServerName === 'cua-driver';
+    if (!includesComputerUse) return performReconnectPluginMcpServers(options);
+
+    const key = JSON.stringify({
+      targetServerName: options.targetServerName ?? '*',
+      userInitiated: options.userInitiated === true,
+      autoConnectComputerUse: options.autoConnectComputerUse === true,
+    });
+    if (computerUseActivation?.key === key) return computerUseActivation.promise;
+
+    const epoch = ++computerUseLifecycleEpoch;
+    const promise = performReconnectPluginMcpServers(options, epoch);
+    computerUseActivation = { key, promise };
+    void promise.finally(() => {
+      if (computerUseActivation?.promise === promise) computerUseActivation = null;
+    }).catch(() => {});
+    return promise;
   };
 
   const getComputerUseCapabilityStatus = (): { state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string } => {
@@ -2269,7 +2386,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         userInitiated: false,
         autoConnectComputerUse: autoConnectDecision.eligible,
       });
-      return { dispose: disposePluginMcpServers };
+      return {
+        dispose: () => {
+          computerUseLifecycleEpoch += 1;
+          disposePluginMcpServers();
+        },
+      };
     },
     async registerDeferredPythonMcpTools(): Promise<PluginMcpServerState[]> {
       const names = [...deferredPythonServerNames];
@@ -2323,6 +2445,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return getComputerUseCapabilityStatus();
     },
     async disableComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      computerUseLifecycleEpoch += 1;
       disposePluginMcpServers((server) => server.name === 'cua-driver');
       for (let index = pluginMcpServers.length - 1; index >= 0; index -= 1) {
         if (pluginMcpServers[index].name === 'cua-driver') pluginMcpServers.splice(index, 1);

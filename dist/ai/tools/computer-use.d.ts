@@ -12,5 +12,10 @@ export interface ComputerUseUnavailableError {
         type: string;
         label: string;
     };
+    waitForUserAction?: boolean;
+    retryable?: boolean;
+    notifyBackend?: boolean;
+    remember?: boolean;
+    nextAction?: string;
 }
 export declare function createComputerUseTool(backend: ComputerUseBackend): Tool;
