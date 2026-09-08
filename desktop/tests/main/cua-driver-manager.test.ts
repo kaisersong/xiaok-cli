@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   buildCuaDriverDaemonLaunch,
@@ -9,6 +11,25 @@ import {
 } from '../../electron/cua-driver-manager.js';
 
 describe('CUA driver manager', () => {
+  it('keeps the Desktop CUA manager behind a macOS dynamic-import boundary', () => {
+    const source = readFileSync(join(process.cwd(), 'electron', 'desktop-services.ts'), 'utf8');
+    expect(source).not.toMatch(/^import\s+.*cua-connection-manager/m);
+
+    const dynamicImport = source.indexOf("await import('../../src/platform/mcp/cua-connection-manager.js')");
+    const platformGate = source.lastIndexOf("process.platform !== 'darwin'", dynamicImport);
+    const connectionSetup = source.lastIndexOf('let connectionRef: McpClientConnection | null = null', dynamicImport);
+    const wrapperRegistration = source.indexOf('registry.registerTool(createComputerUseTool');
+    const wrapperPlatformGate = source.lastIndexOf("if (process.platform === 'darwin')", wrapperRegistration);
+    expect(dynamicImport).toBeGreaterThan(-1);
+    expect(platformGate).toBeGreaterThan(-1);
+    expect(platformGate).toBeLessThan(dynamicImport);
+    expect(connectionSetup).toBeGreaterThan(-1);
+    expect(platformGate).toBeLessThan(connectionSetup);
+    expect(wrapperRegistration).toBeGreaterThan(-1);
+    expect(wrapperPlatformGate).toBeGreaterThan(-1);
+    expect(wrapperPlatformGate).toBeLessThan(wrapperRegistration);
+  });
+
   it('launches the daemon through the exact CuaDriver.app path instead of app-name resolution', () => {
     expect(buildCuaDriverDaemonLaunch()).toEqual({
       command: 'open',

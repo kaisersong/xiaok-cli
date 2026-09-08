@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createComputerUseTool } from '../../../src/ai/tools/computer-use.js';
+import { CuaConnectionReobserveRequiredError } from '../../../src/platform/mcp/cua-connection-manager.js';
+
+const cuaFailureFixtures = JSON.parse(readFileSync(
+  join(process.cwd(), 'tests', 'fixtures', 'cua-runtime-failure-messages.json'),
+  'utf8',
+)) as { sessionEndedResult: string };
 
 describe('createComputerUseTool', () => {
   it('returns a recoverable enablement error instead of disappearing when backend is not ready', async () => {
@@ -93,6 +101,70 @@ describe('createComputerUseTool', () => {
       userAction: { type: 'reconnect_computer_use', label: '重新连接' },
     });
     expect(onRecoverableError).toHaveBeenCalledOnce();
+  });
+
+  it('sanitizes an ended CUA session when a non-managed backend cannot revive it', async () => {
+    const onRecoverableError = vi.fn();
+    const tool = createComputerUseTool({
+      onRecoverableError,
+      callToolResult: async () => ({
+        text: cuaFailureFixtures.sessionEndedResult,
+        images: [],
+        isError: true,
+        summary: cuaFailureFixtures.sessionEndedResult,
+      }),
+    });
+
+    const raw = await tool.execute({ action: 'list_windows' });
+    const result = JSON.parse(raw);
+
+    expect(raw).not.toContain('mcp-59792');
+    expect(raw).not.toContain('start_session');
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
+      retryable: true,
+      waitForUserAction: true,
+      userAction: { type: 'reconnect_computer_use', label: '重新连接' },
+    });
+    expect(onRecoverableError).toHaveBeenCalledOnce();
+  });
+
+  it('returns reobserve-required without marking the recovered backend failed or running capture_after', async () => {
+    const onRecoverableError = vi.fn();
+    const calls: string[] = [];
+    const tool = createComputerUseTool({
+      onRecoverableError,
+      callToolResult: async (name) => {
+        calls.push(name);
+        throw new CuaConnectionReobserveRequiredError();
+      },
+    });
+
+    const first = JSON.parse(await tool.execute({
+      action: 'click',
+      x: 10,
+      y: 20,
+      capture_after: true,
+    }));
+    const second = JSON.parse(await tool.execute({
+      action: 'click',
+      x: 10,
+      y: 20,
+      capture_after: true,
+    }));
+
+    expect(first).toEqual({
+      ok: false,
+      code: 'COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED',
+      message: 'Computer Use 连接已恢复。请先重新观察当前界面，再决定是否重试刚才的操作。',
+      retryable: true,
+      waitForUserAction: false,
+      nextAction: 'observe',
+    });
+    expect(second).toEqual(first);
+    expect(calls).toEqual(['click', 'click']);
+    expect(onRecoverableError).not.toHaveBeenCalled();
   });
 
   it('wraps CUA observation results without dropping image or structured content', async () => {

@@ -5,6 +5,7 @@ import {
   InvalidComputerUseInputError,
   translateCuaAction,
 } from '../../platform/computer-use/cua-action-contract.js';
+import { classifyCuaRuntimeFailure } from '../../platform/mcp/cua-runtime-failure.js';
 
 export interface ComputerUseBackend {
   getUnavailableError?(): ComputerUseUnavailableError | null;
@@ -16,6 +17,11 @@ export interface ComputerUseUnavailableError {
   code: string;
   message: string;
   userAction?: { type: string; label: string };
+  waitForUserAction?: boolean;
+  retryable?: boolean;
+  notifyBackend?: boolean;
+  remember?: boolean;
+  nextAction?: string;
 }
 
 /**
@@ -48,7 +54,7 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
     permission: 'write',
     definition: {
       name: 'xiaok_computer_use',
-      description: 'Observe and operate local macOS apps through CUA Driver with Xiaok safety checks. If this tool returns any COMPUTER_USE_* error, stop using Computer Use and wait for the user action; do not fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.',
+      description: 'Observe and operate local macOS apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED has waitForUserAction=false, first observe the current UI again, then decide whether the interrupted mutation still needs to be retried. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -82,23 +88,27 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
     },
     async execute(input) {
       const returnRecoverableError = (error: ComputerUseUnavailableError, notifyBackend = false): string => {
-        if (notifyBackend) {
+        if (notifyBackend && error.notifyBackend !== false) {
           try {
             backend.onRecoverableError?.(error);
           } catch {
             // Recovery state updates are best effort; the tool response must still be safe.
           }
         }
-        const repeated = repeatedRecoverableErrors.has(error.code);
-        repeatedRecoverableErrors.add(error.code);
+        const remember = error.remember !== false;
+        const repeated = remember && repeatedRecoverableErrors.has(error.code);
+        if (remember) repeatedRecoverableErrors.add(error.code);
+        const retryable = error.retryable ?? !repeated;
+        const waitForUserAction = error.waitForUserAction ?? true;
         return JSON.stringify({
           ok: false,
           code: error.code,
           message: error.message,
-          retryable: !repeated,
-          waitForUserAction: true,
+          retryable,
+          waitForUserAction,
           ...(repeated ? { repeated: true } : {}),
-          ...(!repeated && error.userAction ? { userAction: error.userAction } : {}),
+          ...(!repeated && waitForUserAction && error.userAction ? { userAction: error.userAction } : {}),
+          ...(error.nextAction ? { nextAction: error.nextAction } : {}),
         });
       };
 
@@ -119,7 +129,7 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       try {
         prepared = await buildActionInput(backend, action, input);
       } catch (error) {
-        const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
+        const recoverable = classifyRecoverableComputerUseError(error);
         if (recoverable) return returnRecoverableError(recoverable, true);
         throw error;
       }
@@ -143,12 +153,12 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       try {
         result = await backend.callToolResult(translated.operation, translated.input);
       } catch (error) {
-        const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
+        const recoverable = classifyRecoverableComputerUseError(error);
         if (recoverable) return returnRecoverableError(recoverable, true);
         throw error;
       }
       if (result.isError) {
-        const recoverable = classifyRecoverableComputerUseError(result.summary || result.text);
+        const recoverable = classifyRecoverableComputerUseError(result);
         if (recoverable) return returnRecoverableError(recoverable, true);
         return `Error: ${result.summary || result.text || 'computer-use action failed'}`;
       }
@@ -171,12 +181,19 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         // public `capture` action, so both paths force include_screenshot and share
         // one allowed-field set (design §6.1).
         const captureTranslated = translateCuaAction('capture', captureInput);
-        const capture = await backend.callToolResult(
-          captureTranslated.operation,
-          captureTranslated.input,
-        );
+        let capture: McpRuntimeToolResult;
+        try {
+          capture = await backend.callToolResult(
+            captureTranslated.operation,
+            captureTranslated.input,
+          );
+        } catch (error) {
+          const recoverable = classifyRecoverableComputerUseError(error);
+          if (recoverable) return returnRecoverableError(recoverable, true);
+          throw error;
+        }
         if (capture.isError) {
-          const recoverable = classifyRecoverableComputerUseError(capture.summary || capture.text);
+          const recoverable = classifyRecoverableComputerUseError(capture);
           if (recoverable) return returnRecoverableError(recoverable, true);
         }
         response.captureAfter = sanitizeToolResult(capture);
@@ -187,15 +204,24 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
   };
 }
 
-function classifyRecoverableComputerUseError(message: string): ComputerUseUnavailableError | null {
-  const normalized = message.toLowerCase();
-  const mentionsCuaSocket = normalized.includes('cua-driver.sock');
-  const daemonUnreachable = normalized.includes('cua-driver daemon not reachable')
-    || (mentionsCuaSocket && normalized.includes('daemon not reachable'))
-    || (mentionsCuaSocket && normalized.includes('connect enoent'))
-    || (mentionsCuaSocket && normalized.includes('econnrefused'));
+function classifyRecoverableComputerUseError(value: unknown): ComputerUseUnavailableError | null {
+  const code = readErrorCode(value);
+  if (code === 'COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED') {
+    return {
+      code,
+      message: 'Computer Use 连接已恢复。请先重新观察当前界面，再决定是否重试刚才的操作。',
+      waitForUserAction: false,
+      retryable: true,
+      notifyBackend: false,
+      remember: false,
+      nextAction: 'observe',
+    };
+  }
 
-  if (!daemonUnreachable) return null;
+  const runtimeFailure = classifyCuaRuntimeFailure(value);
+  if (!runtimeFailure || runtimeFailure.kind === 'authorization_denied') {
+    if (code !== 'COMPUTER_USE_CONNECTION_RECOVERY_FAILED') return null;
+  }
 
   return {
     code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT',
@@ -204,8 +230,10 @@ function classifyRecoverableComputerUseError(message: string): ComputerUseUnavai
   };
 }
 
-function formatUnknownError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function readErrorCode(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const code = (value as { code?: unknown }).code;
+  return typeof code === 'string' ? code : null;
 }
 
 function checkBlockedInput(action: string, input: Record<string, unknown>): string | null {

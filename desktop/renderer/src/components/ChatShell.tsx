@@ -19,6 +19,7 @@ import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-di
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
 import { getStreamingRenderDelay } from '../lib/streaming-render-policy';
+import { parseComputerUseRecoverableAction } from '../lib/computer-use-recoverable-action';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
@@ -198,29 +199,6 @@ function buildResultCardMessage(input: {
     result: input.result,
     generatedFiles: input.generatedFiles,
   };
-}
-
-function parseComputerUseRecoverableAction(response: string, cuFallback: string): ComputerUseActionData | null {
-  try {
-    const parsed = JSON.parse(response) as {
-      ok?: unknown;
-      code?: unknown;
-      message?: unknown;
-      userAction?: { type?: unknown; label?: unknown };
-    };
-    if (parsed.ok !== false || typeof parsed.code !== 'string' || !parsed.code.startsWith('COMPUTER_USE_')) {
-      return null;
-    }
-    return {
-      code: parsed.code,
-      message: typeof parsed.message === 'string' ? parsed.message : cuFallback,
-      ...(typeof parsed.userAction?.type === 'string' ? { actionType: parsed.userAction.type } : {}),
-      ...(typeof parsed.userAction?.label === 'string' ? { label: parsed.userAction.label } : {}),
-      status: 'idle',
-    };
-  } catch {
-    return null;
-  }
 }
 
 function isComputerUseSettingsAction(actionType: string | undefined): boolean {

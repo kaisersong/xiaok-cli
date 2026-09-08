@@ -1,9 +1,27 @@
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+
 let buffer = '';
 let transport = null;
 let toolCallCount = 0;
+let sessionRevived = false;
 
 const failAfterFirstToolCall = process.env.CUA_MCP_FAIL_AFTER_FIRST_TOOL_CALL === '1';
+const endSessionAfterFirstToolCall = process.env.CUA_MCP_END_SESSION_AFTER_FIRST_TOOL_CALL === '1';
+const exitOnceMarker = process.env.CUA_MCP_EXIT_ONCE_MARKER || '';
+const callLogPath = process.env.CUA_MCP_CALL_LOG_PATH || '';
+const toolCallDelayMs = Number(process.env.CUA_MCP_DELAY_TOOL_CALL_MS || 0);
 const staleDaemonError = 'Internal error: cua-driver daemon not reachable on /Users/song/Library/Caches/cua-driver/cua-driver.sock. Start it with `open -n -g -a CuaDriver --args serve` and retry.';
+const endedSessionError = process.env.CUA_MCP_SESSION_ENDED_MESSAGE
+  || "session 'mcp-fixture-ended' has ended; Call start_session with this id to revive it before issuing further actions, or use a new session id.";
+
+function logEvent(event) {
+  if (!callLogPath) return;
+  appendFileSync(callLogPath, `${JSON.stringify({ ...event, pid: process.pid })}\n`, 'utf8');
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function encodeFramed(message) {
   const payload = JSON.stringify(message);
@@ -50,10 +68,11 @@ function readLineMessages(input) {
   return { messages, rest };
 }
 
-function respond(message) {
+async function respond(message) {
   const encode = transport === 'line' ? encodeLine : encodeFramed;
 
   if (message.method === 'initialize') {
+    logEvent({ event: 'initialize' });
     process.stdout.write(encode({
       jsonrpc: '2.0',
       id: message.id,
@@ -67,6 +86,7 @@ function respond(message) {
   }
 
   if (message.method === 'tools/list') {
+    logEvent({ event: 'tools_list' });
     process.stdout.write(encode({
       jsonrpc: '2.0',
       id: message.id,
@@ -85,6 +105,35 @@ function respond(message) {
   if (message.method === 'tools/call') {
     const name = message.params?.name;
     toolCallCount += 1;
+    logEvent({ event: 'tool_call', name, input: message.params?.arguments ?? {} });
+    if (toolCallDelayMs > 0) await delay(toolCallDelayMs);
+    if (exitOnceMarker && toolCallCount > 1 && !existsSync(exitOnceMarker)) {
+      writeFileSync(exitOnceMarker, String(process.pid), 'utf8');
+      process.exit(0);
+    }
+    if (endSessionAfterFirstToolCall && toolCallCount > 1 && !sessionRevived && name !== 'start_session') {
+      process.stdout.write(encode({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          content: [{ type: 'text', text: endedSessionError }],
+          isError: true,
+        },
+      }));
+      return;
+    }
+    if (name === 'start_session') {
+      sessionRevived = true;
+      process.stdout.write(encode({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          content: [{ type: 'text', text: 'session revived' }],
+          structuredContent: { session: 'fixture-session', status: 'active' },
+        },
+      }));
+      return;
+    }
     if (failAfterFirstToolCall && toolCallCount > 1) {
       process.stdout.write(encode({
         jsonrpc: '2.0',
@@ -123,13 +172,13 @@ process.stdin.on('data', (chunk) => {
   if (transport === 'framed') {
     const parsed = readFramedMessages(buffer);
     buffer = parsed.rest;
-    parsed.messages.forEach(respond);
+    parsed.messages.forEach((message) => { void respond(message); });
     return;
   }
 
   if (transport === 'line') {
     const parsed = readLineMessages(buffer);
     buffer = parsed.rest;
-    parsed.messages.forEach(respond);
+    parsed.messages.forEach((message) => { void respond(message); });
   }
 });
