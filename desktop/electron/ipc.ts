@@ -918,7 +918,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:saveModelConfig', async (_event, input) => {
     log('info', 'saveModelConfig', { providerId: input?.providerId });
-    const r = await services.saveModelConfig(input);
+    const r = await services.saveModelConfig(input, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
     log('info', 'saveModelConfig ok');
     return r;
   });
@@ -1020,7 +1020,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:createTask', async (_event, input) => {
     log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
-    const r = await services.createTask(sanitizeTaskCreateInput(input));
+    const r = await services.createTask(sanitizeTaskCreateInput(input), options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
     log('info', 'createTask ok', { taskId: r?.taskId });
     return r;
   });
@@ -1072,13 +1072,13 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
     log('info', 'answerQuestion', { taskId: input?.taskId });
-    const r = await services.answerQuestion(input);
+    const r = await services.answerQuestion(input, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
     log('info', 'answerQuestion ok');
     return r;
   });
   ipcMain.handle('desktop:cancelTask', async (_event, input) => {
     log('info', 'cancelTask', { taskId: input?.taskId });
-    await services.cancelTask(input.taskId);
+    await services.cancelTask(input.taskId, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
     log('info', 'cancelTask ok');
   });
   ipcMain.handle('desktop:getActiveTask', async () => {
@@ -1267,7 +1267,7 @@ export async function registerDesktopIpc(
       prompt: input.prompt,
       filePaths: expanded,
       ...(context ? { context } : {}),
-    });
+    }, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });

@@ -140,6 +140,9 @@ export type DesktopTaskEvent = {
     type: 'needs_user';
     question: NeedsUserQuestion;
 } | {
+    type: 'question_resolved';
+    questionId: string;
+} | {
     type: 'task_cancelled';
     taskId: string;
     reason: string;

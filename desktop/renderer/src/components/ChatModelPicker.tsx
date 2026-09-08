@@ -63,7 +63,8 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
     ? config?.providers.find((p) => p.id === currentModel.provider) ?? null
     : null;
 
-  const buttonLabel = currentModel?.label ?? t.chatInput.modelPicker.empty;
+  const modelLabel = (model: DesktopModelEntryView) => model.id === 'local-codex' ? t.localCodex : model.label;
+  const buttonLabel = currentModel ? modelLabel(currentModel) : t.chatInput.modelPicker.empty;
 
   const handleOpen = () => {
     if (disabled || saving) return;
@@ -162,7 +163,7 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
                     color: active ? 'var(--c-text-heading)' : 'var(--c-text-secondary)',
                   }}
                 >
-                  <span className="truncate">{model.label}</span>
+                  <span className="truncate">{modelLabel(model)}</span>
                   {active && (
                     <span
                       className="ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px]"

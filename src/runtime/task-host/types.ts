@@ -126,6 +126,7 @@ export type DesktopTaskEvent =
   | { type: 'progress'; message: string; stage?: string; eventId: string }
   | { type: 'assistant_delta'; delta: string; eventId: string }
   | { type: 'needs_user'; question: NeedsUserQuestion }
+  | { type: 'question_resolved'; questionId: string }
   | { type: 'task_cancelled'; taskId: string; reason: string; partialText?: string }
   | { type: 'result'; result: TaskResult }
   | { type: 'artifact_recorded'; artifactId: string; kind: string; label: string; filePath: string; previewAvailable: boolean; turnId: string; creator?: string; mimeType?: string }

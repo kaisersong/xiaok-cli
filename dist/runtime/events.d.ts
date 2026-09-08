@@ -90,6 +90,16 @@ export type RuntimeEvent = {
     sessionId: string;
     turnId: string;
     approvalId: string;
+    prompt?: string;
+    choices?: Array<{
+        id: string;
+        label: string;
+    }>;
+} | {
+    type: 'approval_resolved';
+    sessionId: string;
+    turnId: string;
+    approvalId: string;
 } | {
     type: 'tool_started';
     sessionId: string;

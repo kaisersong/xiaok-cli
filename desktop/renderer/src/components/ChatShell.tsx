@@ -267,10 +267,13 @@ export function ChatShell() {
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
   const [agentHistory, setAgentHistory] = useState<{ threadId: string; groupId?: string } | null>(null);
-  const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined);
   const [canvasVisible, setCanvasVisible] = useState(false);
   const sidebarWasCollapsedRef = useRef(false);
   const [thread, setThread] = useState<ThreadRecord | null>(null);
+  // Wait for the bound task before choosing its execution-state subscription.
+  // Native Codex events already arrive through the standard task stream.
+  const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined,
+    thread?.id === taskId && !thread?.currentTaskId?.startsWith('task_codex_'));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'waiting_user' | 'completed' | 'failed'>('idle');
@@ -616,6 +619,11 @@ export function ChatShell() {
             }]);
           }
         }
+        break;
+      }
+      case 'question_resolved': {
+        setCurrentQuestion(question => question?.questionId === event.questionId ? null : question);
+        setStatus('running');
         break;
       }
       case 'needs_user': {

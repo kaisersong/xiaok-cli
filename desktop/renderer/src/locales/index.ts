@@ -6,6 +6,7 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  localCodex: string;
   multiAgent: {
     approvals: { title: string; pending: (count: number) => string; approve: string; deny: string; query: string;
       viewInput: string; nextInput: string; inputLoading: string; inputFailed: string; metadataFailed: string; retryMetadata: string;

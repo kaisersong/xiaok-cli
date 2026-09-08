@@ -595,7 +595,8 @@ export function ChatView({
                       onClick={() => onAnswer(choice.id)}
                       className="rounded-lg px-4 py-2 text-sm bg-[var(--c-accent)] text-white hover:opacity-90"
                     >
-                      {choice.label}
+                      {thread.currentTaskId?.startsWith('task_codex_') && choice.id === 'approve' ? t.multiAgent.approvals.approve
+                        : thread.currentTaskId?.startsWith('task_codex_') && choice.id === 'deny' ? t.multiAgent.approvals.deny : choice.label}
                     </button>
                   ))}
               </>} />

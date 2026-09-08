@@ -2,6 +2,7 @@ import type { LocaleStrings } from "./index";
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  localCodex: "Local Codex",
   multiAgent: {
     approvals: { title: 'Tool approval', pending: count => `${count} pending approvals`, approve: 'Approve this invocation only', deny: 'Deny this invocation', query: 'Query approval operation',
       viewInput: 'View invocation input', nextInput: 'Read next input page', inputLoading: 'Reading input…', inputFailed: 'Input could not be read or verified. Read it again explicitly.',

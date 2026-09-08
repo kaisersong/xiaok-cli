@@ -9,6 +9,20 @@ const empty = (threadId = 't', hasAgentHistory = false): MultiAgentGroupSnapshot
   counts: { total: 0, running: 0, completed: 0, failed: 0, unread: 0 }, hasAgentHistory } as MultiAgentGroupSnapshot);
 afterEach(() => { cleanup(); access.api = undefined; });
 describe('BDD: hook-owned main thread facts survive connection generations only within their scope', () => {
+  it('does not subscribe for a native executor and releases the prior executor subscription', async () => {
+    const api = { subscribeMultiAgents: vi.fn(async input => ({ subscriptionId: input.subscriptionId, snapshot: empty('t') })),
+      unsubscribeMultiAgents: vi.fn(async () => {}) } as unknown as MultiAgentDesktopAPI;
+    access.api = api;
+    const view = renderHook(({ enabled }) => useMultiAgentConnection('t', undefined, enabled), { initialProps: { enabled: false } });
+    expect(api.subscribeMultiAgents).not.toHaveBeenCalled();
+    expect(view.result.current.summary.needsRecovery).toBe(false);
+    view.rerender({ enabled: true });
+    await vi.waitFor(() => expect(view.result.current.summary.phase).toBe('live'));
+    view.rerender({ enabled: false });
+    expect(view.result.current.connection).toBeNull();
+    expect(view.result.current.summary.needsRecovery).toBe(false);
+    await vi.waitFor(() => expect(api.unsubscribeMultiAgents).toHaveBeenCalledOnce());
+  });
   it('U1 Given same thread group change, Then confirmed history survives loading and stale false ACK while old stopped callbacks are ignored', async () => {
     let resolveSecond!: (value: any) => void;
     const subscriptions: Array<{ id: string; receive: (event: MultiAgentTransport) => void }> = [];

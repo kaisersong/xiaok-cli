@@ -5,7 +5,7 @@ import type { MultiAgentConnection } from '../lib/multi-agent-connection';
 const noSubscribe = () => () => {};
 const noSnapshot = () => null;
 
-/** Uses the existing push subscription; never infers model activity from host running. */
+/** Local Codex uses the standard task stream; other tasks use the agent push subscription. */
 export function ChatExecutionStatus({ connection, sourceTaskId }: {
   connection?: MultiAgentConnection | null; sourceTaskId?: string | null;
 }) {
@@ -15,7 +15,8 @@ export function ChatExecutionStatus({ connection, sourceTaskId }: {
   const group = view?.snapshot?.group;
   const root = view?.root;
   let label = t.chatView.executionSyncing;
-  if (state?.phase === 'error' || state?.error || view?.error) label = t.chatView.executionDisconnected;
+  if (sourceTaskId?.startsWith('task_codex_')) label = t.chatView.executionRunning;
+  else if (state?.phase === 'error' || state?.error || view?.error) label = t.chatView.executionDisconnected;
   else if (state?.phase === 'live' && group && !group.historicalOnly && group.groupId === view?.activeGroupId
     && view.threadDeleteState === 'none' && sourceTaskId && root?.sourceTaskId === sourceTaskId) {
     const approval = view.snapshot?.pendingApprovals?.some(item => item.agentId === root.id

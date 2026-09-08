@@ -1,3 +1,5 @@
+import { CodexTaskBridge, LOCAL_CODEX_MODEL } from './codex-task-bridge.js';
+import type { NativeActor } from './codex-native-service.js';
 import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
 import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
@@ -801,6 +803,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
   const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
   const multiAgentWorkspaceId = createHash('sha256').update(multiAgentCwd).digest('hex');
+  const codexTasks = new CodexTaskBridge({ dataRoot: options.dataRoot, profileId: `desktop-user:${multiAgentProfileId}`, cwd: multiAgentCwd, materialRegistry, snapshotStore, admitThread: async threadId => {
+    await multiAgentReady;
+    const revision=multiAgentService?.assertExecutionAdmission(threadId);
+    await prepareMultiAgentThread(threadId);
+    const revalidate=()=>{multiAgentService?.assertExecutionAdmission(threadId,revision);};
+    revalidate(); return revalidate;
+  } });
+  const modelSnapshot = (config: Config): DesktopModelConfigSnapshot => {
+    const snapshot = createModelConfigSnapshot(config);
+    snapshot.providers.push({ id: LOCAL_CODEX_MODEL, label: 'Codex', type: 'custom', protocol: 'openai_responses', apiKeyConfigured: false });
+    snapshot.models.push({ id: LOCAL_CODEX_MODEL, provider: LOCAL_CODEX_MODEL, model: LOCAL_CODEX_MODEL, label: 'Codex', isDefault: codexTasks.selected() });
+    if (codexTasks.selected()) { snapshot.defaultModelId=LOCAL_CODEX_MODEL; snapshot.defaultProvider=LOCAL_CODEX_MODEL; for (const model of snapshot.models) model.isDefault=model.id===LOCAL_CODEX_MODEL; }
+    return snapshot;
+  };
   // Unknown injected runners and every non-local host remain ordinary.
   const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'));
   const multiAgentCatalog = multiAgentStore ? new DesktopToolCatalogBridge({ registry, workspaceId: multiAgentWorkspaceId,
@@ -812,8 +828,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
       actorId: `desktop-user:${multiAgentProfileId}` }),
     onExecutionAuthorizationChanged: snapshot => multiAgentCatalog!.applyExecutionAuthorization(snapshot),
-    stopForWorkspaceExecutionRevocation: () => {
+    stopForWorkspaceExecutionRevocation: async () => {
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
+      await codexTasks.stopForRevocation();
       return goalCoordinator.stopForWorkspaceExecutionRevocation({ requestSource: 'user' });
     },
     onRecoveredHostTerminal: async input => {
@@ -822,6 +839,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await goalCoordinator.handleRecoveredHostTerminal(input);
     },
     beforeThreadDeletion: async threadId => {
+      await codexTasks.stopThread(threadId);
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
       await goalCoordinator.stopForThreadDeletion({ threadId, requestSource: 'user' });
     },
@@ -2157,6 +2175,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   return {
     multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
     async disposeMultiAgent(): Promise<void> {
+      await codexTasks.dispose();
       unsubscribeMultiAgentGoal?.();
       await multiAgentApprovals?.dispose();
       await multiAgentService?.dispose(); multiAgentCatalog?.dispose();
@@ -2627,10 +2646,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       prompt: string;
       filePaths: string[];
       context?: TaskCreateContext;
-    }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+    }, nativeActor?: NativeActor): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+      const nativeSelected=codexTasks.selected();
+      if(nativeSelected) codexTasks.authorize(nativeActor);
       return afterLocalRecovery(async () => {
-        const context = localChatContext(input.context);
-        const permissionRevision = context?.threadId ? multiAgentService?.assertExecutionAdmission(context.threadId) : undefined;
+        const context = nativeSelected ? input.context : localChatContext(input.context);
+        const permissionRevision = !nativeSelected && context?.threadId ? multiAgentService?.assertExecutionAdmission(context.threadId) : undefined;
         mkdirSync(options.dataRoot, { recursive: true });
         const taskId = `task_${Date.now().toString(36)}`;
         const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
@@ -2647,16 +2668,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           }
           // Import failures keep their original skip behavior, but neither a
           // success nor a failure may advance an old submission after revoke.
-          if (context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
+          if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
         }
-        if (context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
-        return goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context });
+        if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
+        return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor) : goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context });
       });
     },
     async getModelConfig() {
-      return createModelConfigSnapshot(await loadConfig());
+      return modelSnapshot(await loadConfig());
     },
-    async saveModelConfig(input: DesktopSaveModelConfigInput) {
+    async saveModelConfig(input: DesktopSaveModelConfigInput, nativeActor?: NativeActor) {
+      if(input.modelId===LOCAL_CODEX_MODEL){
+        if(nativeActor?.requestSource!=='user'||nativeActor.actorId!==`desktop-user:${multiAgentProfileId}`)throw new Error('native_access_denied');
+        codexTasks.select(true);return modelSnapshot(await loadConfig());
+      }
       const config = await loadConfig();
       const providerId = normalizeProviderId(input.providerId);
       ensureProvider(config, providerId, input);
@@ -2688,7 +2713,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
 
       await saveConfig(config);
-      return createModelConfigSnapshot(config);
+      codexTasks.select(false);return modelSnapshot(config);
     },
     async updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput) {
       const config = await loadConfig();
@@ -2890,9 +2915,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       await saveConfig(config);
     },
-    createTask: (input: Parameters<typeof host.createTask>[0]) => afterLocalRecovery(() => goalCoordinator.admitUserTask(
-      multiAgentService ? { ...input, context: localChatContext(input.context) } : input,
-    )),
+    createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
+      if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
+      return afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input));
+    },
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
     createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'>) =>
       withExecutionLane('background', () => afterLocalRecovery(() => goalCoordinator.admitUserTask({
@@ -2936,12 +2962,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     runKSwarmAssignPo,
     runKSwarmReviewSubmission,
     runKSwarmPlanApproved,
-    subscribeTask: host.subscribeTask.bind(host),
-    answerQuestion: host.answerQuestion.bind(host),
-    cancelTask: host.cancelTask.bind(host),
+    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number }) => (codexTasks.owns(taskId)?codexTasks.host:host).subscribeTask(taskId,sinceIndex),
+    answerQuestion: (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => codexTasks.owns(input.taskId)?codexTasks.answer(input,nativeActor):host.answerQuestion(input),
+    cancelTask: (taskId:string, reasonOrActor?:string|NativeActor) => codexTasks.owns(taskId)?codexTasks.cancel(taskId,typeof reasonOrActor==='string'?undefined:reasonOrActor):host.cancelTask(taskId,typeof reasonOrActor==='string'?reasonOrActor:undefined),
     async getActiveTask(): Promise<{ taskId: string } | null> {
       for (const ref of await host.getActiveTasks()) {
-        const snapshot = (await host.recoverTask(ref.taskId)).snapshot;
+        const snapshot = (await (codexTasks.owns(ref.taskId)?codexTasks.host:host).recoverTask(ref.taskId)).snapshot;
         if (snapshot.executionScope?.kind === 'goal_turn') {
           const binding = goalStore.getTaskBinding(ref.taskId);
           if (snapshot.executionScope.origin === 'continuation' || binding?.attachedAt === null) continue;
@@ -2950,7 +2976,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       return null;
     },
-    recoverTask: recoverTaskWithWorkflowArtifacts,
+    recoverTask: (taskId:string) => codexTasks.owns(taskId)?codexTasks.host.recoverTask(taskId):recoverTaskWithWorkflowArtifacts(taskId),
     async recoverStaleTasks(): Promise<void> {
       await multiAgentReady;
       const active = await host.getActiveTasks();
@@ -2962,7 +2988,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             // path would collapse recoverable generation state into failure.
             continue;
           }
-          await host.recoverTask(ref.taskId);
+          await (codexTasks.owns(ref.taskId)?codexTasks.host:host).recoverTask(ref.taskId);
         } catch {
           // Per-task recovery failure must not block desktop startup.
         }

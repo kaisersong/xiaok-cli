@@ -2,6 +2,7 @@ import type { LocaleStrings } from "./index";
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  localCodex: "本地 Codex",
   multiAgent: {
     approvals: { title: '工具审批', pending: count => `${count} 项待审批`, approve: '仅批准本次', deny: '拒绝本次', query: '查询审批操作',
       viewInput: '查看本次参数', nextInput: '读取下一页参数', inputLoading: '正在读取参数…', inputFailed: '参数读取或校验失败，请手动重读。',

@@ -62,6 +62,7 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
       delta: event.delta,
     };
   }
+  if (event.type === 'approval_resolved') return { type: 'question_resolved', questionId: event.approvalId };
   if (event.type === 'approval_required') {
     return {
       type: 'needs_user',
@@ -69,8 +70,8 @@ export function projectRuntimeEventToDesktopEvent(input: ProjectRuntimeEventInpu
         questionId: event.approvalId,
         taskId,
         kind: 'assumption_approval',
-        prompt: '需要用户确认后继续。',
-        choices: [
+        prompt: event.prompt ?? '需要用户确认后继续。',
+        choices: event.choices ?? [
           { id: 'approve', label: '继续' },
           { id: 'deny', label: '暂停' },
         ],

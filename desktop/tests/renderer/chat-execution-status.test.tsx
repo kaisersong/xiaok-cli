@@ -11,6 +11,10 @@ function show(root: any, extra: any = {}, phase = 'live') {
   render(<LocaleProvider><ChatExecutionStatus connection={connection} sourceTaskId="task" /></LocaleProvider>);
 }
 describe('current task execution status', () => {
+  it('uses the native task stream without waiting for an unrelated agent group', () => {
+    render(<LocaleProvider><ChatExecutionStatus sourceTaskId="task_codex_fixture" /></LocaleProvider>);
+    expect(screen.getByText('正在执行…')).toBeInTheDocument();
+  });
   it('shows pending root as queued, not thinking', () => {
     show({ sourceTaskId: 'task', status: 'pending', executionActive: false });
     expect(screen.getByText(/排队中/)).toBeInTheDocument();
