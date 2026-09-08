@@ -1,6 +1,7 @@
 import type { Tool } from '../../../types.js';
 import type { PermissionClass } from '../../../types.js';
 import { normalizeMcpToolSchema, type McpToolSchema } from '../client.js';
+import type { McpInvocationOptions } from './client.js';
 
 export interface McpRuntimeServerDeclaration {
   name: string;
@@ -9,7 +10,7 @@ export interface McpRuntimeServerDeclaration {
 
 export interface McpRuntimeConnectedClient {
   listTools(): Promise<McpToolSchema[]>;
-  callTool(name: string, input: Record<string, unknown>): Promise<string>;
+  callTool(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<string>;
   dispose(): void;
 }
 
@@ -46,8 +47,19 @@ export function buildMcpRuntimeTools(
   return schemas.map((schema) => ({
     permission: (options.resolvePermission ?? resolveDefaultMcpToolPermission)(declaration.name, schema.name),
     definition: normalizeMcpToolSchema(declaration.name, schema),
-    async execute(input) {
-      return client.callTool(schema.name, input);
+    async execute(input, context) {
+      const signal = context?.signal;
+      signal?.throwIfAborted();
+      try {
+        const result = await (signal
+          ? client.callTool(schema.name, input, { signal })
+          : client.callTool(schema.name, input));
+        signal?.throwIfAborted();
+        return result;
+      } catch (error) {
+        signal?.throwIfAborted();
+        throw error;
+      }
     },
   }));
 }

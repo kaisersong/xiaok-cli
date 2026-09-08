@@ -34,6 +34,7 @@ export interface PlatformRuntimeContext {
     worktreeManager: WorktreeManager;
     mcpTools: Tool[];
     mcpReady: Promise<void>;
+    /** Publishes the complete current MCP catalog, including empty catalogs. */
     onMcpToolsChanged(listener: (tools: Tool[]) => void): () => void;
     capabilityRegistry: CapabilityRegistry;
     reminderDefaultTimeZone: string;
@@ -46,6 +47,7 @@ export interface PlatformRuntimeContext {
         prompt: string;
         cwd?: string;
         parentDepth?: number;
+        signal: AbortSignal;
     }) => Promise<string>, notify?: (job: BackgroundJobRecord) => Promise<void> | void): ReturnType<typeof createBackgroundRunner>;
 }
 export interface PlatformCapabilityHealth {

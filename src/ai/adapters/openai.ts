@@ -34,6 +34,7 @@ import {
   type ProviderConversationAuthorizationReservation,
 } from '../runtime/provider-conversation-authorization.js';
 import { assertKimiTransportAllowed } from '../runtime/kimi-rollback-policy.js';
+import { applyExperimentalToolOrder, parseExperimentalToolOrder } from '../providers/experimental-tool-order.js';
 
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
@@ -405,12 +406,16 @@ export class OpenAIAdapter implements ModelAdapter {
   private readonly kimiCodingHeadersApplied: boolean;
   private readonly onUsageDiagnostic: KimiUsageDiagnosticSink;
   readonly harnessContext: OpenAIAdapterInit['harnessContext'];
+  private readonly experimentalToolOrder: ReturnType<typeof parseExperimentalToolOrder>;
   private reasoningDialectState: ReasoningDialectState = {
     current: 'reasoning_content',
     learned: false,
   };
 
-  constructor(init: OpenAIAdapterInit) {
+  constructor(
+    init: OpenAIAdapterInit,
+    experimentalToolOrder = parseExperimentalToolOrder(process.env.XIAOK_EXPERIMENTAL_TOOL_ORDER),
+  ) {
     assertKimiTransportAllowed(init.harnessContext.identity);
     const strictKimiK3 = init.harnessContext.profile.id !== 'generic-openai';
     if (
@@ -424,6 +429,7 @@ export class OpenAIAdapter implements ModelAdapter {
     this.kimiCodingHeadersApplied = init.kimiCodingHeadersApplied;
     this.onUsageDiagnostic = init.onUsageDiagnostic ?? recordUsageDiagnostic;
     this.harnessContext = init.harnessContext;
+    this.experimentalToolOrder = experimentalToolOrder;
     ownedHarnessProfiles.set(this, init.harnessContext.profile.id);
     this.client = new OpenAI({
       apiKey: init.apiKey,
@@ -502,7 +508,7 @@ export class OpenAIAdapter implements ModelAdapter {
         runtimeOptions,
         capabilityOverrides,
       }),
-    });
+    }, this.experimentalToolOrder);
     if (
       clone.harnessContext.identityFingerprint
       === this.harnessContext.identityFingerprint
@@ -874,7 +880,9 @@ export class OpenAIAdapter implements ModelAdapter {
     const request: OpenAI.ChatCompletionCreateParamsStreaming = {
       model: this.harnessContext.identity.wireModel,
       messages: openaiMessages,
-      tools: openaiTools.length > 0 ? openaiTools : undefined,
+      tools: openaiTools.length > 0
+        ? applyExperimentalToolOrder(openaiTools, this.experimentalToolOrder, this.harnessContext, this.client.baseURL)
+        : undefined,
       stream: true,
       stream_options: { include_usage: true },
     };

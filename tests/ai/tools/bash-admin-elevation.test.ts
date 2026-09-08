@@ -23,6 +23,13 @@ const spawnMock = vi.fn((command: string, args: string[]) => {
     setTimeout(() => {
       child.stdout?.write('Install requires administrator privileges; please run manually');
     }, 5);
+  } else {
+    setTimeout(() => {
+      for (const entry of spawned) {
+        if (entry.command !== 'taskkill') entry.child.emit('close', null);
+      }
+      child.emit('close', 0);
+    }, 0);
   }
 
   return child;
@@ -51,4 +58,3 @@ describe.runIf(process.platform === 'win32')('bashTool Windows elevation handlin
     expect(spawned.some(entry => entry.command === 'taskkill')).toBe(true);
   });
 });
-

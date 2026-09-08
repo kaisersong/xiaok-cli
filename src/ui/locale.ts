@@ -34,6 +34,15 @@ const TOOL_LABELS: Record<UiLocale, Record<string, string>> = {
 const UI_COPY = {
   'zh-CN': {
     approvalTitle: 'xiaok 想要执行以下操作',
+    subAgents: {
+      title: 'SubAgent', idle: '无活动', cleaning: '关闭·清理中',
+      collaboration: 'SubAgent 协作', arranging: '安排 SubAgent', started: '开始', assignment: '分工', result: '交付摘要', elapsed: '耗时',
+      tools: (count: number) => `${count} 次工具调用`, failures: (count: number) => `${count} 次失败`,
+      round: (turn: number) => `第 ${turn} 轮`,
+      constellations: ['双鱼座', '天秤座', '白羊座', '金牛座', '双子座', '巨蟹座', '狮子座', '处女座', '天蝎座', '射手座', '摩羯座', '水瓶座'],
+      phases: { starting: '初始化', model: '模型请求', thinking: '思考中', tool: '工具执行' },
+      statuses: { pending: '排队', running: '运行中', completed: '完成', failed: '失败', interrupted: '已中断', closed: '已关闭' },
+    },
     toolLabel: '工具',
     targetLabels: {
       command: '命令',
@@ -46,6 +55,15 @@ const UI_COPY = {
   },
   en: {
     approvalTitle: 'xiaok wants to run',
+    subAgents: {
+      title: 'SubAgent', idle: 'idle ', cleaning: 'closed·cleaning',
+      collaboration: 'SubAgent collaboration', arranging: 'Arrange SubAgent', started: 'started', assignment: 'Assignment', result: 'Result summary', elapsed: 'elapsed',
+      tools: (count: number) => `${count} tool calls`, failures: (count: number) => `${count} failed`,
+      round: (turn: number) => `turn ${turn}`,
+      constellations: ['Pisces', 'Libra', 'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius'],
+      phases: { starting: 'starting', model: 'model request', thinking: 'thinking', tool: 'tool' },
+      statuses: { pending: 'queued', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'interrupted', closed: 'closed' },
+    },
     toolLabel: 'Tool',
     targetLabels: {
       command: 'Command',

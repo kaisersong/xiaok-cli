@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../main/desktop-multi-agent-catalog-authorization.bdd.test.ts",
+    "../main/desktop-multi-agent-approval-durable-dto.bdd.test.ts",
+    "../main/desktop-multi-agent-authorization-store.bdd.test.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

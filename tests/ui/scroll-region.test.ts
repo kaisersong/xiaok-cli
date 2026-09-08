@@ -36,6 +36,116 @@ function createMockScrollRegion() {
 }
 
 describe('ScrollRegionManager activity rendering', () => {
+  it('renders vertical agents and Working separately, preserves the draft, clears shrinking rows without scrolling each tick', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.renderPromptFrame({ inputValue: 'KEEP_DRAFT', cursor: 10, placeholder: '', statusLine: 'MODEL' });
+      manager.renderActivity('SubAgent Pisces: read\nSubAgent Libra: thinking\nWorking');
+      const lines = harness.screen.lines();
+      const first = lines.findIndex(line => line.includes('SubAgent Pisces'));
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(lines[first + 1]).toContain('SubAgent Libra');
+      expect(lines[first + 2]).toContain('Working');
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      const before = harness.output.raw.length;
+      for (let i = 0; i < 20; i++) manager.renderActivity('SubAgent Pisces: read\nSubAgent Libra: thinking\nWorking');
+      expect(harness.output.raw.slice(before)).not.toContain('\n');
+      manager.renderActivity('Working');
+      expect(harness.screen.text()).not.toContain('SubAgent');
+      manager.clearActivity();
+      expect(harness.screen.text()).not.toContain('Working');
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+    } finally { manager.end(); harness.restore(); }
+  });
+  it('pages ten agents on a short screen and preserves the main activity and transcript tail', () => {
+    vi.useFakeTimers();
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      vi.setSystemTime(0);
+      manager.begin();
+      manager.writeAtContentCursor(Array.from({ length: 15 }, (_, i) => `BODY_${i}\n`).join(''));
+      const activity = [...Array.from({ length: 10 }, (_, i) => `SubAgent agent_${i}`), 'Working'].join('\n');
+      manager.renderActivity(activity);
+      expect(harness.screen.text()).toContain('BODY_14');
+      expect(harness.screen.text()).toContain('agent_0');
+      expect(harness.screen.text()).toContain('Working');
+      const offset = harness.output.raw.length;
+      vi.setSystemTime(4000);
+      manager.renderActivity(activity);
+      expect(harness.screen.text()).toContain('agent_9');
+      expect(harness.screen.text()).not.toContain('agent_0');
+      expect(harness.screen.text()).toContain('BODY_14');
+      expect(harness.output.raw.slice(offset)).not.toContain('\n');
+      manager.clearActivity();
+      expect(harness.screen.text()).not.toContain('SubAgent');
+      expect(harness.screen.text()).toContain('BODY_14');
+    } finally { manager.end(); harness.restore(); vi.useRealTimers(); }
+  });
+
+  it('keeps vertical activity and input intact when the terminal shrinks then grows', () => {
+    const harness = createTtyHarness(80, 30);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.renderPromptFrame({ inputValue: 'KEEP_DRAFT', cursor: 10, placeholder: '', statusLine: 'MODEL' });
+      manager.renderActivity('SubAgent Pisces\nSubAgent Libra\nWorking');
+      manager.updateSize(20, 45);
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      expect(harness.screen.text()).toContain('SubAgent Pisces');
+      manager.renderActivity('Working');
+      expect(harness.screen.text()).not.toContain('SubAgent');
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      manager.updateSize(30, 80);
+      expect(harness.screen.text()).toContain('Working');
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('clears every agent row while a question owns the footer, then restores live progress', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.renderActivity('SubAgent Pisces\nSubAgent Libra\nWorking');
+      manager.renderPromptFrame({ inputValue: 'DRAFT', cursor: 5, placeholder: '', statusLine: 'MODEL', overlayLines: ['QUESTION'], overlayKind: 'question', owner: 'renderer' });
+      expect(harness.screen.text()).not.toContain('SubAgent');
+      manager.renderActivity('SubAgent hidden\nWorking');
+      expect(harness.screen.text()).not.toContain('hidden');
+      expect(harness.screen.text()).toContain('QUESTION');
+      manager.clearOverlayPromptState();
+      // The input owner restores its draft after releasing the question editor.
+      manager.renderPromptFrame({ inputValue: 'DRAFT', cursor: 5, placeholder: '', statusLine: 'MODEL' });
+      manager.renderActivity('SubAgent Pisces\nWorking');
+      expect(harness.screen.text()).toContain('SubAgent Pisces');
+      expect(harness.screen.text()).toContain('DRAFT');
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('reserves transcript space before a smaller footer can erase a completed response', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.writeAtContentCursor(Array.from({ length: 14 }, (_, i) => `LINE_${i}\n`).join(''));
+      manager.writeAtContentCursor('FINAL_RESPONSE');
+      manager.renderFooter();
+      manager.updateSize(20, 52);
+      expect(harness.screen.text()).toContain('FINAL_RESPONSE');
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('does not pad activity rows with spaces that reflow when the terminal narrows', () => {
+    const { manager, getOutput, resetOutput } = createMockScrollRegion();
+    manager.begin();
+    resetOutput();
+    manager.renderActivity('SubAgent Pisces\nWorking');
+    expect(getOutput()).not.toMatch(/(?:SubAgent Pisces|Working) +/);
+    manager.end();
+  });
+
   describe('basic activity rendering', () => {
     it('renders activity line when scroll region is active', () => {
       const { manager, getOutput } = createMockScrollRegion();
@@ -199,7 +309,7 @@ describe('ScrollRegionManager activity rendering', () => {
       manager.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'gpt-5.4' });
 
       const output = getOutput();
-      expect(output).toMatch(/❯\x1b\[22;39m \x1b\[2mType your message\.\.\. +\x1b\[0m/);
+      expect(output).toMatch(/❯\x1b\[22;39m \x1b\[2mType your message\.\.\.\x1b\[K\x1b\[0m/);
     });
 
     it('keeps the footer rows visible while content is streaming', () => {
@@ -1275,7 +1385,7 @@ describe('ANSI compatibility', () => {
     const output = getOutput();
     // Footer uses absolute cursor positioning (\x1b[row;colH) to ensure
     // it renders at exact terminal bottom rows regardless of cursor state.
-    expect(output).toMatch(/\x1b\[21;1H\x1b\[2K\x1b\[48;5;238m +\x1b\[0m/);  // padded background row above the prompt
+    expect(output).toMatch(/\x1b\[21;1H\x1b\[2K\x1b\[48;5;238m\x1b\[K\x1b\[0m/);  // padded background row above the prompt
     expect(output).toMatch(/\x1b\[22;1H/);  // input bar at row 22
     expect(output).toMatch(/\x1b\[24;1H/);  // status bar at row 24
     expect(output).toContain('Type...');

@@ -28,15 +28,8 @@ export async function runDeliverableGate(snapshot, gateFunction, signal) {
     if (!looksLikeMultiDeliverable(snapshot.prompt)) {
         return true;
     }
-    // Built-in check: look at the last progress_plan_reported event
-    const planEvents = snapshot.events.filter(e => e.type === 'progress_plan_reported');
-    if (planEvents.length > 0) {
-        const lastPlan = planEvents[planEvents.length - 1];
-        const hasIncomplete = lastPlan.steps.some(s => s.status !== 'completed');
-        if (hasIncomplete) {
-            return false;
-        }
-    }
+    if (!hasCompleteLastDeliveryPlan(snapshot))
+        return false;
     // If a custom gate function is provided, also run it
     if (gateFunction) {
         const artifacts = snapshot.events
@@ -54,6 +47,24 @@ export async function runDeliverableGate(snapshot, gateFunction, signal) {
         catch {
             // Fail-open: if gate errors (abort, network, etc.), don't block completion
             return true;
+        }
+    }
+    return true;
+}
+/** The same built-in, CPU-only check used by ordinary tasks and delivery facts. */
+export function isDeliveryPlanComplete(snapshot) {
+    if (!looksLikeMultiDeliverable(snapshot.prompt))
+        return true;
+    return hasCompleteLastDeliveryPlan(snapshot);
+}
+function hasCompleteLastDeliveryPlan(snapshot) {
+    // Built-in check: look at the last progress_plan_reported event
+    const planEvents = snapshot.events.filter(e => e.type === 'progress_plan_reported');
+    if (planEvents.length > 0) {
+        const lastPlan = planEvents[planEvents.length - 1];
+        const hasIncomplete = lastPlan.steps.some(s => s.status !== 'completed');
+        if (hasIncomplete) {
+            return false;
         }
     }
     return true;

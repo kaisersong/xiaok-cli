@@ -34,6 +34,7 @@ export declare const accentAmber: (s: string) => string;
 export declare const boldAccentAmber: (s: string) => string;
 export declare const accentCyan: (s: string) => string;
 export declare const boldAccentCyan: (s: string) => string;
+export declare function formatSubAgentCodename(name: string): string;
 export declare function startSpinner(message: string): () => void;
 export type RailTone = 'explore' | 'run' | 'change' | 'skill' | 'result' | 'error' | 'neutral';
 export declare function formatRailHeader(label: string, detail?: string, tone?: RailTone): string;

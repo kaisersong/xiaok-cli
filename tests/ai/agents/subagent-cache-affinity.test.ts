@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { executeNamedSubAgent } from '../../../src/ai/agents/subagent-executor.js';
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import type { ModelAdapter } from '../../../src/types.js';
@@ -6,6 +6,7 @@ import type { ModelAdapter } from '../../../src/types.js';
 describe('subagent cache affinity', () => {
   it('keeps a real subagent Agent runtime side call affinity-free', async () => {
     const captured: Array<StreamOptions | undefined> = [];
+    const dispose = vi.fn();
     const adapter: ModelAdapter = {
       getModelName: () => 'mock',
       stream: async function* (_messages, _tools, _systemPrompt, options) {
@@ -23,11 +24,13 @@ describe('subagent cache affinity', () => {
       createRegistry: () => ({
         getToolDefinitions: () => [],
         executeTool: async () => 'unused',
+        dispose,
       }) as never,
       buildSystemPrompt: async () => 'isolated prompt',
     })).resolves.toBe('subagent result');
 
     expect(captured).toHaveLength(1);
     expect(captured[0]).not.toHaveProperty('cacheKey');
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 });

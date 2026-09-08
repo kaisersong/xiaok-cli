@@ -13,6 +13,7 @@ import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
 import { createGoalTools } from '../ai/tools/goal.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
+import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -196,7 +197,11 @@ async function runChat(initialInput, opts) {
         writeError(String(e));
         process.exit(1);
     }
-    const memoryStore = await createMemoryStoreAsync(config.memory);
+    // print/json 无头模式（一次性子任务）不初始化分层记忆与向量检索：
+    // 跳过 sqlite/ONNX/embedding 启动开销，避免无谓的 embedding 请求
+    const memoryStore = await createMemoryStoreAsync(opts.print || opts.json
+        ? { ...(config.memory ?? {}), type: 'file' }
+        : config.memory);
     memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
@@ -254,6 +259,9 @@ async function runChat(initialInput, opts) {
         ? 'fork'
         : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
     const transcriptLogger = await FileTranscriptLogger.open(sessionId);
+    const multiAgentProgress = new MultiAgentProgressView();
+    const subAgentNotices = new SubAgentNoticeQueue();
+    let flushSubAgentNotices = () => { };
     const transcriptBuffer = new TranscriptBuffer({
         onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
     });
@@ -439,6 +447,7 @@ async function runChat(initialInput, opts) {
     // Resolve model capabilities early (needed for getPromptInput)
     let modelCapabilities = resolveModelCapabilities(adapter);
     const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
+        cliDelegation: { interactive: isTTY() },
         enterpriseId: creds?.enterpriseId ?? null,
         devApp,
         budget: modelCapabilities.contextLimit,
@@ -658,6 +667,7 @@ async function runChat(initialInput, opts) {
             },
         }),
         createAskUserQuestionTool({
+            interactive: isTTY(),
             onEnterInteractive: () => askUserOnEnter?.(),
             onExitInteractive: () => askUserOnExit?.(),
             renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
@@ -787,6 +797,28 @@ async function runChat(initialInput, opts) {
             observeSkillToolResult(event);
             observeSkillEvidence(event);
         },
+        onMultiAgentEvent: (event) => {
+            multiAgentProgress.update(event);
+            try {
+                transcriptLogger.record({ type: 'multi_agent', event, timestamp: event.timestamp });
+            }
+            catch (error) {
+                log.debug('multi_agent_transcript_failed', String(error));
+            }
+        },
+        onSubAgentEvent: (event) => {
+            const block = multiAgentProgress.updateRun(event, process.stdout.columns ?? 100);
+            try {
+                transcriptLogger.record({ type: 'subagent_progress', event, timestamp: event.timestamp });
+            }
+            catch (error) {
+                log.debug('subagent_progress_transcript_failed', String(error));
+            }
+            if (!opts.print && !opts.json) {
+                subAgentNotices.push(block);
+                flushSubAgentNotices();
+            }
+        },
     });
     const registry = registryFactory.createRegistry(cwd);
     const reminders = registryFactory.getReminderApi();
@@ -800,6 +832,7 @@ async function runChat(initialInput, opts) {
         },
     });
     const buildCleanupSteps = () => [
+        () => registryFactory.dispose(),
         () => transcriptLogger.close(),
         () => platform.dispose(),
         () => disposeModelAdapter(adapter),
@@ -957,7 +990,6 @@ async function runChat(initialInput, opts) {
     const historyMessages = persistedSession?.messages ?? [];
     let welcomeVisible = historyMessages.length === 0 && !opts.dryRun;
     let contentRows = 0; // tracks how many rows of content have been written
-    let resizeTimeout = null;
     let handleResize = null;
     suspendInteractiveUi = (context, error, fallbackStream = null) => {
         if (terminalUiSuspended) {
@@ -1004,6 +1036,7 @@ async function runChat(initialInput, opts) {
         }
     };
     const runtimeState = new TuiRuntimeState({
+        getActivitySummary: (now) => multiAgentProgress.summary(now, Math.max(1, (process.stdout.columns ?? 100) - 1)),
         statusBar,
         scrollRegion,
         onSuspendInteractiveUi: (context, error) => {
@@ -1026,7 +1059,14 @@ async function runChat(initialInput, opts) {
     const stopLiveActivityTimer = () => {
         runtimeState.stopLiveActivityTimer();
     };
-    const withPausedLiveActivity = async (action) => (runtimeState.withPausedLiveActivity(action));
+    const withPausedLiveActivity = async (action) => {
+        try {
+            return await runtimeState.withPausedLiveActivity(action);
+        }
+        finally {
+            flushSubAgentNotices();
+        }
+    };
     function ensureBusyInputCapture() {
         if (terminalUiSuspended || !scrollRegion.isActive()) {
             return;
@@ -1057,6 +1097,7 @@ async function runChat(initialInput, opts) {
             askUserQuestionPromptActive = false;
             runtimeState.exitInteractivePrompt();
         }
+        flushSubAgentNotices();
         ensureBusyInputCapture();
         runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
     };
@@ -1692,6 +1733,10 @@ async function runChat(initialInput, opts) {
         process.stdout.write(separatedBlock);
         mdRenderer.beginNewSegment();
         resetStreamingSegment();
+    };
+    flushSubAgentNotices = () => {
+        subAgentNotices.flush(!runtimeState.isInteractivePromptActive()
+            && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
     };
     const persistSession = async (options = {}) => {
         if (options.refreshIntentLedger ?? true) {
@@ -2529,6 +2574,11 @@ async function runChat(initialInput, opts) {
             activeBusyCapture?.stop();
             activeBusyCapture = null;
         };
+        const takeBusyDraft = () => {
+            const draft = activeBusyCapture?.getSnapshot();
+            stopBusyCapture();
+            return draft;
+        };
         const stashQueuedInputIfAny = (options) => {
             const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
             if (options?.stopCapture !== false) {
@@ -2599,6 +2649,7 @@ async function runChat(initialInput, opts) {
                 summary: transcriptSummary,
             });
             endStreamingPhaseForInterrupt();
+            flushSubAgentNotices();
             if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
                 turnHadAskUserQuestion = true;
                 enterAskUserQuestionPrompt();
@@ -2629,6 +2680,7 @@ async function runChat(initialInput, opts) {
         runtimeHooks.on('tool_finished', (_e) => {
             log.debug('tool_finished', JSON.stringify({ tool: _e?.toolName, ok: _e?.ok }));
             goalTurnDrafts.get(_e.turnId)?.collector.accept(_e);
+            flushSubAgentNotices();
             scheduleActivityResume('Thinking', 160);
         });
         runtimeHooks.on('tool_execution_fact', (event) => {
@@ -2759,6 +2811,10 @@ async function runChat(initialInput, opts) {
             void refreshIntentLedger().then(renderIntentSummaryLine);
         });
         runtimeHooks.on('turn_stop', (event) => {
+            if (subAgentNotices.hasPending) {
+                endStreamingPhaseForInterrupt();
+                flushSubAgentNotices();
+            }
             if (event.reason === 'user_aborted') {
                 abortedRuntimeTurnIds.add(event.turnId);
             }
@@ -2777,19 +2833,15 @@ async function runChat(initialInput, opts) {
         });
         // 处理终端窗口大小调整
         handleResize = () => {
-            if (resizeTimeout)
-                clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(() => {
-                const rows = process.stdout.rows ?? 24;
-                const cols = process.stdout.columns ?? 80;
-                try {
-                    scrollRegion.updateSize(rows, cols);
-                }
-                catch (error) {
-                    suspendInteractiveUi('resize_render', error);
-                }
-                // 普通文档流模式下不做底部重绘，后续输出自然适配新尺寸
-            }, 100);
+            // Update geometry before the next activity/input repaint can use stale rows.
+            const rows = process.stdout.rows ?? 24;
+            const cols = process.stdout.columns ?? 80;
+            try {
+                scrollRegion.updateSize(rows, cols);
+            }
+            catch (error) {
+                suspendInteractiveUi('resize_render', error);
+            }
         };
         process.stdout.on('resize', handleResize);
         // SIGINT 处理
@@ -2858,7 +2910,10 @@ async function runChat(initialInput, opts) {
                     renderInputSeparator();
                 }
                 runtimeState.markInputReady();
-                input = await inputReader.read('> ');
+                const busyDraft = takeBusyDraft();
+                input = await inputReader.read('> ', busyDraft?.draft
+                    ? { initialInput: { input: busyDraft.draft, cursor: busyDraft.cursor } }
+                    : undefined);
             }
             if (input === null || input.trim() === '/exit') {
                 stopBusyCapture();
@@ -3537,10 +3592,6 @@ async function runChat(initialInput, opts) {
         disarmGoal();
         stopBusyCapture();
         stopActivity();
-        if (resizeTimeout) {
-            clearTimeout(resizeTimeout);
-            resizeTimeout = null;
-        }
         if (handleResize) {
             process.stdout.off('resize', handleResize);
         }

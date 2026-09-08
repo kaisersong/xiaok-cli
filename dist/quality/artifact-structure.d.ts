@@ -5,3 +5,5 @@ export interface StructuralValidationResult {
 }
 export declare function resolveStructuralKind(filePath: string): StructuralKind | undefined;
 export declare function validateArtifactStructure(filePath: string, kind: StructuralKind): StructuralValidationResult;
+/** Shared byte rules; async delivery uses the same bounded reads and predicates. */
+export declare function validateArtifactBytes(kind: StructuralKind, buf: Buffer, bytesRead: number): StructuralValidationResult;

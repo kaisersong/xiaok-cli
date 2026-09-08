@@ -103,6 +103,7 @@ export type RuntimeEvent = {
     invocationId: string;
     toolName: string;
     ok: boolean;
+    invoked?: boolean;
 } | {
     type: 'tool_execution_fact';
     sessionId: string;

@@ -293,17 +293,17 @@ describe('Agent Autonomy Behavior - Mock Model', () => {
   // Prompt 指令验证
   // -------------------------------------------------------------------------
 
-  it('PROMPT CHECK: should include CRITICAL execution instruction', async () => {
-    expect(systemPrompt).toContain('EXECUTE IMMEDIATELY');
-    expect(systemPrompt).toContain('When the user says "允许"');
+  it('PROMPT CHECK: requests and approval trigger execution', async () => {
+    expect(systemPrompt).toContain('instructions to execute');
+    expect(systemPrompt).toContain('user approval');
   });
 
   it('PROMPT CHECK: should include user authorization instruction', async () => {
-    expect(systemPrompt).toContain('User authorization = immediate execution');
+    expect(systemPrompt).toContain('authorized scope');
   });
 
   it('PROMPT CHECK: should include plan approval instruction', async () => {
-    expect(systemPrompt).toContain('Plan approval = immediate execution');
+    expect(systemPrompt).toContain('Do not ask again');
   });
 
   it('PROMPT CHECK: should include interactive command boundary', async () => {
@@ -315,22 +315,22 @@ describe('Agent Autonomy Behavior - Mock Model', () => {
   // -------------------------------------------------------------------------
 
   it('PROMPT CHECK: should include decomposition philosophy', async () => {
-    expect(systemPrompt).toContain('Always decompose before you act');
-    expect(systemPrompt).toContain('PREVIEW');
-    expect(systemPrompt).toContain('CHUNK');
-    expect(systemPrompt).toContain('RECURSIVE');
+    expect(systemPrompt).toContain('Break substantial work into verifiable steps');
+    expect(systemPrompt).toContain('Inspect relevant source');
+    expect(systemPrompt).toContain('dependencies');
+    expect(systemPrompt).toContain('simple questions');
   });
 
   it('PROMPT CHECK: should include verification principle', async () => {
     expect(systemPrompt).toContain('Verify before claiming success');
-    expect(systemPrompt).toContain('Check stdout');
-    expect(systemPrompt).toContain('Check stderr');
+    expect(systemPrompt).toContain('stdout/stderr');
+    expect(systemPrompt).toContain('not verified');
   });
 
   it('PROMPT CHECK: should include parallel execution heuristic', async () => {
-    expect(systemPrompt).toContain('Parallel-first');
-    expect(systemPrompt).toContain('Multiple independent file reads');
-    expect(systemPrompt).toContain('Dependent operations MUST be sequential');
+    expect(systemPrompt).toContain('independent tool calls in parallel');
+    expect(systemPrompt).toContain('reads, searches');
+    expect(systemPrompt).toContain('dependent operations sequentially');
   });
 
   // -------------------------------------------------------------------------

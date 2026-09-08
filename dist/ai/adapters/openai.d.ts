@@ -9,8 +9,9 @@ export declare class OpenAIAdapter implements ModelAdapter {
     private readonly kimiCodingHeadersApplied;
     private readonly onUsageDiagnostic;
     readonly harnessContext: OpenAIAdapterInit['harnessContext'];
+    private readonly experimentalToolOrder;
     private reasoningDialectState;
-    constructor(init: OpenAIAdapterInit);
+    constructor(init: OpenAIAdapterInit, experimentalToolOrder?: Readonly<import("../providers/experimental-tool-order.js").ExperimentalToolOrder> | null);
     getModelName(): string;
     getHarnessProfileId(): string;
     /**

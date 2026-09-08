@@ -1,4 +1,5 @@
 import Module, { createRequire } from 'node:module';
+import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -68,6 +69,31 @@ describe('preload API contract', () => {
       'createTask',
       'createTaskWithFiles',
       'subscribeTask',
+      'getMultiAgentSnapshot',
+      'listMultiAgentGroups',
+      'listMultiAgents',
+      'getMultiAgentEvents',
+      'getAgentContent',
+      'getMultiAgentOperation',
+      'getMultiAgentResources',
+      'resolveMultiAgentResource',
+      'resetMultiAgentGroup',
+      'getMultiAgentThreadDeletion',
+      'deleteMultiAgentThread',
+      'sendAgentMessage',
+      'followupAgent',
+      'interruptAgent',
+      'closeAgent',
+      'subscribeMultiAgents',
+      'unsubscribeMultiAgents',
+      'getLocalExecutionAuthorization',
+      'getLocalExecutionWorkspace',
+      'getMultiAgentApproval',
+      'decideMultiAgentApproval',
+      'setLocalExecutionAuthorization',
+      'getLocalExecutionAuthorizationOperation',
+      'subscribeLocalExecutionAuthorization',
+      'unsubscribeLocalExecutionAuthorization',
       'getGoal',
       'createGoal',
       'pauseGoal',
@@ -920,6 +946,10 @@ const HANDLER_REGISTRATION_FILES = [
 
 function extractRegisteredHandlerChannels(): Set<string> {
   const channels = new Set<string>();
+  // This registrar deliberately generates semantic channels. Execute the real
+  // registrar instead of duplicating its command table in this source scanner.
+  const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
+  dispose();
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:ipcMain|shutdownAwareIpc)\.handle\(\s*'([^']+)'/g;
@@ -986,6 +1016,8 @@ describe('IPC handler ↔ preload key parity', () => {
     // is classified as event subscription. Add the invoke side here so it does
     // not appear orphaned.
     reverseMap.add('desktop:subscribeTask');
+    reverseMap.add('desktop:subscribeMultiAgents');
+    reverseMap.add('desktop:subscribeLocalExecutionAuthorization');
     const knownOrphans = new Set(KNOWN_UNROUTED_HANDLERS);
 
     const undeclaredOrphans: string[] = [];

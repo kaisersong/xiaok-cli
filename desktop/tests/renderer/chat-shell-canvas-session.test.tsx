@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
 const { mockGetThread, mockRecoverTask, mockSubscribeTask, mockReadFileContent } = vi.hoisted(() => ({
   mockGetThread: vi.fn(),
   mockRecoverTask: vi.fn(),
   mockSubscribeTask: vi.fn(() => () => {}),
-  mockReadFileContent: vi.fn(async () => ({ content: '' })),
+  mockReadFileContent: vi.fn(async (_filePath: string) => ({ content: '' })),
 }));
 
 vi.mock('../../renderer/src/api', () => ({
@@ -83,6 +83,7 @@ vi.mock('../../renderer/src/components/CanvasPanel', () => ({
     conversationId,
     sourceTaskId,
     sourceArtifact,
+    onClose,
   }: {
     initialPreviewModeRequest?: { id: number; startInEditMode: boolean };
     initialPreviewFile?: string | null;
@@ -91,6 +92,7 @@ vi.mock('../../renderer/src/components/CanvasPanel', () => ({
     conversationId?: string;
     sourceTaskId?: string;
     sourceArtifact?: { artifactId: string; kind?: string; mimeType?: string; title?: string; sourceTaskId?: string };
+    onClose: () => void;
   }) => (
     <div data-testid="canvas-panel">
       <span data-testid="canvas-panel-mode">{initialPreviewModeRequest?.startInEditMode ? 'edit' : 'preview'}</span>
@@ -101,11 +103,13 @@ vi.mock('../../renderer/src/components/CanvasPanel', () => ({
       <span data-testid="canvas-panel-task">{sourceTaskId}</span>
       <span data-testid="canvas-panel-artifact">{sourceArtifact?.artifactId}</span>
       <span data-testid="canvas-panel-artifact-task">{sourceArtifact?.sourceTaskId}</span>
+      <button type="button" onClick={onClose}>close-canvas-content</button>
     </div>
   ),
 }));
 vi.mock('../../renderer/src/components/TaskPanel', () => ({
-  TaskPanel: () => null,
+  TaskPanel: ({ onArtifactClick }: { onArtifactClick: (artifact: { artifactId: string; title: string; kind: string; filePath: string }) => void }) =>
+    <button type="button" onClick={() => onArtifactClick({ artifactId: 'task-artifact', title: 'report.html', kind: 'html', filePath: '/tmp/report.html' })}>open-task-artifact</button>,
 }));
 vi.mock('../../renderer/src/layouts/AppLayout', () => ({
   useSidebarCollapse: () => ({ collapsed: false, setCollapsed: () => {} }),
@@ -144,9 +148,55 @@ function Nav() {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('ChatShell canvas is scoped per session', () => {
+  it('the real parent reopens a retained Canvas after the surface close button through its existing request id even when canvasOpen is already true', async () => {
+    mockGetThread.mockImplementation(async (id: string) => thread(id));
+    await act(async () => { render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider>
+      <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+    </LocaleProvider></MemoryRouter>); });
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-canvas' }));
+    expect(screen.getByRole('tabpanel', { name: '画布' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '收起侧栏' }));
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    expect(screen.getByTestId('canvas-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('canvas-open')).toHaveTextContent('closed');
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-canvas' }));
+    expect(screen.getByRole('tabpanel', { name: '画布' })).toBeVisible();
+    expect(screen.getByTestId('canvas-open')).toHaveTextContent('open');
+  });
+
+  it.each([899, 900])('an explicitly collapsed surface at %s px stays collapsed after the next real Canvas open/close instead of restoring an older Task selection', async width => {
+    localStorage.setItem('xiaok:locale', 'zh');
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe() { this.callback([{ contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      disconnect() {}
+    });
+    mockGetThread.mockImplementation(async (id: string) => thread(id));
+    await act(async () => { render(<MemoryRouter initialEntries={[{ pathname: '/t/thread-A', state: { createGoal: true } }]}>
+      <LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider>
+    </MemoryRouter>); });
+    if (width === 899) fireEvent.click(screen.getByRole('button', { name: '任务' }));
+    expect(screen.getByRole('tabpanel', { name: '任务' })).toBeVisible();
+    // This action is in the visible Task drawer, not an inert main composer.
+    fireEvent.click(screen.getByRole('button', { name: 'open-task-artifact' }));
+    await waitFor(() => expect(screen.getByRole('tabpanel', { name: '画布' })).toBeVisible());
+    fireEvent.click(screen.getByRole('button', { name: 'close-canvas-content' }));
+    expect(screen.getByRole('tabpanel', { name: '任务' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '收起侧栏' }));
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    expect(screen.getByTestId('chat-right-main')).not.toHaveAttribute('inert');
+    fireEvent.click(screen.getByRole('button', { name: 'toggle-canvas' }));
+    await waitFor(() => expect(screen.getByRole('tabpanel', { name: '画布' })).toBeVisible());
+    fireEvent.click(screen.getByRole('button', { name: 'close-canvas-content' }));
+    expect(screen.queryByRole('tabpanel')).toBeNull();
+    expect(screen.getByTestId('canvas-open')).toHaveTextContent('closed');
+    expect(document.querySelectorAll('.chat-right-panel')).toHaveLength(1);
+  });
+
   it('closes the canvas when switching to another session and reopens it when returning', async () => {
     mockGetThread.mockImplementation(async (id: string) => thread(id));
 

@@ -1,4 +1,9 @@
 import type { StreamChunk, UsageStats } from '../../types.js';
+/** Public activity metadata only; never includes private reasoning or tool arguments. */
+export interface RuntimeActivity {
+    phase: 'starting' | 'model' | 'thinking' | 'tool';
+    toolName?: string;
+}
 export type AgentRuntimeEvent = {
     type: 'run_started';
     runId: string;

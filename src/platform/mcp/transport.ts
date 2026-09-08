@@ -89,6 +89,25 @@ export interface McpClientConnection {
   dispose(): void;
 }
 
+/** Preserve caller cancellation across SDK v2's RequestTimeout normalization. */
+export async function callMcpToolWithSignal(
+  client: Pick<Client, 'callTool'>,
+  params: Parameters<Client['callTool']>[0],
+  options?: Parameters<Client['callTool']>[1],
+): ReturnType<Client['callTool']> {
+  const signal = options?.signal;
+  signal?.throwIfAborted();
+  try {
+    // Keep SDK validation, catalog caching and header-refresh retry intact.
+    const result = await client.callTool(params, options);
+    signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
+  }
+}
+
 export type McpConnectionResult =
   | { status: 'connected'; connection: McpClientConnection }
   | { status: 'disabled'; serverName: string; error: Error };

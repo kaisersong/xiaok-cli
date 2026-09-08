@@ -13,9 +13,22 @@ export class CuaConnectionManager {
     get state() {
         return this._state;
     }
-    async callToolResult(name, input) {
-        const connection = await this._ensureConnected();
-        return connection.callToolResult(name, input);
+    async callToolResult(name, input, options) {
+        options?.signal?.throwIfAborted();
+        try {
+            // Initialization is shared. A caller must not cancel a sibling's startup.
+            const connection = await this._ensureConnected();
+            options?.signal?.throwIfAborted();
+            const result = await (options
+                ? connection.callToolResult(name, input, options)
+                : connection.callToolResult(name, input));
+            options?.signal?.throwIfAborted();
+            return result;
+        }
+        catch (error) {
+            options?.signal?.throwIfAborted();
+            throw error;
+        }
     }
     async dispose() {
         if (this._state === 'idle')

@@ -269,10 +269,10 @@ describe('PromptBuilder static/dynamic split', () => {
     });
 
     const staticSegment = snapshot.segments.find((s) => s.key === 'static_identity');
-    expect(staticSegment?.text).toContain('Always decompose before you act');
-    expect(staticSegment?.text).toContain('PREVIEW');
-    expect(staticSegment?.text).toContain('CHUNK');
-    expect(staticSegment?.text).toContain('RECURSIVE');
+    expect(staticSegment?.text).toContain('Break substantial work into verifiable steps');
+    expect(staticSegment?.text).toContain('Inspect relevant source');
+    expect(staticSegment?.text).toContain('dependencies');
+    expect(staticSegment?.text).toContain('simple questions');
   });
 
   it('should include verification section in static prefix', async () => {
@@ -293,8 +293,8 @@ describe('PromptBuilder static/dynamic split', () => {
 
     const staticSegment = snapshot.segments.find((s) => s.key === 'static_identity');
     expect(staticSegment?.text).toContain('Verify before claiming success');
-    expect(staticSegment?.text).toContain('Check stdout');
-    expect(staticSegment?.text).toContain('Check stderr');
+    expect(staticSegment?.text).toContain('stdout/stderr');
+    expect(staticSegment?.text).toContain('not verified');
   });
 
   it('should include parallel execution section in static prefix', async () => {
@@ -314,8 +314,8 @@ describe('PromptBuilder static/dynamic split', () => {
     });
 
     const staticSegment = snapshot.segments.find((s) => s.key === 'static_identity');
-    expect(staticSegment?.text).toContain('Parallel-first');
-    expect(staticSegment?.text).toContain('Multiple independent file reads');
-    expect(staticSegment?.text).toContain('Dependent operations MUST be sequential');
+    expect(staticSegment?.text).toContain('independent tool calls in parallel');
+    expect(staticSegment?.text).toContain('reads, searches');
+    expect(staticSegment?.text).toContain('dependent operations sequentially');
   });
 });

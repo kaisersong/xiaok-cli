@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FileTaskSnapshotStore, recoverTaskSnapshotSync } from '../../../src/runtime/task-host/snapshot-store.js';
@@ -15,6 +15,31 @@ describe('FileTaskSnapshotStore', () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('checks terminal thread history without depending on the active index or loading every task into the runtime cache', async () => {
+    const store = new FileTaskSnapshotStore(rootDir);
+    await store.save({ ...createSnapshot('task_history', 'completed'), context: { threadId: 'legacy-thread', taskIds: [] } });
+    const reloaded = new FileTaskSnapshotStore(rootDir);
+    expect(await reloaded.getActiveTasks()).toEqual([]);
+    expect(await reloaded.hasThreadHistory('legacy-thread')).toBe(true);
+    expect(await reloaded.hasThreadHistory('new-thread')).toBe(false);
+    expect((reloaded as unknown as { cache: Map<string, unknown> }).cache.size).toBe(0);
+    expect(existsSync(join(rootDir, 'snapshots', 'task_history.json'))).toBe(true);
+  });
+
+  it('fails closed on corrupt checkpoints instead of treating unreadable history as an unowned thread', async () => {
+    mkdirSync(join(rootDir, 'snapshots'));
+    writeFileSync(join(rootDir, 'snapshots', 'broken.json'), '{broken');
+    await expect(new FileTaskSnapshotStore(rootDir).hasThreadHistory('thread')).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses symlinked ownership checkpoints without reading or modifying their target', async () => {
+    mkdirSync(join(rootDir, 'snapshots'));
+    const target = join(rootDir, 'external.json'); writeFileSync(target, JSON.stringify(createSnapshot('external', 'completed')));
+    symlinkSync(target, join(rootDir, 'snapshots', 'linked.json'));
+    await expect(new FileTaskSnapshotStore(rootDir).hasThreadHistory('thread')).rejects.toThrow(/owner_unknown/);
+    expect(readFileSync(target, 'utf8')).toBe(JSON.stringify(createSnapshot('external', 'completed')));
   });
 
   it('saves and recovers one active task snapshot', async () => {

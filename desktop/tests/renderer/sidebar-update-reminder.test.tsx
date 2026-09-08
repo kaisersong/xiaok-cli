@@ -90,6 +90,18 @@ afterEach(() => {
 });
 
 describe('Sidebar update reminder', () => {
+  it('keeps a conversation visible and reports pending cleanup when main refuses final deletion', async () => {
+    mockApi.deleteThread.mockRejectedValueOnce(new Error('thread_deletion_pending'));
+    renderSidebar({ checking: false, available: false, downloading: false, downloaded: false, progress: 0 }, '/', [{
+      id: 'delete-thread', title: 'Delete safety', taskIds: [], currentTaskId: null, mode: 'work', status: 'idle', starred: false, createdAt: 1, updatedAt: 1,
+    }]);
+    const row = await screen.findByTestId('thread-item-delete-thread');
+    const button = row.querySelectorAll('button')[row.querySelectorAll('button').length - 1];
+    fireEvent.click(button); fireEvent.click(button);
+    await waitFor(() => expect(mockApi.deleteThread).toHaveBeenCalledWith('delete-thread'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('仍有执行或资源尚未回收');
+    expect(mockThreadList.removeThread).not.toHaveBeenCalled(); expect(row).toBeInTheDocument();
+  });
   it('localizes the built-in assistant schedule names by stable id', async () => {
     Object.defineProperty(window, 'xiaokDesktop', {
       value: {

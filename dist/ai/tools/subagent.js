@@ -1,4 +1,5 @@
 import { executeNamedSubAgent } from '../agents/subagent-executor.js';
+import { getCanonicalToolId } from './tool-identity.js';
 const DEFAULT_SUBAGENT_MAX_DEPTH = 3;
 function resolveMaxDepth(explicit) {
     if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit > 0) {
@@ -75,12 +76,15 @@ export function createSubAgentTool(options) {
                 return `background agent queued: ${job.jobId}`;
             }
             return executeNamedSubAgent({
+                onSubAgentEvent: options.onSubAgentEvent,
+                taskDescription: invocation.description,
                 agentDef,
                 prompt: invocation.prompt,
                 sessionId: options.sessionId,
                 cwd: options.cwd,
                 adapter: options.adapter,
                 createRegistry: options.createRegistry,
+                releaseRegistry: options.releaseRegistry,
                 buildSystemPrompt: options.buildSystemPrompt,
                 worktreeManager: options.worktreeManager,
                 forkContext: context,
@@ -101,11 +105,11 @@ function buildAgentDef(agents, invocation) {
     }
     // Mode 2: Inline agent
     // Filter out 'subagent' from allowed tools to prevent unbounded recursion
-    const inlineTools = (invocation.tools ?? []).filter(t => t !== 'subagent');
+    const inlineTools = (invocation.tools ?? []).filter(t => getCanonicalToolId(t) !== 'subagent');
     return {
         name: invocation.name ?? 'inline',
         systemPrompt: '',
-        allowedTools: inlineTools.length > 0 ? inlineTools : undefined,
+        allowedTools: inlineTools.length > 0 ? inlineTools : invocation.tools?.length ? ['tool_search'] : undefined,
         model: invocation.model,
         modelCapability: invocation.modelCapability,
         maxIterations: 50,
@@ -121,11 +125,13 @@ function buildSubAgentDescription(agents) {
     const preDefined = agents.map(a => a.name).join(', ');
     return `Spawn a subagent to execute an independent task.
 
+Follow the CLI delegation policy when present: clear independent work can be delegated without the user naming an agent; simple or dependent work stays with the caller. Honor user opt-out and ask-first instructions, including background mode. Never spawn alongside an unanswered question about this delegation. Prefer spawn_agent when addressable parallel work or follow-up is needed.
+
 Two modes:
 1. Pre-defined agent: agent="${preDefined}", prompt="..."
    Uses a pre-configured agent with its own system prompt and tool restrictions.
 
-2. Inline agent: description="...", prompt="...", tools=["Read","Edit",...]
+2. Inline agent: description="...", prompt="...", tools=["read","grep",...]
    Creates a temporary agent for one-off tasks. The "subagent" tool is automatically
    excluded to prevent infinite recursion.
 

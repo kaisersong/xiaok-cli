@@ -10,7 +10,7 @@ const logger = createLogger('agent-runtime');
 const MAX_COMPACT_MEMORY_REMINDER_CHARS = 8_000;
 const COMPACT_MEMORY_REMINDER_PREFIX = '<system-reminder>\n[Memory restored after compact]\n';
 const COMPACT_MEMORY_REMINDER_SUFFIX = '\n</system-reminder>';
-import type { AgentRuntimeEvent } from './events.js';
+import type { AgentRuntimeEvent, RuntimeActivity } from './events.js';
 import { isAbortError } from './abort-utils.js';
 import {
   buildPromptCacheSegments,
@@ -38,7 +38,16 @@ import {
   type ProviderConversationSurfaceKind,
 } from './provider-conversation-authorization.js';
 
+function normalizeRuntimeAbortReason(reason: unknown): unknown {
+  if (isAbortError(reason)) return reason;
+  const aborted = new DOMException('Agent run aborted', 'AbortError');
+  Object.defineProperty(aborted, 'cause', { value: reason, configurable: true });
+  return aborted;
+}
+
 export interface AgentRuntimeOptions {
+  onActivity?: (activity: RuntimeActivity) => void;
+  takePendingInput?: () => string | undefined;
   adapter: ModelAdapter;
   registry: ToolRegistry;
   session: AgentSessionState;
@@ -59,6 +68,8 @@ export interface AgentRuntimeOptions {
 }
 
 export class AgentRuntime {
+  private readonly onActivity?: (activity: RuntimeActivity) => void;
+  private readonly takePendingInput?: () => string | undefined;
   private adapter: ModelAdapter;
   private readonly registry: ToolRegistry;
   private readonly session: AgentSessionState;
@@ -83,6 +94,8 @@ export class AgentRuntime {
   private static readonly MAX_EMPTY_RETRIES = 2;
 
   constructor(options: AgentRuntimeOptions) {
+    this.onActivity = options.onActivity;
+    this.takePendingInput = options.takePendingInput;
     this.adapter = options.adapter;
     this.registry = options.registry;
     this.session = options.session;
@@ -127,7 +140,7 @@ export class AgentRuntime {
     invocationContext?: RunInvocationContext,
   ): Promise<void> {
     if (externalSignal?.aborted) {
-      throw new DOMException('agent aborted', 'AbortError');
+      throw normalizeRuntimeAbortReason(externalSignal.reason);
     }
 
     const run = this.controller.startRun();
@@ -143,10 +156,7 @@ export class AgentRuntime {
     let executedToolIds = new Set<string>();
 
     try {
-      if (mergedSignal.aborted) {
-        onEvent({ type: 'run_aborted', runId: run.runId });
-        throw new DOMException('agent aborted', 'AbortError');
-      }
+      mergedSignal.throwIfAborted();
 
       if (typeof input === 'string') {
         this.session.appendUserText(input);
@@ -167,7 +177,7 @@ export class AgentRuntime {
       let autoCompactionBlocked = false;
       let noReplacementRevision: number | undefined;
       while (true) {
-        this.throwIfAborted(mergedSignal, onEvent, run.runId);
+        mergedSignal.throwIfAborted();
         currentAssistantBlocks = [];
         assistantBlocksCommitted = false;
         toolResults = [];
@@ -184,6 +194,10 @@ export class AgentRuntime {
           onEvent({ type: 'run_completed', runId: run.runId });
           return;
         }
+
+        // Only drain at a complete conversation boundary, never inside a tool batch.
+        const pendingInput = this.takePendingInput?.();
+        if (pendingInput) this.session.appendUserText(pendingInput);
 
         if (
           !autoCompactionBlocked
@@ -249,6 +263,7 @@ export class AgentRuntime {
           }
         }
 
+        this.reportActivity({ phase: 'model' });
         const providerMessages = this.session.getMessages();
         const streamProviderConversation = this.providerSurfaceKind === 'cli-subagent'
           ? streamCliSubagentProviderConversation
@@ -261,13 +276,14 @@ export class AgentRuntime {
           options: this.buildInvocationOptions(mergedSignal, invocationContext),
           invocationId: `${run.runId}:${iteration}`,
         })) {
+          this.reportActivity({ phase: chunk.type === 'thinking' ? 'thinking' : 'model' });
           if (chunk.type === 'usage') {
             const usage = this.session.updateUsage(chunk.usage);
             onEvent({ type: 'usage_updated', runId: run.runId, usage });
             continue;
           }
 
-          this.throwIfAborted(mergedSignal, onEvent, run.runId);
+          mergedSignal.throwIfAborted();
           if (chunk.type === 'text') {
             // Merge consecutive text blocks to avoid fragmented storage
             const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
@@ -312,7 +328,7 @@ export class AgentRuntime {
             break;
           }
         }
-        this.throwIfAborted(mergedSignal, onEvent, run.runId);
+        mergedSignal.throwIfAborted();
 
         const hasVisibleOutput = currentAssistantBlocks.some(
           (block) => block.type === 'text' || block.type === 'tool_use',
@@ -334,6 +350,14 @@ export class AgentRuntime {
 
         const toolCalls = currentAssistantBlocks.filter((block): block is ToolCall => block.type === 'tool_use');
         if (toolCalls.length === 0) {
+          // A message may arrive while the final response is streaming. Handle it in
+          // this run after committing that response, without fabricating tool results.
+          const lateInput = this.takePendingInput?.();
+          if (lateInput) {
+            this.session.appendUserText(lateInput);
+            iteration += 1;
+            continue;
+          }
           this.emitVerificationGuardIfNeeded(input, verificationToolCalls, codeMutatingToolSeen, run.runId, onEvent);
           onEvent({ type: 'run_completed', runId: run.runId });
           return;
@@ -342,7 +366,8 @@ export class AgentRuntime {
         toolResults = [];
         const baseToolExecutionContext = this.buildToolExecutionContext(mergedSignal);
         for (const toolCall of toolCalls) {
-          this.throwIfAborted(mergedSignal, onEvent, run.runId);
+          mergedSignal.throwIfAborted();
+          this.reportActivity({ phase: 'tool', toolName: toolCall.name });
           onEvent({
             type: 'tool_started',
             runId: run.runId,
@@ -362,6 +387,8 @@ export class AgentRuntime {
             },
           };
           const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
+          mergedSignal.throwIfAborted();
+          this.reportActivity({ phase: 'model' });
           const ok = isSuccessfulModelToolResult(result);
           executedToolIds.add(toolCall.id);
           verificationToolCalls.push({
@@ -401,7 +428,7 @@ export class AgentRuntime {
         iteration += 1;
       }
     } catch (error) {
-      if (isAbortError(error)) {
+      if (mergedSignal.aborted || isAbortError(error)) {
         const partialSentinel = '\n\n[partial - interrupted by user]';
         const blocks = currentAssistantBlocks.map((block) => ({ ...block })) as MessageBlock[];
 
@@ -452,7 +479,8 @@ export class AgentRuntime {
           .map((block) => block.text)
           .join('');
         onEvent({ type: 'run_aborted', runId: run.runId, partialText });
-        throw error;
+        if (isAbortError(error)) throw error;
+        throw normalizeRuntimeAbortReason(mergedSignal.reason);
       }
 
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -463,18 +491,8 @@ export class AgentRuntime {
     }
   }
 
-  private throwIfAborted(
-    signal: AbortSignal,
-    onEvent: (event: AgentRuntimeEvent) => void,
-    runId: string,
-  ): void {
-    if (!signal.aborted) {
-      return;
-    }
-
-    onEvent({ type: 'run_aborted', runId });
-
-    throw new DOMException('agent aborted', 'AbortError');
+  private reportActivity(activity: RuntimeActivity): void {
+    try { this.onActivity?.(activity); } catch { /* Telemetry cannot break a run. */ }
   }
 
   private refreshModelPolicy(): void {

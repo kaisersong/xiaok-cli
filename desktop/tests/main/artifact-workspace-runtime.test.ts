@@ -161,7 +161,10 @@ describe('artifact workspace runtime contract', () => {
     });
     await host.cancelTask(created.taskId);
 
-    expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'cancelled' });
+    await host.drain();
+    await vi.waitFor(() => {
+      expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'cancelled' });
+    });
     expect((await host.recoverTask(created.taskId)).snapshot.events.at(-1))
       .toEqual({ type: 'task_terminal', status: 'cancelled' });
   });
@@ -340,7 +343,11 @@ describe('desktop tool loop invocation and consumer ordering', () => {
 
     await expect(execution).rejects.toBe(sentinel);
     expect(usage).toHaveBeenCalledTimes(1);
-    expect(usage).toHaveBeenCalledWith(12, 3);
+    expect(usage).toHaveBeenCalledWith(
+      12,
+      3,
+      expect.stringMatching(/^inv_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+    );
     expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'assistant_delta' }),
     );
@@ -375,7 +382,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
 
     await expect(execution).rejects.toBe(sentinel);
     expect(usage).toHaveBeenCalledTimes(1);
-    expect(usage).toHaveBeenCalledWith(21, 5);
+    expect(usage).toHaveBeenCalledWith(21, 5, 'turn-1:tail');
     expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'assistant_delta' }),
     );

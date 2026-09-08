@@ -23,6 +23,7 @@ export interface TuiRuntimeScrollRegion {
     clearActivity(): void;
 }
 export interface TuiRuntimeStateOptions {
+    getActivitySummary?: (now: number) => string;
     statusBar: TuiRuntimeStatusBar;
     scrollRegion: TuiRuntimeScrollRegion;
     onSuspendInteractiveUi: (context: string, error: unknown) => void;
@@ -43,6 +44,7 @@ export declare class TuiRuntimeState {
     private snapshot;
     constructor(options: TuiRuntimeStateOptions);
     getSnapshot(): TuiSurfaceSnapshot;
+    isInteractivePromptActive(): boolean;
     setSummarySource(summarySource: TuiSummarySource): void;
     getFooterInputPrompt(): string;
     beginTurn(activityLabel?: string, options?: TuiBeginTurnOptions): void;

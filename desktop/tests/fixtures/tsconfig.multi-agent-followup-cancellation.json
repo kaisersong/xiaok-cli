@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../main/desktop-multi-agent-followup-cancellation-receipts.bdd.test.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

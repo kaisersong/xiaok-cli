@@ -8,6 +8,7 @@ import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
+import { threadDeletionError } from '../lib/thread-deletion';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -71,6 +72,8 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deletingThreads = useRef(new Set<string>());
   const [gtdEnabled, setGtdEnabled] = useState<boolean>(() => {
     try { return localStorage.getItem('xiaok:gtd-enabled') === 'true'; } catch { return false; }
   });
@@ -224,12 +227,16 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (deletingThreads.current.has(id)) return;
+    deletingThreads.current.add(id);
+    setDeleteError(null);
     try {
       log.info('deleteThread', id);
       await api.deleteThread(id);
       removeThread(id);
       log.info('deleteThread ok');
-    } catch { /* ignore */ }
+    } catch (error) { setDeleteError(threadDeletionError(error, t)); }
+    finally { deletingThreads.current.delete(id); }
   };
 
   const handleDoubleClick = (thread: ThreadResponse) => {
@@ -325,6 +332,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       className="relative flex w-60 flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
       style={{ paddingTop: 12 }}
     >
+      {deleteError && <p role="alert" className="mx-3 mb-2 text-xs text-[var(--c-text-secondary)]">{deleteError}</p>}
       {/* Main navigation */}
       <div className="px-2">
         <div className="flex flex-col gap-0.5">
@@ -945,6 +953,8 @@ function SidebarThreadListItem({
         <button
           type="button"
           onClick={handleDeleteClick}
+          aria-label={confirmingDelete ? t.deleteThreadInlineConfirm : t.deleteThread}
+          title={t.deleteThreadConfirmBody}
           className={`ml-0.5 shrink-0 p-0.5 ${confirmingDelete ? 'block text-[10px] font-medium text-red-500' : 'hidden text-[var(--c-text-secondary)] hover:text-red-500 group-hover:block'}`}
         >
           {confirmingDelete ? t.deleteThreadInlineConfirm : <X className="size-3" />}

@@ -144,7 +144,7 @@ export function createWorktreeManager(options: WorktreeManagerOptions): Worktree
         const existing = registry.leases.find((lease) => lease.branch === input.branch);
         if (existing) {
           const registration = gitWorktrees.find((entry) =>
-            entry.path === existing.path && entry.branch === existing.branch
+            sameWorktreePath(entry.path, existing.path) && entry.branch === existing.branch
           );
           if (existing.state === 'active' && registration) {
             if (
@@ -233,7 +233,7 @@ export function createWorktreeManager(options: WorktreeManagerOptions): Worktree
 
         try {
           const registration = (await listGitWorktrees(options.execGit))
-            .find((entry) => entry.path === lease.path && entry.branch === lease.branch);
+            .find((entry) => sameWorktreePath(entry.path, lease.path) && entry.branch === lease.branch);
           if (!registration) {
             throw new Error(`git_registration_mismatch: ${lease.branch}`);
           }
@@ -308,7 +308,7 @@ export function createWorktreeManager(options: WorktreeManagerOptions): Worktree
           }
 
           const registration = gitWorktrees.find((entry) =>
-            entry.path === lease.path && entry.branch === lease.branch
+            sameWorktreePath(entry.path, lease.path) && entry.branch === lease.branch
           );
           const inactive = await isInactive(lease.allocator, inspectProcess);
           if (!registration && !existsSync(lease.path) && inactive) {
@@ -494,11 +494,11 @@ async function reconcileRegistry(
   const skipped: Array<{ branch: string; reason: string }> = [];
 
   for (const lease of [...registry.leases]) {
-    const registrationByPath = gitWorktrees.find((entry) => entry.path === lease.path);
+    const registrationByPath = gitWorktrees.find((entry) => sameWorktreePath(entry.path, lease.path));
     const registrationByBranch = gitWorktrees.find((entry) => entry.branch === lease.branch);
     if (
       (registrationByPath && registrationByPath.branch !== lease.branch)
-      || (registrationByBranch && registrationByBranch.path !== lease.path)
+      || (registrationByBranch && !sameWorktreePath(registrationByBranch.path, lease.path))
     ) {
       throw new Error(`git_registration_mismatch: ${lease.branch}`);
     }
@@ -552,6 +552,15 @@ async function listGitWorktrees(
     }
   }
   return records;
+}
+
+function sameWorktreePath(left: string, right: string): boolean {
+  if (resolve(left) === resolve(right)) return true;
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
 }
 
 async function gitBranchExists(

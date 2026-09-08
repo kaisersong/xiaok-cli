@@ -58,7 +58,9 @@ export function createComputerUseTool(backend) {
                 additionalProperties: true,
             },
         },
-        async execute(input) {
+        async execute(input, context) {
+            const options = context?.signal ? { signal: context.signal } : undefined;
+            options?.signal?.throwIfAborted();
             const returnRecoverableError = (error, notifyBackend = false) => {
                 if (notifyBackend) {
                     try {
@@ -93,9 +95,11 @@ export function createComputerUseTool(backend) {
                 return blocked;
             let prepared;
             try {
-                prepared = await buildActionInput(backend, action, input);
+                prepared = await buildActionInput(backend, action, input, options);
+                options?.signal?.throwIfAborted();
             }
             catch (error) {
+                options?.signal?.throwIfAborted();
                 const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
                 if (recoverable)
                     return returnRecoverableError(recoverable, true);
@@ -120,9 +124,11 @@ export function createComputerUseTool(backend) {
             }
             let result;
             try {
-                result = await backend.callToolResult(translated.operation, translated.input);
+                result = await callComputerUseBackend(backend, translated.operation, translated.input, options);
+                options?.signal?.throwIfAborted();
             }
             catch (error) {
+                options?.signal?.throwIfAborted();
                 const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
                 if (recoverable)
                     return returnRecoverableError(recoverable, true);
@@ -140,7 +146,8 @@ export function createComputerUseTool(backend) {
                 result: sanitizeToolResult(result),
             };
             if (input.capture_after === true && action !== 'capture' && action !== 'list_apps' && action !== 'list_windows') {
-                const captureInput = await buildCaptureInput(backend, input);
+                const captureInput = await buildCaptureInput(backend, input, options);
+                options?.signal?.throwIfAborted();
                 if (typeof captureInput === 'string') {
                     const recoverable = classifyRecoverableComputerUseError(captureInput);
                     if (recoverable)
@@ -152,7 +159,8 @@ export function createComputerUseTool(backend) {
                 // public `capture` action, so both paths force include_screenshot and share
                 // one allowed-field set (design §6.1).
                 const captureTranslated = translateCuaAction('capture', captureInput);
-                const capture = await backend.callToolResult(captureTranslated.operation, captureTranslated.input);
+                const capture = await callComputerUseBackend(backend, captureTranslated.operation, captureTranslated.input, options);
+                options?.signal?.throwIfAborted();
                 if (capture.isError) {
                     const recoverable = classifyRecoverableComputerUseError(capture.summary || capture.text);
                     if (recoverable)
@@ -160,9 +168,24 @@ export function createComputerUseTool(backend) {
                 }
                 response.captureAfter = sanitizeToolResult(capture);
             }
+            options?.signal?.throwIfAborted();
             return JSON.stringify(response);
         },
     };
+}
+async function callComputerUseBackend(backend, name, input, options) {
+    options?.signal?.throwIfAborted();
+    try {
+        const result = await (options
+            ? backend.callToolResult(name, input, options)
+            : backend.callToolResult(name, input));
+        options?.signal?.throwIfAborted();
+        return result;
+    }
+    catch (error) {
+        options?.signal?.throwIfAborted();
+        throw error;
+    }
 }
 function classifyRecoverableComputerUseError(message) {
     const normalized = message.toLowerCase();
@@ -197,12 +220,12 @@ function checkBlockedInput(action, input) {
     }
     return null;
 }
-async function buildActionInput(backend, action, input) {
+async function buildActionInput(backend, action, input, options) {
     if (action === 'capture') {
-        return buildCaptureInput(backend, input);
+        return buildCaptureInput(backend, input, options);
     }
     if (action === 'screenshot') {
-        return buildScreenshotInput(backend, input);
+        return buildScreenshotInput(backend, input, options);
     }
     if (action === 'list_windows') {
         return buildListWindowsInput(input);
@@ -231,7 +254,7 @@ function buildListWindowsInput(input) {
     }
     return output;
 }
-async function buildCaptureInput(backend, input) {
+async function buildCaptureInput(backend, input, options) {
     const direct = buildDirectWindowStateInput(input);
     if (direct)
         return direct;
@@ -239,7 +262,7 @@ async function buildCaptureInput(backend, input) {
     if (!app) {
         return 'Error: capture requires pid + window_id, or an app name that can be resolved through list_windows';
     }
-    const windows = await backend.callToolResult('list_windows', { on_screen_only: true });
+    const windows = await callComputerUseBackend(backend, 'list_windows', { on_screen_only: true }, options);
     if (windows.isError) {
         return `Error: ${windows.summary || windows.text || 'list_windows failed before capture'}`;
     }
@@ -253,7 +276,7 @@ async function buildCaptureInput(backend, input) {
         ...pickWindowStateOptions(input),
     };
 }
-async function buildScreenshotInput(backend, input) {
+async function buildScreenshotInput(backend, input, options) {
     const direct = buildDirectWindowAddressInput(input);
     if (direct)
         return direct;
@@ -261,7 +284,7 @@ async function buildScreenshotInput(backend, input) {
     if (!app) {
         return 'Error: screenshot requires pid + window_id, or an app name that can be resolved through list_windows';
     }
-    const windows = await backend.callToolResult('list_windows', { on_screen_only: true });
+    const windows = await callComputerUseBackend(backend, 'list_windows', { on_screen_only: true }, options);
     if (windows.isError) {
         return `Error: ${windows.summary || windows.text || 'list_windows failed before screenshot'}`;
     }

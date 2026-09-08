@@ -15,6 +15,21 @@ const MCP_STDERR_TAIL = Symbol('mcpStderrTail');
 const STDERR_TAIL_LIMIT = 4096;
 export class InPlaceStdioClientTransport extends StdioClientTransport {
 }
+/** Preserve caller cancellation across SDK v2's RequestTimeout normalization. */
+export async function callMcpToolWithSignal(client, params, options) {
+    const signal = options?.signal;
+    signal?.throwIfAborted();
+    try {
+        // Keep SDK validation, catalog caching and header-refresh retry intact.
+        const result = await client.callTool(params, options);
+        signal?.throwIfAborted();
+        return result;
+    }
+    catch (error) {
+        signal?.throwIfAborted();
+        throw error;
+    }
+}
 export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;
 export const DEFAULT_MCP_CATALOG_TIMEOUT_MS = 10_000;
 export const DEFAULT_MCP_CALL_TIMEOUT_MS = 120_000;

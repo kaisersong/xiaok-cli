@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../main/desktop-host-cancellation-process-recovery.bdd.test.ts",
+    "desktop-host-cancellation-process-recovery-child.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

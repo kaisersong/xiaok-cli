@@ -15,7 +15,7 @@ interface PhaseAbort {
   dispose(): void;
 }
 
-export function createDesktopLoopLLMPort(executionCoordinator = new DesktopExecutionCoordinator()): LoopLLMPort {
+export function createDesktopLoopLLMPort(executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1 })): LoopLLMPort {
   return {
     async complete(input) {
       const config = await loadConfig();
@@ -64,7 +64,7 @@ export function createDesktopLoopLLMPort(executionCoordinator = new DesktopExecu
             completionAbort.dispose();
           }
           return { text };
-        });
+        }, 'background');
       } finally {
         queueAbort.dispose();
       }

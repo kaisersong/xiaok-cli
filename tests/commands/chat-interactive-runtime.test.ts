@@ -1382,7 +1382,7 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
 
       await waitFor(() => {
-        expect(harness.output.normalized).toContain('[background] job_1 completed: background worker finished via gpt-5.4');
+        expect(harness.output.normalized).toMatch(/\[background\] job_[\da-f-]+ completed: background worker finished via gpt-5\.4/);
       }, { timeoutMs: 3_000 });
 
       await waitForInputTurnReady(harness);

@@ -217,8 +217,8 @@ async function main() {
   // 验证 prompt 包含关键指令
   console.log('\n=== Prompt 关键指令检查 ===');
   const promptChecks = [
-    { pattern: 'CRITICAL: EXECUTE IMMEDIATELY', name: '立即执行指令' },
-    { pattern: 'User authorization = immediate execution', name: '用户授权执行指令' },
+    { pattern: 'instructions to execute', name: '立即执行指令' },
+    { pattern: 'authorized scope', name: '用户授权执行指令' },
     { pattern: 'genuine interactive input', name: '交互式命令边界' },
   ];
 

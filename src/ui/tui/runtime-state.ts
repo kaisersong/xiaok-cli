@@ -36,6 +36,7 @@ export interface TuiRuntimeScrollRegion {
 }
 
 export interface TuiRuntimeStateOptions {
+  getActivitySummary?: (now: number) => string;
   statusBar: TuiRuntimeStatusBar;
   scrollRegion: TuiRuntimeScrollRegion;
   onSuspendInteractiveUi: (context: string, error: unknown) => void;
@@ -66,6 +67,10 @@ export class TuiRuntimeState {
 
   getSnapshot(): TuiSurfaceSnapshot {
     return { ...this.snapshot };
+  }
+
+  isInteractivePromptActive(): boolean {
+    return this.interactivePromptDepth > 0;
   }
 
   setSummarySource(summarySource: TuiSummarySource): void {
@@ -244,7 +249,8 @@ export class TuiRuntimeState {
       return;
     }
 
-    const line = this.options.statusBar.getActivityLine(Date.now(), this.liveActivityFrame++);
+    const now = Date.now();
+    const line = this.options.statusBar.getActivityLine(now, this.liveActivityFrame++);
     if (!line) {
       return;
     }
@@ -252,7 +258,8 @@ export class TuiRuntimeState {
     this.liveActivityVisible = true;
     this.snapshot.activityVisible = true;
     try {
-      this.options.scrollRegion.renderActivity(line);
+      const summary = this.options.getActivitySummary?.(now);
+      this.options.scrollRegion.renderActivity(summary ? `${summary}\n${line}` : line);
     } catch (error) {
       this.options.onSuspendInteractiveUi('render_live_activity', error);
     }

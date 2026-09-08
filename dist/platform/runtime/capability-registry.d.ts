@@ -8,8 +8,9 @@ export interface CapabilityRecord {
 }
 export declare class CapabilityRegistry {
     private readonly records;
-    register(record: CapabilityRecord): void;
-    unregister(name: string): void;
+    register(record: CapabilityRecord, owner?: object): void;
+    unregister(name: string, owner?: object): void;
+    unregisterOwner(owner: object): void;
     get(name: string): CapabilityRecord | undefined;
     search(query: string): CapabilityRecord[];
 }

@@ -91,6 +91,17 @@ describe('scheduled task thread aggregation', () => {
     expect(fakeApi.threads.get('thread-dream')?.currentTaskId).toBe('task_new');
   });
 
+  it.each([true, false])('recreates an entry when the prior conversation is deleted during task attachment (preferred=%s)', async preferred => {
+    const fakeApi = createFakeThreadApi([{ id: 'old-thread', currentTaskId: 'task_old', taskIds: ['task_old'] }]);
+    const attach = fakeApi.updateThreadTaskId.getMockImplementation()!;
+    fakeApi.updateThreadTaskId.mockImplementationOnce(async () => {
+      fakeApi.threads.delete('old-thread'); throw new Error('thread_not_found');
+    }).mockImplementation(attach);
+    const linked = await ensureAggregatedScheduledThread({ id: 'schedule', name: 'work', ...(preferred ? { threadId: 'old-thread' } : {}) }, ['task_old', 'task_new'], fakeApi);
+    expect(linked.threadId).not.toBe('old-thread'); expect(fakeApi.threads.has(linked.threadId!)).toBe(true);
+    expect(fakeApi.threads.get(linked.threadId!)?.taskIds).toEqual(['task_old', 'task_new']);
+  });
+
   it('adopts an existing scheduled runtime thread and backfills other runs into it', async () => {
     const fakeApi = createFakeThreadApi([
       {

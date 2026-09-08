@@ -1,4 +1,6 @@
 import { appendFileSync } from 'node:fs';
+import type { MultiAgentEvent } from '../ai/agents/multi-agent-coordinator.js';
+import type { SubAgentProgressEvent } from '../ai/agents/subagent-presentation.js';
 import {
   acquireTranscriptLease,
   archiveTranscript,
@@ -27,6 +29,8 @@ export {
 };
 
 export type TranscriptEvent =
+  | { type: 'subagent_progress'; event: SubAgentProgressEvent; timestamp: number }
+  | { type: 'multi_agent'; event: MultiAgentEvent; timestamp: number }
   | { type: 'input_key'; key: string; timestamp: number }
   | { type: 'input_read_attach'; timestamp: number }
   | { type: 'input_read_detach'; reason: 'submit' | 'cancel' | 'eof'; timestamp: number }

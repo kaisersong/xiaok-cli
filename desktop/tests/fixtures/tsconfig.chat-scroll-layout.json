@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.renderer.json",
+  "compilerOptions": { "types": ["vite/client", "node", "@testing-library/jest-dom"] },
+  "include": [
+    "../../renderer/src/global.d.ts",
+    "chat-scroll-layout-renderer.tsx",
+    "chat-scroll-layout-api.ts",
+    "../e2e/chat-scroll-layout.spec.ts",
+    "../renderer/chat-view-conversation-index.test.tsx"
+  ]
+}

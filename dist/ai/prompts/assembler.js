@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
 import { formatSkillsContext } from '../skills/loader.js';
+import { getCliDelegationSection } from './sections/cli-delegation.js';
 import { getIntroSection, getSystemSection, getDoingTasksSection, getIntentDelegationSection, getActionsSection, getUsingToolsSection, getToneAndStyleSection, getOutputEfficiencySection, getSessionGuidanceSection, getDecompositionSection, getVerificationSection, getParallelExecutionSection, } from './sections/index.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const API_OVERVIEW_PATH = join(__dirname, '../../../data/yzj-api-overview.md');
@@ -65,6 +66,10 @@ export async function assembleSystemPrompt(opts) {
             cacheable: true,
             kind: 'system_rule',
         }];
+    if (opts.channel === 'chat' && opts.cliDelegation) {
+        segments.push({ key: 'tool_policy', title: 'CLI Delegation Policy',
+            text: getCliDelegationSection(opts.cliDelegation), cacheable: true, kind: 'system_rule' });
+    }
     // -----------------------------------------------------------------------
     // SYSTEM_PROMPT_DYNAMIC_BOUNDARY
     // Everything below changes per-turn and should NOT be cached.
@@ -92,8 +97,6 @@ export async function assembleSystemPrompt(opts) {
         mcpInstructions: opts.mcpInstructions,
         currentTokenUsage: opts.currentTokenUsage,
         contextLimit: opts.contextLimit,
-        lastAssistantMessage: opts.lastAssistantMessage,
-        lastUserMessage: opts.lastUserMessage,
     });
     if (guidance)
         dynamicSections.push(guidance);
@@ -128,7 +131,7 @@ export async function assembleSystemPrompt(opts) {
     });
     const autoContextSection = formatLoadedContext(autoContext);
     // 10. Yunzhijia API overview (budget-managed)
-    const base = [staticText, ...dynamicSections].join('\n\n');
+    const base = [...segments.map((segment) => segment.text), ...dynamicSections].join('\n\n');
     let remaining = opts.budget - estimateTokens(base);
     let apiOverview = '';
     if (existsSync(API_OVERVIEW_PATH)) {

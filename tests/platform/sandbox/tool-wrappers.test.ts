@@ -180,3 +180,45 @@ describe('sandbox tool wrappers — denial callback flow', () => {
     expect(result).toBe('content of /repo/src/index.ts');
   });
 });
+
+describe('sandbox cancellation propagation', () => {
+  it('rechecks network policy after bash workdir approval', async () => {
+    const policy = createSandboxPolicy({ allowedPaths: new Set(['/repo']), network: 'deny' });
+    const enforcer = createSandboxEnforcer(policy);
+    const [wrapped] = applySandboxToTools([fakeBashTool()], enforcer, async () => {
+      policy.expandAllowedPaths(['/external']);
+      return { shouldProceed: true };
+    });
+    expect(await wrapped!.execute({ workdir: '/external', command: 'curl https://example.com' }))
+      .toContain('sandbox denied network access');
+  });
+  it.each(['bash', 'read', 'write', 'edit'])('forwards context through %s and refuses approval after abort', async (name) => {
+    const policy = createSandboxPolicy({ allowedPaths: new Set(['/repo']) });
+    const enforcer = createSandboxEnforcer(policy);
+    const controller = new AbortController();
+    const context = { signal: controller.signal, toolInvocationId: 'same-invocation' };
+    let forwarded: unknown;
+    let executions = 0;
+    let approve!: () => void;
+    const pending = new Promise<void>((resolve) => { approve = resolve; });
+    const base: Tool = { ...fakeReadTool(), definition: { ...fakeReadTool().definition, name },
+      execute: async (_input, actual) => { forwarded = actual; executions++; return 'done'; },
+    };
+    const [wrapped] = applySandboxToTools([base], enforcer, async () => {
+      await pending;
+      policy.expandAllowedPaths(['/external']);
+      return { shouldProceed: true };
+    });
+    const input = (path: string) => name === 'bash' ? { workdir: path, command: 'echo ok' } : { file_path: path };
+    await wrapped!.execute(input('/repo'), context as never);
+    expect(forwarded).toBe(context);
+    const result = wrapped!.execute(input('/external'), context as never);
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort();
+    approve();
+    await rejected;
+    expect(executions).toBe(1);
+    await expect(wrapped!.execute(input('/repo'), context as never)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(executions).toBe(1);
+  });
+});

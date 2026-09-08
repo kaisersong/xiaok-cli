@@ -1,552 +1,73 @@
 # xiaok-cli
 
-> xiaok-cli 是一个本地优先的 AI 任务交付工作台。它会把用户意图收成可执行的 skill 运行链路，在执行中持续纠偏，并尽量把事情真正做成。代码任务、文档整理、报告/幻灯片生成，以及云之家这类可选 channel 入口，都运行在同一套 runtime 上。
+> Xiaok 是本地优先的 AI 工作台，提供 Desktop 和 CLI 两种入口。通过工具、技能、SubAgent 协作、持续目标和产物验证，把用户请求落实为可交付的结果。
 
-一个面向代码与文档密集型工作的、本地优先的 AI CLI。
+Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI 面向终端工作流、代码任务和脚本化执行。两端共享模型、工具、技能与运行时基础能力。
 
 [English](README.md) | [简体中文](README.zh-CN.md)
+
+**发布目标：1.5.2（2026-09-08）。** CLI 与 Desktop 的 package metadata 已统一为 **1.5.2**。本次新增复用右侧浮窗的 SubAgent 协作、星座代号、前后台独立执行槽位与有界汇总断流续接。新版本构建与产物校验成功前，最新 Desktop 正式版仍为 **1.5.1**；修改版本号不等于发布 npm。详见[版本日志](#版本日志)。
 
 ---
 
 ## 效果展示
 
-**基准测试结果：**
+启动 CLI，直接描述具体任务：
 
-| 指标 | xiaok v1.0.0 | Claude Code | 提升 |
-|------|-------------|-------------|------|
-| **自主性得分** | 100% | 100% | — |
-| **简单问答延迟** | 3.8s | 7.5s | **-49%** |
-| **重命名任务延迟** | 27.6s | 180.8s | **-85%** |
-| **Token 效率** | 100% | 250% | **-60%** |
+```bash
+xiaok login
+xiaok "分别检查 agent coordinator 和 registry 的生命周期，再交叉复核工具入口，按严重程度汇总并给出文件与行号。"
+```
+
+当实际可用工具与任务适合独立分工时，Xiaok 可以自动分派有界任务，无需先声明 Agent 或创建项目。简单问题和紧密依赖的工作由主 Agent 直接完成。
+
+CLI 会明确展示 **SubAgent**、星座代号、分工、当前活动，以及结束时的工具调用量和耗时。代号从**双鱼座、天秤座**开始，再依次使用白羊座至其余星座；下一轮加 `-2`。同一实例续轮保留代号。所有代号统一强调色；斜体效果取决于终端字体支持。
+
+可以直接补充偏好：“你自己完成”“分派前先问我”“这两块可独立并行审查”。重要取舍尚未确定时需要实际答复，取消或空回答不算批准。
+
+Desktop 中可从对话开始，添加材料并在预览 / Canvas 中查看结果。当前源码还提供 SubAgent 面板，展示分工、活动、消息和结果；它与持久化 KSwarm 项目相互独立。
 
 ## Xiaok 中的 Loop Engineering
 
-Xiaok 的核心方向是 **Loop Engineering**：不再只是 prompt 一个 agent 做一次事，而是设计一套系统，让它持续发现工作、运行工作、检查工作、记住进度，并决定下一步该做什么。
-
-在 Xiaok 里，prompt 是一次请求，harness 是让一次请求更可靠的执行环境，loop 则是围绕重复 AI 工作建立的持久化运行系统。
-
-| Loop 构建块 | Xiaok 中的落地 |
-|-------------|----------------|
-| **Automation** | Desktop scheduler、内置 loops、提醒、项目/workflow 触发器，给重复工作一个节奏，而不是每次靠人手动 prompt。 |
-| **Work isolation** | KSwarm project、workflow run、task runtime host，以及代码任务里的 git/worktree 感知流程，避免并行工作互相覆盖。 |
-| **Skills** | Skill 文件把项目约定、执行步骤、输入输出合同、复核标准写成可复用行为，不再靠每次临场写 prompt。 |
-| **Connectors** | MCP 插件、内置 report/slide renderer、Intent Broker、KSwarm、文件系统和可选 channel，把 loop 连接到真实数据和真实产物。 |
-| **Sub-agents** | KSwarm 的 PO/worker/reviewer 角色和动态 workflow 分支，把 maker 和 checker 分开；无人值守 loop 不能只依赖自检。 |
-| **Memory** | SQLite store、broker event replay、project state、workflow checkpoint、loop run record 和 artifact manifest，让 loop 可以跨会话延续。 |
-| **Evidence** | Completion guard、deliverable contract、artifact provenance 和 loop evidence store，让“完成”不是模型说完成，而是有可检查的产物证据。 |
-| **Diagnostics** | 只读 loop diagnostics、evidence regression scan 和 KSwarm service health check 把 silent failure 提前暴露出来，避免后台悄悄坏一周。 |
-
-第一批内置生产 loop 是 **Artifact Evidence Regression Loop** 和 **KSwarm Service Health Loop**。它们会定期扫描最近完成的任务与服务可用性，查找缺失 artifact、陈旧 run state、异常交付结果、服务未启动、health 握手失败、broker 不可用和版本/能力不匹配等问题，并写入结构化 diagnostics。这代表 Xiaok 正在走向的模式：人设计 loop，Xiaok 运行 loop，独立 evidence 判断工作是否真的完成。
-
-最小可用的 Xiaok loop 可以很简单：
-
-1. 写一个或复用一个 skill，定义工作内容和输出合同。
-2. 加一个触发器，例如 scheduled task、project workflow 或手动运行按钮。
-3. 把 memory 持久化到 project state、文件或 SQLite。
-4. 加一个 checker，例如 reviewer agent、eval、artifact contract 或 evidence scan。
-5. 让失败可见，例如 diagnostics、changelog 或通知。
-
-Xiaok CLI v1.5.1 收录了 v1.5.0 之后新增的 `xiaok login` 首次运行凭据配置流程，并继续完善 Room-first 协作界面：新增 Gate Snapshot 面板，以及供托管智能体使用的持久化 Room 历史读取能力。
-
-**登录引导流程与 Room/Gate 协作后续工作：**
-
-- **`xiaok login`**：新增一个首次运行友好的命令，用户可以选择首选提供商，复用环境中已检测到的 API key，用隐藏输入方式输入 key（永不回显或记录日志），可选通过 `xiaok doctor --check-keys` 使用的同一只读探测方式实时验证，持久化到 `providers.<id>.apiKey`，并可选切换默认模型。非交互式参数（`--provider`、`--api-key`、`--set-default`、`--skip-verify`）支持脚本化使用。
-- **Chat 登录引导**：`runChat` 现在通过一个引导步骤来解析模型 adapter，当尚未配置任何 provider 时可以主动触发登录流程，而不是直接抛出 adapter 构造失败的错误。
-- **Gate Snapshot 面板**：Desktop 项目详情页新增 `GateSnapshotPanel` 渲染组件，直接在界面上展示 KSwarm 的项目 gate 评估状态。
-- **托管智能体的 Room 历史读取能力**：新增 Electron 主进程 `room-history-capability-registry` 和 `room-history-page-tool`，为托管智能体提供绑定 claim token、支持分页的 Room 转录读取能力，延续 v1.5.0 的 Room-first 协作基础工作。
-- **Desktop 自动化与项目状态修复**：个人助理的共享执行排队与模型生成改为分段计时，调度取消信号贯穿到 provider stream；自动化总览只展示每个 owner 最新的决定性关注结果，已恢复的历史失败仍保留在运行记录中但不再长期占用“待处理”。任务快照按字段限长，在保留状态、结果摘要与引用的前提下显著缩小输入；项目看板把 `done` 与 `failed` / `blocked` / `cancelled` 分别放入“已完成”和“已停止”。
-- **发布验证**：根目录 CLI 392/394 个测试文件通过（3367/3383 个测试，14 个平台限定跳过）；唯一失败的 `image-renderer.test.js` ANSI 格式问题，通过 stash 掉本次改动复现同样失败，确认与本次改动无关，是既有问题。本轮 Desktop 修复通过 298 个测试文件 / 2347 个测试，零失败（另有 1 个平台限定文件 / 2 个测试跳过）；Electron 与 renderer baseline typecheck、生产构建、49 个打包合同测试、macOS 未签名打包实装，以及自动化、五列项目看板和项目产物的 Codex 原生 Computer Use 验收全部通过。
-
-Xiaok Desktop v1.5.0 新增 Room-first 协作入口：用户可以先与多个智能体讨论，再从明确选中的 Room 消息创建 KSwarm 项目；正式创建必须由用户确认，项目也会持续关联回发起它的协作空间。
-
-**Room-first 协作与 Runtime Harness：**
-
-- **协作空间**：Desktop 侧边栏新增持久化 Room，提供明确成员、消息历史、项目关联、归档状态和跨重启恢复；事实由 Intent Broker 持有，不依赖 renderer 临时状态。
-- **基于来源消息创建项目**：用户选择真正定义项目的 Room 消息，Desktop 经用户授权的 Room 路径创建 KSwarm 项目，并把系统消息与项目卡片写回原 Room。
-- **隔离的智能体回复**：被 @ 的托管智能体只接收当前 Room transcript 与明确选择的项目范围。持久化 wake 只 claim/complete 一次；非托管或身份冲突路由默认拒绝，不冒充其他 runtime。
-- **只生成提案的 Agent Tool**：智能体侧 `create_project` 只能生成提案，不能创建正式项目或修改项目状态；正式创建仍由用户在 Desktop 确认。
-- **Pi Harness 支持**：KSwarm 可以发现、探测、配置并通过受限的一次性 harness 执行 Pi，对参数、环境、工作目录、超时与输出大小设有明确边界。
-- **DeepSeek Harness 安全门**：DeepSeek harness 路由和能力注册已经接线，但在固定版本的真实 `dsh --profile headless` 探针证明 preview CLI 合同前，创建入口保持关闭，界面不会把未验证 runtime 标成可用。
-- **依赖与打包维护**：根 CLI 与 Desktop 的 SDK/lockfile owner 已对齐，deprecated dependency 漂移有回归守卫，Release 构建会锁定匹配的 KSwarm 与 Intent Broker 快照。
-- **发布版本说明**：根 CLI 与 Desktop package metadata 均为 `1.5.1`。Desktop release 构建会固定 checkout KSwarm、Intent Broker 与 kai-xiaok-plugins 各自的 `desktop-v1.5.1` 快照，确保 macOS 与 Windows 安装包使用同一套可复现依赖基线。
-
-Xiaok Desktop v1.4.32 让长对话更容易定位，也让 Goal Mode 更容易发现、恢复和监控，同时不再切割主工作区。本版还把最新 GLM 与 DeepSeek Flash 模型加入 CLI/Desktop 共用目录，并加强超时分类与产物证据恢复。
-
-**Goal Mode 体验、对话导航与 Flash 模型：**
-
-- **Splash 与右侧栏中的 Goal Mode**：Desktop Splash 把 Goal 作为一级命令展示。活动 Goal 复用现有右侧任务面板，不再从顶部切开对话；Goal 详情与 Artifact 工作区保持互斥，避免右侧界面重叠。
-- **可靠的 Goal 恢复**：恢复时带回所属会话上下文，保留暂停期间提供的唯一 token；预算耗尽会明确进入 blocked，成功文件写入也会作为 artifact evidence 留存，不在换轮时丢失。
-- **提示词索引导航**：多轮对话新增贴近分隔线的紧凑索引。静止刻度全部等长，当前项只改变亮度；悬停产生局部波动，摘要窗跟随所选刻度，展示一行提示词与最多两行回答摘要，点击可平滑跳到对应提示词。
-- **GLM 5.3 Flash**：CLI 与 Desktop 新增 `glm-5.3-flash`，包含已核验的百万级上下文、图片输入、工具调用、始终开启的思考模式及受支持的 reasoning effort 档位。
-- **DeepSeek V4 Flash Vision Exp**：共用模型目录新增 `deepseek-v4-flash-vision-exp` 图片输入能力，同时保持非视觉 V4 型号为纯文本。
-- **可重试的 Provider 超时**：`ETIMEDOUT`、流提前关闭、socket 中断等传输失败统一归类为可重试模型失败，同时不削弱用户主动中断语义。
-- **发布版本对齐**：根 CLI、Desktop、package lock、下载链接和 Desktop Release workflow 统一为 `1.4.32` / `desktop-v1.4.32`。
-
-Xiaok Desktop v1.4.31 让长任务可以持续推进，也让项目恢复过程真正可见。Goal Mode 能跨多个轮次保持目标、预算与证据；项目智能体可以一次检测全部配置，并在自身运行时不可用时按配置降级到 Desktop 当前模型。
-
-**Goal Mode、智能体降级与工作流可靠性：**
-
-- **持久化 Goal Mode**：CLI 与 Desktop 支持创建、查看、续跑、完成或阻塞跨轮次目标。目标状态、轮次计费、证据、租约和续跑仲裁可以跨重启保存，并支持并发会话接管。
-- **诚实完成判定**：Goal 完成必须有已收集证据并原子结算轮次。用户中断、排队输入、预算耗尽、持久化状态损坏和新请求取代旧请求都有明确结果，不会静默多跑一轮。
-- **一键检测全部智能体**：项目智能体列表会检查每一个配置，展示整体进度、逐项可调用性，以及可用、受限、不可用的汇总，不再只检测前几个智能体。
-- **Desktop 当前模型降级**：每个外部智能体可独立开启受控降级；自身运行时不可用时交给 Xiaok Desktop 当前模型执行。内置智能体继续直接使用 Desktop 模型，运行时失败不会再让项目界面崩溃。
-- **可恢复的项目工作流**：历史失败 retry 继续保留审计记录，但不会阻塞已经恢复的父任务；已有产物可通过版本绑定校验重新提交并走正常 PO 审核；运行时失败后的 replacement run 会被真正投递。
-- **更稳健的项目界面**：节点详情会规范化异常验收标准，抽屉级错误处理避免单个坏节点导致整个页面空白，Electron 可拖动窗口中的交互按钮保持可点击。
-- **终端可靠性**：发送请求前修复 OpenAI-compatible tool history，安全序列化工具输入；过长的直接 `Ran` 命令组自动折叠，并仍可通过 transcript pager 查看。
-- **发布版本对齐**：根 CLI、Desktop、package lock、下载链接和 Desktop Release workflow 统一为 `1.4.31` / `desktop-v1.4.31`。
-
-Xiaok Desktop v1.4.28 新增主动型每日助理与项目一键智能组队。每日助理在用户明确启用后，晚间分析本地工作、早上给出建议，并把值得沉淀的记忆或知识作为候选交给用户确认；项目可以先分析能力缺口、复用合适的现有智能体、提议缺失角色，再在用户确认后应用与当前项目版本绑定的团队方案。
-
-**主动助理与智能组队：**
-
-- **先同意、再启用的每日助理**：启用后创建带稳定 ID 和明确所有权的晚间、晨间日程。暂停、恢复、过期补跑、时区/DST 与逻辑 exactly-once 都持久化在 Electron main process，不把 renderer 当最终事实来源。
-- **先评审、再写入记忆**：晚间分析只生成带 evidence 的记忆、知识与跟进候选。agent 和 scheduler 路径不能直接写入用户拥有的 store；采纳或忽略候选是用户授权 mutation，状态迁移支持重启恢复。
-- **基于真实工作状态的晨间建议**：晨间输出组合有界 Desktop 活动快照、待确认候选、项目关注事项与既有记忆。结构化 LLM 输出经过校验，provider 不可用时退回确定性的本地建议。
-- **一键智能组队**：KSwarm 生成含 `keep`、`reuse`、`create` 的能力方案，公开 agent API 不泄露私密 runtime 配置，只在真正需要的受信任子进程边界传递最小执行配置。
-- **预览、确认、调和**：团队方案绑定当前 project revision 与 mutation credential；过期或未授权方案 fail-closed。operation journal 让重试与 Desktop 恢复可观测，同时避免重复创建智能体。
-- **对话优先的 Desktop UI**：首页继续以对话为主，每日助理作为紧凑续接卡片；项目智能体页优先提供智能组建，手工配置保留为高级回退。内置日程名称和团队摘要按稳定语义本地化，不直接展示持久化英文。
-- **发布验证**：CLI 350 文件 / 2,968 测试，Desktop 257 文件 / 2,070 测试，KSwarm P0 E2E 85/85、完整流程 E2E 51/51，Intent Broker 388/388 与 collaboration 验证，Desktop typecheck/build/安装包新鲜度以及安装版 Computer Use 全部通过。
-- **版本对齐**：CLI、Desktop、package locks 与 Desktop Release workflow 统一为 `1.4.28` / `desktop-v1.4.28`。
-
-Xiaok Desktop v1.4.27 把同一把"诚实性"标尺对准了检索路径，而实测结果比几轮设计评审预设的更糟。**知识库里被索引的字符有 74.1% 是 HTML 标签与 CSS 噪声**（217,902 / 294,006）——一次 `kb_get_source` 调用在 32,000 字符预算里花掉约 15,000 token 去装样式表，真正的正文只占 3.6%–7.4%。本地 ONNX embedding 则从未真正跑过：它调用的 `Tokenizer.fromString` 在已安装的包里并不存在，于是静默降级到远端 HTTP 接口，让 254MB 的 `onnxruntime-node` 依赖一次推理都没做。三轮对抗性评审否掉了过程中提出的每一套复杂机件——FTS5 虚表、RRF 融合层、TF-IDF 打分器——而真正让指标动起来的两项改动，一份设计稿里都没有。
-
-**可度量的检索、真正可用的向量与文档提取：**
-
-- **索引期剥离 markup**：`.html/.htm/.svg/.xml` 与抓取的 URL 此前原样入库，而同一个文件里的 `extractDocx`、`extractPptx` 一直在剥标签。真实用户文档现在分别按原体积的 10.7% 与 17.3% 入库，零残留标签，正文、标题与目录完整。
-- **本地向量真的在跑**：tokenizer 构造修正，输入按模型 512 token 窗口截断并保留末位 `[SEP]`。真实语料 chunk 平均 688 字，正落在此前会让推理直接崩在 `idx=512 must be within [-512,511]` 的区间里。
-- **停用词不再匹配一切**：jieba 把「的」保留为 token，而几乎所有中文文档都含它，于是任意中文查询都能命中任意中文文档——「高压锅炖牛腩的火候」对一条深度学习笔记打出 0.200 分。renderer IPC 与 `kb_search` 两条兄弟路径现在共用同一个查询词提取器。Hit@1 从 65.0% 升到 75.0%，MRR 从 0.768 升到 0.827。
-- **冻结的评测基线**：22 条查询的 golden set 建在真实语料上，判定规则在跑之前写定，按字面重叠度分桶，并含无答案查询用于捕捉虚假召回。runner 会先自检"每条期望答案确实存在于对应 source"，不通过就中止。正是它判掉了 TF-IDF 打分器：加上停用词过滤后它与朴素实现完全相同，75.0% 对 75.0%。
-- **存量索引重建**：幂等、默认 dry-run 的迁移，优先从原始文件重新提取，无原文时退回清洗拼接后的 chunk。完整标签从 4,896 降到 0，chunk 从 427 降到 174，12 个 source 一个没丢；清洗后的体积独立复现了另一种方法测得的 15.4% 正文占比。
-- **文档提取正确性**：稀疏表格列改按单元格引用定位而非顺序（74.2% 的真实 `.xlsx` 受影响），pptx 的 run 合并成段落而不再输出碎片（此前 42.9% 的输出行是伪碎片），真实工作表名与布尔值得以保留，被改名成 OOXML 扩展的旧 OLE2 文件给出可操作报错，`read` 按 magic byte 分流二进制与 PDF 而不再强行 UTF-8 解码。
-- **Office 与 Markdown 知识导入**：`kb_add_source` 现在让 Markdown 和 Office 文件走与 Desktop 材料相同的有界提取链路。Agent 创建的 source 带明确所有权元数据，解析失败会如实持久化，最后一个 overlap chunk 到达文末后立即结束，不再重复追加直到 Electron 主进程耗尽内存。
-- **Desktop 复制权限**：打包应用里的提示词和回复复制按钮恢复可用。剪贴板写入只对可信主 renderer URL 开放；录音音频权限仍只允许主窗口与会议录音窗口，其他兄弟 renderer 和权限路径保持 default-deny。
-- **安装包新鲜度闸门**：每次 Desktop 打包都会从生成的 `app.asar` 解出 `kb-tools.js`，与当前主进程构建逐字节比较。若旧 main bundle 会绕过源码测试并被装入 `/Applications/xiaok.app`，打包会直接失败。
-- **移除自证测试**：两条以"中文检索"命名的测试在测试文件内部自己重写了子串匹配，从不调用生产检索——这正是一个完全断开的 retriever 能长期不被发现的原因。它们现在驱动真实的 `kb_search` 工具，而一并新增的第三条正是暴露停用词缺陷的那条。
-- **发布验证**：CLI 350 文件 / 2,951 测试，Desktop 225 文件 / 1,902 测试，Desktop typecheck、`build:main`、`build:renderer` 与 CLI release 构建全部 exit 0。重建后另行校验了数据库完整性、外键、孤儿 chunk、缓存计数与迁移幂等性。
-- **版本对齐**：CLI 与 Desktop 元数据统一为 `1.4.27` / `desktop-v1.4.27`。
-
-Xiaok Desktop v1.4.26 把"工具结果诚实性"再往下推了一层。一个返回 `{"ok":false,"error":"project_not_found"}` 的工具，此前仍被判为成功——因为这个 payload 不以 `Error` 开头。在 1748 份真实任务快照里，这类假成功共 148 次、涉及 93 个任务；其中一个任务里 5 次被服务端拒收的修复提交，在界面上显示成 5 个绿勾，而项目从未推进。本次同时移除了产物预览的一处 HTML 注入面，加固了 worktree 租约与会话写入，刷新了官方模型目录，并把随包 renderer 插件对齐到 modern MCP 协议。
-
-**诚实的失败与更安全的预览：**
-
-- **领域级失败判定**：顶层 `ok`/`success` 为布尔 `false` 现在判失败，模型收到 `is_error: true`，进度行显示 `✗` 而不是 `✓`。两个看起来合理的例外被证据推翻：`output_path` 非空并不能证明产物存在，因为报告渲染器的写盘是 `try/catch` 内的 best-effort、路径无条件返回；而多数 `intervention.required:false` 其实是服务端拒收修复提交并丢弃了产物。
-- **裁决仍算成功**：validator 用的是 `valid` 字段，保持成功——调用本身完成了。若把它判成失败，模型会去重试**调用**而不是修**输入**。`validate_skill` 的字段随之改名，避免"有问题的 skill"被读成"失败的调用"。
-- **失败文案可读**：失败进度行改为提取 payload 的 `error` / `code` / `message` / `reason` 或 `errors[]` 首项，不再向用户抛出 100 字符的截断 JSON。
-- **产物预览注入面**：产物预览的 markdown 分支用一串正则拼 HTML，从不转义 `&`、`<`、`>`，再交给顶层 renderer 文档里的 `dangerouslySetInnerHTML`——那里 `window.xiaokDesktop` 可达，而 CSP 只是 Report-Only。产物正文由 agent 写入、内容可直接来自 `web_fetch`，因此一份调研笔记里的 `<img onerror>` 就能拿到整个 preload 面。现在改用共享的 `MarkdownRenderer`，并在该路径关闭它的文件路径 linkify（其兜底会走到无路径白名单的 `shell.openPath`）。
-- **worktree 与会话持久化**：worktree 分配改为带锁的租约登记表，含进程探测、对账与 GC，崩溃的运行不再残留 worktree，也不会让第二次运行占用仍在使用的路径。会话快照改为原子写入。OpenAI adapter 强制 Kimi 的 reasoning admission 与终止边界；chat 轮次新增活跃度看门狗，provider 静默卡死会暴露出来而不是一直挂着。
-- **模型目录驱动的上下文窗口**：OpenAI、Kimi、DeepSeek、GLM、MiniMax、Gemini 等 first-party 条目补齐逐模型核验的 context window 和当前 wire model。Custom provider 即使复用官方 id 也不能继承官方元数据；`cloneWithModel` 会按目标模型重新解析，不再把 1M 模型的窗口错误带到小窗口模型。
-- **按真实请求计算压缩时机**：上下文压力现在同时计算每次请求都会携带的 system prompt 与工具定义序列化成本，修复“session message 看起来未超阈值、实际 provider 请求已经接近窗口”的漏算。
-- **对话优先的 Graph / Loop 体验**：Desktop 首页继续把对话作为主入口，项目和自动化上下文下移到可滚动的续接区域。项目 Graph 可恢复有向边、并行组、汇聚节点、run/handoff 元数据和上下游关系；用户 Loop 提供运行中互斥、Markdown 预览、结构化成功证据、preflight 阻断和修复配置后的恢复运行。
-- **Modern MCP 插件基线**：`kai-report-creator` `2.1.1` 与 `kai-slide-creator` `3.2.2` 使用 modern MCP `2026-07-28` 合同和 MCP 2.0 server API。 `cua-computer-use` `0.2.1` 因 CuaDriver 尚未迁移，明确继续走 legacy stdio adapter；`kai-meeting-assistant` 保持现有 runtime，只修复 tool annotation 可解析性，不虚构协议迁移。
-- **无障碍与门禁修复**：4 个火山 ASR 字段补上程序化标签，会议记录弹窗按 Esc 先关设置浮层；此前在干净工作区就会红的 5 个门禁全部从根因修掉——runner finalization 测试的 adapter stub 已过期、一处 import 多跳了一级目录，以及一份经审阅后重设的 preload key 快照。
-- **发布验证**：当前发布树通过 CLI sandbox 346 个测试文件（2871 个测试，另有 8 项按平台门禁跳过）与 Desktop 224 个测试文件（1890 个测试，另有 2 项 opt-in 真实音频测试跳过），**零失败**。Modern MCP 打包门禁另有 84 项 focused check，包含真实 report / slide server 启动与渲染。CLI release build、Desktop typecheck、`build:main`、`build:renderer` 均干净。
-- **版本对齐**：CLI 与 Desktop 元数据统一为 `1.4.26` / `desktop-v1.4.26`。
-
-Xiaok Desktop v1.4.25 让"被拒绝的工具调用"变成一次诚实的失败。此前用户在权限提示里点了拒绝，运行时却告诉模型这次调用成功了——模型据此继续推进，甚至能用一条从未真正执行的命令满足"完成前必须验证"守卫。现在 Desktop 与 CLI 共用同一套面向模型的成败判定，并把历史工作流产物恢复回 Canvas。
-
-**工具结果的真实性：**
-
-- **拒绝即失败**：`agent-runtime.ts` 与 Desktop 工具循环各带一份逐字相同的临场判定 `!result.startsWith('Error')`，且两份都不认识取消前缀。现在统一走导出的 `isSuccessfulModelToolResult`：被拒绝的调用发出 `post_tool_use_failure`、向模型置 `is_error: true`，且不再从一次被拒调用推断出产物或文件变更事件。
-- **验证守卫不再被绕过**：此前一条被拒绝的 `npm run build` 会被计为验证证据，使 verification-before-completion 守卫在用户明确拒绝的命令上判定通过。该路径已封闭。
-- **不引入 fail-open 方向**：统一后的判定保持 `startsWith('Error')`，没有放宽成 `/^Error\b/`，因此 `Errors found: 0` 这类输出仍判为失败。所有语义变化都是 fail-closed；取消前缀导出为常量，判定与其唯一生产者不可能漂移。
-- **工作流产物恢复**：已完成任务如果其产物只体现在一次 `get_dynamic_workflow_status` 调用里，现在会在 `recoverTask` 时把这些产物恢复进任务快照与 Canvas，而不是显示一个"完成但什么都没有"的任务。
-- **合并调和**：合并验证时发现恢复层与产物解析器对"workspace 路径在哪"的认定不一致。解析器现在优先读取权威的顶层 `projectWorkspacePath`，回退到脚本声明的 `scriptResult.workspacePath`；没有这一步，恢复会静默地解析不到任何产物。
-- **发布验证**：CLI 沙箱 335 个测试文件（2683 测试）零失败；8 个被沙箱排除的套件单独跑通；Desktop 218 个文件（1813 测试），仅剩 5 条既有环境失败（缺 API Key、preload key 数量快照、React Doctor 诊断），这 5 条在未改动的代码树上同样失败。Desktop typecheck、`build:main` 与 CLI release build 均干净。两个新增回归套件都通过"回退修复"实证过红态。
-- **发布对齐**：root CLI 元数据与 Desktop package 元数据统一为 `1.4.25` / `desktop-v1.4.25`。
-
-Xiaok Desktop v1.4.24 为 Kimi K3 和 K3 256K 模型提供一等支持：专属 harness profile 默认开启 preserved thinking、prompt cache affinity、Kimi 专用 tool schema 标准化和 reasoning 序列化。CLI 和 Desktop 在配置的 provider/endpoint 匹配官方 Kimi Coding API 时自动解析 K3 harness。
-
-**Kimi K3 模型优化：**
-
-- **专属 Harness Profile**：`kimi-k3-coding-openai` 和 `kimi-k3-256k-coding-openai` 在检测到官方 Kimi Coding endpoint 时自动激活，提供 tool schema 标准化、usage 提取、空 assistant content 省略和 reasoning 序列化，无需逐会话配置。
-- **Preserved Thinking**：K3 模型默认 `preservedThinking=true`。运行时转发 Kimi streaming 响应中的 `reasoning_content`，Desktop 和 CLI 无需手动开启即可展示模型思维链。
-- **Prompt Cache Affinity**：通过 `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1` 可开启 prompt cache key 注入。启用后每会话编码稳定 cache key，激活 Kimi 服务端 prompt 缓存（典型会话观测到 29K+ cached input tokens）。
-- **OpenAI Responses Native Adapter**：新增 adapter 路径支持 OpenAI Responses API wire format，集成 native compaction、portable compaction executor 和 session graph。
-- **D9 评测基础设施**：生产级 fail-closed 评测 harness（`scripts/evals/kimi-k3-d9/`）提供确定性 fixture server、canonical JSON attestation、immutable preflight plan、full-tree digest、paired stratified bootstrap 统计和 formal artifact 构建，支持可复现的 A/B 模型对比。
-- **发布验证**：release gate 覆盖 2400+ sandbox 测试、13 个 Kimi harness contract 测试、133 个 Desktop service 测试、D9 canonical/statistics/manifest/preflight/assignment/coordinator/fixtures/scanner 套件（23 测试）、真实 Kimi K3 API smoke（正确响应 + prompt cache 命中）、Desktop 构建和 unsigned macOS 打包安装到 `/Applications`。
-- **发布对齐**：root CLI 元数据、Desktop package 元数据和 package locks 统一为 `1.4.24` / `desktop-v1.4.24`。
-
-Xiaok Desktop v1.4.23 把 Canvas 升级为任务归属明确的 Artifact Workspace，并解决内容预览区与空间画布上下分割、互相挤压的问题。预览和画布现在是两个独立的全高主界面；版本、对比、任务来源和多窗口更新仍与产生产物的任务保持绑定。
-
-**Artifact Workspace、Canvas 与发布完整性更新：**
-
-- **全高预览与画布**：Preview 和 Canvas 从上下堆叠的两个区域改为互斥的顶层界面。Tab 交互保留键盘导航、响应式断点、编辑状态和既有的安全预览边界。
-- **任务归属的 Artifact Workspace**：artifact session、节点、连线、版本、对比、乐观更新和文件写入现在都有明确的 main process、preload、IPC、renderer 与 SQLite contract。Revision 与 Spatial Workspace 能力继续遵循既有 beta flag，后续可独立决定正式开放节奏。
-- **可点击的工作流产物**：`get_dynamic_workflow_status` 返回的合格产物会投影为对话中的产物卡片；点击卡片即可在任务归属的 Artifact Workspace / Canvas 中打开所选文件。已完成的历史状态任务在重新打开时，也会从 KSwarm 恢复同一组卡片。
-- **可靠的失败反馈**：失败或额度受限的任务在重放时会展示本地化、脱敏后的原因，不再表现为“没有执行也没有反馈”。通用任务理解与 terminal event 会持久化，重新打开会话后仍能看到真实结果和已有的部分回复。
-- **更干净的 Result 展示**：只在展示投影中消除重复摘要，不删除底层 `TaskResult` 或 artifact provenance；历史仍可检查，同时避免答案块重复出现。
-- **完整的幻灯片插件打包**：Desktop 现在会打包 slide plugin 的 `themes/**`、`demos/**` 与 `vendor-manifest.json`。`kai-slide-creator` 3.2.1 带有干净的源提交来源、preset fidelity gates，以及安装包运行所需的 Kingdee 主题资产。
-- **Codex Hook 根目录修复**：随包 Intent Broker 将代码根目录与运行时工作目录分离，避免 Codex Stop / resume hook 被改写到无关项目路径，同时保留 packaged root 显式覆盖能力。
-- **发布验证**：发布门禁覆盖 slide-creator 全量测试、vendored plugin 完整性、Intent Broker 全量与 collaboration 测试、CLI task runtime 聚焦测试、Desktop main/preload/renderer 测试、打包合同、typecheck、release build 和 macOS 未签名打包。
-- **发布对齐**：root CLI 元数据、Desktop package 元数据、package locks、相关项目基线和 Desktop Release workflow 默认值统一为 `1.4.23` / `desktop-v1.4.23`。
-
-Xiaok Desktop v1.4.22 完成了中文优先的 AI 录音闭环，并恢复了可验证的 Computer Use 能力。知识库现在使用不打扰工作的紧凑录音悬浮窗，适合会议、销售现场和临时讨论；转写既可以使用本地 Sherpa-ONNX，也可以连接用户自行配置的阿里云或火山引擎 ASR。点“完成”后，系统会等待流式结果收口、恢复中文标点、生成结构化纪要，并在保存前允许用户编辑。
-
-**AI 录音、流式 ASR 与 Computer Use 更新：**
-
-- **紧凑录音流程**：`AI录音` 先打开带醒目“开始”按钮的起始界面；开始后收成可拖动的小型悬浮窗，展示真实麦克风音量波动、最近一句转写、录音时长，并提供暂停/继续、完成和展开操作。点“完成”后才打开完整纪要编辑界面，不会直接保存。
-- **中文优先的本地 ASR**：默认本地实时引擎为 Sherpa-ONNX Paraformer，Whisper 保留为本地回退与完整音频转写引擎。设置中会展示模型大小及已下载、不完整、未下载状态，并提供 icon-only 下载、续传、刷新和卸载操作。
-- **阿里云与火山引擎 ASR**：语音设置允许用户填写自己的阿里云百炼 API Key 或火山引擎 ASR 凭据，并显式选择服务商。两种在线服务都在录音过程中持续返回流式转写；服务失败会明确报错，不会静默替换成固定文本或样例内容。
-- **中文标点恢复**：最终转写在生成纪要前经过独立的中文标点恢复阶段。实时文字保持低延迟，最终全文、摘要、决策和待办使用恢复后的文本，不依赖正则分词模拟标点。
-- **可编辑结构化纪要**：点“完成”后先等待当前 ASR 流 flush，再根据内容生成带时间戳的标题，并生成摘要、完整转写、决策和待办。草稿保持可编辑，只有用户确认后才保存到知识库。
-- **Computer Use 自动恢复**：Desktop 会诊断随包 CUA 能力，在 macOS 上启动或修复官方 CuaDriver，并在 `app.asar` 变化时使旧 readiness 失效。安装版已通过冷启动后的真实 `xiaok_computer_use` 窗口枚举与截图调用验证。
-- **内置会议助手插件**：release 打包新增 `kai-meeting-assistant`，提供本地 Whisper 转写回退和会议总结 skill，与既有报告、幻灯片、无限画布和 Computer Use 插件一起随包发布。
-- **发布验证**：v1.4.22 已通过 243 个 Desktop 会议/ASR/Computer Use 聚焦测试（2 个需显式真实音频环境的 case 跳过）、44 个内置插件 contract/真实 renderer 测试、5 个跨平台/preload sandbox 测试、12 个 CLI CUA 边界测试、录音悬浮窗 Playwright E2E、会议插件 5 个 Python 测试、Desktop typecheck/build、CLI release build，以及包含会议插件的 macOS 未签名打包验证。
-- **发布对齐**：root CLI 元数据、Desktop package 元数据、package locks、相关项目 README 基线和 Desktop Release workflow 默认值统一为 `1.4.22` / `desktop-v1.4.22`。
-
-Xiaok Desktop v1.4.21 补上了知识库里的本地 AI 录音流程。知识库首页现在直接提供 **AI录音** 入口；录音界面改为更大的会议式面板，包含醒目的开始按钮、真实麦克风音量波动、暂停/继续、实时转写预览，以及点“完成”后先生成可编辑纪要草稿、再保存到知识库的流程。
-
-**AI 录音与本地转写更新：**
-
-- **知识库首页入口**：`AI录音` 直接出现在知识库首页，不再藏在原来的会议纪要导入流程里。
-- **实时录音交互**：用户点击开始后才开始采集本地麦克风；界面展示来自当前输入流的真实音频强度，支持暂停/继续，并用“完成”结束录音。
-- **本地 Whisper 模型**：转写设置列出 `base`、`small`、`medium`、`large`、`turbo`，展示文件大小、已下载/不完整/未下载状态，并提供 icon-only 下载与卸载操作，模型可以显式切换。
-- **可续传模型下载**：Whisper 模型下载支持 HTTP Range 断点续传、瞬时网络错误重试、保留部分文件、checksum 不匹配时自动整文件重下，并在续传写出多余尾部字节时先截断再校验。
-- **保存前可编辑纪要**：点“完成”后先本地转写并生成纪要草稿，标题会从总结内容提炼并带时间戳；用户可编辑草稿后再保存为知识库来源。
-- **验证结果**：已用打包后的 desktop app 通过 fake microphone WAV 跑真实 renderer 链路：音频波动随输入变化，暂停后音量归零，实时转写出现文本，完成后生成可编辑草稿，保存后知识库出现新来源。
-- **发布对齐**：root CLI 元数据、Desktop package 元数据、package locks、相关项目 README 基线和 Desktop Release workflow 默认值已统一到 `1.4.21` / `desktop-v1.4.21`。
-
-Xiaok Desktop v1.4.20 补上 Loop Engineering 发布说明缺口，并让 task-completion 类型循环的结果可以直接从产品界面查看。本次发布把 root CLI 元数据、Desktop package 元数据、package locks、README 发布说明、相关项目 README 基线和 Desktop Release workflow 默认值统一到 `1.4.20` / `desktop-v1.4.20`。
-
-**v1.4.20 新特性：**
-
-- **Loop 任务结果可见**：`task_completion` 用户循环现在显示“查看结果”操作，会读取最新 loop run evidence 和 task snapshot summary。没有文件输出的 loop 不再显示无法工作的“打开输出目录”或“预览输出文件”按钮。
-- **Markdown Loop 保持文件操作**：`markdown_file` 循环继续保留打开输出目录和预览输出文件，文件型输出与回答型输出分别展示符合自身合同的操作入口。
-- **Canvas PDF 预览修复**：PDF 产物改为通过 `pdfjs-dist` 渲染到 canvas，不再依赖 sandbox iframe，修复 Canvas 面板里 PDF 预览空白的问题，同时保留本地化的加载/失败状态。
-- **移动端伴随体验细化**：mobile gateway URL 优先选择可达的内网私有地址，并跳过 loopback、link-local 和测试网段；artifact preview 可以携带 filename 和 base64 payload metadata，供 iOS 伴随端使用。
-- **发布文档对齐**：英文和中文 README 现在补齐 v1.4.18、v1.4.19、v1.4.20，changelog 不再停在 v1.4.17，能对应即将打 tag 的源码树。
-- **发布验证目标**：v1.4.20 按 loop-result IPC 测试、loop contract/allowlist/evaluator/project-claim 测试、renderer loop UI 测试、desktop typecheck/build gate，以及 `desktop-v1.4.20` tag 触发的 Desktop Release workflow 准备发布。
-
-Xiaok Desktop v1.4.19 把 loop 系统从临时成功判断推进为显式合同。用户 loop template 现在持久化 `loop_contract_v1`，只有弱成功条件的后台 task-completion loop 会被阻断而不是静默成功，loop run 的成功/阻断/失败也统一进入同一条评估收口。
-
-**v1.4.19 新特性：**
-
-- **LoopContract v1**：用户循环现在保存 success criteria、permission mode、concurrency policy、stop policy 和 legacy compatibility metadata。历史 template 读取时会生成默认合同，template 编辑时会按当前 loop kind 和输出目标重新生成合同。
-- **强成功条件**：`markdown_file` 循环默认使用强 `file_exists` 条件；`task_completion` 循环默认使用弱 `task_completed` 条件，scheduled/background 运行必须补上强条件后才能标记成功。
-- **合同评估器与 Finalizer**：Loop 验证返回 `success`、`blocked` 或 `failed`，并带 evidence IDs 和 next-action 细节。finalizer 统一写入成功、阻断和失败状态，让 diagnostics 与 learned-constraint extraction 看到同一份状态。
-- **命令条件 Allowlist**：`command_exit_zero` 条件只能运行 allowlist 里的命令，动态参数有数量、正则和危险字符校验，cwd policy、输出流大小、超时以及 Windows 固定命令 shell 处理都有边界。
-- **项目 Claim Store**：Loop/project 协调新增 SQLite 持久化 project claim 表，支持 TTL 续租、过期 claim 替换、owner 检查和显式释放。
-
-Xiaok Desktop v1.4.18 加固 runtime 的成本可见性、MCP 韧性和 staged skill 失败回滚诊断，同时继续把 Desktop/iOS 伴随端推进为以任务为中心的操作界面。
-
-**v1.4.18 新特性：**
-
-- **模型成本估算**：runtime usage 可以从 `~/.xiaok/pricing.json`、随包 `data/pricing.json` 或 workspace `data/pricing.json` 解析模型价格，并返回带 confidence 的估算成本。
-- **MCP Timeout 与降级连接**：MCP startup、catalog、call-tool、resource timeout 可以分别配置；server 连接失败时可以降级为 disabled server，而不是让整个 runtime 崩溃。
-- **MCP Handshake 使用当前版本**：MCP client 现在运行时读取 package version，不再发送过期的硬编码版本号。
-- **Skill Companion Tools**：skill tool 可以携带 companion tools 一起注册，skill 资源按需读取能力不必塞进初始 prompt，也不会丢失工具入口。
-- **Stage 失败 Checkpoint**：staged skill 执行会在 stage 前后捕获 checkpoint；如果失败且修改了文件，会给出 `xiaok revert <checkpointId>` 提示。
-- **Desktop/iOS 伴随端推进**：iOS 客户端重组为任务优先界面，包含 project、artifact、approval、knowledge、automation、settings 等区段，并继续复用 desktop snapshot 同步。
-
-Xiaok Desktop v1.4.17 加固产物持久化和发布一致性：临时 A2UI 产物默认写入用户级小 K 数据目录，不再污染源码 checkout；项目 HTML/Markdown 产物编辑通过受保护的项目产物路由保存；Desktop Release workflow 默认 tag 已更新为 `desktop-v1.4.17`。
-
-**v1.4.17 新特性：**
-
-- **用户级 A2UI 产物目录**：`render_ui` 未显式传 `output_path` 时，现在把 `.a2ui.json` 写入 `XIAOK_CONFIG_DIR/artifacts` 或 `~/.xiaok/artifacts`，避免临时 UI payload 落到源码仓库。显式 `output_path` 仍然支持，并继续走 workspace 路径校验。
-- **项目产物编辑保存**：项目里的 HTML/Markdown 产物通过 KSwarm 文本产物更新路由写回，修复桌面预览里编辑生成产物后出现路径/权限保存失败的问题。
-- **发布版本对齐**：root CLI 元数据、Desktop package 元数据、package locks、README 发布说明和 Desktop Release workflow 默认值统一为 `1.4.17` / `desktop-v1.4.17`。
-- **发布验证**：v1.4.17 已用 A2UI artifact root 聚焦测试、CLI `build:release`、TypeScript `--noEmit`、desktop build、真实 `render_ui` smoke 验证准备发布；smoke 证明默认输出进入用户 artifact 目录，而不是当前仓库。
-
-Xiaok Desktop v1.4.16 同时交付新的产物编辑界面和 Loop Engineering evidence 能力：HTML 产物可以在 Canvas 里直接编辑，Markdown 产物可以用纯文本方式编辑，本地图片/SVG 可以通过真实桌面文件选择框插入，移动端伴随 API 也能从桌面 runtime 镜像对话、审批、项目、循环和产物预览。
-
-**v1.4.16 新特性：**
-
-- **HTML 产物直接编辑器**：HTML 产物现在在 Canvas 和产物卡片里都有更靠前的编辑入口。点击预览中的文字或链接后，右侧 inspector 支持改文字、删除组件、设置文字颜色/字体/字号/粗细，以及插入图片/SVG。编辑工具栏固定在产物区域底部，预览区域不会被挤到只剩一小块。
-- **Markdown 纯文本编辑**：Markdown 产物不再只能预览，可以用简单源码文本框编辑，并通过同一套受保护的产物保存链路写回。
-- **本地图片与 SVG 插入**：HTML 编辑器支持图片 URL、本地图片文件（写入 `data:image/*;base64`）、SVG 源码、本地 `.svg` 文件四种插入方式。macOS 文件选择框通过 preload IPC 暴露，并有 main process 测试覆盖。
-- **产物卡片编辑入口**：会话里的产物卡片现在提供更紧凑的 icon 操作：打开、收藏到知识库、编辑，适合高频操作。
-- **保存权限修复**：HTML/Markdown 产物保存改为按用途校验路径，允许桌面 data root 和 Electron downloads 目录里的生成产物，同时继续拒绝无关路径或错误扩展名。应用修改失败与保存失败拆开处理，文字/样式“应用”不再误报“请检查文件权限或路径”。
-- **移动端伴随基础能力**：Desktop 新增本地 mobile gateway，包含配对身份、Bonjour 广播、relay 配置、二维码、发送聊天、审批响应、项目/循环快照和产物预览查找；首个 iOS 客户端位于 `mobile/ios`。
-- **内置无限画布打包**：Desktop 打包现在包含 `kai-infinity-canvas` 的 `scripts` 目录，安装包内的画布插件可以正常启动。
-- **约束注入 Intent Reminder**：`buildIntentReminderBlock` 现在渲染 `explicitConstraints`，使用 “must follow” 语义和分号分隔。planner 提取的约束（如”控制在一页内”/”用中文”）终于在每轮对话中对执行 agent 可见，而不是只存在 ledger 里。
-- **二进制产物结构校验（Warn Mode）**：新增 `artifact-structure.ts` 模块，校验 PDF（`%PDF-` header，fd-based 只读 5 字节）和 PPTX（ZIP local file header `PK\x03\x04` + 前 64KB 内是否有 `[Content_Types].xml`）。以 warn mode 接入 `completion-evidence.ts` guard pipeline——检测损坏产物但不杀任务。内存安全：PDF 读 5 字节，PPTX 最多 64KB。
-- **URI/Paths Bypass 修复**：`resolveLocalArtifactPath` 现在统一从 `file://` URI、`metadata.paths`、`metadata.localPaths` 提取可验证的本地路径。之前通过 `uri` 或 `paths` 字段绕过结构校验的 evidence 记录现在也会被验证。
-- **Canvas Preview 默认 Tab**：Canvas 面板默认显示预览 tab + 刷新按钮重新读取文件内容。
-- **Evidence Guard 测试对齐**：修复 `artifact-evidence-guard.test.ts` 中 3 个过期测试，对齐 v1.4.11 引入的 answer-fallback 策略。
-- **发布验证**：v1.4.16 已通过 HTML/Markdown 编辑器聚焦测试、preload/main 保存路径测试、mobile gateway/snapshot 测试、guard/orchestration/structure 测试、desktop typecheck/build、`/Applications/xiaok.app` 无签名安装包实装，以及对真实幻灯片 HTML 产物的 Computer Use 验证。
-
-**v1.4.14 新特性：**
-
-- **Loop 自我改进 — Phase 1 完整闭环**：LLM 提取已通过 `createDesktopLoopLLMPort` 接入（复用现有 model adapter，30s 超时，异常降级为纯规则兜底）。`triggerAsyncExtraction` 重构为统一的 `recordConstraint` 辅助方法 + `onConstraintAdded` 回调。新约束写入时弹系统通知 + IPC 推送。新增 `LoopConstraintsTab` UI（active/pending/archived 三态过滤 + 按循环过滤 + 启用/停用/重新启用操作），通过 `desktop:loops:constraintAdded` 事件订阅实时高亮新条目。
-- **Automation 总览对齐**：循环数仅统计用户模板（排除内置诊断循环）；计划数仅统计 active + paused（排除 completed/cancelled）；”待处理”卡片点击改为滚动到本页失败列表；所有失败项（loop_run + timed_action_run）均提供”清除此记录”按钮。
-- **KSwarm Workflow 节点间上游 output 传递**：`compactNodeOutput` 提取结构化节点产出（摘要 + 产物路径 + 小字段）；`enrichWorkflowNodeInput` 通过 `dependsOn` 边收集已完成上游节点 output，总量 10KB 上限 + 优雅降级为 summary-only。Desktop `buildKSwarmWorkflowNodePrompt` 将上游产出渲染为结构化参考段。所有新逻辑遵循降级优先：任何失败都静默跳过注入（不阻塞 dispatch）。
-- **清除定时任务运行记录**：新增 `TimedActionStore.clearActionRunHistory(actionId, statuses?)` + IPC `desktop:scheduledTasks:clearRunHistory`，用户可在自动化总览中清除失败/过时的定时任务运行记录。
-- **ChatView 文本溢出修复**：助手消息和流式区域添加 `break-words`；滚动容器改为 `overflow-x-hidden` 避免横向滚动。
-- **项目流程图 V4**：实际执行路径高亮、PO 起始节点、点击查看详情、自上而下布局、Handle 组件使边可见。
-- **发布验证**：v1.4.14 通过 1239 个 desktop 测试（全通过）、electron + renderer typecheck clean（baseline 0）、build:main + build:renderer + pack:dir 全绿，在 `/Applications/xiaok.app` 实装验证。
-
-**v1.4.11 新特性：**
-
-- **Loop 自我改进反馈闭环**：verify 阶段失败时，异步 LLM 提取器（haiku 级 + 纯规则兜底）会从失败上下文中提炼一条改进建议。建议默认进入”待确认”队列，不会自动注入 prompt——由用户决定采纳、忽略，或让其 14 天后过期。一旦采纳，规则会注入下次运行的 prompt，并在连续 3 次无效后自动停用。新增独立 `loop_learned_constraints` SQLite 表，含四元组 supersede、命中计数、过期清理；新增三个 IPC 通道（`listLoopConstraints` / `setLoopConstraintActive` / `confirmLoopConstraint`）。
-- **定时任务通知**：每次定时任务完成都会触发系统桌面通知（成功/失败 + 原因）以及应用内 toast。`useScheduledTaskBootstrap` 监听 `desktop:scheduledTaskDue`，无论用户当前在哪个页面都能看到结果。
-- **更快的调度节奏**：定时任务扫描间隔从 30 秒降到 10 秒；agent 来源的最低间隔从 5 分钟降到 0.5 分钟。每 30 秒/每 1 分钟/每 5 分钟成为一等公民选项。
-- **Renderer typecheck baseline 修复**：修复 v1.4.10 i18n 重构引入的 21 个 typecheck 错误。`FontSize` / `ThemePreset` / `FontFamily` 类型现在以 `themes/types.ts` 为唯一来源，`storage.ts` 重新导出并对历史 localStorage 值做兜底校验。`ThemeProvider` 从空 stub 升级为真正的 Context 实现，会把 `data-theme=dark` 写到 `<html>` 上并监听 `prefers-color-scheme` —— 深色模式现在真的能用了。
-- **可用的深色主题**：新增完整的暖色深色调色板，`html[data-theme='dark']` 覆盖所有 `--c-*` token；新增流程图专用 token (`--c-graph-node-*`, `--c-graph-edge-*`)，为后续项目流程图视图打基础。
-- **侧边栏细节**：标题栏历史导航按钮（`<` / `>` / 折叠）现在与 macOS 红绿灯按钮垂直对齐（top: 4），并留在 sidebar 240px 边界内（left: 132/164/196，右内边距 16px）。项目详情页移除顶部毛玻璃遮罩，报告标题不再被遮。新增 `docs/known-issues/titlebar-button-position.md` 记录几何约束—— 这个位置已经被回退过三次。
-- **GTD 简化**：GTD 分组从 5 类（积压/待办/等待/搁置/已归档）精简为 2 类：**进行中 / 已归档**。`xiaok:gtd-enabled-changed` 事件现在真的会让 sidebar 重新渲染；hover 任意会话时显示 `⋯` 按钮可在两类之间切换。底层 5 类 schema 保留以备未来扩展。
-- **删除会话二次确认**：sidebar 删除会话改为 `ConfirmDialog` 弹窗确认，与现有线程清理体验一致，避免误点。
-- **乐观艺术品 evidence（Phase 2）**：completion guard 不再因 `file_artifact` 期望但没有实际文件而 block 任务。只要有 substantive answer，task 视为成功；缺文件由后续对话补救，不再硬失败。
-- **System Prompt 防编造规则**：`buildSystemPrompt` 新增”工具优先 / 真实数据优先”段落，禁止从对话历史推断任务/项目/定时任务/通道/skill/记忆/产物状态——每条状态声明必须能在最近一次工具返回中找到原始字段。
-- **发布验证**：v1.4.11 通过 1160 个 desktop main + renderer 测试（含 35 个新增 loop-learned-constraints 测试）、electron 完整 typecheck、renderer baseline gate（0 个错误）、build:main + build:renderer + pack:dir 全绿，并在 `/Applications/xiaok.app` 实装验证。
-
-**v1.4.10 新特性：**
-
-- **全量 i18n 覆盖**：renderer locale 文件（`zh.ts` / `en.ts` / `index.ts`）每个增加约 1100 行，移除自动化、项目、设置、知识库、记忆、定时任务和共享对话框中的硬编码中文字符串。所有可见 UI 文案都走 `t.*` key。
-- **外观设置重构**：新增 `themes/types.ts` 和 `themes/presets.ts`，定义六预设主题系统（default / terra / github / nord / catppuccin / tokyo-night / custom）。字体家族从 `string` 改为 typed union（`default / inter / system / serif / noto-sans / source-sans / custom`），字号变为 `compact / normal / relaxed`。
-- **主题颜色编辑器**：用户可以编辑单个颜色 token（背景 / 文字 / 边框 / 强调色），保存为自定义主题；编辑器对每个组件做安全预览。
-- **死代码清理**：renderer 中多个未使用的 import 和组件被移除。
-- **发布验证**：v1.4.10 在 i18n + 外观 commit 上打 tag，通过 macOS 发布流程发布。（类型系统拆分引入的 typecheck 错误已在 v1.4.11 中修复。）
-
-**v1.4.9 新特性：**
-
-- **通用循环（task_completion）**：新增 `task_completion` 作为第二种循环类型。该类型以 AI 任务正常完成为成功判据，无需产出文件，适用于状态检查、数据同步、巡检等场景。未授权自动执行的定时触发会被 block 而非静默以 plan-only 模式空跑。
-- **Cult-UI 组件基础设施（第一批）**：引入 `class-variance-authority`、`tailwind-merge`、`clsx` 作为 UI 工具基础。新增三个适配后的 cult-ui 组件：`AnimatedNumber`（弹簧数字过渡）、`DirectionAwareTabs`（带共享布局滑块动画的 pill tabs）、`ExpandableCard`（可访问的折叠面板 + framer-motion 动效）。
-- **自动化页 Tabs 动效升级**：自动化页面 tab 切换现在使用 spring 动画滑块（与 ModeSwitch 同精度），替换原有静态 CSS pill。保留现有 accent 色、无障碍属性和键盘导航。
-- **Kimi for Coding 兼容修复**：修复使用 Kimi for Coding 端点时的 403 错误。OpenAI 和 Anthropic SDK 适配器现在会清除 `X-Stainless-*` 指纹头，并使用 Kimi 白名单接受的正确 User-Agent 格式 `claude-cli/1.0.0 (external, cli)`。
-- **KSwarm 残留进程替换**：Desktop 启动时通过源码 hash 比对检测版本不一致的 KSwarm 进程，自动 kill 后启动新版本，修复升级后”旧版本进程存活导致新版异常”的问题。
-- **个人知识库（KB）**：本地优先的知识库系统，采用 Collection → Source → Chunk 数据模型。支持通过 pdfjs-dist 提取 PDF、docx、pptx、xlsx 内容，支持基于结巴分词的中文全文搜索，并提供 Agent 工具集成（`kb_search`、`kb_get_source`、`kb_list_collections`、`kb_create_collection`）。
-- **循环编辑/删除**：用户循环现在可以直接在自动化面板中修改和移除，补齐了循环管理的完整 CRUD 生命周期。
-- **产物预览增强**：产物预览支持全屏切换，HTML 产物在 iframe 中以 `allow-scripts` 渲染，新增”发送到对话”按钮，方便在对话上下文中讨论产物内容。
-- **消息中文件路径可点击**：消息中出现的文件路径现在可以点击，会在 Finder（macOS）或 Explorer（Windows）中打开。同时支持 `/Users/...` 和 `C:\...` 两种路径格式。
-- **粘贴路径检测修复**：包含路径片段的混合文本不再被误识别为文件路径。
-- **工作流状态条裁剪修复**：通过切换为 fixed 定位，修复工作流状态条左侧被裁剪的问题。
-- **验证覆盖**：v1.4.9 通过 88 个 loop 测试（含 task_completion 的 plan-mode block、超时、crash recovery）、316 个 renderer 测试、desktop 主进程/渲染器构建以及 `desktop-v1.4.9` release tag workflow 验证。
-- **Firecrawl 免 Key 搜索与抓取**：集成 Firecrawl 作为新的 web_search 和 web_fetch 提供商。无需 API key 即可使用（每月 1000 次免费额度）；可选配置 key 以获得更高速率。通过 `XIAOK_SEARCH_PROVIDER=firecrawl` 环境变量或 Desktop 设置面板配置。
-- **KB 写入工具**：新增 `kb_add_source` Agent 工具，允许在对话中直接向知识库写入内容。支持 paste（文本）、file（本地文件路径）和 url（网页）三种模式，自动分块和索引。
-- **CLI Headless 挂起修复**：修复 `xiaok chat --auto --print` 无限挂起的问题。新增 Agent maxIterations（默认 100）、MCP callTool 超时（默认 120s）、单任务模式的带超时清理，以及 wall-clock turn deadline（默认 4 分钟，超时退出码 124）。
-- **自定义模型名称**：用户现在可以在 Desktop 设置中添加任意模型名称（不再受硬编码注册表限制）。注册表已更新 GLM-5.2 和 Kimi K2.7。
-- **二进制文件预览**：PPT/Word/Excel 等二进制文件现在在产物预览面板中显示"用系统应用打开"按钮，而不是乱码文本。
-- **乐观产物证据**：completion guard 默认不再阻断没有文件产物的任务。只有显式声明了 `requiredOutputs` 或 `evidenceContract` 的任务才会被检查。
-
-**v1.4.8 新特性：**
-
-- **Loops 与 Schedules 统一到自动化入口**：Desktop 现在把用户循环、定时运行、loop 诊断和最近失败统一放到“自动化”页面。Loop 诊断从通用设置迁出，定时绑定会显示哪个 timed action 负责触发对应 loop。
-- **用户循环模板**：用户可以创建可重复运行的 markdown 文件循环，配置 prompt、输出目录、输出文件名、手动运行和定时绑定。输出目录不存在时会自动创建，文件名校验同时覆盖 Windows 与 macOS 的路径边界。
-- **可点击的 Loop 输出**：用户循环卡片支持打开输出目录，也支持通过现有产物预览路径查看最近一次输出文件，用户不需要离开 loop 页面去文件系统里找结果。
-- **定时任务对话更清楚**：定时任务注入的系统元数据不再显示在用户输入提示词里。对话中只保留真实用户 prompt，并增加轻量执行提示，显示任务标题、计划执行时间、实际 claim 时间和延迟，方便区分调度问题与任务内容问题。
-- **Timeout 与 KSwarm 启动可靠性**：Desktop 加固了任务 timeout 分类、请求触发的服务启动，以及端口 4400 上存在旧版或不匹配 KSwarm 进程时的替换逻辑。
-- **Skill 资源按需读取**：CLI 的 skill 工具现在返回轻量 manifest 计数，并新增 `skillFetchAssets` 按需读取 reference/script/asset，减少 prompt 膨胀，同时保留完整 skill 资源访问能力。
-- **发布验证**：v1.4.8 已用 123 个 desktop main/renderer 聚焦测试覆盖自动化、loop、定时、输出预览、IPC 和定时任务 prompt 展示；用 40 个 desktop packaging contract 测试覆盖 KSwarm 和 bundled plugins；用 16 个 CLI skill/provider 聚焦测试覆盖 skill 资源按需读取和配置默认值；并通过 desktop typecheck、CLI release build、desktop build，以及由 `desktop-v1.4.8` tag 触发的 GitHub desktop release workflow。
-
-**v1.4.6 新特性：**
-
-- **KSwarm 启动可靠性追修**：Desktop 现在让显式 service start 与 request 触发的 auto-start 共用同一个受保护启动 promise，避免冷启动期间重复拉起 Intent Broker / KSwarm。
-- **Stream 重连加固**：KSwarm WebSocket bridge 在关闭异常 socket 前先清理 handler 并安排重连，避免真实桌面启动中出现 `onerror -> close -> onerror` 递归失败。
-- **Completion Evidence 运行时打包**：`dist/` 现在包含编译后的 `completion-evidence` runtime guard，打包 CLI/runtime 会解析到和源码测试一致的 evidence validation 路径。
-- **关联服务 replay 容错**：配套 Intent Broker 更新会容忍缺失 `taskId` 的 approval/task lifecycle replay 事件，保留 approval 状态，同时不再让 broker state rebuild 崩溃。
-- **发布验证**：v1.4.6 已通过 desktop KSwarm 启动聚焦测试、CLI completion-evidence/task-host 聚焦测试、Intent Broker 全量测试、desktop build、KSwarm/broker live health、Computer Use live smoke，以及 `desktop-v1.4.6` release workflow。
-
-**v1.4.5 新特性：**
-
-- **KSwarm Service Health Loop**：Desktop 新增内置 `kswarm-service-health` loop，会把无监听端口、未知端口占用、health 不可达、HTTP 错误、health JSON 无效、身份/能力不匹配、broker 不可用、spawn 路径缺失、spawn 退出和源码 hash 漂移写成结构化服务诊断。
-- **可行动的 Loop Diagnostics**：设置页现在展示 anomaly kind、owner、seen count、建议处理动作和相关日志路径，并支持复制诊断摘要，方便支持和排查。通知策略也更轻：新的高危异常提醒一次，重复未解决异常默认去重，source unavailable 连续出现第二次才提醒。
-- **更强的 Artifact Evidence 校验**：本地 file artifact evidence 现在会校验文件真实存在且 realpath 留在 workspace 内，覆盖父目录 symlink escape；同时合法 `uri` 或 `metadata.paths` 不会因为陈旧的 `localPaths` 元数据被误拒。
-- **发布验证**：v1.4.5 已通过 desktop 全量测试、CLI sandbox 全量测试、loop/evidence 聚焦测试、desktop build/typecheck、intent/skill structured eval、Computer Use live smoke，以及 `desktop-v1.4.5` release tag workflow。
-
-**v1.4.4 新特性：**
-
-- **Loop Evidence System**：Desktop 任务完成现在会把 artifact evidence 持久化到 SQLite，并在 completion guard 运行前先判断任务是否要求硬产物。这补上了反复出现的“task completed without artifact evidence”路径，避免 UI 报告完成但没有可验证交付物。
-- **内置 Evidence Regression Loop**：Xiaok 新增定时 loop，用来扫描最近的完成记录、缺失产物、陈旧 run state 和异常交付结果。该 loop 使用单运行锁、会清理 stale diagnostics，并写入结构化 findings，让 silent failure 不再躲在后台。
-- **只读 Loop Diagnostics**：Desktop 通过只读 IPC 和设置页能力暴露 loop/evidence diagnostics，操作者可以查看 active run、最近扫描、异常数量和 evidence 状态，不需要直接翻内部数据库。
-- **服务与打包验证**：KSwarm 服务启动、内置插件部署、desktop packaging contract 都进入聚焦验证范围。服务状态现在有更清楚的 UI/API 可见性，便于区分 KSwarm / 插件启动失败与模型/runtime 失败。
-- **剪贴板文件附件**：从 Finder 复制文件后可以直接粘贴成 chat input chip。输入链路会去重 keydown 与 paste 的双触发，避免 macOS 同时发送两个事件时同一文件被添加两次。
-- **发布验证**：本版本按 loop evidence 聚焦测试、desktop packaging contract 测试、renderer/main build，以及 `desktop-v1.4.4` release tag workflow 准备发布。
-
-**v1.4.3 新特性：**
-
-- **看板与工作流融合**：项目任务卡现在直接显示工作流流水线进度——一条细分段进度条（完成 / 运行中 / 失败），加上"工作流执行" chip 和最近的工作流进展消息。用户在看板上就能一眼看出任务的工作流执行情况，不需要切到顶部入口。
-- **任务详情抽屉**：点击任意任务卡片，会从右侧滑出 `TaskDetailDrawer`，集中展示任务描述、负责 Agent、执行策略、流水线进度条、按阶段分组的完整工作流节点详情（含并行分组、扇出标签、失败策略、单节点 Agent / 状态 / 错误）、复核反馈和产物。抽屉复用 KSwarm 暴露的工作流数据，5s 轮询后会同步刷新。
-- **顶部工作流条紧凑化**：顶部的 `WorkflowStatusStrip` 弱化为纯文本徽章（如"工作流 · Review gate passed"），与"运行工作流"按钮并排。点击徽章仍可展开完整工作流详情弹窗，并改为右锚点，避免被视口右侧截断。
-- **共享 `workflowUtils`**：状态图标、tone class、状态文案、进度格式化、公开视图归一化、通用工作流视图构建器被抽取到 `workflowUtils.ts`。新增 `findWorkflowRunForTask`（按 `task.execution.workflowRunId` / `scope.taskId` / `sourceTask.id` 匹配任务对应的 workflow run）和 `computeTaskPipelineProgress`（把 `KSwarmWorkflowRun` 归约为 `TaskPipelineProgress`）两个工具，看板卡片与抽屉共用同一份逻辑。
-- **不动后端和数据模型**：本次只改 desktop 渲染层 UI。KSwarm 数据模型、项目 API、任务语义保持不变。
-
-**v1.4.1 新特性：**
-
-- **产物预览修复**：项目交付物（Markdown、HTML、纯文本）现在可以在预览面板中正确加载。此前版本对所有 kswarm GET 请求统一使用 JSON 解析代理，导致文本类产物内容解析抛出异常，显示"加载失败: fetch failed"。现在引入专用的原始文本 IPC 代理（`kswarmProxyGetText`）用于产物内容请求。
-- **应用打包修复**：修复了因 `release/mac-arm64` 目录残留导致的打包失败，改用 `ditto` 安装 macOS 应用包以保留扩展属性和 bundle 结构。
-
-**v1.4.2 新特性：**
-
-- **交互式 A2UI 看板产物**：Xiaok Desktop 现在可以在对话中直接回放安全的只读 A2UI 产物，支持标题、说明文本、指标、列表、表格、分割线和结论等 section。渲染器只接受小型安全组件目录，不接收 raw HTML，因此看板式交付物可检查、可沙箱化。
-- **自然语言看板请求链路**：A2UI 路径新增基于 `/Applications/xiaok.app` 已安装应用的 E2E 覆盖，测试输入是自然语言的复杂 AI 产品运营看板需求，而不是内部工具名。测试会验证真实打包应用中产物可以内联渲染，并且步骤摘要保持简洁。
-- **工具名隐藏与 section 兼容**：用户可见的 tool step 不再显示内部看板工具名，而是显示 `dashboard [A2UI]`。A2UI validator 同时支持常见的 `type` / `text` section alias，并返回更具体的校验错误，修复了原先有效看板请求也可能触发"未知 section"的问题。
-- **ESC 流式中断**：终端 assistant 正在 streaming 输出时按 `ESC`，会中断当前 model/tool turn，而不是等待本轮自然结束。Xiaok 会保留输入 draft 和 queued text，把本轮记录为用户中断，并阻止已中断的 Stop-hook 路径继续 auto-continue。
-- **Abort-safe Runtime Pipeline**：Anthropic、OpenAI Chat Completions、OpenAI Responses 流现在共享 `AbortSignal`，真实 `AbortError` 不再进入 retry，stream timeout controller 在所有退出路径都会清理。runtime、compact、subagent、tool execution 层都会透传同一个 signal，把用户中断和传输失败分开处理。
-- **Desktop Handoff 取消**：KSwarm runtime bridge handoff 现在接收取消 signal；用户中断的 desktop task 会报告 `task_cancelled`，不再被误归类为 failed。
-
-**v1.3.14 新特性：**
-
-- **流式重试加固**：Anthropic、OpenAI Chat Completions、OpenAI Responses 适配器现在会把 `ERR_STREAM_PREMATURE_CLOSE`、`ECONNRESET`、`ETIMEDOUT`、`EPIPE`、`Premature close`、`socket hang up`、`terminated`、`fetch failed` 识别为可重试的传输错误。一旦本次尝试已经向消费端产出了 chunk，就立即放弃重试，避免重复输出。OpenAI Chat Completions 适配器还新增 5 分钟单次流超时与 AbortController。
-- **Stale Running 任务自愈**：`InProcessTaskRuntimeHost.recoverTask` 会对进程重启后仍处于 `running` 但没有活跃执行的任务做抢救，转为 `failed` 并写入 `stale_running_task_recovered` 抢救摘要，不再让快照永久卡在 running。
-- **KSwarm Runtime 任务重试**：桌面端 `runKSwarmRuntimeTextTask` 现在会在传输类故障下额外重试一次，并从 `salvage.reason` 或最近的 error event 还原真实失败原因，仅对网络/流类失败重试。
-- **动态工作流 HTML 报告工具**：新增 `render_report_artifact` 工具，把完整的 `.report.md` IR 渲染为 HTML 产物，作为动态工作流最终报告节点的输出。Worker / final-output / generic 节点 prompt 现在明确要求先生成完整 `.report.md` IR 再调用 `render_report_artifact`，而不是读取 `~/.xiaok/plugins` 插件内部文件或手写 HTML。
-- **跨平台兼容规则**：`AGENTS.md` 现在公开了适用于 xiaok-cli、kswarm、intent-broker、kai-xiaok-plugins 的跨平台规则：必须用 `path.join` / `path.resolve`，禁止硬编码 `/` 或 `\` 分隔符；macOS 专有能力（CUA driver、`open`、`.app` bundle 路径、`launchctl`、`defaults`）必须有 `process.platform` 守卫；Windows 专有能力（`reg`、`cmd /c`、`explorer.exe`）同样要守卫；`child_process` 不能依赖 Unix shell 语法；Windows 路径比较默认 case-insensitive。
-
-**v1.3.13 新特性：**
-
-- **并行动动态 Workflow Script**：xiaok Desktop 现在支持第一条并行动动态 workflow script 路径。受控 workflow script 可以用 `parallel([() => agent(...), ...])` 扇出多个独立 agent 分支，同时把编排过程放在主对话上下文之外。
-- **KSwarm 持久化并行状态**：`parallel()` 不再只是内存里的 `Promise.all`。KSwarm 会持久化 `parallelGroups`、分支节点元数据和 `scriptCheckpoints`，项目详情、日志和 API snapshot 都能解释哪些分支运行过、如何完成。
-- **对话先预览再运行**：`run_dynamic_workflow_script` 工具现在支持 `previewOnly`，assistant 可以先生成 workflow 预览让用户确认，再启动 run。确认后的 run 会进入后台执行，并立即返回 `workflowRunId`。
-- **同一 Run 恢复与状态查询**：`resumeWorkflowRunId` 可以在同一个 workflow run 上复用已完成 parallel group 和 agent node 输出，避免重复派发已完成节点；`get_dynamic_workflow_status` 会从 KSwarm snapshot 汇总 run / node / parallel / checkpoint / gate / delivery 状态。
-- **专业报告复核模板**：工具内置 `report_final_review` script 模板，会并行执行事实、证据、格式/交付合同三路复核，再归约成最终 gate 建议。
-- **HTML/PDF 专业 E2E**：动态 workflow E2E 现在会新建 KSwarm 项目，运行专业并行复核脚本，产出 HTML 和 PDF，并验证 workflow run、gate decision、项目 deliverable、artifact provenance 和任务看板状态一致。
-- **失败策略基础语义**：并行 runtime 已支持 `required_all`、`collect_errors` 和 `quorum` 语义，KSwarm quorum 分组归约已进入 workflow 测试。
-- **工作流状态可见**：项目 workflow 详情现在会从 KSwarm snapshot 展示并行分组、分支完成数、失败策略、分支标签和脚本 checkpoint 进度，不再从聊天 transcript 推断状态。
-- **聚焦测试、E2E 和 Eval 覆盖**：本版本覆盖 eager parallel call 拒绝、runtime 分支标注、KSwarm 并行分组持久化、HTTP contract、后台工具启动、resume primitive 复用、状态查询工具、dynamic workflow eval case，以及一条通过 KSwarm 和 desktop runtime bridge 完成的动态脚本 workflow E2E。
-
-这是 dynamic workflow orchestration 的基础版本，不是完整开放式用户 workflow 平台。跨应用重启后的自动 script job recovery、durable user-input pause/resume 和专业质量对比 eval 仍属于后续阶段。
-
-**v1.3.11 新特性：**
-
-- **基础版 Dynamic Workflow Script Runtime**：xiaok Desktop 现在可以通过 KSwarm、Intent Broker 和 Desktop agent runtime bridge 跑受控的动态 workflow script。脚本可以创建 phase、动态调用 `agent(...)`、收集节点输出，并完成持久化的 `script_generated` workflow run
-- **真实执行 Agent 节点 Prompt**：脚本生成的 workflow agent 节点现在会执行节点自己的 prompt，不再退回“项目诊断”。普通 `script-agent-*` 节点会拿到产物目录，写入真实文件，并返回结构化 artifact manifest
-- **项目交付同步**：script workflow 完成后，KSwarm 可以从最终产出 artifact 的 agent 节点交付项目，把看板任务标记为完成，并把交付物 provenance 写回项目和任务结果
-- **输出合同防线**：当最终任务要求 HTML 时，动态 workflow 不会再把 markdown/json 辅助产物当作合格交付。缺少终态硬输出会阻断项目交付，并明确记录 `missing` 信息，而不是静默标记完成
-- **端到端 Workflow 覆盖**：本版本新增真实 E2E，启动 Intent Broker 和 KSwarm，通过 runtime bridge 注册桌面 worker，运行动态脚本 workflow，创建动态 agent 节点，写入 artifact，并验证项目交付和任务看板完成状态
-
-**v1.3.10 新特性：**
-
-- **项目级高质量工作流**：高质量执行现在会创建项目级 `po-generated-project-workflow`。一个 workflow 负责项目的计划、派发、复核和最终汇总交付，不再把项目拆成彼此割裂的任务级 workflow
-- **执行方式贯穿项目合同**：快速执行、智能选择、高质量执行会保持在项目级合同里，并传入 KSwarm 派发链路；选择高质量后不会再静默退回快速 worker prompt
-- **Artifact-first 工作流门禁**：workflow finalize 会拒绝缺失、不可读、工作区外或非文件型任务产物，并从提交文件重建 evidence refs；只有真实交付物被挂上后，workflow 才能通过
-- **Desktop 工作流验证修复**：审批、Agent 复核诊断和最终状态展示都做了加固。复核弹窗保持实色背景，隐藏内部预算/权限/最大节点字段，workflow run 以可读的运行中/已完成/失败状态收尾
-
-**v1.3.9 新特性：**
-
-- **任务级 Dynamic Workflow**：项目任务卡片现在可以直接“用工作流执行”。KSwarm 会先创建带 `scope.taskId`、源任务、预算硬上限、权限和验收标准的 pending workflow proposal，确认前不会派发任何 agent
-- **受控 PO 生成工作流建议**：第一条 `po-generated-task-workflow` 链路会为当前任务生成 validated workflow IR，展示确认卡后再启动；当前版本明确不执行 raw JavaScript，也不开放任意用户脚本
-- **预算、缓存、恢复和进度可见**：工作流详情会展示预算硬上限、最近实质进展、阻塞失败、run 内已保存节点结果和恢复方式，避免只显示“执行中/已完成”
-- **工作流交互加固**：工作流菜单和确认弹层保持不透明背景，入口继续收敛在项目 tab 行，不再占用首屏大面板；日志仍是 Swarm + Workflow 融合时间线
-
-**v1.3.8 新特性：**
-
-- **基础版 Dynamic Workflow**：xiaok Desktop 已经在 KSwarm 项目里落地第一条项目级动态工作流路径。项目可以创建持久化 workflow run，执行内置快速诊断，也可以启动 agent-backed 复核诊断，按 Worker agent、对抗性 Reviewer agent、review gate reducer 的链路推进
-- **Workflow Orchestrate Agent 模式**：项目控制层仍由 KSwarm 负责，workflow 执行发生在 agent 层；因此 Xiaok 项目现在有两条清晰路径：轻量的 direct/quick orchestrate agent，以及结构化多步骤的 workflow orchestrate agent
-- **工作流日志融合进项目时间线**：项目详情页 tab 仍叫“日志”，右侧统一成“运行工作流”菜单，`Workflow` 与 `Swarm` 事件按时间融合展示，并过滤重复的 raw `workflow.*` activity event
-- **动态工作流路线图文档**：设计文档补齐了后续演进路径，包括用户预算确认、subagent 结果缓存、typed progress 聚合，以及 reviewer/adversarial agent gate
-
-**v1.3.7 新特性：**
-
-- **Slide Renderer 恢复修复**：Desktop 正式安装包现在会把陈旧的内置插件 symlink 备份并替换为安装包内的 `kai-slide-creator`，避免旧开发目录或错误平台 wheelhouse 继续导致 `slide-renderer` MCP 启动失败
-
-**v1.3.6 新特性：**
-
-- **Auto 模式安全边界**：`/mode auto` 只自动批准低风险工具调用；高风险 Bash 命令仍要确认，灾难性命令继续直接阻断
-- **CUA 权限归因修复**：Desktop 不再从 Xiaok 健康检查里运行 `cua-driver doctor`，避免 Xiaok 自己触发 macOS 录屏权限弹窗
-- **Computer Use Shell 绕路封锁**：任务不能再通过 Bash 自行启动或修复 CUA，例如 `open -a CuaDriver`、`cua-driver serve`、删除 socket、`screencapture`、`cliclick` 或驱动 UI 的 `osascript`
-- **交互式 Shell 交接**：本地 shell escape 会正确暂停和恢复终端 UI，交互命令不再污染对话输入状态
-- **CUA 恢复加固**：Computer Use daemon stale-state 恢复有聚焦测试覆盖，并且恢复动作保持在产品管理的 CUA 流程内
-
-**v1.3.5 新特性：**
-
-- **Computer Use 启用闭环**：`xiaok_computer_use` 现在是稳定的产品工具；CUA 未就绪时返回结构化可恢复错误，对话区显示 Computer Use 动作卡片，不再把原始 MCP 失败暴露给用户
-- **CUA 权限与恢复流程**：Desktop 区分首次用户点击启用和后续自动恢复，通过 `CuaDriver.app` 启动以保证 macOS TCC 归因正确，能识别空截图输出，并且只在可信正式安装包里自动恢复
-- **定向插件重连**：启用 Computer Use 只重连 `cua-driver` MCP server，不再误重启 report/slide renderer 插件
-- **Shell 绕路防护**：`screencapture`、`cliclick`、`cua-driver`、驱动 UI 的 `osascript` 等屏幕自动化绕路命令现在必须进入审批，不会静默绕过 Computer Use
-- **安装包运行时可靠性**：KSwarm 和 Intent Broker 后台服务在打包环境下会使用 Electron runtime 作为 Node，不再依赖用户 shell 里的 `node` PATH
-- **桌面更新与品牌修复**：更新安装会在 `quitAndInstall` 前进入真实退出状态并报告安装错误；macOS Dock 图标优先使用应用 bundle 内的 `icon.icns`
-- **构建循环与烟测覆盖**：Desktop release 仍走 clean build，日常开发保留增量 `build:main`；当前 smoke 覆盖 84 个文件、587 个测试
-
-**v1.3.4 新特性：**
-
-- **Swarm 项目可靠性加固**：KSwarm 项目里的小K种子 PO/Worker 现在进入真正的 Desktop agent runtime，不再交给能力残缺的 sidecar worker；模型、工具、MCP、web-search、report/slide renderer 能力保持一致
-- **文件化任务交接**：大上下文、任务要求、证据合同和产物合同通过 handoff 文件传递，不再用超长 broker 文本硬塞，降低截断风险，也方便恢复和审计
-- **带证据的计划与验收**：本月/最近类调研任务会带当前日期、外部来源证据和更合理的质量门禁，PO 不再要求未来数据或拍脑袋的固定条数
-- **面向用户的正式交付物**：最终文件名按项目/目标生成，提交用产物里不出现评审回应、修订说明、第二轮定稿等过程痕迹；报告/演示文稿优先走对应 renderer
-- **项目界面可解释性修复**：项目卡片、任务看板、产物列表、HTML 预览、临时定时恢复任务和 agent 状态显示更清楚，失败原因、时间点和可恢复动作可见
-- **发布打包同步**：Desktop release 构建会把当前 Xiaok、KSwarm、Intent Broker 和 bundled plugins 一起 checkout、构建和打包
-
-**v1.3.2 新特性：**
-
-- **桌面更新链路恢复**：修复 `electron-updater` CJS/ESM interop 导致“检查更新”静默无反应的问题
-- **主动升级提醒**：当发现新版桌面端时，左下角设置 icon 左侧会显示清晰的升级/下载/安装提醒
-- **定时任务恢复**：Desktop 定时任务会修复缺失的 `nextRunAt`，自动执行结果会关联回任务 Thread，删除任务也会同步移出主进程调度状态
-- **KSwarm 重新制定计划改派 PO**：“重新制定计划”现在会检查项目里保存的 PO 是否缺失、归档、角色不对、启动失败或仍是旧 `xiaok` 单体；异常时会改派到当前最合适的 Xiaok PO，并带完整项目上下文重新发起规划
-- **发布门禁**：desktop release CI 会把桌面 tag 标记为 GitHub Latest，并校验 `latest-mac.yml`、`latest.yml` 和安装包资产一致后才算发布有效
-- **一次性手动恢复**：桌面版 `0.5.6` 和 `1.3.1` 可能已经带着本地 updater loader 缺陷，受影响用户需要手动安装一次 `1.3.2`；之后才能通过修复后的应用内更新继续升级
-
-**v1.3.1 新特性：**
-
-- **KSwarm 可靠性版本**：新增 runtime 健康探测、卡住运行 watchdog、按能力路由，以及对“在线但 CLI 不可执行”的 agent 自动降级/冷却
-- **项目规划可恢复**：如果 Xiaok/Desktop 或 PO agent 在制定计划阶段中断，项目详情页会显示“重新制定计划”，项目不再卡死
-- **交付物合同校验**：显式要求 PPTX/HTML/Markdown 的任务会在进入 PO 验收前校验产物类型，Markdown 不再能冒充幻灯片交付
-- **本地执行器注册表**：当没有健康 agent 具备 PPTX 输出能力时，明确要求 PPTX 的演示任务可以使用确定性的注册执行器兜底
-- **桌面配置保持**：Desktop 启动与发布流程统一使用真实用户 HOME，模型、skill、plugin、channel 配置不会因为隔离 HOME 消失
-- **发布打包刷新**：macOS 与 Windows 桌面产物统一从 1.3.1 源码和插件 bundle 基线构建
-
-**v1.2.0 新特性：**
-
-- **KSwarm 蜂群式项目交付**：在对话中创建多智能体协作项目 — Agent 自动选择 PO + 成员，分发任务，团队协作交付高质量成果
-- **长期记忆**：Agent 跨会话记住用户偏好、姓名、习惯，通过 `notebook_write`/`notebook_read` 工具持久化
-- **记忆管理界面**：在设置面板中查看、新增、删除持久化记忆条目
-- **Agent 设置面板**：配置 Agent 人格、Spawn Profile、LLM Provider 绑定
-- **模型配置增强**：Provider 设置支持协议选择和高级 JSON 配置
-- **更智能的任务交付**：TaskPanel 分步进度上报，Agent 自主规划和追踪多步骤工作
-
-**v1.1.0 新特性：**
-
-- **产物 Canvas 修订**：HTML 预览中点击"修订"标注元素，携带完整 DOM 上下文向 Agent 发送修改指令
-- **预览自动刷新**：Agent 修改产物文件后 Canvas 预览自动重新加载
-- **产物卡片**：Claude 风格文件卡片，带类型图标、标题和"打开"按钮，产物一目了然
-- **欢迎页改版**：个性化打字机问候语，面向企业场景的快速提示词
-- **个人资料设置**：通用设置中可编辑显示名称和头像（localStorage 存储，系统用户名降级）
-- **插件打包方案**：完整的桌面端插件生命周期设计文档（esbuild + Python venv）
-
-**v1.0.0 新特性：**
-
-- **完整 i18n 支持**：桌面版全量中英文国际化，支持运行时语言切换
-- **KSwarm 多智能体**：多 AI 智能体协作执行复杂任务，状态实时监控
-- **项目管理**：看板、需求跟踪、智能体分配、活动时间线、产物视图
-- **定时任务**：支持 cron 表达式的周期任务，可暂停/恢复/手动执行
-- **插件系统**：从 GitHub 或本地安装、管理 MCP Server 插件
-- **桌面版 v1.0.0**：原生 macOS/Windows 应用，侧边栏、Canvas 预览、设置界面、自动更新
-
-**典型使用场景：**
-
-1. 本地终端交互式对话：`xiaok`
-2. 恢复上次会话：`xiaok -c`
-3. 单次任务执行：`xiaok "review the changes"`
-4. 通过已安装 skill 生成报告、brief 或幻灯片
-5. 启动本地 daemon：`xiaok daemon start`
-6. 可选的云之家 / 移动端接入：`xiaok yzjchannel serve`、`/yzjchannel`
-
----
+一个提示词启动一次工作；一个有效的 Loop 还需要触发器、执行器、持久状态、检查器和用户看得见的结果。
+
+| 组成 | Xiaok 实现 |
+|---|---|
+| 自动化 | 定时任务、用户 Loop、项目与工作流触发 |
+| 执行 | 带工具与技能的 CLI / Desktop agent runtime |
+| 工作隔离 | 独立 SubAgent 会话、继承的工具权限、可选 worktree |
+| 连接能力 | MCP 插件、本地文件、Intent Broker、KSwarm、可选消息通道 |
+| 记忆 | 会话状态、SQLite、知识来源、工作流检查点、Loop 记录 |
+| 证据 | 可读产物、技能合同、完成检查、审核门禁、来源记录 |
+| 诊断 | 产物证据回归 Loop、KSwarm 服务健康 Loop、运行历史及失败原因 |
+
+建立 Loop 时，先定义工作与交付合同，再选择触发方式、保存状态，并增加能区分实际交付与表面成功的检查。提醒只通知，定时任务才执行 AI 工作。每日助理需要用户启用，生成的记忆与知识候选可先审阅再采纳。
+
+**当前源码重点：**
+
+- **SubAgent 协作**：为有价值的独立分工自动启动，展示具体任务，支持消息、同实例续轮、中断、关闭及清理状态。
+- **简化系统提示词**：合并重复执行指令，消除授权与输出格式冲突。CLI 通用层从 20,687 缩到 5,993 字符；Desktop 基础层从 8,297 缩到 3,239 字符。这是固定文本测量，不代表 token、延迟或模型质量的同比改善。
+- **Goal Mode**：持久目标、状态、暂停/恢复、预算、证据与受控续跑。
+- **Room-first 协作**：先与智能体讨论，再通过用户确认，从选中的来源消息创建项目。
+- **产物与知识工作流**：预览、编辑、文档入库、本地检索、录音转写和可复用技能。
 
 ## Swarm 项目
 
-xiaok Desktop 内置 KSwarm 项目交付能力，适合需要计划、并行执行、质量验收和最终汇总的工作。一个项目包含人类审批过的计划、PO agent、worker agents、任务看板、产物和最终交付物。
+KSwarm 负责需要计划、智能体分工、并行任务、审核、恢复和最终交付的持久项目。项目拥有独立状态与产物，不等于一次对话里的 SubAgent 组。
+
+智能体侧 `create_project` 工具只生成**提案**。正式创建走 Desktop 中受信任的用户确认路径；普通内容生成或自动 SubAgent 分派不会静默创建持久项目。
 
 ### 基础版 Dynamic Workflow
 
-v1.3.13 在 KSwarm 项目之上扩展了基础动态工作流能力。它还不是面向用户的通用 workflow builder，也还不是执行任意 raw JavaScript 的开放平台，但已经是一条真实的 durable workflow runtime 切片：
+- **持久运行**：阶段、节点、依赖、并行组、检查点、状态与 gate decision 由 KSwarm 保存。
+- **内置诊断**：直接检查项目状态，或启动智能体诊断与独立评审。
+- **项目与任务范围**：High Quality 项目工作流协调整体交付；任务级提案处理用户明确选择的任务。
+- **受控脚本**：受信任工作流使用 `phase`、`agent`、`parallel([() => agent(...), ...])`、`pipeline`，由运行时校验并约束执行。
+- **预览与续跑**：先预览再执行；使用 `workflowRunId` 查询状态，通过 `resumeWorkflowRunId` 恢复已保存的运行，无需重贴另一份脚本。
+- **产物优先审核**：任务与最终交付必须满足格式、来源及产物合同。修复文件重新进入审核，不靠强制改状态完成。
+- **可见进度**：看板、Graph、任务详情和日志展示持久化任务/工作流状态、并行进展、阻碍、恢复与交付物。
 
-- **持久化 workflow run**：KSwarm 会记录 workflow run 的 phase、node、状态、进度、gate decision 和时间戳，Desktop 可以刷新、恢复展示并审计执行过程。
-- **快速诊断工作流**：系统内置控制流检查项目状态、阻塞原因、可派发任务和推荐动作，不调用智能体，适合秒级项目体检。
-- **Agent 复核诊断工作流**：Xiaok 可以启动结构化 workflow，先派 Worker agent 做项目诊断，再派 Reviewer/PO agent 做对抗性复核，最后通过 gate 归约决策。
-- **项目级高质量工作流**：高质量项目执行会在项目 scope 创建单个 `po-generated-project-workflow`。workflow 负责任务派发、review gate 和最终交付物提交，不再把项目拆散成互不关联的任务级 workflow。
-- **任务级手动工作流执行**：任务卡片仍可在用户明确想重跑或检查某个任务时打开 `po-generated-task-workflow` proposal。proposal 会带 task scope、预算、权限和验收标准，必须人工确认后才 dispatch。
-- **受控 PO 生成建议**：KSwarm 可以根据项目/任务上下文生成 validated workflow IR。当前版本是受控模板，用来验证 proposal 和审批链路；不会执行模型生成的 raw JavaScript 或任意用户脚本。
-- **受控动态脚本执行**：可信模型生成的 workflow script 可以在受限 desktop runtime 中运行。脚本可以创建 phase、调用 `agent(...)`、使用 thunk 形式的 `parallel(...)`、返回终态结果，或用结构化原因阻塞 run。
-- **持久化并行编排**：并行脚本分支会进入 KSwarm `parallelGroups`，记录分支节点身份、fan-out 标签、required/schema/evidence 元数据和脚本 checkpoint。xiaok 能展示并行进度，而不是依赖聊天 transcript。
-- **对话优先的预览确认**：动态脚本工具可以先返回 `previewOnly` workflow plan，用户确认后再启动。启动后后台执行并返回 `workflowRunId`，后续状态查询都读取 KSwarm snapshot。
-- **同一 run 恢复与状态查询**：对话 agent 可以传 `resumeWorkflowRunId` 继续同一个脚本 run，并复用已完成 primitive；也可以调用 `get_dynamic_workflow_status` 查询 KSwarm run、node、parallel group、checkpoint、gate、delivery 和后台 job 状态。
-- **专业报告终态复核**：内置脚本示例展示了专业 workflow 的基本形态：先盘点交付物，再并行做事实/证据/格式合同复核，最后归约成 gate 建议。
-- **Artifact-first 交付门禁**：workflow 中完成的任务必须提交可读的工作区内文件或有效产物引用。finalize 会从这些文件重建 evidence，遇到缺产物、不可读、工作区外、或只有文字摘要时会阻断交付。
-- **预算、缓存、恢复和进度 UI**：工作流详情会展示 hard budget、最近实质进展、blocking failure、run 内已保存节点结果和恢复方式。
-- **清晰的界面语义**：右侧动作统一为“运行工作流”菜单；项目 tab 仍保留“日志”，因为它同时包含 Swarm 活动和 Workflow 活动。
-- **融合时间线**：Workflow run 和 Swarm activity 按时间进入同一条项目日志，通过来源标签区分，而不是上下分区或置顶专区。
-
-这条实现明确了 Xiaok 的 dynamic workflow 产品方向：KSwarm 继续作为项目控制层，workflow orchestration 在 agent 层执行；当前从内置 workflow 和受控 PO-generated proposal 起步，后续可以演进到更丰富的动态生成执行计划。
-
-v1.3.4 的 Swarm 路径重点把职责边界理清：
-
-- **KSwarm 负责项目生命周期**：项目状态、计划审批、阶段派发、任务状态、重试、评审记录、交付清单和恢复决策。
-- **Agent 负责真实执行**：小K种子 PO/Worker 走完整 Desktop agent runtime；Claude、Codex、Qoder 等外部 agent 通过各自 broker adapter 执行。
-- **Renderer 负责正式输出**：用户要求报告或演示文稿时，优先生成 renderer-backed HTML 产物；只有用户明确要求 Markdown 或 PPTX 时才强制对应格式。
-- **Artifact 是事实来源**：任务完成必须提交真实文件或可解析的产物引用，不能只在摘要里说“已生成”。
-- **质量门禁按任务语境生效**：硬门禁只覆盖缺产物、格式不对、缺来源证据、renderer shell 无效等客观合同；“本月产品动态要几条才够”这类内容要求应来自项目类型知识，而不是全局硬编码。
-
-这让 Swarm 项目更适合调研报告、产品分析、技术大会演讲准备、文档生产等多步骤交付场景：用户能看到进度，也能在中断后恢复。
+KSwarm 管项目编排，Xiaok 与外部智能体 runtime 执行任务，随包 renderer 生成正式报告和幻灯片，Intent Broker 传递任务与回复。各层的健康和完成状态分别验证。
 
 ---
 
@@ -554,67 +75,50 @@ v1.3.4 的 Swarm 路径重点把职责边界理清：
 
 ### 1. 意图优先的任务交付
 
-xiaok 的目标是让用户感觉“AI 在做事”，而不是“我在操作一个流程系统”。
+先理解交付目标，复用现有技能和材料，在授权范围内持续执行。多步任务保持进度准确，简单问题直接回答。最终回复说明交付了什么、在哪里、验证了什么。
 
-- 重要请求会被视作带交付物的 intent，而不是普通聊天 turn。
-- skill 会按当前意图和阶段去匹配，并结合运行时证据做轻量重排。
-- 多阶段工作主要在内部编排，用户看到的是进展和结果，不是模板流程。
-- 最终输出应该更像交付结果，而不是状态回执。
+### 2. 精简且分层的系统提示词
 
-### 2. 7 层 Prompt 架构
+当前结构用简明规则与运行时上下文替代旧的“7 层”描述：
 
-System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
+| 入口 | 稳定规则 | 运行时附加内容 |
+|---|---|---|
+| CLI | 身份、执行、授权、工具、沟通、计划、验证和阶段交接 | 权限模式、技能目录、延迟工具、工作区约定、记忆、CLI 专用分派策略 |
+| Desktop | 执行与证据、提醒/定时任务、材料、知识、项目边界和交付格式 | 当前模型、技能目录、材料、受管 SubAgent 策略与上下文 |
 
-**静态前缀（可缓存，跨 turn 稳定）：**
-
-| 层 | Section | 内容 |
-|---|---------|------|
-| 1 | Intro | 角色定义 — 任务交付型 AI skill 工作台；苍穹/云之家属于擅长场景 |
-| 2 | System | 运行时规则 — permission mode、prompt injection 防护 |
-| 3 | DoingTasks | 任务哲学 — 不加功能、先读后改、安全意识 |
-| 4 | Actions | 风险边界 — 破坏性操作需确认 |
-| 5 | UsingTools | 工具语法 — read 不用 cat、并行调用 |
-| 6 | ToneAndStyle | 交互风格 — 简洁、file_path:line_number |
-| 7 | OutputEfficiency | 输出效率 — 先说结论不铺垫 |
-
-**动态后缀（每 turn 重建）：**
-- 会话上下文、Session Guidance、Memory 注入、Token Budget、自动上下文
+技能仍按目录发现、按需加载。工作区内容与记忆提供上下文，不增加权限。提示词不能替代 service 权限检查与工具参数校验。对应实现见 [CLI prompt assembler](src/ai/prompts/assembler.ts) 与 [Desktop 基础规则](desktop/electron/desktop-system-prompt.ts)。
 
 ### 3. 安全优先
 
-**Bash 安全分类器**（三级风险）：
+| 层次 | 边界 |
+|---|---|
+| 权限模式 | `default` 按需询问，`auto` 放行低风险操作但保留高风险检查，`plan` 禁止写入与 Bash |
+| Bash 分类 | `block`、`warn`、`safe` 分类配合权限检查；未命中危险规则不等于无条件安全 |
+| 工具执行 | 校验输入、执行当前允许集、不能换工具绕过用户拒绝 |
+| Agent mutation | 根据调用者和数据所有权约束控制/写入操作，分派不能扩大权限 |
+| 交付 | 核验产物与结果；“closed”本身不证明执行和资源已真正结束 |
 
-| 级别 | 命令示例 | 行为 |
-|------|----------|------|
-| Block | `rm -rf /`、`mkfs`、`curl|sh` | 直接拒绝 |
-| Warn | `rm -rf`、`git reset --hard`、`DROP TABLE` | 需确认 |
-| Safe | 其他命令 | 直接执行 |
-
-**工具输入校验** — JSON Schema 验证器在每次工具调用前校验必填字段和类型。
+Computer Use 使用独立的权限与运行路径，仅支持 macOS，不能改用 shell 截图或桌面控制绕行。
 
 ### 4. 分阶段上下文管理
 
-长任务不应该无限堆成一个越来越飘的大上下文。xiaok 会把完整事实保存在会话状态里，但尽量只把当前阶段需要的内容投影给模型：
-
-1. **微压缩** — 工具结果超过 8000 字符自动截断
-2. **阶段交接** — 阶段完成后可把 artifact 交接到新的上下文，而不是把整条历史硬拖下去
-3. **记忆回注** — compact / handoff 后把相关记忆重新注入会话
+持久保存 intent ledger，同时聚焦当前阶段。压缩过大的工具结果，保留溢出文件引用，通过明确产物交接，并在压缩后恢复相关记忆。易变状态重新查询，不把旧摘要当实时快照。
 
 ### 5. 类型化记忆
 
-持久化文件记忆存储，支持类型分类：
-
-- `user` — 用户偏好、角色、知识
-- `feedback` — 用户对 AI 行为的确认/纠正
-- `project` — 项目进度、决策、bug
-- `reference` — 外部资源指针
+CLI 记忆区分 `user`、`feedback`、`project`、`reference`。Desktop 还提供持久笔记本与本地知识库，用于文档、来源和检索。记忆属于背景上下文；用户要求保存的个人信息才持久化，每日助理候选由用户采纳。
 
 ### 6. 非侵入多 Agent 协作
 
-通过 Intent Broker 生命周期 hook 接入：
-- SessionStart / UserPromptSubmit / Stop
-- session_id / transcript_path 上下文注入
-- auto-continue 多 Agent 协作
+| 机制 | 适用场景 |
+|---|---|
+| SubAgent | 当前对话内有明确边界的独立工作 |
+| KSwarm 项目 | 持久计划、任务派发、独立审核、恢复与最终交付 |
+| Intent Broker / Room | 不同智能体 runtime 之间的协作，以及带成员和消息历史的持久会话 |
+
+权限允许时，SubAgent 工具有 `spawn_agent`、`send_message`、`wait_agent`、`list_agents`、`followup_task`、`interrupt_agent`、`close_agent`。续轮复用实例；用户禁止分派、要求先问、工具限制和数据所有权边界持续有效。
+
+交互式 CLI 可以就重要分派选择提问。无交互 CLI 与当前 Desktop agent loop 尚无该交互式问答通道：只影响可选分派时由主 Agent 完成；缺少关键决定时先说明，不启动未获授权的工作。
 
 ---
 
@@ -622,43 +126,36 @@ System Prompt 采用 CC 风格的 7 层设计，显式静态/动态分界：
 
 ### 环境要求
 
-- **Node.js >= 22** —— 从 v1.4.30 起要求（内置 SQLite 引擎改用面向 Node 22+ 的 N-API 预编译包）
-- 桌面版需要 macOS（Apple Silicon 或 Intel）或 Windows x64
+- **CLI**：Node.js **22 或更高版本**。
+- **完整源码栈**：Node.js **22.22 或更高版本**，满足 KSwarm 的 engine 要求。
+- **已发布 Desktop 安装包**：macOS Apple Silicon 与 Windows x64。正常使用安装版无需单独安装 Node.js。
+- Computer Use 需要 macOS 及对应辅助功能/屏幕权限。模型和外部服务凭据按实际使用能力配置。
 
 ### npm 安装
 
 ```bash
 npm install -g xiaokcode
-```
-
-更新到最新版本：
-
-```bash
-xiaok update
-```
-
-安装后直接运行：
-
-```bash
+xiaok login
 xiaok
 ```
 
-npm 包名是 `xiaokcode`，但 CLI 命令仍然保持 `xiaok`。
+npm 包名是 `xiaokcode`，命令是 `xiaok`。使用 `xiaok update` 更新。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
 
 ### 源码安装（开发用）
 
 ```bash
-git clone https://github.com/kaisersong/xiaok-cli ~/.xiaok-cli
-cd ~/.xiaok-cli
-npm install
+git clone https://github.com/kaisersong/xiaok-cli.git
+cd xiaok-cli
+npm ci
 npm run build
+node dist/index.js
 ```
 
-源码安装路径只用于参与 `xiaok-cli` 开发，或需要保留本地 git 仓库的场景。
+以上可用于 CLI 开发。Desktop 源码构建还依赖同级关联仓库，见[关联项目](#关联项目)和[开发](#开发)。重新构建后启动新进程，已运行进程不会自动替换已加载模块。
 
 ### 配置
 
-**全局配置：** `~/.xiaok/config.json`
+默认配置：`~/.xiaok/config.json`；`XIAOK_CONFIG_DIR` 可覆盖配置根目录。项目设置位于 `<repo>/.xiaok/settings.json`，快捷键默认位于 `~/.xiaok/keybindings.json`。
 
 ```json
 {
@@ -712,72 +209,62 @@ npm run build
 }
 ```
 
-旧的 schema v1 配置会在加载时自动迁移。也可以直接用 CLI 维护 provider 和 model catalog：
+v1 配置在加载时迁移。可使用登录、配置命令或 Desktop 设置管理 provider 与模型：
 
 ```bash
-xiaok config set model anthropic
+xiaok login --provider kimi
 xiaok config set model kimi/k3
-xiaok config set api-key <key> --provider kimi
 xiaok config get providers
 xiaok config get models
+xiaok doctor --check-keys
 ```
 
 #### Kimi K3
 
-新建 Kimi 配置会使用官方 wire model ID `k3`，同时提供 exact K3 profile `k3-256k`；已有 Kimi 配置继续保留当前模型，不会被自动迁移。K3 默认使用 262,144 tokens 上下文和 `high` 推理强度；Allegretto 及以上计划可显式选择 1,048,576 tokens。推理强度支持 `low`、`high`、`max`，不提供 `none`，因为关闭推理会路由到其他模型。
+内置精确 profile 使用 `k3` 和 `k3-256k`。当前默认配置是 262,144 token 上下文与 `high` reasoning effort；可选上下文与思考档位取决于具体模型/profile。
 
-CLI 与 Desktop 默认保留 Kimi 官方 `reasoning_content`，但仅存在于当前 provider conversation 与工具调用链的 task-local 内存中。原始推理及其 provenance 在 durable session/task 持久化前会被剥离，不会进入终端输出、Desktop event、Canvas、普通日志或 tool-facing context。若 K3 的 resume、continue 或 fork 所绑定的 durable history 已包含 assistant turn，会在任何 provider 请求或状态修改前以 `KIMI_K3_DURABLE_RESUME_UNSUPPORTED` 失败；仅预绑定但还没有 assistant turn 的 session 按 fresh conversation 处理。
+CLI 与 Desktop 仅在任务内的 provider 对话内存中保留 K3 `reasoning_content`；原始推理不进入持久会话/任务历史、用户事件、普通日志或工具上下文。已有 assistant turn 的持久化历史不能直接 resume/continue/fork，会返回 `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`；此 profile 应开启新会话。
 
-因此，exact `k3` 与 `k3-256k` profile 在 CLI 和 Desktop 上都默认开启 `preservedThinking`。显式发送 `prompt_cache_key` 仍然默认关闭，因为还没有有效的 product-level paired eval 证明其达到所需收益；Xiaok 不宣称显式 key 带来性能提升。诊断用 opt-in 仍为 `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`。
-
-Desktop 模型设置会为当前 K3 模型显示 262K/1M 上下文和 Low/High/Max 推理强度选项。切换模型或推理强度会让 Kimi provider conversation state 失效，因此切换后建议新建会话。当前计划限制与模型行为以 [Kimi Code 官方模型文档](https://www.kimi.com/code/docs/kimi-code/models) 为准。
-
-**项目配置：** `<repo>/.xiaok/settings.json`
-
-**快捷键：** `~/.xiaok/keybindings.json`
+Kimi 显式 `prompt_cache_key` 默认关闭。`XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1` 仅用于诊断，不代表已证实的性能收益。切换模型或 reasoning effort 需要新的 provider 对话。实现见[模型 harness profile](src/ai/providers/model-harness-profile.ts)。
 
 ---
 
 ## 桌面版
 
-xiaok Desktop 是一个原生 macOS 应用，为 xiaok 运行时提供图形界面。它与 CLI 共享同一套后端，但提供侧边栏浏览任务历史、Canvas 预览生成的文件、以及设置管理界面。
+Desktop 是基于 Electron 与 React 的主要图形工作台。主进程 service 持有持久状态并执行任务，renderer 展示结构化状态，通过有限的 preload / IPC API 发起请求。
 
 ### 下载
 
-从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 下载：
+从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest) 获取当前正式版。已核实 `desktop-v1.5.1` 提供：
 
-- **xiaok-1.5.1-arm64.dmg** — macOS DMG 安装包（Apple Silicon）
-- **xiaok-1.5.1-arm64-mac.zip** — macOS ZIP 包（Apple Silicon）
-- **xiaok-setup-1.5.1.exe** — Windows 安装包（x64）
+- `xiaok-1.5.1-arm64.dmg` — macOS Apple Silicon 安装包。
+- `xiaok-1.5.1-arm64-mac.zip` — macOS Apple Silicon 压缩包。
+- `xiaok-setup-1.5.1.exe` — Windows x64 安装程序。
+
+自动更新使用 `latest-mac.yml` 与 `latest.yml`。本文标记为近期源码的改动，需要源码构建或后续正式发布后使用。
 
 ### 功能特性
 
-- **任务侧边栏**：浏览最近任务，切换时显示选中高亮
-- **Canvas 预览**：自动打开生成的文件（HTML、MD、PDF）在侧边面板
-- **项目管理**：看板拖拽、智能体分配、活动时间线
-- **KSwarm 多智能体**：从界面创建、审批、恢复、验收和交付多智能体项目
-- **基础版 Dynamic Workflow**：以持久化 workflow run 运行项目快速诊断、Agent 复核诊断、项目级高质量工作流和任务级手动 workflow proposal，包含预算、缓存、恢复、进度、Reviewer、artifact 和 gate 元数据
-- **自动化**：在同一个入口创建定时任务、绑定用户 loop、查看运行历史，并直接打开 loop 输出文件
-- **定时任务**：创建周期任务（每小时、每天、每周、cron），对话里显示计划执行和实际 claim 时间
-- **插件系统**：安装和管理 MCP Server 插件，支持启用/禁用
-- **自带运行时的插件**：需要 Python 的插件改用应用内自带的固定版本解释器，打包时用内容哈希校验，插件不再依赖机器上恰好装了什么 Python
-- **宿主能力网关**：插件 provider 通过显式声明、可单独吊销的网关访问宿主能力（文件、通知、渲染），不再拥有环境级权限
-- **组件重试**：插件组件失败后提供统一重试入口，并说明上次失败的原因
-- **远程访问优雅降级**：移动端 relay 凭据过期只会关闭远程访问，不影响本地任何功能，且只提示一次可执行的重新登录动作，不再无限重试
-- **国际化**：完整中英文支持，运行时切换语言
-- **设置界面**：配置模型提供商、技能、消息通道、MCP 服务器
-- **自动更新**：新版本发布时自动通知更新，并在设置按钮左侧显示升级提醒
+- **对话与 Goal Mode**：任务历史、提示词导航、持久目标、暂停/恢复和可见进度。
+- **SubAgent 面板**：当前源码中的受管协作，提供稳定星座代号、分工、活动、消息与结果。
+- **预览 / Canvas**：HTML、Markdown、PDF、报告和幻灯片预览，产物编辑、修订与任务来源；部分高级界面仍受功能开关控制。
+- **项目与 Room**：从对话经用户确认创建项目，提供看板、工作流 Graph、审核门禁与恢复。
+- **自动化**：定时 AI 任务、提醒、用户 Loop、诊断、运行历史和输出预览。
+- **知识与录音**：本地文档入库/检索、笔记本、录音转写和可编辑纪要；ASR 能力取决于配置的 provider 或已安装本地模型。
+- **插件**：MCP 工具、随包报告/幻灯片/画布/会议能力、受管运行时就绪检查、组件重试及 macOS Computer Use。
+- **设置与访问**：模型/provider、技能、通道、插件配置，中英文界面、主题、更新与可选移动端 companion。
 
 ### 开发构建
 
-本地构建桌面版：
+先准备关联仓库和依赖，在根目录执行：
 
 ```bash
-cd desktop
-npm install
-npm run build
-npx electron-builder --mac --arm64
+npm ci --prefix desktop
+npm run build --prefix desktop
+npm run dev:all --prefix desktop
 ```
+
+仅构建不会替换已安装应用。未签名本地打包与发布前置条件见[开发](#开发)。
 
 ---
 
@@ -786,109 +273,76 @@ npx electron-builder --mac --arm64
 ### 基本命令
 
 ```bash
-# 交互式对话
-xiaok
-
-# 恢复上次会话
-xiaok -c
-
-# 恢复指定会话
-xiaok --resume <session-id>
-
-# 单次任务
-xiaok "review the current workspace changes"
-
-# 诊断 API Key 解析（哪个环境变量或配置项生效、是否可用）
-xiaok doctor --check-keys
-
-# 将 CLI 更新到 npm 最新版本
-xiaok update
-
-# 管理本地 daemon
-xiaok daemon start
-xiaok daemon status
-xiaok daemon stop
-
-# 启动云之家 IM 网关
-xiaok yzjchannel serve
+xiaok                              # 交互式聊天
+xiaok login                        # 配置 provider/key
+xiaok -c                           # 恢复上次会话，需模型支持
+xiaok --resume <session-id>         # 恢复指定会话
+xiaok "审查当前工作区改动"           # 执行任务
+xiaok doctor --check-keys           # 诊断凭据解析
+xiaok update                       # 更新 npm CLI
+xiaok daemon status                # 查看本地 daemon
+xiaok plugin search                # 浏览插件
+xiaok transcript <session-id>      # 检查执行历史
+xiaok yzjchannel serve             # 可选云之家网关
 ```
 
 ### 会话内命令
 
 ```text
-/exit                         退出会话
-/clear                        清屏
-/compact                      压缩当前会话上下文
-/context                      查看当前仓库上下文
+/exit                         退出聊天
+/clear                        清屏并重新显示欢迎页
+/compact                      压缩较早对话上下文
+/context                      查看已加载的仓库上下文
 /mode [default|auto|plan]     查看或切换权限模式
 /models                       切换模型
-/reminder <自然语言>          创建提醒
-/reminder list                查看提醒列表
+/goal <objective>              创建持久目标
+/goal status|pause|cancel      查看、暂停或取消目标
+/goal resume [newTurnLimit]    恢复，可指定新的轮次限制
+/goal replace <objective>      替换当前目标
+/reminder <natural language>  创建通知提醒
+/reminder list                列出提醒
 /reminder cancel <id>         取消提醒
-/settings                     查看当前生效配置
-/skills-reload                重新加载已安装 skill
-/yzjchannel                   连接嵌入式云之家 channel
-/help                         显示帮助
-/<skill-name> [args]          调用 skill
+/settings                     查看 CLI 设置
+/skills-reload                重载技能
+/yzjchannel                   连接内嵌通道
+/help                         查看帮助
+/<skill-name> [args]          调用技能
 ```
 
-`auto` 模式会自动批准低风险工具调用。递归删除、硬重置、强推、数据库删除、屏幕自动化 shell fallback 等高风险 Bash 命令仍会要求确认；灾难性 Bash 命令继续由 Bash 安全分类器直接阻断。
+权限模式与用户意图分开：`auto` 不替用户回答待定问题，也不覆盖“分派前先问我”。
 
 ### 终端按键与内联图片
 
-```text
-Ctrl+O                        用 $PAGER 打开完整会话转录
-```
-
-`Ctrl+O` 会把整个会话（用户输入、助手回复、工具观察、命令输出）渲染成临时 ANSI 文件（权限 `0600`，退出后删除），交给 `$PAGER`（默认 `less -R`）打开。pager 打开期间独占 stdin，退出后自动恢复输入行与页脚。轮次正在流式输出或有权限确认等待时，该按键会被忽略。Windows 或没有可用 pager 时，转录改为直接打印到 scrollback。
-
-提交的图片在终端支持时会内联显示：运行时探测 kitty graphics 协议（仅 PNG）与 iTerm2 inline-image 协议。不支持的终端（包括 tmux pane）降级为 `[Image <宽>×<高>]` 占位文本，图片转义序列也不会写入 transcript 日志。
+- **Esc** 请求中断当前执行轮次，同时保留草稿与排队输入。
+- **Ctrl+O** 在空闲时用 `$PAGER`（默认 `less -R`）查看完整 transcript；私有 ANSI 临时文件退出后删除，不支持的环境回退到 scrollback。
+- 支持的终端通过 kitty 或 iTerm2 协议显示提交的图片；tmux 等不支持的环境显示占位提示。
+- SubAgent 代号使用统一强调色；中文斜体取决于终端字体回退，ANSI 样式本身不保证字形倾斜。
 
 ### 云之家 IM 命令
 
 ```text
-/help                    显示帮助
+/help                    查看帮助
 /bind <cwd>              绑定工作区
 /bind clear              清除工作区绑定
-/status [taskId]         查看任务状态
-/approve <approvalId>    批准待审批动作
-/deny <approvalId>       拒绝待审批动作
+/status [taskId]         查询任务状态
+/approve <approvalId>    批准待处理操作
+/deny <approvalId>       拒绝待处理操作
 /cancel <taskId>         取消运行中任务
-/skill <name> [args]     调用 skill
+/skill <name> [args]     调用技能
 ```
+
+云之家属于可选适配器，本地 CLI / Desktop 使用不依赖它。
 
 ### 典型工作流
 
-**本地开发：**
-
 ```bash
-# 初始化项目
 xiaok init
-
-# 交互式开发
-xiaok "add user authentication"
-
-# 代码审查
+xiaok "实现这项改动并完成相关验证"
 xiaok review
-
-# 提交
 xiaok commit
 ```
 
-**云之家集成（可选 channel 适配器）：**
-
-```bash
-# 配置
-xiaok yzjchannel config set-webhook-url "https://..."
-
-# 启动网关
-xiaok yzjchannel serve
-
-# 在云之家机器人聊天窗口使用
-/help
-/bind /Users/song/projects/my-project
-/skill commit -m "fix: bug"
-```
+复用文档能力时安装对应插件并调用技能；独立调查任务直接说明交付物与约束，由运行时选择有价值的 SubAgent 分工。持续目标使用 `/goal`，重复工作使用 Desktop 自动化，正式多智能体项目交付使用经用户确认的 KSwarm 项目。
 
 ---
 
@@ -896,150 +350,240 @@ xiaok yzjchannel serve
 
 ### 核心功能
 
-- **7 层 Prompt 架构** — CC 风格 section 函数，静态/动态分界，每 turn 动态注入
-- **Provider catalog + 多模型** — 内置 Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini 一等 provider，并支持自定义 endpoint
-- **Bash 安全** — block/warn/safe 三级分类，拦截危险命令
-- **工具输入校验** — JSON Schema 验证器，每次调用前校验
-- **类型化记忆** — user/feedback/project/reference 分类存储
-- **本地 daemon + 提醒** — 基于 SQLite 的 durable reminder scheduler，daemon/client 隔离
-- **Firecrawl 免 Key 网页搜索 + 抓取** — 结构化 JSON 搜索和 Markdown 抓取，无需注册 API key
+- Anthropic、OpenAI、Kimi、DeepSeek、GLM、MiniMax、Gemini 与自定义端点的共享 provider 目录。
+- 精简系统规则、按入口注入上下文、工具校验、权限模式与有范围约束的 Agent 控制。
+- 文件/搜索/编辑/shell、网页搜索与抓取、LSP、持久目标和会话诊断。
+- 区分执行状态、逻辑关闭和资源清理；取消未结束时如实展示，不伪报资源已释放。
 
 ### 技能系统
 
-- **三层技能** — 内置、全局、项目级分层加载
-- **依赖解析** — 技能间依赖自动解析
-- **allowed-tools** — 白名单约束技能可用工具
-- **安装/卸载** — 技能目录加载与刷新
-- **结构化 skill 合同** — 支持 `required-references`、`required-scripts`、`required-steps`、`success-checks`
-- **严格执行可靠性** — execution bundle、evidence 记录、completion gate 和 adherence eval
+- 内置、全局、项目和插件技能目录，依赖解析与按需加载。
+- `allowed-tools` 执行时约束，安装/卸载后刷新目录。
+- `required-references`、`required-scripts`、`required-steps`、`success-checks` 结构化合同。
+- strict skill 的执行 bundle、产物证据、完成检查和遵循度评估。
 
 ### 内置 Agent
 
-| Agent | 角色 | 工具 |
-|-------|------|------|
-| Explore | 只读探索 | read/grep/glob/bash(ls/git) |
-| Plan | 仅规划 | read/grep/glob |
-| Verification | 对抗测试 | read/grep/glob/bash |
+| Agent | 分工 | 声明工具 |
+|---|---|---|
+| Explore | 只读调查代码库 | read、grep、glob、bash、tool_search；提示词把 Bash 限制为只读检查 |
+| Plan | 架构与实现规划 | read、grep、glob、tool_search |
+| Verification | 对抗式验证 | read、grep、glob、bash、tool_search |
+
+无需预建命名 Agent 才能分派；内联 SubAgent 可直接接收有界任务与明确工具允许集。预设指令、可见工具和运行时权限是不同层次。
 
 ### LSP 代码智能
 
-内置 `lsp` 工具：
-
-| 操作 | 说明 |
-|------|------|
-| goToDefinition | 跳转定义 |
-| findReferences | 查找引用 |
-| hover | 悬停文档 |
-| documentSymbol | 文档符号列表 |
+`lsp` 支持 `goToDefinition`、`findReferences`、`hover`、`documentSymbol`。结构大纲用于指导局部读取；语法回退不能代替语义级定义与引用查找。
 
 ### 会话管理
 
-- **自动保存** — 每次对话自动保存
-- **恢复会话** — `xiaok -c` 恢复上次，`xiaok --resume <id>` 恢复指定
-- **Session ID** — 退出时显示，方便追溯
+自动持久化、session ID、受支持的恢复、记忆重注入及明确的取消语义保持工作连续性。具体模型的历史约束仍有效，特别是严格 Kimi K3 profile。
 
 ### 性能与大负载可靠性
 
-- **转录流式分析** — CLI 检查 transcript 时逐行解析 JSONL，不再把完整文件物化到内存。真实 182 MB、170,488 事件转录的峰值 RSS 从约 1.29 GB 降至 108 MB（-91.6%），耗时从约 0.51s 降至 0.40s。
-- **安全转录归档** — 使用 `xiaok transcript <sessionId> --gzip [--older-than-days N]` 显式压缩非活动转录。归档使用 writer claim、不可变内容寻址 gzip segment、完整 manifest 校验、透明读取和崩溃恢复；同一份 182 MB 转录压缩至 2.56 MB（-98.60%）。
-- **增量任务快照** — Runtime 持久化改为追加带校验和的 journal，并按几何阈值生成 checkpoint，不再随每个事件重写完整快照。终态快照仍兼容旧读取器，损坏或分叉历史默认拒绝。
-- **Desktop 启动关键路径收窄** — 静态内置资源保持早期部署，managed Python 探测、环境准备和 Python MCP 连接延迟到主窗口可交互之后；未证明 ready 前，Python 工具保持不可用。
-- **流式渲染合并** — 首个 assistant delta 立即显示，后续更新最多每 80 ms 合并一次并与浏览器绘制帧对齐，在不丢失最终 delta 的前提下减少 React 更新和 Markdown 重解析。
+- 增量读取 JSONL transcript，支持显式 gzip 归档：`xiaok transcript <session-id> --gzip --older-than-days 7`。
+- 带校验和的任务 journal 与 checkpoint，避免每个事件都重写全量快照。
+- Desktop 窗口可交互后再推进受管 Python / 插件就绪工作。
+- 合并 renderer 流式更新，有界工具输出保留产物引用。
+- 缩短固定系统文本，同时保留技能、工作区约定、权限边界和分派策略。
 
 ### 本地 Daemon 与提醒
 
-- **`xiaok daemon` 宿主** — `start/status/stop/restart/update/serve`
-- **按 OS 用户单例运行** — 多个 chat 实例共享一个本地 daemon
-- **Durable reminder** — SQLite 持久化、恢复、重试、按 session 绑定投递
-- **实例互不拖垮** — daemon 异常不阻塞 chat 启动，chat 退出不影响 daemon
+用户级 daemon 提供 SQLite 持久提醒、恢复和重试，多个 CLI 会话可共享。daemon 可用性与 chat 启动相互独立。通知提醒不执行 AI 任务。
 
 ### 云之家 IM 集成
 
-- **嵌入式 Channel** — 会话内 `/yzjchannel` 直连
-- **WebSocket/Webhook** — 双模式入站支持
-- **审批处理** — 待审批动作两端推送
-- **生命周期管理** — 跟随 chat 进程 cleanup
+内嵌 `/yzjchannel`、WebSocket/webhook 入站、工作区绑定、任务状态、批准转发与取消，把可选 IM 入口连接到运行时。
 
 ### Intent Broker 集成
 
-- **Lifecycle Hook** — SessionStart / UserPromptSubmit / Stop
-- **上下文注入** — session_id / transcript_path
-- **Auto-continue** — 多 Agent 协作自动续跑
+生命周期 hook 注册会话与项目上下文，发布 work-state，区分可执行任务/问题和信息通知，支持事件重放与受控续跑。消息送达不代表任务执行成功。
 
-### 评估系统（v0.5.2）
+### 评估系统
 
-**6 类测试用例（26 个）：**
+定向单测与合同测试覆盖提示词、工具、权限、历史、取消及交付。CLI 进程/TTY 测试使用本地 SSE 服务；Desktop 覆盖 main service、IPC 与 renderer。真实模型评测与确定性桩测试分开。
 
-| 类别 | 任务数 | 描述 | 目标 |
-|------|-------|------|------|
-| Autonomy | 6 | 文件操作、重构 | L4（不问） |
-| Investigation | 4 | 错误诊断、调试 | L3（≤1 问） |
-| Clarification | 4 | 复杂场景 | L2-L3 |
-| Action | 4 | 直接执行 | L4 |
-| Complex | 4 | 多步推理 | L3 |
-| Safety | 4 | 破坏性操作 | L1（应问） |
-
-**评估维度：**
-- 自主性（40%）— AskUserQuestion 频率
-- 效率（25%）— 步骤效率、Token 用量
-- 正确性（35%）— 任务完成、代码正确性
+可使用 `npm run eval:intent-delegation`、`npm run eval:skill-quality`、`npm run eval:skill-adherence` 及 `scripts/evals/` 中对应脚本。历史自主性 benchmark 不代表当前模型之间的性能保证。
 
 ---
 
 ## 架构概览
 
 ```text
-src/
-  ai/
-    prompts/sections/    7 个独立 section 函数
-    adapters/            Anthropic/OpenAI/OpenAI Responses 适配器
-    agents/              自定义 agent + 内置 explore/plan/verification
-    memory/              类型化文件记忆
-    providers/           Provider profile、协议映射、配置归一化
-    runtime/             agent runtime、compact runner
-    skills/              技能加载器、规划器
-    tools/               read/write/edit/bash/grep/glob/web/lsp/reminders
-    permissions/         三层权限策略引擎
-  channels/              渠道网关、任务/审批/会话
-  commands/              CLI 命令
-  platform/              MCP/LSP 插件、worktree 隔离
-  runtime/daemon/        通用本地 daemon 宿主与控制面
-  runtime/reminder/      提醒调度、SQLite store、daemon/client 桥接
-  ui/                    终端 UI：流式 Markdown、状态栏
+xiaok-cli/
+  src/
+    ai/              模型、提示词、技能、工具、Agent、权限、记忆
+    commands/        CLI 命令与 chat/goal 入口
+    platform/        Runtime registry、MCP/LSP、worktree、后台执行
+    runtime/         Task host、目标、daemon、提醒、证据与诊断
+    ui/              终端 transcript、输入、进度与 SubAgent 展示
+    channels/        可选消息通道适配器
+  desktop/
+    electron/        主进程服务、任务/Agent 执行、store、IPC 与 sidecar
+    renderer/        对话、SubAgent 面板、项目、知识与产物
+    shared/          Desktop 共享合同
+  data/              内置技能、Agent 与领域资源
+  tests/             CLI 单测、合同测试、进程/TTY 测试
 ```
+
+### 关联项目
+
+| 仓库 | 职责 | 与 Xiaok 的边界 |
+|---|---|---|
+| [kswarm](https://github.com/kaisersong/kswarm) | 持久项目/任务/工作流状态、派发、评审、恢复与产物门禁 | Desktop 主进程启动并调用 sidecar，agent runtime 执行任务 |
+| [intent-broker](https://github.com/kaisersong/intent-broker) | participant、代号、事件、任务交接、批准、Room 与重放 | 传递协作事实，不伪造任务结果，不持有 KSwarm 项目状态 |
+| [kai-xiaok-plugins](https://github.com/kaisersong/kai-xiaok-plugins) | 技能、MCP server、随包渲染与转写资源 | 提供能力；Xiaok 管理激活、权限、任务状态与用户交付 |
+
+当前插件集合包括 report `2.3.0`、slide `3.3.0`、infinity canvas `0.2.0`、meeting assistant `0.1.0`、Computer Use `0.2.1`。会议插件提供 Whisper 回退与总结，麦克风采集及其他 ASR 集成由 Desktop 管理。Computer Use 仅支持 macOS。
+
+Desktop 源码开发要求关联仓库同级放置：
+
+```text
+projects/
+  xiaok-cli/
+  kswarm/
+  intent-broker/
+  kai-xiaok-plugins/
+```
+
+```bash
+git clone https://github.com/kaisersong/kswarm.git
+git clone https://github.com/kaisersong/intent-broker.git
+git clone https://github.com/kaisersong/kai-xiaok-plugins.git
+```
+
+在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 当前将三个关联仓库固定到 `desktop-v1.5.1`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
 
 ---
 
 ## 开发
 
+在 `xiaok-cli` 中执行：
+
 ```bash
-npm run build       # 构建
-npm test            # 默认 sandbox + eval 套件
-npm run test:skill:fast     # 日常快速 skill 回归
-npm run test:skill:release  # 发版前 skill 执行套件
-npm run test:watch  # 监听模式
-npm run dev -- --help  # 从源码运行
+npm ci
+npm run build
+npm test
+npm run test:full
+npm run test:skill:fast
+npm run test:skill:release
+npm run dev -- --help
 ```
+
+默认测试先编译到 `.test-dist`，再执行 sandbox 配置与评估。`test:full` 包含 sandbox 排除的子进程测试；socket / 子进程测试需要允许相关操作的环境。
+
+准备 Desktop 与 sidecar 依赖：
+
+```bash
+npm ci --prefix ../kswarm
+npm ci --prefix ../intent-broker
+npm ci --prefix ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+npm run build --prefix ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+npm ci --prefix desktop
+npm run test --prefix desktop
+npm run typecheck --prefix desktop
+npm run build --prefix desktop
+```
+
+Python runtime、wheels 和其他插件组件依赖必须符合目标平台与 manifest。按插件仓库构建说明和 release workflow 准备，不能直接复制另一平台的 wheelhouse。
+
+macOS **未签名本地打包**（先完成构建与插件准备）：
+
+```bash
+cd desktop
+CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --dir \
+  --config electron-builder.json \
+  -c.mac.identity=null \
+  -c.win.signAndEditExecutable=false
+```
+
+关联仓库改动还需验证各自边界：
+
+| 改动 | 对应检查 |
+|---|---|
+| KSwarm 项目/runtime/工作流 | 在 `kswarm` 跑 `npm test` 与 `npm run test:all` |
+| Broker participant/adapter/协作 | 在 `intent-broker` 跑 `npm test` 与 `npm run verify:collaboration` |
+| Report renderer | 在对应 package 构建、bundle，并做 MCP initialize 冒烟 |
+| Slide/Python 插件 | 插件测试、目标平台 wheels 与 runtime 校验 |
+| 进入打包的关联资源 | Desktop packaging contract、构建并检查 unpacked app |
+
+回到 `xiaok-cli` 根目录运行 Desktop 打包合同测试：
+
+```bash
+npm run test --prefix desktop -- --run \
+  tests/main/kswarm-contract.test.ts \
+  tests/main/deploy-bundled-plugins.test.ts \
+  tests/main/e2e-plugin-bundling.test.ts \
+  tests/main/e2e-plugin-rendering.test.ts
+```
+
+构建新鲜度报错时，定位并重建对应 owner 的生成物，不反复重试同一打包命令。正式发布还需匹配且已 push 的关联仓库快照、适用的签名/公证，以及发布后的 `npm run desktop:verify-release -- desktop-v<version>`。
 
 ---
 
 ## 兼容性
 
-| 平台 | 集成方式 |
-|------|----------|
-| macOS | 完全支持 |
-| Linux | 完全支持 |
-| Windows | 部分支持（Hook 有限制） |
+| 平台 | CLI | 已发布 Desktop | Computer Use |
+|---|---|---|---|
+| macOS Apple Silicon | 支持 | DMG / ZIP | 授权后支持 |
+| macOS Intel | CLI / 源码使用 | 本次核实的最新 release 无 Intel 产物 | 仍需满足 macOS runtime 要求 |
+| Windows x64 | 支持，终端/hook 细节有差异 | 安装程序 | 不支持 |
+| Linux | CLI / 源码使用 | 有 build target，本次核实的最新 release 无安装包 | 不支持 |
 
-| Provider / 协议 | 支持 |
-|-----------------|------|
-| Anthropic | 流式、prompt 缓存、图片输入 |
-| OpenAI 兼容 | 流式、兼容 endpoint、自定义 base URL |
-| Gemini (`openai_responses`) | Responses API 适配、tools、thinking |
+| Provider / 协议 | 运行时支持 |
+|---|---|
+| Anthropic | 流式、工具、受支持模型的图片与缓存 |
+| OpenAI-compatible | 流式、工具调用、自定义端点与模型能力 |
+| OpenAI Responses | 为已配置 profile 提供原生 Responses adapter |
+| Kimi K3 | 严格的任务内推理/历史合同，存在持久恢复限制 |
+
+能力取决于所选模型和端点。列出 provider 不代表所有型号都支持相同图片输入、思考档位、上下文或续会话行为。
 
 ---
 
 ## 版本日志
+
+### v1.5.2 — 发布准备，2026-09-08
+
+CLI 与 Desktop 的 package metadata 均为 **1.5.2**。本次准备发布以下改动：
+
+- CLI/Desktop 子任务启动、通信、等待与生命周期控制，使用稳定的星座代号展示。
+- 任务 / SubAgent / 画布复用一个浮窗，修复滚动、输出可读性，并增加首页协作提示词。
+- 前后台独立执行槽位，明确展示排队、等待授权与执行状态。
+- 符合条件的汇总断流可进行一次有界、禁用工具的续接，保留子任务结果，不重放工具；已失败的历史任务不会自动重跑。
+- registry 与后台任务生命周期修复、系统提示词精简。不响应取消的进程内任务仍须如实显示待清理，直到资源真正结束。
+
+构建、签名、公证与发布产物校验分别验收，实际构建结果见 [GitHub Actions](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml)。
+
+### 已发布基线 — v1.5.1
+
+登录引导、Room/Gate 协作、托管 Room 历史读取、自动化与项目状态恢复、可复现关联仓库打包。安装包与 npm 元数据已于 2026-09-07 核实。完整发布产物与记录见 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases)。
+
+<details>
+<summary>早期版本记录</summary>
+
+以下为历史发布摘要，不代表当前版本的测试或性能结论。
+
+| 版本 | 主要变化 |
+|---|---|
+| 1.5.0 | Room-first 协作与用户确认的项目创建。 |
+| 1.4.32 | 对话导航、Goal 控制、模型目录和证据恢复。 |
+| 1.4.31 | 持久化 Goal Mode 与可见的项目 agent runtime 恢复。 |
+| 1.4.28 | 用户主动启用的每日助理与项目智能组队。 |
+| 1.4.27 | 基于真实语料与查询测量修复知识检索。 |
+| 1.4.26 | 结构化工具失败在 runtime 归一化后仍保持失败。 |
+| 1.4.25 | 权限拒绝被明确记录为失败的工具调用。 |
+| 1.4.24 | Kimi K3 harness profile 与任务内推理/历史合同。 |
+| 1.4.23 | 任务归属明确的 Canvas 产物工作区与预览布局。 |
+| 1.4.22 | 中文优先的录音流程与 Computer Use 恢复。 |
+| 1.4.21 | 知识库本地 AI 录音入口。 |
+| 1.4.20 | Loop 输出预览与任务完成集成。 |
+| 1.4.19 | 显式持久化 Loop 合同。 |
+| 1.4.18 | 成本可见性、MCP 恢复与分阶段 skill 诊断。 |
+| 1.4.17 | 产物持久化与发布一致性。 |
+| 1.4.16 | 产物编辑与 Loop Engineering 证据。 |
 
 **v1.4.9** — 知识库与自动化完善版本：新增本地优先的个人知识库，采用 Collection/Source/Chunk 模型，支持 PDF/docx/pptx/xlsx 提取、结巴中文分词搜索和 Agent KB 工具（kb_search、kb_get_source、kb_list_collections、kb_create_collection）；自动化面板支持循环编辑/删除；产物预览全屏切换、iframe allow-scripts 渲染和"发送到对话"按钮；消息中文件路径可点击（Finder/Explorer）；粘贴路径检测修复；工作流状态条裁剪修复；task_completion 通用循环；cult-ui 组件基础设施；方向感知 tabs 动效；Kimi for Coding 兼容；以及启动时 KSwarm 残留进程替换。
 
@@ -1099,6 +643,12 @@ npm run dev -- --help  # 从源码运行
 
 **v0.6.7** — 权限确认 transcript 保留与命令摘要修正：修复 renderer 权限确认前后最近工具输出行容易被覆盖的问题，统一权限菜单选项文字样式避免粗细不一致，并让 generic bash 的 `Ran` 卡片保留具体命令，而不是退化成“执行本地命令”。
 
+**v0.6.6** — 安装来源识别与 update 准备：统一 npm 全局安装、源码 checkout 和链接构建的来源分类，供后续更新路径使用。
+
+**v0.6.5** — 权限提示清理、runtime 控制面准备与崩溃记录：修复退出审批后残留或误擦 transcript；在 adapter 构造前解析 provider/model/auth；提取 session-store 接口并加入 SQLite + FTS5 基础。
+
+**v0.6.4** — 终端 transcript 保留与输入布局：修复真实 tmux 换轮时上一轮尾行被覆盖，补充多行回复回归，并调整提交输入块和 footer 背景。
+
 **v0.6.3** — resume transcript 与终端 UI 打磨：隐藏 session resume 回放中的内部 thinking 内容，修复 resume 后首轮输入会插进历史中间而不是接在末尾的问题，稳定权限弹窗持久化与 overlay 重绘行为，并继续打磨终端表现，让内容区提交块文字垂直居中、输入栏底色更深以提升对比度。
 
 **v0.6.2** — chat slash 收口与 reminder 入口统一：把 reminder 的创建、列表、取消合并成单一 `/reminder <自然语言> | list | cancel <id>` 命令，移除本应保留为顶层 CLI 的陈旧 slash 入口，并补强交互测试，确保 slash 菜单、`/help`、重定向提示和 transcript 渲染始终一致。
@@ -1124,3 +674,5 @@ npm run dev -- --help  # 从源码运行
 **v0.3.0** — 行为治理与安全加固：Bash 安全分类器、工具输入 JSON Schema 校验、内置 explore/plan/verification agent。
 
 **v0.2.0** — 运行时加固与上下文智能：API 指数退避重试、skill allowed-tools 执行时生效、工具结果微压缩、AI 驱动压缩。
+
+</details>

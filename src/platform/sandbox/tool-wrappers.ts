@@ -40,15 +40,16 @@ export function applySandboxToTools(
     if (tool.definition.name === 'bash') {
       return {
         ...tool,
-        execute: async (input) => {
+        execute: async (input, context) => {
+          context?.signal?.throwIfAborted();
           if (typeof input.workdir === 'string') {
             const fileDecision = enforcer.enforceFile(input.workdir);
             if (!fileDecision.allowed) {
               const retry = await options.onSandboxDenied?.(input.workdir, tool.definition.name);
-              if (retry?.shouldProceed && enforcer.enforceFile(input.workdir).allowed) {
-                return tool.execute(input);
+              context?.signal?.throwIfAborted();
+              if (!retry?.shouldProceed || !enforcer.enforceFile(input.workdir).allowed) {
+                return `Error: sandbox denied bash workdir: ${fileDecision.reason}`;
               }
-              return `Error: sandbox denied bash workdir: ${fileDecision.reason}`;
             }
           }
 
@@ -59,7 +60,7 @@ export function applySandboxToTools(
             }
           }
 
-          return tool.execute(input);
+          return tool.execute(input, context);
         },
       };
     }
@@ -67,18 +68,20 @@ export function applySandboxToTools(
     if (['read', 'write', 'edit'].includes(tool.definition.name)) {
       return {
         ...tool,
-        execute: async (input) => {
+        execute: async (input, context) => {
+          context?.signal?.throwIfAborted();
           if (typeof input.file_path === 'string') {
             const decision = enforcer.enforceFile(input.file_path);
             if (!decision.allowed) {
               const retry = await options.onSandboxDenied?.(input.file_path, tool.definition.name);
+              context?.signal?.throwIfAborted();
               if (retry?.shouldProceed && enforcer.enforceFile(input.file_path).allowed) {
-                return tool.execute(input);
+                return tool.execute(input, context);
               }
               return `Error: sandbox denied path: ${decision.reason}`;
             }
           }
-          return tool.execute(input);
+          return tool.execute(input, context);
         },
       };
     }

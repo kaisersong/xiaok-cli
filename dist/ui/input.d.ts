@@ -25,6 +25,7 @@ export interface ScrollPromptRenderFrame {
     overlayKind?: 'generic' | 'permission' | 'feedback' | 'queued' | 'question';
 }
 export interface InputReadOptions {
+    initialInput?: InputSnapshot;
     overlayLines?: string[];
     overlayKind?: ScrollPromptRenderFrame['overlayKind'];
 }

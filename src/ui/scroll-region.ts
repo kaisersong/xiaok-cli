@@ -99,6 +99,7 @@ export class ScrollRegionManager {
   private config: ScrollRegionConfig;
   private lastActivityLine = '';
   private lastActivityRow: number | null = null;
+  private lastActivityRows = 0;
   private lastInputPrompt = '';
   private lastSummaryLine = '';
   private lastStatusLine = '';
@@ -295,21 +296,52 @@ export class ScrollRegionManager {
   }
 
   private composeActivityLineRender(activityLine: string): string {
-    const previousActivityRow = this.lastActivityRow;
     const activityRow = this.getActivityRow();
-    const cols = this.config.columns;
-    let output = '';
-
-    if (previousActivityRow !== null && previousActivityRow !== activityRow) {
-      output += `${MOVE_TO_ROW.replace('%d', String(previousActivityRow))}${CLEAR_LINE}`;
+    const allLines = activityLine.split('\n');
+    // Leave at least half the content region available for transcript. Only
+    // overflow pages rotate; the main activity always stays on the last row.
+    const budget = Math.max(1, Math.floor(activityRow / 2));
+    let lines = allLines;
+    if (allLines.length > budget) {
+      const slots = Math.max(0, budget - 1);
+      const children = allLines.slice(0, -1);
+      const page = Math.floor(Date.now() / 4000) % Math.max(1, Math.ceil(children.length / Math.max(1, slots)));
+      lines = [...children.slice(page * slots, (page + 1) * slots), allLines[allLines.length - 1]];
     }
-    output += `${MOVE_TO_ROW.replace('%d', String(activityRow))}${CLEAR_LINE}${this.padLine(activityLine, cols, false)}`;
-    this.lastActivityRow = activityRow;
+    const firstRow = activityRow - lines.length + 1;
+    let output = this.composeActivityClear();
+    // Clear old rows before scrolling so stale activity never enters history.
+    // Single-line activity keeps its existing overlay behavior.
+    if (lines.length > 1) {
+      this.stream.write(output);
+      output = '';
+      this.reserveTranscriptRows(Math.max(1, firstRow - 1), this.getScrollBottom());
+    }
+    lines.forEach((line, index) => {
+      output += `${MOVE_TO_ROW.replace('%d', String(firstRow + index))}${CLEAR_LINE}${truncateAnsi(line, getSafeRenderWidth(this.config.columns))}\x1b[0m`;
+    });
+    this.lastActivityRow = firstRow;
+    this.lastActivityRows = lines.length;
+    return output;
+  }
+
+  private composeActivityClear(rowShift = 0): string {
+    let output = '';
+    if (this.lastActivityRow !== null) {
+      for (let index = 0; index < this.lastActivityRows; index++) {
+        const oldRow = this.lastActivityRow + index;
+        for (const row of new Set([oldRow, oldRow - rowShift])) {
+          if (row >= 1 && row <= this.config.rows) output += `${MOVE_TO_ROW.replace('%d', String(row))}${CLEAR_LINE}`;
+        }
+      }
+    }
+    this.lastActivityRow = null;
+    this.lastActivityRows = 0;
     return output;
   }
 
   private clearActivityIfContentWillUseRow(row: number): void {
-    if (this.lastActivityRow === row) {
+    if (this.lastActivityRow !== null && row >= this.lastActivityRow && row < this.lastActivityRow + this.lastActivityRows) {
       this.clearActivity();
     }
   }
@@ -454,13 +486,26 @@ export class ScrollRegionManager {
    * Update terminal size.
    */
   updateSize(rows: number, columns: number): void {
+    const previousScrollBottom = this.getScrollBottom();
     if (this.active) {
       this.stream.write(RESET_SCROLL_REGION);
+      const rowShift = this.lastActivityRow === null ? 0 : Math.max(0, this.config.rows - rows);
+      this.stream.write(this.composeActivityClear(rowShift));
+      if (rowShift > 0) {
+        for (let row = Math.max(1, this.lastFooterClearStartRow - rowShift); row <= rows; row++) this.clearScreenRow(row);
+      }
       this.clearRenderedFooterRows();
     }
 
     this.config = { ...this.config, rows, columns };
     if (this.active) {
+      this.reserveTranscriptRows(this.getScrollBottom(), Math.min(rows, previousScrollBottom));
+      // Reflow can move chrome away from its old absolute rows. Clear the
+      // unoccupied tail before restoring it, preserving the transcript cursor.
+      const firstEmptyRow = this._cursorRow + (this._cursorCol > 0 ? 1 : 0);
+      for (let row = firstEmptyRow; row <= Math.min(rows, previousScrollBottom); row++) {
+        this.clearScreenRow(row);
+      }
       // Re-apply scroll region with new size
       this.setScrollRegion();
       this.renderFooter();
@@ -708,6 +753,8 @@ export class ScrollRegionManager {
     if (!this.active) return;
 
     this._footerVisible = true;
+    // Clear the old multi-row footprint before drawing a resized input/footer.
+    if (this.lastActivityRows > 1) this.stream.write(this.composeActivityClear());
 
     const cols = this.config.columns;
     const previousInputRows = this.lastInputRenderRows;
@@ -893,6 +940,7 @@ export class ScrollRegionManager {
   }
 
   private renderOverlayPromptFrame(frame: ScrollPromptFrame): void {
+    this.stream.write(this.composeActivityClear());
     const overlayKind = frame.overlayKind ?? 'generic';
     const isPermissionOverlay = overlayKind === 'permission';
     const keepStatusLineVisible = (
@@ -1090,8 +1138,7 @@ export class ScrollRegionManager {
     if (!this.active) return;
 
     this.lastActivityLine = '';
-    const activityRow = this.lastActivityRow ?? this.getScrollBottom();
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(activityRow))}${CLEAR_LINE}`);
+    this.stream.write(this.composeActivityClear());
     this.stream.write(RESET_ALL);
     this.lastActivityRow = null;
   }
@@ -1286,9 +1333,7 @@ export class ScrollRegionManager {
     }
 
     this.lastActivityLine = '';
-    const scrollBottom = this.lastActivityRow ?? this.getScrollBottom();
-
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(scrollBottom))}${CLEAR_LINE}`);
+    this.stream.write(this.composeActivityClear());
     this.lastActivityRow = null;
   }
 
@@ -1755,15 +1800,9 @@ export class ScrollRegionManager {
    * The line should already have background set. Adds spaces and resets.
    */
   private padLineWithBg(line: string, width: number): string {
-    const safeWidth = getSafeRenderWidth(width);
-    const visibleLen = getDisplayWidth(line);
-    if (visibleLen >= safeWidth) {
-      // Line is too long, truncate and reset
-      return truncateAnsi(line, safeWidth) + RESET_ALL;
-    }
-    // Add spaces to fill width (background color continues), then reset
-    const padding = ' '.repeat(safeWidth - visibleLen);
-    return line + padding + RESET_ALL;
+    // Erase with the current background instead of writing padding spaces:
+    // spaces become content during terminal resize/reflow and duplicate chrome.
+    return truncateAnsi(line, getSafeRenderWidth(width)) + '\x1b[K' + RESET_ALL;
   }
 
   private padBackgroundRow(width: number): string {
@@ -1771,7 +1810,7 @@ export class ScrollRegionManager {
   }
 
   private renderSingleFooterTextLine(line: string, width: number): string {
-    return this.padLine(line, width, false);
+    return truncateAnsi(line, getSafeRenderWidth(width)) + '\x1b[K';
   }
 
 }

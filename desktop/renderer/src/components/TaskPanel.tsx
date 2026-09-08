@@ -1,6 +1,8 @@
 import React, { type ReactNode } from 'react';
 import type { TaskResult, ArtifactSummary } from '../../../shared/task-types';
 import { useLocale } from '../contexts/LocaleContext';
+import type { MultiAgentConnection } from '../lib/multi-agent-connection';
+import { TaskDeliveryStatus } from './HostDeliveryStatus';
 
 interface PlanStepItem {
   id: string;
@@ -16,6 +18,8 @@ interface TaskPanelProps {
   onFileClick: (file: { filePath: string; name: string }) => void;
   onArtifactClick: (artifact: ArtifactSummary) => void;
   goalContent?: ReactNode;
+  deliveryConnection?: MultiAgentConnection | null;
+  sourceTaskId?: string;
 }
 
 function StepIcon({ status }: { status: string }) {
@@ -33,7 +37,7 @@ function StepIcon({ status }: { status: string }) {
   }
 }
 
-export function TaskPanel({ planSteps, status, result, generatedFiles, onFileClick, onArtifactClick, goalContent }: TaskPanelProps) {
+export function TaskPanel({ planSteps, status, result, generatedFiles, onFileClick, onArtifactClick, goalContent, deliveryConnection, sourceTaskId }: TaskPanelProps) {
   const { t } = useLocale();
   if (planSteps.length === 0 && !goalContent) return null;
 
@@ -43,6 +47,7 @@ export function TaskPanel({ planSteps, status, result, generatedFiles, onFileCli
   return (
     <aside className={`task-panel${goalContent ? ' task-panel--with-goal' : ''}${goalContent && planSteps.length === 0 ? ' task-panel--goal-only' : ''}`}>
       {goalContent ? <div className="task-panel__goal">{goalContent}</div> : null}
+      {deliveryConnection ? <TaskDeliveryStatus connection={deliveryConnection} sourceTaskId={sourceTaskId} /> : null}
       {planSteps.length > 0 ? <div className="task-panel__section">
         <div className="task-panel__heading">{t.taskPanelProgress}</div>
         <ul className="task-panel__steps">

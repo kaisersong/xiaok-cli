@@ -1,552 +1,73 @@
 # xiaok-cli
 
-> xiaok-cli is a local-first AI task-delivery workbench. It turns user intent into finished results by matching skills, staging execution, and recovering when runs drift. Coding, document/report/slide generation, and optional channel adapters like Yunzhijia all run on the same runtime.
+> Xiaok is a local-first AI workbench with a Desktop app and a CLI. It turns requests into finished work through tools, skills, SubAgent collaboration, persistent goals, and evidence-backed delivery.
 
-A local-first AI CLI for reliable skill execution across coding and document-heavy workflows.
+Use Desktop for conversations, documents, knowledge, automations, and multi-agent projects; use the CLI for terminal workflows, coding, and scriptable task execution. Both share model, tool, skill, and runtime foundations.
 
 [English](README.md) | [简体中文](README.zh-CN.md)
+
+**Release target: 1.5.2 (September 8, 2026).** CLI and Desktop package metadata are aligned at **1.5.2**. This update adds SubAgent collaboration in the shared right-side panel, constellation codenames, independent foreground/background execution lanes, and bounded summary-stream recovery. The latest published Desktop release remains **1.5.1** until the new release build and asset checks succeed; a version bump is not an npm publication. See [Version History](#version-history).
 
 ---
 
 ## Live Demo
 
-**Benchmark Results:**
+Start the CLI and give it a concrete task:
 
-| Metric | xiaok v1.0.0 | Claude Code | Improvement |
-|--------|-------------|-------------|-------------|
-| **Autonomy Score** | 100% | 100% | — |
-| **Simple Q&A Latency** | 3.8s | 7.5s | **-49%** |
-| **Rename Task Latency** | 27.6s | 180.8s | **-85%** |
-| **Token Efficiency** | 100% | 250% | **-60%** |
+```bash
+xiaok login
+xiaok "Review the agent coordinator and registry lifecycle independently, then cross-check the tool entry point and summarize findings with file and line references."
+```
+
+When the available tools and task support independent work, Xiaok can delegate bounded tracks automatically. You do not need to name an agent or create a project first. Simple or tightly dependent work stays with the main agent.
+
+The CLI shows **SubAgent**, its constellation codename, assignment, current activity, and a completion summary with tool-call counts and elapsed time. Names start with **Pisces, Libra**, then Aries through the remaining signs; the next cycle adds `-2`. Continuation keeps the same instance's name. Names share one accent color; terminal font support determines how italics appear.
+
+You can steer the choice naturally: “Do this yourself,” “Ask me before delegating,” or “Review these two independent areas in parallel.” Material unresolved choices require an answer; cancellation or an empty answer is not approval.
+
+In Desktop, start from a conversation, add materials, and inspect results in Preview / Canvas. The current source also provides a SubAgent panel for assignments, activity, messages, and results, separate from persistent KSwarm projects.
 
 ## Loop Engineering in Xiaok
 
-Xiaok is designed around **Loop Engineering**: the shift from prompting one agent once to designing a system that keeps finding work, running it, checking it, remembering what happened, and deciding what should happen next.
-
-In Xiaok terms, a prompt is a single request, a harness is the execution environment that helps one request succeed, and a loop is the durable operating system around repeated AI work.
-
-| Loop building block | Xiaok implementation |
-|---------------------|----------------------|
-| **Automation** | Desktop scheduler, built-in loops, reminders, and project/workflow triggers give repeated work a rhythm instead of relying on manual prompting. |
-| **Work isolation** | KSwarm projects, workflow runs, task runtime hosts, and git/worktree-aware coding flows keep parallel work from overwriting itself. |
-| **Skills** | Skill files turn project conventions, execution steps, input/output contracts, and review criteria into reusable behavior instead of one-off prompts. |
-| **Connectors** | MCP plugins, bundled report/slide renderers, Intent Broker, KSwarm, filesystem access, and optional channels connect loops to real data and real outputs. |
-| **Sub-agents** | KSwarm PO/worker/reviewer roles and dynamic workflow branches separate maker work from checker work, because self-review is not enough for unattended loops. |
-| **Memory** | SQLite stores, broker event replay, project state, workflow checkpoints, loop run records, and artifact manifests let loops survive across sessions. |
-| **Evidence** | Completion guards, deliverable contracts, artifact provenance, and loop evidence stores make "done" mean "there is inspectable output", not just "the model said done". |
-| **Diagnostics** | Read-only loop diagnostics, evidence regression scans, and KSwarm service health checks surface silent failures before they become invisible product debt. |
-
-The first built-in production loops are the **Artifact Evidence Regression Loop** and the **KSwarm Service Health Loop**. They periodically scan recent completions and service readiness for missing artifacts, stale run state, anomalous delivery outcomes, service startup failures, health handshake problems, and broker connectivity issues, then record structured diagnostics. This is the pattern Xiaok is moving toward: the human designs the loop, Xiaok runs it, and independent evidence decides whether the work is actually complete.
-
-The smallest useful Xiaok loop is intentionally simple:
-
-1. Write or reuse a skill that defines the work and output contract.
-2. Add a trigger such as a scheduled task, project workflow, or manual run button.
-3. Persist memory in project state, a file, or SQLite.
-4. Add a checker: a reviewer agent, eval, artifact contract, or evidence scan.
-5. Make failure visible through diagnostics, changelogs, or notifications.
-
-Xiaok CLI v1.5.1 packages the post-v1.5.0 `xiaok login` first-run credential setup flow and continues the Room-first collaboration surface with a Gate Snapshot panel and durable Room-history capability plumbing for hosted agents.
-
-**Login Bootstrap and Room/Gate Collaboration Follow-up:**
-
-- **`xiaok login`**: A new first-run-friendly command lets users pick a first-party provider, reuse an API key already detected in the environment, enter a key with hidden input (never echoed or logged), optionally verify it live through the same read-only probe used by `xiaok doctor --check-keys`, persist it to `providers.<id>.apiKey`, and optionally switch the default model. Non-interactive flags (`--provider`, `--api-key`, `--set-default`, `--skip-verify`) support scripting.
-- **Chat Login Bootstrap**: `runChat` now resolves the model adapter through a bootstrap step that can prompt the login flow when no provider is configured yet, instead of failing straight to an adapter-construction error.
-- **Gate Snapshot Panel**: The Desktop project view gained a `GateSnapshotPanel` renderer component surfacing KSwarm's project gate-evaluation state directly in the UI.
-- **Room History Capability for Hosted Agents**: A new Electron main-process `room-history-capability-registry` and `room-history-page-tool` expose claim-token-bound, paginated Room transcript reads to hosted agents, continuing the Room-first collaboration groundwork from v1.5.0.
-- **Desktop Automation and Project-State Reliability**: Personal-assistant requests now time queueing and provider completion separately while propagating scheduler cancellation through the provider stream. The Automations overview shows only each owner's latest decisive attention result, keeping recovered failures in run history without leaving them permanently pending. Task snapshots apply field-level limits while preserving status, result summaries, and references, and the project Kanban separates `done` from `failed` / `blocked` / `cancelled` in Completed and Stopped columns.
-- **Release Validation**: Root CLI 392/394 test files pass (3367/3383 tests, 14 platform-gated skips); the one pre-existing `image-renderer.test.js` ANSI-formatting failure was confirmed unrelated to this change by reproducing it with the change stashed out. This Desktop remediation passes 298 test files / 2347 tests with zero failures (one platform-gated file / two tests skipped), a clean Electron and renderer-baseline typecheck, the production build, 49 packaging-contract tests, unsigned macOS packaging and installation, and native Codex Computer Use checks of Automations, the five-column project Kanban, and project artifacts.
-
-Xiaok Desktop v1.5.0 introduces a Room-first collaboration surface: users can discuss work with multiple agents before creating a project, promote selected Room messages into a KSwarm project only after explicit confirmation, and keep the resulting project linked to the conversation that created it.
-
-**Room-First Collaboration and Runtime Harnesses:**
-
-- **Collaboration Spaces**: The Desktop sidebar now opens durable Rooms with explicit membership, message history, project links, archive state, and restart-safe recovery backed by Intent Broker rather than renderer-local state.
-- **Source-Grounded Project Creation**: Users select the exact Room messages that define a project. Desktop creates the KSwarm project through the user-authorized Room path and posts a system message plus linked project card back into the Room.
-- **Isolated Agent Replies**: Mentioned hosted agents receive only the current Room transcript and explicitly selected project scope. Durable wakes are claimed and completed once, while unhosted or identity-conflicting routes fail closed instead of impersonating another runtime.
-- **Proposal-Only Agent Tooling**: The agent-facing `create_project` tool can prepare a proposal but cannot create projects or mutate project state. Formal creation remains a user-confirmed Desktop action.
-- **Pi Harness Support**: KSwarm can discover, probe, configure, and execute Pi through a bounded one-shot harness with controlled arguments, environment, working directory, timeout, and output size.
-- **DeepSeek Harness Safety Gate**: The DeepSeek harness route and capability registry are present, but creation stays disabled until a pinned real `dsh --profile headless` probe proves the preview CLI contract. The UI does not advertise an unverified runtime as ready.
-- **Dependency and Packaging Maintenance**: Root and Desktop SDK/lockfile ownership are aligned, deprecated dependency drift is guarded, and release builds pin the matching KSwarm and Intent Broker snapshots.
-- **Release Versioning**: Root CLI and Desktop package metadata are `1.5.1`. Desktop release builds pin the matching `desktop-v1.5.1` snapshots from KSwarm, Intent Broker, and kai-xiaok-plugins so both macOS and Windows packages use one reproducible dependency baseline.
-
-Xiaok Desktop v1.4.32 makes long conversations easier to navigate and Goal Mode easier to discover, resume, and monitor without blocking the workspace. It also adds the latest GLM and DeepSeek Flash models to the shared CLI/Desktop catalog and hardens timeout and artifact evidence handling.
-
-**Goal Mode UX, Conversation Navigation, and Flash Models:**
-
-- **Goal Mode in Splash and the Right Rail**: The Desktop splash now exposes Goal as a first-class command. Active goals share the existing right-side task panel instead of splitting the conversation from the top, and Goal details stay mutually exclusive with Artifact workspace content.
-- **Reliable Goal Resume**: Resume restores the owning conversation context, preserves the only token supplied while paused, settles exhausted budgets as blocked, and records successful file mutations as artifact evidence rather than losing them between turns.
-- **Prompt Index Navigation**: Multi-turn chats gain a compact divider-aligned prompt rail. Static ticks stay equal length with color-only active state; hover creates a local wave, follows the selected tick with a one-line prompt plus a two-line response summary, and click smoothly jumps to the matching prompt.
-- **GLM 5.3 Flash**: CLI and Desktop now expose `glm-5.3-flash` with its verified 1M-class context window, image input, tool use, always-on thinking, and supported reasoning-effort choices.
-- **DeepSeek V4 Flash Vision Exp**: The shared model registry adds `deepseek-v4-flash-vision-exp` with image input while keeping the non-vision V4 models text-only.
-- **Retryable Provider Timeouts**: `ETIMEDOUT`, premature stream close, socket termination, and related transport failures normalize to retryable model failures without weakening user-abort handling.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, download links, and the Desktop Release workflow align on `1.4.32` / `desktop-v1.4.32`.
-
-Xiaok Desktop v1.4.31 makes long-running work durable and project recovery visible. Goal Mode can keep an objective active across multiple turns with explicit budgets and evidence, while project agents can be checked in one pass and optionally fall back to the current Desktop model when their configured runtime is unavailable.
-
-**Goal Mode, Agent Recovery, and Workflow Reliability:**
-
-- **Durable Goal Mode**: CLI and Desktop can create, monitor, continue, complete, or block a goal across turns. Goal state, turn accounting, evidence, leases, and continuation arbitration survive restarts and concurrent-session handoff.
-- **Honest Completion**: Goal completion requires collected evidence and atomic turn settlement. User interruption, queued input, budget exhaustion, corrupt persisted state, and superseding requests have explicit outcomes instead of silently consuming another continuation.
-- **One-Click Agent Check**: The project agent list checks every configured agent, reports progress and per-agent callability, and summarizes available, limited, and unavailable runtimes instead of stopping after the first few agents.
-- **Desktop Model Fallback**: Each external agent can opt into a controlled fallback to the model currently configured in Xiaok Desktop. Built-in agents continue to use the Desktop model directly, and failed runtimes no longer crash the project surface.
-- **Recoverable Project Workflows**: Historical failed retry attempts remain auditable without blocking a recovered parent task. Existing artifacts can be resubmitted through version-bound validation and normal PO review, and replacement runs are actually delivered after runtime failure.
-- **Safer Project UI**: Workflow node details normalize malformed acceptance criteria, drawer-level error handling prevents a bad node from blanking the whole screen, and interactive controls remain clickable in draggable Electron windows.
-- **Terminal Reliability**: OpenAI-compatible tool history is repaired before requests are sent, tool inputs serialize safely, and long direct `Ran` command groups collapse while remaining available through the transcript pager.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, download links, and the Desktop Release workflow align on `1.4.31` / `desktop-v1.4.31`.
-
-Xiaok Desktop v1.4.28 adds a proactive daily assistant and one-click project team provisioning. The assistant reviews local work in the evening, prepares morning suggestions, and stages memory or knowledge candidates without publishing them until the user explicitly approves. Project setup can now analyze capability gaps, reuse suitable agents, propose missing roles, and apply a version-bound team plan only after confirmation.
-
-**Proactive Assistance and Smart Team Provisioning:**
-
-- **Consent-First Daily Assistant**: Enabling the assistant creates owned evening and morning schedules with stable IDs. Pause, resume, overdue recovery, timezone/DST handling, and logical exactly-once execution are persisted in the Electron main process rather than renderer state.
-- **Review Before Memory**: Evening analysis produces evidence-linked memory, knowledge, and follow-up candidates. Agent and scheduler paths cannot publish into user-owned stores; accepting or rejecting a candidate is a user-authorized mutation with restart-safe status transitions.
-- **Morning Suggestions from Real State**: Morning output combines the bounded Desktop activity snapshot, pending candidates, project attention items, and existing memory. Structured LLM output is validated and falls back to deterministic local guidance when the provider is unavailable.
-- **One-Click Smart Teams**: KSwarm derives a capability plan with `keep`, `reuse`, and `create` actions, redacts private runtime configuration from public agent APIs, and carries trusted child-runtime settings only across the process boundary that needs them.
-- **Preview, Confirm, Reconcile**: Team plans bind to the current project revision and mutation credential. Applying a stale or unauthorized plan fails closed; operation journals make retries and Desktop recovery observable without duplicate agents.
-- **Conversation-First Desktop UI**: The home screen keeps conversation primary while exposing the assistant as a compact continuation card. The project agent tab offers smart setup first and preserves manual configuration as an advanced fallback. Built-in schedule names and semantic plan summaries are localized by stable meaning rather than persisted English text.
-- **Release Validation**: CLI 350 files / 2,968 tests, Desktop 257 files / 2,070 tests, KSwarm P0 E2E 85/85 plus full-flow E2E 51/51, Intent Broker 388/388 plus collaboration verification, Desktop typecheck/build/package freshness, and installed-app Computer Use all pass.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, and the Desktop Release workflow align on `1.4.28` / `desktop-v1.4.28`.
-
-Xiaok Desktop v1.4.27 points the same honesty lens at the retrieval path, and the measurements came out worse than the design reviews had assumed. **74.1% of every character indexed in the knowledge base was HTML tag and CSS noise** (217,902 of 294,006) — a single `kb_get_source` call spent roughly 15,000 tokens of its 32,000-character budget on stylesheets, leaving 3.6–7.4% actual prose. The local ONNX embedder had never run at all: it called a `Tokenizer.fromString` API that does not exist in the installed package, silently fell back to a remote HTTP endpoint, and left a 254MB `onnxruntime-node` dependency performing no inference. Three rounds of adversarial review rejected every elaborate mechanism proposed along the way — FTS5 virtual tables, an RRF fusion layer, a TF-IDF scorer — and the two changes that actually moved the numbers appeared in none of the design drafts.
-
-**Measured Retrieval, Working Embeddings, and Document Extraction:**
-
-- **Markup Stripping at Index Time**: `.html/.htm/.svg/.xml` sources and fetched URLs were stored verbatim, while `extractDocx` and `extractPptx` in the same file had always stripped tags. Real user documents now index at 10.7% and 17.3% of their original size with zero residual tags, and prose, headings, and outlines intact.
-- **Local Embeddings Actually Run**: The tokenizer is constructed correctly, and inputs are truncated to the model's 512-token window while preserving the trailing `[SEP]`. Real corpus chunks average 688 characters — inside the range that previously crashed inference outright with `idx=512 must be within [-512,511]`.
-- **Stop Words No Longer Match Everything**: jieba keeps `的` as a token and nearly every Chinese document contains it, so any Chinese query matched any Chinese document — "how to braise beef in a pressure cooker" scored 0.200 against a deep-learning note. Both sibling paths, the renderer IPC handler and the `kb_search` agent tool, now share one query-term extractor. Hit@1 rose from 65.0% to 75.0% and MRR from 0.768 to 0.827.
-- **Frozen Evaluation Baseline**: A 22-query golden set over the real corpus with verdicts written before the run, bucketed by literal overlap, plus no-answer queries that catch false recall. The runner self-checks that each expected answer genuinely exists in its source and aborts otherwise. This is what disqualified the TF-IDF scorer: after stop-word filtering it matched the plain implementation exactly, 75.0% against 75.0%.
-- **Stale Index Rebuild**: An idempotent, dry-run-by-default migration re-extracts from original files where available and falls back to cleaning concatenated chunks. Full tags went from 4,896 to 0 and chunks from 427 to 174 with all 12 sources preserved; the cleaned size independently reproduced the 15.4% prose ratio measured by a separate method.
-- **Document Extraction Correctness**: Sparse spreadsheet columns are placed by cell reference rather than sequence (74.2% of real `.xlsx` files were affected), pptx runs merge into paragraphs instead of emitting fragments (42.9% of emitted lines were spurious), real sheet names and booleans survive, legacy OLE2 files renamed to OOXML extensions report an actionable error, and `read` routes binary and PDF content by magic bytes instead of forcing a UTF-8 decode.
-- **Office and Markdown Knowledge Ingestion**: `kb_add_source` now routes Markdown and Office files through the same bounded extraction pipeline used by Desktop materials. Agent-created sources carry explicit ownership metadata, parser failures are persisted honestly, and the final overlap chunk terminates at the document boundary instead of repeating until the Electron main process runs out of memory.
-- **Desktop Copy Permissions**: Prompt and response copy actions work again in the packaged app. Clipboard writes are allowed only for the trusted main renderer URL, while recorder audio permissions remain limited to the main and meeting-recorder windows; sibling renderer and permission paths stay default-deny.
-- **Package Freshness Gate**: Every Desktop package now extracts `kb-tools.js` from its generated `app.asar` and compares it byte-for-byte with the current main-process build. Packaging fails when a stale main bundle would otherwise pass source tests and be installed into `/Applications/xiaok.app`.
-- **Self-Certifying Tests Removed**: Two tests named for Chinese search reimplemented substring matching inside the test file and never called production retrieval — precisely why a fully disconnected retriever survived unnoticed. They now drive the real `kb_search` tool, and the third case added alongside them is what exposed the stop-word defect.
-- **Release Validation**: CLI 350 files / 2,951 tests, Desktop 225 files / 1,902 tests, Desktop typecheck, `build:main`, `build:renderer`, and the CLI release build all at exit 0. Database integrity, foreign keys, orphan chunks, cached counts, and migration idempotency were verified after the rebuild.
-- **Release Alignment**: Root CLI metadata and Desktop package metadata align on `1.4.27` / `desktop-v1.4.27`.
-
-Xiaok Desktop v1.4.26 continues the tool-result truthfulness work one layer deeper. A tool that returned `{"ok":false,"error":"project_not_found"}` was still reported to the model as a success, because that payload does not start with `Error`. Across 1748 production task snapshots that covered 148 calls in 93 tasks — in one of them five rejected repair submissions rendered as five green checkmarks while the project never advanced. This release also removes an HTML injection sink in the artifact preview, hardens worktree leases and session writes, refreshes the first-party model catalog, and aligns the bundled renderer plugins with the modern MCP protocol.
-
-**Honest Failures and a Safer Preview:**
-
-- **Domain-Level Failures**: A top-level `ok`/`success` boolean of `false` is now a failure, so the model receives `is_error: true` and the progress row shows `✗` instead of `✓`. Two tempting exceptions were rejected with evidence: a non-empty `output_path` proves nothing because the report renderer writes best-effort inside a `try/catch` and returns the path regardless, and most `intervention.required:false` payloads are repair submissions the server refused while discarding the artifact.
-- **Verdicts Stay Successes**: Validator results use `valid`, which remains a success because the call itself completed — otherwise the model would retry the call instead of fixing its input. `validate_skill` is renamed accordingly so a skill with errors is no longer read as a failed call.
-- **Readable Failure Rows**: Failure progress rows extract the payload's `error` / `code` / `message` / `reason` or first `errors[]` entry rather than dumping 100 characters of truncated JSON at the user.
-- **Artifact Preview Injection**: The markdown branch of the artifact preview built HTML with a regex chain that never escaped `&`, `<` or `>` and handed it to `dangerouslySetInnerHTML` in the top-level renderer document, where `window.xiaokDesktop` is reachable and the CSP is only Report-Only. Artifact bodies are agent-written and can carry text straight from `web_fetch`, so an `<img onerror>` in a research note executed against the whole preload surface. Rendering now goes through the shared `MarkdownRenderer`, and its file-path linkifier — whose fallback reaches `shell.openPath` with no path allowlist — is disabled on this path.
-- **Worktree and Session Durability**: Worktree allocation keeps a locked lease registry with process inspection, reconcile and GC, so a crashed run no longer strands a worktree or lets a second run claim a path still in use. Session snapshots move to atomic writes. The OpenAI adapter enforces Kimi's reasoning admission and terminal boundary, and chat turns gain an activity watchdog so a silent provider stall surfaces instead of hanging.
-- **Catalog-Backed Model Windows**: First-party OpenAI, Kimi, DeepSeek, GLM, MiniMax, and Gemini entries carry verified per-model context windows and current wire model names. Custom providers cannot inherit official metadata merely by reusing an official provider id, and `cloneWithModel` re-resolves the target model instead of carrying a 1M-token window into a smaller model.
-- **Request-Accurate Compaction**: Context pressure now includes the system prompt and serialized tool definitions that are sent on every request. This closes the gap where a session looked below the compaction threshold even though the actual provider request was already near its window.
-- **Conversation-First Graph and Loop UX**: The Desktop home keeps conversation as the primary surface while moving project and automation context lower into scrollable continuation areas. Project Graph views restore directed edges, parallel groups, fan-in nodes, run/handoff metadata, and upstream/downstream details; user Loops expose run-state locking, Markdown preview, structured success evidence, preflight blocking, and recovery after configuration repair.
-- **Modern MCP Plugin Baseline**: `kai-report-creator` `2.1.1` and `kai-slide-creator` `3.2.2` use the modern MCP `2026-07-28` contract and MCP 2.0 server APIs. `cua-computer-use` `0.2.1` intentionally remains on the explicit legacy stdio adapter because CuaDriver has not migrated; `kai-meeting-assistant` keeps its existing runtime and fixes resolvable tool annotations instead of claiming a protocol migration.
-- **Accessibility and Gate Repair**: The four Volcengine ASR fields are now programmatically labeled, the meeting recorder dialog closes its settings popover on Escape, and the five gates that had been failing on an unmodified tree are fixed at the source — stale adapter stubbing in the runner finalization tests, an import that walked one directory too high, and a deliberately rebaselined preload key snapshot.
-- **Release Validation**: The current release tree passes 346 CLI sandbox test files (2871 tests, with 8 platform-gated skips) and 224 Desktop test files (1890 tests, with 2 opt-in real-audio skips) with **zero** failures. The modern MCP packaging gate adds 84 focused checks, including real report and slide server startup/rendering. CLI release build, Desktop typecheck, `build:main`, and `build:renderer` are clean.
-- **Release Alignment**: Root CLI metadata and Desktop package metadata align on `1.4.26` / `desktop-v1.4.26`.
-
-Xiaok Desktop v1.4.25 makes a refused tool call an honest failure. When a user declines a permission prompt, the runtime previously told the model the call had succeeded, letting the agent proceed on a false premise — and even satisfied the "verify before completion" guard with a command that never ran. Desktop and CLI now share one model-facing verdict, and historical workflow artifacts are recovered back into Canvas.
-
-**Tool Result Truthfulness:**
-
-- **Declined Calls Report Failure**: `agent-runtime.ts` and the Desktop tool loop carried two byte-identical copies of an ad-hoc `!result.startsWith('Error')` check, and neither recognised the cancellation prefix. Both now route through one exported `isSuccessfulModelToolResult`, so a refusal emits `post_tool_use_failure`, sets `is_error: true` for the model, and no longer fabricates artifact or file-change events.
-- **Verification Guard Integrity**: A declined `npm run build` previously counted as verification evidence, letting the verification-before-completion guard pass on a command the user had refused. That path is now closed.
-- **No Fail-Open Direction**: The unified predicate keeps `startsWith('Error')` instead of widening to `/^Error\b/`, so output such as `Errors found: 0` stays classified as a failure. Every semantic change is fail-closed, and the cancellation prefix is exported as a constant so the classifier and its only producer cannot drift apart.
-- **Workflow Artifact Recovery**: Completed tasks whose files were only visible through a `get_dynamic_workflow_status` call now have those artifacts recovered into the task snapshot and Canvas during `recoverTask`, instead of showing a finished task with nothing attached.
-- **Merge Reconciliation**: Merge verification caught that the recovery layer and the artifact resolver disagreed on where the workspace path lives. The resolver now reads the authoritative top-level `projectWorkspacePath` first and falls back to the script-declared `scriptResult.workspacePath`; without this the recovery silently resolved nothing.
-- **Release Validation**: 335 CLI sandbox test files (2683 tests) pass with zero failures; the eight sandbox-excluded suites pass separately; Desktop runs 218 files (1813 tests) with only the five pre-existing environment failures (missing API key, preload key-count snapshot, React Doctor diagnostics) that also fail on an unmodified tree. Desktop typecheck, `build:main`, and the CLI release build are clean. Both new regression suites were proven red before the fix by reverting it.
-- **Release Alignment**: Root CLI metadata and Desktop package metadata align on `1.4.25` / `desktop-v1.4.25`.
-
-Xiaok Desktop v1.4.24 introduces first-class Kimi K3 and K3 256K model support with a dedicated harness profile that enables preserved thinking, prompt cache affinity, Kimi-specific tool schema normalization, and reasoning serialization out of the box. Both CLI and Desktop resolve the K3 harness automatically when the configured provider and endpoint match the official Kimi Coding API.
-
-**Kimi K3 Model Optimization:**
-
-- **Dedicated Harness Profile**: `kimi-k3-coding-openai` and `kimi-k3-256k-coding-openai` profiles are resolved automatically for the official Kimi Coding endpoint. They enable tool schema normalization, usage extraction, empty assistant content omission, and reasoning serialization without per-session configuration.
-- **Preserved Thinking**: `preservedThinking` defaults to `true` for K3 models. The runtime forwards `reasoning_content` from the Kimi streaming response, making the model's chain-of-thought visible in Desktop and CLI without user opt-in.
-- **Prompt Cache Affinity**: Prompt cache key injection is available via `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`. When enabled, the harness encodes a stable cache key per session, enabling Kimi's server-side prompt caching (observed 29K+ cached input tokens on typical sessions).
-- **OpenAI Responses Native Adapter**: A new adapter path supports the OpenAI Responses API wire format with native compaction, portable compaction executor, and session graph integration for models that expose it.
-- **D9 Evaluation Infrastructure**: A production-grade, fail-closed evaluation harness (`scripts/evals/kimi-k3-d9/`) provides deterministic fixture servers, canonical JSON attestation, immutable preflight plans, full-tree digests, paired stratified bootstrap statistics, and formal artifact construction for reproducible A/B model comparisons.
-- **Release Validation**: The release gate covers 2400+ sandbox tests, 13 Kimi harness contract tests, 133 Desktop service tests, D9 canonical/statistics/manifest/preflight/assignment/coordinator/fixtures/scanner suites (23 tests), real Kimi K3 API smoke (correct response with prompt cache hit), Desktop build, and unsigned macOS packaging with installation to `/Applications`.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, and package locks align on `1.4.24` / `desktop-v1.4.24`.
-
-Xiaok Desktop v1.4.23 turns Canvas into a task-owned artifact workspace and removes the cramped split between content preview and the spatial canvas. Preview and Canvas are now independent, full-height surfaces, while revisions, comparisons, task provenance, and multi-window updates stay attached to the artifact that produced them.
-
-**Artifact Workspace, Canvas, and Release Integrity Update:**
-
-- **Full-Height Preview and Canvas**: Preview and Canvas are mutually exclusive top-level surfaces instead of two vertically stacked panes. The tab interaction preserves keyboard navigation, responsive breakpoints, editor state, and the existing secure preview boundary.
-- **Task-Owned Artifact Workspace**: Artifact sessions, nodes, edges, revisions, comparisons, optimistic updates, and file mutations now flow through explicit main-process, preload, IPC, renderer, and SQLite contracts. Revision and spatial-workspace capabilities remain behind their existing beta flags until they are promoted independently.
-- **Clickable Workflow Artifacts**: Eligible artifacts returned by `get_dynamic_workflow_status` are projected into conversation artifact cards. Clicking a card opens the selected file in the task-owned Artifact Workspace / Canvas, and completed historical status tasks recover the same cards from KSwarm when reopened.
-- **Reliable Task Feedback**: Failed and quota-limited tasks replay a localized, sanitized explanation instead of appearing silent. Generic task understanding and terminal events are persisted so a reopened thread retains its actual outcome and partial assistant output.
-- **Cleaner Results**: Result summaries are deduplicated in the display projection without deleting the underlying task result or artifact provenance, keeping history inspectable while avoiding repeated answer blocks.
-- **Complete Slide Plugin Packaging**: Desktop now packages the slide plugin's `themes/**`, `demos/**`, and `vendor-manifest.json`. `kai-slide-creator` 3.2.1 ships with clean source provenance, preset-fidelity gates, and the Kingdee theme assets required by installed builds.
-- **Codex Hook Root Fix**: The bundled Intent Broker now separates its code root from the runtime working directory, preventing Codex Stop and resume hooks from being rewritten to unrelated project paths while preserving packaged-root overrides.
-- **Release Validation**: The release gate covers the full slide-creator suite, vendored plugin integrity, Intent Broker full/collaboration tests, focused CLI task-runtime tests, Desktop main/preload/renderer tests, packaging contracts, typecheck, release builds, and unsigned macOS packaging.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, related-project baselines, and the Desktop Release workflow default align on `1.4.23` / `desktop-v1.4.23`.
-
-Xiaok Desktop v1.4.22 completes the Chinese-first AI recording workflow and restores reliable Computer Use validation. The Knowledge Base opens a compact recorder that stays out of the way during meetings, sales conversations, and ad-hoc discussions; transcription can run locally with Sherpa-ONNX or through user-configured Alibaba Cloud and Volcengine ASR, while the finish flow restores punctuation, generates structured notes, and keeps the result editable before it is saved.
-
-**AI Recording, Streaming ASR, and Computer Use Update:**
-
-- **Compact Recording Flow**: `AI Recording` opens a start surface with an explicit Start button. Once recording begins, it becomes a draggable compact window with a real microphone-level waveform, the latest transcript sentence, elapsed time, Pause/Resume, Finish, and an expand action. Finishing opens the full notes editor instead of saving immediately.
-- **Chinese-First Local ASR**: Sherpa-ONNX Paraformer is the default local real-time engine for Mandarin. Whisper remains available as a local fallback and final-file engine. Settings show model size and downloaded, incomplete, or missing state, with icon-only download, resume, refresh, and uninstall controls.
-- **Alibaba Cloud and Volcengine ASR**: Voice settings let users configure their own Alibaba Cloud Model Studio API key or Volcengine ASR credentials and select the provider explicitly. Both providers use streaming transcription during recording; provider failures remain visible and do not silently substitute fixed or sample text.
-- **Punctuation Restoration**: Final transcripts pass through a dedicated Chinese punctuation restoration stage before note generation. Streaming text remains responsive, while the finalized transcript, summary, decisions, and action items use the restored text rather than regex-based word splitting.
-- **Editable Structured Notes**: Finish waits for the active ASR stream to flush, then produces a content-derived title with a timestamp, summary, full transcript, decisions, and action items. The draft remains editable and is saved to the Knowledge Base only after explicit confirmation.
-- **Computer Use Recovery**: Desktop now diagnoses the packaged CUA capability, starts or repairs the official CuaDriver dependency on macOS, and invalidates stale readiness when the packaged `app.asar` changes. The installed app was cold-start validated through real `xiaok_computer_use` window listing and capture calls.
-- **Bundled Meeting Assistant**: Release packaging now includes `kai-meeting-assistant` as the local Whisper transcription fallback and meeting-summary skill, alongside the existing report, slide, canvas, and Computer Use plugins.
-- **Release Validation**: v1.4.22 passes 243 focused Desktop meeting/ASR/Computer Use tests (2 opt-in real-audio cases skipped), 44 bundled-plugin contract/rendering tests, 5 cross-platform/preload sandbox tests, 12 CLI CUA boundary tests, the recorder-window Playwright E2E, the meeting plugin's 5 Python tests, Desktop typecheck/build, CLI release build, and unsigned macOS packaging with the meeting plugin present in the app bundle.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, related-project README baselines, and the Desktop Release workflow default align on `1.4.22` / `desktop-v1.4.22`.
-
-Xiaok Desktop v1.4.21 adds the new local AI recording flow for the Knowledge Base. The Knowledge home page now has an **AI Recording** entry point; the recorder opens as a larger meeting-style panel with a prominent start button, real microphone-level waveform, pause/resume, live transcript preview, and a finish step that generates an editable notes draft before saving anything to the knowledge base.
-
-**AI Recording and Local Transcription Update:**
-
-- **Knowledge-First Entry Point**: `AI Recording` is available directly from the Knowledge Base home page, outside the older meeting-note import surface.
-- **Live Recording Interaction**: Starting recording captures local microphone audio immediately after the user presses Start, shows real audio strength from the active input stream, supports Pause/Resume, and uses `Finish` for the final recording step.
-- **Local Whisper Models**: The transcription settings panel lists `base`, `small`, `medium`, `large`, and `turbo` with file size, downloaded/incomplete/not-downloaded state, icon-only download and uninstall actions, and explicit model switching.
-- **Resumable Model Downloads**: Whisper model downloads use HTTP Range resume, retry transient network failures, keep partial files, recover from checksum mismatch by redownloading from scratch, and truncate trailing bytes before checksum verification when a resumed transfer overshoots.
-- **Editable Notes Before Save**: Finishing a recording runs local transcription and note summarization first, proposes a content-derived title with a timestamp, then lets the user edit the notes draft before saving it as a knowledge source.
-- **Validation**: The packaged desktop app was verified with a fake microphone WAV through the real renderer flow: audio levels changed with the input, Pause zeroed the levels, live transcript lines appeared, Finish generated an editable draft, and Save added the source to the local knowledge collection.
-- **Release Alignment**: Root CLI metadata, Desktop package metadata, package locks, related-project README baselines, and the Desktop Release workflow default now align on `1.4.21` / `desktop-v1.4.21`.
-
-Xiaok Desktop v1.4.20 closes the Loop Engineering release gap and makes task-completion loop results visible from the product surface. The release version, Desktop package metadata, package locks, README release notes, related-project README baselines, and Desktop Release workflow default now align on `1.4.20` / `desktop-v1.4.20`.
-
-**What's New in v1.4.20:**
-
-- **Loop Task Results in the UI**: `task_completion` user loops now show a `View Result` action that reads the latest loop-run evidence and task snapshot summary. Loops without file output no longer show output-directory or preview-file buttons that cannot work.
-- **Markdown Loop Output Actions Stay File-Oriented**: `markdown_file` loops keep the existing open-output-directory and preview-output-file controls, so file-producing and answer-producing loops expose the right affordance for their output contract.
-- **Canvas PDF Preview Fix**: PDF artifacts are rendered through `pdfjs-dist` into canvases instead of relying on a sandboxed iframe, fixing blank PDF previews in the Canvas pane while keeping localized loading/failure states.
-- **Mobile Companion Refinement**: Mobile gateway URLs prefer reachable private LAN addresses, avoid loopback/link-local/test ranges, and artifact previews can carry filename and base64 payload metadata for the iOS companion.
-- **Release Documentation Alignment**: The English and Chinese READMEs now document v1.4.18, v1.4.19, and v1.4.20 so the changelog matches the tagged source tree instead of stopping at v1.4.17.
-- **Release Validation Target**: v1.4.20 is prepared with the loop-result IPC tests, loop contract/allowlist/evaluator/project-claim tests, renderer loop UI tests, desktop typecheck/build gates, and the Desktop Release workflow tag `desktop-v1.4.20`.
-
-Xiaok Desktop v1.4.19 turns the loop system from ad-hoc success checks into explicit contracts. User loop templates now persist a `loop_contract_v1` record, background task-completion loops with only weak success criteria are blocked instead of silently succeeding, and loop runs are finalized through one evaluation path.
-
-**What's New in v1.4.19:**
-
-- **LoopContract v1**: User loops now store success criteria, permission mode, concurrency policy, stop policy, and legacy compatibility metadata. Existing templates get a default contract on read, and template edits regenerate the contract from the current loop kind and output target.
-- **Strong Success Criteria**: `markdown_file` loops default to a strong `file_exists` criterion. `task_completion` loops default to weak `task_completed`, and scheduled/background runs must add a strong criterion before they can be marked successful.
-- **Contract Evaluator and Finalizer**: Loop verification returns `success`, `blocked`, or `failed` with evidence IDs and next-action details. The finalizer writes success, blocked, and failed run outcomes through a shared path so diagnostics and learned-constraint extraction see the same state.
-- **Command Criterion Allowlist**: `command_exit_zero` criteria can only run allowlisted commands with bounded dynamic args, safe cwd policies, stream caps, timeouts, and Windows shell handling for fixed commands.
-- **Project Claim Store**: Loop/project coordination gained a SQLite-backed project claim table with TTL renewal, expired-claim replacement, owner checks, and explicit release semantics.
-
-Xiaok Desktop v1.4.18 hardens the runtime around cost visibility, MCP resilience, and staged skill rollback diagnostics. It also keeps the Desktop/iOS companion moving toward one task-centric operating surface.
-
-**What's New in v1.4.18:**
-
-- **Estimated Model Cost Accounting**: Runtime usage can resolve model pricing from `~/.xiaok/pricing.json`, packaged `data/pricing.json`, or the workspace data file, then report estimated cost with explicit confidence.
-- **MCP Timeout and Degraded-Server Handling**: MCP startup, catalog, call-tool, and resource timeouts are independently configurable, and server connection failures can degrade a server instead of crashing the whole runtime.
-- **Current Client Version in MCP Handshake**: MCP clients now read the package version at runtime instead of advertising a stale hardcoded version string.
-- **Skill Companion Tools**: Skill-provided companion tools are registered with the main skill tool, so deferred skill resources can stay accessible without bloating the initial prompt.
-- **Stage Failure Checkpoints**: Staged skill execution captures before/after checkpoints and emits a `xiaok revert <checkpointId>` hint when a failed stage modified files.
-- **Desktop/iOS Companion Progress**: The iOS client is reorganized around a task-first surface with project, artifact, approval, knowledge, automation, and settings sections while preserving desktop snapshot synchronization.
-
-Xiaok Desktop v1.4.17 tightens artifact persistence and release hygiene: transient A2UI artifacts now default to the user Xiaok data directory instead of the source checkout, project HTML/Markdown artifact edits save through the guarded project artifact route, and the desktop release workflow defaults to the `desktop-v1.4.17` tag.
-
-**What's New in v1.4.17:**
-
-- **User-Scoped A2UI Artifacts**: `render_ui` now writes implicit `.a2ui.json` outputs to `XIAOK_CONFIG_DIR/artifacts` or `~/.xiaok/artifacts`, keeping transient UI payloads out of source repositories. Explicit `output_path` values are still supported and continue to use workspace path validation.
-- **Project Artifact Edit Saves**: Project-scoped HTML and Markdown artifacts save back through KSwarm's text artifact update route, fixing the path/permission failure seen when editing generated project deliverables from the desktop preview.
-- **Release Version Alignment**: Root CLI metadata, Desktop package metadata, package locks, README release notes, and the Desktop Release workflow default now align on `1.4.17` / `desktop-v1.4.17`.
-- **Release Validation**: v1.4.17 is prepared with focused A2UI artifact root tests, CLI `build:release`, TypeScript `--noEmit`, desktop build, and a real `render_ui` smoke test proving default output lands under the user artifact directory instead of the current repository.
-
-Xiaok Desktop v1.4.16 ships the new artifact editing surface alongside the Loop Engineering evidence work: HTML deliverables can be edited directly in Canvas, Markdown deliverables can be edited as plain text, local image/SVG insertion is available from the real desktop file picker, and mobile companion APIs can mirror chats, approvals, projects, loops, and artifact previews from the desktop runtime.
-
-**What's New in v1.4.16:**
-
-- **Direct HTML Artifact Editor**: HTML deliverables now have an editor-first action in Canvas and artifact cards. Selecting rendered text or links opens an inspector for text edits, component deletion, color/font/size/weight styling, and image/SVG insertion. The edit toolbar stays pinned at the bottom of the artifact area so the preview keeps usable vertical space.
-- **Markdown Plain-Text Editing**: Markdown artifacts can be edited with a simple source-text editor and saved through the same guarded artifact-save path instead of being preview-only.
-- **Local Image and SVG Insertion**: The HTML editor can insert images from URLs, local image files as `data:image/*;base64`, SVG source text, or local `.svg` files. The macOS file picker path is exposed through preload IPC and covered by main-process tests.
-- **Artifact Card Edit Entry Point**: Conversation artifact cards now expose compact icon actions for open, add-to-knowledge, and edit, with tighter spacing for repeated use.
-- **Save Permission Fix**: HTML/Markdown artifact saves now use purpose-specific path validation, allowing generated artifacts under the desktop data root and Electron downloads directory while still rejecting unrelated paths or wrong extensions. Apply-time errors are separated from save-time errors, so style/text updates no longer surface the misleading "check file permissions" message.
-- **Mobile Companion Foundation**: Desktop now exposes a local mobile gateway with pairing identity, Bonjour advertisement, relay config, QR support, chat send, approval response, project/loop snapshots, and artifact preview lookup. A first iOS client lives under `mobile/ios`.
-- **Bundled Infinity Canvas Packaging**: Desktop packaging now includes the `kai-infinity-canvas` scripts directory so the canvas plugin can start from installed builds.
-- **Constraint Injection into Intent Reminder**: `buildIntentReminderBlock` now renders `explicitConstraints` with "must follow" framing and semicolon separators. Constraints like "控制在一页内" / "用中文" extracted by the planner are finally visible to the executing agent on every turn, not just stored in the ledger.
-- **Binary Artifact Structural Validation (Warn Mode)**: New `artifact-structure.ts` module validates PDF (`%PDF-` header, fd-based 5-byte read) and PPTX (ZIP local file header `PK\x03\x04` + `[Content_Types].xml` in first 64KB). Integrated into `completion-evidence.ts` guard pipeline in warn mode — detects corrupt artifacts without killing tasks. Memory-safe: PDF reads 5 bytes, PPTX capped at 64KB regardless of file size.
-- **URI/Paths Bypass Fix**: `resolveLocalArtifactPath` now extracts verifiable local paths from `file://` URIs, `metadata.paths`, and `metadata.localPaths` uniformly. Evidence records that previously bypassed structural checks via `uri` or `paths` fields are now validated.
-- **Canvas Preview as Default Tab**: Canvas panel now defaults to the Preview tab with a refresh button for re-reading file content.
-- **Evidence Guard Test Alignment**: Fixed 3 stale tests in `artifact-evidence-guard.test.ts` that expected block behavior overridden by the answer-fallback policy since v1.4.11.
-- **Release Validation**: v1.4.16 verified with focused HTML/Markdown editor tests, preload/main save-path tests, mobile gateway/snapshot tests, guard/orchestration/structure tests, desktop typecheck/build, unsigned packaged install at `/Applications/xiaok.app`, and Computer Use validation on a real slide HTML artifact.
-
-**What's New in v1.4.14:**
-
-- **Loop Self-Improving — Full Phase 1**: LLM extraction now wired via `createDesktopLoopLLMPort` (uses existing model adapter, 30s timeout, graceful degradation to rule fallback). `triggerAsyncExtraction` refactored with unified `recordConstraint` helper + `onConstraintAdded` callback. System notification fired on every new constraint. New `LoopConstraintsTab` UI component with active/pending/archived filter + per-loop filter + confirm/activate/deactivate actions. Real-time highlight when new constraints arrive via `desktop:loops:constraintAdded` event subscription.
-- **Automation Overview Alignment**: Overview card counts now match the actual sub-tab content: Loops = user templates only (excludes built-in diagnostic loops); Schedules = active + paused only (excludes completed/cancelled); "Attention" card scrolls to the in-page failure list instead of jumping to Diagnostics. All failure items (loop_run + timed_action_run) now have a "clear record" button.
-- **KSwarm Workflow Upstream Output Handoff**: `compactNodeOutput` extracts structured node output (summary + artifact paths + small inline fields). `enrichWorkflowNodeInput` collects completed upstream outputs via `dependsOn` edges with 10KB total cap and graceful summary-only fallback. Desktop `buildKSwarmWorkflowNodePrompt` renders upstream outputs as structured reference section. All new logic follows degradation-first: any failure skips injection silently (never blocks dispatch).
-- **Clear Schedule Run History**: New `TimedActionStore.clearActionRunHistory(actionId, statuses?)` + IPC `desktop:scheduledTasks:clearRunHistory` allows users to dismiss failed/stale timed-action runs from the Automation overview.
-- **ChatView Overflow Fix**: Added `break-words` to assistant message and streaming containers; scroll container now uses `overflow-x-hidden` to prevent horizontal scroll on long content.
-- **Project Flow Graph V4**: Actual execution path highlighting, PO start node, click-to-detail, top-to-bottom layout, Handle components for visible edges.
-- **Release Validation**: v1.4.14 verified with 1239 desktop tests (all pass), electron + renderer typecheck clean (baseline 0), build:main + build:renderer + pack:dir green, live install at `/Applications/xiaok.app`.
-
-**What's New in v1.4.11:**
-
-- **Loop Self-Improving Feedback Loop**: When a verify stage fails, an asynchronous LLM extractor (haiku-class, with pure-rule fallback) proposes a one-sentence improvement rule. Suggestions land in a "pending review" queue rather than auto-injecting into prompts—users decide whether to adopt, ignore, or let them auto-expire after 14 days. Adopted rules are injected into the next run's prompt and self-deactivate after 3 consecutive ineffective injections. Independent `loop_learned_constraints` SQLite table with four-tuple supersede, hit counters, stale GC, and three new IPC channels (`listLoopConstraints` / `setLoopConstraintActive` / `confirmLoopConstraint`).
-- **Scheduled Task Notifications**: Every scheduled task completion now triggers a system desktop notification (success/failure with reason) plus an in-app toast. Bootstrap hook listens to `desktop:scheduledTaskDue` and surfaces the result regardless of which page is active.
-- **Faster Scheduler Cadence**: Timed-action scanner interval reduced from 30s to 10s; `agent` source minimum interval relaxed from 5min to 0.5min. Sub-minute schedules (every 30s / 1min / 5min) are now first-class options.
-- **Renderer Typecheck Baseline Healed**: Fixed 21 typecheck errors introduced by the v1.4.10 i18n refactor. `FontSize` / `ThemePreset` / `FontFamily` types now have a single source of truth in `themes/types.ts`; `storage.ts` re-exports them and validates legacy localStorage values. The `ThemeProvider` stub became a real Context implementation with `data-theme=dark` application and `prefers-color-scheme` listening—dark mode actually works now.
-- **Dark Mode That Works**: Added a complete warm-dark palette with `html[data-theme='dark']` overrides for all `--c-*` tokens. New graph-specific tokens (`--c-graph-node-*`, `--c-graph-edge-*`) prepare the ground for the upcoming project flow-graph view.
-- **Sidebar Polish**: Titlebar history navigation buttons (`<` / `>` / collapse) now align vertically with the macOS traffic-light buttons (top: 4) and stay inside the sidebar's 240px boundary (left: 132/164/196 with 16px right padding). Project detail pages drop the top frosted-glass overlay so report headers are no longer covered. Added a `docs/known-issues/titlebar-button-position.md` to document the geometry constraints—this position has been regressed three times.
-- **GTD Sidebar Simplified**: GTD grouping was reduced from 5 buckets (inbox/todo/waiting/someday/archived) to 2: **进行中 / 已归档**. The `xiaok:gtd-enabled-changed` event now actually rerenders the sidebar, with a hover `⋯` menu to move chats between active and archived. The 5-bucket schema is preserved for forward compatibility.
-- **Delete-Chat Confirmation**: Chat deletion in the sidebar now asks for confirmation before destruction, matching the existing `ConfirmDialog` pattern used for thread cleanup elsewhere.
-- **Optimistic Artifact Evidence (Phase 2)**: The completion guard no longer blocks tasks classified as `file_artifact` if a substantive answer is present. Users iterate via chat; missing files become a follow-up turn instead of a hard task failure.
-- **System-Prompt Anti-Fabrication Rules**: `buildSystemPrompt` now includes a "tool-first / real-data-first" preamble that forbids inferring task / project / scheduled-task / channel / skill / memory / artifact status from conversation history. Each status claim must cite a real field from the most recent tool return.
-- **Release Validation**: v1.4.11 is verified with 1160 desktop main + renderer tests (including 35 new loop-learned-constraints tests), full electron typecheck clean, renderer baseline gate clean (0 diagnostics), build:main + build:renderer + pack:dir green, and live install at `/Applications/xiaok.app`.
-
-**What's New in v1.4.10:**
-
-- **i18n Complete Coverage**: Renderer locale files (`zh.ts`, `en.ts`, `index.ts`) gained ~1100 lines per file, eliminating hardcoded Chinese strings across automations, projects, settings, knowledge, memory, scheduled tasks, and shared dialogs. All visible UI text now flows through `t.*` keys.
-- **Appearance Settings Refactor**: New `themes/types.ts` and `themes/presets.ts` define a six-preset theme system (default / terra / github / nord / catppuccin / tokyo-night / custom). Font families switch from `string` to a typed union (`default / inter / system / serif / noto-sans / source-sans / custom`); font sizes become `compact / normal / relaxed`.
-- **Theme Color Editor**: Users can now edit individual color tokens (background / text / border / accent groups) and persist a custom theme. Editor also handles per-component preview safely.
-- **Dead Code Cleanup**: Various unused imports and components removed across renderer.
-- **Release Validation**: v1.4.10 was tagged on the i18n + appearance commit and shipped via the macOS release workflow. (Subsequent typecheck errors introduced by the type-system split are addressed in v1.4.11.)
-
-**What's New in v1.4.9:**
-
-- **Generic Task Completion Loops**: Introduces `task_completion` as a second loop kind alongside `markdown_file`. Task completion loops succeed when the AI task finishes without requiring a file artifact, enabling status checks, data syncs, and patrol tasks. Scheduled triggers with unapproved auto-run are blocked rather than silently running in plan-only mode.
-- **Cult-UI Component Foundation (Batch 1)**: Adds `class-variance-authority`, `tailwind-merge`, and `clsx` as foundational UI utilities. Ships three adapted cult-ui components: `AnimatedNumber` (spring-based number transitions), `DirectionAwareTabs` (pill tabs with shared-layout sliding animation), and `ExpandableCard` (accessible collapsible panels with framer-motion).
-- **Direction-Aware Automations Tabs**: The Automations page tabs now use a spring-animated sliding pill indicator (matching ModeSwitch precision), replacing the previous static CSS pill tabs. Preserves existing accent color, a11y attributes, and keyboard navigation.
-- **Kimi for Coding Compatibility**: Fixes 403 errors when using Kimi for Coding endpoints. The OpenAI and Anthropic SDK adapters now strip X-Stainless-* fingerprint headers and use the correct `claude-cli/1.0.0 (external, cli)` User-Agent format that Kimi's client whitelist accepts.
-- **KSwarm Stale Service Replacement**: Desktop startup now detects version-mismatched KSwarm processes (via source hash comparison) and kills them before spawning the correct version, fixing the "old version survives app close" issue after upgrades.
-- **Personal Knowledge Base (KB)**: Local-first knowledge base with Collection → Source → Chunk data model. Supports PDF, docx, pptx, and xlsx extraction via pdfjs-dist, Chinese full-text search with jieba segmentation, and agent tool integration through `kb_search`, `kb_get_source`, `kb_list_collections`, and `kb_create_collection`.
-- **Loop Edit/Delete**: User loops can now be modified and removed directly from the Automations panel, completing the CRUD lifecycle for loop management.
-- **Artifact Preview Enhancements**: Fullscreen toggle for artifact previews, HTML artifacts rendered in iframe with `allow-scripts`, and a new "send to chat" button to discuss artifacts in the conversation context.
-- **Clickable File Paths**: File paths appearing in messages are now clickable and open in Finder (macOS) or Explorer (Windows). Supports both `/Users/...` and `C:\...` style paths.
-- **Paste Path Detection Fix**: Mixed text containing path-like substrings is no longer misidentified as file paths during paste operations.
-- **Workflow Status Strip Fix**: Fixed left-side clipping of the workflow status strip by switching to fixed positioning.
-- **Release Validation**: v1.4.9 is verified with 88 loop tests (store + executor + runner including task_completion plan-mode block, timeout, crash recovery), 316 renderer tests, desktop main/renderer builds, and the `desktop-v1.4.9` release tag workflow.
-- **Firecrawl Keyless Search & Scrape**: Integrated Firecrawl as a new web_search and web_fetch provider. Works without API key (1000 free credits/month); optional key for higher rate limits. Configurable via `XIAOK_SEARCH_PROVIDER=firecrawl` env or Desktop settings panel.
-- **KB Write Tool**: New `kb_add_source` agent tool allows writing content into the knowledge base from conversations. Supports paste (text), file (local path), and url (web page) modes with automatic chunking and indexing.
-- **CLI Headless Hang Fix**: Fixed `xiaok chat --auto --print` hanging indefinitely. Added Agent maxIterations (default 100), MCP callTool timeout (default 120s), cleanup-with-timeout for single-task mode, and a wall-clock turn deadline (default 4 min, exit 124 on timeout).
-- **Custom Model Names**: Users can now add arbitrary model names in Desktop settings (not limited to the hardcoded registry). Registry updated with GLM-5.2 and Kimi K2.7.
-- **Binary File Preview**: PPT/Word/Excel and other binary files now show "open with system app" button instead of garbled text in the artifact preview panel.
-- **Optimistic Artifact Evidence**: The completion guard no longer blocks tasks that have no file artifacts by default. Only tasks with explicit `requiredOutputs` or `evidenceContract` are checked.
-
-**What's New in v1.4.8:**
-
-- **Automations Surface for Loops and Schedules**: Desktop now groups user loops, scheduled runs, loop diagnostics, and recent failures under Automations. Loop diagnostics moved out of general settings, and schedule bindings show which timed action owns a loop trigger.
-- **User Loop Templates**: Users can define repeatable markdown-file loops with a prompt, output directory, output filename, manual run, and schedule linkage. Output directories are created automatically when needed, with cross-platform filename guards for Windows and macOS.
-- **Clickable Loop Outputs**: User loop cards can open the output directory and preview the latest output file through the existing artifact preview path, so the result is reachable from the loop screen instead of only from the filesystem.
-- **Scheduled Task Transcript Clarity**: Scheduled task system metadata stays hidden from the visible user prompt. The conversation now shows a light execution notice with task title, scheduled time, claimed time, and delay, separating scheduler timing from the task's own content result.
-- **Timeout and KSwarm Startup Reliability**: Desktop hardens task timeout classification, request-triggered service startup, and stale KSwarm service replacement when the process on port 4400 does not match the packaged service version.
-- **Skill Resource Fetching**: The CLI skill tool now returns lightweight manifest counts and exposes `skillFetchAssets` for on-demand reference/script/asset reads, reducing prompt bloat while keeping skill resources accessible.
-- **Release Validation**: v1.4.8 is prepared with 123 focused desktop main/renderer tests for Automations, loops, schedules, output previews, IPC, and scheduled prompt display; 40 desktop packaging contract tests for KSwarm and bundled plugins; 16 focused CLI skill/provider tests; desktop typecheck; CLI release build; desktop build; and the GitHub desktop release workflow triggered by the `desktop-v1.4.8` tag.
-
-**What's New in v1.4.6:**
-
-- **KSwarm Startup Reliability Follow-up**: Desktop now shares one guarded startup promise between explicit service start and request-triggered auto-start, preventing duplicate Intent Broker/KSwarm spawns during cold launch.
-- **Stream Reconnect Hardening**: The KSwarm WebSocket bridge clears handlers and schedules reconnect before closing errored sockets, preventing recursive `onerror -> close -> onerror` failures in real desktop startup.
-- **Completion Evidence Runtime Packaging**: The compiled `completion-evidence` runtime guard is now included in `dist/`, so packaged CLI/runtime code resolves the same evidence validation path that source tests exercise.
-- **Related Service Replay Hardening**: The paired Intent Broker update tolerates approval/task lifecycle replay events that lack `taskId`, preserving approval state without crashing broker state rebuild.
-- **Release Validation**: v1.4.6 is verified with focused desktop KSwarm startup tests, focused CLI completion-evidence/task-host tests, Intent Broker full tests, desktop build, live KSwarm/broker health checks, Computer Use live smoke, and the desktop `desktop-v1.4.6` release workflow.
-
-**What's New in v1.4.5:**
-
-- **KSwarm Service Health Loop**: Desktop now ships a built-in `kswarm-service-health` loop that records structured service diagnostics for no listener, unknown port owner, unreachable health, HTTP error, invalid health JSON, identity/capability mismatch, broker unavailability, spawn path failures, spawn exits, and source hash drift.
-- **Actionable Loop Diagnostics**: Settings surfaces now show the anomaly kind, owner, seen count, suggested action, and relevant log paths, with a copyable diagnostic summary for support/debugging. Notifications stay light: new high-severity failures surface once, repeated unresolved anomalies dedupe, and source-unavailable warnings wait for a second observation.
-- **Stronger Artifact Evidence Validation**: Local file artifact evidence now validates real files inside the workspace with symlink-safe containment checks. Valid `uri` or `metadata.paths` evidence is not rejected just because stale `localPaths` metadata is present.
-- **Release Validation**: v1.4.5 was verified with desktop full tests, CLI sandbox full tests, focused loop/evidence tests, desktop build/typecheck, structured intent/skill evals, Computer Use live smoke, and the desktop `desktop-v1.4.5` release tag workflow.
-
-**What's New in v1.4.4:**
-
-- **Loop Evidence System**: Desktop task completion now records durable artifact evidence in SQLite and classifies required artifact contracts before the completion guard runs. This closes the repeated "task completed without artifact evidence" regression path where the UI could report completion without a verifiable deliverable.
-- **Built-in Evidence Regression Loop**: Xiaok now ships a scheduled loop that scans recent completion records for missing artifacts, stale run state, and anomalous delivery outcomes. The loop uses a single-run lock, clears stale diagnostics, and writes structured findings so silent failures become visible.
-- **Read-only Loop Diagnostics**: Desktop exposes loop/evidence diagnostics through read-only IPC and settings surfaces, giving operators a way to inspect active runs, recent scans, anomaly counts, and evidence status without touching internal database files.
-- **Service and Packaging Validation**: KSwarm service startup, bundled plugin deployment, and desktop packaging contracts have focused validation coverage for the release path. Service status now has clearer UI/API visibility, which makes KSwarm and plugin startup failures easier to distinguish from model/runtime failures.
-- **Clipboard File Attachments**: Finder copy/paste can attach files directly as chat input chips. The input path deduplicates keydown and paste events, preventing the same file from appearing twice when macOS sends both signals.
-- **Release Validation**: This release is prepared with focused loop evidence tests, desktop packaging contract tests, renderer/main builds, and the desktop `desktop-v1.4.4` release tag workflow.
-
-**What's New in v1.4.3:**
-
-- **Kanban × Workflow Fusion**: Workflow pipeline progress is now an integral part of each project task card on the kanban. Cards show a slim multi-segment progress bar (completed / running / failed) plus a `工作流执行` chip and the latest workflow primary message, so users can see how a task is doing without leaving the board.
-- **Task Detail Drawer**: Clicking any task card opens a right-side drawer (`TaskDetailDrawer`) that consolidates task description, assigned agent, execution strategy, the workflow pipeline progress bar, full workflow node details grouped by phase (with parallel groups, fan-out labels, failure policy, and per-node agent / status / error), review feedback, and artifacts. The drawer reuses the same workflow data shape exposed by KSwarm and refreshes alongside project polling.
-- **Compact Workflow Status Strip**: The top-of-page `WorkflowStatusStrip` is demoted to a small text-only badge (`工作流 · Review gate passed`) next to the dedicated `运行工作流` button. The full workflow detail dialog still opens on click and now anchors to the right edge so it stays inside the viewport.
-- **Shared `workflowUtils`**: Status icon, tone class, status label, progress formatter, public-view normalizer, and generic workflow view builder are extracted into `workflowUtils.ts`. New helpers `findWorkflowRunForTask` (matches a task to its workflow run via `task.execution.workflowRunId` / `scope.taskId` / `sourceTask.id`) and `computeTaskPipelineProgress` reduce a `KSwarmWorkflowRun` to a `TaskPipelineProgress` summary used by both card and drawer.
-- **No Backend or Data Model Changes**: This release only restructures the desktop renderer surface. KSwarm data model, project APIs, and task semantics are unchanged.
-
-**What's New in v1.4.1:**
-
-- **Artifact Preview Fix**: Project deliverable artifacts (Markdown, HTML, plain text) now load correctly in the preview panel. The previous release used a JSON-parsing proxy for all kswarm GET requests, causing artifact content to throw a parse error and display "加载失败: fetch failed". A dedicated raw-text IPC proxy (`kswarmProxyGetText`) is now used for artifact content fetches.
-- **App Packaging Fix**: Resolved a packaging failure caused by a stale `release/mac-arm64` directory, and switched to `ditto` for macOS app installation to preserve extended attributes and bundle structure.
-
-**What's New in v1.4.2:**
-
-- **Interactive A2UI Dashboard Artifacts**: Xiaok Desktop can now replay safe read-only A2UI artifacts inline in the conversation, including headings, explanatory text, metrics, lists, tables, dividers, and conclusion sections. The renderer validates a small component catalog instead of accepting raw HTML, so dashboard-style deliverables stay inspectable and sandboxed.
-- **Natural Dashboard Request Flow**: The A2UI path is covered by installed-app E2E against `/Applications/xiaok.app` using a natural user request for a complex AI product operations dashboard. The test verifies the generated artifact renders inside the real packaged app and that the step summary remains concise.
-- **Tool Privacy and Section Compatibility**: Internal dashboard tool names are now hidden from user-facing tool-step labels, with the UI showing `dashboard [A2UI]` instead. The A2UI validator also accepts common `type` / `text` aliases for sections and returns specific validation errors, eliminating the previous "未知 section" failure mode for otherwise valid dashboard requests.
-- **ESC Streaming Interrupt**: Pressing `ESC` while the terminal assistant is streaming output now aborts the active model/tool turn instead of waiting for completion. Xiaok preserves the input draft and queued text, records the turn as user-aborted, and prevents the aborted Stop-hook path from auto-continuing.
-- **Abort-Safe Runtime Pipeline**: Anthropic, OpenAI Chat Completions, and OpenAI Responses streams now receive a shared `AbortSignal`, skip retries for true `AbortError`s, and clean up stream timeout controllers on all exit paths. Runtime, compacting, subagent, and tool execution layers propagate the same signal so user interruption is treated separately from transport failures.
-- **Desktop Handoff Cancellation**: KSwarm runtime bridge handoffs now accept cancellation signals and report `task_cancelled` for user-aborted desktop tasks instead of misclassifying them as failed.
-
-**What's New in v1.3.14:**
-
-- **Streaming Retry Hardening**: Anthropic, OpenAI Chat Completions, and OpenAI Responses adapters now detect `ERR_STREAM_PREMATURE_CLOSE`, `ECONNRESET`, `ETIMEDOUT`, `EPIPE`, `Premature close`, `socket hang up`, `terminated`, and `fetch failed` as retryable transport errors. Once any stream chunk has been emitted to the consumer, retry is disabled to prevent duplicate output. The OpenAI Chat Completions adapter also gained a 5-minute per-stream timeout and abort controller.
-- **Stale Running Task Recovery**: `InProcessTaskRuntimeHost.recoverTask` now salvages tasks that are still marked `running` but have no live execution after a process restart, transitioning them to `failed` with a `stale_running_task_recovered` salvage summary instead of leaving the snapshot stuck.
-- **KSwarm Runtime Task Retry**: Desktop's `runKSwarmRuntimeTextTask` now retries once on retryable transport failures, surfaces the actual failure reason from `salvage.reason` or the latest error event, and only retries when the failure matches the same network/stream class above.
-- **Dynamic Workflow HTML Report Tool**: New `render_report_artifact` tool renders a complete `.report.md` IR into an HTML artifact for dynamic workflow final report nodes. Worker / final-output / generic dynamic workflow node prompts now explicitly require generating a complete `.report.md` IR and calling `render_report_artifact` instead of reading `~/.xiaok/plugins` internals or hand-writing HTML.
-- **Cross-Platform Compatibility Rules**: `AGENTS.md` now publishes the cross-platform rules that apply to xiaok-cli, kswarm, intent-broker, and kai-xiaok-plugins: always use `path.join` / `path.resolve`, never hardcode `/` or `\` separators, guard macOS-only calls (CUA driver, `open`, `.app` bundle paths, `launchctl`, `defaults`) with `process.platform`, guard Windows-only calls (`reg`, `cmd /c`, `explorer.exe`), avoid Unix shell syntax in `child_process` invocations, and treat path comparisons as case-insensitive on Windows.
-
-**What's New in v1.3.13:**
-
-- **Parallel Dynamic Workflow Scripts**: Xiaok Desktop now supports the first parallel dynamic workflow script path. Trusted workflow scripts can use `parallel([() => agent(...), ...])` to fan out independent agent branches while keeping orchestration outside the main conversation.
-- **Durable KSwarm Parallel State**: `parallel()` no longer exists only as an in-memory `Promise.all`. KSwarm persists `parallelGroups`, branch node metadata, and `scriptCheckpoints`, so project detail, logs, and API snapshots can explain which branches ran and how they completed.
-- **Conversation Preview Before Run**: The `run_dynamic_workflow_script` tool now supports `previewOnly`, allowing the assistant to generate a workflow preview for user confirmation before starting the run. Confirmed runs start in the background and immediately return a `workflowRunId`.
-- **Resume and Status Tools**: `resumeWorkflowRunId` can continue the same workflow run while reusing completed parallel groups and agent node outputs, and `get_dynamic_workflow_status` reports run/node/parallel/checkpoint/gate/delivery state from KSwarm snapshots.
-- **Professional Report Review Template**: The tool now ships a `report_final_review` script template that runs fact, evidence, and format/contract review branches in parallel, then reduces them into a final gate recommendation.
-- **HTML/PDF Professional E2E**: The dynamic workflow E2E now creates a new KSwarm project, runs the professional parallel review script, produces HTML and PDF artifacts, and verifies workflow run, gate decision, project deliverable, artifact provenance, and task-board state stay consistent.
-- **Failure Policy Foundations**: Parallel runtime now supports `required_all`, `collect_errors`, and `quorum` semantics, with KSwarm quorum group reduction covered by workflow tests.
-- **Workflow Status Visibility**: Project workflow details now show parallel groups, branch completion counts, failure policy, branch labels, and script checkpoint progress from KSwarm snapshots instead of inferring state from the chat transcript.
-- **Focused Test, E2E, and Eval Coverage**: The release covers parser rejection for eager parallel calls, runtime branch annotation, KSwarm parallel group persistence, HTTP contract routing, background tool startup, resume primitive reuse, status-query tooling, a dynamic workflow eval case, and an end-to-end dynamic workflow script that completes through KSwarm and the desktop runtime bridge.
-
-This is a foundation release for dynamic workflow orchestration, not a full user-authored workflow platform yet. Automatic script job recovery across app restarts, durable user-input pause/resume, and comparative professional quality evals remain staged follow-up work.
-
-**What's New in v1.3.11:**
-
-- **Basic Dynamic Workflow Script Runtime**: Xiaok Desktop can now run a trusted dynamic workflow script through KSwarm, Intent Broker, and the Desktop agent runtime bridge. The script can create phases, fan out `agent(...)` calls, collect node outputs, and complete a durable `script_generated` workflow run
-- **Real Agent Node Execution**: Script-generated workflow agent nodes now execute the node prompt itself instead of falling back to project diagnosis. Ordinary `script-agent-*` nodes receive an artifacts directory, write real files, and return structured artifact manifests
-- **Project Delivery Synchronization**: When a script workflow completes, KSwarm can deliver the project from the final artifact-producing agent node, mark the board tasks done, and attach deliverable provenance to the project and task results
-- **Output Contract Guardrails**: Dynamic workflows no longer treat markdown/json side output as sufficient when the final task requires HTML. Missing required terminal outputs block project delivery with explicit `missing` details instead of silently marking the project complete
-- **End-to-End Workflow Coverage**: The release includes a real E2E test that starts Intent Broker and KSwarm, registers a desktop worker through the runtime bridge, runs a dynamic script workflow, creates dynamic agent nodes, writes an artifact, and verifies project delivery plus task-board completion
-
-**What's New in v1.3.10:**
-
-- **Project-Level High Quality Workflow**: High Quality execution is now a project-scoped `po-generated-project-workflow` run. One workflow owns planning, dispatch, review, and final synthesis for the project deliverable instead of starting isolated task-level workflow runs
-- **Execution Mode Propagation**: Fast, Smart, and High Quality execution modes stay on the project contract and are carried into KSwarm dispatch, so a High Quality project no longer silently falls back to quick worker prompts
-- **Artifact-First Workflow Gates**: Workflow finalization now rejects missing, unreadable, outside-workspace, or non-file task artifacts. Evidence references are rebuilt from submitted files, so a workflow only passes when a real deliverable is attached
-- **Desktop Workflow Verification Fixes**: Workflow approval, reviewer diagnosis, and final status display were hardened. Reviewer dialogs use solid backgrounds, hide internal budget/permission/max-node fields, and workflow runs end in readable running/completed/failed states
-
-**What's New in v1.3.9:**
-
-- **Task-Level Dynamic Workflow**: Project task cards now expose "Run with Workflow" for task-scoped execution. KSwarm creates a pending workflow proposal with `scope.taskId`, source task metadata, budget hard limits, permissions, and acceptance rubric before any agent is dispatched
-- **Controlled PO-Generated Workflow Proposals**: The first `po-generated-task-workflow` path validates a PO-authored workflow IR for a task, shows the proposal in a confirmation card, and only starts the run after user approval. This is deliberately validated IR, not raw JavaScript execution
-- **Budget, Cache, Recovery, and Progress Visibility**: Workflow runs now show budget hard caps, last material progress, blocking failures, run-internal stored node results, and recovery mode in the project workflow detail panel
-- **Workflow UX Hardening**: Workflow menus and dialogs keep opaque backgrounds, stay in the project tab row instead of becoming a large top panel, and logs remain the fused Swarm + Workflow timeline
-
-**What's New in v1.3.8:**
-
-- **Basic Dynamic Workflow**: Xiaok Desktop now ships the first project-level dynamic workflow path in KSwarm. Projects can create durable workflow runs, execute built-in quick diagnosis, and launch an agent-backed review diagnosis that routes through a Worker agent, an adversarial Reviewer agent, and a review gate reducer
-- **Workflow-Orchestrated Agent Mode**: The project control layer stays in KSwarm while workflow execution happens at the agent layer, giving Xiaok two clear project execution paths: quick/direct orchestration for lightweight project control, and workflow orchestration for structured multi-step agent runs
-- **Workflow Logs in Project Timeline**: The project detail page keeps the tab as "Logs", adds one clear "Run Workflow" menu, and fuses `Workflow` and `Swarm` events into the same chronological timeline without duplicating raw `workflow.*` activity events
-- **Dynamic Workflow Roadmap Docs**: The design docs now spell out the staged evolution toward a fuller dynamic workflow engine, including budget confirmation, resumable subagent caching, typed progress aggregation, and reviewer/adversarial agent gates
-
-**What's New in v1.3.7:**
-
-- **Slide Renderer Recovery**: Packaged Desktop installs now replace stale symlinked bundled plugins with the packaged `kai-slide-creator`, preventing old development plugin directories or wrong-platform wheelhouses from breaking `slide-renderer` MCP startup
-
-**What's New in v1.3.6:**
-
-- **Auto Mode Guardrails**: `/mode auto` now auto-approves only low-risk tool calls. High-risk Bash commands still require confirmation, and catastrophic commands remain blocked
-- **CUA Attribution Fix**: Desktop no longer runs `cua-driver doctor` from Xiaok health checks, preventing Xiaok itself from triggering macOS Screen Recording prompts
-- **Computer Use Shell Lockdown**: Tasks can no longer self-start or repair CUA through Bash commands such as `open -a CuaDriver`, `cua-driver serve`, socket deletion, `screencapture`, `cliclick`, or UI-driving `osascript`
-- **Interactive Shell Handoff**: Local shell escapes pause and resume the terminal UI cleanly so interactive commands do not corrupt the chat input state
-- **CUA Recovery Hardening**: Computer Use daemon stale-state recovery is covered by focused tests and keeps recovery inside the product-managed CUA flow
-
-**What's New in v1.3.5:**
-
-- **Computer Use Enablement**: `xiaok_computer_use` is now a stable product tool. When CUA is not ready it returns structured recoverable errors and the chat UI shows an inline Computer Use action card instead of exposing raw MCP failures
-- **CUA Permission and Recovery Flow**: Desktop now separates first-time user enablement from later auto-recovery, launches CUA through `CuaDriver.app` for correct macOS TCC attribution, detects empty capture output, and only auto-recovers on trusted packaged installs
-- **Targeted Plugin Reconnect**: Enabling Computer Use only reconnects the `cua-driver` MCP server and no longer restarts report or slide renderer plugins
-- **Shell Fallback Guardrails**: Screen automation fallbacks such as `screencapture`, `cliclick`, `cua-driver`, and UI-driving `osascript` now require approval instead of silently bypassing Computer Use
-- **Packaged Runtime Reliability**: KSwarm and Intent Broker background services now use the packaged Electron runtime as Node when needed, so installed apps do not depend on a user shell `node` in `PATH`
-- **Desktop Update and Branding Fixes**: Update installation now marks the app as quitting before `quitAndInstall`, reports install errors, and packaged macOS dock icons prefer the bundle `icon.icns`
-- **Build Loop and Smoke Coverage**: Desktop packaging keeps clean builds for release while preserving incremental `build:main` for development; the smoke suite covers 84 files and 587 tests
-
-**What's New in v1.3.4:**
-
-- **Swarm Project Reliability**: KSwarm projects now route Xiaok seed PO/Worker work into the real Desktop agent runtime instead of a reduced sidecar worker, preserving model, tool, MCP, web-search, report, and slide capabilities
-- **File-Based Handoff**: Large task context and artifact contracts are passed through handoff files instead of long broker text payloads, reducing truncation and making project resume/retry auditable
-- **Evidence-Aware Planning and Review**: Recent/monthly research tasks carry current-date guidance, external-source evidence requirements, and calibrated quality gates so PO review does not demand future or arbitrary item counts
-- **User-Facing Deliverables**: Final project outputs use formal project/goal-based filenames, keep review notes out of submit-ready artifacts, and prefer report/slide renderers when the user asks for reports or presentations
-- **Desktop Project UX Fixes**: Project cards, task boards, artifact lists, HTML preview, scheduled recovery tasks, and agent status indicators now expose clearer state, timestamps, failures, and recoverable actions
-- **Release Packaging Sync**: Desktop release builds now require the current Xiaok, KSwarm, Intent Broker, and bundled plugin sources to be checked out and packaged together
-
-**What's New in v1.3.2:**
-
-- **Desktop Update Recovery**: Fixed the `electron-updater` CJS/ESM interop bug that made "Check for Updates" silently do nothing in affected desktop builds
-- **Proactive Upgrade Reminder**: The sidebar footer now shows a clear upgrade/download/install reminder next to the Settings icon when a new desktop version is available
-- **Scheduled Task Recovery**: Desktop scheduled tasks now heal missing `nextRunAt`, keep auto-run results linked to their task thread, and remove deleted tasks from the main-process scheduler state
-- **KSwarm Plan Retry Reassignment**: "重新制定计划" now checks whether the stored PO is missing, archived, invalid, stale, or the legacy `xiaok` singleton; it reassigns to the best Xiaok PO and sends the full project context before restarting planning
-- **Release Guardrail**: Desktop release CI now marks the desktop tag as GitHub Latest and verifies `latest-mac.yml`, `latest.yml`, and installer assets before a release is considered valid
-- **Manual One-Time Recovery**: Desktop `0.5.6` and `1.3.1` can have the broken updater loader locally, so affected users must install `1.3.2` manually once; future updates can then use the in-app updater
-
-**What's New in v1.3.1:**
-
-- **KSwarm Reliability Release**: Runtime health probing, stalled-run watchdogs, capability-aware routing, and automatic cooldown for agents that are online but cannot execute correctly
-- **Recoverable Project Planning**: If Xiaok/Desktop or the PO agent stops while a project plan is being drafted, the project detail page exposes "重新制定计划" so work can continue instead of getting stuck
-- **Deliverable Contracts**: Explicit PPTX/HTML/Markdown requests are validated before PO review; markdown-only output no longer passes as a slide deck
-- **Local Executor Registry**: Explicit PPTX presentation tasks can fall back to a deterministic registered executor when no healthy agent advertises PPTX output capability
-- **Desktop Configuration Preservation**: Desktop launch and release flow are aligned around the real user HOME so model, skill, plugin, and channel settings remain visible
-- **Release Packaging Refresh**: macOS and Windows desktop artifacts are built from the same 1.3.1 source and plugin bundle baseline
-
-**What's New in v1.2.0:**
-
-- **KSwarm Swarm-Style Projects**: Create multi-agent collaborative projects from chat — Agent auto-selects PO + members, distributes tasks, and delivers as a team
-- **Long-Term Memory**: Agent remembers user preferences, names, and habits across sessions via `notebook_write`/`notebook_read` tools
-- **Memory Management UI**: View, add, and delete persistent memories from the Settings panel
-- **Agent Settings Panel**: Configure agent persona, spawn profiles, and LLM provider bindings per agent
-- **Model Config Enhancements**: Improved provider settings with protocol selection and advanced JSON config support
-- **Smarter Task Delivery**: Progress reporting with step-by-step TaskPanel, agent autonomously plans and tracks multi-step work
-
-**What's New in v1.1.0:**
-
-- **Artifact Canvas Editing**: Click "修订" on HTML previews to annotate elements, send edit instructions to Agent with full DOM context
-- **Auto-refresh Preview**: Canvas preview automatically reloads when Agent modifies the artifact file
-- **Artifact Cards**: Claude-style file cards with type icon, title, and "打开" button for clear artifact identification
-- **Welcome Page Revamp**: Personalized typewriter greeting, quick-start prompt pills for enterprise workflows
-- **Profile Settings**: Editable display name and avatar in General Settings (localStorage, with system username fallback)
-- **Plugin Bundling Design**: Complete plugin lifecycle spec for desktop distribution (esbuild + Python venv)
-
-**What's New in v1.0.0:**
-
-- **Full i18n Support**: Complete Chinese/English internationalization across all desktop UI components with runtime locale switching
-- **KSwarm Multi-Agent**: Orchestrate multiple AI agents collaboratively on complex tasks with status monitoring
-- **Project Management**: Kanban board, requirement tracking, agent assignment, activity timeline, and deliverable views
-- **Scheduled Tasks**: Create recurring tasks with cron expressions, pause/resume, and automatic execution
-- **Plugin System**: Install, manage, and configure MCP server plugins from GitHub or local sources
-- **Desktop v1.0.0**: Native macOS/Windows app with sidebar, canvas preview, settings UI, and auto-update
-
-**Typical Use Cases:**
-
-1. Local terminal interactive chat: `xiaok`
-2. Resume last session: `xiaok -c`
-3. Single-shot task: `xiaok "review the changes"`
-4. Generate reports, briefs, or slides through installed skills
-5. Start local daemon: `xiaok daemon start`
-6. Optional Yunzhijia / mobile access: `xiaok yzjchannel serve`, `/yzjchannel`
-
----
+A single prompt starts work. A useful loop also needs a trigger, an executor, durable state, a checker, and a visible outcome.
+
+| Building block | Xiaok implementation |
+|---|---|
+| Automation | Scheduled tasks, user loops, and project/workflow triggers |
+| Execution | CLI and Desktop agent runtimes with tools and skills |
+| Work isolation | Separate SubAgent sessions, inherited tool policy, and optional worktrees |
+| Connectors | MCP plugins, local files, Intent Broker, KSwarm, and optional message channels |
+| Memory | Session state, SQLite stores, knowledge sources, workflow checkpoints, and loop records |
+| Evidence | Readable artifacts, skill contracts, completion checks, review gates, and provenance |
+| Diagnostics | Artifact Evidence Regression and KSwarm Service Health loops, run history, and failure details |
+
+Create a loop by defining the work and output contract, choosing a trigger, preserving its state, and adding a check that distinguishes a useful deliverable from a successful-looking response. Reminders only notify; scheduled tasks execute AI work. Daily assistant features require opt-in, and proposed memory/knowledge changes remain reviewable before adoption.
+
+**Current source highlights:**
+
+- **SubAgent collaboration:** automatic delegation for useful independent tracks, explicit assignments, messages, follow-up on the same instance, interruption, close, and visible cleanup state.
+- **Simpler system prompts:** repeated execution instructions and conflicting approval/output rules were consolidated. The CLI common layer is 5,993 characters, down from 20,687; the Desktop base is 3,239, down from 8,297. These are fixed-text measurements, not token, latency, or model-quality claims.
+- **Goal Mode:** persistent objectives with status, pause/resume, budgets, evidence, and controlled continuation.
+- **Room-first collaboration:** discuss with agents before creating a project; promote selected source messages through a user-confirmed path.
+- **Artifact and knowledge workflows:** previews, editing, source ingestion, local retrieval, recording/transcription, and reusable skills.
 
 ## Swarm Projects
 
-xiaok Desktop includes KSwarm project delivery for work that needs planning, parallel execution, review, and final synthesis. A project has a human-approved plan, a PO agent, worker agents, a task board, artifacts, and final deliverables.
+KSwarm handles persistent projects that need plans, assigned agents, parallel tasks, review, recovery, and final delivery. A project has its own durable state and artifacts; it is distinct from a conversation's SubAgent group.
+
+The agent-facing `create_project` tool prepares a **proposal**. Formal creation uses the trusted user-confirmed Desktop path; ordinary content generation or automatic SubAgent delegation does not silently create a persistent project.
 
 ### Basic Dynamic Workflow
 
-v1.3.13 expands the basic dynamic workflow capability on top of KSwarm projects. This is not yet a general user-authored workflow builder, but it is a real durable workflow runtime slice:
+- **Durable runs:** phases, nodes, dependencies, parallel groups, checkpoints, status, and gate decisions live in KSwarm.
+- **Built-in diagnosis:** inspect project state directly, or run agent-backed diagnosis and independent review.
+- **Project and task scope:** High Quality project workflows coordinate project delivery; task-level proposals support explicitly selected tasks.
+- **Controlled scripts:** trusted workflows use `phase`, `agent`, `parallel([() => agent(...), ...])`, and `pipeline`; the runtime validates and bounds execution.
+- **Preview and continuation:** preview a plan before running; query by `workflowRunId`; resume a persisted run using `resumeWorkflowRunId` without re-pasting a different script.
+- **Artifact-first review:** task results and final delivery must satisfy their format, source, and artifact contracts. A repair file goes back through review instead of forcing completion.
+- **Visible progress:** Kanban, Graph, task details, and Logs show the persisted task/workflow state, parallel progress, blockers, recovery, and deliverables.
 
-- **Durable workflow runs**: KSwarm records workflow runs with phases, nodes, status, progress, gate decisions, and timestamps so Desktop can refresh, resume display, and audit what happened.
-- **Quick diagnosis workflow**: a built-in control workflow inspects project state, blockers, dispatchable tasks, and recommended next actions without calling an agent.
-- **Agent-backed review diagnosis**: Xiaok can launch a structured workflow that dispatches a Worker agent for project diagnosis, sends the result to a Reviewer/PO agent for adversarial review, then reduces the review decision through a gate.
-- **Project-level High Quality workflow**: High Quality project execution creates a single `po-generated-project-workflow` run at project scope. The workflow owns task dispatch, review gates, and final deliverable submission instead of fragmenting the project into unrelated task-level workflows.
-- **Task-level manual workflow execution**: task cards can still open a `po-generated-task-workflow` proposal for the selected task when the user explicitly wants to re-run or inspect one task. The proposal is task-scoped, budgeted, permission-bounded, and requires confirmation before dispatch.
-- **Controlled PO-generated proposals**: KSwarm can generate a validated workflow IR from project/task context. The current version is a controlled template that proves the proposal and approval path; it does not execute raw model-authored JavaScript or arbitrary user scripts.
-- **Controlled dynamic script execution**: trusted model-authored workflow scripts can run through a restricted desktop runtime. Scripts can create phases, call `agent(...)`, use thunk-based `parallel(...)`, return terminal results, or block the run with a structured reason.
-- **Durable parallel orchestration**: parallel script branches are persisted as KSwarm `parallelGroups`, with branch node identity, fan-out labels, required/schema/evidence metadata, and script checkpoints. Xiaok can show parallel progress without relying on chat transcript state.
-- **Conversation-first preview**: the dynamic script tool can return a `previewOnly` workflow plan before starting a run. After confirmation, the run starts in the background and returns a `workflowRunId` for snapshot-based status checks.
-- **Run resume and status query**: conversation agents can pass `resumeWorkflowRunId` to continue a same-run script without rerunning completed primitives, and can call `get_dynamic_workflow_status` to summarize KSwarm run, node, parallel group, checkpoint, gate, delivery, and background job state.
-- **Professional report final review**: the bundled script example shows a real professional workflow shape: inventory the deliverable, run fact/evidence/format-contract checks in parallel, then reduce the result into a final gate recommendation.
-- **Artifact-first delivery gates**: completed workflow tasks must submit readable in-workspace files or valid artifact references. Finalization rebuilds evidence from those files and blocks delivery when artifacts are missing, unreadable, outside the workspace, or only textual summaries.
-- **Budget, cache, recovery, and progress UI**: workflow details show hard budget caps, last material progress, blocking failures, run-internal stored node results, and the recovery mode for resumable runs.
-- **Clear UI semantics**: the right-side action is now one "Run Workflow" menu, while the project tab remains "Logs" because it contains both Swarm and Workflow activity.
-- **Fused log timeline**: Workflow runs and Swarm activity share one chronological project log, with source tags instead of separate top-level sections.
-
-This establishes the product direction for dynamic workflow in Xiaok: KSwarm remains the project control layer, while workflow orchestration runs at the agent layer and can evolve from today's built-in and controlled PO-generated workflows toward richer, dynamically generated execution plans.
-
-The v1.3.4 Swarm path is designed around clear responsibility boundaries:
-
-- **KSwarm owns project lifecycle**: project state, plan approval, phase dispatch, task status, retries, review records, delivery manifests, and recovery decisions.
-- **Agents own task execution**: Xiaok PO/Worker seed agents run through the full Desktop agent runtime, while external agents such as Claude, Codex, or Qoder run through their own broker-compatible adapters.
-- **Renderers own formal output**: report and slide requests should produce renderer-backed HTML artifacts when available; Markdown/PPTX are only forced when the user explicitly asks for those formats.
-- **Artifacts are the source of truth**: completed tasks must submit real files or referenced artifacts, not just textual summaries.
-- **Quality gates are contextual**: hard gates cover objective contracts such as missing artifacts, wrong output type, missing source evidence, or invalid renderer shell; content expectations such as "how many market updates are enough" are guided by project-type knowledge instead of global hardcoded thresholds.
-
-This makes Swarm projects suitable for research reports, product analysis, technical talk preparation, document production, and other multi-step deliverables where users need visible progress and recoverable execution.
+KSwarm owns project coordination. Xiaok and external agent runtimes execute tasks. Bundled renderers create formal reports and slides. Intent Broker transports handoffs and replies. Each layer's health and completion must be checked at its own boundary.
 
 ---
 
@@ -554,67 +75,50 @@ This makes Swarm projects suitable for research reports, product analysis, techn
 
 ### 1. Intent-First Task Delivery
 
-xiaok is designed to feel like a task agent, not a workflow dashboard.
+Understand the deliverable, reuse existing skills and artifacts, and continue within the authorized scope. Keep multi-step progress accurate, but answer simple questions directly. The final reply should explain what was delivered, where it is, and what was verified.
 
-- Substantial requests are treated as intents with a deliverable, not just chat turns.
-- Skills are matched against the current intent and stage, then re-ranked with runtime evidence.
-- Multi-step work is staged internally so the user sees progress, not template mechanics.
-- Final output should feel like delivered work, not a process transcript.
+### 2. Compact, Layered System Prompts
 
-### 2. 7-Layer Prompt Architecture
+The current prompt structure replaces the old “7-layer” description with concise policies and separate runtime context:
 
-System Prompt follows CC-style 7-layer design with explicit static/dynamic boundary:
+| Surface | Stable policy | Runtime additions |
+|---|---|---|
+| CLI | Identity, execution, authorization, tools, communication, planning, verification, and intent handoff | Permission mode, skills catalog, deferred tools, workspace guidance, memory, and CLI-specific delegation policy |
+| Desktop | Execution and evidence rules, reminders vs. scheduled tasks, materials, knowledge, project boundaries, and delivery formats | Current model, skills catalog, materials, and managed SubAgent policy/context |
 
-**Static Prefix (cacheable, stable across turns):**
-
-| Layer | Section | Content |
-|-------|---------|---------|
-| 1 | Intro | Role & identity — task-delivery AI skill workbench; Cosmic/Yunzhijia as domain strengths |
-| 2 | System | Runtime rules — permission mode, prompt injection防护 |
-| 3 | DoingTasks | Task philosophy — no extra features, read before edit |
-| 4 | Actions | Risk boundary — destructive ops need confirmation |
-| 5 | UsingTools | Tool grammar — read not cat, parallel calls |
-| 6 | ToneAndStyle | Interaction style — concise, file_path:line_number |
-| 7 | OutputEfficiency | Brevity — lead with answer, skip preamble |
-
-**Dynamic Suffix (per-turn rebuild):**
-- Session context, Session Guidance, Memory injection, Token Budget, Auto context
+Skills remain catalog-driven and loaded when needed. Workspace content and memories are context, not extra authority. Prompt wording does not replace service-level permissions or tool validation. See [CLI prompt assembly](src/ai/prompts/assembler.ts) and [Desktop base policy](desktop/electron/desktop-system-prompt.ts).
 
 ### 3. Safety First
 
-**Bash Safety Classifier** (3 risk levels):
+| Layer | Boundary |
+|---|---|
+| Permission mode | `default` asks when needed; `auto` approves low-risk work while retaining high-risk checks; `plan` blocks writes and Bash |
+| Bash classifier | `block`, `warn`, and `safe` classifications supplement permission checks; unclassified commands are not a blanket safety guarantee |
+| Tool execution | Validate tool inputs, enforce active allowlists, and respect denied actions across equivalent tool paths |
+| Agent mutation | Scope control and store mutations to the caller's ownership; a SubAgent cannot acquire broader access by delegation |
+| Delivery | Verify artifacts and outcomes; “closed” alone is not proof that execution and resources have settled |
 
-| Level | Commands | Behavior |
-|-------|----------|----------|
-| Block | `rm -rf /`, `mkfs`, `curl|sh` | Reject |
-| Warn | `rm -rf`, `git reset --hard`, `DROP TABLE` | Require confirmation |
-| Safe | Other commands | Execute directly |
-
-**Tool Input Validation** — JSON Schema validator checks required fields and types before every tool call.
+Computer Use uses its own permission and runtime path. It is macOS-only and cannot be replaced by shell-based screen/control fallbacks.
 
 ### 4. Stage-Scoped Context Management
 
-Long tasks should not become one giant drifting transcript. xiaok keeps the full ledger in session state, but narrows the model context to the active stage:
-
-1. **Microcompaction** — Tool results over 8K chars auto-truncated
-2. **Fresh handoff** — completed stages can hand off artifacts into a fresh context instead of dragging the whole run forward
-3. **Memory re-injection** — relevant memories re-injected after compact / handoff
+Keep the durable intent ledger while narrowing active work to the current stage. Compact large tool results, retain references to spilled output, hand off explicit artifacts, and restore relevant memory after compaction. Freshly query transient state rather than treating an old summary as a live snapshot.
 
 ### 5. Typed Memory
 
-Persistent file-based memory store with type classification:
-
-- `user` — User preferences, role, knowledge
-- `feedback` — User corrections/confirmations
-- `project` — Project progress, decisions, bugs
-- `reference` — External resource pointers
+CLI memory distinguishes `user`, `feedback`, `project`, and `reference` records. Desktop also provides persistent notebooks and a local Knowledge Base for documents, sources, and retrieval. Memory is background context; personal information is persisted when requested, and daily-assistant candidates require user adoption.
 
 ### 6. Non-Invasive Multi-Agent Collaboration
 
-Via Intent Broker lifecycle hooks:
-- SessionStart / UserPromptSubmit / Stop
-- session_id / transcript_path context injection
-- auto-continue for multi-agent workflows
+| Mechanism | Use it for |
+|---|---|
+| SubAgent | Bounded independent work inside the current conversation |
+| KSwarm project | Persistent planning, task dispatch, independent review, recovery, and final delivery |
+| Intent Broker / Rooms | Coordination between agent runtimes and durable conversations with membership and message history |
+
+SubAgent tools include `spawn_agent`, `send_message`, `wait_agent`, `list_agents`, `followup_task`, `interrupt_agent`, and `close_agent` when allowed. Continuation reuses an instance; user opt-out, ask-first instructions, tool restrictions, and ownership boundaries still apply.
+
+The CLI can ask about material delegation choices when interactive input is available. Headless CLI and the current Desktop agent loop do not have that interactive question transport: optional delegation falls back to main-agent execution; essential missing decisions are reported before unapproved work starts.
 
 ---
 
@@ -622,43 +126,36 @@ Via Intent Broker lifecycle hooks:
 
 ### Requirements
 
-- **Node.js >= 22** — required since v1.4.30 (the bundled SQLite engine ships N-API prebuilds that target Node 22+)
-- macOS (Apple Silicon or Intel) or Windows x64 for the desktop app
+- **CLI:** Node.js **22 or later**.
+- **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
+- **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
+- Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.
 
 ### Install from npm
 
 ```bash
 npm install -g xiaokcode
-```
-
-Update to latest version:
-
-```bash
-xiaok update
-```
-
-After installation, run:
-
-```bash
+xiaok login
 xiaok
 ```
 
-The npm package name is `xiaokcode`, while the CLI command stays `xiaok`.
+The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
 
 ### From Source (Development)
 
 ```bash
-git clone https://github.com/kaisersong/xiaok-cli ~/.xiaok-cli
-cd ~/.xiaok-cli
-npm install
+git clone https://github.com/kaisersong/xiaok-cli.git
+cd xiaok-cli
+npm ci
 npm run build
+node dist/index.js
 ```
 
-Use the source install path only if you are developing on `xiaok-cli` itself or need a local git-backed checkout.
+This is sufficient for CLI development. Desktop source builds also use sibling repositories; follow [Related Projects](#related-projects) and [Development](#development). Use a new process after rebuilding; already running processes retain their loaded modules.
 
 ### Configuration
 
-**Global Config:** `~/.xiaok/config.json`
+Default config: `~/.xiaok/config.json`. `XIAOK_CONFIG_DIR` overrides the configuration root. Project settings live in `<repo>/.xiaok/settings.json`; keybindings default to `~/.xiaok/keybindings.json`.
 
 ```json
 {
@@ -712,72 +209,62 @@ Use the source install path only if you are developing on `xiaok-cli` itself or 
 }
 ```
 
-Version 1 configs are auto-migrated on load. You can also manage the catalog from CLI:
+Version 1 configuration is migrated on load. Manage providers and models through login, configuration commands, or Desktop settings:
 
 ```bash
-xiaok config set model anthropic
+xiaok login --provider kimi
 xiaok config set model kimi/k3
-xiaok config set api-key <key> --provider kimi
 xiaok config get providers
 xiaok config get models
+xiaok doctor --check-keys
 ```
 
 #### Kimi K3
 
-New Kimi configurations use the official wire model ID `k3`; `k3-256k` is also available as an exact K3 profile. Existing Kimi configurations keep their current model and are not migrated automatically. K3 defaults to a 262,144-token context window and `high` reasoning effort; Allegretto and higher plans can explicitly select the 1,048,576-token window. Reasoning effort supports `low`, `high`, and `max`—there is no `none` option because disabling reasoning routes to a different model.
+The built-in exact profiles use `k3` and `k3-256k`. Current defaults use a 262,144-token context and `high` reasoning effort; available context and effort controls are model/profile-specific.
 
-CLI and Desktop preserve Kimi's official `reasoning_content` by default, but only in task-local memory for the current provider conversation and tool chain. Raw reasoning and its provenance are stripped before durable session/task persistence and never enter terminal output, Desktop events, Canvas, ordinary logs, or tool-facing context. K3 resume, continue, and fork requests whose durable history already contains an assistant turn fail before any provider request or state mutation with `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`; a pre-bound session with no assistant turn is treated as a fresh conversation.
+CLI and Desktop preserve K3 `reasoning_content` only in task-local provider conversation memory. Raw reasoning is excluded from durable task/session history, user-visible events, ordinary logs, and tool-facing context. Durable resume/continue/fork histories that already contain an assistant turn are rejected with `KIMI_K3_DURABLE_RESUME_UNSUPPORTED`; start a new conversation for that profile.
 
-Accordingly, `preservedThinking` is default-on for exact `k3` and `k3-256k` profiles on both surfaces. Explicit `prompt_cache_key` emission remains default-off because no valid product-level paired evaluation has demonstrated the required benefit; Xiaok makes no explicit-key performance claim. The diagnostic opt-in remains `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1`.
-
-Desktop model settings expose the 262K/1M context and Low/High/Max effort controls for the active K3 model. Changing the model or reasoning effort invalidates Kimi's provider conversation state, so starting a new session is recommended after a switch. See the [official Kimi Code model documentation](https://www.kimi.com/code/docs/kimi-code/models) for current plan limits and model behavior.
-
-**Project Settings:** `<repo>/.xiaok/settings.json`
-
-**Keybindings:** `~/.xiaok/keybindings.json`
+Explicit Kimi `prompt_cache_key` emission remains disabled by default. `XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE=1` is a diagnostic opt-in, not a demonstrated performance benefit. Changing the model or reasoning effort requires a fresh provider conversation. See [model harness profiles](src/ai/providers/model-harness-profile.ts).
 
 ---
 
 ## Desktop App
 
-xiaok Desktop is a native macOS app that provides a GUI for the xiaok runtime. It shares the same backend as the CLI, but offers a sidebar for task history, canvas preview for generated files, and settings management.
+Desktop is the main graphical workbench, built with Electron and React. Main-process services own durable state and execution; the renderer displays structured state and sends requests through narrow preload/IPC APIs.
 
 ### Download
 
-Download from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases):
+Get the current published build from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The verified `desktop-v1.5.1` assets are:
 
-- **xiaok-1.5.1-arm64.dmg** — macOS DMG installer (Apple Silicon)
-- **xiaok-1.5.1-arm64-mac.zip** — macOS ZIP package (Apple Silicon)
-- **xiaok-setup-1.5.1.exe** — Windows installer (x64)
+- `xiaok-1.5.1-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.1-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.1.exe` — Windows x64 installer.
+
+The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
 ### Features
 
-- **Task Sidebar**: Browse recent tasks, switch between them with selection highlighting
-- **Canvas Preview**: Auto-open generated files (HTML, MD, PDF) in a side panel
-- **Project Management**: Kanban board with drag-and-drop, agent assignment, activity timeline
-- **KSwarm Multi-Agent**: Create, approve, recover, review, and deliver multi-agent projects from the UI
-- **Basic Dynamic Workflow**: Run project quick diagnosis, agent-backed review diagnosis, project-scoped High Quality workflows, and task-scoped manual workflow proposals as durable workflow runs with budget, cache, recovery, progress, Reviewer, artifact, and gate metadata
-- **Automations**: Create scheduled tasks, bind schedules to user loops, inspect run history, and open loop output files from the same surface
-- **Scheduled Tasks**: Create recurring tasks (hourly, daily, weekly, cron) with visible planned/actual execution timing in task transcripts
-- **Plugin System**: Install and manage MCP server plugins with enable/disable controls
-- **Self-Contained Plugin Runtimes**: Plugins that need Python run against a pinned interpreter shipped inside the app, verified at pack time by a content hash, so a plugin no longer depends on whatever Python the machine happens to have
-- **Host Capability Gateways**: Plugin providers reach host capabilities (files, notifications, rendering) through declared, individually revocable gateways instead of ambient access
-- **Component Retry**: Failed plugin components expose a single retry entry point that reports why the last attempt failed
-- **Graceful Remote-Access Degradation**: An expired mobile relay credential disables remote access only — it never blocks local work — and surfaces one actionable sign-in prompt instead of retrying forever
-- **i18n**: Full Chinese/English support with runtime locale switching
-- **Settings UI**: Configure model providers, skills, channels, MCP servers
-- **Auto-Update**: Automatic update notifications when new versions are released, with a sidebar upgrade reminder next to Settings
+- **Conversations and Goal Mode:** task history, prompt navigation, persistent objectives, pause/resume, and visible progress.
+- **SubAgent panel:** current-source managed collaboration with stable constellation names, assignments, activity, messages, and results.
+- **Preview / Canvas:** HTML, Markdown, PDF, report and slide previews, artifact editing, revisions, and task provenance; some advanced surfaces remain feature-gated.
+- **Projects and Rooms:** user-confirmed project creation from conversations, Kanban, workflow Graph, review gates, and recovery.
+- **Automations:** scheduled AI tasks, reminders, user loops, diagnostics, run history, and output previews.
+- **Knowledge and recording:** local document ingestion/retrieval, notebooks, recording/transcription, and editable notes; ASR capabilities depend on configured providers or installed local models.
+- **Plugins:** MCP tools, bundled report/slide/canvas/meeting capabilities, managed runtime readiness, component retry, and macOS Computer Use.
+- **Settings and access:** model/provider, skill, channel and plugin configuration, Chinese/English UI, themes, updates, and optional mobile companion access.
 
-### Development
+### Desktop Development
 
-To build the desktop app locally:
+Prepare the sibling repositories and dependencies first. From the repository root:
 
 ```bash
-cd desktop
-npm install
-npm run build
-npx electron-builder --mac --arm64
+npm ci --prefix desktop
+npm run build --prefix desktop
+npm run dev:all --prefix desktop
 ```
+
+A build alone does not replace an installed app. For unsigned local packaging and release prerequisites, see [Development](#development).
 
 ---
 
@@ -786,109 +273,76 @@ npx electron-builder --mac --arm64
 ### Commands
 
 ```bash
-# Interactive chat
-xiaok
-
-# Resume last session
-xiaok -c
-
-# Resume specific session
-xiaok --resume <session-id>
-
-# Single task
-xiaok "review the current workspace changes"
-
-# Diagnose API key resolution (which env var or config entry wins, and whether it works)
-xiaok doctor --check-keys
-
-# Update the CLI to the latest npm release
-xiaok update
-
-# Manage local daemon
-xiaok daemon start
-xiaok daemon status
-xiaok daemon stop
-
-# Start Yunzhijia IM gateway
-xiaok yzjchannel serve
+xiaok                              # Interactive chat
+xiaok login                        # Provider/key setup
+xiaok -c                           # Resume the last session, if supported by its model
+xiaok --resume <session-id>         # Resume a specific session
+xiaok "review workspace changes"   # Run a task
+xiaok doctor --check-keys           # Diagnose credential resolution
+xiaok update                       # Update the npm CLI
+xiaok daemon status                # Inspect the local daemon
+xiaok plugin search                # Browse plugins
+xiaok transcript <session-id>      # Inspect execution history
+xiaok yzjchannel serve             # Optional Yunzhijia gateway
 ```
 
 ### In-Session Commands
 
 ```text
 /exit                         Exit chat
-/clear                        Clear the screen
-/compact                      Compact the current conversation context
-/context                      Show loaded repo context
-/mode [default|auto|plan]     Show or switch permission mode
+/clear                        Clear screen and redisplay the welcome page
+/compact                      Compact earlier conversation context
+/context                      Show loaded repository context
+/mode [default|auto|plan]     Inspect or change permission mode
 /models                       Switch model
-/reminder <natural language>  Create a reminder
+/goal <objective>              Start a persistent goal
+/goal status|pause|cancel      Inspect, pause, or cancel the goal
+/goal resume [newTurnLimit]    Resume with an optional turn limit
+/goal replace <objective>      Replace the active goal
+/reminder <natural language>  Create a notification reminder
 /reminder list                List reminders
 /reminder cancel <id>         Cancel a reminder
-/settings                     Show active CLI settings
-/skills-reload                Reload installed skills
-/yzjchannel                   Connect the embedded Yunzhijia channel
+/settings                     Show CLI settings
+/skills-reload                Reload skills
+/yzjchannel                   Connect the embedded channel
 /help                         Show help
 /<skill-name> [args]          Invoke a skill
 ```
 
-`auto` mode auto-approves low-risk tool calls. It still asks for confirmation before high-risk Bash commands such as recursive deletion, hard resets, force pushes, database drops, and screen-automation shell fallbacks. Catastrophic Bash commands remain blocked by the Bash safety classifier.
+Permission mode is separate from user intent: `auto` does not answer an unresolved question or override “ask before delegating.”
 
 ### Terminal Keys & Inline Images
 
-```text
-Ctrl+O                        Open the full session transcript in $PAGER
-```
-
-`Ctrl+O` renders the whole session — user input, assistant replies, tool observations, command output — into a temporary ANSI file (mode `0600`, removed on exit) and hands it to `$PAGER` (default `less -R`). The pager owns stdin while open; the input line and footer are restored when it exits. The key is ignored while a turn is streaming or a permission prompt is waiting. On Windows, or when no usable pager exists, the transcript is printed to the scrollback instead.
-
-Submitted images are shown inline when the terminal supports it, via the kitty graphics protocol (PNG only) or the iTerm2 inline-image protocol, both detected at runtime. Terminals without support — tmux panes included — fall back to an `[Image <w>×<h>]` placeholder, and image escape sequences never reach the transcript log.
+- **Esc** requests interruption of the current running turn while preserving drafts and queued input.
+- **Ctrl+O** opens the full transcript in `$PAGER` (default `less -R`) when idle. The temporary ANSI file is private and removed on exit; unsupported environments fall back to scrollback.
+- Supported terminals display submitted images using kitty or iTerm2 protocols. Unsupported terminals, including tmux panes, use a placeholder.
+- SubAgent names use a uniform accent; CJK italics depend on terminal/font fallback and are not guaranteed by ANSI styling alone.
 
 ### Yunzhijia IM Commands
 
 ```text
 /help                    Show help
-/bind <cwd>              Bind workspace
-/bind clear              Clear workspace binding
-/status [taskId]         Check task status
-/approve <approvalId>    Approve pending action
-/deny <approvalId>       Deny pending action
-/cancel <taskId>         Cancel running task
-/skill <name> [args]     Invoke skill
+/bind <cwd>              Bind a workspace
+/bind clear              Clear the workspace binding
+/status [taskId]         Query task state
+/approve <approvalId>    Approve a pending action
+/deny <approvalId>       Deny a pending action
+/cancel <taskId>         Cancel a running task
+/skill <name> [args]     Invoke a skill
 ```
+
+Yunzhijia is an optional adapter, not a prerequisite for local CLI or Desktop work.
 
 ### Typical Workflows
 
-**Local Development:**
-
 ```bash
-# Initialize project
 xiaok init
-
-# Interactive development
-xiaok "add user authentication"
-
-# Code review
+xiaok "implement the requested change and verify it"
 xiaok review
-
-# Commit
 xiaok commit
 ```
 
-**Yunzhijia Integration (optional channel adapter):**
-
-```bash
-# Configure
-xiaok yzjchannel config set-webhook-url "https://..."
-
-# Start gateway
-xiaok yzjchannel serve
-
-# Use in Yunzhijia bot chat
-/help
-/bind /Users/song/projects/my-project
-/skill commit -m "fix: bug"
-```
+For reusable document work, install the relevant plugin and invoke its skill. For independent investigation, state the deliverables and constraints; the runtime can choose useful SubAgent work. For long-running objectives, use `/goal`. For recurring work, use Desktop Automations. For formal multi-agent project delivery, use a user-confirmed KSwarm project.
 
 ---
 
@@ -896,150 +350,240 @@ xiaok yzjchannel serve
 
 ### Core
 
-- **7-layer prompt architecture** — CC-style section functions, static/dynamic boundary, per-turn injection
-- **Provider catalogs + multi-model** — first-party profiles for Anthropic/OpenAI/Kimi/DeepSeek/GLM/MiniMax/Gemini plus custom endpoints
-- **Bash safety** — block/warn/safe 3-level classification
-- **Tool input validation** — JSON Schema validator before each call
-- **Typed memory** — user/feedback/project/reference classification
-- **Local daemon + reminders** — durable reminder scheduler on SQLite with daemon/client isolation
-- **Firecrawl keyless web search + scrape** — structured JSON search and markdown scrape without API key registration
+- Shared provider catalogs for Anthropic, OpenAI, Kimi, DeepSeek, GLM, MiniMax, Gemini, and custom endpoints.
+- Compact system policies with runtime-specific context, tool validation, permission modes, and scoped agent controls.
+- File/search/edit/shell tools, web search/scrape, LSP, durable goals, and session diagnostics.
+- Separate status for execution, logical close, and resource cleanup; stalled cancellation is visible rather than reported as physical release.
 
 ### Skill System
 
-- **3-tier skills** — Built-in, global, project-level
-- **Dependency resolution** — Auto-resolve skill dependencies
-- **allowed-tools** — Whitelist enforcement
-- **Install/uninstall** — Catalog reload
-- **Structured skill contracts** — `required-references`, `required-scripts`, `required-steps`, and `success-checks`
-- **Strict execution reliability** — execution bundles, evidence tracking, completion gates, and adherence evals
+- Built-in, global, project, and plugin-provided catalogs with dependency resolution and on-demand loading.
+- `allowed-tools` enforcement and runtime catalog refresh after install/uninstall.
+- Structured `required-references`, `required-scripts`, `required-steps`, and `success-checks` contracts.
+- Execution bundles, artifact evidence, completion checks, and adherence evaluations for strict skills.
 
 ### Built-in Agents
 
-| Agent | Role | Tools |
-|-------|------|-------|
-| Explore | Read-only exploration | read/grep/glob/bash(ls/git) |
-| Plan | Architecture only | read/grep/glob |
-| Verification | Adversarial testing | read/grep/glob/bash |
+| Agent | Role | Declared tools |
+|---|---|---|
+| Explore | Read-only repository investigation | read, grep, glob, bash, tool_search; its instructions restrict Bash to read-only inspection |
+| Plan | Architecture and implementation planning | read, grep, glob, tool_search |
+| Verification | Adversarial validation | read, grep, glob, bash, tool_search |
+
+Named presets are optional. Inline SubAgents can receive a bounded assignment and an explicit tool allowlist. Preset instructions, available tools, and runtime permissions are distinct layers.
 
 ### LSP Code Intelligence
 
-Built-in `lsp` tool:
-
-| Operation | Description |
-|-----------|-------------|
-| goToDefinition | Jump to symbol definition |
-| findReferences | Find all references |
-| hover | Show documentation/type info |
-| documentSymbol | List file symbols |
+`lsp` supports `goToDefinition`, `findReferences`, `hover`, and `documentSymbol`. A structural outline can guide targeted reads; syntactic fallback is not a substitute for semantic definitions or references.
 
 ### Session Management
 
-- **Auto-save** — Every session auto-saved
-- **Resume** — `xiaok -c` for last, `xiaok --resume <id>` for specific
-- **Session ID** — Shown on exit for traceability
+Automatic persistence, session IDs, resume where supported, scoped memory restoration, and honest cancellation preserve continuity. Model-specific history restrictions still apply, especially to strict Kimi K3 profiles.
 
 ### Performance & Large-Workload Reliability
 
-- **Streaming transcript analysis** — CLI transcript inspection parses JSONL incrementally instead of materializing the whole file. On a real 182 MB / 170,488-event transcript, peak RSS fell from about 1.29 GB to 108 MB (-91.6%) while wall time improved from about 0.51s to 0.40s.
-- **Safe transcript archival** — Inactive transcripts can be compressed explicitly with `xiaok transcript <sessionId> --gzip [--older-than-days N]`. Archival uses writer claims, immutable content-addressed gzip segments, validated manifests, transparent reads, and crash recovery; the same 182 MB transcript compressed to 2.56 MB (-98.60%).
-- **Incremental task snapshots** — Runtime task persistence appends checksummed journal records and creates geometric checkpoints instead of rewriting the complete snapshot for every event. Terminal snapshots remain compatible with legacy readers, and corrupt or divergent histories fail closed.
-- **Responsive Desktop startup** — Static bundled resources are deployed early, while managed Python discovery, environment preparation, and Python MCP connection are deferred until after the main window becomes interactive. Python tools remain unavailable until readiness is proven.
-- **Coalesced streaming rendering** — The first assistant delta renders immediately; later updates are coalesced to at most once every 80 ms and aligned with animation frames, reducing repeated React and Markdown work without dropping the terminal delta.
+- Incremental JSONL transcript analysis and explicit gzip archival: `xiaok transcript <session-id> --gzip --older-than-days 7`.
+- Checksummed task journals and checkpoints instead of full-snapshot rewrites on every event.
+- Deferred managed Python/plugin readiness work after the Desktop window becomes interactive.
+- Coalesced renderer deltas and bounded tool output with retained artifact references.
+- Reduced fixed system text while preserving skills, workspace guidance, permission boundaries, and delegation policy.
 
 ### Local Daemon & Reminders
 
-- **`xiaok daemon` host** — `start/status/stop/restart/update/serve`
-- **Per-user daemon** — multiple chat instances share one local daemon
-- **Durable reminders** — SQLite-backed store, recovery, retry, bound-session delivery
-- **Instance isolation** — daemon failure does not block chat startup, client failure does not crash daemon
+A per-user daemon provides durable SQLite-backed reminders, recovery and retries. Multiple CLI sessions can share it; daemon availability and chat startup remain separate. Notification reminders do not execute AI tasks.
 
 ### Yunzhijia IM Integration
 
-- **Embedded Channel** — `/yzjchannel` inside session
-- **WebSocket/Webhook** — Dual inbound mode support
-- **Approval handling** — Pending actions pushed to both ends
-- **Lifecycle management** — Cleanup with chat process
+Embedded `/yzjchannel`, WebSocket/webhook inbound modes, workspace binding, task status, approval forwarding, and cancellation bridge optional IM access to the runtime.
 
 ### Intent Broker Integration
 
-- **Lifecycle Hooks** — SessionStart / UserPromptSubmit / Stop
-- **Context injection** — session_id / transcript_path
-- **Auto-continue** — Multi-agent auto-resume
+Lifecycle hooks register sessions and project context, publish work-state, transport actionable tasks/questions and informational notes, replay events, and support controlled continuation. Message delivery is not evidence that task execution succeeded.
 
-### Evaluation System (v0.5.2)
+### Evaluation System
 
-**6 Categories (26 test cases):**
+Focused unit/contract suites cover prompts, tools, permissions, session history, cancellation, and artifact delivery. CLI process/TTY tests use a local SSE server; Desktop tests cover main services, IPC and renderer behavior. Live-model evaluations are separate from deterministic fixtures.
 
-| Category | Tasks | Description | Target |
-|----------|-------|-------------|--------|
-| Autonomy | 6 | File ops, refactoring | L4 (no asks) |
-| Investigation | 4 | Error diagnosis, debugging | L3 (≤1 ask) |
-| Clarification | 4 | Complex scenarios | L2-L3 |
-| Action | 4 | Direct execution | L4 |
-| Complex | 4 | Multi-step reasoning | L3 |
-| Safety | 4 | Destructive ops | L1 (should ask) |
-
-**Evaluation Dimensions:**
-- Autonomy (40%) — AskUserQuestion frequency
-- Efficiency (25%) — Step efficiency, token usage
-- Correctness (35%) — Task completion, code correctness
+Use `npm run eval:intent-delegation`, `npm run eval:skill-quality`, `npm run eval:skill-adherence`, and the scripts under `scripts/evals/` for the corresponding evaluation surfaces. Historical autonomy benchmarks are not current model-to-model guarantees.
 
 ---
 
 ## Architecture
 
 ```text
-src/
-  ai/
-    prompts/sections/    7 independent section functions
-    adapters/            Anthropic/OpenAI/OpenAI Responses adapters
-    agents/              Custom agent + built-in explore/plan/verification
-    memory/              Typed file-based memory
-    providers/           Provider profiles, protocol mapping, config normalization
-    runtime/             Agent runtime, compact runner
-    skills/              Skill loader, planner
-    tools/               read/write/edit/bash/grep/glob/web/lsp/reminders
-    permissions/         3-layer permission engine
-  channels/              Channel gateways, task/approval/session
-  commands/              CLI commands
-  platform/              MCP/LSP plugins, worktree isolation
-  runtime/daemon/        Shared local daemon host and control plane
-  runtime/reminder/      Reminder scheduler, SQLite store, daemon/client bridge
-  ui/                    Terminal UI: streaming markdown, status bar
+xiaok-cli/
+  src/
+    ai/              Models, prompts, skills, tools, agents, permissions, memory
+    commands/        CLI commands and chat/goal entry points
+    platform/        Runtime registries, MCP/LSP, worktrees, background execution
+    runtime/         Task host, goals, daemon, reminders, evidence and diagnostics
+    ui/              Terminal transcript, input, progress and SubAgent display
+    channels/        Optional channel adapters
+  desktop/
+    electron/        Main services, task/agent execution, stores, IPC and sidecars
+    renderer/        Conversations, SubAgent panel, projects, knowledge and artifacts
+    shared/          Shared Desktop contracts
+  data/              Built-in skills, agents and domain resources
+  tests/             CLI unit, contract and process/TTY tests
 ```
+
+### Related Projects
+
+| Repository | Responsibility | Xiaok boundary |
+|---|---|---|
+| [kswarm](https://github.com/kaisersong/kswarm) | Persistent project/task/workflow state, dispatch, review, recovery, artifact gates | Desktop main starts and calls the sidecar; agent runtimes execute its tasks |
+| [intent-broker](https://github.com/kaisersong/intent-broker) | Participants, aliases, events, handoffs, approvals, Rooms and replay | Transports coordination; it does not fabricate task results or own KSwarm project state |
+| [kai-xiaok-plugins](https://github.com/kaisersong/kai-xiaok-plugins) | Skills, MCP servers and bundled rendering/transcription resources | Supplies capabilities; Xiaok owns activation, permissions, task state and user-facing delivery |
+
+The current plugin manifests list report `2.3.0`, slide `3.3.0`, infinity canvas `0.2.0`, meeting assistant `0.1.0`, and Computer Use `0.2.1`. The meeting plugin provides Whisper fallback and summarization; Desktop owns microphone capture and its other ASR integrations. Computer Use stays macOS-only.
+
+Desktop source development expects sibling checkouts:
+
+```text
+projects/
+  xiaok-cli/
+  kswarm/
+  intent-broker/
+  kai-xiaok-plugins/
+```
+
+```bash
+git clone https://github.com/kaisersong/kswarm.git
+git clone https://github.com/kaisersong/intent-broker.git
+git clone https://github.com/kaisersong/kai-xiaok-plugins.git
+```
+
+Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) currently pins all three siblings to `desktop-v1.5.1`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
 
 ---
 
 ## Development
 
+From `xiaok-cli`:
+
 ```bash
-npm run build       # Build
-npm test            # Default sandbox + eval suite
-npm run test:skill:fast     # Fast skill regression suite
-npm run test:skill:release  # Release-only skill execution suite
-npm run test:watch  # Watch mode
-npm run dev -- --help  # Run from source
+npm ci
+npm run build
+npm test
+npm run test:full
+npm run test:skill:fast
+npm run test:skill:release
+npm run dev -- --help
 ```
+
+The default suite compiles tests to `.test-dist` and runs the sandbox configuration plus evaluations. `test:full` includes subprocess-dependent coverage excluded by the sandbox suite. Socket/subprocess tests need an environment that permits them.
+
+Prepare Desktop and sidecar dependencies:
+
+```bash
+npm ci --prefix ../kswarm
+npm ci --prefix ../intent-broker
+npm ci --prefix ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+npm run build --prefix ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer
+npm ci --prefix desktop
+npm run test --prefix desktop
+npm run typecheck --prefix desktop
+npm run build --prefix desktop
+```
+
+Plugin Python runtimes, wheels and other component dependencies must match the target platform and the plugin manifests. Follow the plugin repository's build instructions and the release workflow; copying another platform's wheelhouse is insufficient.
+
+For an **unsigned local package** on macOS (after the build and plugin preparation):
+
+```bash
+cd desktop
+CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --dir \
+  --config electron-builder.json \
+  -c.mac.identity=null \
+  -c.win.signAndEditExecutable=false
+```
+
+When changing related repositories, validate their own boundaries too:
+
+| Change | Required checks |
+|---|---|
+| KSwarm project/runtime/workflow | `npm test` and `npm run test:all` in `kswarm` |
+| Broker participant/adapter/collaboration | `npm test` and `npm run verify:collaboration` in `intent-broker` |
+| Report renderer | Build, bundle, and MCP initialize smoke test in its package |
+| Slide/Python plugin | Plugin tests, target-platform wheels and runtime verification |
+| Packaged sibling resources | Desktop packaging contracts, build, and inspect an unpacked app |
+
+From the `xiaok-cli` root, run Desktop packaging contracts:
+
+```bash
+npm run test --prefix desktop -- --run \
+  tests/main/kswarm-contract.test.ts \
+  tests/main/deploy-bundled-plugins.test.ts \
+  tests/main/e2e-plugin-bundling.test.ts \
+  tests/main/e2e-plugin-rendering.test.ts
+```
+
+Build freshness checks identify the owning generated resource; rebuild that owner instead of repeatedly retrying an unchanged package command. Formal releases additionally require matching pushed sibling snapshots, signing/notarization where applicable, and `npm run desktop:verify-release -- desktop-v<version>` after publication.
 
 ---
 
 ## Compatibility
 
-| Platform | Support |
-|----------|---------|
-| macOS | Full |
-| Linux | Full |
-| Windows | Partial (Hook limitations) |
+| Platform | CLI | Published Desktop | Computer Use |
+|---|---|---|---|
+| macOS Apple Silicon | Supported | DMG / ZIP | Supported with permissions |
+| macOS Intel | CLI/source use | No Intel asset in the verified latest release | macOS-only runtime requirements apply |
+| Windows x64 | Supported; terminal/hook details vary | Installer | Unavailable |
+| Linux | CLI/source use | Build targets exist; no asset in the verified latest release | Unavailable |
 
-| Provider / Protocol | Support |
-|---------------------|---------|
-| Anthropic | Streaming, prompt caching, image input |
-| OpenAI-compatible | Streaming, compatible endpoints, custom base URLs |
-| Gemini (`openai_responses`) | Responses API adapter, tools, thinking |
+| Provider / protocol | Runtime support |
+|---|---|
+| Anthropic | Streaming, tools, supported model images/caching |
+| OpenAI-compatible | Streaming, tool calls, custom endpoints and model-specific capabilities |
+| OpenAI Responses | Native Responses adapter for configured profiles |
+| Kimi K3 | Strict task-local reasoning/history contract; durable resume restrictions |
+
+Capabilities follow the selected model and endpoint. A listed provider does not mean every model supports images, reasoning controls, context sizes, or resume in the same way.
 
 ---
 
 ## Version History
+
+### v1.5.2 — Release preparation, September 8, 2026
+
+CLI and Desktop package metadata are **1.5.2**. This release prepares the following changes:
+
+- CLI/Desktop SubAgent spawning, messaging, waiting, and lifecycle controls with stable constellation codenames.
+- One shared Task / SubAgent / Canvas floating surface, corrected scrolling, readable output, and a homepage collaboration prompt.
+- Independent foreground/background execution lanes and explicit queued, approval, and execution status.
+- One bounded, tool-free summary continuation after an eligible stream disconnect, preserving completed child results without replaying tools. Already-failed historical tasks are not automatically rerun.
+- Registry/background-task lifecycle fixes and simplified system prompts. Non-cooperative in-process work remains visibly pending until resources actually settle.
+
+Build, signing, notarization, and release-asset verification are separate gates. See [GitHub Actions](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) for the actual build result.
+
+### Published baseline — v1.5.1
+
+Login bootstrap, Room/Gate collaboration, hosted Room-history access, automation and project-state recovery, and reproducible sibling packaging. Downloaded assets and npm metadata were checked on September 7, 2026. See [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) for release-specific artifacts and notes.
+
+<details>
+<summary>Earlier release history</summary>
+
+Historical release summaries; these are not current test or performance results.
+
+| Version | Main change |
+|---|---|
+| 1.5.0 | Room-first collaboration and user-confirmed project creation. |
+| 1.4.32 | Conversation navigation, Goal controls, model catalog and evidence recovery. |
+| 1.4.31 | Persistent Goal Mode and visible project-agent runtime recovery. |
+| 1.4.28 | Opt-in daily assistant and project team recommendations. |
+| 1.4.27 | Knowledge retrieval repair based on real corpus/query measurements. |
+| 1.4.26 | Structured tool failures remain failures through runtime normalization. |
+| 1.4.25 | Permission denials remain explicit failed tool calls. |
+| 1.4.24 | Kimi K3 harness profiles and task-local reasoning/history contracts. |
+| 1.4.23 | Task-owned Canvas artifact workspaces and preview layout. |
+| 1.4.22 | Chinese-first recording workflow and Computer Use recovery. |
+| 1.4.21 | Local AI recording entry point in the Knowledge Base. |
+| 1.4.20 | Loop output previews and task-completion integration. |
+| 1.4.19 | Explicit persisted loop contracts. |
+| 1.4.18 | Cost visibility, MCP recovery, and staged-skill diagnostics. |
+| 1.4.17 | Artifact persistence and release consistency. |
+| 1.4.16 | Artifact editing and Loop Engineering evidence. |
 
 **v1.4.9** — Knowledge Base and Automation refinement release: adds local-first Personal Knowledge Base with Collection/Source/Chunk model, PDF/docx/pptx/xlsx extraction, Chinese jieba segmentation search, and agent KB tools (kb_search, kb_get_source, kb_list_collections, kb_create_collection); loop edit/delete from the Automations panel; artifact preview fullscreen toggle with iframe allow-scripts and "send to chat"; clickable file paths in messages (Finder/Explorer); paste path detection fix; workflow status strip clipping fix; task_completion generic loops; cult-ui component foundation; direction-aware tabs animation; Kimi for Coding compatibility; and KSwarm stale service replacement on startup.
 
@@ -1130,3 +674,5 @@ npm run dev -- --help  # Run from source
 **v0.3.0** — Behavior governance & security: Bash safety classifier, tool input JSON Schema validation, built-in explore/plan/verification agents.
 
 **v0.2.0** — Runtime hardening & context intelligence: API retry with backoff, skill allowed-tools enforcement, tool result microcompaction, AI-driven compact.
+
+</details>

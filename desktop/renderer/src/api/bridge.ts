@@ -63,7 +63,7 @@ import type {
   UserLoopTemplateView,
 } from './types';
 import type { ChannelBindingResponse, ChannelIdentityResponse, Persona } from './types';
-import { getDesktopApi } from '../shared/desktop';
+import { getDesktopApi, isDesktop } from '../shared/desktop';
 
 // Declare window.xiaokDesktop with exact types from preload-api.ts
 declare global {
@@ -147,6 +147,31 @@ async function withStore<T>(
       tx.oncomplete = () => resolve(request.result);
     }
   });
+}
+
+/** The read/compare/write stays in one IndexedDB transaction, with no IPC await. */
+async function mutateStoredThread(id: string, mutate: (thread: ThreadRecord | null) => ThreadRecord | null): Promise<void> {
+  const db = await openDB();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(THREADS_STORE, 'readwrite'), store = tx.objectStore(THREADS_STORE);
+      let failure: unknown;
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(failure ?? tx.error);
+      tx.onabort = () => reject(failure ?? tx.error);
+      const request = store.get(id);
+      request.onsuccess = () => {
+        try {
+          const next = mutate(request.result ?? null);
+          if (next) store.put(next); else store.delete(id);
+        } catch (error) { failure = error; tx.abort(); }
+      };
+    });
+  } finally { db.close(); }
+}
+
+function threadTaskIdentity(thread: ThreadRecord | null): string {
+  return JSON.stringify(thread ? [thread.currentTaskId ?? null, thread.taskIds ?? []] : null);
 }
 
 // Local storage keys for starred threads
@@ -256,19 +281,18 @@ export const api = {
   },
 
   async updateThreadTitle(id: string, title: string): Promise<void> {
-    const thread = await api.getThread(id);
-    if (!thread) throw new Error(`Thread ${id} not found`);
-    thread.title = title;
-    thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
+    await mutateStoredThread(id, thread => {
+      if (!thread) throw new Error('thread_not_found');
+      return { ...withoutThreadCompatibility(thread), title, updatedAt: Date.now() };
+    });
   },
 
   async updateThreadSidebarState(
     id: string,
     state: { starred?: boolean; gtdBucket?: ThreadRecord['gtdBucket']; mode?: ThreadMode; sidebar_work_folder?: string | null }
   ): Promise<void> {
-    const thread = await api.getThread(id);
-    if (!thread) throw new Error(`Thread ${id} not found`);
+    await mutateStoredThread(id, thread => {
+    if (!thread) throw new Error('thread_not_found');
     if (state.starred !== undefined) {
       thread.starred = state.starred;
       thread.pinnedAt = state.starred ? Date.now() : null;
@@ -277,21 +301,58 @@ export const api = {
     if (state.mode !== undefined) thread.mode = state.mode;
     if (state.sidebar_work_folder !== undefined) thread.sidebar_work_folder = state.sidebar_work_folder;
     thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
+    return withoutThreadCompatibility(thread);
+    });
   },
 
   async updateThreadTaskId(id: string, taskId: string): Promise<void> {
-    const thread = await api.getThread(id);
-    if (!thread) throw new Error(`Thread ${id} not found`);
-    thread.currentTaskId = taskId;
-    if (!thread.taskIds.includes(taskId)) {
-      thread.taskIds.push(taskId);
-    }
-    thread.updatedAt = Date.now();
-    await withStore('readwrite', (store) => store.put(withoutThreadCompatibility(thread)));
+    await mutateStoredThread(id, thread => {
+      if (!thread) throw new Error('thread_not_found');
+      if (thread.deletionPending && (!(thread.taskIds ?? []).includes(taskId) || thread.currentTaskId !== taskId)) throw new Error('thread_deletion_pending');
+      return { ...withoutThreadCompatibility(thread), currentTaskId: taskId,
+        taskIds: [...new Set([...(thread.taskIds ?? []), taskId])], updatedAt: Date.now() };
+    });
   },
 
   async deleteThread(id: string): Promise<void> {
+    if (isDesktop()) {
+      const desktop = getDesktopApi();
+      if (!desktop?.getMultiAgentThreadDeletion || !desktop.deleteMultiAgentThread) {
+        throw new Error('thread_deletion_unavailable');
+      }
+      const thread = await api.getThread(id), identity = threadTaskIdentity(thread);
+      const snapshot = await desktop.getMultiAgentThreadDeletion({ threadId: id });
+      if (snapshot.threadId !== id || !Number.isSafeInteger(snapshot.threadRevision) || snapshot.threadRevision < 0) {
+        throw new Error('thread_deletion_unknown');
+      }
+      if (!thread && !(snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed')) throw new Error('thread_deletion_pending');
+      const taskIds = [...new Set([...(thread?.taskIds ?? []), ...(thread?.currentTaskId ? [thread.currentTaskId] : [])])];
+      const recoveringCompletion = thread?.deletionPending && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed';
+      for (let offset = 0; !recoveringCompletion && offset < taskIds.length; offset += 8) {
+        await Promise.all(taskIds.slice(offset, offset + 8).map(async taskId => {
+          if (!desktop.recoverTask) throw new Error('thread_deletion_unavailable');
+          const recovered = await desktop.recoverTask(taskId).catch(() => { throw new Error('thread_deletion_unknown'); });
+          if (recovered.snapshot?.context?.threadId !== id) throw new Error('thread_deletion_unavailable');
+        }));
+      }
+      if (thread) await mutateStoredThread(id, current => {
+        if (!current && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed') return null;
+        if (!current || threadTaskIdentity(current) !== identity) throw new Error('thread_deletion_pending');
+        return { ...current, deletionPending: true };
+      });
+      const result = snapshot.deleteState === 'deleted' ? snapshot.operation : await desktop.deleteMultiAgentThread({
+        threadId: id, expectedThreadRevision: snapshot.threadRevision,
+        operationId: `delete:${snapshot.threadRevision}:${crypto.randomUUID()}`, confirmTerminate: true,
+      });
+      if (result?.state !== 'completed') {
+        throw new Error(result?.state === 'cleanup_pending' ? 'thread_deletion_pending' : 'thread_deletion_unknown');
+      }
+      await mutateStoredThread(id, current => {
+        if (current && threadTaskIdentity(current) !== identity) throw new Error('thread_deletion_pending');
+        return null;
+      });
+      return;
+    }
     await withStore('readwrite', (store) => store.delete(id));
   },
 

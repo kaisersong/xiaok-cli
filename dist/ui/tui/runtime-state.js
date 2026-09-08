@@ -19,6 +19,9 @@ export class TuiRuntimeState {
     getSnapshot() {
         return { ...this.snapshot };
     }
+    isInteractivePromptActive() {
+        return this.interactivePromptDepth > 0;
+    }
     setSummarySource(summarySource) {
         this.snapshot.summarySource = summarySource;
     }
@@ -173,14 +176,16 @@ export class TuiRuntimeState {
         if (this.options.scrollRegion.isContentStreaming()) {
             return;
         }
-        const line = this.options.statusBar.getActivityLine(Date.now(), this.liveActivityFrame++);
+        const now = Date.now();
+        const line = this.options.statusBar.getActivityLine(now, this.liveActivityFrame++);
         if (!line) {
             return;
         }
         this.liveActivityVisible = true;
         this.snapshot.activityVisible = true;
         try {
-            this.options.scrollRegion.renderActivity(line);
+            const summary = this.options.getActivitySummary?.(now);
+            this.options.scrollRegion.renderActivity(summary ? `${summary}\n${line}` : line);
         }
         catch (error) {
             this.options.onSuspendInteractiveUi('render_live_activity', error);

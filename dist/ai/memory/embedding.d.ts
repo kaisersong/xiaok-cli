@@ -11,6 +11,7 @@ export declare class EmbeddingClient {
     private cache;
     private onnxEngine;
     private onnxStatus;
+    private onnxUnavailableWarned;
     constructor(db: Database.Database, config: EmbeddingConfig);
     private cacheKey;
     embed(text: string): Promise<Float32Array>;

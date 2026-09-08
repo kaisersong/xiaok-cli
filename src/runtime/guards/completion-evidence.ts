@@ -60,13 +60,13 @@ export function mergeCompletionExpectations(expectations: CompletionExpectation[
   };
 }
 
-export function validateCompletionEvidence(input: {
+export function* completionEvidenceFlow(input: {
   ownerKind: CompletionExpectation['ownerKind'];
   ownerId: string;
   targetStatus: string;
   expectation?: CompletionExpectation;
   evidence?: CompletionEvidenceRecord[];
-}): EvidenceValidationResult {
+}): EvidenceFlow {
   if (isBlockedStatus(input.targetStatus)) {
     return validateBlockedEvidence(input);
   }
@@ -111,7 +111,7 @@ export function validateCompletionEvidence(input: {
 
   let lastFailure: EvidenceValidationResult | undefined;
   for (const record of expectedEvidence) {
-    const result = validateEvidenceRecord(record);
+    const result = yield* validateEvidenceRecord(record);
     if (result.ok) {
       return result;
     }
@@ -136,7 +136,7 @@ function validateBlockedEvidence(input: {
   return { ok: true };
 }
 
-function validateEvidenceRecord(record: CompletionEvidenceRecord): EvidenceValidationResult {
+function* validateEvidenceRecord(record: CompletionEvidenceRecord): EvidenceFlow {
   if (!hasText(record.summary)) {
     return fail('validation_failed', 'Completion evidence requires a non-empty summary.');
   }
@@ -149,10 +149,10 @@ function validateEvidenceRecord(record: CompletionEvidenceRecord): EvidenceValid
       return { ok: true };
     case 'file_artifact':
       if (hasText(record.uri) || isNonEmptyStringArray(record.metadata?.paths)) {
-        return runStructuralCheck(resolveLocalArtifactPath(record));
+        return yield* runStructuralCheck(resolveLocalArtifactPath(record));
       }
       {
-        const localResult = validateLocalFileArtifactEvidence(record);
+        const localResult = yield* validateLocalFileArtifactEvidence(record);
         if (!localResult.ok) {
           return localResult;
         }
@@ -163,7 +163,7 @@ function validateEvidenceRecord(record: CompletionEvidenceRecord): EvidenceValid
         const firstPath = workspaceRoot && !isAbsolute(localPaths[0]!)
           ? resolve(workspaceRoot, localPaths[0]!)
           : localPaths[0]!;
-        return runStructuralCheck(firstPath);
+        return yield* runStructuralCheck(firstPath);
       }
       return fail('validation_failed', 'File artifact evidence requires a URI or paths metadata.');
     case 'command_action':
@@ -257,7 +257,7 @@ function isNoOpSummary(summary: string): boolean {
   return /\bno-?op\b|无变化/iu.test(summary);
 }
 
-function validateLocalFileArtifactEvidence(record: CompletionEvidenceRecord): EvidenceValidationResult {
+function* validateLocalFileArtifactEvidence(record: CompletionEvidenceRecord): EvidenceFlow {
   const localPaths = record.metadata?.localPaths;
   if (localPaths === undefined) {
     return { ok: true };
@@ -272,7 +272,7 @@ function validateLocalFileArtifactEvidence(record: CompletionEvidenceRecord): Ev
   const resolvedRoot = resolve(workspaceRoot);
   let realRoot: string;
   try {
-    realRoot = realpathSync.native(resolvedRoot);
+    realRoot = (yield { kind: 'realpath', path: resolvedRoot }) as string;
   } catch {
     return fail('validation_failed', 'File artifact evidence workspace root is missing.');
   }
@@ -288,10 +288,10 @@ function validateLocalFileArtifactEvidence(record: CompletionEvidenceRecord): Ev
       }
     }
     try {
-      if (lstatSync(resolvedPath).isSymbolicLink()) {
+      if (((yield { kind: 'lstat', path: resolvedPath }) as { isSymbolicLink(): boolean }).isSymbolicLink()) {
         return fail('validation_failed', `File artifact evidence local path is a symlink: ${localPath}`);
       }
-      const realPath = realpathSync.native(resolvedPath);
+      const realPath = (yield { kind: 'realpath', path: resolvedPath }) as string;
       const realRel = relative(realRoot, realPath);
       if (realRel.startsWith('..') || isAbsolute(realRel)) {
         return fail('validation_failed', `File artifact evidence local path escapes workspace: ${localPath}`);
@@ -299,7 +299,7 @@ function validateLocalFileArtifactEvidence(record: CompletionEvidenceRecord): Ev
     } catch {
       return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
     }
-    if (!existsSync(resolvedPath)) {
+    if (!(yield { kind: 'exists', path: resolvedPath })) {
       return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
     }
   }
@@ -334,7 +334,7 @@ function resolveLocalArtifactPath(record: CompletionEvidenceRecord): string | un
   return undefined;
 }
 
-function runStructuralCheck(localPath: string | undefined): EvidenceValidationResult {
+function* runStructuralCheck(localPath: string | undefined): EvidenceFlow {
   if (!localPath) {
     return { ok: true };
   }
@@ -342,10 +342,10 @@ function runStructuralCheck(localPath: string | undefined): EvidenceValidationRe
   if (!structKind) {
     return { ok: true };
   }
-  if (!existsSync(localPath)) {
+  if (!(yield { kind: 'exists', path: localPath })) {
     return { ok: true };
   }
-  const result = validateArtifactStructure(localPath, structKind);
+  const result = (yield { kind: 'structure', path: localPath, structuralKind: structKind }) as ReturnType<typeof validateArtifactStructure>;
   if (!result.ok) {
     return { ok: true, warning: `Artifact structural issue (${structKind}): ${result.error}` };
   }
@@ -354,4 +354,30 @@ function runStructuralCheck(localPath: string | undefined): EvidenceValidationRe
 
 function fail(failureKind: EvidenceValidationFailure, message: string): EvidenceValidationResult {
   return { ok: false, failureKind, message };
+}
+
+export type CompletionEvidenceInput = Parameters<typeof completionEvidenceFlow>[0];
+export type EvidenceEffect = { kind: 'exists' | 'realpath' | 'lstat'; path: string }
+  | { kind: 'structure'; path: string; structuralKind: 'pdf' | 'pptx' };
+export type EvidenceEffectResult = boolean | string | { isSymbolicLink(): boolean } | ReturnType<typeof validateArtifactStructure>;
+type EvidenceFlow = Generator<EvidenceEffect, EvidenceValidationResult, EvidenceEffectResult>;
+
+/** One rule flow, with distinct synchronous and asynchronous effect interpreters. */
+export function validateCompletionEvidence(input: CompletionEvidenceInput): EvidenceValidationResult {
+  const flow = completionEvidenceFlow(input);
+  let step = flow.next();
+  while (!step.done) {
+    let value: EvidenceEffectResult;
+    try {
+      const effect = step.value;
+      switch (effect.kind) {
+        case 'exists': value = existsSync(effect.path); break;
+        case 'realpath': value = realpathSync.native(effect.path); break;
+        case 'lstat': value = lstatSync(effect.path); break;
+        case 'structure': value = validateArtifactStructure(effect.path, effect.structuralKind); break;
+      }
+    } catch (error) { step = flow.throw(error); continue; }
+    step = flow.next(value);
+  }
+  return step.value;
 }

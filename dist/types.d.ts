@@ -62,6 +62,12 @@ export interface ToolExecutionContext {
         };
     };
     signal?: AbortSignal;
+    /** Main-only, one-invocation guard installed by ToolRegistry after approval.
+     * Never tool input, an IPC credential, or a reusable permission grant. */
+    assertPermissionApproval?: () => void;
+    /** Desktop scoped dispatch observer, appended only after provider projection.
+     * Not an input field or permission; called at the actual bound invocation. */
+    onToolInvocationStarted?: () => void;
     /** Host-only correlation fields. They are never part of tool input/model payloads. */
     toolInvocationId?: string;
     runtimeFactSink?: {
@@ -76,6 +82,13 @@ export interface ToolExecutionFact {
     normalizedFilePaths?: string[];
 }
 export type PermissionClass = 'safe' | 'write' | 'bash';
+/** A main approval port consumes its own input-bound grant synchronously.
+ * Boolean CLI decisions remain a distinct backwards-compatible policy. */
+export interface ToolPermissionGrant {
+    approved: true;
+    prepareInput(finalInput: Record<string, unknown>): Record<string, unknown>;
+    assertCurrent(): void;
+}
 export interface Tool {
     definition: ToolDefinition;
     permission: PermissionClass;

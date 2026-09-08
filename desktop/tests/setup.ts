@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { afterEach } from 'vitest'
+import { afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 
 // Windows holds transient locks on just-written files / just-closed SQLite
@@ -53,6 +53,13 @@ class ResizeObserverMock {
 
 if (typeof globalThis.ResizeObserver === 'undefined') {
   Object.assign(globalThis, { ResizeObserver: ResizeObserverMock });
+}
+
+// jsdom has no native element scrolling. This supplies only the callable API;
+// actual scroll geometry/overflow is verified by chat-scroll-layout.spec.ts in
+// Electron, not simulated by this unit-test stub.
+if (typeof Element !== 'undefined' && typeof Element.prototype.scrollTo !== 'function') {
+  Element.prototype.scrollTo = vi.fn();
 }
 
 function createMemoryStorage(): Storage {

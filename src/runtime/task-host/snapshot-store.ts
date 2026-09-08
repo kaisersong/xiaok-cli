@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { appendFile, mkdir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, opendir, readFile, rename, truncate, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ActiveTaskRef, DesktopTaskEvent, TaskSnapshot } from './types.js';
 
@@ -38,6 +38,12 @@ interface CachedSnapshot {
 
 export interface TaskSnapshotStoreDiagnostics {
   onWrite?: (operation: 'checkpoint' | 'journal' | 'index', bytes: number) => void;
+}
+
+/** Internal delivery continuation only; tracking is of unmodified physical IO. */
+export interface TaskSnapshotReadOptions {
+  signal: AbortSignal;
+  trackPending(raw: Promise<unknown>): void;
 }
 
 const CHECKPOINT_META_KEY = '__xiaokJournal';
@@ -85,15 +91,35 @@ export class FileTaskSnapshotStore {
     return tasks[0] ?? null;
   }
 
-  async recoverTask(taskId: string): Promise<TaskSnapshot | null> {
+  async recoverTask(taskId: string, options?: TaskSnapshotReadOptions): Promise<TaskSnapshot | null> {
+    options?.signal.throwIfAborted();
     const pendingWrite = this.taskWriteQueues.get(taskId);
-    if (pendingWrite) await pendingWrite;
+    if (pendingWrite) await waitSnapshotRead(() => pendingWrite, options);
+    options?.signal.throwIfAborted();
     const cached = this.cache.get(taskId);
     if (cached) return cached.snapshot;
-    const loaded = await this.loadSnapshotState(taskId);
+    const loaded = await this.loadSnapshotState(taskId, options);
+    options?.signal.throwIfAborted();
     if (!loaded) return null;
     this.cache.set(taskId, loaded);
     return loaded.snapshot;
+  }
+
+  /** Read-only legacy ownership check, including terminal tasks absent from the active index. */
+  async hasThreadHistory(threadId: string): Promise<boolean> {
+    let directory: Awaited<ReturnType<typeof opendir>>;
+    try { directory = await opendir(this.snapshotDir()); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+    for await (const entry of directory) {
+      if (!entry.name.endsWith('.json')) continue;
+      if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('task_history_owner_unknown');
+      // One checkpoint at a time. Do not recover every task into the runtime's
+      // snapshot cache or replay its history simply to establish ownership.
+      const snapshot = parseCheckpoint(await readFile(join(this.snapshotDir(), entry.name), 'utf8')).snapshot;
+      if (!snapshot || typeof snapshot.taskId !== 'string') throw new Error('task_history_owner_unknown');
+      if (snapshot.context?.threadId === threadId) return true;
+    }
+    return false;
   }
 
   async clearActiveTask(taskId: string): Promise<void> {
@@ -165,24 +191,27 @@ export class FileTaskSnapshotStore {
     await this.syncIndexForTransition(current.snapshot, snapshot);
   }
 
-  private async loadSnapshotState(taskId: string): Promise<CachedSnapshot | null> {
+  private async loadSnapshotState(taskId: string, options?: TaskSnapshotReadOptions): Promise<CachedSnapshot | null> {
     let raw: string;
     try {
-      raw = await readFile(this.snapshotPath(taskId), 'utf8');
+      raw = await waitSnapshotRead(() => readFile(this.snapshotPath(taskId), 'utf8'), options);
     } catch (error) {
+      options?.signal.throwIfAborted();
       if (isNodeErrorCode(error, 'ENOENT')) return null;
       throw error;
     }
-
+    options?.signal.throwIfAborted();
     const checkpoint = parseCheckpoint(raw);
 
     let journalRaw: string;
     try {
-      journalRaw = await readFile(this.journalPath(taskId), 'utf8');
+      journalRaw = await waitSnapshotRead(() => readFile(this.journalPath(taskId), 'utf8'), options);
     } catch (error) {
+      options?.signal.throwIfAborted();
       if (isNodeErrorCode(error, 'ENOENT')) return checkpoint;
       throw error;
     }
+    options?.signal.throwIfAborted();
     return replayJournal(checkpoint, journalRaw, taskId);
   }
 
@@ -256,6 +285,28 @@ export class FileTaskSnapshotStore {
   private tempPath(target: string): string {
     return `${target}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   }
+}
+
+function waitSnapshotRead<T>(start: () => Promise<T>, options?: TaskSnapshotReadOptions): Promise<T> {
+  if (!options) return start();
+  const { signal, trackPending } = options;
+  signal.throwIfAborted();
+  const raw = start(); // Deliberately do not pass AbortSignal into the raw IO.
+  trackPending(raw);
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    raw.then(value => {
+      signal.removeEventListener('abort', abort);
+      if (signal.aborted) reject(signal.reason); else resolve(value);
+    }, error => {
+      signal.removeEventListener('abort', abort);
+      reject(signal.aborted ? signal.reason : error);
+    });
+    // A synchronous tracker may observe cancellation while registering the raw
+    // obligation. Never install a waiter which missed that cancellation.
+    if (signal.aborted) abort();
+  });
 }
 
 /**

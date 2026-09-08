@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -112,7 +112,17 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ChatShell } from '../../renderer/src/components/ChatShell';
 import { _resetDesktopApiCache } from '../../renderer/src/shared/desktop';
 
+beforeEach(() => {
+  // This suite exercises the wide chat layout. Unlike the global no-op mock,
+  // report the measured region so production responsive behavior is exercised.
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe() { this.callback([{ contentRect: { width: 1200 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+    unobserve() {} disconnect() {}
+  });
+});
 afterEach(() => {
+  vi.unstubAllGlobals();
   cleanup();
   vi.clearAllMocks();
   window.localStorage.clear();
@@ -155,7 +165,8 @@ describe('ChatShell draft prompt navigation state', () => {
     expect(await screen.findByTestId('task-panel')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'open-canvas' }));
     expect(await screen.findByTestId('canvas-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('task-panel')).not.toBeInTheDocument();
+    // The unified surface keeps inactive view drafts mounted but inaccessible.
+    expect(screen.getByTestId('task-panel')).not.toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'close-canvas' }));
     expect(await screen.findByTestId('task-panel')).toBeInTheDocument();

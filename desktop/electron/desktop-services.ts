@@ -1,9 +1,11 @@
 import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
 import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
-import { homedir, platform, arch, type } from 'node:os';
+import { homedir, platform } from 'node:os';
+import { buildDesktopSystemPrompt, VISUAL_PDF_EXPORT_GUIDANCE } from './desktop-system-prompt.js';
 import { spawnSync, execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { parseGoalRequestId, type GoalAttachmentRequest } from '../shared/goal-attachment.js';
 import { bumpSkillCatalogVersion, getSkillCatalogVersion } from './skill-catalog-invalidation.js';
 import { createAdapter, createAdapterFromBinding } from '../../src/ai/models.js';
 import type { ModelInvocationOptions, StreamOptions } from '../../src/ai/runtime/model-capabilities.js';
@@ -33,8 +35,19 @@ import type {
 import { MaterialRegistry } from '../../src/runtime/task-host/material-registry.js';
 import { FileTaskSnapshotStore } from '../../src/runtime/task-host/snapshot-store.js';
 import { InProcessTaskRuntimeHost, type TaskRunner, type TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
+import { loadCustomAgents } from '../../src/ai/agents/loader.js';
+import { PermissionManager } from '../../src/ai/permissions/manager.js';
+import { DesktopMultiAgentStore } from './desktop-multi-agent-store.js';
+import { DesktopMultiAgentService, type DesktopAgentExecutionContext, type DesktopHostDeliveryAuthority } from './desktop-multi-agent-service.js';
+import { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approval-transport.js';
+import { DesktopMultiAgentRuntime } from './desktop-multi-agent-runtime.js';
+import { getDesktopDelegationPolicy } from './desktop-delegation-policy.js';
+import { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
+import { DesktopMultiAgentWorktrees } from './desktop-multi-agent-worktrees.js';
+import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from './desktop-multi-agent-catalog-bridge.js';
+import { DesktopMcpCatalogRegistration } from './desktop-mcp-catalog-registration.js';
 import { projectRuntimeEventsToDesktopEvents } from '../../src/runtime/task-host/event-projection.js';
-import type { ArtifactSummary, DesktopTaskEvent, MaterialRecord, MaterialRole, TaskCreateContext, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
+import type { ArtifactSummary, DesktopTaskEvent, MaterialRecord, MaterialRole, TaskCreateContext, TaskCreateInput, TaskSnapshot, TaskUnderstanding } from '../../src/runtime/task-host/types.js';
 import type { RuntimeEvent } from '../../src/runtime/events.js';
 import { diagnoseTraceBundle } from '../../src/runtime/diagnostics/diagnoser.js';
 import { diagnoseProjectSnapshot } from '../../src/runtime/diagnostics/project-diagnoser.js';
@@ -48,6 +61,8 @@ import {
   writeTraceBundleToPath,
 } from '../../src/runtime/trace/exporter.js';
 import type { Config, Message, MessageBlock, ModelAdapter, StreamChunk, ToolCall, ToolDefinition, ToolExecutionContext } from '../../src/types.js';
+import type { DesktopMailboxPort } from '../shared/multi-agent-types.js';
+import { DesktopMultiAgentIterationLimitError } from './desktop-multi-agent-mailbox.js';
 import { buildToolList, isSuccessfulModelToolResult, ToolRegistry } from '../../src/ai/tools/index.js';
 import { createGoalTools } from '../../src/ai/tools/goal.js';
 import type { GoalInput } from '../../src/runtime/goal/types.js';
@@ -68,10 +83,12 @@ import { ConnectorsStore } from './connectors-store.js';
 import { maybePersistToolResult, buildViewForAPI, shouldAutoCompact, compactConversation, getContextLimit } from './context-manager.js';
 import {
   normalizeMcpRuntimeToolResult,
+  type McpInvocationOptions,
 } from '../../src/ai/mcp/runtime/client.js';
 import type { McpToolSchema } from '../../src/ai/mcp/client.js';
 import { buildMcpRuntimeTools } from '../../src/ai/mcp/runtime/tools.js';
 import {
+  callMcpToolWithSignal,
   createMcpClientConnection,
   getMcpConnectionStderrTail,
   resolveMcpCatalogTimeoutMs,
@@ -127,7 +144,7 @@ import {
   type PreparedGoalTask,
 } from './desktop-goal-coordinator.js';
 import { SqliteGoalStore } from './goal-store-sqlite.js';
-import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js';
+import { DesktopExecutionCoordinator, withExecutionLane } from './desktop-execution-coordinator.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -419,7 +436,11 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  /** Main-owned embedding/profile path; never accepted from renderer or tools. */
+  knowledgeDbPath?: string;
   dataRoot: string;
+  /** Main-owned working directory, never copied from renderer task input. */
+  workspaceRoot?: string;
   now?: () => number;
   runner?: TaskRunner;
   kswarmService: KSwarmService;
@@ -758,7 +779,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     now: options.now,
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
-  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator();
+  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
   const coordinateRunner = (runner: TaskRunner): TaskRunner => input => (
     executionCoordinator.run(input.signal, () => runner(input))
   );
@@ -775,7 +796,39 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
   let goalCoordinator: DesktopGoalCoordinator | undefined;
   const tools = buildToolList();
-  const registry = new ToolRegistry({ autoMode: true }, tools);
+  const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools);
+  const staticGatewayNames = new Set(options.pluginProviderRuntime ? createAllHostGateways(options.pluginProviderRuntime).map(tool => tool.definition.name) : []);
+  const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
+  const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
+  const multiAgentWorkspaceId = createHash('sha256').update(multiAgentCwd).digest('hex');
+  // Unknown injected runners and every non-local host remain ordinary.
+  const multiAgentStore = options.runner ? undefined : new DesktopMultiAgentStore(join(options.dataRoot, 'multi-agent', 'groups.sqlite'));
+  const multiAgentCatalog = multiAgentStore ? new DesktopToolCatalogBridge({ registry, workspaceId: multiAgentWorkspaceId,
+    getService: () => multiAgentService }) : undefined;
+  const multiAgentWorktrees = multiAgentStore ? new DesktopMultiAgentWorktrees({ store: multiAgentStore }) : undefined;
+  let multiAgentRuntime: DesktopMultiAgentRuntime | undefined;
+  const multiAgentService = multiAgentStore ? new DesktopMultiAgentService({ store: multiAgentStore, coordinator: executionCoordinator,
+    worktrees: multiAgentWorktrees,
+    executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
+      actorId: `desktop-user:${multiAgentProfileId}` }),
+    onExecutionAuthorizationChanged: snapshot => multiAgentCatalog!.applyExecutionAuthorization(snapshot),
+    stopForWorkspaceExecutionRevocation: () => {
+      if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
+      return goalCoordinator.stopForWorkspaceExecutionRevocation({ requestSource: 'user' });
+    },
+    onRecoveredHostTerminal: async input => {
+      if (input.snapshot.executionScope?.kind !== 'goal_turn') return;
+      if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
+      await goalCoordinator.handleRecoveredHostTerminal(input);
+    },
+    beforeThreadDeletion: async threadId => {
+      if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
+      await goalCoordinator.stopForThreadDeletion({ threadId, requestSource: 'user' });
+    },
+    hasUnboundHistory: async threadId => Boolean(await goalStore.load(threadId)) || await snapshotStore.hasThreadHistory(threadId),
+    createSession: input => multiAgentRuntime!.createSession(input) }) : undefined;
+  const multiAgentApprovals = multiAgentService ? new DesktopMultiAgentApprovalTransport({ store: multiAgentStore!, service: multiAgentService }) : undefined;
+  if (multiAgentService) multiAgentRuntime = new DesktopMultiAgentRuntime({ service: multiAgentService, worktrees: multiAgentWorktrees, approvals: multiAgentApprovals });
   const initialPlanBootstrapStore = new JsonKSwarmInitialPlanBootstrapStore(options.dataRoot);
   const initialPlanBootstrapQueue = new KSwarmInitialPlanBootstrapQueue(
     initialPlanBootstrapStore,
@@ -801,7 +854,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const kbUserData = process.platform === 'win32'
       ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'xiaok-desktop')
       : join(homedir(), 'Library', 'Application Support', 'xiaok-desktop');
-    const kbDbPath = join(kbUserData, 'knowledge.db');
+    const kbDbPath = options.knowledgeDbPath ?? join(kbUserData, 'knowledge.db');
     kbStore = createKbStoreSqlite(kbDbPath);
     const kbRetriever = createKbRetriever({ db: (kbStore as any)._db ?? ({} as any), embedFn: () => null });
     const kbSourceExtractor = createSourceExtractor({ officeParser: officeDocumentParser });
@@ -844,7 +897,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
    */
   const reservedServerHandles = new Map<string, {
     listOperations: () => Promise<readonly string[]>;
-    call: (name: string, input: Record<string, unknown>) => Promise<string>;
+    call: (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => Promise<string>;
     close: () => Promise<void>;
   }>();
   const pluginDependencies = options.pluginDependencies ?? [
@@ -864,7 +917,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     onRecoverableError: (error) => {
       markComputerUseRecoverableFailure(error);
     },
-    callToolResult: (name, input) => {
+    callToolResult: (name, input, options) => {
+      options?.signal?.throwIfAborted();
       if (!computerUseBackend) {
         return Promise.resolve({
           text: computerUseUnavailableError.message,
@@ -873,7 +927,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           summary: computerUseUnavailableError.code,
         });
       }
-      return computerUseBackend.callToolResult(name, input);
+      return computerUseBackend.callToolResult(name, input, options);
     },
   }));
 
@@ -1108,13 +1162,19 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               undefined,
               { timeout: catalogTimeout },
             )).tools as McpToolSchema[];
-            const callToolResult = async (name: string, input: Record<string, unknown>) =>
-              normalizeMcpRuntimeToolResult(await connection.client.callTool(
+            const callToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => {
+              const result = await callMcpToolWithSignal(connection.client,
                 { name, arguments: input },
-                { timeout: callTimeout },
-              ));
-            const callTool = async (name: string, input: Record<string, unknown>) =>
-              (await callToolResult(name, input)).text;
+                { timeout: callTimeout, signal: options?.signal },
+              );
+              options?.signal?.throwIfAborted();
+              return normalizeMcpRuntimeToolResult(result);
+            };
+            const callTool = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => {
+              const result = await callToolResult(name, input, options);
+              options?.signal?.throwIfAborted();
+              return result.text;
+            };
             if (server.name === 'slide-renderer' || server.name === 'report-renderer') {
               reservedServerHandles.set(server.name, {
                 listOperations: async () => schemas.map((schema) => schema.name),
@@ -1151,8 +1211,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               );
               toolCount = mcpTools.length;
             }
+            let catalogRegistration: DesktopMcpCatalogRegistration<McpToolSchema> | undefined;
+            if (server.name !== 'cua-driver') {
+              catalogRegistration = new DesktopMcpCatalogRegistration({ registry, connection, ownerId: `mcp:${plugin.name}:${server.name}`,
+                listSchemas: async () => (await connection.client.listTools(undefined, { timeout: catalogTimeout })).tools as McpToolSchema[],
+                buildTools: next => buildMcpRuntimeTools({ name: server.name, command: server.command }, { listTools: async () => next, callTool, dispose: connection.dispose }, next)
+                  .filter(tool => !staticGatewayNames.has(tool.definition.name)),
+                onChanged: current => { const view = pluginMcpServers.find(item => item.name === server.name && item.pluginName === plugin.name); if (view) view.toolCount = current.length; },
+                onDisconnected: () => { const view = pluginMcpServers.find(item => item.name === server.name && item.pluginName === plugin.name); if (view) { view.connected = false; view.toolCount = 0; } },
+              });
+              try { await catalogRegistration.refresh(); } catch (error) { catalogRegistration.dispose(); throw error; }
+            }
             for (const tool of mcpTools) {
-              registry.registerTool(tool);
               if (
                 plugin.name === 'kai-slide-creator'
                 && server.name === 'slide-renderer'
@@ -1173,6 +1243,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               name: server.name,
               pluginName: plugin.name,
               dispose: () => {
+                catalogRegistration?.dispose();
                 if (server.name === 'cua-driver') {
                   computerUseBackend = null;
                   computerUseUnavailableError = buildComputerUseNeedsEnablementError();
@@ -1283,6 +1354,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     {
       officeToMarkdown: input => officeDocumentParser.parse(input),
       ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
+      ...(multiAgentRuntime ? { multiAgent: { runtime: multiAgentRuntime, service: multiAgentService!, catalog: multiAgentCatalog!, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } } : {}),
     },
   );
   const restrictedArtifactRunner = createDesktopModelRunnerWithRegistry(
@@ -1297,12 +1369,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       officeToMarkdown: input => officeDocumentParser.parse(input),
     },
   );
+  const localChatDescriptor = Object.freeze({ kind: 'localChat' as const, multiAgent: Boolean(multiAgentRuntime), invoke: defaultDesktopRunner });
+  const localGoalDescriptor = Object.freeze({ kind: 'localGoal' as const, multiAgent: Boolean(multiAgentRuntime), invoke: defaultDesktopRunner });
+  const ordinaryRunner = coordinateRunner(options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
+    ? restrictedArtifactRunner(input) : defaultDesktopRunner(input)));
+  let hostDeliveryAuthority: DesktopHostDeliveryAuthority | undefined;
   const host = new InProcessTaskRuntimeHost({
     materialRegistry,
     snapshotStore,
-    runner: coordinateRunner(options.runner ?? (input => input.executionScope?.kind === 'artifact_workspace_generation'
-      ? restrictedArtifactRunner(input)
-      : defaultDesktopRunner(input))),
+    runner: input => {
+      const prepared = multiAgentStore?.getRootBinding(input.taskId);
+      if (!prepared) return ordinaryRunner(input);
+      const descriptor = input.executionScope?.kind === 'goal_turn' ? localGoalDescriptor : localChatDescriptor;
+      if (!descriptor.multiAgent || input.executionScope && input.executionScope.kind !== 'goal_turn') return Promise.reject(new Error('unsupported multi-agent runner'));
+      return multiAgentService!.runRoot(input, context => descriptor.invoke(input, context));
+    },
+    authorizePreparation: (taskId, marker) => { if (!multiAgentService) throw new Error('multi_agent_unsupported_runner'); multiAgentService.assertHostPreparation(taskId, marker); },
+    assertTaskAdmission: snapshot => multiAgentService?.assertHostAdmission(snapshot),
+    decideCancellation: (snapshot, reason) => multiAgentService?.decideHostCancellation(snapshot, reason) ?? Promise.resolve({ hostAbortAllowed: true }),
+    getExecutionPolicy: snapshot => ({ deliveryRepair: multiAgentStore?.getRootBinding(snapshot.taskId) ? 'explicit' : 'automatic' }),
+    onDeliveryReport: async report => {
+      if (!multiAgentService || !hostDeliveryAuthority) throw new Error('multi_agent_host_delivery_owner_unavailable');
+      return multiAgentService.recordHostDelivery({ requestSource: 'scheduler', authority: hostDeliveryAuthority, report });
+    },
+    authorizeDeliveryRecovery: input => {
+      if (!multiAgentService) throw new Error('multi_agent_unsupported_runner');
+      multiAgentService.assertDeliveryRecovery(input);
+    },
     now: options.now,
     aheGuards: { artifactEvidence: true, recoveryContinuity: true },
     // Use timestamp + random suffix to ensure unique taskId across app restarts.
@@ -1325,9 +1418,29 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
   });
 
+  const prepareMultiAgentThread = async (threadId: string): Promise<void> => {
+    await multiAgentReady;
+    await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user');
+  };
+  const localTaskHost = multiAgentService ? {
+    prepareTask: async (input: TaskCreateInput) => {
+      await multiAgentReady;
+      if (input.executionScope && input.executionScope.kind !== 'goal_turn') return host.prepareTask(input);
+      const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
+      await prepareMultiAgentThread(threadId);
+      return multiAgentService.prepareRoot(host, threadId, input);
+    },
+    startTask: host.startTask.bind(host), cancelTask: host.cancelTask.bind(host),
+  } : host;
   goalCoordinator = new DesktopGoalCoordinator({
     store: goalStore,
-    taskHost: host,
+    taskHost: localTaskHost,
+    multiAgent: multiAgentService,
+    prepareThread: prepareMultiAgentThread,
+    authorizeRecoveredDelivery: input => {
+      if (!multiAgentService) throw new Error('multi_agent_unsupported_runner');
+      multiAgentService.assertDeliveryRecovery(input);
+    },
     instanceId: `desktop_${randomUUID()}`,
     now: options.now,
     publishGoalChanged: input => {
@@ -1336,6 +1449,32 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     publishGoalTaskPrepared: input => {
       for (const listener of goalTaskPreparedListeners) listener(input);
     },
+  });
+  // Goal construction only installs its owner; recovery can now await its real
+  // receipt before the same ready Promise opens any local task admission.
+  const multiAgentReady = multiAgentService?.initialize(host) ?? Promise.resolve();
+  let multiAgentStartupReady = !multiAgentService;
+  if (multiAgentService) hostDeliveryAuthority = multiAgentService.bindHostDeliveryOwner(host);
+  // Keep initialization failure observable by every admission path, without an
+  // unhandled rejection when the window has not submitted its first task yet.
+  void multiAgentReady.then(() => { multiAgentStartupReady = true; }, () => {});
+  // Ready callers must enter Goal synchronously so its original permission
+  // revision is captured before any queued revoke/regrant can run.
+  const afterLocalRecovery = <T>(action: () => Promise<T>): Promise<T> => (
+    multiAgentStartupReady ? action() : multiAgentReady.then(action)
+  );
+  // The local host already creates this ID for unthreaded Chat. Capture it at
+  // the public admission boundary so Goal can fence the same request across IO.
+  const localChatContext = (context?: TaskCreateContext): TaskCreateContext | undefined => (
+    multiAgentService ? { ...context, threadId: context?.threadId || `local_${randomUUID()}` } : context
+  );
+  const unsubscribeMultiAgentGoal = multiAgentStore?.subscribe(event => {
+    if (!['status', 'result', 'message_consumed'].includes(event.kind)) return;
+    const threadId = multiAgentStore.requireGroup(event.groupId).threadId;
+    // Same durable source as the Agents panel; no renderer/Goal polling owner.
+    void goalCoordinator!.getGoal(threadId).then(goal => {
+      if (goal) for (const listener of goalChangedListeners) listener({ threadId, goal });
+    }).catch(error => console.warn('[goal] child projection failed:', error instanceof Error ? error.message : String(error)));
   });
   for (const tool of createGoalTools(goalCoordinator.createRegistryGoalToolHost())) {
     registry.registerTool(tool);
@@ -1899,6 +2038,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   return {
+    multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
+    async disposeMultiAgent(): Promise<void> {
+      unsubscribeMultiAgentGoal?.();
+      await multiAgentApprovals?.dispose();
+      await multiAgentService?.dispose(); multiAgentCatalog?.dispose();
+      // A never-settled owner still needs its journal until process exit.
+      if (executionCoordinator.snapshot().active === 0 && !multiAgentService?.runtimeStatus().blocked) multiAgentStore?.close();
+    },
     parseOfficeDocument(input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) {
       return officeDocumentParser.parse(input);
     },
@@ -2100,10 +2247,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!runtime?.start) return { started: false, reason: 'no_provider_runtime' };
       const bridge: ReservedProviderBridge = {
         listOperations: async (server) => reservedServerHandles.get(server)?.listOperations() ?? [],
-        call: async (server, request) => {
+        call: async (server, request, signal) => {
+          signal?.throwIfAborted();
           const handle = reservedServerHandles.get(server);
           if (!handle) throw new Error(`provider_unavailable: ${server} has no live connection`);
-          return handle.call(request.operation, request.input);
+          const result = await handle.call(request.operation, request.input, { signal });
+          signal?.throwIfAborted();
+          return result;
         },
         close: async (server) => { await reservedServerHandles.get(server)?.close(); },
       };
@@ -2355,22 +2505,30 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       filePaths: string[];
       context?: TaskCreateContext;
     }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
-      mkdirSync(options.dataRoot, { recursive: true });
-      const taskId = `task_${Date.now().toString(36)}`;
-      const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
-      for (const filePath of input.filePaths) {
-        try {
-          const record = await materialRegistry.importMaterial({
-            taskId,
-            sourcePath: filePath,
-            role: 'customer_material',
-            roleSource: 'user',
-          });
-          materials.push({ materialId: record.materialId, role: record.role });
-        } catch (e) {
+      return afterLocalRecovery(async () => {
+        const context = localChatContext(input.context);
+        const permissionRevision = context?.threadId ? multiAgentService?.assertExecutionAdmission(context.threadId) : undefined;
+        mkdirSync(options.dataRoot, { recursive: true });
+        const taskId = `task_${Date.now().toString(36)}`;
+        const materials: Array<{ materialId: string; role?: MaterialRole }> = [];
+        for (const filePath of input.filePaths) {
+          try {
+            const record = await materialRegistry.importMaterial({
+              taskId,
+              sourcePath: filePath,
+              role: 'customer_material',
+              roleSource: 'user',
+            });
+            materials.push({ materialId: record.materialId, role: record.role });
+          } catch (e) {
+          }
+          // Import failures keep their original skip behavior, but neither a
+          // success nor a failure may advance an old submission after revoke.
+          if (context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
         }
-      }
-      return goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context: input.context });
+        if (context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
+        return goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context });
+      });
     },
     async getModelConfig() {
       return createModelConfigSnapshot(await loadConfig());
@@ -2609,15 +2767,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       await saveConfig(config);
     },
-    createTask: (input: Parameters<typeof host.createTask>[0]) => goalCoordinator.admitUserTask(input),
+    createTask: (input: Parameters<typeof host.createTask>[0]) => afterLocalRecovery(() => goalCoordinator.admitUserTask(
+      multiAgentService ? { ...input, context: localChatContext(input.context) } : input,
+    )),
+    /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
+    createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'>) =>
+      withExecutionLane('background', () => afterLocalRecovery(() => goalCoordinator.admitUserTask({
+        prompt: input.prompt, materials: input.materials, permissionMode: input.permissionMode,
+        watchdogMs: input.watchdogMs, maxToolLoopIterations: input.maxToolLoopIterations,
+        context: localChatContext(),
+      }))),
     getGoal: (threadId: string) => goalCoordinator.getGoal(threadId),
-    createGoal: (input: { threadId: string } & GoalInput) => goalCoordinator.createGoal(input),
+    createGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest) => {
+      const requestId = parseGoalRequestId(input.requestId);
+      return afterLocalRecovery(() => goalCoordinator.createGoal({ ...input, requestId }));
+    },
     pauseGoal: (threadId: string) => goalCoordinator.pauseGoal({ threadId }),
-    resumeGoal: (input: { threadId: string; turnLimit?: number }) => goalCoordinator.resumeGoal(input),
+    resumeGoal: (input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest) => {
+      const requestId = parseGoalRequestId(input.requestId);
+      return afterLocalRecovery(() => goalCoordinator.resumeGoal({ ...input, requestId }));
+    },
     cancelGoal: (threadId: string) => goalCoordinator.cancelGoal({ threadId }),
-    replaceGoal: (input: { threadId: string } & GoalInput) => goalCoordinator.replaceGoal(input),
+    replaceGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest) => {
+      const requestId = parseGoalRequestId(input.requestId);
+      return afterLocalRecovery(() => goalCoordinator.replaceGoal({ ...input, requestId }));
+    },
     ackGoalTaskAttached: (input: { threadId: string; attachmentId: string }) => (
-      goalCoordinator.ackGoalTaskAttached(input)
+      afterLocalRecovery(() => goalCoordinator.ackGoalTaskAttached(input))
     ),
     setGoalUserQueuePending: (input: { threadId: string; pending: boolean }) => (
       goalCoordinator.setUserQueuePending(input)
@@ -2653,6 +2829,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     recoverTask: recoverTaskWithWorkflowArtifacts,
     async recoverStaleTasks(): Promise<void> {
+      await multiAgentReady;
       const active = await host.getActiveTasks();
       for (const ref of active) {
         try {
@@ -4297,224 +4474,8 @@ class InMemoryIntentLedgerStore {
   }
 }
 
-const VISUAL_PDF_EXPORT_GUIDANCE = '如果用户要求把已有 HTML、Canvas、报告、幻灯片或网页产物导出为 PDF，必须从对应视觉产物执行浏览器打印/print-to-pdf，保留原产物版式；不要用 make-pdf 或普通 Markdown 转 PDF 重新排版，除非用户明确要求 Markdown 文档 PDF。';
 
-function buildSystemPrompt(): string {
-  const home = homedir();
-  const cwd = process.cwd();
-  const plat = platform();
-  const archStr = arch();
-  const ostype = type();
-  const defaultDownloads = join(home, 'Downloads');
-  return `你是 xiaok desktop 的助手。你可以使用工具来帮助用户完成各种任务。
-
-## 系统信息
-
-- 操作系统: ${ostype} (${plat} ${archStr})
-- 用户主目录: ${home}
-- 默认下载目录: ${defaultDownloads}
-- 当前工作目录: ${cwd}
-- 当前日期: <currentDate>${new Date().toISOString().slice(0, 10)}</currentDate>
-
-**重要**: 写入文件时使用上述路径，不要猜测用户名或路径。
-
-## 工具优先 / 真实数据优先（防编造）
-
-- 在汇报任何项目、任务、定时任务、消息通道、skill、记忆、产物的状态前，必须先调用对应的查询工具拿当前状态，禁止凭对话历史或印象推断。
-- 不允许把"我之前说过的状态"或"我估计是这样"当作事实。每一条状态声明都必须能在最近一次工具返回里找到原始字段；回复中要引用真实字段名/取值（例如 'task.failureReason'、'projectIntervention.primaryAction.strategy'、'gateDecision.reason'、'scheduled_task.lastRunAt'），不要改写或润色。
-- 工具调用失败时，如实告诉用户"我没有读到 X，请稍后重试或 Y"，禁止伪造结果。
-- 如果用户问的状态你还没读，先调工具再回答；不要先给一段听起来对的话再补调。
-- 长流程不能省略状态核查：每次推进项目、续跑工作流、续跑/取消定时任务前，都要先 inspect 当前真实状态，再决定动作。
-
-你有以下工具可用：
-- Read: 读取文件内容
-- Write: 创建或覆盖文件
-- Edit: 精确编辑文件中的特定内容
-- Bash: 执行 shell 命令
-- Grep: 搜索文件内容
-- Glob: 按模式匹配查找文件
-- skill: 调用已安装的 skill
-- reminder_create: 创建到点通知提醒，只通知用户，不会自动执行 AI 任务
-- reminder_list: 列出所有活跃的提醒
-- reminder_cancel: 取消一个提醒
-- scheduled_task_create: 创建未来会自动执行 AI 任务的定时任务
-- scheduled_task_list: 列出自动执行 AI 的定时任务
-- scheduled_task_cancel: 只能请求取消由当前 agent 拥有的 interval 临时任务；严禁 agent 取消 user-owned 或 assistant-owned 定时任务
-- channel_list: 列出所有配置的消息通道（云之家、Discord、飞书等）
-- channel_send: 向指定通道发送消息（当用户说"发消息到云之家"、"通知团队"时使用）
-- skill_install: 安装一个技能（当用户说"安装XX技能"时使用）
-- skill_uninstall: 卸载一个技能（当用户说"卸载XX技能"时使用）
-- skill_list: 列出已安装的技能
-- report_progress: 向用户报告任务执行计划和进度
-- notebook_write: 将需要跨对话保留的重要信息写入长期笔记本（偏好、身份、约定）
-- notebook_read: 读取长期笔记本中的个人备忘和约定（可与 kb_search 同时使用）
-- kb_list_collections: 列出知识库集合
-- kb_create_collection: 创建知识库集合
-- kb_search: 【知识检索】在用户的知识库中搜索已保存的文档和资料（可与 notebook_read 同时使用）
-- kb_add_source: 向知识库写入内容（文本/文件/URL），写入后自动分片索引，可被 kb_search 检索
-- kb_get_source: 获取知识库中某文档的完整内容（支持分页）
-- inspect_project: 检查 KSwarm 项目状态、卡住任务和最新可读产物
-- create_project: 创建 KSwarm 多智能体协作项目；仅当用户明确说"创建项目""建个项目""用工作流""多智能体协作"时才能调用；单人可完成的任务（写报告、做调研、生成文档等）禁止调用此工具，直接执行即可。用户明确要求 workflow/动态工作流时必须传 executionMode="workflow"
-- run_dynamic_workflow_script: 为 KSwarm 项目运行命令式动态 workflow 脚本，支持 phase、agent、parallel、pipeline 编排
-- get_dynamic_workflow_status: 查询 dynamic workflow run 当前状态、并行分支、阻塞原因和交付状态
-- continue_project: 安全推进已经卡住的 KSwarm 项目
-- repair_project_task_from_file: 修复 KSwarm 失败任务时，提交已经写入 artifacts 的产物文件路径回审核流
-- repair_project_task: 旧兼容工具；不要用它提交完整正文
-
-## 提醒与自动执行
-
-xiaok desktop 内置了统一定时动作服务。不要写 shell 脚本、cron、launchd 等系统级定时机制来实现普通提醒或自动任务。
-如果用户明确要求写脚本或使用系统定时，则遵循用户要求。
-
-reminder_create 只创建到点通知，不会自动执行 AI 任务，不会检查项目、调用工具或继续推理。
-
-scheduled_task_create 会在到期时自动创建新的 AI task。用户说“你/小K 之后去检查/执行/生成/推进”时使用它。
-
-用户说“每隔N分钟检查/执行/直到完成”时，使用 scheduled_task_create，并在 prompt 中写清业务停止条件。取消不是自动完成义务；只能请求取消由当前 agent 拥有的 interval 临时任务，严禁 agent 取消 user-owned 或 assistant-owned 定时任务。
-
-不要用 reminder_create 承诺会自动检查项目、调用工具或继续推理。
-
-示例：
-- "30分钟后提醒我发日报" → reminder_create(content="发日报", schedule_at=<当前时间+30分钟>)
-- "明天早上9点提醒我开会" → reminder_create(content="开会", schedule_at=<明天9点的时间戳>)
-- "10分钟后你再看一下这个项目" → scheduled_task_create(frequency="once", schedule_at=<当前时间+10分钟>, prompt="检查项目...")
-- "每5分钟检查项目直到完成" → scheduled_task_create(frequency="interval", interval_minutes=5, prompt="检查项目并报告是否完成", max_runs=288)
-- "每天晚上11点同步代码" → scheduled_task_create(frequency="daily", hour=23, minute=0, prompt="同步代码到GitHub")
-
-时间戳使用毫秒级 UNIX timestamp。
-
-## 知识库（重要）
-
-用户已在知识库中保存了文档和资料，在笔记本中保存了个人备忘。当用户提问时，**同时调用 notebook_read 和 kb_search**，从两个来源获取信息。
-
-使用方法：
-- 同时调用 notebook_read(query) 和 kb_search(query)（collection_id 可省略，默认使用第一个集合）
-- 如果都无结果，直接用自身知识回答，不要重复搜索
-- 需要读全文时调用 kb_get_source(source_id)
-
-触发条件：用户问的问题不是通用常识、且可能涉及个人资料/文档/偏好时，同时搜索两个来源。纯代码任务或通用问题不需要搜索。
-
-## create_project 使用边界（重要）
-
-create_project 只用于用户**明确要求**多智能体协作或项目管理的场景。判断标准：
-
-**必须调用 create_project 的情况**：
-- 用户说”创建项目””建个项目””发起项目””启动工作流””用工作流方式””让多个智能体协作””多人并行”
-
-**禁止调用 create_project 的情况**（直接执行）：
-- 用户说”写报告””写调研报告””生成文档””帮我做个PPT””分析一下XX””总结这些材料”
-- 任何单人可完成的内容生成、分析、整理任务
-- 用户没有提到”项目””工作流””协作””多智能体”等关键词
-
-简单规则：如果一个人（你自己）能直接完成的任务，就直接做，不要创建项目。
-
-## Swarm 项目推进
-
-## Dynamic Workflow
-
-当用户明确说”workflow 方式””动态工作流””用工作流跑””让 N 个智能体并行”等：
-
-1. 先用 create_project 创建 KSwarm 项目，并传 executionMode="workflow"。
-2. 再调用 run_dynamic_workflow_script 启动命令式 JavaScript workflow；脚本必须使用 phase(...)、agent(...)、parallel(...) 或 pipeline(...)，不要提交声明式 agents/nodes/tasks JSON。
-3. 用户要求多个智能体或并行处理时，脚本必须用 parallel([() => agent(...), ...]) 表达并行分支；不要把并行需求改写成串行步骤。
-4. 默认 waitForCompletion=false，启动后必须在回复中说明 workflowRunId、当前正在后台执行、可以到项目详情查看状态；用户问进展时用 get_dynamic_workflow_status。
-5. 如果最终交付物是报告、分析报告、研究报告，最终节点必须生成 report renderer HTML 交付物；只生成 .report.md 或普通 markdown 不算完成。脚本里的最终 agent prompt 要明确要求调用 report renderer / kai-report-creator 生成 HTML，并返回 html artifact 路径。
-6. 如果 workflow 被阻塞，不要说已完成；说明 gateDecision 或 projectDelivery 里的失败原因，并给出下一步需要修复的交付物。
-
-当用户要求"推进项目"、"诊断项目"、"修复项目"、"项目卡住了"，或提到某个 Swarm/KSwarm 项目名称时：
-
-1. 如果上下文没有完整 projectId、taskId、expectedTaskUpdatedAt，先调用 inspect_project 读取项目状态；用户只给项目名时，也先调用 inspect_project。
-2. 如果 inspect_project 返回 ambiguous_project，不要猜测项目；列出候选并请用户确认。
-3. 如果 inspect_project 返回 projectIntervention.primaryAction.strategy 是 needs_conversation，或卡住任务已经多次质量失败，不要先调用 continue_project；直接根据 inspect_project 返回的失败原因和最新可读产物生成完整修复产物，把完整修复产物写入 artifacts 文件，然后调用 repair_project_task_from_file。
-4. 其他可自动恢复的 projectIntervention.required 状态，先调用 continue_project，并传入 projectId、expectedPrimaryTaskId、expectedTaskUpdatedAt。
-5. 如果 continue_project 返回 recovery_budget_exceeded、needs_user_action 或 needs_conversation，不要反复调用 continue_project；应根据 inspect_project 返回的失败原因和最新可读产物，生成完整修复产物，把文件写入 artifacts 后调用 repair_project_task_from_file。
-6. 不要在回复、stdout、tool 参数或聊天消息中粘贴完整交付物；只传 artifactPath、summary、mimeType 等元数据。
-7. repair_project_task_from_file 只是提交复审，不是强制完成；不要跳过必需任务，不要人工放行不合格结果，不要提交占位符。
-8. 完成后说明项目是"已继续派发"、"已提交复审"还是"仍需用户确认"，并说明下一步等待谁处理。
-9. 如果 inspect_project 返回 projectIntervention.kind 是 script_workflow（strategy=resume_workflow），说明这是被中断的动态工作流（dynamic workflow），需要续跑而不是新建：先调用 get_dynamic_workflow_status 查看卡点，再调用 run_dynamic_workflow_script 续跑，只传 projectId 和 resumeWorkflowRunId（即 intervention 里的 workflowRunId），不要传 script 参数——已持久化的脚本源会自动恢复并重新校验，重贴脚本可能导致 hash 不一致而失败。
-
-## 消息通道功能
-
-xiaok desktop 支持向外部消息通道发送消息。当用户说"发消息到云之家"、"通知飞书群"等时：
-
-1. 先用 channel_list 查看可用的通道
-2. 用 channel_send 发送消息到指定通道
-
-示例：
-- "发消息到云之家通知团队开会" → channel_list 确认通道 → channel_send(channel_id="yunzhijia", message="开会通知")
-
-## 技能管理功能
-
-xiaok 支持从 ClawHub 安装技能。当用户说"安装XX技能"时：
-
-1. 用 skill_install 安装技能
-2. 安装后可以用斜杠命令调用（如 /skill-name）
-
-示例：
-- "帮我安装 kai-slide-creator 技能" → skill_install(skill_name="kai-slide-creator")
-
-## 长期记忆
-
-当用户要求你"记住"某些信息（如姓名、偏好、习惯、常用配置等），使用 notebook_write 工具写入笔记本。这些信息会跨对话持久保存。
-- "记住我叫张三" → notebook_write(content="用户名字：张三", tags=["个人信息"])
-- "以后代码都用 TypeScript" → notebook_write(content="用户偏好：代码使用 TypeScript", tags=["偏好"])
-
-## 关于用户上传的附件
-
-当用户消息提到"附件"、"文档"、"上传的文档"、"上传的文件"时，指的是用户通过 Plus 按钮上传的文件。
-这些文件会被自动导入到任务材料库，当前消息会列出每个文件的 materialId、文件名、格式和解析状态。
-读取附件必须使用 read_material 工具，并传入对应的 materialId。
-不要用 Glob、Read、Bash 或临时脚本去重新寻找、复制或解析同一个上传附件。
-如果 read_material 返回 unsupported 或 failed，应明确告诉用户哪个文件暂时无法直接读取，以及原因。
-
-用户上传文件后，消息中会显示"附件: 文件名"的提示。你应该：
-1. 确认收到附件
-2. 在需要文件内容时调用 read_material
-3. 基于附件内容回答问题或执行任务
-
-## Slash 命令（技能调用）注意事项
-
-当用户使用斜杠命令（例如 /kai-report-creator）调用技能时，技能内容已经直接注入到当前对话上下文中（你会在 prompt 中看到 "Skill content:" 标记后的完整技能指令）。
-- 不需要用 glob、find 或 shell 命令搜索技能文件
-- 不需要用 read 工具读取 SKILL.md
-- 直接按照 Skill content 中的指令执行即可
-- 禁止搜索技能目录或相关文件，那会浪费时间和 token
-- 绝对不要在 xiaok 的技能目录之外搜索或执行技能（如其他 agent 的目录）
-
-当用户要求执行操作时，直接使用工具完成，不要说"我没有权限"。用户已经授权你使用所有工具。
-保持简洁、准确。
-
-## 输出格式规则
-
-在对话输出中，优先使用 Markdown 内联格式，而不是生成 HTML 文件：
-
-- **流程图/架构图/时序图/状态图**：直接用 \`\`\`mermaid 代码块，不要生成 HTML 文件
-- **表格**：直接用 Markdown table 语法（| col | col |），不要生成 HTML 文件
-- **图表/数据可视化**：用 mermaid xychart，不要生成 HTML 文件
-- 只在用户明确要求"生成网页"、"导出 HTML"等场景下才生成 HTML 文件
-- 需要画图时直接在回复中嵌入 mermaid 代码块，渲染器会自动渲染为图形
-
-## 视觉产物导出 PDF
-
-${VISUAL_PDF_EXPORT_GUIDANCE}
-
-## 任务进度报告
-
-当用户请求涉及多个步骤的非trivial任务时，使用 report_progress 工具向用户报告执行计划和进度：
-
-1. **何时调用**：接到需要多步完成的任务时（如"帮我写方案"、"分析这些文件"、"生成报告"等），先规划 3-6 个步骤，然后调用 report_progress 上报计划
-2. **何时不调用**：简单问答（如"今天天气"、"解释一下XX"）、单步操作（如"读取某文件"）不需要调用
-3. **更新时机**：每完成一个步骤后，再次调用 report_progress 更新所有步骤的状态
-4. **label 要求**：使用面向用户的自然语言描述，不要使用技术术语
-5. **多产物规则**：如果用户请求包含多个交付物（如"报告+演示文稿"、"文档+代码"），必须为每个交付物规划独立的步骤。不可在完成一个产物后就停止。
-
-示例：
-- 用户说"帮我基于这些材料写一版方案" → 调用 report_progress，steps 包含：收集材料、分析需求、起草方案、校验完整性
-- 用户说"做一份报告写一份演示文稿" → steps 必须同时包含"生成报告"和"生成演示文稿"两个独立步骤
-- 每完成一步，更新对应 step 的 status 为 completed，下一步为 running`;
-}
-
-const BASE_SYSTEM_PROMPT = buildSystemPrompt();
+const BASE_SYSTEM_PROMPT = buildDesktopSystemPrompt();
 
 /** Convert tool name to user-friendly label for TaskPanel auto-progress */
 function toolNameToLabel(name: string, input?: Record<string, unknown>): string {
@@ -4587,7 +4548,8 @@ export function createReportArtifactTool(): Tool {
         required: ['ir_content', 'output_path'],
       },
     },
-    async execute(input) {
+    async execute(input, context) {
+      context?.signal?.throwIfAborted();
       const record = input as Record<string, unknown>;
       const irContent = readString(record.ir_content);
       const outputPath = resolve(readString(record.output_path));
@@ -4634,7 +4596,9 @@ export function createReportArtifactTool(): Tool {
           irContent,
           outputPath,
           theme,
+          signal: context?.signal,
         });
+        context?.signal?.throwIfAborted();
         const outputExists = existsSync(outputPath);
         const success = outputExists && (result.success !== false || isReportRendererStructurallyValid(result.validation));
         if (success && isRecord(result.validation) && result.validation.l3_passed === false) {
@@ -4651,6 +4615,7 @@ export function createReportArtifactTool(): Tool {
           warnings: Array.isArray(result.warnings) ? result.warnings : [],
         });
       } catch (error) {
+        context?.signal?.throwIfAborted();
         return JSON.stringify({
           success: false,
           output_path: outputPath,
@@ -4661,7 +4626,7 @@ export function createReportArtifactTool(): Tool {
   };
 }
 
-function createReportProgressTool(): Tool {
+export function createReportProgressTool(): Tool {
   return {
     permission: 'safe',
     definition: {
@@ -4701,12 +4666,10 @@ function createReportProgressTool(): Tool {
           status: validStatuses.has(s.status) ? s.status : 'planned',
         });
       }
-      const base = JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated });
       const allCompleted = validated.length > 0 && validated.every(s => s.status === 'completed');
-      if (allCompleted) {
-        return base + '\n\n⚠️ 所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。';
-      }
-      return base;
+      return JSON.stringify({ ok: true, displayed_steps: validated.length, _validated: validated,
+        ...(allCompleted ? { completionReminder: '所有步骤已标记完成。请回顾用户原始请求，确认是否所有要求的交付物都已生成。如果有遗漏，请追加新步骤继续执行，不要结束任务。' } : {}),
+      });
     },
   };
 }
@@ -4717,13 +4680,16 @@ async function renderReportArtifactViaBundledMcp({
   irContent,
   outputPath,
   theme,
+  signal,
 }: {
   pluginDir: string;
   serverBundlePath: string;
   irContent: string;
   outputPath: string;
   theme?: string;
+  signal?: AbortSignal;
 }): Promise<Record<string, unknown>> {
+  signal?.throwIfAborted();
   mkdirSync(dirname(outputPath), { recursive: true });
   const command = process.env.XIAOK_NODE_CMD || process.execPath;
   const runtimeEnv = !process.env.XIAOK_NODE_CMD && process.versions.electron
@@ -4739,9 +4705,12 @@ async function renderReportArtifactViaBundledMcp({
   }, {
     cwd: pluginDir,
     clientName: 'xiaok-desktop-report-renderer',
+    startupSignal: signal,
   });
   try {
-    const raw = normalizeMcpRuntimeToolResult(await connection.client.callTool(
+    // A connection which completes startup late still belongs to this finally.
+    signal?.throwIfAborted();
+    const result = await callMcpToolWithSignal(connection.client,
       {
         name: 'render_report',
         arguments: {
@@ -4750,8 +4719,10 @@ async function renderReportArtifactViaBundledMcp({
           ...(theme ? { theme } : {}),
         },
       },
-      { timeout: 30_000 },
-    )).text;
+      { timeout: 30_000, signal },
+    );
+    signal?.throwIfAborted();
+    const raw = normalizeMcpRuntimeToolResult(result).text;
     try {
       const parsed = JSON.parse(raw) as unknown;
       if (isRecord(parsed)) return parsed;
@@ -4974,10 +4945,11 @@ async function executeDesktopTaskTool(
     materials: MaterialRecord[];
     materialRegistry?: MaterialRegistry;
     context: ToolExecutionContext;
+    scoped?: boolean;
     officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   },
 ): Promise<{ ok: boolean; result: string }> {
-  if (toolCall.name === 'read_material') {
+  if (toolCall.name === 'read_material' && !options.scoped) {
     return executeReadMaterialForDesktop(toolCall.input, {
       taskId: options.taskId,
       materials: options.materials,
@@ -5071,7 +5043,7 @@ async function streamDesktopToolLoopFinalization(input: {
   intentId: string;
   stepId: string;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
-  onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>) => void;
+  onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>) => void | Promise<void>;
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
@@ -5084,7 +5056,8 @@ async function streamDesktopToolLoopFinalization(input: {
     invocationId: `inv_${randomUUID()}`,
   })) {
     if (chunk.type === 'usage') {
-      input.onUsage?.(chunk);
+      const captured = input.onUsage?.(chunk);
+      if (captured) await captured;
       continue;
     }
     throwIfAborted(input.signal);
@@ -5138,6 +5111,7 @@ interface ToolLoopStrategies {
 }
 
 interface ToolLoopContext {
+  canResumeSummary?: () => boolean;
   adapter: Pick<ModelAdapter, 'stream'>;
   systemPrompt: string;
   messages: Message[];
@@ -5159,10 +5133,14 @@ interface ToolLoopContext {
   skillInvocation: SkillInvocation | null;
   skillCatalog: SkillCatalog;
   dataRoot: string;
+  /** Per-invocation execution directory; ordinary legacy runners keep dataRoot. */
+  cwd?: string;
   taskStartTime: number;
   strategies: ToolLoopStrategies;
   maxIterations?: number;
-  onUsage?: (inputTokens: number, outputTokens: number) => void;
+  onUsage?: (inputTokens: number, outputTokens: number, usageId?: string) => void | Promise<void>;
+  mailbox?: DesktopMailboxPort;
+  onActivity?: (activity: { phase: 'model' | 'thinking' | 'tool'; toolName?: string }) => void;
 }
 
 interface ArtifactWorkspaceToolAck {
@@ -5429,7 +5407,75 @@ function parseArtifactWorkspaceToolAck(result: string): ArtifactWorkspaceToolAck
   };
 }
 
-export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
+export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<Awaited<ReturnType<typeof runDesktopToolLoopBody>>> {
+  try {
+    return await runDesktopToolLoopBody(ctx);
+  } catch (error) {
+    const interrupted = ctx.signal.aborted || error instanceof Error && error.name === 'AbortError';
+    try {
+      await ctx.mailbox?.trySealTurn({ outcome: interrupted ? 'interrupted' : 'failed' });
+    } catch (finishError) {
+      // The mailbox owner freezes/aborts on persistence failure. Preserve the
+      // original AbortError for the host cancellation path, never normalize it.
+      if (!interrupted) throw new AggregateError([error, finishError], 'multi_agent_finish_failed');
+    }
+    if (ctx.mailbox && ctx.signal.aborted) {
+      // The legacy ordinary loop wraps cancellation in Error("task cancelled").
+      // A managed child must preserve interruption rather than publish failure.
+      const reason = ctx.signal.reason;
+      if (reason instanceof Error && reason.name === 'AbortError') throw reason;
+      throw new DOMException(reason instanceof Error ? reason.message : 'multi-agent turn aborted', 'AbortError');
+    }
+    throw error;
+  }
+}
+
+async function prepareDesktopLoopRequest(ctx: ToolLoopContext, streamOptions: StreamOptions, canCompact: boolean, inputTokens: number): Promise<Message[]> {
+  throwIfAborted(ctx.signal);
+  if (Date.now() > ctx.taskDeadline) throw new Error('desktop_tool_loop_deadline_exceeded');
+  if (canCompact && ctx.strategies.compact.enabled && ctx.strategies.compact.shouldCompact(inputTokens)) {
+    await ctx.strategies.compact.doCompact(ctx.messages, streamOptions);
+  }
+  throwIfAborted(ctx.signal);
+  const batch = await ctx.mailbox?.drainInput();
+  let restore = () => {};
+  let confirmed = false;
+  try {
+    throwIfAborted(ctx.signal);
+    if (batch?.messages.length) {
+      const block: MessageBlock = { type: 'text', text: `<inter_agent_messages>\n${JSON.stringify(batch.messages.map(message => ({
+        messageId: message.messageId, sender: message.sender, kind: message.kind, text: message.preview,
+      })))}\n</inter_agent_messages>` };
+      const lastIndex = ctx.messages.length - 1;
+      const previous = ctx.messages[lastIndex];
+      if (previous?.role === 'user') {
+        ctx.messages[lastIndex] = { ...previous, content: [block, ...previous.content] };
+        restore = () => { ctx.messages[lastIndex] = previous; };
+      } else {
+        ctx.messages.push({ role: 'user', content: [block] });
+        restore = () => { ctx.messages.pop(); };
+      }
+    }
+    // This exact view is the one whose input claim is committed. Do not compact,
+    // rebuild or inject input between confirmApplied and the provider request.
+    const apiMessages = ctx.strategies.buildApiView(ctx.messages);
+    throwIfAborted(ctx.signal);
+    if (batch?.claimId) {
+      await ctx.mailbox!.confirmApplied(batch.claimId);
+      confirmed = true;
+    }
+    throwIfAborted(ctx.signal);
+    return apiMessages;
+  } catch (error) {
+    if (!confirmed) {
+      restore();
+      if (batch?.claimId) await ctx.mailbox!.returnClaim(batch.claimId);
+    }
+    throw error;
+  }
+}
+
+async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
   reply: string;
   totalToolCalls: number;
   totalInputTokens: number;
@@ -5457,6 +5503,9 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
   let { skillInvocation } = ctx;
   let skillNamesDetected: string[] = [];
   let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
+  const maxIterations = ctx.maxIterations ?? DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS;
+  let finishedNormally = false;
+  let summaryRecoveryMode = false;
 
   if (skillInvocation) {
     appendTrace(ctx.dataRoot, {
@@ -5465,7 +5514,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     });
   }
 
-  while (iteration < (ctx.maxIterations ?? DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS)) {
+  while (iteration < maxIterations) {
     throwIfAborted(ctx.signal);
     if (Date.now() > ctx.taskDeadline) throw new Error('任务超时，可能是网络不稳定或模型响应过慢。请检查网络后重试。');
     iteration++;
@@ -5491,19 +5540,21 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
 
     const assistantBlocks: MessageBlock[] = [];
 
-    if (ctx.strategies.compact.enabled && iteration > 1 && ctx.strategies.compact.shouldCompact(lastRequestInputTokens)) {
-      await ctx.strategies.compact.doCompact(ctx.messages, streamOptions);
-    }
-
-    const apiMessages = ctx.strategies.buildApiView(ctx.messages);
+    const apiMessages = await prepareDesktopLoopRequest(ctx, streamOptions, iteration > 1, lastRequestInputTokens);
     lastRequestInputTokens = 0;
-    for await (const chunk of streamDesktopTaskProviderConversation({
+    let providerInvocationId = `inv_${randomUUID()}`;
+    for await (const chunk of streamDesktopSummaryRecovery({
       adapter: ctx.adapter,
       messages: apiMessages,
       tools: ctx.allToolDefs,
       systemPrompt: ctx.systemPrompt,
       options: streamOptions,
-      invocationId: `inv_${randomUUID()}`,
+      invocationId: providerInvocationId,
+      deadline: ctx.taskDeadline,
+      summaryOnly: summaryRecoveryMode,
+      canRecover: ctx.canResumeSummary,
+      onRecovery: () => { summaryRecoveryMode = true; },
+      onInvocation: id => { providerInvocationId = id; },
     })) {
       if (chunk.type === 'usage') {
         try {
@@ -5511,11 +5562,14 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           lastRequestInputTokens = inputTkns;
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
+          const captured = ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, providerInvocationId);
+          if (captured) await captured;
+        } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
         continue;
       }
       throwIfAborted(ctx.signal);
+      ctx.onActivity?.({ phase: chunk.type === 'thinking' ? 'thinking' : chunk.type === 'tool_use' ? 'tool' : 'model',
+        ...(chunk.type === 'tool_use' ? { toolName: chunk.name } : {}) });
       if (chunk.type === 'text') {
         const lastBlock = assistantBlocks[assistantBlocks.length - 1];
         if (lastBlock?.type === 'text') {
@@ -5552,6 +5606,12 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     if (toolCalls.length === 0) {
       if (assistantBlocks.some((block) => block.type === 'text' && block.text.trim())) {
         toolResultsAwaitingFinalResponse = false;
+      }
+      if (ctx.mailbox && !toolResultsAwaitingFinalResponse) {
+        const decision = await ctx.mailbox.trySealTurn({ limitReached: iteration >= maxIterations });
+        if (decision.kind === 'continue') continue;
+        if (decision.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply);
+        finishedNormally = true;
       }
       break;
     }
@@ -5620,7 +5680,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         executionScope: ctx.executionScope,
         session: {
           sessionId: ctx.sessionId,
-          cwd: ctx.dataRoot,
+          cwd: ctx.cwd ?? ctx.dataRoot,
           createdAt: ctx.taskStartTime,
           updatedAt: Date.now(),
           lineage: [ctx.sessionId],
@@ -5642,9 +5702,15 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         toolDefinitions: ctx.allToolDefs.map((definition) => ({ ...definition })),
         signal: ctx.signal,
       };
-      const toolContext = isStrictKimiK3Adapter(ctx.adapter)
+      const projectedToolContext = isStrictKimiK3Adapter(ctx.adapter)
         ? projectStrictToolExecutionContext(rawToolContext)
         : rawToolContext;
+      let invoked = false;
+      // Internal observer is deliberately added after the strict provider
+      // projection, whose allowlist must never accept executable callbacks.
+      const toolContext = ctx.mailbox
+        ? { ...projectedToolContext, onToolInvocationStarted: () => { invoked = true; } }
+        : projectedToolContext;
       let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
         registry: ctx.registry,
         taskId: ctx.taskId,
@@ -5652,20 +5718,26 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         materialRegistry: ctx.materialRegistry,
         context: toolContext,
         officeToMarkdown: ctx.officeToMarkdown,
+        scoped: Boolean(ctx.mailbox),
       });
+      ctx.signal.throwIfAborted();
       if (ok) {
         await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
       } else {
         await ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
       }
+      ctx.signal.throwIfAborted();
       await ctx.emitRuntimeEvent({
         type: 'tool_finished', sessionId: ctx.sessionId, turnId: ctx.turnId,
         invocationId: toolCall.id, toolName: toolCall.name, ok,
+        ...(ctx.mailbox ? { invoked } : {}),
       });
+      ctx.signal.throwIfAborted();
       if (ctx.strategies.trackAutoProgress && !isInternalTool) {
         const label = toolNameToLabel(toolCall.name, toolCall.input as Record<string, unknown>);
         autoSteps.push({ id: `auto-${totalToolCalls}`, label, status: ok ? 'completed' : 'failed' });
         await ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: autoSteps });
+        ctx.signal.throwIfAborted();
       }
 
       if (skillInvocation) {
@@ -5683,6 +5755,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       if (scopedArtifact) {
         artifactEventEmitted = true;
         await ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath: scopedArtifact.artifactPath, event: 'add' });
+        ctx.signal.throwIfAborted();
         await ctx.emitRuntimeEvent({
           type: 'artifact_recorded',
           sessionId: ctx.sessionId,
@@ -5696,11 +5769,13 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           creator: scopedArtifact.creator,
           mimeType: scopedArtifact.mimeType,
         });
+        ctx.signal.throwIfAborted();
       }
       const writeArtifactPath = resolveWriteToolArtifactPath(toolCall.name, runtimeToolInput);
       if (ok && !artifactEventEmitted && writeArtifactPath) {
         const filePath = writeArtifactPath;
         await ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
+        ctx.signal.throwIfAborted();
         const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
         const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
         const fileName = basename(filePath) || filePath;
@@ -5716,6 +5791,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           path: filePath,
           creator: 'agent',
         });
+        ctx.signal.throwIfAborted();
         if (ctx.strategies.emitSkillArtifactTrace && skillInvocation) {
           appendTrace(ctx.dataRoot, {
             ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
@@ -5742,6 +5818,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
             path: artifact.filePath,
             creator: artifact.creator,
           });
+          ctx.signal.throwIfAborted();
         }
       }
       if (
@@ -5754,6 +5831,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
         const filePath = resolveToolOutputArtifactPath(runtimeToolInput, result, { toolName: toolCall.name, toolStartedAt });
         if (filePath) {
           await ctx.emitRuntimeEvent({ type: 'file_changed', sessionId: ctx.sessionId, filePath, event: 'add' });
+          ctx.signal.throwIfAborted();
           const extMatch = filePath.match(/\.([a-zA-Z0-9]+)$/);
           const kind = extMatch ? extMatch[1].toLowerCase() : 'other';
           const fileName = basename(filePath) || filePath;
@@ -5769,6 +5847,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
             path: filePath,
             creator: 'agent',
           });
+          ctx.signal.throwIfAborted();
         }
       }
       if (ok && toolCall.name === 'report_progress') {
@@ -5776,10 +5855,13 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
           const parsed = JSON.parse(result);
           if (parsed._validated) {
             await ctx.emitRuntimeEvent({ type: 'progress_plan_reported', sessionId: ctx.sessionId, steps: parsed._validated });
-            result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps });
+            result = JSON.stringify({ ok: true, displayed_steps: parsed.displayed_steps,
+              ...(typeof parsed.completionReminder === 'string' ? { completionReminder: parsed.completionReminder } : {}),
+            });
           }
-        } catch { /* non-critical */ }
+        } catch { ctx.signal.throwIfAborted(); /* Non-cancellation progress parse errors remain non-critical. */ }
       }
+      ctx.signal.throwIfAborted();
       const resultContent = ctx.strategies.processToolResult(result, toolCall.name, toolCall.id);
       toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
     }
@@ -5801,7 +5883,7 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
     });
     const finalized = await streamDesktopToolLoopFinalization({
       adapter: ctx.adapter,
-      apiMessages: ctx.strategies.buildApiView(ctx.messages),
+      apiMessages: await prepareDesktopLoopRequest(ctx, streamOptions, true, lastRequestInputTokens),
       systemPrompt: ctx.systemPrompt,
       streamOptions,
       signal: ctx.signal,
@@ -5810,18 +5892,24 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<{
       intentId: ctx.intentId,
       stepId: ctx.stepId,
       emitRuntimeEvent: ctx.emitRuntimeEvent,
-      onUsage: (chunk) => {
+      onUsage: async (chunk) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
           lastRequestInputTokens = inputTkns;
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0);
-        } catch (e) { console.warn('[usage] token capture failed:', (e as Error).message) }
+          await ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, `${ctx.turnId}:tail`);
+        } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
       },
     });
     reply += finalized.reply;
     ctx.messages.push({ role: 'assistant', content: finalized.assistantBlocks });
+  }
+
+  if (ctx.mailbox && !finishedNormally) {
+    const exhausted = iteration >= maxIterations;
+    const decision = await ctx.mailbox.trySealTurn({ outcome: exhausted ? 'failed' : 'completed', limitReached: true });
+    if (exhausted || decision.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply);
   }
 
   return {
@@ -6700,10 +6788,11 @@ export function createDesktopModelRunnerWithRegistry(
     restrictedArtifactGeneration?: boolean;
     /** Stable provider-runtime identity captured before services exist (§4). */
     pluginProviderRuntime?: GatewayRuntimeFacade;
+    multiAgent?: { runtime: DesktopMultiAgentRuntime; service: DesktopMultiAgentService; catalog: DesktopToolCatalogBridge; workspaceId: string; cwd: string };
     officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   } = {},
-): TaskRunner {
-  const cwd = process.cwd();
+): (input: TaskRunnerInput, rootContext?: DesktopAgentExecutionContext) => Promise<void> {
+  const cwd = runnerOptions.multiAgent?.cwd ?? process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let loadedSkillCatalogVersion = -1;
@@ -6738,8 +6827,22 @@ export function createDesktopModelRunnerWithRegistry(
     registry.registerTool(createGetRoomMessagesPageTool());
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope }) => {
-    const turnId = `turn_${Date.now().toString(36)}`;
+  if (runnerOptions.multiAgent && registry instanceof DesktopOwnedToolRegistry) {
+    registry.registerOwnedTool({ definition: READ_MATERIAL_TOOL_DEFINITION, permission: 'safe', execute: async () => 'Error: tool_scope_unsupported' }, {
+      ownerId: 'desktop-host', slotKey: 'read_material', binding: 'custom', verifiedReadOnly: true,
+      bindInvocation: authority => async input => (await executeReadMaterialForDesktop(input, {
+        taskId: authority.agentId, materials: authority.materialIds.map(id => materialRegistry.get(id)).filter((item): item is MaterialRecord => Boolean(item)),
+        materialRegistry, signal: authority.signal, officeToMarkdown: runnerOptions.officeToMarkdown,
+        pdfToText: async bytes => (await import('./pdf-text.js')).extractPdfText(bytes),
+      })).result,
+    });
+  }
+
+  return async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }, rootContext) => {
+    if (rootContext && !runnerOptions.multiAgent) throw new Error('unsupported multi-agent runner context');
+    if (rootContext) runnerOptions.multiAgent!.service.assertInvocation(rootContext.actor);
+    const signal = rootContext?.signal ?? hostSignal;
+    const turnId = rootContext?.turnId ?? `turn_${Date.now().toString(36)}`;
     const intentId = `intent_${Date.now().toString(36)}`;
     const stepId = `${intentId}:step:reply`;
     const taskStartTime = Date.now();
@@ -6822,16 +6925,31 @@ export function createDesktopModelRunnerWithRegistry(
     }
 
     const modelIdentity = `\n\n## 模型信息\n\n你当前运行的模型是: ${adapter.getModelName()}。不要假设自己是其他模型。`;
-    const systemPrompt = skillsContext
+    let systemPrompt = skillsContext
       ? `${BASE_SYSTEM_PROMPT}${modelIdentity}\n\nAvailable skills:\n${skillsContext}`
       : `${BASE_SYSTEM_PROMPT}${modelIdentity}`;
 
     const userText = materialsContext
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
-    const allToolDefs = materials && materials.length > 0
-      ? [...registry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
-      : registry.getToolDefinitions();
+    let scopedRegistry: ReturnType<DesktopMultiAgentRuntime['bindRoot']> | undefined;
+    if (rootContext) {
+      const multi = runnerOptions.multiAgent!;
+      multi.service.assertInvocation(rootContext.actor, rootContext);
+      multi.catalog.authorizeRoot(rootContext);
+      systemPrompt += `\n\n${getDesktopDelegationPolicy()}\n\nChildren share the selected model, have separate history and working directories, and stay within inherited tool policy. Root context: ${JSON.stringify({ groupId: rootContext.groupId, agentId: rootContext.agentId, cwd: rootContext.cwd })}`;
+      const agents = await loadCustomAgents(undefined, rootContext.cwd);
+      scopedRegistry = multi.runtime.bindRoot(rootContext, { adapter, systemPrompt, catalog: multi.catalog.catalog,
+        policy: multi.catalog.catalog.snapshotPolicy(), workspaceId: multi.workspaceId, materialIds: materials.map(item => item.materialId),
+        registryOptions: {
+          autoMode: (permissionMode ?? 'auto') === 'auto', permissionManager: new PermissionManager({ mode: permissionMode ?? 'auto' }),
+        }, materials, materialRegistry, skillCatalog, dataRoot, agents, emitRuntimeEvent, maxIterations: maxToolLoopIterations,
+      });
+    }
+    const invocationRegistry = scopedRegistry?.registry ?? registry;
+    const allToolDefs = !rootContext && materials && materials.length > 0
+      ? [...invocationRegistry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
+      : invocationRegistry.getToolDefinitions();
     const imageBlocks = materials && materials.length > 0 ? buildImageBlocksForMaterials(materials) : [];
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
@@ -6848,10 +6966,14 @@ export function createDesktopModelRunnerWithRegistry(
       systemPrompt,
       messages,
       allToolDefs,
-      registry,
+      registry: invocationRegistry,
       invocationOptions,
       signal,
-      taskDeadline: Date.now() + TASK_TIMEOUT_MS,
+      taskDeadline: rootContext?.effectiveDeadline ?? Date.now() + TASK_TIMEOUT_MS,
+      cwd: rootContext?.cwd,
+      mailbox: rootContext?.mailbox,
+      canResumeSummary: rootContext ? () => runnerOptions.multiAgent!.service.canResumeSummary(rootContext) : undefined,
+      onActivity: rootContext ? activity => { void runnerOptions.multiAgent!.service.recordActivity(rootContext, activity).catch(() => {}); } : undefined,
       sessionId,
       turnId,
       intentId,
@@ -6861,13 +6983,17 @@ export function createDesktopModelRunnerWithRegistry(
       materials,
       materialRegistry,
       officeToMarkdown: runnerOptions.officeToMarkdown,
-      emitRuntimeEvent,
+      emitRuntimeEvent: async event => {
+        if (rootContext && (event.type === 'assistant_delta' || event.type === 'artifact_recorded')) await runnerOptions.multiAgent!.service.recordRuntimeEvent(rootContext, event);
+        await emitRuntimeEvent(event);
+      },
       skillInvocation,
       skillCatalog,
       dataRoot,
       taskStartTime,
       maxIterations: maxToolLoopIterations,
-      onUsage: (inputTokens, outputTokens) => {
+      onUsage: async (inputTokens, outputTokens, usageId) => {
+        if (rootContext) await runnerOptions.multiAgent!.service.recordUsage(rootContext, { usageId: usageId!, inputTokens, outputTokens });
         pendingUsageWrites.push(emitUsage({ inputTokens, outputTokens }));
       },
       strategies: {
@@ -6886,7 +7012,7 @@ export function createDesktopModelRunnerWithRegistry(
     } catch (error) {
       await Promise.allSettled(pendingUsageWrites);
       throw error;
-    }
+    } finally { scopedRegistry?.dispose(); }
     await Promise.all(pendingUsageWrites);
 
     const { reply, totalToolCalls, totalInputTokens, totalOutputTokens, referenceReads } = loopResult;

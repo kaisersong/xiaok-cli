@@ -1,4 +1,8 @@
 import type { IpcRenderer } from 'electron';
+import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
+import type { GoalAttachmentRequest, GoalAttachmentSource } from '../shared/goal-attachment.js';
+export type { GoalAttachmentRequest, GoalAttachmentSource } from '../shared/goal-attachment.js';
+import { createMultiAgentPreload } from './desktop-multi-agent-preload.js';
 import type {
   DesktopTaskEvent,
   GoalTurnExecutionScope,
@@ -70,6 +74,31 @@ export const PRELOAD_API_KEYS = [
   'createTask',
   'createTaskWithFiles',
   'subscribeTask',
+  'getMultiAgentSnapshot',
+  'listMultiAgentGroups',
+  'listMultiAgents',
+  'getMultiAgentEvents',
+  'getAgentContent',
+  'getMultiAgentOperation',
+  'getMultiAgentResources',
+  'resolveMultiAgentResource',
+  'resetMultiAgentGroup',
+  'getMultiAgentThreadDeletion',
+  'deleteMultiAgentThread',
+  'sendAgentMessage',
+  'followupAgent',
+  'interruptAgent',
+  'closeAgent',
+  'subscribeMultiAgents',
+  'unsubscribeMultiAgents',
+  'getLocalExecutionAuthorization',
+  'getLocalExecutionWorkspace',
+  'getMultiAgentApproval',
+  'decideMultiAgentApproval',
+  'setLocalExecutionAuthorization',
+  'getLocalExecutionAuthorizationOperation',
+  'subscribeLocalExecutionAuthorization',
+  'unsubscribeLocalExecutionAuthorization',
   'getGoal',
   'createGoal',
   'pauseGoal',
@@ -323,6 +352,8 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
   'subscribeTask',
+  'subscribeMultiAgents',
+  'subscribeLocalExecutionAuthorization',
   'onCollaborationRoomEvent',
   'onGoalChanged',
   'onGoalTaskPrepared',
@@ -361,6 +392,29 @@ export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
 // name. Tests cross-check this against the live preload implementation and the
 // main-process handler registry to catch drift.
 export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
+  getMultiAgentSnapshot: 'desktop:getMultiAgentSnapshot',
+  listMultiAgentGroups: 'desktop:listMultiAgentGroups',
+  listMultiAgents: 'desktop:listMultiAgents',
+  getMultiAgentEvents: 'desktop:getMultiAgentEvents',
+  getAgentContent: 'desktop:getAgentContent',
+  getMultiAgentOperation: 'desktop:getMultiAgentOperation',
+  getMultiAgentResources: 'desktop:getMultiAgentResources',
+  resolveMultiAgentResource: 'desktop:resolveMultiAgentResource',
+  resetMultiAgentGroup: 'desktop:resetMultiAgentGroup',
+  getMultiAgentThreadDeletion: 'desktop:getMultiAgentThreadDeletion',
+  deleteMultiAgentThread: 'desktop:deleteMultiAgentThread',
+  sendAgentMessage: 'desktop:sendAgentMessage',
+  followupAgent: 'desktop:followupAgent',
+  interruptAgent: 'desktop:interruptAgent',
+  closeAgent: 'desktop:closeAgent',
+  unsubscribeMultiAgents: 'desktop:unsubscribeMultiAgents',
+  getLocalExecutionAuthorization: 'desktop:getLocalExecutionAuthorization',
+  getLocalExecutionWorkspace: 'desktop:getLocalExecutionWorkspace',
+  getMultiAgentApproval: 'desktop:getMultiAgentApproval',
+  decideMultiAgentApproval: 'desktop:decideMultiAgentApproval',
+  setLocalExecutionAuthorization: 'desktop:setLocalExecutionAuthorization',
+  getLocalExecutionAuthorizationOperation: 'desktop:getLocalExecutionAuthorizationOperation',
+  unsubscribeLocalExecutionAuthorization: 'desktop:unsubscribeLocalExecutionAuthorization',
   getModelConfig: 'desktop:getModelConfig',
   saveModelConfig: 'desktop:saveModelConfig',
   updateModelRuntimeOptions: 'desktop:updateModelRuntimeOptions',
@@ -1158,10 +1212,12 @@ export interface KSwarmAgentSemanticInput {
 export interface DesktopGoalProjection {
   state: GoalState;
   activation: GoalActivation;
+  waitingReason?: 'waiting_children' | 'children_need_attention';
 }
 
 export interface DesktopGoalTaskPrepared {
   attachmentId: string;
+  attachmentSource: GoalAttachmentSource;
   threadId: string;
   taskId: string;
   executionScope: GoalTurnExecutionScope;
@@ -1179,7 +1235,7 @@ export interface DesktopGoalChangedEvent {
   goal: DesktopGoalProjection;
 }
 
-export interface DesktopApi {
+export interface DesktopApi extends MultiAgentDesktopAPI {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
@@ -1217,11 +1273,11 @@ export interface DesktopApi {
     context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   getGoal(threadId: string): Promise<DesktopGoalProjection | null>;
-  createGoal(input: { threadId: string } & GoalInput): Promise<DesktopGoalMutationResult>;
+  createGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   pauseGoal(threadId: string): Promise<DesktopGoalProjection>;
-  resumeGoal(input: { threadId: string; turnLimit?: number }): Promise<DesktopGoalMutationResult>;
+  resumeGoal(input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   cancelGoal(threadId: string): Promise<DesktopGoalProjection>;
-  replaceGoal(input: { threadId: string } & GoalInput): Promise<DesktopGoalMutationResult>;
+  replaceGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void>;
   setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
   onGoalChanged(handler: (input: DesktopGoalChangedEvent) => void): () => void;
@@ -1575,6 +1631,7 @@ interface IpcRendererLike {
 
 export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = ''): FullDesktopApi {
   return {
+    ...createMultiAgentPreload(ipcRenderer),
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
     updateModelRuntimeOptions: (input) => ipcRenderer.invoke('desktop:updateModelRuntimeOptions', input) as ReturnType<DesktopApi['updateModelRuntimeOptions']>,

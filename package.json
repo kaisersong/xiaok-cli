@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -68,6 +68,8 @@
     "eval:graphiti-knowledge:test": "npm run test:sandbox:build && npm run test:sandbox:run -- .test-dist/tests/evals/graphiti-knowledge-*.test.js",
     "eval:kimi-k3:d9:test": "npm run test:sandbox:build && npm run test:sandbox:run -- .test-dist/tests/evals/kimi-k3-d9-*.test.js",
     "eval:xiaok:product": "node scripts/evals/xiaok-product/run.mjs",
+    "eval:local-model-cache": "node scripts/evals/local-model-cache/run.mjs",
+    "eval:local-model-cache:test": "node --test tests/evals/local-model-cache.test.mjs tests/evals/local-model-cache-capture.test.mjs tests/evals/local-model-cache-command.test.mjs",
     "eval:xiaok:product:test": "npm run test:sandbox:build && npm run test:sandbox:run -- .test-dist/tests/evals/xiaok-product-*.test.js",
     "eval:run": "node benchmark/run.mjs",
     "eval:quick": "node benchmark/run.mjs --runs 1 --tasks aut-rename,eff-simple-qa,eff-math",

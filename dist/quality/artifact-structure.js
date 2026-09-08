@@ -24,10 +24,7 @@ function validatePdfStructure(filePath) {
     try {
         const buf = Buffer.alloc(5);
         const bytesRead = readSync(fd, buf, 0, 5, 0);
-        if (bytesRead < 5 || buf.toString('ascii') !== '%PDF-') {
-            return { ok: false, error: 'missing %PDF- header signature' };
-        }
-        return { ok: true };
+        return validateArtifactBytes('pdf', buf, bytesRead);
     }
     finally {
         closeSync(fd);
@@ -40,6 +37,21 @@ function validatePptxStructure(filePath) {
         const readLen = Math.min(65536, size);
         const buf = Buffer.alloc(readLen);
         const bytesRead = readSync(fd, buf, 0, readLen, 0);
+        return validateArtifactBytes('pptx', buf, bytesRead);
+    }
+    finally {
+        closeSync(fd);
+    }
+}
+/** Shared byte rules; async delivery uses the same bounded reads and predicates. */
+export function validateArtifactBytes(kind, buf, bytesRead) {
+    if (kind === 'pdf') {
+        if (bytesRead < 5 || buf.toString('ascii') !== '%PDF-') {
+            return { ok: false, error: 'missing %PDF- header signature' };
+        }
+        return { ok: true };
+    }
+    if (kind === 'pptx') {
         if (bytesRead < 4) {
             return { ok: false, error: 'file too small to be valid PPTX' };
         }
@@ -52,7 +64,5 @@ function validatePptxStructure(filePath) {
         }
         return { ok: true };
     }
-    finally {
-        closeSync(fd);
-    }
+    return { ok: true };
 }

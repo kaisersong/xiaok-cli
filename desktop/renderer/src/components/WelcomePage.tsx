@@ -204,10 +204,10 @@ export function WelcomePage() {
       let taskId: string;
       if (files && files.length > 0) {
         const filePaths = files.map(f => f.filePath);
-        const result = await api.createTaskWithFiles({ prompt: text, filePaths });
+        const result = await api.createTaskWithFiles({ prompt: text, filePaths, context: { threadId: thread.id } });
         taskId = result.taskId;
       } else {
-        const result = await api.createTask({ prompt: text, materials: [] });
+        const result = await api.createTask({ prompt: text, materials: [], context: { threadId: thread.id } });
         taskId = result.taskId;
       }
       await api.updateThreadTaskId(thread.id, taskId);
@@ -405,6 +405,14 @@ function QuickPrompts({ onSelect, onGoalSelect }: { onSelect: (prompt: string) =
           className={buttonClassName}
         >
           {t.welcome.goalQuickPrompt}
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect(t.welcome.subagentPrompt)}
+          title={t.welcome.subagentPrompt}
+          className={buttonClassName}
+        >
+          {t.welcome.subagentQuickPrompt}
         </button>
         {t.welcome.quickPrompts.map(prompt => (
           <button

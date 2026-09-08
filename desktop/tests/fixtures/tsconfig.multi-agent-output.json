@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.renderer.json",
+  "compilerOptions": { "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"], "noEmit": true },
+  "include": ["../../renderer/src/global.d.ts", "../renderer/multi-agent-output-coalescing.bdd.test.tsx", "../renderer/multi-agent-panel.bdd.test.tsx"]
+}

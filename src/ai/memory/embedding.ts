@@ -15,6 +15,7 @@ export class EmbeddingClient {
   private cache: Map<string, Float32Array> = new Map();
   private onnxEngine: OnnxEmbeddingEngine | null = null;
   private onnxStatus: OnnxStatus | null = null;
+  private onnxUnavailableWarned = false;
 
   constructor(db: Database.Database, config: EmbeddingConfig) {
     this.db = db;
@@ -123,6 +124,17 @@ export class EmbeddingClient {
       if (this.onnxStatus.engine === 'onnx') {
         return this.onnxEngine.embed(texts);
       }
+    }
+
+    if (this.config.provider !== 'api') {
+      // provider='local'（默认）但 ONNX 引擎不可用：快速失败，禁止静默回退到
+      // 默认 HTTP 端点（如 localhost:11434）。检索/写入路径已有 try/catch，
+      // 会降级为关键词检索；如需向量检索请显式配置 memory.embedding.provider='api'。
+      if (!this.onnxUnavailableWarned) {
+        this.onnxUnavailableWarned = true;
+        console.warn('[memory] ONNX 向量引擎不可用且未配置 memory.embedding.provider=api，向量检索已禁用（关键词检索兜底）');
+      }
+      throw new Error('embedding unavailable: onnx engine not ready and no explicit embedding api configured');
     }
 
     const resp = await fetch(`${this.config.apiUrl}/embeddings`, {

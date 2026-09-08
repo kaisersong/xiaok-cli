@@ -1,13 +1,14 @@
 import type { Tool } from '../../../types.js';
 import type { PermissionClass } from '../../../types.js';
 import { type McpToolSchema } from '../client.js';
+import type { McpInvocationOptions } from './client.js';
 export interface McpRuntimeServerDeclaration {
     name: string;
     command: string;
 }
 export interface McpRuntimeConnectedClient {
     listTools(): Promise<McpToolSchema[]>;
-    callTool(name: string, input: Record<string, unknown>): Promise<string>;
+    callTool(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<string>;
     dispose(): void;
 }
 export interface McpRuntimeToolFactoryOptions {

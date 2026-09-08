@@ -11,6 +11,7 @@ import type { MemoryRecord } from '../memory/store.js';
 import type { HarnessMemoryRecord } from '../../runtime/harness-memory/types.js';
 import { formatLoadedContext, loadAutoContext } from '../runtime/context-loader.js';
 import { formatSkillsContext } from '../skills/loader.js';
+import { getCliDelegationSection, type CliDelegationOptions } from './sections/cli-delegation.js';
 import {
   getIntroSection,
   getSystemSection,
@@ -35,6 +36,7 @@ const API_OVERVIEW_PATH = join(__dirname, '../../../data/yzj-api-overview.md');
 
 export interface AssemblerOptions {
   channel?: 'chat' | 'yzj';
+  cliDelegation?: CliDelegationOptions;
   enterpriseId: string | null;
   devApp: DevAppIdentity | null;
   cwd: string;
@@ -132,6 +134,10 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     cacheable: true,
     kind: 'system_rule',
   }];
+  if (opts.channel === 'chat' && opts.cliDelegation) {
+    segments.push({ key: 'tool_policy', title: 'CLI Delegation Policy',
+      text: getCliDelegationSection(opts.cliDelegation), cacheable: true, kind: 'system_rule' });
+  }
 
   // -----------------------------------------------------------------------
   // SYSTEM_PROMPT_DYNAMIC_BOUNDARY
@@ -166,8 +172,6 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
     mcpInstructions: opts.mcpInstructions,
     currentTokenUsage: opts.currentTokenUsage,
     contextLimit: opts.contextLimit,
-    lastAssistantMessage: opts.lastAssistantMessage,
-    lastUserMessage: opts.lastUserMessage,
   });
   if (guidance) dynamicSections.push(guidance);
 
@@ -207,7 +211,7 @@ export async function assembleSystemPrompt(opts: AssemblerOptions): Promise<Asse
   const autoContextSection = formatLoadedContext(autoContext);
 
   // 10. Yunzhijia API overview (budget-managed)
-  const base = [staticText, ...dynamicSections].join('\n\n');
+  const base = [...segments.map((segment) => segment.text), ...dynamicSections].join('\n\n');
   let remaining = opts.budget - estimateTokens(base);
 
   let apiOverview = '';

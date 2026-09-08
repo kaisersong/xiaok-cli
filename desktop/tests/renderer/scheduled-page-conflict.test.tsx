@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   updateThreadTaskId: vi.fn(),
   onReminder: vi.fn(),
   getReminderStatus: vi.fn(),
+  deleteThread: vi.fn(),
 }));
 
 vi.mock('../../renderer/src/shared/desktop', () => ({
@@ -35,6 +36,7 @@ vi.mock('../../renderer/src/api', () => ({
     updateThreadTaskId: mocks.updateThreadTaskId,
     getThread: vi.fn(),
     listThreads: vi.fn(),
+    deleteThread: mocks.deleteThread,
   },
 }));
 
@@ -49,6 +51,38 @@ function renderScheduledPage(path = '/automations/schedules') {
 }
 
 describe('ScheduledPage stale schedule edits', () => {
+  it('preserves a newer main scheduled run that arrives while its old conversation is deleting', async () => {
+    const oldTask = { id: 'delete-race', name: 'Delete race', description: '', prompt: 'work', frequency: 'manual', status: 'active', threadId: 'old-thread', lastRunAt: 100, createdAt: 1, updatedAt: 2 };
+    let finish!: () => void;
+    mocks.getScheduledTasks.mockResolvedValue([oldTask]); mocks.deleteThread.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    renderScheduledPage(); await screen.findByText('Delete race'); fireEvent.click(screen.getByTitle('删除任务会话'));
+    fireEvent.click(screen.getByText('删除', { selector: 'button' }));
+    await waitFor(() => expect(mocks.deleteThread).toHaveBeenCalledWith('old-thread'));
+    mocks.getScheduledTasks.mockResolvedValue([{ ...oldTask, threadId: 'new-thread', lastRunAt: 200, updatedAt: 3 }]);
+    const writes: unknown[] = [];
+    const originalSet = localStorage.setItem.bind(localStorage);
+    const cacheWrites = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === 'xiaok:scheduled-tasks') writes.push(JSON.parse(value));
+      return originalSet(key, value);
+    });
+    finish();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('xiaok:scheduled-tasks')!)).toMatchObject([{ id: oldTask.id, threadId: 'new-thread', lastRunAt: 200 }]));
+    expect(screen.getByTitle('删除任务会话')).toBeInTheDocument();
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes.every(value => (value as Array<{ threadId?: string }>).every(task => Boolean(task.threadId)))).toBe(true);
+    cacheWrites.mockRestore();
+  });
+  it('does not unlink a scheduled conversation when main reports cleanup pending', async () => {
+    const task = { id: 'delete-instance', name: 'Instance safety', description: '', prompt: 'work', frequency: 'manual', status: 'active', threadId: 'instance-thread', lastRunAt: 100, createdAt: 1, updatedAt: 2 };
+    mocks.getScheduledTasks.mockResolvedValue([task]); mocks.deleteThread.mockRejectedValueOnce(new Error('thread_deletion_pending'));
+    renderScheduledPage(); await screen.findByText('Instance safety');
+    fireEvent.click(screen.getByTitle('删除任务会话'));
+    fireEvent.click(screen.getByText('删除', { selector: 'button' }));
+    await waitFor(() => expect(mocks.deleteThread).toHaveBeenCalledWith('instance-thread'));
+    expect(await screen.findByText(/仍有执行或资源尚未回收/)).toBeVisible();
+    expect(JSON.parse(localStorage.getItem('xiaok:scheduled-tasks')!)).toMatchObject([{ id: task.id, threadId: 'instance-thread', lastRunAt: 100 }]);
+    expect(screen.getByTitle('删除任务会话')).toBeInTheDocument();
+  });
   const scrollIntoView = vi.fn();
 
   beforeEach(() => {
@@ -64,6 +98,7 @@ describe('ScheduledPage stale schedule edits', () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     localStorage.clear();
     scrollIntoView.mockReset();

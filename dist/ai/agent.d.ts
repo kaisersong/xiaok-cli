@@ -1,6 +1,6 @@
 import type { MessageBlock, ModelAdapter, RuntimeHookSink, StreamChunk, UsageStats } from '../types.js';
 import type { ToolRegistry } from './tools/index.js';
-import type { AgentRuntimeEvent } from './runtime/events.js';
+import type { AgentRuntimeEvent, RuntimeActivity } from './runtime/events.js';
 import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
 import type { PromptSnapshot } from './prompts/types.js';
 import type { MemoryStore } from './memory/store.js';
@@ -8,6 +8,8 @@ import type { RunInvocationContext } from './runtime/model-capabilities.js';
 export type OnChunk = (chunk: StreamChunk) => void;
 export type OnRuntimeEvent = (event: AgentRuntimeEvent) => void;
 export interface AgentOptions {
+    onActivity?: (activity: RuntimeActivity) => void;
+    takePendingInput?: () => string | undefined;
     maxIterations?: number;
     contextLimit?: number;
     compactThreshold?: number;

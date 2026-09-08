@@ -403,6 +403,22 @@ describe('CanvasPanel managed artifact preview integration', () => {
     expect(panelControl.unmounts).toBe(0);
   });
 
+  it('U2/U3 Given the outer right surface switches to Agents, Then both retained canvas surfaces lose interaction authority without losing local state', () => {
+    const view = renderPanel();
+    fireEvent.change(screen.getByLabelText('Preview local state'), { target: { value: 'preserved while hidden' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Canvas' }));
+    const oldCallback = panelControl.latestProps!.onPreviewVersion as CapturedPreviewRequest['callback'];
+    const oldContext = panelControl.latestProps!.previewNavigationContext as PreviewNavigationContext;
+    view.rerender(panelElement({ interactionActive: false }));
+    expect(previewControl.latestProps).toMatchObject({ interactionActive: false });
+    expect(panelControl.latestProps).toMatchObject({ interactionActive: false });
+    view.rerender(panelElement({ interactionActive: true }));
+    act(() => oldCallback({ id: 'late', kind: 'html' }, { versionId: 'late', kind: 'html', mimeType: 'text/html', title: 'late', contentKind: 'html', content: 'LATE_HIDDEN_CALLBACK' }, oldContext));
+    expect(screen.getByRole('tab', { name: 'Canvas' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Preview local state')).toHaveValue('preserved while hidden');
+    expect(previewControl.mounts).toBe(1); expect(panelControl.mounts).toBe(1);
+  });
+
   it('exposes Workspace and Tools as active tabpanels while keeping Preview and Canvas inert', () => {
     renderPanel();
 

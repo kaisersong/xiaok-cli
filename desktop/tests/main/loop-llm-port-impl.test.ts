@@ -61,9 +61,9 @@ describe('Desktop Loop LLM port timeout boundaries', () => {
   });
 
   it('does not spend the completion budget while waiting for the shared execution lease', async () => {
-    const coordinator = new DesktopExecutionCoordinator({ capacity: 1 });
+    const coordinator = new DesktopExecutionCoordinator({ capacity: 1, backgroundCapacity: 1 });
     let releaseLease!: () => void;
-    const occupied = coordinator.run(undefined, () => new Promise<void>(resolve => { releaseLease = resolve; }));
+    const occupied = coordinator.run(undefined, () => new Promise<void>(resolve => { releaseLease = resolve; }), 'background');
     await Promise.resolve();
     providerMocks.stream.mockImplementation(() => streamChunks([
       { type: 'text', delta: 'ok' },
@@ -81,9 +81,9 @@ describe('Desktop Loop LLM port timeout boundaries', () => {
   });
 
   it('reports stable queue and completion timeout reasons', async () => {
-    const coordinator = new DesktopExecutionCoordinator({ capacity: 1 });
+    const coordinator = new DesktopExecutionCoordinator({ capacity: 1, backgroundCapacity: 1 });
     let releaseLease!: () => void;
-    const occupied = coordinator.run(undefined, () => new Promise<void>(resolve => { releaseLease = resolve; }));
+    const occupied = coordinator.run(undefined, () => new Promise<void>(resolve => { releaseLease = resolve; }), 'background');
     await Promise.resolve();
     const port = createDesktopLoopLLMPort(coordinator);
     const queueTimeout = port.complete(completionInput({ queueTimeoutMs: 20, completionTimeoutMs: 60_000 }));
@@ -101,7 +101,7 @@ describe('Desktop Loop LLM port timeout boundaries', () => {
   });
 
   it('propagates caller cancellation and reports output budget cancellation explicitly', async () => {
-    const port = createDesktopLoopLLMPort(new DesktopExecutionCoordinator({ capacity: 1 }));
+    const port = createDesktopLoopLLMPort(new DesktopExecutionCoordinator({ capacity: 1, backgroundCapacity: 1 }));
     const controller = new AbortController();
     providerMocks.stream.mockImplementation(waitForAbortStream);
     const cancelled = port.complete(completionInput({ signal: controller.signal }));

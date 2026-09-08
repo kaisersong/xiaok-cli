@@ -1,340 +1,49 @@
-# Repo Notes
+# xiaok-cli 工作规则
 
-## 语言
+## 工作方式与完成标准
 
-- 始终使用中文回复。
+- 始终用中文回复。当前重心是 xiaok desktop；根据任务定位相关代码，不把 yzj channel/webhook/websocket 混入无关变更。
+- 用户要求实现或修复时，持续完成范围内的实现、运行、检查和必要修复；只做分析的请求保持只读。完成说明区分已完成、阻塞和未验证，并给出实际证据。
+- 先确认现有实现是否已解决问题。新功能、行为变更及高风险修复按“设计 → 对抗性评审 → 回归测试 → production code”推进；根因不明或曾回归的修复视为高风险。设计与评审的篇幅随风险调整，不把它们变成等待用户确认的默认停点。
+- 纯文案、格式、注释和不改变产品行为的指令整理，做对应检查即可。运行与改动相关的测试和构建；通过后，只有新改动、失败或未解风险才扩大或重复验证。测试调用真实生产入口，不在测试中重实现被测逻辑。
+- 保留其他任务的改动；协作时先确认工作归属。worktree 只用于隔离实现，不将 feature worktree `npm link` 到全局；需要验证本地 xiaok 命令时先确认主 checkout 和实际入口。worktree 是否活跃以 `git worktree list` 为准，集成后再清理本任务 worktree。
 
-## 相关项目
+## 架构与不可省略的边界
 
-- `xiaok-cli` 关联项目都在 `/Users/song/projects/` 下：
-  - `kswarm`：多智能体项目编排服务。负责 project / task / deliverable 状态、PO / worker agent、任务分派、项目推进、干预、重试、review、project health 和项目产物状态。`xiaok desktop` 通过 main process 的 KSwarm service adapter 启动、探活和调用它，renderer 只展示结构化项目状态。
-  - `intent-broker`：本地协作与事件中转服务。负责 participant / agent 注册、消息和事件流、任务进度同步、跨 agent adapter 协调，以及 KSwarm 与本地执行 agent 之间的通信基础。desktop 打包时它是关联 sidecar service。
-  - `kai-xiaok-plugins`：小 K 插件与 MCP server 集合。负责 report / slide 等 bundled plugin 能力、plugin registry、MCP server 资源和打包输入。desktop 会把其中需要的插件资源打入 `extraResources` 并部署到 `~/.xiaok/plugins`。
-- 从 GitHub 拉取更新时，这些项目要一起更新。
-- 提交代码时，相关项目也要一起提交；如果某次只提交其中一部分，必须在最终说明里写清楚原因。
-- 修改 KSwarm project workflow、agent contract、project state、artifact handoff 时，优先检查 `kswarm` 是否也需要改。
-- 修改 agent 协作、事件投递、adapter、broker lifecycle、queued / progress / approval 流程时，优先检查 `intent-broker` 是否也需要改。
-- 修改报告、幻灯片、MCP plugin、bundled plugin、plugin packaging 或 runtime path 时，优先检查 `kai-xiaok-plugins` 是否也需要改。
+- Electron main 是 filesystem、SQLite、后台执行、调度、通知、子进程、服务和窗口生命周期的本地事实来源；preload 只提供白名单语义 API；renderer 管展示和局部 UI 状态，不持有 durable state 或后台事实。一个业务轮询只能有一个 owner。
+- reminder 是到点通知，scheduled task 是自动执行。变更 IPC 时同步 main handler、preload API/实现、renderer types 和 contract tests。
+- agent mutation service 必须显式接收 `requestSource: 'user' | 'agent' | 'scheduler'`，在 service 内按来源与所有权 default deny、allowlist 放行，并有越权拒绝测试。工具描述写“只能/严禁”的边界，避免引导自动取消或删除。安全修复同时审查同权限兄弟入口，不能只堵可零成本绕过的一路就宣称修复。
+- 路径用 `path.join` / `path.resolve`；renderer 文件 URL/文件名用 `lib/file-path.ts`。不硬编码本机路径；兼容 Windows 盘符、UNC、大小写和分隔符。Windows 不直接无 shell spawn `.cmd` shim；后台 Node sidecar 用 `process.execPath` 与 `ELECTRON_RUN_AS_NODE=1`。
+- CUA 当前仅 macOS：平台 gate 必须早于动态导入 CUA manager 和注册 wrapper；Windows 缺失 CUA 时仍应能启动。改启动/子进程/原生模块/路径相关逻辑时验证 Windows 分支。
+- renderer 用户可见字符串全部用 `t.*`，同步 `locales/index.ts`、`zh.ts`、`en.ts`；纯函数接收 labels，带变量用函数 key。AI prompt、技术标识符和注释除外。
+- 发布涉及真实 sibling repo 内容：有未提交、未 push、过期 bundle 或缺平台 wheels 时不能称 release ready。本地验证打包禁止签名；只有正式发布才允许签名。
 
-## 关联项目构建 / 测试 / 发布联动
+## 关联项目与文档位置
 
-- 本地构建 desktop 时，`desktop/electron-builder.json` 会从 sibling repos 打包资源：
-  - `../../kswarm/src`、`../../kswarm/scripts`、`../../kswarm/package.json`、`../../kswarm/node_modules/ws`
-  - `../../intent-broker/src`、`../../intent-broker/package.json`、`../../intent-broker/adapters`、`../../intent-broker/node_modules/ws`
-  - `../../kai-xiaok-plugins/plugins/kai-report-creator`
-  - `../../kai-xiaok-plugins/plugins/kai-slide-creator`
-- 因此 packaging / release 不能只看 `xiaok-cli` 当前 repo；必须确认 sibling repos 的本地内容、依赖和构建产物是当前要发布的版本。
-- 改 `kswarm` 后，至少在 `/Users/song/projects/kswarm` 跑与改动相关的 focused test；发布或改 project workflow / runtime / recovery 时优先跑：
-  ```bash
-  npm test
-  npm run test:all
-  ```
-  如果只改了窄路径，可以用对应脚本，例如 `npm run test:delivery`、`npm run test:event-log`、`npm run test:e2e-p0`，但最终说明要写清楚为什么足够。
-- 改 `intent-broker` 后，至少在 `/Users/song/projects/intent-broker` 跑：
-  ```bash
-  npm test
-  ```
-  如果改 participant / adapter / collaboration 流程，再跑：
-  ```bash
-  npm run verify:collaboration
-  ```
-- 改 `kai-xiaok-plugins` 的 report-renderer 后，在 `plugins/kai-report-creator/mcp-servers/report-renderer` 跑：
-  ```bash
-  npm run build
-  npm run build:bundle
-  ```
-  并做 MCP initialize smoke test，确认 `dist/server.bundle.js` 可启动。
-- 改 `kai-xiaok-plugins` 的 slide-renderer / Python MCP / bundled wheels 后，要按目标平台更新或验证 `plugins/kai-slide-creator/bundled-wheels/`，并跑该插件相关 Python tests；desktop release 的 macOS 和 Windows wheels 不能混用。
-- 只要关联项目改动会进入 desktop 打包资源，回到 `/Users/song/projects/xiaok-cli` 后还要跑 desktop packaging contract：
-  ```bash
-  cd desktop
-  npm run test -- --run tests/main/kswarm-contract.test.ts tests/main/deploy-bundled-plugins.test.ts tests/main/e2e-plugin-bundling.test.ts tests/main/e2e-plugin-rendering.test.ts
-  npm run build
-  ```
-  必要时再跑 `npm run pack:dir`，确认 `extraResources` 真正进入 unpacked app。
-- desktop release / CI 必须 checkout 与 `extraResources` 对应的 sibling repos。不要假设 CI 里存在本机的 `/Users/song/projects/*`；release workflow 需要显式 checkout `kai-xiaok-plugins`、`kswarm`、`intent-broker` 或使用等价的 vendor / submodule 方案。
-- 发布前如果 sibling repo 有未提交改动、未 push commit、未构建 bundle、缺 wheels，不能宣称 desktop release ready。
+关联 repo 在当前仓库同级，先检查实际路径与状态，不使用历史用户名路径：
 
-## Desktop 构建新鲜度 / Stale Build Artifacts
+| 改动领域 | 同时检查 |
+|---|---|
+| project/task/deliverable、workflow、artifact handoff、recovery | `../kswarm` |
+| participant、协作事件、adapter、broker lifecycle、queued/progress/approval | `../intent-broker` |
+| report/slide、MCP/bundled plugins、打包与 runtime path | `../kai-xiaok-plugins` |
 
-- 如果 desktop 构建提示某个产物还是旧的，不要靠反复运行同一个 build 直到碰巧通过。把它当成 build graph / generated artifact 新鲜度问题处理。
-- 先定位提示里的 owner：
-  - `kswarm` / `auto-worker` / generated service override：检查 `/Users/song/projects/kswarm` 的源文件和 `desktop/.generated/kswarm/**` 是否由当前源重新生成，通常需要重新跑 `cd desktop && npm run build:main`，必要时先确认 `scripts/generate-desktop-service-overrides.mjs` 的输入路径。
-  - `report-renderer` / `server.bundle.js`：到 `/Users/song/projects/kai-xiaok-plugins/plugins/kai-report-creator/mcp-servers/report-renderer` 跑 `npm run build` 和 `npm run build:bundle`，再回到 desktop build。
-  - `slide-renderer` / `bundled-wheels`：确认 `/Users/song/projects/kai-xiaok-plugins/plugins/kai-slide-creator/bundled-wheels/` 是当前目标平台需要的 wheel 集合。
-  - `intent-broker` 或 `kswarm` dependency：确认 sibling repo 的 `node_modules/ws` 存在且来自当前 repo install，而不是依赖旧打包输出。
-- 修 stale build 时只重建对应 owner 的产物；不要无差别清理多个 repo 的 build output。需要删除生成物时，只删除明确可再生的命名产物，并在最终说明写清楚。
-- stale build 修复后，至少跑一次 deterministic 验证，而不是把“重复 build 终于过了”当作通过：
-  ```bash
-  cd desktop
-  npm run test -- --run tests/main/kswarm-contract.test.ts tests/main/deploy-bundled-plugins.test.ts tests/main/e2e-plugin-bundling.test.ts tests/main/e2e-plugin-rendering.test.ts
-  npm run build
-  ```
-  packaging / release 相关时再跑 `npm run pack:dir`。
+用户要求拉取更新时，以上项目一起检查更新；要求提交代码时一起处理相关改动，若只提交一部分，最终说明原因。desktop 打包从 sibling repos 取资源，发布 CI 必须显式 checkout 它们。
 
-## 当前重心
+`docs` 可能为 symlink，先解析实际目标；其 design/superpowers/analysis/bugfix 均属本任务文档范围，必要编辑不用因 symlink 另行确认。文档改动的 Git 状态在实际文档 repo 中检查。
 
-- 当前项目重心是 `xiaok desktop`，不是旧的 `xiaok chat` CLI runtime refactor。
-- desktop 相关工作默认先考虑 Electron main process、preload / IPC、renderer、daemon、scheduler、SQLite、KSwarm、intent-broker、bundled plugins、packaging 的边界。
-- `xiaok chat` terminal frontend 规则仍然有效，但只在修改 `src/ui/**` 或 `src/commands/chat.ts` 中直接影响 TUI 的路径时适用。
-- 不要把 `yzj` channel、webhook、websocket 工作混入 desktop 或 terminal frontend 的当前变更，除非用户明确要求。
+## 按任务读取专项规则
 
-## CUA / Computer Use 平台边界
+只读取本次触及的行；一次任务可以匹配多行，不通读整个表。
 
-- CUA / Computer Use 当前是 macOS-only 能力。
-- Windows CLI / desktop startup 不能顶层 import、启动期解析或暴露 CUA / CuaDriver / `cua-driver mcp` 依赖；平台 gate 必须发生在动态 import `platform/mcp/cua-connection-manager` 和注册 `xiaok_computer_use` wrapper 之前。
-- Windows 上发现 `cua-driver` / `cua-computer-use` plugin 时，应标记为 macOS-only degraded capability 并跳过 wrapper 注册，不能让 `xiaok --auto` 因 CUA 模块缺失或 CuaDriver 不存在而启动失败。
-- 改 CUA lazy activation 或 CLI runtime startup 时，必须跑 package-boundary 测试，证明缺失 compiled CUA manager 时 Windows runtime context 仍可导入并跳过 CUA。
+| 触发条件 | 必读规则 |
+|---|---|
+| 改 desktop 架构、生命周期、IPC、调度、KSwarm 或 renderer 行为 | [.agents/guidance/desktop-architecture.md](.agents/guidance/desktop-architecture.md)：按领域继续定位设计文档 |
+| 改路径、子进程、CLI/runtime startup、CUA、原生依赖 | [.agents/guidance/cross-platform.md](.agents/guidance/cross-platform.md) |
+| 新增/修改 agent tool、权限校验、用户 store 写入、外部副作用 | [.agents/guidance/agent-tools.md](.agents/guidance/agent-tools.md) |
+| 修改可执行代码并选择测试/构建；排查 sandbox 测试失败 | [.agents/guidance/verification.md](.agents/guidance/verification.md) |
+| sibling 资源、构建产物新鲜度、packaging/release/CI | [.agents/guidance/packaging.md](.agents/guidance/packaging.md) |
+| `src/ui/**` 或 `src/commands/chat.ts` 中直接影响 TUI 的代码 | [.agents/guidance/terminal.md](.agents/guidance/terminal.md) |
+| 新方案、竞品借鉴、安全/性能/检索优化、复杂修复 | [.agents/guidance/evidence-and-design.md](.agents/guidance/evidence-and-design.md) |
 
-## Worktrees
-
-- CLI runtime layer refactor 已经合回主工作区。
-- 当前没有 active runtime refactor worktree。
-- 本地验证 `xiaok` 命令必须使用主工作区 `/Users/song/projects/xiaok-cli`；不要 `npm link` feature worktree。
-- 如果后续确实需要 worktree，只为隔离实现创建，并在集成后移除。
-
-## 跨平台兼容
-
-以下规则适用于 `xiaok-cli` 及所有关联项目（`kswarm`、`intent-broker`、`kai-xiaok-plugins`）。
-
-### 路径
-- 路径拼接必须用 `path.join` / `path.resolve`，禁止硬编码 `/` 或 `\` 分隔符。
-- 禁止对 `os.homedir()`、config dir、temp dir 的结果做字符串拼接 `/`；一律用 `path.join`。
-- 不要在代码里硬编码具体机器路径（`/Users/<name>/...`、`C:\Users\<name>\...`）；运行时推导。
-- 取文件名用 `path.basename`（Node 侧）或 renderer 的 `fileBasename`，不要 `split('/').pop()`（Windows 路径用 `\`）。
-- 判断"路径是否在某根目录内"用 `path.relative` + `isAbsolute`，不要 `resolved.startsWith(root + '/')`——硬编码 `/` 在 Windows 永不匹配，会误拒合法路径。
-- 判断绝对路径要同时认 POSIX `/`、Windows 盘符 `C:\`/`C:/`、UNC `\\`，不要只 `startsWith('/')`。
-- 文件路径比较和去重必须考虑大小写（Windows case-insensitive）和盘符（`C:\` vs `/`）。
-- renderer 构造 `file://` URL 用 `lib/file-path.ts` 的 `toFileUrl`（Windows 产出 `file:///D:/...`），不要写 `` `file://${path}` ``。
-
-### 子进程
-- spawn / exec 的命令和参数不要假设 Unix shell 语法（`&&`、`|`、`$VAR`）；跨平台时用 `cross-spawn` 或分多步。
-- **不要无 shell 直接 spawn `.cmd` / `.bin` shim**：`npm`/`npx`/`tsc`/`electron`/`node_modules/.bin/*` 在 Windows 上是 `.cmd`，现代 Node 无 shell spawn 会抛 `EINVAL` / `ENOENT`。处理方式：Windows 上 `shell: true`（参数必须是固定白名单，无注入），或直接 spawn 真实可执行——electron 用 `require('electron')` 返回的路径、tsc 用 `process.execPath` 跑 JS 入口、固定命令用平台对应的 `.cmd`。
-- 拉起后台 node sidecar 用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`（已是标准做法），不要 spawn 裸 `node` 或 `.cmd`。
-
-### 平台守卫
-- macOS 专有能力（CUA driver、`open`、`.app` bundle 路径、`launchctl`、`defaults`）必须有 `process.platform` 守卫；Windows / Linux 下不能调用，也不能因缺失而启动崩溃。macOS 专有的固定路径（如 `/Applications/...`）用 `path.posix` 构造，避免在 Windows 上被转成反斜杠。
-- Windows 专有能力（`reg`、`cmd /c`、`explorer.exe`）同样需要平台守卫。
-- 可选原生模块（`better-sqlite3`、`nodejieba` 等）在 Windows 上可能未构建：生产代码必须优雅降级，测试在模块不可用时用运行时探测 + skip，不要假设一定存在。
-
-### 测试
-- 测试里把 `path.slice` / `path.relative` 得到的相对路径与 POSIX 风格 allowlist / snapshot 比对前，先 `.replace(/\\/g, '/')` 归一化；否则 Windows 的 `\` 路径会全不匹配，导致整批误报。
-- 临时目录递归清理在 Windows 上可能因瞬时文件锁抛 `EPERM`：用 `maxRetries` + best-effort（`desktop/tests/setup.ts` 已全局处理递归删除）。
-- 新增或修改 daemon spawn、MCP server 启动、plugin 路径解析、socket 路径时，必须验证 Windows 分支不崩。CI 可以覆盖，但至少需要 `process.platform === 'win32'` 分支的单元测试或条件跳过。
-
-### 强制 / 工具
-- desktop 路径相关改动遵循 `.kiro/steering/cross-platform-paths.md`（统一用 `lib/file-path.ts` helper）。
-- `desktop/tests/main/cross-platform-path-guard.test.ts` 会扫描反模式（手写 `file://`、以硬编码主目录路径开头的字面量）并直接失败。
-- `.github/workflows/desktop-cross-platform.yml` 在 windows-latest + macos-14 上跑跨平台路径测试 + renderer 构建，把 Windows-only 回归挡在 PR 阶段。
-
-### 已知历史教训
-- CUA 是 macOS 专有，曾因无条件启动导致 Windows CLI 无法启动。
-- 路径硬编码 `/Users/...` 导致 Windows 解析失败（产品代码与测试都出现过）。
-- 无 shell spawn `.cmd` shim（dev-runner 的 tsc/electron/npm、evidence-gate 的 npm、react-doctor bin）在 Windows 抛 `EINVAL`/`ENOENT`，曾让 `npm run dev:all` 和多个测试在 Windows 失败。
-- 路径包含判断硬编码 `/`（kswarm-runtime-bridge `isAllowedPath`）在 Windows 误拒合法 handoff，连带导致取消/超时测试失败。
-- 改动时优先 grep 是否会重蹈以上覆辙。
-
-
-
-## 方案决策前置验证
-
-- 从外部项目分析、竞品参考、设计评审中得出的"值得借鉴"结论，**不等于**"值得现在做"。
-- 决定做一项改动之前，必须先 grep / 实测回答：**当前代码是否已经解决了这个问题？** 如果已解决，不做。
-- 上一条的推论，安全 / 权限 / 校验类改动**必答**：**这个闸门能否被同权限的兄弟路径绕过？** 如果同一 registry、同一 handler、同一权限档里存在另一条能达成同样效果的路径，那么关闭本闸门的边际收益是 **0**，无论被识别的缺陷本身多真实。必须沿实际调用链列出所有兄弟路径，说明本轮是否一并处理；不一并处理就不能宣称"修复"。
-- 对任何"节省 token / 减少 payload / 提升性能"的方案，先用真实数据量化收益。如果收益 < 5%，不做（除非有安全动机）。
-- 允许集 / 白名单的尺寸必须用**该闸门自己的**调用人口推导。用其它工具（尤其是本轮不加闸门的工具）的流量来论证允许集，会得出完全相反的结论。
-- 不要凭印象写"现状"——`formatSkillPayload 把全 body 注入 system prompt` 这类假设，必须 grep 到确切调用链再写进设计。
-- 设计评审循环不能替代 ROI 判断。6 轮评审通过 ≠ 值得做。评审只验证"如果做，怎样不出错"，不验证"应不应该做"。
-- 竞品分析产出的借鉴清单，必须标注"xiaok 是否已有等价实现"一列。已有等价的项直接标 skip，不进入设计阶段。
-- 历史教训（2026-06-15 maka-agent 借鉴方案）：6 轮设计评审 + 26 份文档 + 3.5 天实施 = 1.1% token 节省。根因是第一步"现状判断"就错了（xiaok 早已 lazy catalog），后续所有轮次都在优化一个不存在的问题。
-- 历史教训（2026-08-02 Desktop 工作区约束方案）：同一份设计连续 3 版被 6 名评审 BLOCK。被识别的缺陷是真的（打包后 `write` 的约束根等于 `/`，恒真放行全盘），但三版提出的修法安全收益都是 **0** —— 主症 `buildToolList()` 与 `bash`（35% 调用面）都不在范围内，每个被关闭的口子都有兄弟工具原样绕过。而同一作者 3 天前的父文档已写明"只修 root 覆盖不到一半，绕道成本为零"。**缩小范围时不能把父文档已登记的验收条件一起裁掉。** 详见 `docs/design/2026-08-02-desktop-workspace-root-confinement-design.md` §0.2。
-- 历史教训（2026-08-10 KB 检索）：三版设计被三方评审 BLOCK 共 9 次，**三版里最复杂的机件全部被实测排除**（FTS5 全套 → TF-IDF 打分器 → RRF 向量融合），而七项真正落地的改动**没有一项出现在任何原始设计里**，每项 1–40 行。根因每次都是第一步"现状判断"没去量真实数据：第一版漏了 `kb-retrieval.ts` 已存在；第二版漏了 **74.1% 的索引字符是 HTML 标签与 CSS**（真正的主症）；第三版的验收规则被实测证明**在数学上不可达**（可行域为空集）。最讽刺的一条：设计里的 `fusedScore` 归一化会让 top1 恒等于 1.00，从而**消灭绝对阈值**——而阈值是唯一能修"无答案查询误召"的手段，1 行常量即可，差点被一个实测收益为 0 的机件换掉。详见 `docs/analysis/2026-08-08-kb-retrieval-baseline-and-onnx-fix.md` §10。
-- 检索 / 排序 / 召回 / 相关性类方案，**必须先在用户真实数据上量，再写设计**。至少回答：语料里有多少是噪声？现状实现在真实查询上的失败案例长什么样？只在合成样本或"自己造的对照组"之间比较（例如只比 FTS5 的 AND/OR/隐式三种模式，而从不与现状实现对比）得出的结论，会得到方向相反的答案。
-- 任何检索质量改动都要**先冻结判定规则再跑**：冻结语料、按字面重叠度分桶（零 / 部分 / 高）分别报告、含无答案查询检测虚假召回、明确指标（Hit@K / MRR / NDCG，不用"准确率"）。样本量要够——6 条查询的桶，McNemar 精确检验 p 可以是 1.000，等价于抛硬币。
-- **测试不得重实现被测逻辑。** 在测试文件里自己写一遍子串匹配 / 打分 / 解析，然后断言它工作，是自证而非回归：生产实现坏掉也不会红。历史实例：`kb-integration.test.ts` 两条名为"中文检索"的测试自带一份子串实现、从不调用生产检索，这正是一个**三条腿全断的 retriever** 能长期无人发现的直接原因；同类模式在 ONNX（只测降级路径）与 pdfjs（只测 stub）上已各出现过一次。评测 harness 同样适用——它若自带一份实现，验收结论就与产品行为脱钩。
-
-## Requirement Implementation Gate
-
-- 任何新需求或行为变更，先写设计文档。
-- 实现前先对设计做对抗性评审。
-- 评审后先写测试，再写 production code。
-- 只有 docs、adversarial review、tests 都到位后，才开始写或修改 production code。
-- 核心/高风险改动强制执行方案 + 对抗性评审，不可跳过：
-  - 跨层架构变更，例如 main / preload / renderer / daemon / scheduler / executor / store 的数据流或生命周期变化。
-  - 影响多文件的接口、协议、IPC contract、preload API、tool schema、store schema。
-  - 并发、竞态、信号传递、轮询、后台任务、恢复、取消、重试相关逻辑。
-  - SQLite / durable state / migration / data ownership 相关逻辑。
-  - 会话上下文、历史记录、project state、artifact handoff、KSwarm task state 等影响用户体验连续性的机制。
-  - Bug 修复涉及根因不明确、曾经回归、或者只能通过真实用户流程暴露的问题。
-- 对抗性评审重点：边界条件、并发竞态、取消/异常路径、恢复路径、测试是否真正覆盖核心行为，而不是只覆盖 happy path。
-
-## Desktop 设计文档
-
-- `docs/design/README.md` 是当前设计文档总入口，已经 desktop-first。
-- desktop 改动优先读取：
-  - `docs/design/2026-05-20-xiaok-desktop-architecture-design.md`
-  - `docs/design/2026-05-20-xiaok-desktop-test-matrix.md`
-  - `docs/design/2026-05-20-xiaok-desktop-change-checklist.md`
-- scheduled task / reminder / timed action 相关改动还要读取：
-  - `docs/superpowers/specs/2026-05-20-desktop-recurring-autorun-scheduled-tasks-design.md`
-  - `docs/design/2026-05-20-desktop-scheduled-task-daemon-offline-execution.md`
-  - `docs/design/2026-05-20-desktop-scheduled-task-daemon-offline-execution-test-plan.md`
-- KSwarm / project workflow 相关改动还要读取：
-  - `docs/design/2026-05-12-kswarm-xiaok-integration-architecture.md`
-  - `docs/design/2026-05-16-kswarm-service-lifecycle-gateway.md`
-  - `docs/design/2026-05-16-kswarm-service-lifecycle-gateway-adversarial-review.md`
-
-## Desktop 架构规则
-
-- Electron main process 是本地事实来源，负责 filesystem、SQLite、daemon、scheduler、notification、child process、KSwarm / intent-broker / plugin lifecycle、window lifecycle、packaging runtime path。
-- preload 只暴露白名单、语义级 API，不暴露通用 `fs`、`shell`、`sql`、任意命令执行、任意 socket 连接。
-- renderer 负责展示、交互、局部 UI state、loading / empty / error / success，不负责 durable state 和后台执行。
-- renderer 不能成为 scheduled task、reminder、project、artifact、agent runtime status 的最终事实来源。
-- 不要让 main、renderer、daemon 各自轮询同一个业务事实。轮询服务只能有一个 owner，不同业务通过 executor 分流。
-- reminder 是到点通知；scheduled task 是自动执行任务。工具说明、system prompt、renderer 文案、store 字段必须保持这条边界。
-- scheduler 负责 claim due action、调用 executor、记录结果、计算下一次触发；业务是否补跑 overdue 由 executor 决定。
-- 改 IPC / preload contract 时，同步更新 main handler、`preload-api.ts`、`preload.cjs`、renderer API type 和 contract tests。
-
-## 国际化 (i18n) 强制要求
-
-- renderer 中所有用户可见的字符串（标签、按钮文案、placeholder、toast、confirm、状态文本、错误信息、空状态提示）必须通过 `t.*` locale 引用，禁止硬编码中文或英文。
-- 唯一例外：发送给 AI 模型的 system prompt / template prompt 内容、代码注释、技术标识符（URL、命令名、协议名）。
-- 新增或修改功能时，同步在三个 locale 文件中添加对应 key：
-  - `desktop/renderer/src/locales/index.ts`（类型定义）
-  - `desktop/renderer/src/locales/zh.ts`（中文值）
-  - `desktop/renderer/src/locales/en.ts`（英文值）
-- 纯工具函数（`.ts` 文件，无 React hooks）需要返回用户可见文本时，通过参数接收 locale labels，不要硬编码。
-- 带变量的字符串使用函数类型 key：`keyName: (param: type) => string`。
-- locale key 命名使用 camelCase，按功能分组到嵌套对象（`desktopSettings.*`、`knowledge.*`、`chatView.*`、`projects.*` 等）。
-- 不要使用 `locale === 'zh' ? '中文' : 'English'` 三元表达式，一律走 `t.*` 系统。
-- PR review 时检查：新增的 `.tsx` / `.ts` 文件中不应出现 `[\u4e00-\u9fff]` 范围的硬编码字符（AI prompt 除外）。
-
-## Agent Tool 权限边界
-
-设计任何会被 agent runtime 调用的 tool（特别是 write 类）时，必须按以下规则贯彻，否则会出现 agent 误删/误改用户数据的事故。
-
-历史教训（2026-06-24）：`scheduled_task_cancel` 工具的 description 写"周期任务满足停止条件时必须调用"，导致 agent 在执行 daily 任务时把用户创建的 AI日报自己取消了。Service 层无权限校验，Tool description 引导主动取消，双重失守。
-
-### 强制规则
-
-- **Service 层显式权限参数**：所有 mutation 类 service 方法（`cancel*` / `delete*` / `update*` / `set*Status` 等）必须接收 `requestSource: 'user' | 'agent' | 'scheduler'` 参数，并在方法内部根据来源 + 数据所有权决定是否放行。**禁止**靠 caller 自觉。
-- **Default deny**：默认拒绝 agent 跨域操作。允许的边界用 allowlist 显式列出（例：agent 只能 cancel `source === 'agent'` 且 `trigger.kind === 'interval'` 的临时任务）。
-- **Tool description 写禁区，不写许可**：用 "**严禁** X" / "只能 Y" 的措辞，列出明确不能做的场景。**避免** "必须调用" / "应该调用" 这类引导性措辞——LLM 会找理由用。
-- **Negative test 必备**：每个 agent tool 必须有"越权调用拒绝"的单测，与 happy path 同等地位。例：`scheduled_task_cancel` 调 user-created task 应返回错误且不修改数据。
-- **Audit log（建议）**：mutation 类操作记录 `who / what / why / when`。出问题能在 timed_action_runs / activity log 类表里 5 分钟 trace 完。SQLite 已有 `timed_action_runs` 是好例子。
-
-### 新增/修改 agent tool 的 checklist
-
-- [ ] Service 层有 `requestSource` 参数？
-- [ ] 默认 deny 还是 default allow？写了 allowlist 还是 denylist？
-- [ ] Tool description 是否包含 "**严禁**" / "只能" 等明确边界？是否避免了"必须调用"这类引导措辞？
-- [ ] 有没有 agent 越权调用的 negative test？
-- [ ] 改了 durable state 有没有 audit log（即使是简单的 console.warn + run history record）？
-- [ ] Renderer IPC 路径默认 `requestSource='user'`，agent tool 路径默认 `'agent'`，两路验证清楚？
-
-### 高风险 tool 类型（必须套用上述规则）
-
-- 取消 / 删除（cancel / delete / archive / soft-delete）
-- 状态变更（status / approve / reject / pause / resume）
-- 数据写入到用户拥有的 store（scheduled tasks、reminders、knowledge、project / task state、artifacts metadata）
-- 涉及外部副作用（发送消息、推送通知、调用第三方 API）
-
-## Desktop 验证
-
-- desktop main / service / scheduler:
-  ```bash
-  cd desktop
-  npm run test -- --run tests/main/<target>.test.ts
-  npm run build:main
-  ```
-- preload / IPC contract:
-  ```bash
-  cd desktop
-  npm run test -- --run tests/main/preload-contract.test.ts tests/main/preload-sandbox.test.ts
-  npm run build:main
-  ```
-- renderer UI / hooks / context:
-  ```bash
-  cd desktop
-  npm run test -- --run tests/renderer/<target>.test.tsx
-  npm run build:renderer
-  ```
-- cross-layer desktop 改动：
-  ```bash
-  cd desktop
-  npm run test -- --run tests/main/<target>.test.ts tests/renderer/<target>.test.tsx
-  npm run build:main
-  npm run build:renderer
-  ```
-- typecheck:
-  ```bash
-  cd desktop
-  npm run typecheck
-  ```
-- packaging 相关改动：
-  ```bash
-  cd desktop
-  npm run build
-  ```
-  必要时再跑：
-  ```bash
-  cd desktop
-  npm run pack:dir
-  ```
-- 本地打包**禁止签名**。`npm run pack:dir` 默认会触发 codesign，本机 keychain 经常 `errSecInternalComponent` 失败，且本地验证不需要签名。本地验证使用：
-  ```bash
-  cd desktop
-  CSC_IDENTITY_AUTO_DISCOVERY=false ./node_modules/.bin/electron-builder --dir \
-    --config electron-builder.json \
-    -c.mac.identity=null \
-    -c.win.signAndEditExecutable=false
-  ```
-  仅在需要正式发布产物时才允许签名。
-- `desktop` 的 `typecheck` 使用 baseline；不要因为无关历史错误更新 baseline。只有本次改动确实需要改变 baseline 时，才说明原因并更新。
-
-## Terminal Frontend 说明
-
-- Terminal E2E verification 使用 `tests/e2e/tmux-e2e.py`，它会启动本地 OpenAI-compatible SSE server 和真实 tmux TTY。
-- 首次提交输入后，startup welcome card 应保持在输入上方，直到正常 terminal scrolling 将其滚走；不要在首次 submit 时清空 content region。
-- `Thinking`、`Working` 等 live activity 渲染在 input footer 上方的 activity row，activity 和 `❯` 之间保留一行空白 gap。
-- 不要尝试在 live activity row **上方**（activity 与 transcript 内容之间）加空白 gap。已于 2026-06-24 完整尝试并失败：activity 本身是"覆盖最底行、不移动内容"的 overlay，而要在其上方留空行必然要滚动/移动 transcript 内容；静态预留和 transient 滚动两种实现都会在 24 行终端上把内容挤出可见区，且 transient 方案在多工具一轮内跨多次 activity 累积滚动把 transcript 走飞，破坏 `tests/commands/chat-interactive-runtime.test.ts` 的"换轮后上一轮尾行可见"等内容保留回归。结论：activity 上方留 gap 与"activity overlay 不移动内容"是结构性冲突，除非有全新的不移动内容的机制，否则不要再做。详见 `docs/bugfix/2026-06-24-terminal-activity-transient-lead-gap-design.md`。
-- activity line 不应重复 footer status fields，例如 model、mode、tokens、project。
-- 忙碌/streaming 状态下按 `ESC` 是当前 turn 的用户中断请求，不是失败态；`AbortError` 必须沿 runtime 原样冒泡到 chat 层处理，不能被 normalize 成普通 tool/model failure。
-- ESC 中断必须保留用户 draft 和 queued input，不能清空输入缓冲；`XIAOK_NO_ESC_INTERRUPT=1` 时应退回旧行为。
-- abort 后的 Stop/auto-continue 路径不能继续消耗 aborted turn；broker/runtime 事件应使用 `turn_aborted` + `turn_stop(reason: 'user_aborted')` 表达用户中断。
-- terminal frontend focused 验证示例：
-  ```bash
-  npm run build
-  npm run test:sandbox:build
-  npm run test:sandbox:run -- .test-dist/tests/ui/scroll-region.test.js .test-dist/tests/ui/tool-explorer.test.js .test-dist/tests/ui/permission-prompt.test.js
-  python3 tests/e2e/tmux-e2e.py --project-dir /Users/song/projects/xiaok-cli
-  ```
-
-## CLI / Sandbox 验证说明
-
-- 在 Codex sandbox 中，raw `vitest` 跑 TypeScript source 可能因为 Vite / esbuild 启动 child process 出现 `spawn EPERM`。
-- CLI 侧优先使用 `npm test` 或 `npm run test:sandbox`，它会先把 `src/` 和 `tests/` 编译到 `.test-dist/`，再用 `vitest.sandbox.config.mjs` 跑 emitted JavaScript。
-- reminder / daemon suites 会打开真实 Unix socket；受限 sandbox 中可能出现 `listen EPERM`。需要 full pass signal 时，在 unrestricted 环境重跑。
-- sandbox suite 会排除依赖 subprocess 的测试，例如 `bash` 和 `grep`；完整套件在非受限机器跑 `npm run test:full`。
-
-## Docs Symlink Scope
-
-- 本工作区的 `docs` 是 symlink，指向 `/Users/song/projects/mydocs/xiaok-cli`。
-- `docs/design/**`、`docs/superpowers/**`、`docs/analysis/**`、`docs/bugfix/**` 都视为本 repo 工作范围内的项目文档。
-- 任务需要时，直接更新最小相关文档集；不要因为 design-doc edit 跨 symlink 就额外请求确认。
-- 注意：在 `/Users/song/projects/xiaok-cli` 下执行 `git status` 不会显示这些 docs 改动，因为实际文件属于 `mydocs` repo。
-
-## Desktop Packaging
-
-- Apple Developer 注册信息：
-  - App ID Prefix / Team ID：`Y9YR86UG94`
-  - Bundle ID：`com.xiaok.desktop`（explicit）
-  - Description：`Xiaok Desktop`
-  - 当前注册阶段不需要额外启用 Capabilities / App Services / Capability Requests；Electron hardened runtime entitlements 由签名配置处理，macOS Accessibility / Screen Recording 等是用户本机 TCC 授权，不在 Apple Developer App ID 中申请。
-- `desktop/package.json` 的 `dependencies` 只保留 main process 运行时需要的包；纯 renderer 依赖放在 `devDependencies`。
-- Vite 打包 renderer 时不区分 dependencies / devDependencies，不影响前端构建。
-- `electron-builder.json` 的 `files` 不需要手动加 `node_modules/**/*`，electron-builder 默认会根据 `dependencies` 自动打包运行时模块。
-- 打包前务必确认 `dist/main/` 中所有外部 import 都在 `dependencies` 中声明，验证命令：
-  ```bash
-  find dist/main -name "*.js" -exec grep -h "from ['\"]" {} \; | sed "s/.*from ['\"]//;s/['\"].*//" | grep -v "^\." | grep -v "^node:" | sort -u
-  ```
+性能/token 优化先测真实基线，收益不足 5% 不做（安全动机除外）。检索改动先用真实语料量噪声与失败案例、冻结判定规则和查询分桶，再比较 Hit@K/MRR/NDCG 与无答案误召；保留原验收条件，不能通过缩范围把它们裁掉。

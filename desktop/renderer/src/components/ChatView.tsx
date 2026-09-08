@@ -2,6 +2,9 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
 import { ChatInput } from './ChatInput';
+import { ChatExecutionStatus } from './ChatExecutionStatus';
+import type { MultiAgentConnection } from '../lib/multi-agent-connection';
+import { UserDecisionCard } from './UserDecisionCard';
 import { ToolStepsMessage } from './ToolStepsMessage';
 import { ProjectInlineCard } from './projects/ProjectInlineCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -256,6 +259,7 @@ export interface ArtifactOpenOptions {
 }
 
 interface ChatViewProps {
+  executionConnection?: MultiAgentConnection | null;
   thread: ThreadRecord;
   messages: ChatMessage[];
   streamingText: string;
@@ -265,7 +269,7 @@ interface ChatViewProps {
   generatedFiles: GeneratedFile[];
   prompt: string;
   onPromptChange: (value: string) => void;
-  onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void;
+  onSubmit: (text: string, files?: Array<{ filePath: string; name: string }>) => void | boolean | Promise<void | boolean>;
   onQueue?: (text: string, files: Array<{ filePath: string; name: string }>) => void;
   queuedText?: string | null;
   onCancelQueue?: () => void;
@@ -281,6 +285,7 @@ interface ChatViewProps {
 
 export function ChatView({
   thread, messages, streamingText, status, currentQuestion, result,
+  executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
   onComputerUseAction, onComputerUseDismiss,
@@ -289,7 +294,6 @@ export function ChatView({
 }: ChatViewProps & { initialFiles?: Array<{ filePath: string; name: string; isImage?: boolean }> }) {
   const { t } = useLocale();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const messageAnchorRefs = useRef(new Map<string, HTMLDivElement>());
   const activeIndexFrameRef = useRef<number | null>(null);
   const isAtBottomRef = useRef(true);
@@ -362,9 +366,12 @@ export function ChatView({
 
   const handlePromptIndexSelect = useCallback((id: string) => {
     const anchor = messageAnchorRefs.current.get(id);
-    if (!anchor) return;
+    const scroller = scrollRef.current;
+    if (!anchor || !scroller) return;
     setActivePromptId(id);
-    anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const margin = Number.parseFloat(getComputedStyle(anchor).scrollMarginTop) || 0;
+    scroller.scrollTo({ top: scroller.scrollTop + anchor.getBoundingClientRect().top
+      - scroller.getBoundingClientRect().top - scroller.clientTop - margin, behavior: 'smooth' });
   }, []);
 
   // Track whether user manually scrolled away from bottom
@@ -394,7 +401,8 @@ export function ChatView({
     const now = Date.now();
     if (now - lastScrollTimeRef.current < 100) return;
     lastScrollTimeRef.current = now;
-    bottomRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
+    const scroller = scrollRef.current;
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
     setShowScrollToBottom(false);
   }, [messages, streamingText, status]);
 
@@ -573,17 +581,13 @@ export function ChatView({
                     <path className="opacity-80" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M12 2a10 10 0 0 1 10 10" style={{ color: 'var(--c-accent)' }} />
                   </svg>
                 </div>
-                <span className="text-sm text-[var(--c-text-secondary)]">
-                  {streamingText ? 'Working...' : 'Thinking...'}
-                </span>
+                <ChatExecutionStatus connection={executionConnection} sourceTaskId={thread.currentTaskId} />
               </div>
             )}
 
             {/* Question */}
             {currentQuestion && (
-              <div className="rounded-xl border border-[var(--c-accent)]/30 bg-[var(--c-bg-card)] p-4">
-                <p className="mb-3 text-sm">{currentQuestion.prompt}</p>
-                <div className="flex flex-wrap gap-2">
+              <UserDecisionCard prompt={currentQuestion.prompt} actions={<>
                   {currentQuestion.choices?.map(choice => (
                     <button
                       key={choice.id}
@@ -594,8 +598,7 @@ export function ChatView({
                       {choice.label}
                     </button>
                   ))}
-                </div>
-              </div>
+              </>} />
             )}
 
             {/* Error */}
@@ -608,7 +611,7 @@ export function ChatView({
               </div>
             )}
 
-            <div ref={bottomRef} />
+            <div />
           </div>
         </div>
       </div>
@@ -618,7 +621,8 @@ export function ChatView({
         <button
           type="button"
           onClick={() => {
-            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+            const scroller = scrollRef.current;
+            scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
             setShowScrollToBottom(false);
           }}
           className={`absolute -top-12 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-[var(--c-border)] bg-[var(--c-bg)] shadow-lg transition-all duration-200 hover:bg-[var(--c-bg-sub)] ${showScrollToBottom ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 translate-y-2'}`}

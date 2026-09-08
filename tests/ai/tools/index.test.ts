@@ -483,7 +483,7 @@ describe('ToolRegistry', () => {
 
     const result = await registry.executeTool('bash', { command: 'rm -rf ./build' });
 
-    expect(onPrompt).toHaveBeenCalledWith('bash', { command: 'rm -rf ./build' });
+    expect(onPrompt).toHaveBeenCalledWith('bash', { command: 'rm -rf ./build' }, { tool: registry.getRegisteredTool('bash'), context: undefined });
     expect(execute).not.toHaveBeenCalled();
     // Pins the exact cancellation format the model-facing classifier matches on.
     expect(result.startsWith('（已取消: ')).toBe(true);

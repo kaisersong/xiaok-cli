@@ -1,4 +1,4 @@
-import type { Tool, ToolDefinition, ToolExecutionContext } from '../../types.js';
+import type { Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import type { HooksRunner } from '../../runtime/hooks-runner.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
@@ -7,10 +7,15 @@ import { type WorkspaceToolOptions } from './read.js';
 export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
 export interface RegistryOptions {
     capabilityRegistry?: CapabilityRegistry;
+    /** Child discovery must not advertise tools owned only by other registries. */
+    capabilitySearch?: boolean;
     permissionManager?: PermissionManager;
     autoMode?: boolean;
     dryRun?: boolean;
-    onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+    onPrompt?: (toolName: string, input: Record<string, unknown>, invocation?: {
+        tool: Tool;
+        context?: ToolExecutionContext;
+    }) => Promise<boolean | ToolPermissionGrant>;
     hooksRunner?: HooksRunner;
     agentId?: string;
     onToolObserved?: (event: ToolObservation) => Promise<void> | void;
@@ -37,19 +42,27 @@ export declare class ToolRegistry {
     private permissionManager;
     private options;
     private allowedToolsFilter;
+    private disposed;
     setAllowedTools(names: string[] | null): void;
     constructor(options: RegistryOptions, tools?: Tool[]);
     getToolDefinitions(): ToolDefinition[];
     registerTool(tool: Tool): void;
     registerDeferredTool(definition: ToolDefinition): void;
+    dispose(): void;
+    getRegisteredTool(name: string): Tool | undefined;
+    unregisterTool(name: string, expected?: Tool): void;
     registerDeferredTools(definitions: ToolDefinition[]): void;
     searchDeferredTools(query: string): ToolDefinition[];
     searchTools(query: string): ToolDefinition[];
     executeTool(name: string, rawInput: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
+    private executeRegisteredTool;
     private evaluateProtectedOutputGuard;
     /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
     enableAutoMode(): void;
 }
+/** Runtime shape check: literal true plus both grant methods are required;
+ * synchronous returns are checked when consumed. Objects are never truthy allow. */
+export declare function isToolPermissionGrant(value: unknown): value is ToolPermissionGrant;
 export declare const TOOL_CANCELLED_PREFIX = "\uFF08\u5DF2\u53D6\u6D88: ";
 /**
  * Model-facing verdict: may this result be replayed to the model, and to the

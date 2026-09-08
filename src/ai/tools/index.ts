@@ -1,7 +1,8 @@
-import type { Tool, ToolDefinition, ToolExecutionContext } from '../../types.js';
+import type { Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import type { HooksRunner } from '../../runtime/hooks-runner.js';
 import { formatErrorText } from '../../utils/ui.js';
+import { isAbortError } from '../runtime/abort-utils.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import { validateToolInput } from './validate-input.js';
 import { evaluateProtectedOutputGuard } from '../../runtime/guards/protected-output-guard.js';
@@ -57,10 +58,14 @@ export function buildToolList(
 
 export interface RegistryOptions {
   capabilityRegistry?: CapabilityRegistry;
+  /** Child discovery must not advertise tools owned only by other registries. */
+  capabilitySearch?: boolean;
   permissionManager?: PermissionManager;
   autoMode?: boolean;
   dryRun?: boolean;
-  onPrompt?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+  onPrompt?: (toolName: string, input: Record<string, unknown>, invocation?: {
+    tool: Tool; context?: ToolExecutionContext;
+  }) => Promise<boolean | ToolPermissionGrant>;
   hooksRunner?: HooksRunner;
   agentId?: string;
   onToolObserved?: (event: ToolObservation) => Promise<void> | void;
@@ -86,6 +91,7 @@ export class ToolRegistry {
   private permissionManager: PermissionManager;
   private options: Required<Pick<RegistryOptions, 'dryRun' | 'onPrompt'>> & RegistryOptions;
   private allowedToolsFilter: Set<string> | null = null;
+  private disposed = false;
 
   setAllowedTools(names: string[] | null): void {
     this.allowedToolsFilter = names ? new Set(names.map((name) => getCanonicalToolId(name))) : null;
@@ -116,6 +122,7 @@ export class ToolRegistry {
   }
 
   registerTool(tool: Tool): void {
+    if (this.disposed) throw new Error('tool registry is disposed');
     this.tools.set(tool.definition.name, tool);
     this.canonicalToolNames.set(getCanonicalToolId(tool.definition.name), tool.definition.name);
     this.options.capabilityRegistry?.register({
@@ -123,8 +130,8 @@ export class ToolRegistry {
       name: tool.definition.name,
       description: tool.definition.description,
       inputSchema: tool.definition.inputSchema,
-      execute: async (input) => tool.execute(input),
-    });
+      execute: async (input) => this.executeTool(tool.definition.name, input),
+    }, this);
     for (const companion of tool.companionTools ?? []) {
       if (!this.tools.has(companion.definition.name)) {
         this.registerTool(companion);
@@ -133,13 +140,42 @@ export class ToolRegistry {
   }
 
   registerDeferredTool(definition: ToolDefinition): void {
+    if (this.disposed) throw new Error('tool registry is disposed');
     this.deferredTools.set(definition.name, definition);
     this.options.capabilityRegistry?.register({
       kind: 'tool',
       name: definition.name,
       description: definition.description,
       inputSchema: definition.inputSchema,
-    });
+    }, this);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.options.capabilityRegistry?.unregisterOwner(this);
+    this.tools.clear();
+    this.deferredTools.clear();
+    this.canonicalToolNames.clear();
+    this.allowedToolsFilter = null;
+  }
+
+  getRegisteredTool(name: string): Tool | undefined {
+    return this.tools.get(name);
+  }
+
+  unregisterTool(name: string, expected?: Tool): void {
+    if (expected && this.tools.get(name) !== expected) return;
+    this.tools.delete(name);
+    this.deferredTools.delete(name);
+    this.options.capabilityRegistry?.unregister(name, this);
+    const canonical = getCanonicalToolId(name);
+    if (this.canonicalToolNames.get(canonical) === name) {
+      this.canonicalToolNames.delete(canonical);
+      for (const candidate of this.tools.keys()) {
+        if (getCanonicalToolId(candidate) === canonical) this.canonicalToolNames.set(canonical, candidate);
+      }
+    }
   }
 
   registerDeferredTools(definitions: ToolDefinition[]): void {
@@ -176,10 +212,12 @@ export class ToolRegistry {
   }
 
   searchTools(query: string): ToolDefinition[] {
+    if (this.disposed) return [];
     const activeTools = this.getToolDefinitions();
     const activeEntries = activeTools.map((tool) => buildToolSearchEntry(tool));
     const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
-    const capabilityEntries = (this.options.capabilityRegistry?.search(query.startsWith('select:') ? '' : query) ?? [])
+    const capabilityEntries = (this.options.capabilitySearch === false ? []
+      : this.options.capabilityRegistry?.search(query.startsWith('select:') ? '' : query) ?? [])
       .map((capability) => buildToolSearchEntry(buildCapabilityToolDefinition(capability)));
 
     if (query.startsWith('select:')) {
@@ -220,7 +258,27 @@ export class ToolRegistry {
     rawInput: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<string> {
+    try {
+      const result = await this.executeRegisteredTool(name, rawInput, context);
+      context?.signal?.throwIfAborted();
+      return result;
+    } catch (error) {
+      // Includes rejecting policy/approval/preflight dependencies, which are
+      // deliberately outside ordinary tool-failure normalization below.
+      context?.signal?.throwIfAborted();
+      throw error;
+    }
+  }
+
+  private async executeRegisteredTool(
+    name: string,
+    rawInput: Record<string, unknown>,
+    context?: ToolExecutionContext,
+  ): Promise<string> {
+    context?.signal?.throwIfAborted();
+    if (this.disposed) return 'Error: tool registry is disposed';
     let input = rawInput;
+    let permissionGrant: ToolPermissionGrant | undefined;
     const canonicalToolId = getCanonicalToolId(name);
     if (this.allowedToolsFilter !== null && !this.allowedToolsFilter.has(canonicalToolId)) {
       return `Error: tool "${name}" is not allowed in current skill context`;
@@ -240,12 +298,14 @@ export class ToolRegistry {
     }
 
     const decision = await this.permissionManager.check(tool.definition.name, input);
+    context?.signal?.throwIfAborted();
     if (decision === 'deny') {
       await this.options.hooksRunner?.runHooks('PermissionDenied', {
         tool_name: tool.definition.name,
         input,
         reason: 'policy_denied',
       });
+      context?.signal?.throwIfAborted();
       return `Error: 权限不足: ${name}`;
     }
 
@@ -254,28 +314,34 @@ export class ToolRegistry {
         tool_name: tool.definition.name,
         input,
       });
+      context?.signal?.throwIfAborted();
       if (permissionRequest?.decision === 'deny' || permissionRequest?.ok === false) {
         await this.options.hooksRunner?.runHooks('PermissionDenied', {
           tool_name: tool.definition.name,
           input,
           reason: permissionRequest?.message ?? 'denied_by_permission_hook',
         });
+        context?.signal?.throwIfAborted();
         return `Error: ${permissionRequest?.message ?? `权限不足: ${name}`}`;
       }
       const approved = permissionRequest?.decision === 'allow'
         ? true
-        : await this.options.onPrompt(tool.definition.name, input);
-      if (!approved) {
+        : await this.options.onPrompt(tool.definition.name, input, { tool, context });
+      context?.signal?.throwIfAborted();
+      if (isToolPermissionGrant(approved)) permissionGrant = approved;
+      if (approved !== true && !permissionGrant) {
         await this.options.hooksRunner?.runHooks('PermissionDenied', {
           tool_name: tool.definition.name,
           input,
           reason: 'prompt_declined',
         });
+        context?.signal?.throwIfAborted();
         return `${TOOL_CANCELLED_PREFIX}${name}）`;
       }
     }
 
     const preHookResult = await this.options.hooksRunner?.runPreHooks(tool.definition.name, input);
+    context?.signal?.throwIfAborted();
     if (preHookResult && !preHookResult.ok) {
       return `Error: ${preHookResult.message ?? `${name} blocked by pre hook`}`;
     }
@@ -293,12 +359,32 @@ export class ToolRegistry {
     }
 
     const protectedOutputDecision = await this.evaluateProtectedOutputGuard(tool.definition.name, input);
+    context?.signal?.throwIfAborted();
     if (protectedOutputDecision && !protectedOutputDecision.ok) {
       return `Error: ${protectedOutputDecision.reason}\n${protectedOutputDecision.action}`;
     }
 
+    // Approval/hooks may finish after a caller interrupt or an agent deadline.
+    // Keep cancellation outside failure normalization, and do not start a new operation.
+    context?.signal?.throwIfAborted();
+    if (this.disposed) return 'Error: tool registry is disposed';
     try {
-      const rawResult = await tool.execute(input, context);
+      if (this.tools.get(registeredName) !== tool) return `Error: tool ${name} is no longer registered`;
+      let invocationContext = context;
+      if (permissionGrant) {
+        if (!context) throw new Error('approval_context_unavailable');
+        const prepared = permissionGrant.prepareInput(input);
+        assertSynchronousGrantResult(prepared);
+        if (!prepared || typeof prepared !== 'object' || Array.isArray(prepared)
+          || ![Object.prototype, null].includes(Object.getPrototypeOf(prepared))) throw new Error('approval_grant_invalid');
+        input = prepared;
+        const grant = permissionGrant;
+        const assertPermissionApproval = () => assertSynchronousGrantResult(grant.assertCurrent());
+        assertPermissionApproval();
+        invocationContext = { ...context, assertPermissionApproval };
+      }
+      const rawResult = await tool.execute(input, invocationContext);
+      context?.signal?.throwIfAborted();
 
       // Append hook-provided additional context
       let result = rawResult;
@@ -317,17 +403,22 @@ export class ToolRegistry {
         result: observedResult,
         ok: isSuccessfulToolResult(observedResult),
       });
+      context?.signal?.throwIfAborted();
 
       const warnings = await this.options.hooksRunner?.runPostHooks(tool.definition.name, input) ?? [];
+      context?.signal?.throwIfAborted();
       const modelOutput = sanitizeToolOutput(result);
       return appendToolWarnings(modelOutput.text, [...modelOutput.warnings, ...warnings]);
     } catch (e) {
+      context?.signal?.throwIfAborted();
+      if (isAbortError(e)) throw e;
       const errorMessage = formatErrorText(String(e));
       await this.options.hooksRunner?.runHooks('PostToolUseFailure', {
         tool_name: tool.definition.name,
         tool_input: input,
         error: errorMessage,
       });
+      context?.signal?.throwIfAborted();
       return `Error: ${errorMessage}`;
     }
   }
@@ -354,6 +445,23 @@ export class ToolRegistry {
   /** 用户输入 y! 后，切换当前 registry 为 auto 模式 */
   enableAutoMode(): void {
     this.permissionManager.setMode('auto');
+  }
+}
+
+/** Runtime shape check: literal true plus both grant methods are required;
+ * synchronous returns are checked when consumed. Objects are never truthy allow. */
+export function isToolPermissionGrant(value: unknown): value is ToolPermissionGrant {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const grant = value as Partial<ToolPermissionGrant>;
+  return grant.approved === true && typeof grant.prepareInput === 'function' && typeof grant.assertCurrent === 'function';
+}
+
+function assertSynchronousGrantResult(value: unknown): void {
+  if (value && (typeof value === 'object' || typeof value === 'function') && typeof (value as { then?: unknown }).then === 'function') {
+    // Reject async guards without allowing their rejected Promise to escape as
+    // an unhandled rejection. This is not an approval wait or a second attempt.
+    void Promise.resolve(value).catch(() => undefined);
+    throw new Error('approval_grant_invalid');
   }
 }
 

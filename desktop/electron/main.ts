@@ -58,6 +58,7 @@ import {
 import { createDesktopLoopRuntime } from './loop-executor.js';
 import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
 import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js';
+import { DesktopApplicationWindowOwner } from './desktop-application-window-owner.js';
 import { AssistantService } from './assistant-service.js';
 import { AssistantController } from './assistant-controller.js';
 import { listLatestMorningSuggestions } from './assistant-morning-suggestions.js';
@@ -495,7 +496,35 @@ if (singleInstanceDisabled) {
   debugMain('single-instance-lock:disabled-by-env');
 }
 
-async function createWindow(): Promise<BrowserWindow> {
+const applicationWindowOwner = new DesktopApplicationWindowOwner<BrowserWindow>({
+  current: () => mainWindow && !mainWindow.isDestroyed() ? mainWindow : null,
+  bootstrap: createInitialWindow,
+  createView: createReplacementWindow,
+});
+
+function createWindow(): Promise<BrowserWindow> { return applicationWindowOwner.open(); }
+
+/** No services, schedulers, sidecars or IPC are created on this path. */
+async function createReplacementWindow(): Promise<BrowserWindow> {
+  const preloadPath = join(__dirname, 'preload.cjs');
+  const rendererFile = join(__dirname, '../../../renderer/index.html');
+  const devServer = process.env['XIAOK_DESKTOP_DEV_SERVER'];
+  const window = new BrowserWindow(buildBrowserWindowOptions(preloadPath, {
+    platform: process.platform, iconPath: resolveDesktopWindowIconPath(__dirname, process.platform),
+  }));
+  mainWindow = window;
+  removeWindowsWindowMenu(window, process.platform);
+  attachDesktopContextMenu(window, Menu);
+  configureDesktopView(window, devServer);
+  setupMenuBar(window);
+  if (process.env.NODE_ENV !== 'development' && !devServer) {
+    void setupAutoUpdater(window).catch(error => debugMain('setupAutoUpdater failed', String(error)));
+  }
+  if (devServer) await window.loadURL(devServer); else await window.loadFile(rendererFile);
+  return window;
+}
+
+async function createInitialWindow(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
@@ -508,6 +537,7 @@ async function createWindow(): Promise<BrowserWindow> {
   removeWindowsWindowMenu(window, process.platform);
   attachDesktopContextMenu(window, Menu);
   mainWindow = window;
+  configureDesktopView(window, devServer);
   meetingRecorderController ??= createMeetingRecorderWindowController({
     BrowserWindow,
     getMainWindow: () => mainWindow,
@@ -519,7 +549,7 @@ async function createWindow(): Promise<BrowserWindow> {
     screen,
   });
   registerDesktopPermissionHandlers({ rendererFile, devServer });
-  const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === window.webContents;
+  const isMainWindowSender = (sender: Electron.WebContents): boolean => sender === mainWindow?.webContents;
   const isRecorderWindowSender = (sender: Electron.WebContents): boolean => (
     meetingRecorderController?.ownsWebContents(sender) === true
   );
@@ -601,7 +631,7 @@ async function createWindow(): Promise<BrowserWindow> {
       : kswarmService.restartRelatedService(serviceId)
   ));
   kswarmService.onStatusChange((status) => {
-    window.webContents.send('desktop:kswarm:statusChange', status);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:kswarm:statusChange', status);
   });
 
   const kswarmStreamBridge = new KSwarmStreamBridge('ws://127.0.0.1:4400/ws');
@@ -610,7 +640,7 @@ async function createWindow(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
-  const executionCoordinator = new DesktopExecutionCoordinator();
+  const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
   let managedPythonCommand: string | undefined;
   const services = createDesktopServices({
     dataRoot,
@@ -621,6 +651,7 @@ async function createWindow(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
+  registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
   const mobileBonjourAdvertiser = createMobileBonjourAdvertiser();
@@ -801,8 +832,8 @@ async function createWindow(): Promise<BrowserWindow> {
           });
         }
         latestMobileRelayStatus = status;
-        if (!window.isDestroyed()) {
-          window.webContents.send('desktop:mobileRelayStatus', status);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('desktop:mobileRelayStatus', status);
         }
       },
     })
@@ -828,7 +859,7 @@ async function createWindow(): Promise<BrowserWindow> {
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
     taskPort: {
-      createTask: (input) => services.createTask(input),
+      createTask: (input) => services.createBackgroundTask(input),
       recoverTask: (taskId) => services.recoverTask(taskId),
       cancelTask: (taskId, reason) => services.cancelTask(taskId, reason),
     },
@@ -845,7 +876,8 @@ async function createWindow(): Promise<BrowserWindow> {
           silent: false,
           onClick: () => {
             try {
-              if (window.isDestroyed()) return;
+              const window = mainWindow;
+              if (!window || window.isDestroyed()) return;
               if (window.isMinimized()) window.restore();
               window.show();
               window.focus();
@@ -859,8 +891,8 @@ async function createWindow(): Promise<BrowserWindow> {
         console.warn('[main] loop constraint notification failed:', (e as Error)?.message);
       }
       try {
-        if (!window.isDestroyed()) {
-          window.webContents.send('desktop:loops:constraintAdded', constraint);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('desktop:loops:constraintAdded', constraint);
         }
       } catch (e) {
         console.warn('[main] loop constraint IPC send failed:', (e as Error)?.message);
@@ -1075,8 +1107,8 @@ async function createWindow(): Promise<BrowserWindow> {
   // client——它在 createDesktopServices 之后才创建，不能作为构造参数传入。
   setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
   const emitCollaborationRoomEvent = (event: unknown) => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('desktop:collaborationRoom:event', event);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('desktop:collaborationRoom:event', event);
     }
   };
   const collaborationRoomWakeDispatcher = createCollaborationRoomWakeDispatcher({
@@ -1125,6 +1157,14 @@ async function createWindow(): Promise<BrowserWindow> {
   });
   await registerDesktopIpc(shutdownAwareIpc, window, services, {
     loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },
+    getMainWindow: () => mainWindow,
+    registerLifetimeDisposer: dispose => registerLifetimeDisposerStep('desktop-ipc-views', async () => { dispose(); }),
+    multiAgentAuthorize: event => {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+        || event.senderFrame !== mainWindow.webContents.mainFrame
+        || !isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer })) return null;
+      return { actorId: `desktop-user:${services.multiAgent?.profileId ?? 'unavailable'}` };
+    },
   });
   debugMain('createWindow:ipc-registered');
   shutdownAwareIpc.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
@@ -1274,10 +1314,10 @@ async function createWindow(): Promise<BrowserWindow> {
 
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
     executors: createDesktopTimedActionExecutors({
-      getMainWindow: () => window,
+      getMainWindow: () => mainWindow,
       loopRuntime,
       assistantRuntime,
-      createTask: (input) => services.createTask(input),
+      createTask: (input) => services.createBackgroundTask(input),
     }),
     isGlobalBackgroundAutoRunEnabled: () => globalBackgroundAutoRunEnabled,
     resolveLinkedLoopRun: ({ action, timedActionRunId }) => loopRuntime.resolveTimedActionLoopRun({
@@ -1286,7 +1326,8 @@ async function createWindow(): Promise<BrowserWindow> {
     }),
     onRunComplete: (event) => {
       if (event.action.executor.kind !== 'agent_task') return;
-      if (window.isDestroyed()) return;
+      const window = mainWindow;
+      if (!window || window.isDestroyed()) return;
       const success = event.status === 'success';
       const title = event.action.title || event.action.id;
       window.webContents.send('desktop:scheduledTaskDue', {
@@ -1313,7 +1354,8 @@ async function createWindow(): Promise<BrowserWindow> {
           silent: false,
           onClick: () => {
             try {
-              if (window.isDestroyed()) return;
+              const window = mainWindow;
+              if (!window || window.isDestroyed()) return;
               if (window.isMinimized()) window.restore();
               window.show();
               window.focus();
@@ -1413,12 +1455,12 @@ async function createWindow(): Promise<BrowserWindow> {
 
   // Thread meta (GTD / pinned) — persistent via SQLite in main process
   onSkillCatalogChanged(() => {
-    if (window.isDestroyed()) return;
-    window.webContents.send('desktop:skillsChanged');
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('desktop:skillsChanged');
   });
   const broadcastThreadMeta = () => {
-    if (window.isDestroyed()) return;
-    window.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('desktop:threadMetaChanged', threadMetaStore.getAll());
   };
   shutdownAwareIpc.handle('desktop:getThreadLabels', () => {
     return threadMetaStore.getAll();
@@ -1505,6 +1547,46 @@ async function createWindow(): Promise<BrowserWindow> {
   }
   debugMain('createWindow:before-load');
 
+  if (devServer) {
+    await window.loadURL(devServer);
+  } else {
+    await window.loadFile(rendererFile);
+  }
+  debugMain('createWindow:loaded');
+  // Python discovery, venv creation and dependency checks are intentionally
+  // post-interactive. Static plugin files are already available, while Python
+  // MCP servers remain fail-closed until this main-process-owned command exists.
+  void prepareBundledPluginPythonRuntime(pluginDeployment).then(async (pythonResult) => {
+    managedPythonCommand = pythonResult.pythonCommand;
+    debugMain('createWindow:python-runtime-ready', pythonResult);
+    const mcpRegistered = await mcpRegistrationPromise;
+    if (!mcpRegistered) {
+      services.markDeferredPythonMcpToolsUnavailable();
+      return;
+    }
+    if (managedPythonCommand) {
+      await services.registerDeferredPythonMcpTools();
+    } else {
+      services.markDeferredPythonMcpToolsUnavailable();
+    }
+    const started = await services.startPluginProviderRuntime().catch((error) => {
+      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
+      return { started: false as const };
+    });
+    debugMain('provider-runtime:start', started);
+  }).catch((error) => {
+    debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
+    void mcpRegistrationPromise.then(async (mcpRegistered) => {
+      services.markDeferredPythonMcpToolsUnavailable();
+      if (!mcpRegistered) return;
+      const started = await services.startPluginProviderRuntime().catch(() => ({ started: false as const }));
+      debugMain('provider-runtime:start-after-python-failure', started);
+    });
+  });
+  return window;
+}
+
+function configureDesktopView(window: BrowserWindow, devServer?: string): void {
   window.on('closed', () => {
     destroyMenuBar();
     if (mainWindow === window) {
@@ -1563,43 +1645,6 @@ async function createWindow(): Promise<BrowserWindow> {
     }
   });
 
-  if (devServer) {
-    await window.loadURL(devServer);
-  } else {
-    await window.loadFile(rendererFile);
-  }
-  debugMain('createWindow:loaded');
-  // Python discovery, venv creation and dependency checks are intentionally
-  // post-interactive. Static plugin files are already available, while Python
-  // MCP servers remain fail-closed until this main-process-owned command exists.
-  void prepareBundledPluginPythonRuntime(pluginDeployment).then(async (pythonResult) => {
-    managedPythonCommand = pythonResult.pythonCommand;
-    debugMain('createWindow:python-runtime-ready', pythonResult);
-    const mcpRegistered = await mcpRegistrationPromise;
-    if (!mcpRegistered) {
-      services.markDeferredPythonMcpToolsUnavailable();
-      return;
-    }
-    if (managedPythonCommand) {
-      await services.registerDeferredPythonMcpTools();
-    } else {
-      services.markDeferredPythonMcpToolsUnavailable();
-    }
-    const started = await services.startPluginProviderRuntime().catch((error) => {
-      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
-      return { started: false as const };
-    });
-    debugMain('provider-runtime:start', started);
-  }).catch((error) => {
-    debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
-    void mcpRegistrationPromise.then(async (mcpRegistered) => {
-      services.markDeferredPythonMcpToolsUnavailable();
-      if (!mcpRegistered) return;
-      const started = await services.startPluginProviderRuntime().catch(() => ({ started: false as const }));
-      debugMain('provider-runtime:start-after-python-failure', started);
-    });
-  });
-  return window;
 }
 
 function restoreOrCreateWindow(): void {

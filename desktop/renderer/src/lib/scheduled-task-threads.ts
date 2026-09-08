@@ -109,24 +109,28 @@ export async function ensureAggregatedScheduledThread<T extends ScheduledTaskRun
   if (preferredThreadId) {
     const existing = await threadApi.getThread(preferredThreadId).catch(() => null);
     if (existing) {
-      await attachRuntimeTaskIds(existing, ids, threadApi);
-      return {
+      try {
+        await attachRuntimeTaskIds(existing, ids, threadApi);
+        return {
         ...normalized,
         threadId: existing.id,
         runtimeTaskId: ids[ids.length - 1],
-      };
+        };
+      } catch (error) { if (!isDeletedThread(error)) throw error; }
     }
   }
 
   const threads = await threadApi.listThreads({ limit: 1000 }).catch(() => []);
   const existing = chooseBestThreadForRuntimeIds(threads, ids);
   if (existing) {
-    await attachRuntimeTaskIds(existing, ids, threadApi);
-    return {
+    try {
+      await attachRuntimeTaskIds(existing, ids, threadApi);
+      return {
       ...normalized,
       threadId: existing.id,
       runtimeTaskId: ids[ids.length - 1],
-    };
+      };
+    } catch (error) { if (!isDeletedThread(error)) throw error; }
   }
 
   const created = await threadApi.createThread({ title: (normalized.name || '').slice(0, 40) });
@@ -136,6 +140,10 @@ export async function ensureAggregatedScheduledThread<T extends ScheduledTaskRun
     threadId: created.id,
     runtimeTaskId: ids[ids.length - 1],
   };
+}
+
+function isDeletedThread(error: unknown): boolean {
+  return error instanceof Error && ['thread_not_found', 'thread_deletion_pending'].includes(error.message);
 }
 
 function chooseBestThreadForRuntimeIds(threads: ScheduledThreadRecord[], runtimeTaskIds: string[]): ScheduledThreadRecord | null {

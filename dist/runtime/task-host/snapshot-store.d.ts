@@ -2,6 +2,11 @@ import type { ActiveTaskRef, TaskSnapshot } from './types.js';
 export interface TaskSnapshotStoreDiagnostics {
     onWrite?: (operation: 'checkpoint' | 'journal' | 'index', bytes: number) => void;
 }
+/** Internal delivery continuation only; tracking is of unmodified physical IO. */
+export interface TaskSnapshotReadOptions {
+    signal: AbortSignal;
+    trackPending(raw: Promise<unknown>): void;
+}
 /**
  * A legacy-readable checkpoint plus an append-only mutation journal.
  *
@@ -20,7 +25,9 @@ export declare class FileTaskSnapshotStore {
     getActiveTasks(): Promise<ActiveTaskRef[]>;
     /** @deprecated Use getActiveTasks() — kept for backward compat */
     getActiveTask(): Promise<ActiveTaskRef | null>;
-    recoverTask(taskId: string): Promise<TaskSnapshot | null>;
+    recoverTask(taskId: string, options?: TaskSnapshotReadOptions): Promise<TaskSnapshot | null>;
+    /** Read-only legacy ownership check, including terminal tasks absent from the active index. */
+    hasThreadHistory(threadId: string): Promise<boolean>;
     clearActiveTask(taskId: string): Promise<void>;
     private saveSerial;
     private loadSnapshotState;

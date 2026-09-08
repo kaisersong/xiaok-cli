@@ -42,6 +42,7 @@ describe('subagent tool', () => {
   describe('inline agent mode', () => {
     it('creates inline agent with description and prompt', async () => {
       const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      expect(tool.definition.description).toContain('Follow the CLI delegation policy');
       await tool.execute({
         description: 'code review',
         prompt: 'Check for bugs in src/main.ts',
@@ -59,11 +60,17 @@ describe('subagent tool', () => {
       await tool.execute({
         description: 'recursive test',
         prompt: 'do something',
-        tools: ['Read', 'Edit', 'subagent'],
+        tools: ['Read', 'Edit', ' SubAgent '],
       }, {} as ToolExecutionContext);
 
       const call = (executeNamedSubAgent as any).mock.calls[0][0];
       expect(call.agentDef.allowedTools).toEqual(['Read', 'Edit']);
+    });
+
+    it('does not widen an inline allowlist after excluding its only recursive tool', async () => {
+      const tool = createSubAgentTool({ ...baseOptions, agents: [] });
+      await tool.execute({ prompt: 'no recursion', tools: ['SubAgent'] }, {} as ToolExecutionContext);
+      expect((executeNamedSubAgent as any).mock.calls.at(-1)[0].agentDef.allowedTools).toEqual(['tool_search']);
     });
 
     it('allows inline agent with empty tools list', async () => {

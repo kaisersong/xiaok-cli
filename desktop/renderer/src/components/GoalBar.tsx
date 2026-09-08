@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DesktopGoalProjection } from '../../../electron/preload-api';
 import type { GoalInput, GoalEvidenceKind } from '../../../../src/runtime/goal/types';
 import { useLocale } from '../contexts/LocaleContext';
@@ -24,6 +24,15 @@ export function GoalBar({ goal, loading, error, initialEditing = false, onCreate
   const [turnLimit, setTurnLimit] = useState(20);
   const [evidence, setEvidence] = useState<GoalEvidenceKind[]>(['answer']);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [submitting, setSubmitting] = useState(false), pending = useRef(false), mounted = useRef(true);
+  const [submitFailed, setSubmitFailed] = useState(false);
+  const goalIdentity = goal ? `${goal.state.goalId}:${goal.state.epoch}` : null;
+  const previousGoal = useRef(goalIdentity);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (goalIdentity && goalIdentity !== previousGoal.current) { setEditing(false); setSubmitFailed(false); }
+    previousGoal.current = goalIdentity;
+  }, [goalIdentity]);
   const state = goal?.state;
   const budgetBlocked = state?.status === 'blocked' && state.terminalReason === 'turn_budget_exhausted';
   const [resumeLimit, setResumeLimit] = useState(state ? Math.min(50, state.turnsUsed + 1) : 1);
@@ -33,17 +42,19 @@ export function GoalBar({ goal, loading, error, initialEditing = false, onCreate
       ? (current.length === 1 ? current : current.filter(value => value !== kind))
       : [...current, kind]);
   };
-  const submit = () => {
+  const submit = async () => {
     const trimmed = objective.trim();
-    if (!trimmed) return;
+    if (!trimmed || pending.current || loading) return;
     const input: GoalInput = {
       objective: trimmed,
       ...(criterion.trim() ? { completionCriterion: criterion.trim() } : {}),
       expectedEvidenceKinds: evidence,
       turnLimit,
     };
-    void (replaceMode && onReplace ? onReplace(input) : onCreate(input));
-    setEditing(false);
+    pending.current = true; setSubmitting(true); setSubmitFailed(false);
+    try { await (replaceMode && onReplace ? onReplace(input) : onCreate(input)); }
+    catch { if (mounted.current) setSubmitFailed(true); }
+    finally { pending.current = false; if (mounted.current) setSubmitting(false); }
   };
 
   if (!state || editing) {
@@ -64,14 +75,16 @@ export function GoalBar({ goal, loading, error, initialEditing = false, onCreate
           <fieldset className="flex flex-wrap gap-2"><legend className="mb-1">{t.goalBar.evidence}</legend>{evidenceOptions.map(([kind, label]) => <label key={kind} className="flex items-center gap-1"><input type="checkbox" checked={evidence.includes(kind)} onChange={() => toggleEvidence(kind)} />{label}</label>)}</fieldset>
           <label className="grid gap-1"><span>{t.goalBar.turnBudget}</span><input aria-label={t.goalBar.turnBudget} type="number" min={1} max={50} value={turnLimit} onChange={event => setTurnLimit(Number(event.target.value))} className="w-24 rounded border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1.5" /></label>
         </div>
-        <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditing(false)}>{t.goalBar.close}</button><button type="button" disabled={loading || !objective.trim()} onClick={submit} className="rounded bg-[var(--c-accent)] px-2 py-1 text-white disabled:opacity-50">{t.goalBar.confirmCreate}</button></div>
-        {error ? <p role="alert" className="mt-2 text-[var(--c-danger)]">{error}</p> : null}
+        <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditing(false)}>{t.goalBar.close}</button><button type="button" disabled={loading || submitting || !objective.trim()} onClick={() => void submit()} className="rounded bg-[var(--c-accent)] px-2 py-1 text-white disabled:opacity-50">{t.goalBar.confirmCreate}</button></div>
+        {error || submitFailed ? <p role="alert" className="mt-2 text-[var(--c-danger)]">{error || t.multiAgent.actionFailed}</p> : null}
       </div>
     );
   }
 
   const statusLabel = state.status === 'active'
-    ? (goal.activation === 'armed' ? t.goalBar.statusActive : t.goalBar.statusDisarmed)
+    ? (goal.activation !== 'armed' ? t.goalBar.statusDisarmed
+      : goal.waitingReason === 'waiting_children' ? t.goalBar.waitingChildren
+        : goal.waitingReason === 'children_need_attention' ? t.goalBar.childrenNeedAttention : t.goalBar.statusActive)
     : state.status === 'paused' ? t.goalBar.statusPaused
       : state.status === 'blocked' ? t.goalBar.statusBlocked
         : state.status === 'complete' ? t.goalBar.statusComplete : t.goalBar.statusCancelled;

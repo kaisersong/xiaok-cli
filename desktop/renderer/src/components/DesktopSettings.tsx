@@ -48,6 +48,7 @@ import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
 import { McpErrorRemediationBanner } from './settings/McpErrorRemediationBanner';
 import { DesktopAppearanceSettings } from './settings/DesktopAppearanceSettings';
+import { LocalExecutionAuthorizationCard } from './settings/LocalExecutionAuthorizationCard';
 import type {
   DesktopModelConfigSnapshot,
   DesktopRelatedServiceId,
@@ -3834,6 +3835,7 @@ function GeneralPane() {
 
   return (
     <>
+      <LocalExecutionAuthorizationCard />
       <Section>
         <SectionHeader icon={User}>{t.desktopSettings.profileTitle}</SectionHeader>
         <Card>

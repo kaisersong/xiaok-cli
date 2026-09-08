@@ -14,8 +14,20 @@ export function buildMcpRuntimeTools(declaration, client, schemas, options = {})
     return schemas.map((schema) => ({
         permission: (options.resolvePermission ?? resolveDefaultMcpToolPermission)(declaration.name, schema.name),
         definition: normalizeMcpToolSchema(declaration.name, schema),
-        async execute(input) {
-            return client.callTool(schema.name, input);
+        async execute(input, context) {
+            const signal = context?.signal;
+            signal?.throwIfAborted();
+            try {
+                const result = await (signal
+                    ? client.callTool(schema.name, input, { signal })
+                    : client.callTool(schema.name, input));
+                signal?.throwIfAborted();
+                return result;
+            }
+            catch (error) {
+                signal?.throwIfAborted();
+                throw error;
+            }
         },
     }));
 }

@@ -45,6 +45,7 @@ export declare class ScrollRegionManager {
     private config;
     private lastActivityLine;
     private lastActivityRow;
+    private lastActivityRows;
     private lastInputPrompt;
     private lastSummaryLine;
     private lastStatusLine;
@@ -117,6 +118,7 @@ export declare class ScrollRegionManager {
     private clearScreenRow;
     private getClearScreenRowSequence;
     private composeActivityLineRender;
+    private composeActivityClear;
     private clearActivityIfContentWillUseRow;
     private clearRenderedFooterRows;
     private clearPromptChromeRows;

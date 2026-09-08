@@ -89,6 +89,7 @@ export function createHostGateway(
       inputSchema: contract.inputSchema,
     },
     async execute(input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string> {
+      context?.signal?.throwIfAborted();
       const forwarded = validateGatewayInput(contract, input);
 
       let lease: ProviderInvocationLease<RendererProviderValue>;
@@ -102,7 +103,9 @@ export function createHostGateway(
       }
 
       try {
-        return await lease.value.call({ operation: contract.operation, input: forwarded }, lease.signal);
+        const result = await lease.value.call({ operation: contract.operation, input: forwarded }, lease.signal);
+        lease.signal.throwIfAborted();
+        return result;
       } catch (error) {
         // Classification comes from the lease's frozen abort source, never from
         // the SDK error shape (design §3.4).

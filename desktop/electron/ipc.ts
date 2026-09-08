@@ -16,6 +16,8 @@ import {
   reconstructKnowledgeSourceText,
 } from './kb-source-identity.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
+import { registerDesktopMultiAgentIpc, type MultiAgentIpcEvent } from './desktop-multi-agent-ipc.js';
+import { parseGoalRequestId } from '../shared/goal-attachment.js';
 
 type DesktopServices = ReturnType<typeof createDesktopServices>;
 
@@ -49,6 +51,7 @@ function parseGoalThreadId(value: unknown): string {
 
 function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
   threadId: string;
+  requestId?: string;
   objective: string;
   completionCriterion?: string;
   expectedEvidenceKinds: Array<'answer' | 'file_artifact' | 'command_action' | 'project_update'>;
@@ -57,10 +60,11 @@ function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_goal_input');
   const input = raw as Record<string, unknown>;
   const allowed = new Set([
-    'threadId', 'objective', 'completionCriterion', 'expectedEvidenceKinds', 'turnLimit',
+    'threadId', 'objective', 'completionCriterion', 'expectedEvidenceKinds', 'turnLimit', 'requestId',
   ]);
   const unknown = Object.keys(input).find(key => !allowed.has(key));
   if (unknown) throw new Error(`invalid_goal_field:${unknown}`);
+  const requestId = parseGoalRequestId(input.requestId);
   const objective = typeof input.objective === 'string' ? input.objective.trim() : '';
   if (!objective || objective.length > 4_000) throw new Error(`invalid_goal_${operation}_objective`);
   const completionCriterion = typeof input.completionCriterion === 'string'
@@ -84,6 +88,7 @@ function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
   }
   return {
     threadId: parseGoalThreadId(input.threadId), objective,
+    ...(requestId === undefined ? {} : { requestId }),
     ...(completionCriterion ? { completionCriterion } : {}),
     expectedEvidenceKinds,
     ...(turnLimit === undefined ? {} : { turnLimit: turnLimit as number }),
@@ -454,6 +459,9 @@ function invokeArtifactWorkspaceIpcOperation(
 
 interface RegisterDesktopIpcOptions {
   loopRuntime?: Pick<DesktopLoopRuntime, 'loopStore' | 'evidenceStore' | 'scanner' | 'runner' | 'listAnomalies'>;
+  multiAgentAuthorize?: (event: MultiAgentIpcEvent) => { actorId: string } | null;
+  getMainWindow?: () => BrowserWindow | null;
+  registerLifetimeDisposer?: (dispose: () => void) => void;
 }
 
 const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
@@ -743,6 +751,10 @@ export async function registerDesktopIpc(
   services: DesktopServices,
   options: RegisterDesktopIpcOptions = {}
 ): Promise<void> {
+  const primaryWindow = () => options.getMainWindow?.() ?? window;
+  const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
+    authorize: event => options.multiAgentAuthorize?.(event) ?? null,
+  });
   const { createAliyunLiveTranscriptionRegistry } = await import('./meeting-aliyun-live-transcriber.js');
   const { createVolcengineLiveTranscriptionRegistry } = await import('./meeting-volcengine-live-transcriber.js');
   const meetingAliyunLiveRegistry = createAliyunLiveTranscriptionRegistry();
@@ -788,10 +800,15 @@ export async function registerDesktopIpc(
       if (!target.isDestroyed()) target.webContents.send('desktop:goal:taskPrepared', prepared);
     }
   });
-  const onPrimaryClosed = () => {
+  const disposeApplicationViews = () => {
+    disposeMultiAgentViews();
     unsubscribeArtifactWorkspaceChanges?.();
     unsubscribeGoalChanges?.();
     unsubscribeGoalTaskPrepared?.();
+  };
+  options.registerLifetimeDisposer?.(disposeApplicationViews);
+  const onPrimaryClosed = () => {
+    if (!options.registerLifetimeDisposer) disposeApplicationViews();
     artifactWorkspaceServices.closeArtifactWorkspaceViewKey?.('primary');
   };
   if (typeof window.once === 'function') window.once('closed', onPrimaryClosed);
@@ -800,7 +817,7 @@ export async function registerDesktopIpc(
     const senderWindow = typeof BrowserWindow?.fromWebContents === 'function'
       ? BrowserWindow.fromWebContents(event.sender)
       : undefined;
-    if (senderWindow === window || senderWindow?.webContents.id === window.webContents.id || event.sender.id === window.webContents.id) {
+    if (senderWindow === primaryWindow() || senderWindow?.webContents.id === primaryWindow().webContents.id || event.sender.id === primaryWindow().webContents.id) {
       return 'primary';
     }
     const ownerId = senderWindow?.id ?? event.sender.id;
@@ -972,7 +989,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:selectDirectory', async () => {
     log('info', 'selectDirectory');
-    const result = await dialog.showOpenDialog(window, {
+    const result = await dialog.showOpenDialog(primaryWindow(), {
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) {
@@ -984,7 +1001,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:selectMaterials', async () => {
     log('info', 'selectMaterials');
-    const result = await dialog.showOpenDialog(window, {
+    const result = await dialog.showOpenDialog(primaryWindow(), {
       properties: ['openFile', 'multiSelections'],
     });
     if (result.canceled) {
@@ -1018,14 +1035,16 @@ export async function registerDesktopIpc(
   ));
   ipcMain.handle('desktop:goal:resume', async (_event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_resume_input');
-    const fields = Object.keys(input).filter(key => !['threadId', 'turnLimit'].includes(key));
+    const fields = Object.keys(input).filter(key => !['threadId', 'turnLimit', 'requestId'].includes(key));
     if (fields.length > 0) throw new Error(`invalid_goal_field:${fields[0]}`);
+    const requestId = parseGoalRequestId(input.requestId);
     const turnLimit = input.turnLimit;
     if (turnLimit !== undefined && (!Number.isSafeInteger(turnLimit) || turnLimit < 1 || turnLimit > 50)) {
       throw new Error('invalid_goal_turn_limit');
     }
     return services.resumeGoal({
       threadId: parseGoalThreadId(input.threadId),
+      ...(requestId === undefined ? {} : { requestId }),
       ...(turnLimit === undefined ? {} : { turnLimit }),
     });
   });
@@ -1104,7 +1123,7 @@ export async function registerDesktopIpc(
       return { canceled: true, filePath: '', content: '', error: 'invalid_kind' };
     }
 
-    const result = await dialog.showOpenDialog(window, {
+    const result = await dialog.showOpenDialog(primaryWindow(), {
       properties: ['openFile'],
       filters: kind === 'image'
         ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'] }]
@@ -1136,18 +1155,22 @@ export async function registerDesktopIpc(
   const activeTaskSubs = new Map<string, AbortController>();
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
     const taskId = input.taskId as string;
+    const target = _event?.sender ?? primaryWindow().webContents;
+    const subscriptionKey = `${target.id}:${taskId}`;
     const sinceIndex = typeof input.sinceIndex === 'number' ? input.sinceIndex : undefined;
     log('info', 'subscribeTask', { taskId, sinceIndex });
 
     // Cancel any existing subscription for this taskId to prevent duplicate streams
-    const prev = activeTaskSubs.get(taskId);
+    const prev = activeTaskSubs.get(subscriptionKey);
     if (prev) {
       prev.abort();
-      activeTaskSubs.delete(taskId);
+      activeTaskSubs.delete(subscriptionKey);
     }
 
     const controller = new AbortController();
-    activeTaskSubs.set(taskId, controller);
+    activeTaskSubs.set(subscriptionKey, controller);
+    const onDestroyed = () => controller.abort();
+    target.once?.('destroyed', onDestroyed);
 
     void (async () => {
       try {
@@ -1155,10 +1178,10 @@ export async function registerDesktopIpc(
           ? services.subscribeTask(taskId, { sinceIndex })
           : services.subscribeTask(taskId);
         for await (const event of stream) {
-          if (controller.signal.aborted || window.isDestroyed()) {
+          if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
-          window.webContents.send(`desktop:taskEvent:${taskId}`, event);
+          target.send(`desktop:taskEvent:${taskId}`, event);
         }
         log('info', 'subscribeTask stream ended', { taskId });
       } catch (e) {
@@ -1166,8 +1189,9 @@ export async function registerDesktopIpc(
           log('error', 'subscribeTask error', { taskId, message: String(e) });
         }
       } finally {
-        if (activeTaskSubs.get(taskId) === controller) {
-          activeTaskSubs.delete(taskId);
+        target.removeListener?.('destroyed', onDestroyed);
+        if (activeTaskSubs.get(subscriptionKey) === controller) {
+          activeTaskSubs.delete(subscriptionKey);
         }
       }
     })();
@@ -1533,7 +1557,7 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:artifactRevert', async (_event, filePath: string) => {
     const sid = sessionHash(filePath);
     const ok = revertArtifact(filePath, sid);
-    if (ok) window.webContents.send('desktop:artifactFileChanged', filePath);
+    if (ok && !primaryWindow().isDestroyed()) primaryWindow().webContents.send('desktop:artifactFileChanged', filePath);
     return ok;
   });
 
@@ -1544,7 +1568,7 @@ export async function registerDesktopIpc(
 
   ipcMain.handle('desktop:artifactWatch', async (_event, filePath: string) => {
     watchArtifactFile(filePath, () => {
-      window.webContents.send('desktop:artifactFileChanged', filePath);
+      if (!primaryWindow().isDestroyed()) primaryWindow().webContents.send('desktop:artifactFileChanged', filePath);
     });
   });
 
@@ -1555,7 +1579,7 @@ export async function registerDesktopIpc(
   // ---- File Export ----
   ipcMain.handle('desktop:showSaveDialog', async (_event, input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
     log('info', 'showSaveDialog', { defaultPath: input?.defaultPath });
-    const result = await dialog.showSaveDialog(window, {
+    const result = await dialog.showSaveDialog(primaryWindow(), {
       defaultPath: input?.defaultPath,
       filters: input?.filters ?? [{ name: 'Markdown', extensions: ['md'] }],
     });

@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createPlatformRegistryFactory } from '../../../src/platform/runtime/registry-factory.js';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { applySandboxToTools } from '../../../src/platform/sandbox/tool-wrappers.js';
-import { buildToolList } from '../../../src/ai/tools/index.js';
+import { buildToolList, ToolRegistry } from '../../../src/ai/tools/index.js';
 import type { PlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import type { ModelAdapter, Tool, ToolDefinition } from '../../../src/types.js';
 
@@ -23,6 +23,7 @@ const mockState = vi.hoisted(() => ({
     { definition: { name: 'TaskList', description: 'CC task', inputSchema: {} }, execute: async () => '', permission: 'safe' },
     { definition: { name: 'ExitPlanMode', description: 'CC plan', inputSchema: {} }, execute: async () => '', permission: 'safe' },
   ] as Tool[],
+  registries: [] as any[],
 }));
 
 // Mock dependencies
@@ -33,13 +34,23 @@ vi.mock('./context.js', () => ({
 function mockRegistry(tools: Tool[]) {
   const toolMap = new Map<string, Tool>();
   for (const t of tools) toolMap.set(t.definition.name, t);
-  return {
+  const registry = {
+    getRegisteredTool: (name: string) => toolMap.get(name),
+    dispose: vi.fn(() => toolMap.clear()),
+    unregisterTool: vi.fn((name: string) => toolMap.delete(name)),
     getToolDefinitions: (): ToolDefinition[] => [...toolMap.values()].map(t => t.definition),
+    registerTool: vi.fn((tool: Tool) => { toolMap.set(tool.definition.name, tool); }),
+    executeTool: vi.fn(async (name: string, input: Record<string, unknown>, context?: unknown) => {
+      const tool = toolMap.get(name);
+      if (!tool) throw new Error(`unknown mocked tool: ${name}`);
+      return tool.execute(input, context as any);
+    }),
   };
+  mockState.registries.push(registry);
+  return registry;
 }
-
 vi.mock('../../../src/ai/tools/index.js', () => ({
-  buildToolList: vi.fn(() => mockState.tools),
+  buildToolList: vi.fn((_skillTool, _workspace, extraTools = []) => [...mockState.tools, ...extraTools]),
   ToolRegistry: vi.fn().mockImplementation((_opts, tools) => mockRegistry(tools)),
 }));
 
@@ -67,7 +78,7 @@ function makeMockPlatform(expandAllowedPaths = vi.fn()): PlatformRuntimeContext 
     worktreeManager: undefined,
     lspManager: undefined,
     teamService: undefined,
-    createBackgroundRunner: vi.fn(() => ({})),
+    createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })) })),
     createReminderApi: vi.fn(() => undefined),
     mcpReady: Promise.resolve(),
     onMcpToolsChanged: vi.fn(() => () => undefined),
@@ -167,7 +178,7 @@ describe('registry-factory CC tool filtering', () => {
       worktreeManager: undefined,
       lspManager: undefined,
       teamService: undefined,
-      createBackgroundRunner: vi.fn(() => ({})),
+      createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })) })),
       createReminderApi: vi.fn(() => undefined),
       mcpReady: Promise.resolve(),
       onMcpToolsChanged: vi.fn(() => () => undefined),
@@ -258,7 +269,7 @@ describe('registry-factory allowedTools filtering', () => {
       worktreeManager: undefined,
       lspManager: undefined,
       teamService: undefined,
-      createBackgroundRunner: vi.fn(() => ({})),
+      createBackgroundRunner: vi.fn(() => ({ dispose: vi.fn(async () => ({ settled: true, pendingJobs: [] })) })),
       createReminderApi: vi.fn(() => undefined),
       mcpReady: Promise.resolve(),
       onMcpToolsChanged: vi.fn(() => () => undefined),
@@ -294,5 +305,134 @@ describe('registry-factory allowedTools filtering', () => {
     const names = registry.getToolDefinitions().map(t => t.name);
     expect(names).toContain('Read');
     expect(names).toContain('Write');
+  });
+});
+
+describe('registry-factory multi-agent surface', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState.registries.length = 0;
+  });
+
+  function makeFactory(source: 'chat' | 'yzj') {
+    return createPlatformRegistryFactory({
+      platform: makeMockPlatform(),
+      source,
+      sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      buildSystemPrompt: async () => 'prompt',
+    });
+  }
+
+  it('registers the full control plane for the chat root agent', () => {
+    const names = makeFactory('chat').createRegistry('/test/cwd').getToolDefinitions().map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining([
+      'spawn_agent', 'send_message', 'followup_task', 'wait_agent',
+      'list_agents', 'interrupt_agent', 'close_agent',
+    ]));
+  });
+
+  it('does not give an untracked child unusable coordinator tools', () => {
+    const names = makeFactory('chat')
+      .createRegistry('/test/cwd', ['Read'], 'agent_child', { parentDepth: 1 })
+      .getToolDefinitions().map((tool) => tool.name);
+    expect(names).toEqual(['Read']);
+    for (const name of ['spawn_agent', 'followup_task', 'interrupt_agent', 'close_agent', 'send_message', 'wait_agent', 'list_agents']) {
+      expect(names).not.toContain(name);
+    }
+  });
+
+  it('does not expose session multi-agent tools to the yzj channel', () => {
+    const names = makeFactory('yzj').createRegistry('/test/cwd').getToolDefinitions().map((tool) => tool.name);
+    expect(names).not.toEqual(expect.arrayContaining([
+      'spawn_agent', 'send_message', 'followup_task', 'wait_agent',
+      'list_agents', 'interrupt_agent', 'close_agent',
+    ]));
+  });
+
+  it('unregisters a closed child registry from MCP refresh and unsubscribes on factory dispose', async () => {
+    let publishMcpTools: ((tools: Tool[]) => void) | undefined;
+    const unsubscribe = vi.fn();
+    const platform = makeMockPlatform();
+    platform.onMcpToolsChanged = vi.fn((listener) => {
+      publishMcpTools = listener;
+      return unsubscribe;
+    });
+    const adapter = {
+      async *stream() {
+        yield { type: 'text', delta: 'child done' } as const;
+        yield { type: 'done' } as const;
+      },
+    } as unknown as ModelAdapter;
+    const factory = createPlatformRegistryFactory({
+      platform,
+      source: 'chat',
+      sessionId: 'test-session',
+      adapter: () => adapter,
+      buildSystemPrompt: async () => 'prompt',
+    });
+    const root = factory.createRegistry('/test/cwd') as unknown as ReturnType<typeof mockRegistry>;
+
+    const child = JSON.parse(await root.executeTool('spawn_agent', {
+      task_name: 'child', message: 'run', fork_context: false,
+    })) as { id: string };
+    await root.executeTool('wait_agent', { targets: [child.id], timeout_ms: 10_000 });
+    await root.executeTool('close_agent', { target: child.id });
+
+    expect(mockState.registries).toHaveLength(2);
+    const [rootRegistry, childRegistry] = mockState.registries as Array<ReturnType<typeof mockRegistry>>;
+    rootRegistry.registerTool.mockClear();
+    childRegistry.registerTool.mockClear();
+    publishMcpTools?.([{
+      definition: { name: 'mcp__late__probe', description: 'probe', inputSchema: {} },
+      permission: 'safe',
+      execute: async () => 'ok',
+    }]);
+
+    expect(rootRegistry.registerTool).toHaveBeenCalledOnce();
+    expect(childRegistry.registerTool).not.toHaveBeenCalled();
+    await factory.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(vi.mocked(ToolRegistry)).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['interrupt_agent', 'close_agent'] as const)('forwards %s cancellation through named initialization before registry creation', async (stopTool) => {
+    let finishPrompt!: (value: string) => void;
+    const promptGate = new Promise<string>((resolve) => { finishPrompt = resolve; });
+    const buildSystemPrompt = vi.fn(() => promptGate);
+    const adapter = vi.fn(() => ({ async *stream() { yield { type: 'done' as const }; } } as unknown as ModelAdapter));
+    const platform = makeMockPlatform();
+    const releaseWorktree = vi.fn(async () => {});
+    const allocateWorktree = vi.fn(async (input) => ({ ...input, path: process.cwd(), created: true }));
+    platform.worktreeManager = { allocate: allocateWorktree, release: releaseWorktree } as unknown as PlatformRuntimeContext['worktreeManager'];
+    platform.customAgents = [{ name: 'initializing', systemPrompt: '', source: 'builtin', isolation: 'worktree', cleanup: 'delete' }];
+    const factory = createPlatformRegistryFactory({ platform, source: 'chat',
+      sessionId: 'initialization-cancellation', adapter, buildSystemPrompt,
+    });
+    const root = factory.createRegistry(process.cwd()) as unknown as ReturnType<typeof mockRegistry>;
+    const child = JSON.parse(await root.executeTool('spawn_agent', {
+      task_name: 'initializing', agent: 'initializing', message: 'must not start after stop', fork_context: false,
+    })) as { id: string };
+    await vi.waitFor(() => expect(buildSystemPrompt).toHaveBeenCalledOnce());
+    const stopped = root.executeTool(stopTool, { target: child.id });
+    finishPrompt('late prompt');
+    await stopped;
+    try {
+      await vi.waitFor(async () => {
+        const agents = JSON.parse(await root.executeTool('list_agents', {}));
+        expect(agents.find((item: { id: string }) => item.id === child.id).executionActive).toBe(false);
+      });
+      expect(adapter).not.toHaveBeenCalled();
+      expect(mockState.registries).toHaveLength(1);
+      expect(allocateWorktree).toHaveBeenCalledOnce();
+      expect(releaseWorktree).toHaveBeenCalledExactlyOnceWith(process.cwd());
+      if (stopTool === 'interrupt_agent') {
+        await root.executeTool('followup_task', { target: child.id, message: 'fresh followup' });
+        await vi.waitFor(() => expect(adapter).toHaveBeenCalledOnce());
+        expect(buildSystemPrompt).toHaveBeenCalledTimes(2);
+      }
+    } finally {
+      await factory.dispose();
+    }
   });
 });

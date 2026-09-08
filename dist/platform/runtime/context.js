@@ -19,7 +19,7 @@ import { createReminderService } from '../../runtime/reminder/service.js';
 import { CapabilityRegistry } from './capability-registry.js';
 import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
-import { createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpCatalogTimeoutMs, resolveStdioCommand, tryConnect, } from '../mcp/transport.js';
+import { callMcpToolWithSignal, createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpCatalogTimeoutMs, resolveStdioCommand, tryConnect, } from '../mcp/transport.js';
 import { resolveBuiltinSlideRendererConfig } from '../mcp/python-server.js';
 import { BUILT_IN_MCP_CLASSIFICATIONS, classifyMcpServer, validateRegistry, } from '../mcp/server-classification.js';
 export async function createPlatformRuntimeContext(options) {
@@ -76,6 +76,8 @@ export async function createPlatformRuntimeContext(options) {
     validateRegistry(classificationRegistry);
     const runtimePlatform = options.platform ?? process.platform;
     const mcpTools = [];
+    const mcpCatalogOwner = {};
+    const backgroundRunners = new Set();
     const mcpToolListeners = new Set();
     let disposed = false;
     for (const conflict of mcpConflicts) {
@@ -103,26 +105,27 @@ export async function createPlatformRuntimeContext(options) {
         return true;
     };
     const publishMcpTools = (tools) => {
-        if (disposed || tools.length === 0) {
+        if (disposed) {
             return;
         }
-        mcpTools.push(...tools);
+        mcpTools.splice(0, mcpTools.length, ...tools);
+        capabilityRegistry.unregisterOwner(mcpCatalogOwner);
         for (const tool of tools) {
             capabilityRegistry.register({
                 kind: 'mcp',
                 name: tool.definition.name,
                 description: tool.definition.description,
                 inputSchema: tool.definition.inputSchema,
-            });
+            }, mcpCatalogOwner);
         }
         for (const listener of mcpToolListeners) {
             try {
-                listener(tools);
+                listener([...mcpTools]);
             }
             catch { }
         }
     };
-    const mcpReady = connectWorkspaceMcpServers(mergedMcpServers, capabilityHealth, registerDisposable, () => disposed, classificationRegistry, runtimePlatform).then((tools) => {
+    const mcpReady = connectWorkspaceMcpServers(mergedMcpServers, capabilityHealth, registerDisposable, () => disposed, classificationRegistry, runtimePlatform, publishMcpTools).then((tools) => {
         publishMcpTools(tools);
         healthStore.set(options.cwd, health.snapshot());
     }).catch((error) => {
@@ -156,7 +159,9 @@ export async function createPlatformRuntimeContext(options) {
         createReminderApi,
         health,
         async dispose() {
+            publishMcpTools([]);
             disposed = true;
+            const backgroundShutdowns = await Promise.allSettled([...backgroundRunners].map((runner) => runner.dispose()));
             for (const reminderApi of reminderApis.splice(0)) {
                 await reminderApi.dispose();
             }
@@ -169,6 +174,9 @@ export async function createPlatformRuntimeContext(options) {
                     continue;
                 }
             }
+            const shutdownErrors = backgroundShutdowns.filter((result) => result.status === 'rejected').map((result) => result.reason);
+            if (shutdownErrors.length)
+                throw new AggregateError(shutdownErrors, 'background runner shutdown failed');
         },
         listBackgroundJobs(sessionId) {
             return createBackgroundRunner({
@@ -179,9 +187,11 @@ export async function createPlatformRuntimeContext(options) {
             }).listBySession(sessionId);
         },
         createBackgroundRunner(execute, notify = async () => undefined) {
-            return createBackgroundRunner({
+            if (disposed)
+                throw new Error('platform runtime context is disposed');
+            const runner = createBackgroundRunner({
                 rootDir: join(stateRootDir, 'background-jobs'),
-                execute: async ({ input }) => {
+                execute: async ({ input, signal }) => {
                     const payload = input;
                     if (!payload.agent || !payload.prompt) {
                         return { ok: false, errorMessage: 'invalid background subagent payload' };
@@ -191,6 +201,7 @@ export async function createPlatformRuntimeContext(options) {
                         prompt: payload.prompt,
                         cwd: payload.cwd,
                         parentDepth: payload.parentDepth,
+                        signal,
                     });
                     return { ok: true, summary: result.slice(0, 200) };
                 },
@@ -199,6 +210,20 @@ export async function createPlatformRuntimeContext(options) {
                     await notify(job);
                 },
             });
+            backgroundRunners.add(runner);
+            const disposeRunner = runner.dispose;
+            runner.dispose = async () => {
+                try {
+                    const result = await disposeRunner();
+                    if (!result.settled)
+                        console.warn(`BACKGROUND_CLEANUP_PENDING: ${result.pendingJobs.join(', ')}`);
+                    return result;
+                }
+                finally {
+                    backgroundRunners.delete(runner);
+                }
+            };
+            return runner;
         },
     };
 }
@@ -233,7 +258,7 @@ async function connectWorkspaceLspServers(pluginRuntime, lspManager, cwd, capabi
     }
     return firstClient;
 }
-async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDisposable, shouldStop = () => false, classificationRegistry = BUILT_IN_MCP_CLASSIFICATIONS, platform = process.platform) {
+async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDisposable, shouldStop = () => false, classificationRegistry = BUILT_IN_MCP_CLASSIFICATIONS, platform = process.platform, onToolsChanged) {
     const tools = [];
     const globalCatalogTimeoutMs = resolveMcpCatalogTimeoutMs();
     const globalCallToolTimeoutMs = resolveMcpCallToolTimeoutMs();
@@ -259,15 +284,16 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                 registerDisposable(conn);
                 const callToolTimeoutMs = frozenSnapshot.timeout?.call ?? globalCallToolTimeoutMs;
                 return {
-                    callToolResult: async (name, input) => {
-                        const result = await conn.client.callTool({ name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
+                    callToolResult: async (name, input, options) => {
+                        const result = await callMcpToolWithSignal(conn.client, { name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal });
+                        options?.signal?.throwIfAborted();
                         return normalizeMcpRuntimeToolResult(result);
                     },
                     dispose: () => conn.dispose(),
                 };
             });
             tools.push(createComputerUseTool({
-                callToolResult: (name, input) => cuaManager.callToolResult(name, input),
+                callToolResult: (name, input, options) => cuaManager.callToolResult(name, input, options),
             }));
             registerDisposable({ dispose: () => { cuaManager.dispose(); } });
             capabilityHealth.push({
@@ -295,23 +321,72 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             const activeConnection = connection;
             const catalogTimeoutMs = server.timeout?.catalog ?? globalCatalogTimeoutMs;
             const callToolTimeoutMs = server.timeout?.call ?? globalCallToolTimeoutMs;
-            const toolsResult = await activeConnection.client.listTools(undefined, { timeout: catalogTimeoutMs });
-            const schemas = toolsResult.tools ?? [];
-            tools.push(...buildMcpRuntimeTools({ name: server.name, command: '' }, {
-                listTools: async () => schemas,
-                callTool: async (name, input) => {
-                    const result = await activeConnection.client.callTool({ name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true });
-                    return normalizeMcpRuntimeToolResult(result).text;
-                },
-                dispose: activeConnection.dispose,
-            }, schemas));
+            let serverTools = [];
+            let connected = true;
+            let catalogRevision = 0;
+            const replaceServerTools = (next) => {
+                const previous = new Set(serverTools);
+                const remaining = tools.filter((tool) => !previous.has(tool));
+                serverTools = next;
+                tools.splice(0, tools.length, ...remaining, ...next);
+                onToolsChanged?.([...tools]);
+            };
+            const refreshTools = async () => {
+                const revision = ++catalogRevision;
+                let toolsResult;
+                try {
+                    toolsResult = await activeConnection.client.listTools(undefined, { timeout: catalogTimeoutMs });
+                }
+                catch (error) {
+                    if (!connected || shouldStop() || revision !== catalogRevision)
+                        return serverTools.length;
+                    replaceServerTools([]);
+                    throw error;
+                }
+                if (!connected || shouldStop() || revision !== catalogRevision)
+                    return 0;
+                const schemas = toolsResult.tools ?? [];
+                replaceServerTools(buildMcpRuntimeTools({ name: server.name, command: '' }, {
+                    listTools: async () => schemas,
+                    callTool: async (name, input, options) => {
+                        options?.signal?.throwIfAborted();
+                        if (!connected)
+                            throw new Error(`MCP server is disconnected: ${server.name}`);
+                        const result = await callMcpToolWithSignal(activeConnection.client, { name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal });
+                        options?.signal?.throwIfAborted();
+                        return normalizeMcpRuntimeToolResult(result).text;
+                    },
+                    dispose: activeConnection.dispose,
+                }, schemas));
+                return schemas.length;
+            };
+            const previousOnClose = activeConnection.client.onclose;
+            activeConnection.client.onclose = () => {
+                try {
+                    previousOnClose?.();
+                }
+                finally {
+                    connected = false;
+                    catalogRevision++;
+                    replaceServerTools([]);
+                }
+            };
+            activeConnection.client.setNotificationHandler('notifications/tools/list_changed', async () => {
+                try {
+                    await refreshTools();
+                }
+                catch {
+                    // refreshTools revokes only the failed current revision.
+                }
+            });
+            const schemaCount = await refreshTools();
             if (!registerDisposable(activeConnection)) {
                 connection = undefined;
                 continue;
             }
             connection = undefined;
             const detailParts = [
-                `${schemas.length} tools`,
+                `${schemaCount} tools`,
                 `protocol ${activeConnection.protocolEra}`,
             ];
             if (policy.source === 'legacy-manifest' && policy.reason) {

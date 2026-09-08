@@ -1,3 +1,4 @@
+import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -326,6 +327,7 @@ describe('desktop services', () => {
     });
     await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
     const observedOptions: Array<StreamOptions | undefined> = [];
+    const observedPrompts: string[] = [];
     const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (
       _messages,
       _tools,
@@ -333,6 +335,7 @@ describe('desktop services', () => {
       options,
     ) {
       observedOptions.push(options);
+      observedPrompts.push(_systemPrompt);
       yield { type: 'text', delta: 'ok' };
       yield { type: 'done' };
     });
@@ -357,6 +360,12 @@ describe('desktop services', () => {
         /^sess_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
       expect(observedOptions).toHaveLength(1);
+      // The production default runner must send the simplified policy to the adapter.
+      expect(observedPrompts).toHaveLength(1);
+      expect(observedPrompts[0]).not.toContain('用户已经授权你使用所有工具');
+      expect(observedPrompts[0]).toContain('read_material');
+      expect(observedPrompts[0]).toContain('## 模型信息');
+      expect(observedPrompts[0]).toContain('严禁 agent 取消 user-owned 或 assistant-owned');
       expect(observedOptions[0]).toEqual({
         cacheKey: expect.stringMatching(/^pc1_[0-9a-f]{64}$/),
         providerConversationAuthorization: expect.any(Object),
@@ -4505,25 +4514,21 @@ describe('desktop services', () => {
   });
 
   it('system prompt separates notification reminders from automatic scheduled tasks', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join: pathJoin } = await import('node:path');
-    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+    const prompt = buildDesktopSystemPrompt();
 
-    expect(sourceFile).toContain('reminder_create 只创建到点通知');
-    expect(sourceFile).toContain('scheduled_task_create');
-    expect(sourceFile).toContain('每隔N分钟检查/执行/直到完成');
-    expect(sourceFile).toContain('如果用户明确要求写脚本或使用系统定时，则遵循用户要求');
-    expect(sourceFile).toContain('不要用 reminder_create 承诺会自动检查项目');
+    expect(prompt).toContain('reminder_create 只到点通知');
+    expect(prompt).toContain('scheduled_task_create');
+    expect(prompt).toContain('重复检查写明频率和业务停止条件');
+    expect(prompt).toContain('只有用户明确要求时才用脚本、cron 或系统定时');
+    expect(prompt).toContain('不会自动执行 AI、检查项目或调用工具');
   });
 
   it('system prompt preserves visual PDF export format instead of Markdown repagination', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join: pathJoin } = await import('node:path');
-    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+    const prompt = buildDesktopSystemPrompt();
 
-    expect(sourceFile).toContain('## 视觉产物导出 PDF');
-    expect(sourceFile).toContain('浏览器打印/print-to-pdf');
-    expect(sourceFile).toContain('不要用 make-pdf');
+    expect(prompt).toContain('保留原产物版式');
+    expect(prompt).toContain('浏览器打印/print-to-pdf');
+    expect(prompt).toContain('不要用 make-pdf');
   });
 
   it('timed action tools create notification reminders and agent scheduled tasks', async () => {
@@ -4565,27 +4570,23 @@ describe('desktop services', () => {
   });
 
   it('system prompt routes stuck Swarm project recovery through file-first repair', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join: pathJoin } = await import('node:path');
-    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+    const prompt = buildDesktopSystemPrompt();
 
-    expect(sourceFile).toContain('先调用 inspect_project');
-    expect(sourceFile).toContain('recovery_budget_exceeded');
-    expect(sourceFile).toContain('repair_project_task_from_file');
-    expect(sourceFile).toContain('写入 artifacts');
-    expect(sourceFile).toContain('不要在回复、stdout、tool 参数或聊天消息中粘贴完整交付物');
-    expect(sourceFile).toContain('不要反复调用 continue_project');
-    expect(sourceFile).toContain('needs_conversation');
+    expect(prompt).toContain('先 inspect_project');
+    expect(prompt).toContain('recovery_budget_exceeded');
+    expect(prompt).toContain('repair_project_task_from_file');
+    expect(prompt).toContain('写完整修复文件到 artifacts');
+    expect(prompt).toContain('回复、stdout、tool 参数和消息只传 artifactPath');
+    expect(prompt).toContain('不要重复 continue');
+    expect(prompt).toContain('needs_conversation');
   });
 
   it('system prompt documents resuming interrupted dynamic workflows without re-pasting the script', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { join: pathJoin } = await import('node:path');
-    const sourceFile = readFileSync(pathJoin(__dirname, '../../electron/desktop-services.ts'), 'utf-8');
+    const prompt = buildDesktopSystemPrompt();
 
-    expect(sourceFile).toContain('script_workflow');
-    expect(sourceFile).toContain('resumeWorkflowRunId');
-    expect(sourceFile).toContain('不要传 script 参数');
+    expect(prompt).toContain('script_workflow');
+    expect(prompt).toContain('resumeWorkflowRunId');
+    expect(prompt).toContain('不要传 script');
   });
 
   describe('recoverInterruptedScriptWorkflows', () => {

@@ -7,6 +7,7 @@ import { createPlatformRuntimeContext } from '../../../src/platform/runtime/cont
 import { FileCapabilityHealthStore } from '../../../src/platform/runtime/health-store.js';
 import { resolvePluginShellCommand } from '../../../src/platform/plugins/runtime.js';
 import { waitFor } from '../../support/wait-for.js';
+import { createPlatformRegistryFactory } from '../../../src/platform/runtime/registry-factory.js';
 
 function quote(value: string): string {
   return JSON.stringify(value);
@@ -168,6 +169,74 @@ describe('platform runtime context', () => {
   });
 
   const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
+
+  it.each(['factory', 'context'] as const)('cancels real background subagent execution when %s is disposed', async (owner) => {
+    const cwd = join(tmpdir(), `xiaok-bg-owner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(cwd, { recursive: true });
+    const context = await createPlatformRuntimeContext({ cwd, builtinCommands: ['chat'], reminderMode: 'local' });
+    context.customAgents.push({ name: 'background_probe', systemPrompt: '', source: 'builtin' });
+    let signal: AbortSignal | undefined;
+    let exited = false;
+    const factory = createPlatformRegistryFactory({ platform: context, source: 'chat', sessionId: 'background_lifecycle',
+      adapter: () => ({ getModelName: () => 'probe', async *stream(_messages, _tools, _prompt, options) {
+        signal = options?.signal;
+        await new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }));
+        exited = true;
+        yield { type: 'done' as const };
+      } }), buildSystemPrompt: async () => 'test',
+    });
+    const registry = factory.createRegistry(cwd);
+    try {
+      expect(await registry.executeTool('subagent', { agent: 'background_probe', prompt: 'run', background: true })).toContain('background agent queued:');
+      await waitFor(() => expect(signal).toBeDefined());
+      await (owner === 'factory' ? factory.dispose() : context.dispose());
+      expect(signal?.aborted).toBe(true);
+      expect(exited).toBe(true);
+      expect(context.listBackgroundJobs('background_lifecycle')[0]).toMatchObject({ status: 'failed', errorMessage: expect.stringContaining('BACKGROUND_RUNNER_DISPOSED') });
+    } finally {
+      await factory.dispose();
+      await context.dispose();
+    }
+  });
+
+  itIfCanSpawn.each(['__remove__', '__disconnect__', '__race__'])('reconciles the real stdio MCP catalog after %s', async (action) => {
+    const cwd = join(tmpdir(), `xiaok-mcp-catalog-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(cwd);
+    mkdirSync(cwd, { recursive: true });
+    writePlugin(cwd, 'mutable-mcp', { name: 'mutable-mcp', version: '1.0.0', commands: [], mcpServers: [{
+      name: 'mutable', type: 'stdio', command: process.execPath,
+      args: [join(process.cwd(), 'tests', 'support', 'mcp-stdio-server.js')], env: { XIAOK_TEST_MCP_MUTABLE_CATALOG: '1' },
+    }] });
+    const context = await createPlatformRuntimeContext({ cwd, builtinCommands: ['chat'], reminderMode: 'local' });
+    const factory = createPlatformRegistryFactory({ platform: context, source: 'chat', sessionId: 'mutable',
+      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
+    });
+    const registry = factory.createRegistry(cwd);
+    try {
+      await context.mcpReady;
+      const name = 'mcp__mutable__search';
+      expect(registry.getToolDefinitions().map((tool) => tool.name)).toContain(name);
+      expect(await registry.executeTool(name, { q: action })).toContain('fixture:');
+      if (action === '__race__') {
+        const fresh = 'mcp__mutable__fresh';
+        await waitFor(() => expect(registry.getToolDefinitions().map((tool) => tool.name)).toContain(fresh));
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(context.mcpTools.map((tool) => tool.definition.name)).toContain(fresh);
+        expect(await registry.executeTool(fresh, { q: 'still current' })).toContain('fixture:still current');
+        return;
+      }
+      await waitFor(() => {
+        expect(context.mcpTools).toEqual([]);
+        expect(context.capabilityRegistry.get(name)).toBeUndefined();
+        expect(registry.getToolDefinitions().map((tool) => tool.name)).not.toContain(name);
+      });
+      expect(await registry.executeTool(name, { q: 'stale' })).toContain('Error:');
+    } finally {
+      await factory.dispose();
+      await context.dispose();
+    }
+  });
 
   itIfCanSpawn('loads declared MCP and LSP plugins end-to-end and persists connected capability health', async () => {
     const cwd = join(tmpdir(), `xiaok-platform-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);

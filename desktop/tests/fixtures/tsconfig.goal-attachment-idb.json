@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.renderer.json",
+  "compilerOptions": { "incremental": false, "types": ["vite/client", "node"] },
+  "include": [
+    "goal-attachment-idb-*.ts",
+    "goal-attachment-idb-*.tsx",
+    "../e2e/goal-attachment-idb.spec.ts",
+    "../../renderer/src/global.d.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

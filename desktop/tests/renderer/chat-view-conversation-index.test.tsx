@@ -37,13 +37,9 @@ function renderChat(chatMessages: ChatMessage[]) {
 }
 
 describe('ChatView conversation prompt index', () => {
-  const scrolledElements: Element[] = [];
-
   beforeEach(() => {
-    scrolledElements.length = 0;
-    Element.prototype.scrollIntoView = vi.fn(function scrollIntoView(this: Element) {
-      scrolledElements.push(this);
-    });
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = vi.fn();
   });
 
   afterEach(cleanup);
@@ -129,17 +125,20 @@ describe('ChatView conversation prompt index', () => {
 
   it('smoothly jumps to the selected user prompt anchor', () => {
     renderChat(messages);
-    scrolledElements.length = 0;
+    const scroller = screen.getByTestId('chat-scroll-container');
+    const anchor = document.querySelector<HTMLElement>('[data-message-anchor="user-2"]')!;
+    scroller.scrollTop = 400;
+    anchor.style.scrollMarginTop = '24px';
+    vi.spyOn(scroller, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 52, 800, 600));
+    vi.spyOn(anchor, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 352, 800, 80));
+    const scroll = vi.spyOn(scroller, 'scrollTo');
 
     const index = screen.getByRole('navigation', { name: '提示词索引' });
     fireEvent.click(within(index).getAllByRole('button')[1]);
 
-    const selected = scrolledElements.at(-1) as HTMLElement | undefined;
-    expect(selected?.dataset.messageAnchor).toBe('user-2');
-    expect(Element.prototype.scrollIntoView).toHaveBeenLastCalledWith({
-      behavior: 'smooth',
-      block: 'start',
-    });
+    expect(scroll).toHaveBeenLastCalledWith({ top: 676, behavior: 'smooth' });
+    expect(within(index).getAllByRole('button')[1]).toHaveAttribute('aria-current', 'location');
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('updates the current prompt when the conversation is scrolled', async () => {

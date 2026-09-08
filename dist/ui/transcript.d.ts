@@ -1,6 +1,16 @@
+import type { MultiAgentEvent } from '../ai/agents/multi-agent-coordinator.js';
+import type { SubAgentProgressEvent } from '../ai/agents/subagent-presentation.js';
 import { archiveTranscript, TranscriptStorageError, type TranscriptArchiveOptions, type TranscriptArchivePhase, type TranscriptArchiveResult, type TranscriptReadOptions } from './transcript-storage.js';
 export { archiveTranscript, TranscriptStorageError, type TranscriptArchiveOptions, type TranscriptArchivePhase, type TranscriptArchiveResult, type TranscriptReadOptions, };
 export type TranscriptEvent = {
+    type: 'subagent_progress';
+    event: SubAgentProgressEvent;
+    timestamp: number;
+} | {
+    type: 'multi_agent';
+    event: MultiAgentEvent;
+    timestamp: number;
+} | {
     type: 'input_key';
     key: string;
     timestamp: number;

@@ -3,7 +3,8 @@
 import { readFileSync, existsSync } from 'fs';
 import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { getToolActivityLabel } from './locale.js';
+import { getToolActivityLabel, getUiCopy } from './locale.js';
+import { publicAgentSummary } from '../ai/agents/subagent-presentation.js';
 import { getDisplayWidth, stripAnsi } from './display-width.js';
 import { BUILD_TIME } from '../build-info.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +68,11 @@ export const accentAmber = rgb(229, 192, 123);
 export const boldAccentAmber = boldRgb(229, 192, 123);
 export const accentCyan = rgb(86, 182, 194);
 export const boldAccentCyan = boldRgb(86, 182, 194);
+// One shared accent marks SubAgent codenames; the names distinguish instances.
+// Only the codename is italic; status and task text keep their normal style.
+export function formatSubAgentCodename(name) {
+    return esc("3")(accentCyan(name));
+}
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const RAIL_INDENT = "  ";
 function padToDisplayWidth(text, width) {
@@ -395,7 +401,11 @@ export function describeToolActivity(toolName, input, locale = 'zh-CN', verbose 
     }
     const label = getToolActivityLabel(toolName, locale);
     let detail = '';
-    if (toolName === 'bash') {
+    if (toolName === 'subagent' || toolName === 'spawn_agent') {
+        const task = input.description ?? input.message ?? input.prompt ?? input.task_name ?? input.agent;
+        return `${getUiCopy(locale).subAgents.arranging}${typeof task === 'string' ? ` · ${publicAgentSummary(task, 120)}` : ''}`;
+    }
+    else if (toolName === 'bash') {
         const command = typeof input.command === 'string' ? input.command : '';
         detail = summarizeBashCommand(command, locale, verbose);
         if (!detail)

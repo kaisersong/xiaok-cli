@@ -551,12 +551,13 @@ export class InputReader {
         this.pauseBusyCaptureForRead();
         this.readActive = true;
         return new Promise((resolve) => {
-            clearPastedImagePaths();
-            let input = '';
-            let cursor = 0;
+            if (!options?.initialInput?.input)
+                clearPastedImagePaths();
+            let input = options?.initialInput?.input ?? '';
+            let cursor = Math.max(0, Math.min(input.length, options?.initialInput?.cursor ?? input.length));
             let resolved = false;
             const staticOverlayLines = options?.overlayLines ?? [];
-            let historyState = pushInputHistory(createInputHistoryState(), '', 0);
+            let historyState = pushInputHistory(createInputHistoryState(), input, cursor);
             let richUiEnabled = Boolean(this.renderer) && !this.forcePlainMode;
             let uiErrorNotified = false;
             let historyDraft = null;

@@ -1476,12 +1476,14 @@ describe('AgentRuntime', () => {
       if (event.type === 'usage_updated') {
         controller.abort(sentinel);
       }
-    }, controller.signal)).rejects.toBe(sentinel);
+    }, controller.signal)).rejects.toSatisfy((error: Error) => error.name === 'AbortError' && error.cause === sentinel);
 
     expect(session.getUsage()).toEqual(usage);
     expect(events.filter((type) => type === 'usage_updated')).toHaveLength(1);
     expect(events).toContain('assistant_text');
     expect(events).not.toContain('run_completed');
+    expect(events.filter((type) => type === 'run_aborted')).toHaveLength(1);
+    expect(events).not.toContain('run_failed');
   });
 
   it('checks abort after clean stream exhaustion before reporting completion', async () => {

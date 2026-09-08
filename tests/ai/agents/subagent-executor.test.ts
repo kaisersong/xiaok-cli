@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { executeNamedSubAgent } from '../../../src/ai/agents/subagent-executor.js';
+import {
+  createNamedSubAgentSession,
+  executeNamedSubAgent,
+} from '../../../src/ai/agents/subagent-executor.js';
 import type { ModelAdapter } from '../../../src/types.js';
 import type { ToolRegistry } from '../../../src/ai/tools/index.js';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
@@ -25,7 +28,7 @@ const mockAdapter = {
   stream: vi.fn(),
 } as unknown as ModelAdapter;
 
-const mockRegistry = {} as unknown as ToolRegistry;
+const mockRegistry = { dispose: vi.fn() } as unknown as ToolRegistry;
 
 describe('subagent-executor system prompt isolation', () => {
   let capturedSystemPrompt = '';
@@ -49,7 +52,7 @@ describe('subagent-executor system prompt isolation', () => {
       adapter: () => mockAdapter,
       createRegistry: () => mockRegistry,
       buildSystemPrompt,
-      forkContext: { systemPrompt: 'CONTAMINATED CC SYSTEM PROMPT', session: {} } as any,
+      forkContext: { systemPrompt: 'CONTAMINATED CC SYSTEM PROMPT', session: { messages: [] } } as any,
     });
 
     // buildSystemPrompt should be called (not the forkContext one)
@@ -77,7 +80,7 @@ describe('subagent-executor system prompt isolation', () => {
       buildSystemPrompt,
       forkContext: {
         systemPrompt: 'BRANCH: main\nSPAWNED_SESSION: true\nPROACTIVE: true\n',
-        session: {},
+        session: { messages: [] },
       } as any,
     });
 
@@ -492,7 +495,7 @@ describe('subagent-executor abort signal propagation', () => {
     expect(childSignal?.aborted).toBe(true);
   });
 
-  it('passes an independent child signal even without a parent context signal', async () => {
+  it('does not manufacture a cancellation source when neither caller supplies one', async () => {
     await executeNamedSubAgent({
       agentDef: { name: 'test', systemPrompt: '', source: 'builtin' },
       prompt: 'test',
@@ -504,7 +507,130 @@ describe('subagent-executor abort signal propagation', () => {
 
     const agentInstance = (Agent as any).mock.results[0].value;
     const childSignal = agentInstance.runTurn.mock.calls[0][2] as AbortSignal | undefined;
-    expect(childSignal).toBeDefined();
-    expect(childSignal?.aborted).toBe(false);
+    expect(childSignal).toBeUndefined();
+  });
+});
+
+describe('persistent named subagent session', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reuses one Agent instance across follow-up turns', async () => {
+    const session = await createNamedSubAgentSession({
+      agentDef: { name: 'reviewer', systemPrompt: '', source: 'builtin' },
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      runtimeAgentId: 'agent_1',
+      collaborationPrompt: 'parent=main',
+    });
+
+    await session.run('first');
+    await session.run('second');
+
+    expect(Agent).toHaveBeenCalledOnce();
+    const agentInstance = (Agent as any).mock.results[0].value;
+    expect(agentInstance.runTurn).toHaveBeenNthCalledWith(1, 'first', expect.any(Function), undefined, undefined, expect.any(Function));
+    expect(agentInstance.runTurn).toHaveBeenNthCalledWith(2, 'second', expect.any(Function), undefined, undefined, expect.any(Function));
+    expect((Agent as any).mock.calls[0][2]).toContain('parent=main');
+  });
+
+  it('injects synthesized strict-parent context only on the first persistent turn', async () => {
+    const strictAdapter = createAdapterFromBinding({
+      providerId: 'kimi', providerType: 'first_party', modelId: 'k3', wireModel: 'k3',
+      protocol: 'openai_legacy', apiKey: 'sk-test', baseUrl: 'https://api.kimi.com/coding/v1',
+      headers: {}, capabilities: ['tools', 'thinking'],
+    }) as OpenAIAdapter;
+    const session = await createNamedSubAgentSession({
+      agentDef: { name: 'reviewer', systemPrompt: '', source: 'builtin' },
+      sessionId: 'session-1',
+      adapter: () => strictAdapter,
+      createRegistry: () => mockRegistry,
+      buildSystemPrompt: async () => 'prompt',
+      forkContext: {
+        messages: [{ role: 'assistant', content: [{ type: 'text', text: 'safe parent answer' }] }],
+      } as any,
+    });
+
+    await session.run('first');
+    await session.run('second');
+
+    const agentInstance = (Agent as any).mock.results[0].value;
+    expect(agentInstance.runTurn.mock.calls[0][0]).toContain('xiaok.synthesized-subagent-context');
+    expect(agentInstance.runTurn.mock.calls[1][0]).toBe('second');
+    strictAdapter.dispose();
+  });
+
+  it('releases its registry exactly once when disposed repeatedly', async () => {
+    const releaseRegistry = vi.fn();
+    const session = await createNamedSubAgentSession({
+      agentDef: { name: 'reviewer', systemPrompt: '', source: 'builtin' },
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry: () => mockRegistry,
+      releaseRegistry,
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    await session.dispose();
+    await session.dispose();
+
+    expect(releaseRegistry).toHaveBeenCalledOnce();
+    expect(releaseRegistry).toHaveBeenCalledWith(mockRegistry);
+  });
+
+  it('deactivates registry refresh before full dispose and keeps both operations idempotent', async () => {
+    const releaseRegistry = vi.fn();
+    const session = await createNamedSubAgentSession({
+      agentDef: { name: 'reviewer', systemPrompt: '', source: 'builtin' },
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry: () => mockRegistry,
+      releaseRegistry,
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    await session.deactivate();
+    await session.deactivate();
+    await session.dispose();
+
+    expect(releaseRegistry).toHaveBeenCalledOnce();
+  });
+
+  it('does not create a registry until asynchronous system prompt initialization completes', async () => {
+    let resolvePrompt!: (prompt: string) => void;
+    const promptGate = new Promise<string>((resolve) => { resolvePrompt = resolve; });
+    const createRegistry = vi.fn(() => mockRegistry);
+    const creation = createNamedSubAgentSession({
+      agentDef: { name: 'reviewer', systemPrompt: '', source: 'builtin' },
+      sessionId: 'session-1',
+      adapter: () => mockAdapter,
+      createRegistry,
+      buildSystemPrompt: () => promptGate,
+    });
+    await new Promise(setImmediate);
+
+    expect(createRegistry).not.toHaveBeenCalled();
+    resolvePrompt('prompt');
+    const session = await creation;
+    expect(createRegistry).toHaveBeenCalledOnce();
+    await session.dispose();
+  });
+
+  it('releases the registry when synchronous initialization fails after registry creation', async () => {
+    const releaseRegistry = vi.fn();
+    await expect(createNamedSubAgentSession({
+      agentDef: { name: 'reviewer', systemPrompt: '', source: 'builtin' },
+      sessionId: 'session-1',
+      adapter: () => { throw new Error('adapter setup failed'); },
+      createRegistry: () => mockRegistry,
+      releaseRegistry,
+      buildSystemPrompt: async () => 'prompt',
+    })).rejects.toThrow('adapter setup failed');
+
+    expect(releaseRegistry).toHaveBeenCalledOnce();
+    expect(releaseRegistry).toHaveBeenCalledWith(mockRegistry);
   });
 });

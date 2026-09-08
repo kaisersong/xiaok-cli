@@ -1,10 +1,42 @@
 import type { PromptInjectionTexts } from "../shared/components/prompt-injection";
 import { zh } from "./zh";
 import { en } from "./en";
+import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/task-host/delivery-types';
 
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  multiAgent: {
+    approvals: { title: string; pending: (count: number) => string; approve: string; deny: string; query: string;
+      viewInput: string; nextInput: string; inputLoading: string; inputFailed: string; metadataFailed: string; retryMetadata: string;
+      failure: string; deadline: (seconds: number) => string; unknown: string; received: string; currentPending: (count: number) => string;
+      inputProgress: (start: number, read: number, total: number) => string; statuses: Record<string, string> };
+    authorization: { title: string; scope: string; warning: string; pathUnavailable: string; unavailable: string;
+      unknown: string; allowed: string; denied: string; operationUnknown: string; query: string; restore: string;
+      pause: string; grant: string; confirmPause: string; confirmGrant: string; openSettings: string };
+    executionCompleted: string; deliveryCleanupPending: string; deliveryFollowup: string; deliveryHistory: (sourceTaskId: string) => string;
+    deliveryStatuses: Record<HostDeliveryRecord['status'], string>; deliveryReasons: Record<GuardFailure['code'], string>;
+    alias: (ordinal: number) => string; mainAgent: string; assignment: (task: string) => string; turnLabel: (turn: number) => string;
+    toolSummary: (completed: number, failed: number) => string; toolsRecorded: (count: number) => string;
+    toolsUnrecorded: string; toolsIncomplete: string; otherTools: (count: number) => string; settling: string;
+    taskTab: string; agentsTab: string; agentsHistoryEntry: string; executionState: string; canvasTab: string; closePanel: string; openPanel: (name: string, count: number) => string;
+    loading: string; empty: string; unavailable: string; retry: string; history: string; currentGroup: string; historical: string;
+    moreAgents: string; earlierEvents: string; selectAgent: string; message: string; send: string; followup: string; interrupt: string;
+    closeAgent: string; confirmClose: string; cancel: string; usage: (input: number, output: number) => string; unread: (count: number) => string;
+    elapsed: (seconds: number) => string; sent: string; queued: string; unknown: string; actionFailed: string; cleanupPending: string;
+    released: string; resident: string; resourcesInUse: string; stopped: string; blocked: string; previewTruncated: string; loadContent: string;
+    contentLoading: string; contentReadFailed: string; savedContentTruncated: (byteLength: number) => string;
+    contentSegmented: string; contentSegment: (current: number, total: number) => string;
+    previousContentSegment: string; nextContentSegment: string;
+    queuedReceipt: (agentId: string, expectedTurn?: number) => string;
+    checkOperation: string; userSender: string; moreGroups: string;
+    resources: string; resourcesEmpty: string; moreResources: string; keepResource: string; retryCleanup: string; resourceConfirmation: string;
+    confirmKeep: string; keepExplanation: string; newGroup: string; confirmReset: string; resetExplanation: string; resetPending: string;
+    resourceStates: Record<string, string>;
+    statuses: Record<'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'closed', string>;
+    phases: Record<string, string>; eventKinds: Record<string, string>;
+    activityAnnouncement: (running: number, completed: number) => string; failureAnnouncement: (name: string) => string;
+  };
   // sidebar
   newChat: string;
   chats: string;
@@ -461,6 +493,10 @@ export interface LocaleStrings {
   shareThread: string
   renameThread: string
   deleteThread: string
+  deleteThreadPending: string
+  deleteThreadUnknown: string
+  deleteThreadUnavailable: string
+  deleteThreadFailed: string
   deleteThreadConfirmTitle: string
   deleteThreadConfirmBody: string
   deleteThreadConfirm: string
@@ -2510,6 +2546,8 @@ export interface LocaleStrings {
     greetingSuffix: string;
     inputPlaceholder: string;
     goalQuickPrompt: string;
+    subagentQuickPrompt: string;
+    subagentPrompt: string;
     quickPrompts: readonly string[];
     conversationSubtitle: string;
     overviewTitle: string;
@@ -2870,6 +2908,12 @@ export interface LocaleStrings {
 
   // chatView
   chatView: {
+    executionSyncing: string;
+    executionDisconnected: string;
+    executionQueued: string;
+    executionApproval: string;
+    executionRunning: string;
+    executionFinishing: string;
     copyTitle: string;
     saveToKbTitle: string;
     chatExcerpt: string;
@@ -2924,6 +2968,8 @@ export interface LocaleStrings {
     tokens: (tokens: number) => string;
     tokensUnknown: string;
     statusActive: string;
+    waitingChildren: string;
+    childrenNeedAttention: string;
     statusPaused: string;
     statusBlocked: string;
     statusComplete: string;
@@ -2955,6 +3001,8 @@ export interface LocaleStrings {
     attachmentLabel: string;
     cuUnavailable: string;
     taskCreateFailed: string;
+    goalAttachmentQuerying: string;
+    goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
     modelAuthFailed: string;
     modelServiceFailed: string;

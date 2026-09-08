@@ -17,21 +17,31 @@ function outputRequestsWindowsElevation(output) {
 function terminateChildProcessTree(child) {
     if (process.platform === 'win32' && child.pid) {
         try {
-            // Fire-and-forget taskkill so result resolution is not blocked by process teardown.
             const killer = spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
-                stdio: 'ignore',
-                windowsHide: true,
-                detached: true,
+                stdio: 'ignore', windowsHide: true, detached: true,
             });
+            killer.on('error', () => { child.kill('SIGKILL'); });
             killer.unref();
             return;
         }
         catch {
-            // Fall back to killing the shell process itself if taskkill cannot start.
+            child.kill('SIGKILL');
+            return;
         }
     }
-    child.kill('SIGTERM');
-    setTimeout(() => child.kill('SIGKILL'), 2000);
+    const kill = (signal) => {
+        try {
+            if (child.pid)
+                process.kill(-child.pid, signal);
+            else
+                child.kill(signal);
+        }
+        catch (error) {
+            if (error.code !== 'ESRCH')
+                child.kill(signal);
+        }
+    };
+    kill('SIGKILL');
 }
 export const bashTool = {
     permission: 'bash',
@@ -50,24 +60,38 @@ export const bashTool = {
         },
     },
     async execute(input, context) {
+        context?.signal?.throwIfAborted();
         const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd(), max_chars = 12_000 } = input;
         const risk = classifyBashCommand(command);
         if (risk.level === 'block') {
             return `Error: 命令被安全策略拦截: ${risk.reason}`;
         }
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             const shell = process.platform === 'win32' ? 'cmd' : 'sh';
             const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
-            const child = spawn(shell, shellArgs, { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'] });
+            const child = spawn(shell, shellArgs, { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
             let settled = false;
+            let aborted = false;
+            let terminationResult;
+            const onAbort = () => {
+                if (settled || aborted)
+                    return;
+                aborted = true;
+                terminateChildProcessTree(child);
+            };
             let timer;
             const finish = (result, exitCode) => {
                 if (settled) {
                     return;
                 }
                 settled = true;
+                context?.signal?.removeEventListener('abort', onAbort);
                 if (timer) {
                     clearTimeout(timer);
+                }
+                if (aborted) {
+                    reject(context?.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+                    return;
                 }
                 if (context?.toolInvocationId) {
                     context.runtimeFactSink?.emit({
@@ -82,6 +106,8 @@ export const bashTool = {
             let stdout = '';
             let stderr = '';
             const handleOutput = (stream, data) => {
+                if (aborted || settled || terminationResult)
+                    return;
                 const chunk = data.toString();
                 if (stream === 'stdout') {
                     stdout += chunk;
@@ -91,17 +117,23 @@ export const bashTool = {
                 }
                 const output = `${stdout}\n${stderr}`;
                 if (process.platform === 'win32' && outputRequestsWindowsElevation(output)) {
+                    terminationResult = truncateText(`Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`, max_chars).text;
                     terminateChildProcessTree(child);
-                    finish(truncateText(`Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`, max_chars).text, null);
                 }
             };
             child.stdout?.on('data', (d) => handleOutput('stdout', d));
             child.stderr?.on('data', (d) => handleOutput('stderr', d));
             timer = setTimeout(() => {
+                if (aborted || terminationResult)
+                    return;
+                terminationResult = truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text;
                 terminateChildProcessTree(child);
-                finish(truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text, null);
             }, timeout_ms);
             child.on('close', code => {
+                if (terminationResult) {
+                    finish(terminationResult, null);
+                    return;
+                }
                 if (settled) {
                     return;
                 }
@@ -114,8 +146,16 @@ export const bashTool = {
                 }
             });
             child.on('error', (error) => {
+                if (aborted || terminationResult) {
+                    // A failed kill is not evidence that the process exited.
+                    console.warn(`BASH_TERMINATION_PENDING: ${String(error)}`);
+                    return;
+                }
                 finish(`Error: ${String(error)}`, null);
             });
+            context?.signal?.addEventListener('abort', onAbort, { once: true });
+            if (context?.signal?.aborted)
+                onAbort();
         });
     },
 };

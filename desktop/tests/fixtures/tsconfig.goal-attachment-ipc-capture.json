@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../main/goal-attachment-ipc-contract.bdd.test.ts",
+    "../main/goal-attachment-factory-capture.bdd.test.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

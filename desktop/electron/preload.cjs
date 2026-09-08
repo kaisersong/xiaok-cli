@@ -1,6 +1,75 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const os = require('os');
 
+// Sandbox preload cannot load arbitrary local modules. Behavioral parity with
+// desktop-multi-agent-preload.ts is exercised against this actual entrypoint.
+function createMultiAgentSubscription(ipc, channel, subscribeKey, unsubscribeKey) {
+  const subscriptions = new Map();
+  const pending = new Set();
+  return {
+    async subscribe(input, handler) {
+      const id = input.subscriptionId;
+      if (subscriptions.has(id) || pending.has(id)) throw new Error('duplicate multi-agent subscription');
+      const listener = (_event, data) => {
+        if (subscriptions.get(id) !== listener || !data || typeof data !== 'object' || data.subscriptionId !== id) return;
+        handler(data);
+      };
+      subscriptions.set(id, listener); pending.add(id); ipc.on(channel, listener);
+      try {
+        const result = await ipc.invoke(`desktop:${subscribeKey}`, input);
+        if (subscriptions.get(id) !== listener) {
+          await ipc.invoke(`desktop:${unsubscribeKey}`, { subscriptionId: id });
+          throw new Error('multi-agent subscription cancelled');
+        }
+        return result;
+      } catch (error) {
+        if (subscriptions.get(id) === listener) {
+          subscriptions.delete(id);
+          void ipc.invoke(`desktop:${unsubscribeKey}`, { subscriptionId: id }).catch(() => undefined);
+        }
+        ipc.off(channel, listener); throw error;
+      } finally { pending.delete(id); }
+    },
+    async unsubscribe(input) {
+      const listener = subscriptions.get(input.subscriptionId);
+      if (listener) { subscriptions.delete(input.subscriptionId); ipc.off(channel, listener); }
+      await ipc.invoke(`desktop:${unsubscribeKey}`, input);
+    },
+  };
+}
+
+function createMultiAgentPreload(ipc) {
+  const agents = createMultiAgentSubscription(ipc, 'desktop:multiAgentEvent', 'subscribeMultiAgents', 'unsubscribeMultiAgents');
+  const authorization = createMultiAgentSubscription(ipc, 'desktop:localExecutionAuthorizationChanged', 'subscribeLocalExecutionAuthorization', 'unsubscribeLocalExecutionAuthorization');
+  return {
+    getMultiAgentApproval: input => ipc.invoke('desktop:getMultiAgentApproval', input),
+    decideMultiAgentApproval: input => ipc.invoke('desktop:decideMultiAgentApproval', input),
+    getLocalExecutionAuthorization: input => ipc.invoke('desktop:getLocalExecutionAuthorization', input),
+    getLocalExecutionWorkspace: input => ipc.invoke('desktop:getLocalExecutionWorkspace', input),
+    setLocalExecutionAuthorization: input => ipc.invoke('desktop:setLocalExecutionAuthorization', input),
+    getLocalExecutionAuthorizationOperation: input => ipc.invoke('desktop:getLocalExecutionAuthorizationOperation', input),
+    subscribeLocalExecutionAuthorization: authorization.subscribe,
+    unsubscribeLocalExecutionAuthorization: authorization.unsubscribe,
+    getMultiAgentSnapshot: input => ipc.invoke('desktop:getMultiAgentSnapshot', input),
+    listMultiAgentGroups: input => ipc.invoke('desktop:listMultiAgentGroups', input),
+    listMultiAgents: input => ipc.invoke('desktop:listMultiAgents', input),
+    getMultiAgentEvents: input => ipc.invoke('desktop:getMultiAgentEvents', input),
+    getAgentContent: input => ipc.invoke('desktop:getAgentContent', input),
+    getMultiAgentOperation: input => ipc.invoke('desktop:getMultiAgentOperation', input),
+    getMultiAgentResources: input => ipc.invoke('desktop:getMultiAgentResources', input),
+    resolveMultiAgentResource: input => ipc.invoke('desktop:resolveMultiAgentResource', input),
+    resetMultiAgentGroup: input => ipc.invoke('desktop:resetMultiAgentGroup', input),
+    getMultiAgentThreadDeletion: input => ipc.invoke('desktop:getMultiAgentThreadDeletion', input),
+    deleteMultiAgentThread: input => ipc.invoke('desktop:deleteMultiAgentThread', input),
+    sendAgentMessage: input => ipc.invoke('desktop:sendAgentMessage', input),
+    followupAgent: input => ipc.invoke('desktop:followupAgent', input),
+    interruptAgent: input => ipc.invoke('desktop:interruptAgent', input),
+    closeAgent: input => ipc.invoke('desktop:closeAgent', input),
+    subscribeMultiAgents: agents.subscribe,
+    unsubscribeMultiAgents: agents.unsubscribe,
+  };
+}
+
 function sanitizeArtifactWorkspaceInput(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
   const { requestSource: _requestSource, viewKey: _viewKey, ...safe } = input;
@@ -68,6 +137,7 @@ function sanitizeKSwarmSemanticInput(kind, input) {
 }
 
 contextBridge.exposeInMainWorld('xiaokDesktop', {
+  ...createMultiAgentPreload(ipcRenderer),
   systemUsername: os.userInfo().username,
   getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig'),
   saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input),

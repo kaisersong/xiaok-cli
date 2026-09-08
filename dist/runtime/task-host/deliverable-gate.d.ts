@@ -29,3 +29,5 @@ export declare function looksLikeMultiDeliverable(prompt: string): boolean;
  * If there are planned/running steps remaining, the task is incomplete.
  */
 export declare function runDeliverableGate(snapshot: TaskSnapshot, gateFunction: DeliverableGateFunction | undefined, signal: AbortSignal): Promise<boolean>;
+/** The same built-in, CPU-only check used by ordinary tasks and delivery facts. */
+export declare function isDeliveryPlanComplete(snapshot: TaskSnapshot): boolean;

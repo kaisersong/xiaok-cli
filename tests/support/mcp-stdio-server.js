@@ -10,6 +10,10 @@ if (process.env.XIAOK_TEST_MCP_STUBBORN === '1') {
 
 let buffer = '';
 let transport = null;
+let catalogRemoved = false;
+let raceListRequest;
+let racing = false;
+let freshCatalog = false;
 
 function encodeFramed(message) {
   const payload = JSON.stringify(message);
@@ -82,19 +86,32 @@ function respond(message) {
   }
 
   if (message.method === 'tools/list') {
+    if (racing && !raceListRequest) {
+      raceListRequest = message;
+      process.stdout.write(encode({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+      return;
+    }
+    if (racing) freshCatalog = true;
     process.stdout.write(encode({
       jsonrpc: '2.0',
       id: message.id,
       result: {
-        tools: [
+        tools: catalogRemoved ? [] : [
           {
-            name: 'search',
+            name: freshCatalog ? 'fresh' : 'search',
             description: 'search fixture docs',
             inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] },
           },
         ],
       },
     }));
+    if (racing && raceListRequest) {
+      const oldId = raceListRequest.id;
+      racing = false;
+      setTimeout(() => {
+        process.stdout.write(encode({ jsonrpc: '2.0', id: oldId, error: { code: -32603, message: 'old catalog failed' } }));
+      }, 20);
+    }
     return;
   }
 
@@ -111,6 +128,18 @@ function respond(message) {
         ],
       },
     }));
+    if (process.env.XIAOK_TEST_MCP_MUTABLE_CATALOG === '1') {
+      const action = message.params?.arguments?.q;
+      if (action === '__race__') {
+        racing = true;
+        process.stdout.write(encode({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+      }
+      if (action === '__remove__') {
+        catalogRemoved = true;
+        process.stdout.write(encode({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+      }
+      if (action === '__disconnect__') setTimeout(() => process.exit(0), 10);
+    }
   }
 }
 

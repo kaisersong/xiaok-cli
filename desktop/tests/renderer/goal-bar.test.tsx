@@ -6,6 +6,17 @@ import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 afterEach(cleanup);
 
 describe('GoalBar', () => {
+  it.each([
+    ['waiting_children', '等待子任务及结果交接'],
+    ['children_need_attention', '子任务需要处理'],
+  ] as const)('shows main-owned %s without offering or invoking an automatic continuation', (waitingReason, label) => {
+    const onResume = vi.fn();
+    render(<LocaleProvider><GoalBar goal={{ activation: 'armed', waitingReason,
+      state: { goalId: 'g', sessionId: 't', revision: 2, epoch: 1, objective: 'goal', expectedEvidenceKinds: ['answer'], status: 'active',
+        turnsUsed: 1, tokensUsed: 0, activeWallClockMs: 0, budgetLimits: { turnLimit: 4 }, consecutiveBlockedTurns: 0, createdAt: 1, updatedAt: 2 },
+    }} onCreate={vi.fn()} onResume={onResume} /></LocaleProvider>);
+    expect(screen.getByRole('status')).toHaveTextContent(label); expect(onResume).not.toHaveBeenCalled();
+  });
   it('opens the explicit Goal form immediately for a semantic Splash entry', () => {
     const onCreate = vi.fn();
     render(<LocaleProvider><GoalBar goal={null} initialEditing onCreate={onCreate} /></LocaleProvider>);

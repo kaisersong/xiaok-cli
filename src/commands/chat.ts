@@ -17,6 +17,7 @@ import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
 import { createGoalTools } from '../ai/tools/goal.js';
 import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput, type DebugEvent, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
+import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -318,8 +319,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     writeError(String(e));
     process.exit(1);
   }
+  // print/json 无头模式（一次性子任务）不初始化分层记忆与向量检索：
+  // 跳过 sqlite/ONNX/embedding 启动开销，避免无谓的 embedding 请求
   const memoryStore: MemoryStore = await createMemoryStoreAsync(
-    config.memory as Record<string, unknown> | undefined,
+    opts.print || opts.json
+      ? { ...((config.memory as Record<string, unknown> | undefined) ?? {}), type: 'file' }
+      : config.memory as Record<string, unknown> | undefined,
   );
   memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
 
@@ -384,6 +389,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     ? 'fork'
     : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
   const transcriptLogger = await FileTranscriptLogger.open(sessionId);
+  const multiAgentProgress = new MultiAgentProgressView();
+  const subAgentNotices = new SubAgentNoticeQueue();
+  let flushSubAgentNotices = (): void => {};
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
@@ -595,6 +603,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let modelCapabilities = resolveModelCapabilities(adapter);
 
   const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
+    cliDelegation: { interactive: isTTY() },
     enterpriseId: creds?.enterpriseId ?? null,
     devApp,
     budget: modelCapabilities.contextLimit,
@@ -854,6 +863,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       },
     }),
     createAskUserQuestionTool({
+      interactive: isTTY(),
       onEnterInteractive: () => askUserOnEnter?.(),
       onExitInteractive: () => askUserOnExit?.(),
       renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
@@ -978,6 +988,26 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       observeSkillToolResult(event);
       observeSkillEvidence(event);
     },
+    onMultiAgentEvent: (event) => {
+      multiAgentProgress.update(event);
+      try {
+        transcriptLogger.record({ type: 'multi_agent', event, timestamp: event.timestamp });
+      } catch (error) {
+        log.debug('multi_agent_transcript_failed', String(error));
+      }
+    },
+    onSubAgentEvent: (event) => {
+      const block = multiAgentProgress.updateRun(event, process.stdout.columns ?? 100);
+      try {
+        transcriptLogger.record({ type: 'subagent_progress', event, timestamp: event.timestamp });
+      } catch (error) {
+        log.debug('subagent_progress_transcript_failed', String(error));
+      }
+      if (!opts.print && !opts.json) {
+        subAgentNotices.push(block);
+        flushSubAgentNotices();
+      }
+    },
   });
   const registry = registryFactory.createRegistry(cwd);
   const reminders = registryFactory.getReminderApi();
@@ -992,6 +1022,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
   });
   const buildCleanupSteps = (): Array<() => void | Promise<void>> => [
+    () => registryFactory.dispose(),
     () => transcriptLogger.close(),
     () => platform.dispose(),
     () => disposeModelAdapter(adapter),
@@ -1159,7 +1190,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let welcomeVisible = historyMessages.length === 0 && !opts.dryRun;
 
   let contentRows = 0; // tracks how many rows of content have been written
-  let resizeTimeout: NodeJS.Timeout | null = null;
   let handleResize: (() => void) | null = null;
 
   suspendInteractiveUi = (
@@ -1207,6 +1237,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const runtimeState = new TuiRuntimeState({
+    getActivitySummary: (now) => multiAgentProgress.summary(now, Math.max(1, (process.stdout.columns ?? 100) - 1)),
     statusBar,
     scrollRegion,
     onSuspendInteractiveUi: (context: string, error: unknown) => {
@@ -1235,9 +1266,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     runtimeState.stopLiveActivityTimer();
   };
 
-  const withPausedLiveActivity = async <T>(action: () => Promise<T>): Promise<T> => (
-    runtimeState.withPausedLiveActivity(action)
-  );
+  const withPausedLiveActivity = async <T>(action: () => Promise<T>): Promise<T> => {
+    try { return await runtimeState.withPausedLiveActivity(action); }
+    finally { flushSubAgentNotices(); }
+  };
 
   function ensureBusyInputCapture(): void {
     if (terminalUiSuspended || !scrollRegion.isActive()) {
@@ -1272,6 +1304,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       askUserQuestionPromptActive = false;
       runtimeState.exitInteractivePrompt();
     }
+    flushSubAgentNotices();
     ensureBusyInputCapture();
     runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
   };
@@ -2044,6 +2077,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     process.stdout.write(separatedBlock);
     mdRenderer.beginNewSegment();
     resetStreamingSegment();
+  };
+
+  flushSubAgentNotices = (): void => {
+    subAgentNotices.flush(!runtimeState.isInteractivePromptActive()
+      && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
   };
 
   const persistSession = async (options: {
@@ -2967,6 +3005,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     activeBusyCapture = null;
   };
 
+  const takeBusyDraft = () => {
+    const draft = activeBusyCapture?.getSnapshot();
+    stopBusyCapture();
+    return draft;
+  };
+
   const stashQueuedInputIfAny = (options?: { stopCapture?: boolean }): void => {
     const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
     if (options?.stopCapture !== false) {
@@ -3045,6 +3089,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       summary: transcriptSummary,
     });
     endStreamingPhaseForInterrupt();
+    flushSubAgentNotices();
     if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
       turnHadAskUserQuestion = true;
       enterAskUserQuestionPrompt();
@@ -3075,6 +3120,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   runtimeHooks.on('tool_finished', (_e) => {
     log.debug('tool_finished', JSON.stringify({ tool: (_e as any)?.toolName, ok: (_e as any)?.ok }));
     goalTurnDrafts.get(_e.turnId)?.collector.accept(_e);
+    flushSubAgentNotices();
     scheduleActivityResume('Thinking', 160);
   });
 
@@ -3216,6 +3262,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_stop', (event) => {
+    if (subAgentNotices.hasPending) {
+      endStreamingPhaseForInterrupt();
+      flushSubAgentNotices();
+    }
     if (event.reason === 'user_aborted') {
       abortedRuntimeTurnIds.add(event.turnId);
     }
@@ -3237,17 +3287,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   // 处理终端窗口大小调整
   handleResize = () => {
-    if (resizeTimeout) clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(() => {
-      const rows = process.stdout.rows ?? 24;
-      const cols = process.stdout.columns ?? 80;
-      try {
-        scrollRegion.updateSize(rows, cols);
-      } catch (error) {
-        suspendInteractiveUi('resize_render', error);
-      }
-      // 普通文档流模式下不做底部重绘，后续输出自然适配新尺寸
-    }, 100);
+    // Update geometry before the next activity/input repaint can use stale rows.
+    const rows = process.stdout.rows ?? 24;
+    const cols = process.stdout.columns ?? 80;
+    try {
+      scrollRegion.updateSize(rows, cols);
+    } catch (error) {
+      suspendInteractiveUi('resize_render', error);
+    }
   };
   process.stdout.on('resize', handleResize);
 
@@ -3322,7 +3369,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           renderInputSeparator();
         }
         runtimeState.markInputReady();
-        input = await inputReader.read('> ');
+        const busyDraft = takeBusyDraft();
+        input = await inputReader.read('> ', busyDraft?.draft
+          ? { initialInput: { input: busyDraft.draft, cursor: busyDraft.cursor } }
+          : undefined);
       }
 
     if (input === null || input.trim() === '/exit') {
@@ -4057,10 +4107,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     disarmGoal();
     stopBusyCapture();
     stopActivity();
-    if (resizeTimeout) {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = null;
-    }
     if (handleResize) {
       process.stdout.off('resize', handleResize);
     }

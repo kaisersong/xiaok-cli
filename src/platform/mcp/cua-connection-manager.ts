@@ -1,7 +1,7 @@
-import type { McpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
+import type { McpInvocationOptions, McpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
 
 export interface CuaConnection {
-  callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult>;
+  callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult>;
   dispose(): void;
 }
 
@@ -32,9 +32,21 @@ export class CuaConnectionManager {
     return this._state;
   }
 
-  async callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult> {
-    const connection = await this._ensureConnected();
-    return connection.callToolResult(name, input);
+  async callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult> {
+    options?.signal?.throwIfAborted();
+    try {
+      // Initialization is shared. A caller must not cancel a sibling's startup.
+      const connection = await this._ensureConnected();
+      options?.signal?.throwIfAborted();
+      const result = await (options
+        ? connection.callToolResult(name, input, options)
+        : connection.callToolResult(name, input));
+      options?.signal?.throwIfAborted();
+      return result;
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      throw error;
+    }
   }
 
   async dispose(): Promise<void> {

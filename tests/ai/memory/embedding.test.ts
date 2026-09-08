@@ -16,6 +16,7 @@ describe('EmbeddingClient', () => {
     db = new Database(path.join(tmpDir, 'test.db'));
     runMigrations(db);
     client = new EmbeddingClient(db, {
+      provider: 'api',
       apiUrl: 'http://localhost:11434/v1',
       model: 'nomic-embed-text',
       dimensions: 768,

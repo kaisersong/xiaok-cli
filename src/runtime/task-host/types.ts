@@ -1,3 +1,5 @@
+import type { HostDeliveryRecord } from './delivery-types.js';
+
 export type MaterialRole = 'customer_material' | 'product_material' | 'template_material' | 'unknown';
 export type MaterialRoleSource = 'user' | 'auto';
 export type MaterialParseStatus = 'pending' | 'parsed' | 'unsupported' | 'failed';
@@ -209,6 +211,15 @@ export interface TaskCreateInput {
   executionScope?: TaskExecutionScope;
 }
 
+/** Main-only journal binding, persisted atomically with its host checkpoint. */
+export interface TaskMultiAgentPreparation {
+  groupId: string;
+  rootEpoch: number;
+  rootTurnId: string;
+  preparationId: string;
+  bootId: string;
+}
+
 export interface TaskSnapshot {
   taskId: string;
   sessionId: string;
@@ -221,6 +232,8 @@ export interface TaskSnapshot {
   salvage?: SalvageSummary;
   context?: TaskContextAudit;
   executionScope?: TaskExecutionScope;
+  multiAgentPreparation?: TaskMultiAgentPreparation;
+  hostDelivery?: HostDeliveryRecord;
   usage?: TaskUsage;
   createdAt: number;
   updatedAt: number;

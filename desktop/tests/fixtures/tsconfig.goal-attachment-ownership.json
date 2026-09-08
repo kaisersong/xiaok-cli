@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../renderer/goal-task-attachment-ownership.bdd.test.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

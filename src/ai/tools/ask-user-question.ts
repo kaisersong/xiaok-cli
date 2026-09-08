@@ -8,6 +8,7 @@ import type { Tool } from '../../types.js';
 import { askQuestion } from '../../ui/ask-question.js';
 
 export interface AskUserQuestionToolOptions {
+  interactive?: boolean;
   onEnterInteractive?: () => void;
   onExitInteractive?: () => void;
   renderFrame?: (lines: string[]) => boolean | void;
@@ -19,7 +20,7 @@ export function createAskUserQuestionTool(options: AskUserQuestionToolOptions = 
     permission: 'safe',
     definition: {
       name: 'AskUserQuestion',
-      description: `Use this tool when you need to ask the user questions during execution. This allows you to:
+      description: `${options.interactive === false ? 'Unavailable in this non-interactive CLI: no user answer can be collected. Do the work without optional delegation or report the missing decision.\n\n' : ''}Use this tool when you need to ask the user questions during execution. This allows you to:
 1. Gather user preferences or requirements
 2. Clarify ambiguous instructions
 3. Get decisions on implementation choices as you work
@@ -30,7 +31,7 @@ Usage notes:
 - Use multiSelect: true to allow multiple answers to be selected for a question
 - If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label
 
-IMPORTANT: Do NOT use this tool as a first response to friction or minor obstacles. Only use it when you are genuinely stuck after investigation — not before trying reasonable approaches. The user expects you to solve problems autonomously; asking unnecessary questions disrupts their workflow.`,
+IMPORTANT: Ask before execution when a material scope or cost tradeoff needs the user's decision, or when the user explicitly requested ask-first behavior. Do not ask for routine delegation of clear independent tasks. Never batch the question with the proposed delegation; wait for a real answer. Empty answers and cancellation are not approval. For friction or minor obstacles, investigate and try reasonable approaches before asking.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -65,6 +66,9 @@ IMPORTANT: Do NOT use this tool as a first response to friction or minor obstacl
       },
     },
     async execute(input) {
+      if (options.interactive === false) {
+        return 'Error: AskUserQuestion requires an interactive terminal; no answer was provided. Continue without optional delegation, or report the missing user decision.';
+      }
       const questions = input.questions as Array<{
         header?: string;
         question: string;

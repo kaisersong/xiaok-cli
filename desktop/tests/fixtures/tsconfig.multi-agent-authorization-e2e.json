@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../e2e/multi-agent-authorization-approval.spec.ts",
+    "../../renderer/src/global.d.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

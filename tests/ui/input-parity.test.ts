@@ -50,6 +50,20 @@ function writeTempImage(): string {
 }
 
 describe('idle and busy input parity', () => {
+  it('adopts a busy draft and cursor without submitting it, then starts the following read fresh', async () => {
+    const harness = createTtyHarness();
+    const reader = new InputReader(new ReplRenderer(process.stdout));
+    try {
+      const capture = reader.startBusyCapture();
+      harness.send('ab'); harness.send('\x1b[D');
+      const snapshot = capture.getSnapshot(); capture.stop();
+      const first = reader.read('> ', { initialInput: { input: snapshot.draft, cursor: snapshot.cursor } } as any);
+      harness.send('X'); harness.send('\r');
+      expect(await first).toBe('aXb');
+      const second = reader.read('> '); harness.send('fresh'); harness.send('\r');
+      expect(await second).toBe('fresh');
+    } finally { harness.restore(); }
+  });
   afterEach(() => {
     clearPastedImagePaths();
     for (const dir of tempDirs.splice(0)) {

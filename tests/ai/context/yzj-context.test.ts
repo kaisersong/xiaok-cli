@@ -59,7 +59,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('install_skill');
   });
 
-  it('includes 7-layer behavior governance sections', async () => {
+  it('includes shared execution, authorization and verification rules through the legacy builder', async () => {
     const prompt = await buildSystemPrompt({
       enterpriseId: null,
       devApp: null,
@@ -67,26 +67,18 @@ describe('buildSystemPrompt', () => {
       budget: 4000,
     });
 
-    // Layer 1: Intro (Chinese)
     expect(prompt).toContain('xiaok');
-    expect(prompt).toContain('AI skill 工作台');
-    expect(prompt).toContain('云之家（Yunzhijia）及相关 API / channel 集成');
-    // Layer 2: System (English)
+    expect(prompt).toContain('执行协作者');
     expect(prompt).toContain('permission mode');
-    expect(prompt).toContain('prompt injection');
-    // Layer 3: DoingTasks (English)
-    expect(prompt).toContain('OWASP');
-    expect(prompt).toContain('Read existing code before suggesting modifications');
-    // Layer 4: Actions (English)
-    expect(prompt).toContain('Destructive operations');
-    expect(prompt).toContain('merge conflicts');
-    // Layer 5: UsingTools (English)
+    expect(prompt).toContain('untrusted content');
+    expect(prompt).toContain('Read the relevant code or source material');
+    expect(prompt).toContain('destructive or hard-to-reverse');
+    expect(prompt).toContain('Never overwrite unrelated work');
     expect(prompt).toContain('To read files use Read');
-    expect(prompt).toContain('To edit files use Edit');
-    // Layer 6: ToneAndStyle (English)
+    expect(prompt).toContain('edit with Edit');
     expect(prompt).toContain('file_path:line_number');
-    // Layer 7: OutputEfficiency (English)
-    expect(prompt).toContain('brief and direct');
+    expect(prompt).toContain('Verify before claiming success');
+    expect(prompt).toContain('final response self-contained');
   });
 
   it('includes auto-loaded prompt docs and git context in the system prompt', async () => {

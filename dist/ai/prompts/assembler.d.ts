@@ -6,8 +6,10 @@ import type { SkillMeta } from '../skills/loader.js';
 import type { LoadedContext } from '../runtime/context-loader.js';
 import type { MemoryRecord } from '../memory/store.js';
 import type { HarnessMemoryRecord } from '../../runtime/harness-memory/types.js';
+import { type CliDelegationOptions } from './sections/cli-delegation.js';
 export interface AssemblerOptions {
     channel?: 'chat' | 'yzj';
+    cliDelegation?: CliDelegationOptions;
     enterpriseId: string | null;
     devApp: DevAppIdentity | null;
     cwd: string;

@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.multi-agent-authorization.json",
+  "include": [
+    "../main/desktop-goal-attachment-source.bdd.test.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

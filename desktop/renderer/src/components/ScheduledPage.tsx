@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, X, Clock, Edit3, Trash2, Play, ChevronLeft, XCircle } from 'lucide-react';
 import { api } from '../api';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
+import { threadDeletionError } from '../lib/thread-deletion';
 import {
   collectScheduledRuntimeTaskIds,
   ensureAggregatedScheduledThread,
@@ -269,6 +270,9 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteInstanceId, setConfirmDeleteInstanceId] = useState<string | null>(null);
+  const deletingInstance = useRef(false);
+  const latestTasks = useRef(tasks);
+  latestTasks.current = tasks;
 
   // Form state
   const [formName, setFormName] = useState('');
@@ -596,15 +600,31 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
   };
 
   const confirmDeleteInstance = async () => {
-    if (!confirmDeleteInstanceId) return;
+    if (!confirmDeleteInstanceId || deletingInstance.current) return;
     const task = tasks.find(t => t.id === confirmDeleteInstanceId);
     if (task?.threadId) {
+      deletingInstance.current = true;
       try {
         await api.deleteThread(task.threadId);
-      } catch { /* ignore */ }
-      // Clear threadId from the definition
-      saveTasks(tasks.map(t =>
-        t.id === confirmDeleteInstanceId
+        const desktop = getDesktopApi();
+        if (desktop?.getScheduledTasks) {
+          const current = (await desktop.getScheduledTasks() as ScheduledTask[]).find(item => item.id === task.id);
+          if (!current || current.runtimeTaskId !== task.runtimeTaskId || current.lastRunAt !== task.lastRunAt || current.updatedAt !== task.updatedAt) {
+            await loadTasks();
+            setConfirmDeleteInstanceId(null);
+            return;
+          }
+        }
+      } catch (error) {
+        showToast(threadDeletionError(error, t));
+        setConfirmDeleteInstanceId(null);
+        return;
+      } finally { deletingInstance.current = false; }
+      // Main has no threadId in the schedule definition. This is only the UI
+      // association; preserve a newer association installed while deletion ran.
+      saveTasks(latestTasks.current.map(t =>
+        t.id === task.id && t.threadId === task.threadId && t.runtimeTaskId === task.runtimeTaskId
+          && t.lastRunAt === task.lastRunAt && t.updatedAt === task.updatedAt
           ? { ...t, threadId: undefined, lastRunAt: undefined }
           : t
       ));
@@ -707,6 +727,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
           const { taskId } = await api.createTask({
             prompt: SCHEDULED_CONTEXT_PREFIX + task.prompt,
             materials: [],
+            context: { threadId },
           });
           await api.updateThreadTaskId(threadId, taskId);
           runtimeTaskId = taskId;
@@ -723,6 +744,7 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
         const { taskId } = await api.createTask({
           prompt: SCHEDULED_CONTEXT_PREFIX + task.prompt,
           materials: [],
+          context: { threadId: thread.id },
         });
         await api.updateThreadTaskId(thread.id, taskId);
         threadId = thread.id;

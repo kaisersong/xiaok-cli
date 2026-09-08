@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.renderer.json",
+  "compilerOptions": { "incremental": false, "types": ["vite/client", "node", "@testing-library/jest-dom"] },
+  "include": [
+    "../renderer/desktop-task-thread-identity.bdd.test.tsx",
+    "../../renderer/src/global.d.ts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

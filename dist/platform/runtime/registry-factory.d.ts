@@ -1,9 +1,13 @@
 import type { ModelAdapter, Tool } from '../../types.js';
+import type { SubAgentProgressEvent } from '../../ai/agents/subagent-presentation.js';
 import { ToolRegistry, type ToolObservation } from '../../ai/tools/index.js';
+import { type MultiAgentEvent } from '../../ai/agents/multi-agent-coordinator.js';
 import type { ReminderApi } from '../../runtime/reminder/service.js';
 import type { PlatformRuntimeContext } from './context.js';
 export declare function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Tool[];
 export interface PlatformRegistryFactoryOptions {
+    onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
+    onMultiAgentEvent?: (event: MultiAgentEvent) => void;
     platform: PlatformRuntimeContext;
     source: string;
     sessionId: string;
@@ -30,5 +34,6 @@ export interface PlatformRegistryFactory {
         parentDepth?: number;
     }): ToolRegistry;
     getReminderApi(): ReminderApi | undefined;
+    dispose(): Promise<void>;
 }
 export declare function createPlatformRegistryFactory(options: PlatformRegistryFactoryOptions): PlatformRegistryFactory;

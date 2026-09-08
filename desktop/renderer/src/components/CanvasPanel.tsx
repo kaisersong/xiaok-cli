@@ -35,6 +35,8 @@ interface CanvasPanelProps {
   initialPreviewContent?: string;
   initialPreviewModeRequest?: CanvasPreviewModeRequest;
   expanded?: boolean;
+  embedded?: boolean;
+  interactionActive?: boolean;
   onToggleExpand?: () => void;
   onAnnotation?: (message: string) => void;
 }
@@ -62,6 +64,8 @@ export function CanvasPanel({
   initialPreviewContent,
   initialPreviewModeRequest,
   expanded,
+  embedded,
+  interactionActive = true,
   onToggleExpand,
   onAnnotation,
 }: CanvasPanelProps) {
@@ -97,6 +101,11 @@ export function CanvasPanel({
   const activeTabRef = useRef<CanvasTab>('preview');
   const spatialAvailabilityRef = useRef<SpatialAvailability>('unknown');
   const navigationEpochRef = useRef(0);
+  const interactionActiveRef = useRef(interactionActive);
+  if (interactionActiveRef.current !== interactionActive) {
+    interactionActiveRef.current = interactionActive;
+    navigationEpochRef.current++;
+  }
   const focusOwnerRef = useRef<FocusOwner>('other');
   const workspaceHostHadFocusRef = useRef(false);
   const previewAuthorityRef = useRef({
@@ -165,6 +174,7 @@ export function CanvasPanel({
   ];
 
   const focusTab = useCallback((tab: CanvasTab, scroll = false) => {
+    if (!interactionActiveRef.current) return;
     const element = tabRefs.current[tab];
     element?.focus();
     if (scroll) {
@@ -173,6 +183,7 @@ export function CanvasPanel({
   }, []);
 
   const surfaceOwnsFocus = useCallback((surface: CanvasTab) => {
+    if (!interactionActiveRef.current) return false;
     if (typeof document === 'undefined' || !document.hasFocus()) return false;
     const activeElement = document.activeElement;
     if (activeElement && activeElement !== document.body) {
@@ -184,6 +195,7 @@ export function CanvasPanel({
   }, []);
 
   const workspaceHostOwnsFocus = useCallback(() => {
+    if (!interactionActiveRef.current) return false;
     if (typeof document === 'undefined' || !document.hasFocus()) return false;
     const activeElement = document.activeElement;
     if (activeElement && activeElement !== document.body) {
@@ -380,6 +392,7 @@ export function CanvasPanel({
     preview: ArtifactWorkspacePreview,
     navigationContext: ArtifactWorkspacePreviewNavigationContext,
   ) => {
+    if (!interactionActiveRef.current) return;
     const currentAvailability = spatialAvailabilityRef.current;
     const currentOrigin = currentAvailability === 'enabled' ? 'canvas' : 'preview';
     if (
@@ -471,14 +484,14 @@ export function CanvasPanel({
 
   const spatialEnabled = spatialAvailability === 'enabled' && Boolean(conversationId);
   const compactWorkspace = Boolean(conversationId) && !spatialEnabled;
-  const previewActive = activeTab === 'preview';
-  const workspaceHostActive = spatialEnabled ? activeTab === 'canvas' : previewActive;
+  const previewActive = interactionActive && activeTab === 'preview';
+  const workspaceHostActive = interactionActive && (spatialEnabled ? activeTab === 'canvas' : previewActive);
   const previewInteractionProps = { interactionActive: previewActive };
 
   return (
     <div
       className="flex h-full flex-col border-l border-[var(--c-border)] bg-[var(--c-bg-page)] transition-[width,min-width,max-width] duration-200"
-      style={{ width: expanded ? '60%' : 360, minWidth: expanded ? 500 : 360, maxWidth: expanded ? '70%' : 480, flexShrink: 0 }}
+      style={embedded ? { width: '100%', minWidth: 0, height: '100%' } : { width: expanded ? '60%' : 360, minWidth: expanded ? 500 : 360, maxWidth: expanded ? '70%' : 480, flexShrink: 0 }}
       onFocusCapture={handleFocusCapture}
     >
       {/* Header */}

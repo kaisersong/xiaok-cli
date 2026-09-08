@@ -26,6 +26,7 @@ import {
   type McpServerConfigConflict,
 } from '../mcp/config.js';
 import {
+  callMcpToolWithSignal,
   createMcpClientConnection,
   resolveMcpCallToolTimeoutMs,
   resolveMcpCatalogTimeoutMs,
@@ -61,6 +62,7 @@ export interface PlatformRuntimeContext {
   worktreeManager: WorktreeManager;
   mcpTools: Tool[];
   mcpReady: Promise<void>;
+  /** Publishes the complete current MCP catalog, including empty catalogs. */
   onMcpToolsChanged(listener: (tools: Tool[]) => void): () => void;
   capabilityRegistry: CapabilityRegistry;
   reminderDefaultTimeZone: string;
@@ -69,7 +71,7 @@ export interface PlatformRuntimeContext {
   dispose(): Promise<void>;
   listBackgroundJobs(sessionId: string): BackgroundJobRecord[];
   createBackgroundRunner(
-    execute: (input: { agent: string; prompt: string; cwd?: string; parentDepth?: number }) => Promise<string>,
+    execute: (input: { agent: string; prompt: string; cwd?: string; parentDepth?: number; signal: AbortSignal }) => Promise<string>,
     notify?: (job: BackgroundJobRecord) => Promise<void> | void,
   ): ReturnType<typeof createBackgroundRunner>;
 }
@@ -161,6 +163,8 @@ export async function createPlatformRuntimeContext(
   validateRegistry(classificationRegistry);
   const runtimePlatform = options.platform ?? process.platform;
   const mcpTools: Tool[] = [];
+  const mcpCatalogOwner = {};
+  const backgroundRunners = new Set<ReturnType<typeof createBackgroundRunner>>();
   const mcpToolListeners = new Set<(tools: Tool[]) => void>();
   let disposed = false;
 
@@ -190,21 +194,22 @@ export async function createPlatformRuntimeContext(
     return true;
   };
   const publishMcpTools = (tools: Tool[]): void => {
-    if (disposed || tools.length === 0) {
+    if (disposed) {
       return;
     }
-    mcpTools.push(...tools);
+    mcpTools.splice(0, mcpTools.length, ...tools);
+    capabilityRegistry.unregisterOwner(mcpCatalogOwner);
     for (const tool of tools) {
       capabilityRegistry.register({
         kind: 'mcp',
         name: tool.definition.name,
         description: tool.definition.description,
         inputSchema: tool.definition.inputSchema,
-      });
+      }, mcpCatalogOwner);
     }
     for (const listener of mcpToolListeners) {
       try {
-        listener(tools);
+        listener([...mcpTools]);
       } catch {}
     }
   };
@@ -215,6 +220,7 @@ export async function createPlatformRuntimeContext(
     () => disposed,
     classificationRegistry,
     runtimePlatform,
+    publishMcpTools,
   ).then((tools) => {
     publishMcpTools(tools);
     healthStore.set(options.cwd, health.snapshot());
@@ -250,7 +256,9 @@ export async function createPlatformRuntimeContext(
     createReminderApi,
     health,
     async dispose() {
+      publishMcpTools([]);
       disposed = true;
+      const backgroundShutdowns = await Promise.allSettled([...backgroundRunners].map((runner) => runner.dispose()));
       for (const reminderApi of reminderApis.splice(0)) {
         await reminderApi.dispose();
       }
@@ -262,6 +270,8 @@ export async function createPlatformRuntimeContext(
           continue;
         }
       }
+      const shutdownErrors = backgroundShutdowns.filter((result) => result.status === 'rejected').map((result) => result.reason);
+      if (shutdownErrors.length) throw new AggregateError(shutdownErrors, 'background runner shutdown failed');
     },
     listBackgroundJobs(sessionId: string) {
       return createBackgroundRunner({
@@ -272,9 +282,10 @@ export async function createPlatformRuntimeContext(
       }).listBySession(sessionId);
     },
     createBackgroundRunner(execute, notify = async () => undefined) {
-      return createBackgroundRunner({
+      if (disposed) throw new Error('platform runtime context is disposed');
+      const runner = createBackgroundRunner({
         rootDir: join(stateRootDir, 'background-jobs'),
-        execute: async ({ input }) => {
+        execute: async ({ input, signal }) => {
           const payload = input as { agent?: string; prompt?: string; cwd?: string; parentDepth?: number };
           if (!payload.agent || !payload.prompt) {
             return { ok: false, errorMessage: 'invalid background subagent payload' };
@@ -285,6 +296,7 @@ export async function createPlatformRuntimeContext(
             prompt: payload.prompt,
             cwd: payload.cwd,
             parentDepth: payload.parentDepth,
+            signal,
           });
           return { ok: true, summary: result.slice(0, 200) };
         },
@@ -293,6 +305,18 @@ export async function createPlatformRuntimeContext(
           await notify(job);
         },
       });
+      backgroundRunners.add(runner);
+      const disposeRunner = runner.dispose;
+      runner.dispose = async () => {
+        try {
+          const result = await disposeRunner();
+          if (!result.settled) console.warn(`BACKGROUND_CLEANUP_PENDING: ${result.pendingJobs.join(', ')}`);
+          return result;
+        } finally {
+          backgroundRunners.delete(runner);
+        }
+      };
+      return runner;
     },
   };
 }
@@ -342,6 +366,7 @@ async function connectWorkspaceMcpServers(
   shouldStop: () => boolean = () => false,
   classificationRegistry: readonly McpClassificationEntry[] = BUILT_IN_MCP_CLASSIFICATIONS,
   platform: NodeJS.Platform = process.platform,
+  onToolsChanged?: (tools: Tool[]) => void,
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
   const globalCatalogTimeoutMs = resolveMcpCatalogTimeoutMs();
@@ -372,18 +397,19 @@ async function connectWorkspaceMcpServers(
         registerDisposable(conn);
         const callToolTimeoutMs = frozenSnapshot.timeout?.call ?? globalCallToolTimeoutMs;
         return {
-          callToolResult: async (name, input) => {
-            const result = await conn.client.callTool(
+          callToolResult: async (name, input, options) => {
+            const result = await callMcpToolWithSignal(conn.client,
               { name, arguments: input },
-              { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true },
+              { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal },
             );
+            options?.signal?.throwIfAborted();
             return normalizeMcpRuntimeToolResult(result);
           },
           dispose: () => conn.dispose(),
         };
       });
       tools.push(createComputerUseTool({
-        callToolResult: (name, input) => cuaManager.callToolResult(name, input),
+        callToolResult: (name, input, options) => cuaManager.callToolResult(name, input, options),
       }));
       registerDisposable({ dispose: () => { cuaManager.dispose(); } });
       capabilityHealth.push({
@@ -412,27 +438,64 @@ async function connectWorkspaceMcpServers(
       const activeConnection = connection;
       const catalogTimeoutMs = server.timeout?.catalog ?? globalCatalogTimeoutMs;
       const callToolTimeoutMs = server.timeout?.call ?? globalCallToolTimeoutMs;
-
-      const toolsResult = await activeConnection.client.listTools(undefined, { timeout: catalogTimeoutMs });
-      const schemas = toolsResult.tools ?? [];
-
-      tools.push(
-        ...buildMcpRuntimeTools(
+      let serverTools: Tool[] = [];
+      let connected = true;
+      let catalogRevision = 0;
+      const replaceServerTools = (next: Tool[]): void => {
+        const previous = new Set(serverTools);
+        const remaining = tools.filter((tool) => !previous.has(tool));
+        serverTools = next;
+        tools.splice(0, tools.length, ...remaining, ...next);
+        onToolsChanged?.([...tools]);
+      };
+      const refreshTools = async (): Promise<number> => {
+        const revision = ++catalogRevision;
+        let toolsResult: Awaited<ReturnType<typeof activeConnection.client.listTools>>;
+        try {
+          toolsResult = await activeConnection.client.listTools(undefined, { timeout: catalogTimeoutMs });
+        } catch (error) {
+          if (!connected || shouldStop() || revision !== catalogRevision) return serverTools.length;
+          replaceServerTools([]);
+          throw error;
+        }
+        if (!connected || shouldStop() || revision !== catalogRevision) return 0;
+        const schemas = toolsResult.tools ?? [];
+        replaceServerTools(buildMcpRuntimeTools(
           { name: server.name, command: '' },
           {
             listTools: async () => schemas,
-            callTool: async (name, input) => {
-              const result = await activeConnection.client.callTool(
+            callTool: async (name, input, options) => {
+              options?.signal?.throwIfAborted();
+              if (!connected) throw new Error(`MCP server is disconnected: ${server.name}`);
+              const result = await callMcpToolWithSignal(activeConnection.client,
                 { name, arguments: input },
-                { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true },
+                { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal },
               );
+              options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result).text;
             },
             dispose: activeConnection.dispose,
           },
           schemas,
-        ),
-      );
+        ));
+        return schemas.length;
+      };
+      const previousOnClose = activeConnection.client.onclose;
+      activeConnection.client.onclose = () => {
+        try { previousOnClose?.(); } finally {
+          connected = false;
+          catalogRevision++;
+          replaceServerTools([]);
+        }
+      };
+      activeConnection.client.setNotificationHandler('notifications/tools/list_changed', async () => {
+        try {
+          await refreshTools();
+        } catch {
+          // refreshTools revokes only the failed current revision.
+        }
+      });
+      const schemaCount = await refreshTools();
 
       if (!registerDisposable(activeConnection)) {
         connection = undefined;
@@ -440,7 +503,7 @@ async function connectWorkspaceMcpServers(
       }
       connection = undefined;
       const detailParts: string[] = [
-        `${schemas.length} tools`,
+        `${schemaCount} tools`,
         `protocol ${activeConnection.protocolEra}`,
       ];
       if (policy.source === 'legacy-manifest' && policy.reason) {

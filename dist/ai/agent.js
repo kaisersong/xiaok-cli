@@ -77,6 +77,8 @@ export class Agent {
             compactPlaceholder: this.options.compactPlaceholder,
             memoryStore: this.options.memoryStore,
             providerSurfaceKind: this.options.providerSurfaceKind,
+            onActivity: this.options.onActivity,
+            takePendingInput: this.options.takePendingInput,
         });
     }
     emitLegacyHook(event, turnId) {

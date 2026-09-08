@@ -18,7 +18,7 @@ export function mergeCompletionExpectations(expectations) {
         expectedKinds,
     };
 }
-export function validateCompletionEvidence(input) {
+export function* completionEvidenceFlow(input) {
     if (isBlockedStatus(input.targetStatus)) {
         return validateBlockedEvidence(input);
     }
@@ -58,7 +58,7 @@ export function validateCompletionEvidence(input) {
     }
     let lastFailure;
     for (const record of expectedEvidence) {
-        const result = validateEvidenceRecord(record);
+        const result = yield* validateEvidenceRecord(record);
         if (result.ok) {
             return result;
         }
@@ -76,7 +76,7 @@ function validateBlockedEvidence(input) {
     }
     return { ok: true };
 }
-function validateEvidenceRecord(record) {
+function* validateEvidenceRecord(record) {
     if (!hasText(record.summary)) {
         return fail('validation_failed', 'Completion evidence requires a non-empty summary.');
     }
@@ -88,10 +88,10 @@ function validateEvidenceRecord(record) {
             return { ok: true };
         case 'file_artifact':
             if (hasText(record.uri) || isNonEmptyStringArray(record.metadata?.paths)) {
-                return runStructuralCheck(resolveLocalArtifactPath(record));
+                return yield* runStructuralCheck(resolveLocalArtifactPath(record));
             }
             {
-                const localResult = validateLocalFileArtifactEvidence(record);
+                const localResult = yield* validateLocalFileArtifactEvidence(record);
                 if (!localResult.ok) {
                     return localResult;
                 }
@@ -102,7 +102,7 @@ function validateEvidenceRecord(record) {
                 const firstPath = workspaceRoot && !isAbsolute(localPaths[0])
                     ? resolve(workspaceRoot, localPaths[0])
                     : localPaths[0];
-                return runStructuralCheck(firstPath);
+                return yield* runStructuralCheck(firstPath);
             }
             return fail('validation_failed', 'File artifact evidence requires a URI or paths metadata.');
         case 'command_action':
@@ -178,7 +178,7 @@ function isRecord(value) {
 function isNoOpSummary(summary) {
     return /\bno-?op\b|无变化/iu.test(summary);
 }
-function validateLocalFileArtifactEvidence(record) {
+function* validateLocalFileArtifactEvidence(record) {
     const localPaths = record.metadata?.localPaths;
     if (localPaths === undefined) {
         return { ok: true };
@@ -193,7 +193,7 @@ function validateLocalFileArtifactEvidence(record) {
     const resolvedRoot = resolve(workspaceRoot);
     let realRoot;
     try {
-        realRoot = realpathSync.native(resolvedRoot);
+        realRoot = (yield { kind: 'realpath', path: resolvedRoot });
     }
     catch {
         return fail('validation_failed', 'File artifact evidence workspace root is missing.');
@@ -210,10 +210,10 @@ function validateLocalFileArtifactEvidence(record) {
             }
         }
         try {
-            if (lstatSync(resolvedPath).isSymbolicLink()) {
+            if ((yield { kind: 'lstat', path: resolvedPath }).isSymbolicLink()) {
                 return fail('validation_failed', `File artifact evidence local path is a symlink: ${localPath}`);
             }
-            const realPath = realpathSync.native(resolvedPath);
+            const realPath = (yield { kind: 'realpath', path: resolvedPath });
             const realRel = relative(realRoot, realPath);
             if (realRel.startsWith('..') || isAbsolute(realRel)) {
                 return fail('validation_failed', `File artifact evidence local path escapes workspace: ${localPath}`);
@@ -222,7 +222,7 @@ function validateLocalFileArtifactEvidence(record) {
         catch {
             return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
         }
-        if (!existsSync(resolvedPath)) {
+        if (!(yield { kind: 'exists', path: resolvedPath })) {
             return fail('validation_failed', `File artifact evidence local path is missing: ${localPath}`);
         }
     }
@@ -257,7 +257,7 @@ function resolveLocalArtifactPath(record) {
     }
     return undefined;
 }
-function runStructuralCheck(localPath) {
+function* runStructuralCheck(localPath) {
     if (!localPath) {
         return { ok: true };
     }
@@ -265,10 +265,10 @@ function runStructuralCheck(localPath) {
     if (!structKind) {
         return { ok: true };
     }
-    if (!existsSync(localPath)) {
+    if (!(yield { kind: 'exists', path: localPath })) {
         return { ok: true };
     }
-    const result = validateArtifactStructure(localPath, structKind);
+    const result = (yield { kind: 'structure', path: localPath, structuralKind: structKind });
     if (!result.ok) {
         return { ok: true, warning: `Artifact structural issue (${structKind}): ${result.error}` };
     }
@@ -276,4 +276,35 @@ function runStructuralCheck(localPath) {
 }
 function fail(failureKind, message) {
     return { ok: false, failureKind, message };
+}
+/** One rule flow, with distinct synchronous and asynchronous effect interpreters. */
+export function validateCompletionEvidence(input) {
+    const flow = completionEvidenceFlow(input);
+    let step = flow.next();
+    while (!step.done) {
+        let value;
+        try {
+            const effect = step.value;
+            switch (effect.kind) {
+                case 'exists':
+                    value = existsSync(effect.path);
+                    break;
+                case 'realpath':
+                    value = realpathSync.native(effect.path);
+                    break;
+                case 'lstat':
+                    value = lstatSync(effect.path);
+                    break;
+                case 'structure':
+                    value = validateArtifactStructure(effect.path, effect.structuralKind);
+                    break;
+            }
+        }
+        catch (error) {
+            step = flow.throw(error);
+            continue;
+        }
+        step = flow.next(value);
+    }
+    return step.value;
 }

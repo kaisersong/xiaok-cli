@@ -1,3 +1,4 @@
+export type { GoalAttachmentRequest, GoalAttachmentSource } from '../../../shared/goal-attachment';
 export type {
   ArtifactWorkspaceEventName,
   ArtifactWorkspaceFeatureAccess,
@@ -48,6 +49,8 @@ export type CollaborationMode = ThreadMode;
 export type ThreadGtdBucket = 'inbox' | 'todo' | 'waiting' | 'someday' | 'archived';
 
 export interface ThreadRecord {
+  /** Local association reservation only; main owns execution/deletion status. */
+  deletionPending?: boolean;
   id: string;
   title: string | null;
   status: 'idle' | 'running' | 'completed' | 'failed';

@@ -159,7 +159,7 @@ describe('Kimi K3 D9 packaged renderer automation contract', () => {
     ), 'utf8');
 
     expect(welcome).toContain('<ChatInput');
-    expect(welcome).toContain('api.createTask({ prompt: text, materials: [] })');
+    expect(welcome).toContain('api.createTask({ prompt: text, materials: [], context: { threadId: thread.id } })');
     expect(bridge).toContain('window.xiaokDesktop.createTask(input)');
     expect(preload).toContain(
       "createTask: (input) => ipcRenderer.invoke('desktop:createTask', input)",

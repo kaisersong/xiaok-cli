@@ -31,8 +31,9 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
 }));
 
 vi.mock('../../renderer/src/components/ChatInput', () => ({
-  ChatInput: ({ onSubmit }: { onSubmit?: (text: string, files?: Array<{ filePath: string; name: string }>) => void }) => (
+  ChatInput: ({ onSubmit, value }: { value?: string; onSubmit?: (text: string, files?: Array<{ filePath: string; name: string }>) => void }) => (
     <div data-testid="chat-input">
+      <textarea aria-label="draft" value={value ?? ''} readOnly />
       <button
         type="button"
         onClick={() => onSubmit?.('做对抗性评审', [{ filePath: 'D:\\reports\\board-review.docx', name: 'board-review.docx' }])}
@@ -52,6 +53,30 @@ afterEach(() => {
 });
 
 describe('WelcomePage quick prompts', () => {
+  it('fills the subagent example without starting a task', () => {
+    render(<MemoryRouter><LocaleProvider><WelcomePage /></LocaleProvider></MemoryRouter>);
+    const button = screen.getByRole('button', { name: '调用两个子任务，协作制定产品发布计划' });
+    expect(button).toHaveAttribute('type', 'button');
+    fireEvent.click(button);
+    expect((screen.getByRole('textbox', { name: 'draft' }) as HTMLTextAreaElement).value).toContain('spawn_agent');
+    expect((screen.getByRole('textbox', { name: 'draft' }) as HTMLTextAreaElement).value).toContain('wait_agent');
+    expect(button).toHaveAttribute('title', (screen.getByRole('textbox', { name: 'draft' }) as HTMLTextAreaElement).value);
+    expect(mockCreateThread).not.toHaveBeenCalled();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
+  });
+  it('provides the subagent example in English without automatically submitting', () => {
+    window.localStorage.setItem('xiaok:locale', 'en');
+    render(<MemoryRouter><LocaleProvider><WelcomePage /></LocaleProvider></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Use two subtasks to plan a product launch' }));
+    const draft = (screen.getByRole('textbox', { name: 'draft' }) as HTMLTextAreaElement).value;
+    expect(draft).toContain('spawn_agent');
+    expect(draft).toContain('wait_agent');
+    expect(draft).toContain('Do not create a project');
+    expect(mockCreateThread).not.toHaveBeenCalled();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(mockCreateTaskWithFiles).not.toHaveBeenCalled();
+  });
   it('renders quick prompts in a flex-wrap layout with all items visible', () => {
     render(
       <MemoryRouter>
@@ -72,7 +97,7 @@ describe('WelcomePage quick prompts', () => {
 
     expect(screen.queryByRole('button', { name: oldProjectPrompt })).not.toBeInTheDocument();
     expect(promptGrid).toHaveClass('flex', 'flex-wrap', 'justify-center');
-    expect(promptGrid.querySelectorAll('button')).toHaveLength(11);
+    expect(promptGrid.querySelectorAll('button')).toHaveLength(12);
     expect(screen.getByRole('button', { name: goalPrompt })).toHaveAttribute('title', goalPrompt);
     expect(screen.getByRole('button', { name: scheduledPrompt })).toHaveAttribute('title', scheduledPrompt);
     expect(screen.getByRole('button', { name: workflowPrompt })).toHaveAttribute('title', workflowPrompt);
@@ -144,6 +169,7 @@ describe('WelcomePage quick prompts', () => {
       expect(mockCreateTaskWithFiles).toHaveBeenCalledWith({
         prompt: '做对抗性评审',
         filePaths: ['D:\\reports\\board-review.docx'],
+        context: { threadId: 'thread-file' },
       });
       expect(screen.getByTestId('route-state')).toHaveTextContent('board-review.docx');
     });

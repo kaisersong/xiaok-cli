@@ -1,6 +1,22 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDesktopLoopLLMPort } from '../../../desktop/electron/loop-llm-port-impl.js';
+import { DesktopExecutionCoordinator } from '../../../desktop/electron/desktop-execution-coordinator.js';
+import type { StreamChunk } from '../../../src/types.js';
+import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
+
+const provider = vi.hoisted(() => ({ stream: vi.fn() }));
+vi.mock('../../../src/utils/config.js', () => ({ loadConfig: async () => ({ provider: 'test' }) }));
+vi.mock('../../../src/ai/models.js', () => ({ createAdapter: () => provider }));
+
+const completionInput = {
+  model: 'fast' as const,
+  systemPrompt: 'return text',
+  userMessage: 'test input',
+  maxTokens: 100,
+  temperature: 0,
+};
 
 const PRODUCTION_ROOTS = ['src', join('desktop', 'electron')];
 
@@ -36,25 +52,75 @@ function findAdapterStreamConsumers(): string[] {
 }
 
 describe('production ModelAdapter.stream consumer contract', () => {
+  beforeEach(() => { provider.stream.mockReset(); });
+
   it('keeps every production async stream consumer behind the authorization owner', () => {
     expect(findAdapterStreamConsumers()).toEqual([]);
   });
 
-  it('preserves the loop LLM consumer intentional clean-done and local-limit exits', () => {
-    const source = readFileSync(
-      join(process.cwd(), 'desktop/electron/loop-llm-port-impl.ts'),
-      'utf8',
-    );
+  it('consumes text across usage chunks and closes the provider iterator at done', async () => {
+    const closed = vi.fn();
+    const afterDone = vi.fn();
+    provider.stream.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      try {
+        yield { type: 'text', delta: 'before ' };
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 1 } };
+        yield { type: 'text', delta: 'after usage' };
+        yield { type: 'done' };
+        afterDone();
+        yield { type: 'text', delta: 'must not be consumed' };
+      } finally {
+        closed();
+      }
+    });
 
-    expect(source).toMatch(
-      /text\.length >= input\.maxTokens \* 4[\s\S]*?controller\.abort\(\);[\s\S]*?break;/,
-    );
-    expect(source).toMatch(
-      /chunk\.type === 'done'[\s\S]*?break;/,
-    );
-    expect(source).not.toMatch(
-      /chunk\.type === 'usage'[\s\S]{0,120}?(?:break|return)/,
-    );
+    await expect(createDesktopLoopLLMPort().complete(completionInput))
+      .resolves.toEqual({ text: 'before after usage' });
+    expect(afterDone).not.toHaveBeenCalled();
+    expect(closed).toHaveBeenCalledOnce();
+  });
+
+  it('allows output exactly at the local budget without cancelling the provider', async () => {
+    provider.stream.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', delta: 'x'.repeat(400) };
+      yield { type: 'done' };
+    });
+
+    await expect(createDesktopLoopLLMPort().complete(completionInput))
+      .resolves.toEqual({ text: 'x'.repeat(400) });
+    const options = provider.stream.mock.calls[0][3] as StreamOptions;
+    expect(options.signal?.aborted).toBe(false);
+  });
+
+  it('rejects cumulative output overflow, cancels the provider and releases the execution lease', async () => {
+    const closed = vi.fn();
+    const afterOverflow = vi.fn();
+    provider.stream.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      try {
+        yield { type: 'text', delta: 'x'.repeat(400) };
+        yield { type: 'text', delta: 'y' };
+        afterOverflow();
+        yield { type: 'done' };
+      } finally {
+        closed();
+      }
+    });
+    const coordinator = new DesktopExecutionCoordinator({ capacity: 1, backgroundCapacity: 1 });
+    const port = createDesktopLoopLLMPort(coordinator);
+
+    await expect(port.complete(completionInput)).rejects.toThrow('loop_llm_output_limit');
+    const options = provider.stream.mock.calls[0][3] as StreamOptions;
+    expect(options.signal?.aborted).toBe(true);
+    expect(options.signal?.reason).toMatchObject({ message: 'loop_llm_output_limit' });
+    expect(afterOverflow).not.toHaveBeenCalled();
+    expect(closed).toHaveBeenCalledOnce();
+    expect(coordinator.snapshot()).toEqual({ active: 0, waiting: 0, capacity: 2 });
+
+    provider.stream.mockImplementation(async function* (): AsyncGenerator<StreamChunk> {
+      yield { type: 'text', delta: 'next task' };
+      yield { type: 'done' };
+    });
+    await expect(port.complete(completionInput)).resolves.toEqual({ text: 'next task' });
   });
 
   it('does not add logging of cache affinity state at its production ownership seams', () => {

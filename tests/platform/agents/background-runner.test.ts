@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, rmSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { createBackgroundRunner } from '../../../src/platform/agents/background-runner.js';
 import { waitFor } from '../../support/wait-for.js';
 
@@ -33,7 +35,7 @@ describe('background runner', () => {
       input: 'fix slash menu',
     });
 
-    expect(job.jobId).toBe('job_1');
+    expect(job.jobId).toMatch(/^job_[\da-f-]{36}$/);
     expect(job.status).toBe('queued');
 
     await waitFor(() => {
@@ -106,22 +108,13 @@ describe('background runner', () => {
     });
   });
 
-  it('marks in-flight jobs as interrupted when reloading after process restart', async () => {
-    const runner = createBackgroundRunner({
-      rootDir: testDir,
-      execute: async () => {
-        await new Promise(() => undefined);
-        return { ok: true, summary: 'never' };
-      },
-      notify: async () => undefined,
-    });
-
-    const job = await runner.start({
-      sessionId: 'sess_restart',
-      source: 'yzj',
-      input: 'long running task',
-    });
-
+  it('marks in-flight jobs as interrupted only after their process is confirmed missing', async () => {
+    const job = { schemaVersion: 1, jobId: 'job_1', sessionId: 'sess_restart', source: 'yzj',
+      ownerId: 'exited-owner', ownerPid: 555555,
+      inputSummary: 'process crashed', status: 'running', createdAt: 1, updatedAt: 1 };
+    writeFileSync(join(testDir, 'job_1.json'), JSON.stringify(job));
+    const inspect = vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('missing'), { code: 'ESRCH' }); });
+    try {
     const reloaded = createBackgroundRunner({
       rootDir: testDir,
       execute: async () => ({ ok: true, summary: 'unused' }),
@@ -133,6 +126,7 @@ describe('background runner', () => {
       status: 'failed',
       errorMessage: 'background job interrupted by process restart',
     });
+    } finally { inspect.mockRestore(); }
   });
 
   it('lists background jobs by session', async () => {
@@ -217,5 +211,110 @@ describe('background runner', () => {
     } finally {
       process.off('unhandledRejection', onUnhandledRejection);
     }
+  });
+
+  it('aborts and drains active jobs on dispose without sending completion notifications', async () => {
+    let signal!: AbortSignal;
+    const notify = vi.fn();
+    const runner = createBackgroundRunner({ rootDir: testDir, notify,
+      execute: async (context) => {
+        signal = context.signal;
+        await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+        return { ok: true, summary: 'late success' };
+      },
+    });
+    const job = await runner.start({ sessionId: 'active', source: 'chat', input: 'run' });
+    expect(await runner.dispose()).toEqual({ settled: true, pendingJobs: [] });
+    expect(signal.aborted).toBe(true);
+    expect(runner.get(job.jobId)).toMatchObject({ status: 'failed', errorMessage: expect.stringContaining('BACKGROUND_RUNNER_DISPOSED') });
+    expect(notify).not.toHaveBeenCalled();
+    await expect(runner.start({ sessionId: 'late', source: 'chat', input: 'no' })).rejects.toThrow('disposed');
+    expect(await runner.dispose()).toEqual({ settled: true, pendingJobs: [] });
+  });
+
+  it('cancels queued jobs before execute is entered', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const runner = createBackgroundRunner({ rootDir: testDir, notify: vi.fn(), execute });
+    const starting = runner.start({ sessionId: 'queued', source: 'chat', input: 'run' });
+    const stopping = runner.dispose();
+    const job = await starting;
+    await stopping;
+    expect(execute).not.toHaveBeenCalled();
+    expect(runner.get(job.jobId)).toMatchObject({ status: 'failed' });
+  });
+
+  it('reports a never-settling executor as pending after the bounded shutdown', async () => {
+    const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5, notify: vi.fn(),
+      execute: () => new Promise(() => {}),
+    });
+    const job = await runner.start({ sessionId: 'forever', source: 'chat', input: 'run' });
+    expect(await runner.dispose()).toEqual({ settled: false, pendingJobs: [job.jobId] });
+    expect(runner.get(job.jobId)).toMatchObject({ status: 'failed' });
+  });
+
+  it('ignores late completion after dispose and retains already completed job state', async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const notify = vi.fn();
+    const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5, notify,
+      execute: async ({ input }) => { if (input === 'late') await gate; return { ok: true, summary: String(input) }; },
+    });
+    const done = await runner.start({ sessionId: 'same', source: 'chat', input: 'done' });
+    await waitFor(() => expect(runner.get(done.jobId)?.status).toBe('completed'));
+    const late = await runner.start({ sessionId: 'same', source: 'chat', input: 'late' });
+    await runner.dispose();
+    const cancelled = runner.get(late.jobId);
+    finish();
+    await new Promise(setImmediate);
+    expect(runner.get(late.jobId)).toEqual(cancelled);
+    expect(runner.get(done.jobId)?.status).toBe('completed');
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(await runner.dispose()).toEqual({ settled: true, pendingJobs: [] });
+  });
+
+  it('isolates same-directory runners during creation, completion, recovery and shutdown', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const a = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5,
+      execute: async () => { await gate; return { ok: true }; }, notify: vi.fn() });
+    const b = createBackgroundRunner({ rootDir: testDir,
+      execute: async () => ({ ok: true, summary: 'B completed' }), notify: vi.fn() });
+    const jobA = await a.start({ sessionId: 'A', source: 'chat', input: 'A' });
+    const observer = createBackgroundRunner({ rootDir: testDir,
+      execute: async () => ({ ok: true }), notify: vi.fn() });
+    expect(observer.get(jobA.jobId)?.status).toBe('running');
+    const jobB = await b.start({ sessionId: 'B', source: 'chat', input: 'B' });
+    expect(jobB.jobId).not.toBe(jobA.jobId);
+    await waitFor(() => expect(b.get(jobB.jobId)?.status).toBe('completed'));
+    await a.dispose();
+    const persistedB = JSON.parse(readFileSync(join(testDir, `${jobB.jobId}.json`), 'utf8'));
+    expect(persistedB).toMatchObject({ sessionId: 'B', status: 'completed', resultSummary: 'B completed' });
+    release();
+    await new Promise(setImmediate);
+    await b.dispose();
+    await observer.dispose();
+  });
+
+  it('preserves a live process owner and recovers its job only after that process exits', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    const exited = once(child, 'exit');
+    await once(child, 'spawn');
+    const job = { schemaVersion: 1, jobId: 'job_external', sessionId: 'external', source: 'chat',
+      ownerId: 'external-runner', ownerPid: child.pid, inputSummary: 'running elsewhere',
+      status: 'running', createdAt: 1, updatedAt: 1 };
+    try {
+      writeFileSync(join(testDir, 'job_external.json'), JSON.stringify(job));
+      const reader = createBackgroundRunner({ rootDir: testDir,
+        execute: async () => ({ ok: true }), notify: vi.fn() });
+      expect(reader.get(job.jobId)?.status).toBe('running');
+      expect(JSON.parse(readFileSync(join(testDir, 'job_external.json'), 'utf8')).status).toBe('running');
+    } finally {
+      child.kill();
+      await exited;
+    }
+    const recovered = createBackgroundRunner({ rootDir: testDir,
+      execute: async () => ({ ok: true }), notify: vi.fn() });
+    expect(recovered.get(job.jobId)).toMatchObject({ status: 'failed',
+      errorMessage: 'background job interrupted by process restart' });
   });
 });

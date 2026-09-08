@@ -14,7 +14,16 @@ import { evaluateVerificationBeforeCompletionGuard } from '../../runtime/guards/
 import { MODEL_OUTPUT_CAP, MODEL_OUTPUT_TRUNCATION_MARKER } from '../../shared/stream-safety/redact.js';
 import { isStrictKimiK3Adapter, projectStrictToolExecutionContext, } from './provider-private-projection.js';
 import { streamCliChatTaskProviderConversation, streamCliSubagentProviderConversation, } from './provider-conversation-authorization.js';
+function normalizeRuntimeAbortReason(reason) {
+    if (isAbortError(reason))
+        return reason;
+    const aborted = new DOMException('Agent run aborted', 'AbortError');
+    Object.defineProperty(aborted, 'cause', { value: reason, configurable: true });
+    return aborted;
+}
 export class AgentRuntime {
+    onActivity;
+    takePendingInput;
     adapter;
     registry;
     session;
@@ -35,6 +44,8 @@ export class AgentRuntime {
     // 空响应自动重试配置
     static MAX_EMPTY_RETRIES = 2;
     constructor(options) {
+        this.onActivity = options.onActivity;
+        this.takePendingInput = options.takePendingInput;
         this.adapter = options.adapter;
         this.registry = options.registry;
         this.session = options.session;
@@ -70,7 +81,7 @@ export class AgentRuntime {
     }
     async run(input, onEvent, externalSignal, invocationContext) {
         if (externalSignal?.aborted) {
-            throw new DOMException('agent aborted', 'AbortError');
+            throw normalizeRuntimeAbortReason(externalSignal.reason);
         }
         const run = this.controller.startRun();
         const strictK3Run = this.isStrictK3Adapter(this.adapter);
@@ -83,10 +94,7 @@ export class AgentRuntime {
         let toolResults = [];
         let executedToolIds = new Set();
         try {
-            if (mergedSignal.aborted) {
-                onEvent({ type: 'run_aborted', runId: run.runId });
-                throw new DOMException('agent aborted', 'AbortError');
-            }
+            mergedSignal.throwIfAborted();
             if (typeof input === 'string') {
                 this.session.appendUserText(input);
                 if (this.memoryStore?.writeRawMessage) {
@@ -106,7 +114,7 @@ export class AgentRuntime {
             let autoCompactionBlocked = false;
             let noReplacementRevision;
             while (true) {
-                this.throwIfAborted(mergedSignal, onEvent, run.runId);
+                mergedSignal.throwIfAborted();
                 currentAssistantBlocks = [];
                 assistantBlocksCommitted = false;
                 toolResults = [];
@@ -122,6 +130,10 @@ export class AgentRuntime {
                     onEvent({ type: 'run_completed', runId: run.runId });
                     return;
                 }
+                // Only drain at a complete conversation boundary, never inside a tool batch.
+                const pendingInput = this.takePendingInput?.();
+                if (pendingInput)
+                    this.session.appendUserText(pendingInput);
                 if (!autoCompactionBlocked
                     && shouldCompact(estimateTokens(this.session.getMessages())
                         + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()), this.contextLimit, this.compactThreshold)) {
@@ -171,6 +183,7 @@ export class AgentRuntime {
                         }
                     }
                 }
+                this.reportActivity({ phase: 'model' });
                 const providerMessages = this.session.getMessages();
                 const streamProviderConversation = this.providerSurfaceKind === 'cli-subagent'
                     ? streamCliSubagentProviderConversation
@@ -183,12 +196,13 @@ export class AgentRuntime {
                     options: this.buildInvocationOptions(mergedSignal, invocationContext),
                     invocationId: `${run.runId}:${iteration}`,
                 })) {
+                    this.reportActivity({ phase: chunk.type === 'thinking' ? 'thinking' : 'model' });
                     if (chunk.type === 'usage') {
                         const usage = this.session.updateUsage(chunk.usage);
                         onEvent({ type: 'usage_updated', runId: run.runId, usage });
                         continue;
                     }
-                    this.throwIfAborted(mergedSignal, onEvent, run.runId);
+                    mergedSignal.throwIfAborted();
                     if (chunk.type === 'text') {
                         // Merge consecutive text blocks to avoid fragmented storage
                         const lastBlock = currentAssistantBlocks[currentAssistantBlocks.length - 1];
@@ -230,7 +244,7 @@ export class AgentRuntime {
                         break;
                     }
                 }
-                this.throwIfAborted(mergedSignal, onEvent, run.runId);
+                mergedSignal.throwIfAborted();
                 const hasVisibleOutput = currentAssistantBlocks.some((block) => block.type === 'text' || block.type === 'tool_use');
                 if (!hasVisibleOutput) {
                     // 模型只返回了 thinking（无 text/tool_use），视为空响应自动重试
@@ -246,6 +260,14 @@ export class AgentRuntime {
                 assistantBlocksCommitted = true;
                 const toolCalls = currentAssistantBlocks.filter((block) => block.type === 'tool_use');
                 if (toolCalls.length === 0) {
+                    // A message may arrive while the final response is streaming. Handle it in
+                    // this run after committing that response, without fabricating tool results.
+                    const lateInput = this.takePendingInput?.();
+                    if (lateInput) {
+                        this.session.appendUserText(lateInput);
+                        iteration += 1;
+                        continue;
+                    }
                     this.emitVerificationGuardIfNeeded(input, verificationToolCalls, codeMutatingToolSeen, run.runId, onEvent);
                     onEvent({ type: 'run_completed', runId: run.runId });
                     return;
@@ -253,7 +275,8 @@ export class AgentRuntime {
                 toolResults = [];
                 const baseToolExecutionContext = this.buildToolExecutionContext(mergedSignal);
                 for (const toolCall of toolCalls) {
-                    this.throwIfAborted(mergedSignal, onEvent, run.runId);
+                    mergedSignal.throwIfAborted();
+                    this.reportActivity({ phase: 'tool', toolName: toolCall.name });
                     onEvent({
                         type: 'tool_started',
                         runId: run.runId,
@@ -272,6 +295,8 @@ export class AgentRuntime {
                         },
                     };
                     const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
+                    mergedSignal.throwIfAborted();
+                    this.reportActivity({ phase: 'model' });
                     const ok = isSuccessfulModelToolResult(result);
                     executedToolIds.add(toolCall.id);
                     verificationToolCalls.push({
@@ -311,7 +336,7 @@ export class AgentRuntime {
             }
         }
         catch (error) {
-            if (isAbortError(error)) {
+            if (mergedSignal.aborted || isAbortError(error)) {
                 const partialSentinel = '\n\n[partial - interrupted by user]';
                 const blocks = currentAssistantBlocks.map((block) => ({ ...block }));
                 if (!strictK3Run && !assistantBlocksCommitted && blocks.length > 0) {
@@ -355,7 +380,9 @@ export class AgentRuntime {
                     .map((block) => block.text)
                     .join('');
                 onEvent({ type: 'run_aborted', runId: run.runId, partialText });
-                throw error;
+                if (isAbortError(error))
+                    throw error;
+                throw normalizeRuntimeAbortReason(mergedSignal.reason);
             }
             const normalized = error instanceof Error ? error : new Error(String(error));
             onEvent({ type: 'run_failed', runId: run.runId, error: normalized });
@@ -365,12 +392,11 @@ export class AgentRuntime {
             this.controller.completeRun(run.runId);
         }
     }
-    throwIfAborted(signal, onEvent, runId) {
-        if (!signal.aborted) {
-            return;
+    reportActivity(activity) {
+        try {
+            this.onActivity?.(activity);
         }
-        onEvent({ type: 'run_aborted', runId });
-        throw new DOMException('agent aborted', 'AbortError');
+        catch { /* Telemetry cannot break a run. */ }
     }
     refreshModelPolicy() {
         const capabilities = resolveModelCapabilities(this.adapter);

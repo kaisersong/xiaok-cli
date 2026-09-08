@@ -1,5 +1,5 @@
 import type { Tool } from '../../types.js';
-import type { McpRuntimeToolResult } from '../mcp/runtime/client.js';
+import type { McpInvocationOptions, McpRuntimeToolResult } from '../mcp/runtime/client.js';
 import {
   CUA_ACTION_CONTRACTS,
   InvalidComputerUseInputError,
@@ -9,7 +9,7 @@ import {
 export interface ComputerUseBackend {
   getUnavailableError?(): ComputerUseUnavailableError | null;
   onRecoverableError?(error: ComputerUseUnavailableError): void;
-  callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult>;
+  callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult>;
 }
 
 export interface ComputerUseUnavailableError {
@@ -80,7 +80,9 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         additionalProperties: true,
       },
     },
-    async execute(input) {
+    async execute(input, context) {
+      const options = context?.signal ? { signal: context.signal } : undefined;
+      options?.signal?.throwIfAborted();
       const returnRecoverableError = (error: ComputerUseUnavailableError, notifyBackend = false): string => {
         if (notifyBackend) {
           try {
@@ -117,8 +119,10 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
 
       let prepared: Record<string, unknown> | string;
       try {
-        prepared = await buildActionInput(backend, action, input);
+        prepared = await buildActionInput(backend, action, input, options);
+        options?.signal?.throwIfAborted();
       } catch (error) {
+        options?.signal?.throwIfAborted();
         const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
         if (recoverable) return returnRecoverableError(recoverable, true);
         throw error;
@@ -141,8 +145,10 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
 
       let result: McpRuntimeToolResult;
       try {
-        result = await backend.callToolResult(translated.operation, translated.input);
+        result = await callComputerUseBackend(backend, translated.operation, translated.input, options);
+        options?.signal?.throwIfAborted();
       } catch (error) {
+        options?.signal?.throwIfAborted();
         const recoverable = classifyRecoverableComputerUseError(formatUnknownError(error));
         if (recoverable) return returnRecoverableError(recoverable, true);
         throw error;
@@ -160,7 +166,8 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       };
 
       if (input.capture_after === true && action !== 'capture' && action !== 'list_apps' && action !== 'list_windows') {
-        const captureInput = await buildCaptureInput(backend, input);
+        const captureInput = await buildCaptureInput(backend, input, options);
+        options?.signal?.throwIfAborted();
         if (typeof captureInput === 'string') {
           const recoverable = classifyRecoverableComputerUseError(captureInput);
           if (recoverable) return returnRecoverableError(recoverable, true);
@@ -171,10 +178,13 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         // public `capture` action, so both paths force include_screenshot and share
         // one allowed-field set (design §6.1).
         const captureTranslated = translateCuaAction('capture', captureInput);
-        const capture = await backend.callToolResult(
+        const capture = await callComputerUseBackend(
+          backend,
           captureTranslated.operation,
           captureTranslated.input,
+          options,
         );
+        options?.signal?.throwIfAborted();
         if (capture.isError) {
           const recoverable = classifyRecoverableComputerUseError(capture.summary || capture.text);
           if (recoverable) return returnRecoverableError(recoverable, true);
@@ -182,9 +192,29 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         response.captureAfter = sanitizeToolResult(capture);
       }
 
+      options?.signal?.throwIfAborted();
       return JSON.stringify(response);
     },
   };
+}
+
+async function callComputerUseBackend(
+  backend: ComputerUseBackend,
+  name: string,
+  input: Record<string, unknown>,
+  options?: McpInvocationOptions,
+): Promise<McpRuntimeToolResult> {
+  options?.signal?.throwIfAborted();
+  try {
+    const result = await (options
+      ? backend.callToolResult(name, input, options)
+      : backend.callToolResult(name, input));
+    options?.signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    options?.signal?.throwIfAborted();
+    throw error;
+  }
 }
 
 function classifyRecoverableComputerUseError(message: string): ComputerUseUnavailableError | null {
@@ -230,12 +260,13 @@ async function buildActionInput(
   backend: ComputerUseBackend,
   action: string,
   input: Record<string, unknown>,
+  options?: McpInvocationOptions,
 ): Promise<Record<string, unknown> | string> {
   if (action === 'capture') {
-    return buildCaptureInput(backend, input);
+    return buildCaptureInput(backend, input, options);
   }
   if (action === 'screenshot') {
-    return buildScreenshotInput(backend, input);
+    return buildScreenshotInput(backend, input, options);
   }
   if (action === 'list_windows') {
     return buildListWindowsInput(input);
@@ -268,6 +299,7 @@ function buildListWindowsInput(input: Record<string, unknown>): Record<string, u
 async function buildCaptureInput(
   backend: ComputerUseBackend,
   input: Record<string, unknown>,
+  options?: McpInvocationOptions,
 ): Promise<Record<string, unknown> | string> {
   const direct = buildDirectWindowStateInput(input);
   if (direct) return direct;
@@ -277,7 +309,7 @@ async function buildCaptureInput(
     return 'Error: capture requires pid + window_id, or an app name that can be resolved through list_windows';
   }
 
-  const windows = await backend.callToolResult('list_windows', { on_screen_only: true });
+  const windows = await callComputerUseBackend(backend, 'list_windows', { on_screen_only: true }, options);
   if (windows.isError) {
     return `Error: ${windows.summary || windows.text || 'list_windows failed before capture'}`;
   }
@@ -297,6 +329,7 @@ async function buildCaptureInput(
 async function buildScreenshotInput(
   backend: ComputerUseBackend,
   input: Record<string, unknown>,
+  options?: McpInvocationOptions,
 ): Promise<Record<string, unknown> | string> {
   const direct = buildDirectWindowAddressInput(input);
   if (direct) return direct;
@@ -306,7 +339,7 @@ async function buildScreenshotInput(
     return 'Error: screenshot requires pid + window_id, or an app name that can be resolved through list_windows';
   }
 
-  const windows = await backend.callToolResult('list_windows', { on_screen_only: true });
+  const windows = await callComputerUseBackend(backend, 'list_windows', { on_screen_only: true }, options);
   if (windows.isError) {
     return `Error: ${windows.summary || windows.text || 'list_windows failed before screenshot'}`;
   }

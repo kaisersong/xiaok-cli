@@ -1,16 +1,19 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { ChatView, type ArtifactOpenInfo, type ArtifactOpenOptions, type ChatMessage, type ComputerUseActionData, type GeneratedFile, type ToolStep } from './ChatView';
 import { GoalBar } from './GoalBar';
-import type { DesktopGoalProjection, DesktopGoalTaskPrepared } from '../../../electron/preload-api';
+import type { DesktopGoalMutationResult, DesktopGoalProjection, DesktopGoalTaskPrepared } from '../../../electron/preload-api';
 import type { GoalInput } from '../../../../src/runtime/goal/types';
 import { attachPreparedGoalTask } from '../lib/goal-task-attachment';
 import { CanvasPanel } from './CanvasPanel';
 import { TaskPanel } from './TaskPanel';
+import { ChatRightSurface } from './ChatRightSurface';
+import { MultiAgentPanel } from './MultiAgentPanel';
+import { useMultiAgentConnection } from '../hooks/useMultiAgentConnection';
 import type { ThreadRecord } from '../api/types';
-import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
+import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult, TaskSnapshot } from '../../../shared/task-types';
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
 import { useLocale } from '../contexts/LocaleContext';
@@ -42,6 +45,28 @@ interface DisplayFileRef {
   filePath?: string;
   name?: string;
   originalName?: string;
+}
+
+interface DisplayScope { taskId: string | undefined; attachmentObservers: Set<() => void> }
+interface GoalAttempt { scope: DisplayScope; requestId?: string }
+interface DisplaySource {
+  scope: DisplayScope;
+  sourceTaskId: string;
+  intentOwner: GoalAttempt | null;
+  executionScope?: TaskSnapshot['executionScope'];
+  eventCount: number;
+  terminalSeen: boolean;
+  streamEnded: boolean;
+  resultSummaryInHistory?: string;
+  release?: () => void;
+}
+interface GoalAttachmentWork {
+  attempt: GoalAttempt;
+  prepared: DesktopGoalTaskPrepared;
+  source: DisplaySource;
+  ackInvoked: boolean;
+  readUsed: boolean;
+  promise: Promise<void>;
 }
 
 function normalizeArtifactKind(kind: string): ArtifactKind {
@@ -244,9 +269,28 @@ async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promis
 
 export function ChatShell() {
   const { taskId } = useParams<{ taskId: string }>();
+  const renderScope = useMemo<DisplayScope>(() => ({ taskId, attachmentObservers: new Set<() => void>() }), [taskId]);
+  const liveRenderScope = useRef<typeof renderScope | null>(renderScope);
+  const admissionPending = useRef<typeof renderScope | null>(null);
+  useLayoutEffect(() => {
+    liveRenderScope.current = renderScope;
+    return () => {
+      liveRenderScope.current = null;
+      for (const release of renderScope.attachmentObservers) release();
+      renderScope.attachmentObservers.clear();
+      if (goalAttemptRef.current?.scope === renderScope) goalAttemptRef.current = null;
+      if (displaySourceRef.current?.scope === renderScope) displaySourceRef.current = null;
+      for (const [id, work] of attachmentWorksRef.current) {
+        if (work.attempt.scope === renderScope) attachmentWorksRef.current.delete(id);
+      }
+    };
+  }, [renderScope]);
   const location = useLocation();
   const sidebarCollapse = useSidebarCollapse();
   const { t } = useLocale();
+  const [agentHistory, setAgentHistory] = useState<{ threadId: string; groupId?: string } | null>(null);
+  const multiAgent = useMultiAgentConnection(taskId, agentHistory?.threadId === taskId ? agentHistory?.groupId : undefined);
+  const [canvasVisible, setCanvasVisible] = useState(false);
   const sidebarWasCollapsedRef = useRef(false);
   const [thread, setThread] = useState<ThreadRecord | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -280,24 +324,41 @@ export function ChatShell() {
     text: string;
     files: Array<{ filePath: string; name: string }>;
   } | null>(null);
-  const seenGoalAttachmentsRef = useRef(new Set<string>());
+  const goalAttemptRef = useRef<GoalAttempt | null>(null);
+  const displaySourceRef = useRef<DisplaySource | null>(null);
+  const attachmentWorksRef = useRef(new Map<string, GoalAttachmentWork>());
+  const initializationRef = useRef<{ scope: DisplayScope; promise: Promise<void>; succeeded: boolean } | null>(null);
+  const threadRef = useRef(thread);
+  threadRef.current = thread ?? threadRef.current;
+  const resultRef = useRef(result);
+  resultRef.current = result;
+  const acceptsSource = useCallback((source: DisplaySource) => liveRenderScope.current === source.scope && displaySourceRef.current === source, []);
+  const currentAttempt = useCallback((attempt: GoalAttempt) => liveRenderScope.current === attempt.scope && goalAttemptRef.current === attempt, []);
+  const beginGoalAttempt = useCallback((request = false) => {
+    const attempt: GoalAttempt = { scope: renderScope, ...(request ? { requestId: crypto.randomUUID() } : {}) };
+    goalAttemptRef.current = attempt;
+    return attempt;
+  }, [renderScope]);
   const queuedDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
   const streamRef = useRef('');
   const streamRafRef = useRef<number | null>(null);
   const streamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const streamLastRenderedAtRef = useRef<number | null>(null);
-  const flushStreamingText = () => {
+  const flushStreamingText = (source: DisplaySource) => {
+    if (!acceptsSource(source)) return;
     if (streamRafRef.current !== null || streamTimerRef.current !== null) return;
     const delay = getStreamingRenderDelay(streamLastRenderedAtRef.current, performance.now());
     if (delay > 0) {
       streamTimerRef.current = setTimeout(() => {
+        if (!acceptsSource(source)) return;
         streamTimerRef.current = null;
-        flushStreamingText();
+        flushStreamingText(source);
       }, delay);
       return;
     }
     streamRafRef.current = requestAnimationFrame((renderedAt) => {
+      if (!acceptsSource(source)) return;
       streamRafRef.current = null;
       streamLastRenderedAtRef.current = renderedAt;
       setStreamingText(streamRef.current);
@@ -329,15 +390,21 @@ export function ChatShell() {
   const initialFiles = state?.initialFiles;
   const draftPrompt = state?.draftPrompt;
 
-  const handleEvent = useCallback((rawEvent: { type: string }, sourceTaskId?: string) => {
+  const handleEvent = useCallback((rawEvent: { type: string }, source: DisplaySource) => {
     const event = rawEvent as DesktopTaskEvent;
-    console.log('[ChatShell] event:', event.type);
-
-    // Check if this event belongs to current task (prevent race condition from stale subscriptions)
-    if (currentLoadIdRef.current !== taskId) {
-      console.log('[ChatShell] ignoring stale event for', taskId, 'current is', currentLoadIdRef.current);
+    if (!acceptsSource(source) || source.streamEnded) return;
+    source.eventCount += 1;
+    const sourceTaskId = source.sourceTaskId;
+    const live = !source.terminalSeen;
+    if (event.type === 'task_terminal') {
+      source.terminalSeen = true;
+      source.streamEnded = true;
+      setCurrentQuestion(null);
+      setStatus(event.status === 'cancelled' ? 'idle' : event.status);
+      source.release?.();
       return;
     }
+    if (!live && (event.type === 'progress' || event.type === 'needs_user' || event.type === 'task_started')) return;
 
     const eventTaskKey = sourceTaskId ?? taskId ?? '';
     if (event.type !== 'error' || lastLiveErrorRef.current?.taskKey !== eventTaskKey) {
@@ -379,8 +446,8 @@ export function ChatShell() {
       case 'assistant_delta': {
         const delta = (event as { type: 'assistant_delta'; delta: string }).delta;
         streamRef.current += delta;
-        flushStreamingText();
-        setStatus('running');
+        flushStreamingText(source);
+        if (live) setStatus('running');
         break;
       }
       case 'task_cancelled': {
@@ -396,7 +463,7 @@ export function ChatShell() {
           }]);
         }
         setCurrentQuestion(null);
-        setStatus('idle');
+        if (live) setStatus('idle');
         break;
       }
       case 'artifact_recorded': {
@@ -431,6 +498,7 @@ export function ChatShell() {
           cancelStreamingFlush();
           setStreamingText('');
           if (finalContent) {
+            source.resultSummaryInHistory = finalContent;
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
               role: 'assistant',
@@ -438,7 +506,8 @@ export function ChatShell() {
             }]);
           }
           setResult(resultWithArtifacts);
-          setStatus('completed');
+          resultRef.current = resultWithArtifacts;
+          if (live) setStatus('completed');
           setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
           // Only set title if thread has no title yet (preserve user's prompt as title)
           if (taskId && !titleLockedRef.current) {
@@ -454,13 +523,15 @@ export function ChatShell() {
           setStreamingText('');
           setResult(resultWithArtifacts);
           if (finalText.trim()) {
+            source.resultSummaryInHistory = finalText;
             setMessages(prev => [...prev, {
               id: `msg-${Date.now()}-assistant`,
               role: 'assistant',
               content: finalText,
             }]);
           }
-          setStatus('idle');
+          resultRef.current = resultWithArtifacts;
+          if (live) setStatus('idle');
         }
         // Seal tool-steps group
         if (toolStepsMsgIdRef.current) {
@@ -472,7 +543,7 @@ export function ChatShell() {
           toolStepsActiveRef.current = false;
         }
         // Auto-open canvas when generated files exist, preview first file
-        if (hasGeneratedFiles && !canvasOpen) {
+        if (live && hasGeneratedFiles && !canvasOpen) {
           sidebarWasCollapsedRef.current = sidebarCollapse.collapsed;
           const writeCall = currentTaskEventsRef.current.find(
             e => e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
@@ -493,9 +564,11 @@ export function ChatShell() {
             setCanvasExpanded(true);
             sidebarCollapse.setCollapsed(true);
             api.readFileContent(fp).then(r => {
+              if (!acceptsSource(source) || source.terminalSeen) return;
               setCanvasPreviewContent(r.content);
               setCanvasOpen(true);
             }).catch(() => {
+              if (!acceptsSource(source) || source.terminalSeen) return;
               setCanvasPreviewContent('');
               setCanvasOpen(true);
             });
@@ -613,73 +686,215 @@ export function ChatShell() {
             },
           ];
         });
-        setStatus('failed');
+        if (live) setStatus('failed');
         break;
       }
     }
-  }, [taskId, t]);
+  }, [taskId, t, acceptsSource]);
 
-  const attachGoalTask = useCallback(async (prepared: DesktopGoalTaskPrepared) => {
-    if (!taskId || prepared.threadId !== taskId || seenGoalAttachmentsRef.current.has(prepared.attachmentId)) return;
-    const desktop = getDesktopApi();
-    if (!desktop) throw new Error('desktop_api_unavailable');
-    seenGoalAttachmentsRef.current.add(prepared.attachmentId);
-    try {
-      unsubRef.current?.();
-      const unsubscribe = await attachPreparedGoalTask({
-        prepared,
-        currentThreadId: taskId,
-        updateThreadTaskId: api.updateThreadTaskId,
-        subscribeTask: (newTaskId, handler) => api.subscribeTask(
-          newTaskId,
-          event => handler(event),
-        ),
-        onEvent: event => handleEvent(event as { type: string }, prepared.taskId),
-        ackGoalTaskAttached: desktop.ackGoalTaskAttached,
+  const retainObserver = useCallback((source: DisplaySource, unsubscribe: () => void) => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      source.scope.attachmentObservers.delete(release);
+      if (unsubRef.current === release) unsubRef.current = null;
+      unsubscribe();
+    };
+    source.release = release;
+    if (liveRenderScope.current === source.scope) source.scope.attachmentObservers.add(release);
+    else release();
+    return release;
+  }, []);
+
+  const promoteSource = useCallback((source: DisplaySource, release: (() => void) | null, clearPresentation: boolean) => {
+    const previousRelease = unsubRef.current;
+    const previousSource = displaySourceRef.current;
+    displaySourceRef.current = source;
+    unsubRef.current = release;
+    if (clearPresentation) {
+      const partial = streamRef.current;
+      const previousResult = resultRef.current;
+      const archivedResult = previousResult && previousResult.summary === previousSource?.resultSummaryInHistory
+        ? { ...previousResult, summary: '' } : previousResult;
+      const card = buildResultCardMessage({
+        idHint: `${previousSource?.sourceTaskId ?? 'current'}-${Date.now()}`,
+        result: archivedResult,
+        generatedFiles: collectGeneratedFilesForTurn(currentTaskEventsRef.current, [resultRef.current?.summary ?? '', partial]),
       });
-      if (unsubscribe) unsubRef.current = unsubscribe;
-      setThread(previous => previous ? {
-        ...previous,
-        currentTaskId: prepared.taskId,
-        taskIds: previous.taskIds.includes(prepared.taskId)
-          ? previous.taskIds
-          : [...previous.taskIds, prepared.taskId],
-      } : previous);
-      setStatus('running');
-    } catch (error) {
-      seenGoalAttachmentsRef.current.delete(prepared.attachmentId);
-      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
-      setGoal(await desktop.getGoal(taskId));
+      setMessages(previous => [
+        ...previous.filter(message => message.role !== 'progress').map(message => message.stepsLive ? { ...message, stepsLive: false } : message),
+        ...(partial.trim() ? [{ id: `msg-${Date.now()}-handoff`, role: 'assistant' as const, content: partial }] : []),
+        ...(card && !previous.some(message => message.role === 'result_card' && message.result === previousResult) ? [card] : []),
+      ]);
+      streamRef.current = '';
+      cancelStreamingFlush();
+      setStreamingText('');
+      resultRef.current = null;
+      setResult(null);
+      setCurrentQuestion(null);
+      setPlanSteps([]);
+      currentTaskEventsRef.current = [];
+      allEventsRef.current = [];
+      toolStepsMsgIdRef.current = null;
+      toolStepsActiveRef.current = false;
+      computerUseActionCodesRef.current = new Set();
+      setStatus('idle'); // An installed observer is not proof that ACK started execution.
     }
-  }, [handleEvent, taskId, t.chatShell.taskCreateFailed]);
+    const previous = threadRef.current;
+    if (previous && previous.id === source.scope.taskId) {
+      const next = { ...previous, currentTaskId: source.sourceTaskId,
+        taskIds: previous.taskIds.includes(source.sourceTaskId) ? previous.taskIds : [...previous.taskIds, source.sourceTaskId] };
+      threadRef.current = next;
+      setThread(next);
+    }
+    if (previousRelease !== release) previousRelease?.();
+  }, []);
+
+  const applyGoal = useCallback((next: DesktopGoalProjection | null) => {
+    setGoal(previous => previous && next && previous.state.goalId === next.state.goalId
+      && (previous.state.epoch > next.state.epoch || (previous.state.epoch === next.state.epoch && previous.state.revision > next.state.revision))
+      ? previous : next);
+  }, []);
+
+  const runGoalAttempt = useCallback(async (attempt: GoalAttempt, action: () => Promise<void>) => {
+    if (!currentAttempt(attempt)) return;
+    setGoalLoading(true);
+    setGoalError(null);
+    try { await action(); }
+    catch (error) {
+      if (currentAttempt(attempt)) setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+    } finally {
+      if (currentAttempt(attempt)) setGoalLoading(false);
+    }
+  }, [currentAttempt, t.chatShell.taskCreateFailed]);
+
+  const reconcileUnknownOnce = useCallback(async (work: GoalAttachmentWork) => {
+    const { attempt, source, prepared } = work;
+    if (work.readUsed || !currentAttempt(attempt) || !acceptsSource(source)) return;
+    work.readUsed = true;
+    const eventCount = source.eventCount;
+    setGoalError(t.chatShell.goalAttachmentQuerying);
+    try {
+      const { snapshot } = await api.recoverTask(prepared.taskId);
+      if (!currentAttempt(attempt) || !acceptsSource(source)) return;
+      const scope = snapshot?.executionScope;
+      const expected = prepared.executionScope;
+      const valid = snapshot?.taskId === prepared.taskId && scope?.kind === 'goal_turn'
+        && scope.origin === expected.origin && scope.threadId === expected.threadId && scope.goalId === expected.goalId
+        && scope.epoch === expected.epoch && scope.goalTurnId === expected.goalTurnId;
+      if (valid && !source.terminalSeen && eventCount === source.eventCount) {
+        if (snapshot.status === 'running' || snapshot.status === 'waiting_user') {
+          setStatus(snapshot.status);
+          if (snapshot.status === 'waiting_user') {
+            const last = [...snapshot.events].reverse().find(event => event.type === 'needs_user');
+            if (last?.type === 'needs_user') setCurrentQuestion(last.question);
+          }
+        } else if (snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled') {
+          source.terminalSeen = true;
+          setStatus(snapshot.status === 'cancelled' ? 'idle' : snapshot.status);
+          setCurrentQuestion(null);
+        }
+      }
+    } catch { /* This one read is spent even if the transport or recovery cannot confirm it. */ }
+    if (currentAttempt(attempt) && acceptsSource(source)) setGoalError(t.chatShell.goalAttachmentUnknown);
+  }, [acceptsSource, currentAttempt, t.chatShell.goalAttachmentQuerying, t.chatShell.goalAttachmentUnknown]);
+
+  const validPrepared = useCallback((prepared: DesktopGoalTaskPrepared) => prepared?.threadId === taskId
+    && typeof prepared.taskId === 'string' && prepared.taskId.length > 0
+    && typeof prepared.attachmentId === 'string' && prepared.attachmentId.length > 0
+    && prepared.executionScope?.kind === 'goal_turn' && prepared.executionScope.threadId === taskId
+    && (prepared.executionScope.origin === 'user' || prepared.executionScope.origin === 'continuation')
+    && prepared.executionScope.goalId === prepared.goalRef?.goalId, [taskId]);
+
+  const attachGoalTask = useCallback((prepared: DesktopGoalTaskPrepared, attempt: GoalAttempt, predecessor?: DisplaySource): Promise<void> => {
+    if (!currentAttempt(attempt) || !taskId || !validPrepared(prepared)) return Promise.resolve();
+    const existing = attachmentWorksRef.current.get(prepared.attachmentId);
+    if (existing) return existing.promise;
+    const desktop = getDesktopApi();
+    if (!desktop) return Promise.reject(new Error('desktop_api_unavailable'));
+    const source: DisplaySource = { scope: renderScope, sourceTaskId: prepared.taskId, intentOwner: attempt,
+      executionScope: prepared.executionScope, eventCount: 0, terminalSeen: false, streamEnded: false };
+    const work: GoalAttachmentWork = { attempt, prepared, source, ackInvoked: false, readUsed: false, promise: Promise.resolve() };
+    attachmentWorksRef.current.set(prepared.attachmentId, work);
+    work.promise = (async () => {
+      try {
+        const outcome = await attachPreparedGoalTask({
+          prepared, currentThreadId: taskId,
+          isCurrent: () => liveRenderScope.current === renderScope,
+          isCandidateCurrent: () => currentAttempt(attempt) && (!predecessor || displaySourceRef.current === predecessor),
+          updateThreadTaskId: api.updateThreadTaskId,
+          subscribeTask: (id, handler) => retainObserver(source, api.subscribeTask(id, handler)),
+          onEvent: event => handleEvent(event as DesktopTaskEvent, source),
+          onSubscribed: release => promoteSource(source, release, true),
+          ackGoalTaskAttached: input => { work.ackInvoked = true; return desktop.ackGoalTaskAttached(input); },
+        });
+        if (outcome?.kind === 'unknown') await reconcileUnknownOnce(work);
+      } catch (error) {
+        if (currentAttempt(attempt) && !work.ackInvoked && attachmentWorksRef.current.get(prepared.attachmentId) === work) {
+          attachmentWorksRef.current.delete(prepared.attachmentId);
+        }
+        throw error;
+      }
+    })();
+    return work.promise;
+  }, [currentAttempt, handleEvent, promoteSource, reconcileUnknownOnce, renderScope, retainObserver, taskId, validPrepared]);
 
   useEffect(() => {
     if (!taskId) return;
     const desktop = getDesktopApi();
     if (!desktop) return;
     let live = true;
+    const capturedAttempt = goalAttemptRef.current;
+    const initialCurrent = () => live && liveRenderScope.current === renderScope && goalAttemptRef.current === capturedAttempt;
     setGoalLoading(true);
     setGoalError(null);
     void desktop.getGoal(taskId).then(value => {
-      if (live) setGoal(value);
+      if (initialCurrent()) applyGoal(value);
     }).catch(error => {
-      if (live) setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
+      if (initialCurrent()) setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
     }).finally(() => {
-      if (live) setGoalLoading(false);
+      if (initialCurrent()) setGoalLoading(false);
     });
     const unsubscribeChanged = desktop.onGoalChanged(event => {
-      if (live && event.threadId === taskId) setGoal(event.goal);
+      if (live && liveRenderScope.current === renderScope && event.threadId === taskId) applyGoal(event.goal);
     });
     const unsubscribePrepared = desktop.onGoalTaskPrepared(prepared => {
-      if (live && prepared.threadId === taskId) void attachGoalTask(prepared);
+      if (!live || liveRenderScope.current !== renderScope || !validPrepared(prepared)) return;
+      if (prepared.attachmentSource?.kind === 'request') {
+        // Only its semantic reply creates request work. An early event never
+        // consumes the ID, borrows a newer request, or starts another feedback owner.
+        const work = attachmentWorksRef.current.get(prepared.attachmentId);
+        if (work && currentAttempt(work.attempt) && work.prepared.attachmentSource.kind === 'request'
+          && work.prepared.attachmentSource.requestId === prepared.attachmentSource.requestId
+          && work.prepared.taskId === prepared.taskId) void work.promise.catch(() => {});
+        return;
+      }
+      if (prepared.attachmentSource?.kind !== 'automatic' || prepared.executionScope.origin !== 'continuation') return;
+      const intent = goalAttemptRef.current;
+      const predecessorTaskId = prepared.attachmentSource.predecessorTaskId;
+      void (async () => {
+        const initialization = initializationRef.current;
+        if (initialization?.scope === renderScope) {
+          await initialization.promise;
+          if (!initialization.succeeded) return;
+        }
+        if (!live || liveRenderScope.current !== renderScope || goalAttemptRef.current !== intent) return;
+        const predecessor = displaySourceRef.current;
+        if (!predecessor || predecessor.scope !== renderScope || predecessor.sourceTaskId !== predecessorTaskId
+          || predecessor.intentOwner !== intent || predecessor.executionScope?.kind !== 'goal_turn'
+          || predecessor.executionScope.goalId !== prepared.executionScope.goalId
+          || predecessor.executionScope.epoch !== prepared.executionScope.epoch) return;
+        const attempt = beginGoalAttempt();
+        await runGoalAttempt(attempt, () => attachGoalTask(prepared, attempt, predecessor));
+      })().catch(() => {});
     });
     return () => {
       live = false;
       unsubscribeChanged();
       unsubscribePrepared();
-      seenGoalAttachmentsRef.current.clear();
     };
-  }, [attachGoalTask, taskId, t.chatShell.taskCreateFailed]);
+  }, [applyGoal, attachGoalTask, beginGoalAttempt, currentAttempt, renderScope, runGoalAttempt, taskId, t.chatShell.taskCreateFailed, validPrepared]);
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
@@ -888,6 +1103,13 @@ export function ChatShell() {
 
     // Increment mount generation to cancel any in-flight async from prior effect run
     const gen = ++mountGenRef.current;
+    const capturedIntent = goalAttemptRef.current;
+    const capturedSource = displaySourceRef.current;
+    const loadCurrent = () => mountGenRef.current === gen && liveRenderScope.current === renderScope
+      && goalAttemptRef.current === capturedIntent && displaySourceRef.current === capturedSource;
+    let loadedSource: DisplaySource | null = null;
+    const initialization = { scope: renderScope, promise: Promise.resolve(), succeeded: false };
+    initializationRef.current = initialization;
 
     // Mark this as the current load
     const thisLoadId = taskId;
@@ -925,9 +1147,9 @@ export function ChatShell() {
       setStatus('running');
     }
 
-    api.getThread(taskId).then(async (threadData) => {
+    initialization.promise = api.getThread(taskId).then(async (threadData) => {
       // Check if this is still the current load (prevent race condition)
-      if (mountGenRef.current !== gen) return;
+      if (!loadCurrent()) return;
 
       if (threadData) {
         const allTaskIds = (threadData.taskIds && threadData.taskIds.length > 0) ? threadData.taskIds
@@ -953,12 +1175,14 @@ export function ChatShell() {
         let lastTaskIdForSub: string | null = null;
         let lastSubSinceIndex = 0;
         let lastSubToolStepsMsgId: string | null = null;
+        let lastSnapshot: TaskSnapshot | undefined;
         for (const tid of allTaskIds) {
           // Check again after each async operation
-          if (mountGenRef.current !== gen) return;
+          if (!loadCurrent()) return;
 
           try {
             const { snapshot } = await api.recoverTask(tid);
+            if (!loadCurrent()) return;
             if (snapshot) {
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
@@ -972,6 +1196,7 @@ export function ChatShell() {
               // Collect events for Canvas panel (merge into ref after all tasks processed)
               allEventsRef.current.push(...replayEvents);
               if (tid === allTaskIds[allTaskIds.length - 1]) {
+                lastSnapshot = snapshot;
                 currentTaskEventsRef.current = replayEvents;
               }
 
@@ -998,14 +1223,15 @@ export function ChatShell() {
                 }
               }
             }
-          } catch { /* skip failed task */ }
+          } catch { if (!loadCurrent()) return; /* skip failed task */ }
         }
 
         // Final check before setting any state
-        if (mountGenRef.current !== gen) return;
+        if (!loadCurrent()) return;
 
         // Now set all state atomically after final check
         setThread(threadData);
+        threadRef.current = threadData;
         if (allMessages.length > 0) {
           setMessages(allMessages);
         }
@@ -1013,9 +1239,14 @@ export function ChatShell() {
           setResult(lastResult);
         }
         setStatus(lastStatus);
+        if (lastTaskIdForSub) {
+          loadedSource = { scope: renderScope, sourceTaskId: lastTaskIdForSub, intentOwner: capturedIntent,
+            executionScope: lastSnapshot?.executionScope, eventCount: lastSnapshot?.events.length ?? 0,
+            terminalSeen: lastSnapshot?.status === 'completed' || lastSnapshot?.status === 'failed' || lastSnapshot?.status === 'cancelled', streamEnded: false };
+        }
         if (lastTaskIdForSub && (lastStatus === 'running' || lastStatus === 'waiting_user')) {
           // Guard: if effect was cleaned up during async gap (StrictMode), don't subscribe
-          if (mountGenRef.current !== gen) return;
+          if (!loadCurrent()) return;
           // Rebind live tool-steps refs to the message replay already created, so the
           // incremental stream updates the existing steps instead of spawning a second
           // (perpetually-running) tool_steps message.
@@ -1023,14 +1254,20 @@ export function ChatShell() {
             toolStepsMsgIdRef.current = lastSubToolStepsMsgId;
             toolStepsActiveRef.current = true;
           }
-          unsubRef.current = api.subscribeTask(
+          const source = loadedSource!;
+          const release = retainObserver(source, api.subscribeTask(
             lastTaskIdForSub,
-            (event) => handleEvent(event, lastTaskIdForSub ?? undefined),
+            (event) => handleEvent(event, source),
             lastSubSinceIndex,
-          );
+          ));
+          if (!loadCurrent()) { release(); return; }
+          promoteSource(source, release, false);
+        } else if (loadedSource) {
+          promoteSource(loadedSource, null, false);
         }
+        initialization.succeeded = true;
       } else {
-        setThread({
+        const empty: ThreadRecord = {
           id: taskId,
           title: null,
           status: 'idle',
@@ -1042,10 +1279,13 @@ export function ChatShell() {
           pinnedAt: null,
           currentTaskId: null,
           taskIds: [],
-        });
+        };
+        threadRef.current = empty;
+        setThread(empty);
+        initialization.succeeded = true;
       }
     }).catch((err) => {
-      if (mountGenRef.current === gen) {
+      if (loadCurrent()) {
         setLoadError(err instanceof Error ? err.message : String(err));
         setStatus('failed');
       }
@@ -1055,14 +1295,16 @@ export function ChatShell() {
       // Invalidate in-flight async operations from this effect run
       mountGenRef.current++;
       currentLoadIdRef.current = null;
-      unsubRef.current?.();
-      unsubRef.current = null;
+      loadedSource?.release?.();
     };
-  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot]);
+  }, [taskId, initialPrompt, initialFiles, draftPrompt, handleEvent, replaySnapshot, promoteSource, renderScope, retainObserver]);
 
   const queuePrompt = useCallback((text: string, files: Array<{ filePath: string; name: string }> = []) => {
     const trimmed = text.trim();
     if (!trimmed && files.length === 0) return;
+    beginGoalAttempt();
+    setGoalLoading(false);
+    setGoalError(null);
     log.info(queuedPrompt ? 'queued_prompt_replace' : 'queued_prompt_submit', JSON.stringify({
       threadId: taskId,
       status,
@@ -1071,7 +1313,7 @@ export function ChatShell() {
     setQueuedPrompt({ text: trimmed || t.chatInput.processFiles, files });
     const desktop = getDesktopApi();
     if (taskId && desktop) void desktop.setGoalUserQueuePending({ threadId: taskId, pending: true });
-  }, [queuedPrompt, status, taskId, t.chatInput.processFiles]);
+  }, [beginGoalAttempt, queuedPrompt, status, taskId, t.chatInput.processFiles]);
 
   const cancelQueuedPrompt = useCallback(() => {
     if (queuedPrompt) {
@@ -1087,13 +1329,18 @@ export function ChatShell() {
   }, [queuedPrompt, status, taskId]);
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
-    if (!taskId) return;
+    if (!taskId || admissionPending.current === renderScope) return false;
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {
       queuePrompt(text, files ?? []);
       return;
     }
+    admissionPending.current = renderScope;
+    const attempt = beginGoalAttempt();
+    setGoalLoading(false);
+    setGoalError(null);
+    const current = () => currentAttempt(attempt);
 
     toolStepsMsgIdRef.current = null;
 
@@ -1109,7 +1356,6 @@ export function ChatShell() {
       generatedFiles: collectGeneratedFilesForTurn(currentTaskEventsRef.current, [result?.summary || '', streamingText]),
     });
     setMessages(prev => sealedResultCard ? [...prev, sealedResultCard, userMsg] : [...prev, userMsg]);
-    setPrompt('');
     setStatus('running');
     cancelStreamingFlush();
     setStreamingText('');
@@ -1148,19 +1394,25 @@ export function ChatShell() {
         }));
         newTaskId = result.taskId;
       }
+      if (!current()) return false;
 
       // Update thread with new taskId
       await api.updateThreadTaskId(taskId, newTaskId);
+      if (!current()) return false;
+      setPrompt(previous => previous === text ? '' : previous);
       setThread(prev => prev ? {
         ...prev,
         currentTaskId: newTaskId,
         taskIds: prev.taskIds.includes(newTaskId) ? prev.taskIds : [...prev.taskIds, newTaskId],
       } : prev);
 
-      // Unsubscribe previous and subscribe new
-      unsubRef.current?.();
-      unsubRef.current = api.subscribeTask(newTaskId, (event) => handleEvent(event, newTaskId));
+      const source: DisplaySource = { scope: renderScope, sourceTaskId: newTaskId, intentOwner: attempt,
+        eventCount: 0, terminalSeen: false, streamEnded: false };
+      const release = retainObserver(source, api.subscribeTask(newTaskId, event => handleEvent(event, source)));
+      if (!current()) { release(); return false; }
+      promoteSource(source, release, false);
     } catch (e) {
+      if (!current()) return false;
       const displayMessage = sanitizeUserFacingErrorMessage(e, t.chatShell.taskCreateFailed);
       log.error('handleSubmit error', JSON.stringify({ message: displayMessage, raw: e instanceof Error ? e.message : String(e) }));
       setMessages(prev => [...prev, {
@@ -1169,15 +1421,20 @@ export function ChatShell() {
         content: displayMessage,
       }]);
       setStatus('idle');
+      return false;
+    } finally {
+      if (admissionPending.current === renderScope) admissionPending.current = null;
     }
   };
 
   const handleAnswer = async (choiceId: string) => {
-    if (!currentQuestion || !thread?.currentTaskId) return;
+    const source = displaySourceRef.current;
+    if (!currentQuestion || !thread?.currentTaskId || !source || !acceptsSource(source)) return;
     await api.answerQuestion({
       taskId: thread.currentTaskId,
       answer: { questionId: currentQuestion.questionId, type: 'choice', choiceId },
     });
+    if (!acceptsSource(source) || source.terminalSeen) return;
     setCurrentQuestion(null);
     setStatus('running');
   };
@@ -1235,8 +1492,10 @@ export function ChatShell() {
   };
 
   const handleCancel = async () => {
-    if (!thread?.currentTaskId) return;
+    const source = displaySourceRef.current;
+    if (!thread?.currentTaskId || !source || !acceptsSource(source)) return;
     await api.cancelTask(thread.currentTaskId);
+    if (!acceptsSource(source) || source.terminalSeen) return;
     clearCancelledTaskPresentation();
   };
 
@@ -1244,78 +1503,63 @@ export function ChatShell() {
     action: () => Promise<DesktopGoalProjection>,
     clearTaskPresentation = false,
   ) => {
-    setGoalLoading(true);
-    setGoalError(null);
-    try {
+    const attempt = beginGoalAttempt();
+    await runGoalAttempt(attempt, async () => {
       const next = await action();
-      setGoal(next);
+      if (!currentAttempt(attempt)) return;
+      applyGoal(next);
       if (clearTaskPresentation) clearCancelledTaskPresentation();
-    } catch (error) {
-      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
-    } finally {
-      setGoalLoading(false);
+    });
+  };
+
+  const acceptGoalReply = async (attempt: GoalAttempt, reply: DesktopGoalMutationResult, objective?: string) => {
+    if (!currentAttempt(attempt)) return;
+    const prepared = reply?.preparedTask;
+    if (!validPrepared(prepared) || prepared.attachmentSource?.kind !== 'request'
+      || prepared.attachmentSource.requestId !== attempt.requestId || !attempt.requestId
+      || reply.goal?.state.goalId !== prepared.goalRef.goalId || reply.goal.state.epoch !== prepared.executionScope.epoch) {
+      throw new Error('invalid_goal_attachment_reply');
     }
+    applyGoal(reply.goal);
+    if (objective) setMessages(previous => [...previous, {
+      id: `msg-${Date.now()}-goal-user`, role: 'user', content: objective,
+    }]);
+    await attachGoalTask(prepared, attempt);
   };
 
   const handleGoalCreate = async (input: GoalInput) => {
     if (!taskId) return;
     const desktop = getDesktopApi();
     if (!desktop) return;
-    setGoalLoading(true);
-    setGoalError(null);
-    setMessages(previous => [...previous, {
-      id: `msg-${Date.now()}-goal-user`, role: 'user', content: input.objective,
-    }]);
-    setStatus('running');
-    try {
-      const result = await desktop.createGoal({ threadId: taskId, ...input });
-      setGoal(result.goal);
-      await attachGoalTask(result.preparedTask);
-    } catch (error) {
-      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
-      setStatus('idle');
-    } finally {
-      setGoalLoading(false);
-    }
+    const attempt = beginGoalAttempt(true);
+    await runGoalAttempt(attempt, async () => {
+      const reply = await desktop.createGoal({ threadId: taskId, ...input, requestId: attempt.requestId });
+      await acceptGoalReply(attempt, reply, input.objective);
+    });
   };
 
   const handleGoalReplace = async (input: GoalInput) => {
     if (!taskId) return;
     const desktop = getDesktopApi();
     if (!desktop) return;
-    setGoalLoading(true);
-    setGoalError(null);
-    try {
-      const result = await desktop.replaceGoal({ threadId: taskId, ...input });
-      setGoal(result.goal);
-      setMessages(previous => [...previous, {
-        id: `msg-${Date.now()}-goal-replace-user`, role: 'user', content: input.objective,
-      }]);
-      await attachGoalTask(result.preparedTask);
-    } catch (error) {
-      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
-    } finally {
-      setGoalLoading(false);
-    }
+    const attempt = beginGoalAttempt(true);
+    await runGoalAttempt(attempt, async () => {
+      const reply = await desktop.replaceGoal({ threadId: taskId, ...input, requestId: attempt.requestId });
+      await acceptGoalReply(attempt, reply, input.objective);
+    });
   };
 
   const handleGoalResume = async (turnLimit?: number) => {
     if (!taskId) return;
     const desktop = getDesktopApi();
     if (!desktop) return;
-    setGoalLoading(true);
-    setGoalError(null);
-    try {
-      const result = await desktop.resumeGoal({
-        threadId: taskId, ...(turnLimit === undefined ? {} : { turnLimit }),
+    const attempt = beginGoalAttempt(true);
+    await runGoalAttempt(attempt, async () => {
+      const reply = await desktop.resumeGoal({
+        threadId: taskId, requestId: attempt.requestId, ...(turnLimit === undefined ? {} : { turnLimit }),
       });
-      setGoal(result.goal);
-      await attachGoalTask(result.preparedTask);
-    } catch (error) {
-      setGoalError(sanitizeUserFacingErrorMessage(error, t.chatShell.taskCreateFailed));
-    } finally {
-      setGoalLoading(false);
-    }
+      await acceptGoalReply(attempt, reply);
+    });
   };
 
   useEffect(() => {
@@ -1439,9 +1683,10 @@ export function ChatShell() {
   })();
 
   const showGoalPanel = goal !== null || state?.createGoal === true;
-  const showTaskPanel = !canvasOpen && (planSteps.length > 0 || showGoalPanel);
+  const showTaskPanel = planSteps.length > 0 || showGoalPanel;
   const goalContent = showGoalPanel ? (
     <GoalBar
+      key={taskId}
       goal={goal}
       initialEditing={state?.createGoal === true}
       loading={goalLoading}
@@ -1460,41 +1705,11 @@ export function ChatShell() {
     />
   ) : undefined;
 
-  return (
-    <div className="flex h-full overflow-hidden">
-      <div className="flex flex-1 min-w-0 flex-col">
-        <ChatView
-          thread={thread}
-          messages={messages}
-          streamingText={streamingText}
-          status={status}
-          currentQuestion={currentQuestion}
-          result={result}
-          generatedFiles={generatedFiles}
-          prompt={prompt}
-          onPromptChange={setPrompt}
-          onSubmit={handleSubmit}
-          onQueue={queuePrompt}
-          queuedText={queuedPrompt?.text ?? null}
-          onCancelQueue={cancelQueuedPrompt}
-          onAnswer={handleAnswer}
-          onCancel={handleCancel}
-          onComputerUseAction={handleComputerUseAction}
-          onComputerUseDismiss={handleComputerUseDismiss}
-          canvasOpen={canvasOpen}
-          initialFiles={!initialPrompt && initialFiles ? initialFiles.map(f => ({ filePath: f.filePath || '', name: f.name || f.originalName || '', isImage: false })) : undefined}
-          onToggleCanvas={() => setCanvasOpen(v => !v)}
-          onArtifactClick={openArtifactInCanvas}
-          onArtifactOpenExternal={(artifact) => {
-            if (artifact.filePath) {
-              window.open(toFileUrl(artifact.filePath), '_blank');
-            }
-          }}
-        />
-      </div>
-      {showTaskPanel && (
+  const taskContent = showTaskPanel ? (
         <TaskPanel
           planSteps={planSteps}
+          deliveryConnection={multiAgent.connection}
+          sourceTaskId={thread.currentTaskId ?? undefined}
           status={status}
           result={result}
           generatedFiles={generatedFiles}
@@ -1516,9 +1731,11 @@ export function ChatShell() {
           }}
           onArtifactClick={openArtifactInCanvas}
         />
-      )}
-      {canvasOpen && (
+      ) : null;
+  const canvasContent = canvasOpen ? (
         <CanvasPanel
+          embedded
+          interactionActive={canvasVisible}
           events={allEventsRef.current}
           conversationId={taskId ?? ''}
           sourceTaskId={thread?.currentTaskId ?? undefined}
@@ -1538,7 +1755,44 @@ export function ChatShell() {
             handleSubmit(msg);
           }}
         />
-      )}
-    </div>
+      ) : null;
+  return (
+    <ChatRightSurface key={taskId ?? ''} threadId={taskId ?? ''} agentCount={multiAgent.summary.total}
+      pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
+      hasAgentHistory={multiAgent.summary.hasAgentHistory} needsRecovery={multiAgent.summary.needsRecovery}
+      historicalSelection={multiAgent.summary.historicalSelection} deleted={multiAgent.summary.deleted}
+      taskContent={taskContent} canvasContent={canvasContent} canvasOpen={canvasOpen} canvasExpanded={canvasExpanded}
+      canvasRequestId={canvasPreviewModeRequest.id} onCanvasVisibilityChange={setCanvasVisible}
+      agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
+        onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
+      <ChatView
+        executionConnection={multiAgent.connection}
+        thread={thread}
+        messages={messages}
+        streamingText={streamingText}
+        status={status}
+        currentQuestion={currentQuestion}
+        result={result}
+        generatedFiles={generatedFiles}
+        prompt={prompt}
+        onPromptChange={setPrompt}
+        onSubmit={handleSubmit}
+        onQueue={queuePrompt}
+        queuedText={queuedPrompt?.text ?? null}
+        onCancelQueue={cancelQueuedPrompt}
+        onAnswer={handleAnswer}
+        onCancel={handleCancel}
+        onComputerUseAction={handleComputerUseAction}
+        onComputerUseDismiss={handleComputerUseDismiss}
+        canvasOpen={canvasVisible}
+        initialFiles={!initialPrompt && initialFiles ? initialFiles.map(f => ({ filePath: f.filePath || '', name: f.name || f.originalName || '', isImage: false })) : undefined}
+        onToggleCanvas={() => {
+          if (canvasVisible) setCanvasOpen(false);
+          else { setCanvasOpen(true); setCanvasPreviewModeRequest(previous => ({ ...previous, id: previous.id + 1 })); }
+        }}
+        onArtifactClick={openArtifactInCanvas}
+        onArtifactOpenExternal={artifact => { if (artifact.filePath) window.open(toFileUrl(artifact.filePath), '_blank'); }}
+      />
+    </ChatRightSurface>
   );
 }

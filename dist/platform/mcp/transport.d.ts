@@ -63,6 +63,8 @@ export interface McpClientConnection {
     close(): Promise<void>;
     dispose(): void;
 }
+/** Preserve caller cancellation across SDK v2's RequestTimeout normalization. */
+export declare function callMcpToolWithSignal(client: Pick<Client, 'callTool'>, params: Parameters<Client['callTool']>[0], options?: Parameters<Client['callTool']>[1]): ReturnType<Client['callTool']>;
 export type McpConnectionResult = {
     status: 'connected';
     connection: McpClientConnection;

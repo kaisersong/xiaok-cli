@@ -10,7 +10,7 @@ describe('TuiRuntimeState', () => {
     vi.useRealTimers();
   });
 
-  function createRuntimeState() {
+  function createRuntimeState(getActivitySummary?: (now: number) => string) {
     let activitySnapshot: { label: string; startedAt: number } | null = null;
     let activityLabel = '';
 
@@ -54,6 +54,7 @@ describe('TuiRuntimeState', () => {
       scrollRegion,
       onSuspendInteractiveUi: suspendInteractiveUi,
       isTerminalUiSuspended: () => false,
+      getActivitySummary,
     });
 
     return {
@@ -66,6 +67,32 @@ describe('TuiRuntimeState', () => {
       suspendInteractiveUi,
     };
   }
+
+  it('renders current child progress through the existing overlay timer and respects streaming/prompt suspension', () => {
+    let summary = 'review_runtime read 1s | review_tests 完成';
+    const { runtimeState, scrollRegion, setContentStreaming } = createRuntimeState(() => summary);
+    runtimeState.beginTurn('Waiting');
+    expect(scrollRegion.renderActivity).toHaveBeenLastCalledWith(expect.stringContaining('review_runtime read'));
+    summary = 'review_runtime thinking 2s';
+    vi.advanceTimersByTime(120);
+    expect(scrollRegion.renderActivity).toHaveBeenLastCalledWith(expect.stringContaining('thinking 2s'));
+    setContentStreaming(true);
+    scrollRegion.renderActivity.mockClear();
+    vi.advanceTimersByTime(240);
+    expect(scrollRegion.renderActivity).not.toHaveBeenCalled();
+    setContentStreaming(false);
+    runtimeState.enterInteractivePrompt();
+    vi.advanceTimersByTime(240);
+    expect(scrollRegion.renderActivity).not.toHaveBeenCalled();
+    runtimeState.destroy();
+  });
+
+  it('puts Working below all SubAgent rows', () => {
+    const { runtimeState, scrollRegion } = createRuntimeState(() => 'SubAgent 双鱼座\nSubAgent 天秤座');
+    runtimeState.beginTurn('Working');
+    expect(scrollRegion.renderActivity).toHaveBeenLastCalledWith('SubAgent 双鱼座\nSubAgent 天秤座\n⠋ Working · 1s');
+    runtimeState.destroy();
+  });
 
   it('tracks explicit surface states across the turn lifecycle', () => {
     const { runtimeState } = createRuntimeState();

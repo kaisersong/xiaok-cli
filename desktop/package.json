@@ -1,6 +1,6 @@
 {
   "name": "xiaok-desktop",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "private": true,
   "description": "xiaok Desktop Intent Cockpit",
   "author": "xiaok",
@@ -78,6 +78,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tabbable": "6.5.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",

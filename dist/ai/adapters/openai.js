@@ -8,6 +8,7 @@ import { KIMI_SCHEMA_LIMITS, KimiToolSchemaError, } from '../providers/kimi-tool
 import { getProviderProfile, resolveProviderModelVariant } from '../providers/registry.js';
 import { consumeProviderConversationAuthorization, reserveProviderConversationAuthorization, verifyConsumedProviderConversationAuthorizationForRetry, } from '../runtime/provider-conversation-authorization.js';
 import { assertKimiTransportAllowed } from '../runtime/kimi-rollback-policy.js';
+import { applyExperimentalToolOrder, parseExperimentalToolOrder } from '../providers/experimental-tool-order.js';
 const MAX_RETRIES = 3;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
@@ -290,11 +291,12 @@ export class OpenAIAdapter {
     kimiCodingHeadersApplied;
     onUsageDiagnostic;
     harnessContext;
+    experimentalToolOrder;
     reasoningDialectState = {
         current: 'reasoning_content',
         learned: false,
     };
-    constructor(init) {
+    constructor(init, experimentalToolOrder = parseExperimentalToolOrder(process.env.XIAOK_EXPERIMENTAL_TOOL_ORDER)) {
         assertKimiTransportAllowed(init.harnessContext.identity);
         const strictKimiK3 = init.harnessContext.profile.id !== 'generic-openai';
         if (strictKimiK3
@@ -306,6 +308,7 @@ export class OpenAIAdapter {
         this.kimiCodingHeadersApplied = init.kimiCodingHeadersApplied;
         this.onUsageDiagnostic = init.onUsageDiagnostic ?? recordUsageDiagnostic;
         this.harnessContext = init.harnessContext;
+        this.experimentalToolOrder = experimentalToolOrder;
         ownedHarnessProfiles.set(this, init.harnessContext.profile.id);
         this.client = new OpenAI({
             apiKey: init.apiKey,
@@ -378,7 +381,7 @@ export class OpenAIAdapter {
                 runtimeOptions,
                 capabilityOverrides,
             }),
-        });
+        }, this.experimentalToolOrder);
         if (clone.harnessContext.identityFingerprint
             === this.harnessContext.identityFingerprint) {
             clone.reasoningDialectState = { ...this.reasoningDialectState };
@@ -690,7 +693,9 @@ export class OpenAIAdapter {
         const request = {
             model: this.harnessContext.identity.wireModel,
             messages: openaiMessages,
-            tools: openaiTools.length > 0 ? openaiTools : undefined,
+            tools: openaiTools.length > 0
+                ? applyExperimentalToolOrder(openaiTools, this.experimentalToolOrder, this.harnessContext, this.client.baseURL)
+                : undefined,
             stream: true,
             stream_options: { include_usage: true },
         };

@@ -7,7 +7,7 @@ import type {
 } from '../types.js';
 import type { ToolRegistry } from './tools/index.js';
 import { AgentRunController } from './runtime/controller.js';
-import type { AgentRuntimeEvent } from './runtime/events.js';
+import type { AgentRuntimeEvent, RuntimeActivity } from './runtime/events.js';
 import { toLegacyStreamChunk } from './runtime/events.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
 import { AgentSessionState, type AgentSessionSnapshot, type CompactionRecord } from './runtime/session.js';
@@ -21,6 +21,8 @@ export type OnRuntimeEvent = (event: AgentRuntimeEvent) => void;
 let nextSessionOrdinal = 0;
 
 export interface AgentOptions {
+  onActivity?: (activity: RuntimeActivity) => void;
+  takePendingInput?: () => string | undefined;
   maxIterations?: number;
   contextLimit?: number;
   compactThreshold?: number;
@@ -127,6 +129,8 @@ export class Agent {
       compactPlaceholder: this.options.compactPlaceholder,
       memoryStore: this.options.memoryStore,
       providerSurfaceKind: this.options.providerSurfaceKind,
+      onActivity: this.options.onActivity,
+      takePendingInput: this.options.takePendingInput,
     });
   }
 

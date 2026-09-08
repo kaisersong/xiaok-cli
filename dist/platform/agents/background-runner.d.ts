@@ -5,6 +5,8 @@ export interface BackgroundJobMetadata {
 }
 export interface BackgroundJobRecord {
     jobId: string;
+    ownerId?: string;
+    ownerPid?: number;
     sessionId: string;
     source: string;
     taskId?: string;
@@ -33,10 +35,12 @@ export interface BackgroundExecutionResult {
 export interface BackgroundExecutionContext {
     job: BackgroundJobRecord;
     input: unknown;
+    signal: AbortSignal;
 }
 export interface BackgroundRunnerOptions {
     rootDir: string;
     recoverInterruptedJobs?: boolean;
+    shutdownTimeoutMs?: number;
     execute(context: BackgroundExecutionContext): Promise<BackgroundExecutionResult>;
     notify(job: BackgroundJobRecord): Promise<void> | void;
 }
@@ -45,5 +49,9 @@ export interface BackgroundRunner {
     get(jobId: string): BackgroundJobRecord | undefined;
     listBySession(sessionId: string): BackgroundJobRecord[];
     listByTask(taskId: string): BackgroundJobRecord[];
+    dispose(): Promise<{
+        settled: boolean;
+        pendingJobs: string[];
+    }>;
 }
 export declare function createBackgroundRunner(options: BackgroundRunnerOptions): BackgroundRunner;

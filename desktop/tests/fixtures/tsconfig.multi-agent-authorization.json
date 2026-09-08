@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.electron.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "../main/desktop-multi-agent-authorization-schema.bdd.test.ts",
+    "../main/desktop-multi-agent-workspace-authorization.bdd.test.ts",
+    "../main/desktop-multi-agent-approval-transport.bdd.test.ts",
+    "../main/desktop-multi-agent-approval-factory.bdd.test.ts",
+    "../main/desktop-multi-agent-approval-wire-budget.bdd.test.ts",
+    "../main/desktop-multi-agent-authorization-runtime.bdd.test.ts",
+    "multi-agent-authorization.ts",
+    "multi-agent-authorization-crash.mts",
+    "../../../src/types/**/*.d.ts"
+  ]
+}

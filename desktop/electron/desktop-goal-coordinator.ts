@@ -12,6 +12,7 @@ import type {
 import type { GoalToolHost } from '../../src/ai/tools/goal.js';
 import type { ToolExecutionContext } from '../../src/types.js';
 import type { PersistedTaskEvent } from '../../src/runtime/task-host/task-runtime-host.js';
+import type { HostDeliveryRecoveryReceipt } from '../../src/runtime/task-host/delivery-types.js';
 import type {
   GoalTurnExecutionScope,
   TaskCreateInput,
@@ -19,6 +20,8 @@ import type {
   TaskUnderstanding,
 } from '../../src/runtime/task-host/types.js';
 import { SqliteGoalStore, type GoalTaskBinding } from './goal-store-sqlite.js';
+import type { DesktopMultiAgentService } from './desktop-multi-agent-service.js';
+import { parseGoalRequestId, type GoalAttachmentRequest, type GoalAttachmentSource } from '../shared/goal-attachment.js';
 
 interface GoalTaskHost {
   prepareTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
@@ -29,6 +32,7 @@ interface GoalTaskHost {
 export interface DesktopGoalProjection {
   state: GoalState;
   activation: GoalActivation;
+  waitingReason?: 'waiting_children' | 'children_need_attention';
 }
 
 export interface PreparedGoalTask {
@@ -38,10 +42,12 @@ export interface PreparedGoalTask {
   executionScope: GoalTurnExecutionScope;
   goalRef: { goalId: string; revision: number };
   expiresAt: number;
+  attachmentSource: GoalAttachmentSource;
 }
 
 interface PendingAttachment extends PreparedGoalTask {
   timeout: ReturnType<typeof setTimeout>;
+  permissionRevision: number | undefined;
 }
 
 export interface DesktopGoalCoordinatorOptions {
@@ -53,12 +59,17 @@ export interface DesktopGoalCoordinatorOptions {
   publishGoalChanged?: (input: { threadId: string; goal: DesktopGoalProjection }) => void;
   publishGoalTaskPrepared?: (input: PreparedGoalTask) => void;
   attachmentTimeoutMs?: number;
+  multiAgent?: Pick<DesktopMultiAgentService, 'withGoalDecision' | 'goalReadiness' | 'assertThreadAdmission'
+    | 'getExecutionAuthorization' | 'assertExecutionAdmission'>;
+  prepareThread?(threadId: string): Promise<void>;
+  /** Fixed main-only service closure; ownerId/source strings never authorize recovery. */
+  authorizeRecoveredDelivery?(input: HostDeliveryRecoveryReceipt): void;
 }
 
 export class DesktopGoalCoordinator {
   private readonly now: () => number;
   private readonly service: GoalService;
-  private readonly activation = new Map<string, { goalId: string; armed: boolean }>();
+  private readonly activation = new Map<string, { goalId: string; armed: boolean; permissionRevision: number | undefined }>();
   private readonly pendingByThread = new Map<string, PendingAttachment>();
   private readonly runningByThread = new Map<string, string>();
   private readonly contextRunningByThread = new Map<string, string>();
@@ -87,17 +98,24 @@ export class DesktopGoalCoordinator {
     return {
       state: document.state,
       activation: this.isArmed(threadId, document.state.goalId) ? 'armed' : 'disarmed',
+      ...this.waitingProjection(threadId, document.state),
     };
   }
 
-  async createGoal(input: { threadId: string } & GoalInput): Promise<{
+  async createGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<{
     goal: DesktopGoalProjection;
     preparedTask: PreparedGoalTask;
   }> {
+    const attachmentSource: GoalAttachmentSource = { kind: 'request', requestId: parseGoalRequestId(input.requestId) ?? null };
+    const permissionRevision = this.captureExecutionRevision();
     return this.withThread(input.threadId, async () => {
+      await this.assertThreadAdmission(input.threadId, permissionRevision);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       const state = await this.service.create(this.context(input.threadId, 'user', null), input);
-      this.activation.set(input.threadId, { goalId: state.goalId, armed: true });
-      const preparedTask = await this.prepareGoalTask(input.threadId, state, 'user', state.objective);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
+      this.activation.set(input.threadId, { goalId: state.goalId, armed: true, permissionRevision });
+      const preparedTask = await this.prepareGoalTask(input.threadId, state, 'user', permissionRevision, attachmentSource, state.objective);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       const goal = { state, activation: 'armed' as const };
       this.options.publishGoalChanged?.({ threadId: input.threadId, goal });
       return { goal, preparedTask };
@@ -118,21 +136,28 @@ export class DesktopGoalCoordinator {
     });
   }
 
-  async resumeGoal(input: { threadId: string; turnLimit?: number }): Promise<{
+  async resumeGoal(input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest): Promise<{
     goal: DesktopGoalProjection;
     preparedTask: PreparedGoalTask;
   }> {
+    const attachmentSource: GoalAttachmentSource = { kind: 'request', requestId: parseGoalRequestId(input.requestId) ?? null };
+    const permissionRevision = this.captureExecutionRevision();
     return this.withThread(input.threadId, async () => {
+      await this.assertThreadAdmission(input.threadId, permissionRevision);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       if (this.contextRunningByThread.has(input.threadId)) {
         throw new Error('Cannot resume a Goal while a paused user task is still running');
       }
       const document = await this.requireDocument(input.threadId);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       const state = await this.service.resume(
         this.context(input.threadId, 'user', document.state.revision),
         input.turnLimit === undefined ? {} : { turnLimit: input.turnLimit },
       );
-      this.activation.set(input.threadId, { goalId: state.goalId, armed: true });
-      const preparedTask = await this.prepareGoalTask(input.threadId, state, 'continuation');
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
+      this.activation.set(input.threadId, { goalId: state.goalId, armed: true, permissionRevision });
+      const preparedTask = await this.prepareGoalTask(input.threadId, state, 'continuation', permissionRevision, attachmentSource);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       return { goal: this.publishProjection(input.threadId, state), preparedTask };
     });
   }
@@ -151,21 +176,28 @@ export class DesktopGoalCoordinator {
     });
   }
 
-  async replaceGoal(input: { threadId: string } & GoalInput): Promise<{
+  async replaceGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<{
     goal: DesktopGoalProjection;
     preparedTask: PreparedGoalTask;
   }> {
+    const attachmentSource: GoalAttachmentSource = { kind: 'request', requestId: parseGoalRequestId(input.requestId) ?? null };
+    const permissionRevision = this.captureExecutionRevision();
     return this.withThread(input.threadId, async () => {
+      await this.assertThreadAdmission(input.threadId, permissionRevision);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       if (this.pendingByThread.has(input.threadId) || this.runningByThread.has(input.threadId)) {
         throw new Error('Cannot replace a Goal while a Goal task is pending or running');
       }
       const document = await this.requireDocument(input.threadId);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       const state = await this.service.replace(
         this.context(input.threadId, 'user', document.state.revision),
         input,
       );
-      this.activation.set(input.threadId, { goalId: state.goalId, armed: true });
-      const preparedTask = await this.prepareGoalTask(input.threadId, state, 'user', state.objective);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
+      this.activation.set(input.threadId, { goalId: state.goalId, armed: true, permissionRevision });
+      const preparedTask = await this.prepareGoalTask(input.threadId, state, 'user', permissionRevision, attachmentSource, state.objective);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       return { goal: this.publishProjection(input.threadId, state), preparedTask };
     });
   }
@@ -173,8 +205,12 @@ export class DesktopGoalCoordinator {
   async admitUserTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     const threadId = input.context?.threadId;
     if (!threadId) return this.prepareBindStart(input);
+    const permissionRevision = this.captureExecutionRevision();
     return this.withThread(threadId, async () => {
+      await this.assertThreadAdmission(threadId, permissionRevision);
+      this.assertExecutionAdmission(threadId, permissionRevision);
       const document = await this.service.load(threadId);
+      this.assertExecutionAdmission(threadId, permissionRevision);
       if (!document || !this.isArmed(threadId, document.state.goalId) || document.state.status !== 'active') {
         if (!document) this.activation.delete(threadId);
         this.userQueuePending.delete(threadId);
@@ -183,6 +219,8 @@ export class DesktopGoalCoordinator {
             ...input,
             context: this.mainOwnedContext(threadId),
           });
+          const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
+          if (compensation) await compensation;
           this.options.store.recordContextTask({
             goalId: document.state.goalId,
             threadId,
@@ -192,7 +230,9 @@ export class DesktopGoalCoordinator {
           this.contextRunningByThread.set(threadId, prepared.taskId);
           this.contextTaskThread.set(prepared.taskId, threadId);
           try {
+            this.assertExecutionAdmission(threadId, permissionRevision);
             await this.options.taskHost.startTask(prepared.taskId);
+            this.assertExecutionAdmission(threadId, permissionRevision);
           } catch (error) {
             this.contextRunningByThread.delete(threadId);
             this.contextTaskThread.delete(prepared.taskId);
@@ -200,9 +240,10 @@ export class DesktopGoalCoordinator {
           }
           return prepared;
         }
-        return this.prepareBindStart(input);
+        return this.prepareBindStart(input, permissionRevision);
       }
       await this.cancelPending(threadId, 'superseded_by_user');
+      this.assertExecutionAdmission(threadId, permissionRevision);
       const runningTaskId = this.runningByThread.get(threadId);
       if (runningTaskId) {
         const binding = this.options.store.getTaskBinding(runningTaskId);
@@ -218,21 +259,30 @@ export class DesktopGoalCoordinator {
         context: this.mainOwnedContext(threadId),
         executionScope: scope,
       });
+      const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
+      if (compensation) await compensation;
       this.options.store.bindTask({ ...scopeToBinding(scope, prepared.taskId), attachedAt: this.now() });
       this.runningByThread.set(threadId, prepared.taskId);
       this.userQueuePending.delete(threadId);
+      this.assertExecutionAdmission(threadId, permissionRevision);
       await this.options.taskHost.startTask(prepared.taskId);
+      this.assertExecutionAdmission(threadId, permissionRevision);
       return prepared;
     });
   }
 
   async ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void> {
+    const permissionRevision = this.captureExecutionRevision();
     await this.withThread(input.threadId, async () => {
+      await this.assertThreadAdmission(input.threadId, permissionRevision);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
       const pending = this.pendingByThread.get(input.threadId);
       if (!pending || pending.attachmentId !== input.attachmentId) {
         throw new Error('Goal task attachment is missing, stale, or belongs to another thread');
       }
       const document = await this.requireDocument(input.threadId);
+      this.assertExecutionAdmission(input.threadId, permissionRevision);
+      this.assertExecutionAdmission(input.threadId, pending.permissionRevision);
       if (
         document.state.goalId !== pending.goalRef.goalId
         || document.state.revision !== pending.goalRef.revision
@@ -246,7 +296,9 @@ export class DesktopGoalCoordinator {
       this.pendingByThread.delete(input.threadId);
       this.options.store.markTaskAttached(pending.taskId, this.now());
       this.runningByThread.set(input.threadId, pending.taskId);
+      this.assertExecutionAdmission(input.threadId, pending.permissionRevision);
       await this.options.taskHost.startTask(pending.taskId);
+      this.assertExecutionAdmission(input.threadId, pending.permissionRevision);
     });
   }
 
@@ -299,6 +351,7 @@ export class DesktopGoalCoordinator {
 
   async handlePersistedTaskEvent(input: PersistedTaskEvent): Promise<void> {
     if (input.event.type !== 'task_terminal') return;
+    const predecessorTaskId = input.taskId;
     const terminalEvent = input.event;
     const binding = this.options.store.getTaskBinding(input.taskId);
     if (!binding) {
@@ -312,6 +365,7 @@ export class DesktopGoalCoordinator {
       });
       return;
     }
+    const permissionRevision = this.activation.get(binding.threadId)?.permissionRevision;
     await this.withThread(binding.threadId, async () => {
       if (this.discardedGoalTaskIds.delete(input.taskId)) {
         if (this.runningByThread.get(binding.threadId) === input.taskId) {
@@ -346,14 +400,15 @@ export class DesktopGoalCoordinator {
         record,
         recordedAt: this.now(),
       }));
+      const settle = async (readiness: 'ready' | 'waiting_children' | 'children_need_attention' | 'superseded'): Promise<GoalState | null> => {
       let terminalDecision: Parameters<GoalService['settleTurn']>[1]['terminalDecision'] = { kind: 'none' };
-      if (terminalEvent.status === 'completed' && completeSummary) {
+      if (readiness === 'ready' && terminalEvent.status === 'completed' && completeSummary) {
         const evaluation = new GoalCompletionEvaluator().evaluate(
           document.state,
           [...document.evidence, ...proposed],
         );
         if (evaluation.ok) terminalDecision = { kind: 'complete', reason: completeSummary };
-      } else if (terminalEvent.status === 'completed' && blockerClaim) {
+      } else if (readiness === 'ready' && terminalEvent.status === 'completed' && blockerClaim) {
         terminalDecision = { kind: 'blocker', ...blockerClaim };
       } else if (terminalEvent.status !== 'completed' && cancelReason !== 'superseded_by_user') {
         terminalDecision = {
@@ -380,15 +435,91 @@ export class DesktopGoalCoordinator {
         projection.activation === 'armed'
         && state.status === 'active'
         && !this.userQueuePending.has(binding.threadId)
+        && readiness === 'ready'
       ) {
-        await this.prepareGoalTask(binding.threadId, state, 'continuation');
+        return state;
       }
+      return null;
+      };
+      const continuation = this.options.multiAgent
+        ? await this.options.multiAgent.withGoalDecision(input.taskId, settle) : await settle('ready');
+      if (continuation && this.isArmed(binding.threadId, continuation.goalId)) {
+        this.assertExecutionAdmission(binding.threadId, permissionRevision);
+        await this.prepareGoalTask(binding.threadId, continuation, 'continuation', permissionRevision,
+          { kind: 'automatic', predecessorTaskId });
+      }
+    });
+  }
+
+  /** Consume an inspected, committed recovery terminal without arming or running.
+   * The service owns the recovery handle until this full persistence receipt. */
+  async handleRecoveredHostTerminal(input: HostDeliveryRecoveryReceipt): Promise<void> {
+    const authorize = this.options.authorizeRecoveredDelivery;
+    if (!authorize) throw new Error('Goal delivery recovery authorization is unavailable');
+    authorize(input);
+    // Keep the opaque handle itself; capture every data field before the queue
+    // yields so a caller cannot change the task, usage or scope after admission.
+    const { authority, ...payload } = input;
+    const captured: HostDeliveryRecoveryReceipt = { ...structuredClone(payload), authority };
+    const { event, snapshot } = captured;
+    const scope = snapshot.executionScope;
+    if (event.type !== 'task_terminal' || snapshot.taskId !== captured.taskId
+      || snapshot.status !== event.status || scope?.kind !== 'goal_turn') {
+      throw new Error('Goal delivery recovery requires a bound committed terminal');
+    }
+    const binding = this.requireTaskBinding(captured.taskId);
+    await this.withThread(binding.threadId, async () => {
+      authorize(captured);
+      const current = this.requireTaskBinding(captured.taskId);
+      if (current.threadId !== binding.threadId || current.threadId !== scope.threadId
+        || current.goalId !== scope.goalId || current.epoch !== scope.epoch
+        || current.goalTurnId !== scope.goalTurnId || current.origin !== scope.origin) {
+        throw new Error('Goal delivery recovery task scope mismatch');
+      }
+      const document = await this.service.load(current.threadId);
+      authorize(captured);
+      if (!document || document.state.goalId !== current.goalId || document.state.epoch !== current.epoch
+        || document.state.status !== 'active' || document.turns.some(turn => turn.turnId === current.goalTurnId)) return;
+      // Reuse the ordinary settlement reducer for real usage, duration, evidence
+      // and turn-budget precedence. No completion evaluator or pending claims.
+      const state = await this.service.settleTurn(
+        this.context(current.threadId, 'runtime', document.state.revision),
+        {
+          turnId: current.goalTurnId,
+          tokensUsed: snapshot.usage?.known ? snapshot.usage.inputTokens + snapshot.usage.outputTokens : 0,
+          activeWallClockMs: Math.max(0, snapshot.updatedAt - snapshot.createdAt),
+          evidence: collectEvidence(document.state, current, snapshot),
+          terminalDecision: event.status === 'completed' ? { kind: 'none' }
+            : { kind: 'paused', reason: event.status === 'cancelled' ? 'task_cancelled' : 'runtime_error' },
+        },
+      );
+      this.activation.delete(current.threadId);
+      this.publishProjection(current.threadId, state);
     });
   }
 
   getPendingAttachmentForTest(threadId: string): PreparedGoalTask | null {
     const pending = this.pendingByThread.get(threadId);
     return pending ? stripTimeout(pending) : null;
+  }
+
+  /** Main-only deletion settlement; not registered as an agent tool or IPC. */
+  async stopForThreadDeletion(input: { threadId: string; requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
+    if (input.requestSource !== 'user') throw new Error('thread deletion source is not permitted');
+    await this.withThread(input.threadId, async () => {
+      const { threadId } = input;
+      this.activation.delete(threadId);
+      this.userQueuePending.delete(threadId);
+      this.pendingComplete.delete(threadId);
+      this.pendingBlocked.delete(threadId);
+      await this.cancelPending(threadId, 'thread_deleted');
+      await this.cancelRunningGoalTask(threadId, 'thread_deleted');
+      const document = await this.service.load(threadId);
+      if (document && !['complete', 'cancelled'].includes(document.state.status)) {
+        const state = await this.service.cancel(this.context(threadId, 'user', document.state.revision), 'thread_deleted');
+        this.publishProjection(threadId, state);
+      }
+    });
   }
 
   disarmAll(): void {
@@ -400,12 +531,49 @@ export class DesktopGoalCoordinator {
     this.discardedGoalTaskIds.clear();
   }
 
+  /** Fixed main user callback. The service has already fenced the execution
+   * domain; this coordinator only withdraws Goal admission and persists pauses. */
+  async stopForWorkspaceExecutionRevocation(input: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
+    if (input.requestSource !== 'user') throw new Error('workspace Goal stop source is not permitted');
+    const threads = new Set([
+      ...this.activation.keys(), ...this.pendingByThread.keys(), ...this.runningByThread.keys(),
+      ...this.contextRunningByThread.keys(), ...this.threadChains.keys(),
+    ]);
+    const pending = new Map(this.pendingByThread);
+    // No await before disarming. Queued/awaiting work retains its captured
+    // service revision, so a later grant cannot re-arm the old invocation.
+    this.activation.clear();
+    for (const attachment of pending.values()) clearTimeout(attachment.timeout);
+    this.pendingByThread.clear();
+    this.runningByThread.clear();
+    this.contextRunningByThread.clear();
+    this.contextTaskThread.clear();
+    this.userQueuePending.clear();
+    this.pendingComplete.clear();
+    this.pendingBlocked.clear();
+    const outcomes = await Promise.allSettled([...threads].map(threadId => this.withThread(threadId, async () => {
+      const attachment = pending.get(threadId);
+      if (attachment) await this.cancelDiscardedGoalTask(attachment.taskId, 'permission_revoked');
+      const document = await this.service.load(threadId);
+      // The existing reducer only pauses active Goals. Already stopped and
+      // terminal Goals keep their reason and identity, including cold history.
+      if (document?.state.status !== 'active') return;
+      const state = await this.service.pause(this.context(threadId, 'user', document.state.revision), 'permission_revoked');
+      this.publishProjection(threadId, state);
+    })));
+    const failed = outcomes.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
+  }
+
   private async prepareGoalTask(
     threadId: string,
     state: GoalState,
     origin: GoalTurnExecutionScope['origin'],
+    permissionRevision: number | undefined,
+    attachmentSource: GoalAttachmentSource,
     prompt?: string,
   ): Promise<PreparedGoalTask> {
+    this.assertExecutionAdmission(threadId, permissionRevision);
     if (this.pendingByThread.has(threadId) || this.runningByThread.has(threadId)) {
       throw new Error('A Goal task is already pending or running');
     }
@@ -425,6 +593,8 @@ export class DesktopGoalCoordinator {
       context: this.mainOwnedContext(threadId),
       executionScope,
     });
+    const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
+    if (compensation) await compensation;
     this.options.store.bindTask({ ...scopeToBinding(executionScope, prepared.taskId), attachedAt: null });
     const attachmentId = this.options.createAttachmentId?.() ?? `goal_attachment_${randomUUID()}`;
     const expiresAt = this.now() + (this.options.attachmentTimeoutMs ?? 30_000);
@@ -435,12 +605,14 @@ export class DesktopGoalCoordinator {
     const pending: PendingAttachment = {
       attachmentId, threadId, taskId: prepared.taskId, executionScope,
       goalRef: { goalId: state.goalId, revision: state.revision },
-      expiresAt, timeout,
+      expiresAt, timeout, permissionRevision,
+      attachmentSource,
     };
     this.pendingByThread.set(threadId, pending);
     const published = stripTimeout(pending);
+    this.assertExecutionAdmission(threadId, permissionRevision);
     this.options.publishGoalTaskPrepared?.(published);
-    return published;
+    return stripTimeout(pending);
   }
 
   private async expireAttachment(threadId: string, attachmentId: string): Promise<void> {
@@ -488,10 +660,40 @@ export class DesktopGoalCoordinator {
     }
   }
 
-  private async prepareBindStart(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
+  private async prepareBindStart(input: TaskCreateInput, permissionRevision?: number): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     const prepared = await this.options.taskHost.prepareTask(input);
+    const threadId = input.context?.threadId;
+    if (threadId) {
+      const compensation = this.assertPreparedAdmission(threadId, permissionRevision, prepared.taskId);
+      if (compensation) await compensation;
+    }
     await this.options.taskHost.startTask(prepared.taskId);
+    if (threadId) this.assertExecutionAdmission(threadId, permissionRevision);
     return prepared;
+  }
+
+  private captureExecutionRevision(): number | undefined {
+    return this.options.multiAgent?.getExecutionAuthorization().permissionRevision;
+  }
+
+  private assertExecutionAdmission(threadId: string, permissionRevision: number | undefined): void {
+    this.options.multiAgent?.assertExecutionAdmission(threadId, permissionRevision);
+  }
+
+  private assertPreparedAdmission(threadId: string, permissionRevision: number | undefined, taskId: string): Promise<never> | undefined {
+    // Success remains synchronous with bind/publish/start. Await only a denied
+    // task's actual cancellation, never introduce a post-check microtask gap.
+    try { this.assertExecutionAdmission(threadId, permissionRevision); return undefined; }
+    catch (error) {
+      return this.cancelDiscardedGoalTask(taskId, 'permission_revoked').then(() => { throw error; });
+    }
+  }
+
+  private async assertThreadAdmission(threadId: string, permissionRevision: number | undefined): Promise<void> {
+    this.assertExecutionAdmission(threadId, permissionRevision);
+    await this.options.prepareThread?.(threadId);
+    this.options.multiAgent?.assertThreadAdmission(threadId);
+    this.assertExecutionAdmission(threadId, permissionRevision);
   }
 
   private createScope(
@@ -553,9 +755,15 @@ export class DesktopGoalCoordinator {
     const goal = {
       state,
       activation: this.isArmed(threadId, state.goalId) ? 'armed' as const : 'disarmed' as const,
+      ...this.waitingProjection(threadId, state),
     };
     this.options.publishGoalChanged?.({ threadId, goal });
     return goal;
+  }
+
+  private waitingProjection(threadId: string, state: GoalState): Pick<DesktopGoalProjection, 'waitingReason'> {
+    const readiness = state.status === 'active' ? this.options.multiAgent?.goalReadiness(threadId) : undefined;
+    return readiness && readiness !== 'ready' ? { waitingReason: readiness } : {};
   }
 
   private withThread<T>(threadId: string, action: () => Promise<T>): Promise<T> {
@@ -569,8 +777,8 @@ export class DesktopGoalCoordinator {
 }
 
 function stripTimeout(pending: PendingAttachment): PreparedGoalTask {
-  const { timeout: _timeout, ...result } = pending;
-  return result;
+  const { timeout: _timeout, permissionRevision: _permissionRevision, ...result } = pending;
+  return { ...result, attachmentSource: { ...pending.attachmentSource } };
 }
 
 function scopeToBinding(scope: GoalTurnExecutionScope, taskId: string): Omit<GoalTaskBinding, 'ordinal' | 'attachedAt'> {

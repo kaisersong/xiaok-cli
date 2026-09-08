@@ -1,6 +1,6 @@
-import type { McpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
+import type { McpInvocationOptions, McpRuntimeToolResult } from '../../ai/mcp/runtime/client.js';
 export interface CuaConnection {
-    callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult>;
+    callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult>;
     dispose(): void;
 }
 export type CuaConnectionFactory = () => Promise<CuaConnection>;
@@ -17,7 +17,7 @@ export declare class CuaConnectionManager {
     private readonly _connectTimeoutMs;
     constructor(factory: CuaConnectionFactory, options?: CuaConnectionManagerOptions);
     get state(): CuaConnectionState;
-    callToolResult(name: string, input: Record<string, unknown>): Promise<McpRuntimeToolResult>;
+    callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult>;
     dispose(): Promise<void>;
     private _cleanup;
     private _ensureConnected;
