@@ -139,7 +139,15 @@ xiaok login
 xiaok
 ```
 
-npm 包名是 `xiaokcode`，命令是 `xiaok`。使用 `xiaok update` 更新。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
+npm 包名是 `xiaokcode`，命令是 `xiaok`。使用 `xiaok update` 更新。
+
+> **npm ≥ 11.16 用户**：npm 默认拦截依赖包的 install/postinstall 脚本。若安装时出现 `install scripts not yet covered by allowScripts` 警告，请改用：
+>
+> ```bash
+> npm install -g --allow-scripts=nodejieba,onnxruntime-node xiaokcode
+> ```
+>
+> `onnxruntime-node` 的脚本用于放置本地 embedding 推理所需的原生二进制，`nodejieba` 用于中文分词。脚本被拦截时 CLI 仍可正常启动，但这两项能力会静默降级（embedding 关闭、中文按整段索引）。也可以全局一次性放行：`npm config set allow-scripts=nodejieba,onnxruntime-node --location=user`。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
 
 ### 源码安装（开发用）
 

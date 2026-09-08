@@ -1,7 +1,13 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { InferenceSession, Tensor } from 'onnxruntime-node';
+import type { InferenceSession, Tensor } from 'onnxruntime-node';
+// onnxruntime-node resolves its native binding at import time and throws
+// when its postinstall step was blocked (npm >= 11.16 allow-scripts policy).
+// Keep the value import lazy inside _init() so a missing binding degrades to
+// engine 'none' instead of crashing every command importing this module.
 import { getModelDir } from './model-registry.js';
+
+type OrtModule = typeof import('onnxruntime-node');
 
 export interface OnnxEmbeddingResult {
   engine: 'onnx';
@@ -34,6 +40,7 @@ function truncateToWindow(ids: number[], attentionMask: number[]): { ids: number
 
 export class OnnxEmbeddingEngine {
   private session: InferenceSession | null = null;
+  private ort: OrtModule | null = null;
   private tokenizer: { encode: (text: string) => { ids: number[]; attention_mask: number[] } } | null = null;
   private readonly modelDir: string;
   private initPromise: Promise<OnnxStatus> | null = null;
@@ -57,7 +64,9 @@ export class OnnxEmbeddingEngine {
     }
 
     try {
-      this.session = await InferenceSession.create(modelPath, {
+      const ort = await import('onnxruntime-node');
+      this.ort = ort;
+      this.session = await ort.InferenceSession.create(modelPath, {
         executionProviders: ['cpu'],
         graphOptimizationLevel: 'all',
       });
@@ -69,9 +78,9 @@ export class OnnxEmbeddingEngine {
       // 因此不需要 padding。
       this.tokenizer = new Tokenizer(JSON.parse(tokenizerJson), {}) as unknown as NonNullable<typeof this.tokenizer>;
 
-      const dummyIds = new Tensor('int64', new BigInt64Array([101n, 102n]), [1, 2]);
-      const dummyMask = new Tensor('int64', new BigInt64Array([1n, 1n]), [1, 2]);
-      const dummyTypes = new Tensor('int64', new BigInt64Array([0n, 0n]), [1, 2]);
+      const dummyIds = new ort.Tensor('int64', new BigInt64Array([101n, 102n]), [1, 2]);
+      const dummyMask = new ort.Tensor('int64', new BigInt64Array([1n, 1n]), [1, 2]);
+      const dummyTypes = new ort.Tensor('int64', new BigInt64Array([0n, 0n]), [1, 2]);
       const dummyOut = await this.session.run({ input_ids: dummyIds, attention_mask: dummyMask, token_type_ids: dummyTypes });
       const actualDims = (dummyOut['last_hidden_state'] as Tensor).dims[2] as number;
 
@@ -84,17 +93,18 @@ export class OnnxEmbeddingEngine {
 
   async embed(texts: string[]): Promise<Float32Array[]> {
     const status = await this.init();
-    if (status.engine !== 'onnx' || !this.session || !this.tokenizer) {
+    if (status.engine !== 'onnx' || !this.session || !this.tokenizer || !this.ort) {
       throw new Error('ONNX engine not initialized');
     }
+    const ort = this.ort;
 
     const results: Float32Array[] = [];
     for (const text of texts) {
       const encoded = this.tokenizer.encode(text);
       const { ids, mask } = truncateToWindow(encoded.ids, encoded.attention_mask);
-      const inputIds = new Tensor('int64', BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
-      const attentionMask = new Tensor('int64', BigInt64Array.from(mask.map(BigInt)), [1, mask.length]);
-      const tokenTypeIds = new Tensor('int64', new BigInt64Array(inputIds.size), [1, ids.length]);
+      const inputIds = new ort.Tensor('int64', BigInt64Array.from(ids.map(BigInt)), [1, ids.length]);
+      const attentionMask = new ort.Tensor('int64', BigInt64Array.from(mask.map(BigInt)), [1, mask.length]);
+      const tokenTypeIds = new ort.Tensor('int64', new BigInt64Array(inputIds.size), [1, ids.length]);
 
       const output = await this.session.run({
         input_ids: inputIds,

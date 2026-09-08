@@ -139,7 +139,15 @@ xiaok login
 xiaok
 ```
 
-The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
+The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`.
+
+> **npm >= 11.16 users:** npm blocks dependency install/postinstall scripts by default. If you see a warning like `install scripts not yet covered by allowScripts`, install with:
+>
+> ```bash
+> npm install -g --allow-scripts=nodejieba,onnxruntime-node xiaokcode
+> ```
+>
+> The `onnxruntime-node` script places the native binaries required for local embedding inference; `nodejieba` provides Chinese word segmentation. When the scripts are blocked the CLI still starts, but those capabilities degrade silently (embeddings off, Chinese text indexed as whole segments). To allow them permanently: `npm config set allow-scripts=nodejieba,onnxruntime-node --location=user`. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
 
 ### From Source (Development)
 
