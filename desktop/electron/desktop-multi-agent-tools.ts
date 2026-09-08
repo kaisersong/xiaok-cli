@@ -64,7 +64,7 @@ export function createDesktopMultiAgentTools(options: DesktopMultiAgentToolOptio
       if (input.agent && !configured) throw new Error('unknown predefined agent');
       const agentDef: CustomAgentDef = configured ? structuredClone(configured) : {
         name: String(input.task_name), systemPrompt: typeof input.description === 'string' ? input.description : '',
-        maxIterations: 50, cleanup: 'keep', isolation: input.isolation === 'worktree' ? 'worktree' : undefined,
+        cleanup: 'keep', isolation: input.isolation === 'worktree' ? 'worktree' : undefined,
       };
       if (input.model !== undefined || input.modelCapability !== undefined || agentDef.model !== undefined || agentDef.modelCapability !== undefined) throw new Error('desktop_multi_agent_model_override_unsupported');
       const selected = Array.isArray(input.tools) ? (input.tools as string[]).map(getCanonicalToolId) : undefined;
@@ -77,9 +77,9 @@ export function createDesktopMultiAgentTools(options: DesktopMultiAgentToolOptio
     }),
     make('send_message', '只能向同组 Agent 或 main/parent 发送消息。严禁冒充用户或其他 Agent；消息不触发新执行，在下一模型边界确认进入上下文，不代表模型已理解。', properties, ['target', 'message'], (input, context) =>
       options.service.send({ ...operation(context), target: String(input.target), message: text(input.message) })),
-    make('followup_task', '只能给严格后代追加任务；严禁控制自身、main、祖先或兄弟。忙碌时最多排队四轮，ACK queued_next_admission 不代表已运行，需按 operationId/expectedTurn 观察。', properties, ['target', 'message'], (input, context) =>
+    make('followup_task', '只能给严格后代追加任务；严禁控制自身、main、祖先或兄弟。忙碌时最多排队四轮，组内追加可在当前执行组继续；ACK queued_next_admission 不代表已运行，需按 operationId/expectedTurn 等待。用户已排队的下一轮是屏障，遇到 multi_agent_followup_user_barrier 不可反复重试。', properties, ['target', 'message'], (input, context) =>
       options.service.followup({ ...operation(context), target: String(input.target), message: text(input.message) })),
-    make('wait_agent', '等待同组目标消息通知或实际执行结算。严禁把 stopping/cleanup_pending 当作结束。消息由模型边界消费；本工具不消费正文。未来轮次的 queued 立即返回，不能把旧轮完成当作新轮结果。', {
+    make('wait_agent', '等待同组目标消息通知或实际执行结算。严禁把 stopping/cleanup_pending 当作结束。消息由模型边界消费；本工具不消费正文。等待追加结果时使用 ACK 的 operationId/expectedTurn，operationId 只能对应单个目标；不能把旧轮完成当作新轮结果。非法轮次或用户下一轮屏障会报错，不可反复重试；用户下一轮须当前执行组结束后才可运行。', {
       targets: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1 } },
       timeout_ms: { type: 'number', minimum: 1 }, operation_id: { type: 'string' }, expected_turn: { type: 'integer', minimum: 1 },
     }, ['targets'], input => options.service.wait({ ...identity(), targets: input.targets as string[],

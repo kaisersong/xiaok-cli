@@ -23,18 +23,10 @@ export function resolveRegisteredStrictKimiK3Profile(
     : undefined;
 }
 
-export function assertKimiK3SessionModelSwitchSupported(
+export function requiresKimiK3HistoryMigration(
   currentProfile: StrictKimiK3ProfileId | undefined,
   nextProfile: StrictKimiK3ProfileId | undefined,
   messageCount: number,
-): void {
-  if (
-    messageCount > 0
-    && (currentProfile !== undefined || nextProfile !== undefined)
-    && currentProfile !== nextProfile
-  ) {
-    throw new Error(
-      'KIMI_K3_SESSION_MODEL_SWITCH_UNSUPPORTED：请新建会话后再切换模型',
-    );
-  }
+): boolean {
+  return messageCount > 0 && currentProfile !== nextProfile;
 }

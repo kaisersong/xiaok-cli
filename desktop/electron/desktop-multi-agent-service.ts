@@ -82,6 +82,7 @@ interface LiveChild {
 }
 interface PendingFollowup {
   lane: ExecutionLane;
+  acceptedEpoch?: number;
   operationId: string; callerId: string; message: string; expectedTurn: number;
   readonly sourceTaskId: string | undefined;
   forceNewEpoch: boolean; controller: AbortController; request?: ExecutionLeaseRequest; ticket?: ExecutionLease;
@@ -618,9 +619,7 @@ export class DesktopMultiAgentService {
 
   getApprovalDeadline(actor: DesktopAgentActor): number {
     const state = this.requireActor(actor, 'agent'); const context = state.context;
-    if (context.agentId === `root_${context.groupId}`) return context.effectiveDeadline;
-    const lastActivity = state.group.activities.get(context.agentId)?.lastActivityAt ?? this.requireOwnedAgent(state.group, context.agentId).lastActivityAt ?? Date.now();
-    return Math.min(context.effectiveDeadline, lastActivity + 5 * 60_000);
+    return context.effectiveDeadline;
   }
 
   bindApprovalTransport(transport: DesktopMultiAgentApprovalTransport): DesktopApprovalOwner {
@@ -667,7 +666,7 @@ export class DesktopMultiAgentService {
     const deadline = this.getApprovalDeadline(context.actor);
     if (Date.now() < deadline) return;
     const group = state.group;
-    if (group.lease && Date.now() >= group.lease.deadlineAt!) {
+    if (group.lease?.deadlineAt !== undefined && Date.now() >= group.lease.deadlineAt) {
       const reason = new Error('multi_agent_lease_expired');
       group.leaseController?.abort(reason);
       if (group.root?.context && !this.actors.get(group.root.context.actor)?.sealed) {
@@ -1990,19 +1989,20 @@ export class DesktopMultiAgentService {
       this.requireActor(input.actor, input.requestSource); this.validateText(input.message);
       const target = this.resolveTarget(state, input.target); this.assertDescendant(state, target);
       const child = state.group.children.get(target.id);
-      if (!child || target.status === 'closed' || target.resourcesReleased || target.cleanupError || child.stopRequested && child.execution) throw new Error('agent is not resumable');
+      if (!child || !target.resumable || target.cleanupError || child.stopRequested && child.execution) throw new Error('agent is not resumable');
       const existing = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, input.operationId));
       if (child.followups.length >= 4 && !existing) throw new Error('multi_agent_followup_queue_full');
       const expectedTurn = child.context.turn + child.followups.length + 1;
-      const result = this.mutate(state.group, input, 'followup', { target: target.id, message: input.message }, () => ({
-        operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn,
-      }));
-      if (existing) return result;
+      const result = this.mutate(state.group, input, 'followup', { target: target.id, message: input.message }, () => child.followups.some(pending => pending.requestSource === 'user')
+        ? { operationId: input.operationId, state: 'completed', outcome: 'rejected', targetAgentId: target.id, error: 'multi_agent_followup_user_barrier' }
+        : { operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn });
+      if (existing || result.outcome === 'rejected') return result;
       clearTimeout(child.ttl);
       child.followups.push({ operationId: input.operationId, callerId: state.context.agentId, message: input.message, expectedTurn,
         lane: state.context.memberTicket.lane,
         sourceTaskId: state.context.sourceTaskId,
-        forceNewEpoch: Boolean(child.execution || child.followups.length), controller: new AbortController(), requestSource: 'agent' });
+        acceptedEpoch: state.context.memberTicket.epoch,
+        forceNewEpoch: false, controller: new AbortController(), requestSource: 'agent' });
       this.enqueueNextFollowup(state.group, child);
       return result;
     });
@@ -2012,17 +2012,35 @@ export class DesktopMultiAgentService {
     const state = this.requireActor(input.actor, input.requestSource);
     if (!input.targets.length || input.targets.length > 8) throw new Error('invalid wait targets');
     const targets = input.targets.map(target => this.resolveTarget(state, target).id);
+    if (input.expectedTurn !== undefined && (!Number.isSafeInteger(input.expectedTurn) || input.expectedTurn < 1)) throw new Error('multi_agent_wait_invalid_turn');
+    let expectedTurn = input.expectedTurn;
+    if (input.operationId) {
+      const operation = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, input.operationId!));
+      if (!operation || !['spawn', 'followup'].includes(operation.command) || targets.length !== 1
+        || operation.result.targetAgentId !== targets[0] || operation.result.outcome === 'rejected'
+        || expectedTurn !== undefined && operation.result.expectedTurn !== expectedTurn) throw new Error('multi_agent_wait_invalid_operation');
+      const operationTurn = operation.result.expectedTurn;
+      if (operationTurn !== undefined && (typeof operationTurn !== 'number' || !Number.isSafeInteger(operationTurn) || operationTurn < 1)) throw new Error('multi_agent_wait_invalid_operation');
+      expectedTurn ??= operationTurn;
+    }
     const deadline = Date.now() + Math.max(1, Math.min(30_000, input.timeoutMs));
     const inspect = (): DesktopAgentWaitResult | undefined => {
       this.requireActor(input.actor, input.requestSource);
       const agents = targets.map(id => this.requireOwnedAgent(state.group, id));
-      for (const id of targets) {
-        const queued = state.group.children.get(id)?.followups.find(pending => pending.callerId === state.context.agentId
-          && (!input.operationId || pending.operationId === input.operationId));
-        if (queued) return { reason: 'queued', settled: false, agents, operationId: queued.operationId, expectedTurn: queued.expectedTurn };
+      let future = false;
+      for (const agent of agents) {
+        const pending = state.group.children.get(agent.id)?.followups ?? [];
+        const requestedTurn = expectedTurn ?? pending.filter(item => item.callerId === state.context.agentId && item.requestSource === 'agent').at(-1)?.expectedTurn;
+        if (requestedTurn !== undefined && agent.turn > requestedTurn) throw new Error('multi_agent_wait_turn_superseded');
+        if (requestedTurn !== undefined && agent.turn < requestedTurn) {
+          const next = pending.find(item => item.expectedTurn === requestedTurn);
+          if (!next) throw new Error('multi_agent_wait_invalid_turn');
+          if (pending.some(item => item.expectedTurn <= requestedTurn && item.forceNewEpoch)) throw new Error('multi_agent_wait_user_barrier');
+          if (pending.some(item => item.expectedTurn <= requestedTurn && item.acceptedEpoch !== state.context.memberTicket.epoch)) throw new Error('multi_agent_wait_epoch_barrier');
+          future = true;
+        }
       }
-      if (input.expectedTurn && agents.some(agent => agent.turn < input.expectedTurn!)) return { reason: 'queued', settled: false, agents, operationId: input.operationId, expectedTurn: input.expectedTurn };
-      if (agents.every(agent => TERMINAL.has(agent.status) && !agent.executionActive)) return { reason: 'settled_terminal', settled: true, agents };
+      if (!future && agents.every(agent => TERMINAL.has(agent.status) && !agent.executionActive)) return { reason: 'settled_terminal', settled: true, agents };
       if (agents.some(agent => agent.executionActive && (agent.status === 'interrupted' || agent.stopState !== 'none'))) return { reason: 'stopping', settled: false, agents };
       const messages = this.persistenceIO(state.group, () => this.options.store.unreadMessageIds(state.group.id, state.context.agentId, targets));
       if (messages.length) return { reason: 'message', settled: false, agents, messageIds: messages };
@@ -2032,13 +2050,14 @@ export class DesktopMultiAgentService {
     for (;;) {
       const result = await state.group.commands.run(inspect);
       if (result) return result;
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
         const done = () => { clearTimeout(timer); state.group.waiters.delete(done); resolve(); };
         state.group.waiters.add(done);
         timer = setTimeout(done, Math.max(1, deadline - Date.now()));
         // Register and inspect in one JS turn; do not lose a settled event.
-        if (inspect()) done();
+        try { if (inspect()) done(); }
+        catch (error) { clearTimeout(timer); state.group.waiters.delete(done); reject(error); }
       });
     }
   }
@@ -2236,6 +2255,7 @@ export class DesktopMultiAgentService {
     if (durable.historicalOnly || durable.bootId !== this.options.store.bootId) throw new Error('historical group is read-only');
     const group = { id: groupId, threadId: durable.threadId, commands: this.resourceCommands.get(groupId)?.commands ?? new MultiAgentCommandSequencer(), children: new Map(), lifetime: new AbortController(), waiters: new Set(), outputs: new Map(), activities: new Map() } as LiveGroup;
     group.core = new MultiAgentCoordinator({ executionMode: 'externally_activated', maxResidentAgents: MAX_RESIDENT_CHILDREN + 1, maxDepth: 3, maxMessageChars: 16 * 1024,
+      idleTimeoutMs: 0, turnTimeoutMs: 0,
       closeSettlementTimeoutMs: this.grace, onEvent: event => this.captureCoreEvent(group, event) });
     this.groups.set(groupId, group); return group;
   }
@@ -2250,7 +2270,7 @@ export class DesktopMultiAgentService {
       // active or prepared. Explicit unknown provenance must remain unknown.
       sourceTaskId: provenance ? provenance.sourceTaskId : group.root?.binding.sourceTaskId ?? this.options.store.getAgent(group.id, agentId)?.sourceTaskId,
       rootEpoch: group.root?.binding.rootEpoch ?? this.options.store.requireGroup(group.id).currentRootEpoch,
-      memberTicket, signal: combined, effectiveDeadline: Math.min(memberTicket.deadlineAt!, Date.now() + (agentId === `root_${group.id}` ? 28 : 10) * 60_000),
+      memberTicket, signal: combined, effectiveDeadline: memberTicket.deadlineAt ?? Number.POSITIVE_INFINITY,
       cwd: group.children.get(agentId)?.cwd ?? this.options.store.getThread(this.options.store.requireGroup(group.id).threadId)!.cwd,
       mailbox: undefined as unknown as DesktopMailboxPort,
     };
@@ -2288,11 +2308,17 @@ export class DesktopMultiAgentService {
     if (group.lease?.epoch === ticket.epoch) return;
     group.lease = ticket; group.leaseController = new AbortController();
     clearTimeout(group.deadlineTimer);
-    group.deadlineTimer = setTimeout(() => {
-      void this.expireLease({ requestSource: 'scheduler', groupId: group.id, leaseEpoch: ticket.epoch })
-        .catch(() => this.freezeGroup(group, 'multi_agent_lease_expiry_failed'));
-    }, Math.max(1, ticket.deadlineAt! - Date.now()));
-    group.deadlineTimer.unref?.();
+    if (ticket.deadlineAt === undefined) return;
+    const arm = () => {
+      if (group.lease !== ticket || ticket.released) return;
+      group.deadlineTimer = setTimeout(() => {
+        if (Date.now() < ticket.deadlineAt!) { arm(); return; }
+        void this.expireLease({ requestSource: 'scheduler', groupId: group.id, leaseEpoch: ticket.epoch })
+          .catch(() => this.freezeGroup(group, 'multi_agent_lease_expiry_failed'));
+      }, Math.min(2 ** 31 - 1, Math.max(1, ticket.deadlineAt! - Date.now())));
+      group.deadlineTimer.unref?.();
+    };
+    arm();
   }
 
   /** Main timer command. Never translates expiry into cancellation of an old root. */
@@ -2301,7 +2327,7 @@ export class DesktopMultiAgentService {
     const group = this.groups.get(input.groupId); if (!group || this.disposed) return;
     const sourceTaskId = await group.commands.run(() => {
       const lease = group.lease;
-      if (!lease || lease.epoch !== input.leaseEpoch || lease.released || Date.now() < lease.deadlineAt!) return;
+      if (!lease || lease.epoch !== input.leaseEpoch || lease.released || lease.deadlineAt === undefined || Date.now() < lease.deadlineAt) return;
       const reason = new Error('multi_agent_lease_expired'); let failed = false;
       const root = group.root;
       const activeRoot = root?.context && root.context.memberTicket.epoch === lease.epoch && !this.actors.get(root.context.actor)?.sealed ? root : undefined;
@@ -2364,7 +2390,7 @@ export class DesktopMultiAgentService {
     const pending = child.followups[0];
     if (!pending || pending.request || child.execution || this.disposed || group.frozen) return;
     const signal = AbortSignal.any([pending.controller.signal, group.lifetime.signal]);
-    pending.request = pending.forceNewEpoch
+    pending.request = pending.forceNewEpoch || pending.acceptedEpoch !== undefined && pending.acceptedEpoch !== group.lease?.epoch
       ? this.options.coordinator.enqueueGroupTurn(group.id, signal, pending.lane)
       : group.lease && !group.lease.released
         ? this.options.coordinator.joinOrEnqueue(group.id, group.lease.epoch, 'agent_work', signal)
@@ -2476,7 +2502,12 @@ export class DesktopMultiAgentService {
       error: core.error ? truncateMultiAgentText(core.error, 1024).text : undefined,
       resourcesReleased: core.resourcesReleased && diskPending.length === 0,
       cleanupError: core.cleanupError ? truncateMultiAgentText(core.cleanupError, 512).text : core.resourcesReleased ? diskPending[0]?.lastError : undefined,
-      sessionResident: child?.sessionResident ?? false, resumable: Boolean(child?.sessionResident && !core.resourcesReleased && core.status !== 'closed'),
+      // Initializing turns accept queued followups before session residency;
+      // terminal turns require an actually retained session, never cleanup alone.
+      sessionResident: child?.sessionResident ?? false, resumable: Boolean(child
+        && (child.sessionResident || core.status === 'pending' || core.status === 'running') && !(child.stopRequested && child.execution)
+        && !core.resourcesReleased && !core.cleanupError && core.status !== 'closed'
+        && !(core.executionActive && (core.status === 'failed' || core.status === 'interrupted'))),
       cleanupPending: Boolean((core.status === 'closed' || previous?.stopState === 'stalled' || child?.stopRequested && core.executionActive) && !core.resourcesReleased || core.resourcesReleased && diskPending.length),
       stopState: previous?.stopState === 'stalled' && core.executionActive ? 'stalled' : child?.stopRequested && core.executionActive ? 'requested' : 'none',
       activationState: core.executionActive ? 'active' : core.preparedReservation ? 'prepared' : 'settled',

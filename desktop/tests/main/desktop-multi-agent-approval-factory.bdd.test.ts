@@ -134,13 +134,13 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
     expect(f.store.getOperation(f.context.groupId, `approval-request:${f.pending.approvalId}`)).toMatchObject({ result: { approval: { agentId: f.context.agentId, turnId: f.context.turnId } } });
   });
 
-  it.each([299_000, 301_000, 599_000])('AP3/AP8 Given a real child approval at idle age %sms and its timer has not fired, Then reads never renew the original deadline and late decisions cannot request another model turn', async idleAge => {
+  it.each([299_000, 301_000, 599_000, 601_000])('AP3/AP8 real child idle age %sms does not expire the actor, while the original approval credential TTL is enforced', async idleAge => {
     const f = await startPrompt('child');
     const scope = { threadId: 'approval-thread', groupId: f.context.groupId, approvalId: f.pending.approvalId };
     const deadline = f.boundary.service.getApprovalDeadline(f.context.actor);
     const before = (await f.snapshot()).agents.find(agent => agent.id === f.context.agentId)!;
     expect(before.lastActivityAt).toBeTypeOf('number');
-    expect(deadline).toBe(Math.min(f.context.effectiveDeadline, before.lastActivityAt! + 300_000));
+    expect(deadline).toBe(Infinity);
     const ticketDeadline = f.context.memberTicket.deadlineAt;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(before.lastActivityAt! + idleAge);
     try {
@@ -155,13 +155,13 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
       expect(f.context.memberTicket.deadlineAt).toBe(ticketDeadline);
       expect(existsSync(f.effect)).toBe(false);
       await f.invoke('decideMultiAgentApproval', { ...scope, operationId: `at-idle-${idleAge}`, decision: 'approve' }).catch(() => undefined);
-      if (idleAge < 300_000) {
+      if (idleAge < 600_000) {
         await vi.waitFor(() => expect(existsSync(f.effect)).toBe(true));
         expect(readFileSync(f.effect, 'utf8')).toBe('APPROVAL_PRIVATE_INPUT');
       } else {
-        await vi.waitFor(() => expect(f.store.getAgent(scope.groupId, f.context.agentId)?.executionActive).toBe(false));
+        await vi.waitFor(() => expect(f.requests()).toBe(2));
         expect(existsSync(f.effect)).toBe(false);
-        expect(f.requests(), 'an expired idle owner must terminate, not use the denial to generate a fresh model activity').toBe(1);
+        expect(f.context.signal.aborted).toBe(false);
       }
     } finally { clock.mockRestore(); }
   });
@@ -268,7 +268,7 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
     release.resolve();
     await vi.waitFor(() => expect(observedRequest || requests > 1).toBe(true));
     expect(observedRequest, 'the production request must really reach its group sequencer before this deadline race is testable').toBe(true);
-    const clock = invalidation === 'deadline' ? vi.spyOn(Date, 'now').mockReturnValue(context.effectiveDeadline + 1) : undefined;
+    const clock = invalidation === 'deadline' ? vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 600_001) : undefined;
     const scope = f.scopes.find(item => item.handle.authority.agentId === context.agentId)!;
     expect(scope).toBeDefined();
     if (invalidation === 'scope-dispose') scope.handle.dispose();
@@ -283,7 +283,7 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
       expect(f.db.prepare("SELECT COUNT(*) AS n FROM events WHERE group_id=? AND json_extract(data_json,'$.kind')='approval'").get(context.groupId)).toMatchObject({ n: 0 });
       expect(f.db.prepare('SELECT pending_approval_count FROM thread_bindings WHERE thread_id=?').get('queued-approval')).toMatchObject({ pending_approval_count: 0 });
       expect(existsSync(effect)).toBe(false);
-      if (invalidation === 'deadline') expect(requests).toBe(1);
+      if (invalidation === 'deadline') expect(requests).toBe(2);
     } finally { clock?.mockRestore(); }
   });
 

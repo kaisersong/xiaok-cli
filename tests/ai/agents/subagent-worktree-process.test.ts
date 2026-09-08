@@ -11,7 +11,7 @@ import { ToolRegistry } from '../../../src/ai/tools/index.js';
 const caller = { requestSource: 'agent' as const, callerId: 'main' };
 
 describe('production subagent with real git worktrees', () => {
-  it.each(['delete', 'keep'] as const)('applies %s policy only after the active turn actually exits', async (cleanup) => {
+  it.each(['delete', 'keep'] as const)('applies %s policy only after the active tool actually exits', async (cleanup) => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-subagent-git-'));
     const git = (args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     git(['init']);
@@ -28,8 +28,8 @@ describe('production subagent with real git worktrees', () => {
           agentDef: { name: 'isolated', systemPrompt: '', source: 'builtin', isolation: 'worktree', cleanup },
           sessionId: 'real-worktree', runtimeAgentId: identity.id, cwd: root, signal,
           worktreeManager: manager, buildSystemPrompt: async (cwd) => { worktree = cwd; return 'fixture'; },
-          createRegistry: () => new ToolRegistry({}, []),
-          adapter: () => ({ async *stream() { entered = true; await running; yield { type: 'done' as const }; } }),
+          createRegistry: () => new ToolRegistry({}, [{permission:'safe',definition:{name:'held_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},execute:async () => {entered = true; await running; return 'done';}}]),
+          adapter: () => ({ async *stream() { yield {type:'tool_use' as const,id:'held',name:'held_tool',input:{}}; yield { type: 'done' as const }; } }),
         }),
       });
       await vi.waitFor(() => expect(entered).toBe(true));

@@ -61,7 +61,7 @@ describe('desktop Goal IPC', () => {
     });
     expect(services.createTask).toHaveBeenCalledWith({
       prompt: 'hello', materials: [], context: { threadId: 'thread_1' },
-    });
+    }, undefined);
 
     goalChanged?.({ threadId: 'thread_1', goal: { state: { status: 'active' } } });
     taskPrepared?.({ threadId: 'thread_1', attachmentId: 'attachment_1', taskId: 'task_1' });

@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.2 (September 8, 2026).** CLI and Desktop package metadata are aligned at **1.5.2**. This update adds SubAgent collaboration in the shared right-side panel, constellation codenames, independent foreground/background execution lanes, and bounded summary-stream recovery. The latest published Desktop release remains **1.5.1** until the new release build and asset checks succeed; a version bump is not an npm publication. See [Version History](#version-history).
+**Release target: 1.5.3 (September 9, 2026).** CLI and Desktop metadata are aligned at **1.5.3**. This update removes default Desktop execution time limits, fixes follow-up scheduling and resumability, and includes local Codex integration and CLI reliability improvements. The latest published Desktop baseline is **1.5.2** until the new build and asset checks succeed; a version bump is not an npm publication. See [Version History](#version-history).
 
 ---
 
@@ -235,11 +235,11 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get the current published build from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The verified `desktop-v1.5.1` assets are:
+Get the current published build from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The listed `desktop-v1.5.2` assets are:
 
-- `xiaok-1.5.1-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.1-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.1.exe` — Windows x64 installer.
+- `xiaok-1.5.2-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.2-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.2.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
@@ -544,6 +544,14 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.3 — Release preparation, September 9, 2026
+
+- No default iteration cap; Desktop tasks and SubAgents no longer expire solely because of fixed 10/28/30-minute runtime limits. Explicit limits, cancellation, per-approval expiry, and bounded delivery verification remain effective.
+- Parent-requested follow-ups progress within their execution group; waiting no longer spins on queued future turns. Recovery availability reflects actual retained sessions.
+- Local Codex is available through standard Desktop tasks. CLI improvements cover model-stream recovery, interactive sudo, and reminder placement above the input footer.
+- Failed historical tasks are not rewritten or automatically replayed. A passing local test does not establish success for every model/provider workflow.
+- Unchanged bundled sidecars remain pinned to their reproducible `desktop-v1.5.2` tags.
 
 ### v1.5.2 — Release preparation, September 8, 2026
 

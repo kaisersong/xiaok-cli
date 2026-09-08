@@ -1,5 +1,4 @@
 const BLOCK_PATTERNS = [
-    { pattern: /\bsudo\b/, reason: 'sudo requires password which cannot be provided via Bash tool (stdin disabled). Use `! sudo <command>` to instruct user to run manually' },
     { pattern: /(^|[\s;&|])screencapture(?:\s|$)/i, reason: 'screen capture must use xiaok_computer_use, not shell fallback' },
     { pattern: /(^|[\s;&|])cliclick(?:\s|$)/i, reason: 'desktop control must use xiaok_computer_use, not shell fallback' },
     { pattern: /(^|[\s;&|/])cua-driver(?:\s|$|[/.])/i, reason: 'CUA driver must be managed by Xiaok Computer Use, not shell fallback' },
@@ -18,6 +17,7 @@ const BLOCK_PATTERNS = [
     { pattern: /\|\s*(sh|bash|zsh)\s*$/, reason: 'arbitrary pipe to shell interpreter' },
 ];
 const WARN_PATTERNS = [
+    { pattern: /\bsudo\b/, reason: 'sudo requests elevated privileges in the local terminal' },
     { pattern: /rm\s+-[^\s]*r[^\s]*f/, reason: 'recursive force delete' },
     { pattern: /\bRemove-Item\b[\s\S]*(?:-Recurse|-r\b)[\s\S]*(?:-Force|-f\b)/i, reason: 'PowerShell recursive force delete' },
     { pattern: /\bRemove-Item\b[\s\S]*(?:-Force|-f\b)[\s\S]*(?:-Recurse|-r\b)/i, reason: 'PowerShell recursive force delete' },

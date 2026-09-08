@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**发布目标：1.5.2（2026-09-08）。** CLI 与 Desktop 的 package metadata 已统一为 **1.5.2**。本次新增复用右侧浮窗的 SubAgent 协作、星座代号、前后台独立执行槽位与有界汇总断流续接。新版本构建与产物校验成功前，最新 Desktop 正式版仍为 **1.5.1**；修改版本号不等于发布 npm。详见[版本日志](#版本日志)。
+**发布目标：1.5.3（2026-09-09）。** CLI 与 Desktop 版本统一为 **1.5.3**。本次取消 Desktop 默认执行时限，修复子任务追加调度和可恢复状态，并包含本地 Codex 接入与 CLI 可靠性改进。新版本构建及产物校验成功前，最新 Desktop 正式版基线为 **1.5.2**；修改版本号不等于发布 npm。详见[版本日志](#版本日志)。
 
 ---
 
@@ -235,11 +235,11 @@ Desktop 是基于 Electron 与 React 的主要图形工作台。主进程 servic
 
 ### 下载
 
-从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest) 获取当前正式版。已核实 `desktop-v1.5.1` 提供：
+从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest) 获取当前正式版。`desktop-v1.5.2` 已列出：
 
-- `xiaok-1.5.1-arm64.dmg` — macOS Apple Silicon 安装包。
-- `xiaok-1.5.1-arm64-mac.zip` — macOS Apple Silicon 压缩包。
-- `xiaok-setup-1.5.1.exe` — Windows x64 安装程序。
+- `xiaok-1.5.2-arm64.dmg` — macOS Apple Silicon 安装包。
+- `xiaok-1.5.2-arm64-mac.zip` — macOS Apple Silicon 压缩包。
+- `xiaok-setup-1.5.2.exe` — Windows x64 安装程序。
 
 自动更新使用 `latest-mac.yml` 与 `latest.yml`。本文标记为近期源码的改动，需要源码构建或后续正式发布后使用。
 
@@ -544,6 +544,14 @@ npm run test --prefix desktop -- --run \
 ---
 
 ## 版本日志
+
+### v1.5.3 — 发布准备，2026-09-09
+
+- 默认不设轮次上限；Desktop 主任务和子任务不再因固定 10/28/30 分钟运行时限被终止。显式限制、用户取消、单次审批过期与有限交付检查仍有效。
+- 主任务发起的追加任务可在同执行组推进，等待未来轮次不再反复空转；可恢复状态与实际保留的会话一致。
+- 本地 Codex 接入标准 Desktop 任务；CLI 包含模型断流恢复、交互式 sudo，以及提醒显示在输入区上方的修复。
+- 不改写或自动重跑历史失败任务；本地测试通过不代表所有真实模型任务均已成功验收。
+- 未改动的关联服务继续固定到可复现的 `desktop-v1.5.2` 标签。
 
 ### v1.5.2 — 发布准备，2026-09-08
 

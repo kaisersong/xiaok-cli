@@ -101,6 +101,9 @@ describe('BDD: root cancellation keeps one settlement owner even if its first na
   it('the real main expiry command cannot persist two cancellations for the same live source and epoch', async () => {
     const f = await authorizationFixture(cleanup), service = f.boundary.service, internals = service as unknown as Internals;
     const host = internals.host;
+    // Configure an explicit test policy before any lease is acquired; the
+    // actual factory coordinator and cancellation owner are not substituted.
+    Object.defineProperty(internals.options.coordinator, 'multiAgentLeaseMs', { value: 30 * 60_000 });
     const modelEntered = deferred(), releaseModel = deferred(), stopEntered = deferred(), releaseStop = deferred();
     cleanup.push(() => { releaseModel.resolve(); releaseStop.resolve(); });
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {

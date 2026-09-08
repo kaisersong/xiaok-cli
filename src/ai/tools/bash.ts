@@ -48,7 +48,7 @@ export const bashTool: Tool = {
   permission: 'bash',
   definition: {
     name: 'bash',
-    description: '执行 shell 命令，返回 stdout + stderr。慎用：所有 bash 命令均视为潜在危险操作。',
+    description: '执行 shell 命令，返回 stdout + stderr。慎用：所有 bash 命令均视为潜在危险操作。sudo 在主 CLI 的本地交互终端执行；密码只能由用户在终端输入，严禁通过聊天或工具参数索取、传递密码。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -73,6 +73,8 @@ export const bashTool: Tool = {
     if (risk.level === 'block') {
       return `Error: 命令被安全策略拦截: ${risk.reason}`;
     }
+
+    if (/\bsudo\b/.test(command)) return 'Error: sudo 需要主 CLI 的本地交互终端；请交由主会话执行，或在终端使用 !sudo 命令。';
 
     return new Promise((resolve, reject) => {
       const shell = process.platform === 'win32' ? 'cmd' : 'sh';
@@ -168,3 +170,15 @@ export const bashTool: Tool = {
     });
   },
 };
+
+/** Installed only by the interactive CLI host, before sandbox wrapping. */
+export function createInteractiveBashTool(run: Tool['execute']): Tool {
+  return { ...bashTool, async execute(input, context) {
+    context?.signal?.throwIfAborted();
+    const command = String(input.command ?? '');
+    if (!/\bsudo\b/.test(command)) return bashTool.execute(input, context);
+    const risk = classifyBashCommand(command);
+    if (risk.level === 'block') return `Error: 命令被安全策略拦截: ${risk.reason}`;
+    return run(input, context);
+  } };
+}

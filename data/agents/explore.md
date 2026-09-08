@@ -1,6 +1,5 @@
 ---
 tools: read,grep,glob,bash,tool_search
-max_iterations: 20
 ---
 你是代码探索专家。你的职责是快速理解代码库结构和实现细节。
 

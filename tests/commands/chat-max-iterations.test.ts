@@ -6,7 +6,7 @@ import {
 
 describe('resolveAgentMaxIterations', () => {
   it('returns the default when no env override is provided', () => {
-    expect(resolveAgentMaxIterations({})).toBe(DEFAULT_AGENT_MAX_ITERATIONS);
+    expect(resolveAgentMaxIterations({})).toBeUndefined();
   });
 
   it('honors a positive integer override', () => {

@@ -11,10 +11,6 @@ export function resolveRegisteredStrictKimiK3Profile(adapter) {
         ? profileId
         : undefined;
 }
-export function assertKimiK3SessionModelSwitchSupported(currentProfile, nextProfile, messageCount) {
-    if (messageCount > 0
-        && (currentProfile !== undefined || nextProfile !== undefined)
-        && currentProfile !== nextProfile) {
-        throw new Error('KIMI_K3_SESSION_MODEL_SWITCH_UNSUPPORTED：请新建会话后再切换模型');
-    }
+export function requiresKimiK3HistoryMigration(currentProfile, nextProfile, messageCount) {
+    return messageCount > 0 && currentProfile !== nextProfile;
 }

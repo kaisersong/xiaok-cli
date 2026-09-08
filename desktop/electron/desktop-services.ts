@@ -5154,7 +5154,7 @@ function createReadMaterialResult(ok: boolean, payload: Record<string, unknown>)
   return { ok, result: JSON.stringify(payload, null, 2) };
 }
 
-const DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS = 20;
+import { resolveDesktopToolLoopBudget, resolveDesktopRunDeadline } from './tool-loop-budget.js';
 
 function throwIfAborted(signal: AbortSignal): void {
   if (!signal.aborted) return;
@@ -5652,7 +5652,8 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
   let { skillInvocation } = ctx;
   let skillNamesDetected: string[] = [];
   let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-  const maxIterations = ctx.maxIterations ?? DESKTOP_MODEL_TOOL_LOOP_MAX_ITERATIONS;
+  const budget = resolveDesktopToolLoopBudget(ctx.maxIterations);
+  const maxIterations = budget.limit ?? Number.POSITIVE_INFINITY;
   let finishedNormally = false;
   let summaryRecoveryMode = false;
 
@@ -5669,7 +5670,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     iteration++;
 
     if (skillInvocation) {
-      const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, ctx.dataRoot);
+      const budgetResult = checkBudget(skillInvocation, iteration, totalToolCalls, referenceReads, totalInputTokens, ctx.dataRoot, maxIterations);
       if (!budgetResult.ok) {
         appendTrace(ctx.dataRoot, {
           ts: Date.now(), taskId: ctx.sessionId, skillName: skillInvocation.primarySkill,
@@ -5759,9 +5760,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       if (ctx.mailbox && !toolResultsAwaitingFinalResponse) {
         const decision = await ctx.mailbox.trySealTurn({ limitReached: iteration >= maxIterations });
         if (decision.kind === 'continue') continue;
-        if (decision.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply);
+        if (decision.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply, maxIterations, iteration, budget.source);
         finishedNormally = true;
       }
+      if (!ctx.mailbox && !toolResultsAwaitingFinalResponse) finishedNormally = true;
       break;
     }
     const toolResults: MessageBlock[] = [];
@@ -6055,10 +6057,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     ctx.messages.push({ role: 'assistant', content: finalized.assistantBlocks });
   }
 
-  if (ctx.mailbox && !finishedNormally) {
+  if (!finishedNormally) {
     const exhausted = iteration >= maxIterations;
-    const decision = await ctx.mailbox.trySealTurn({ outcome: exhausted ? 'failed' : 'completed', limitReached: true });
-    if (exhausted || decision.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply);
+    const decision = await ctx.mailbox?.trySealTurn({ outcome: exhausted ? 'failed' : 'completed', limitReached: true });
+    if (exhausted || decision?.kind === 'limit_reached') throw new DesktopMultiAgentIterationLimitError(reply, maxIterations, iteration, budget.source);
   }
 
   return {
@@ -7105,7 +7107,6 @@ export function createDesktopModelRunnerWithRegistry(
       ...imageBlocks,
     ];
     const messages = buildDesktopProviderMessages(adapter, hostHistory, userContent);
-    const TASK_TIMEOUT_MS = deadlineMs ?? 28 * 60_000;
 
     const pendingUsageWrites: Promise<void>[] = [];
     let loopResult: Awaited<ReturnType<typeof runDesktopToolLoop>>;
@@ -7118,7 +7119,7 @@ export function createDesktopModelRunnerWithRegistry(
       registry: invocationRegistry,
       invocationOptions,
       signal,
-      taskDeadline: rootContext?.effectiveDeadline ?? Date.now() + TASK_TIMEOUT_MS,
+      taskDeadline: resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs),
       cwd: rootContext?.cwd,
       mailbox: rootContext?.mailbox,
       canResumeSummary: rootContext ? () => runnerOptions.multiAgent!.service.canResumeSummary(rootContext) : undefined,

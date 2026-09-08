@@ -103,8 +103,8 @@ export class Agent {
   }
 
   setAdapter(adapter: ModelAdapter): void {
-    this.adapter = adapter;
     this.runtime.setAdapter(adapter);
+    this.adapter = adapter;
   }
 
   setSystemPrompt(systemPrompt: string): void {

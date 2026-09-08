@@ -44,7 +44,8 @@ describe.runIf(nativeAuthorizer)('BDD W4: actual queued cancellation receipts su
     '$action marks each failed $source queued receipt unknown and still cancels its sibling', async ({ action, source }) => {
       const f = await siblingActivityFixture(cleanup), turn = f.child.turn;
       await enqueue(f, source, 'failed-first');
-      await enqueue(f, source === 'user' ? 'agent' : 'user', 'successful-second');
+      // Agent work cannot be appended behind a future user-epoch barrier.
+      await enqueue(f, 'user', 'successful-second');
       let faults = 0;
       f.db.setAuthorizer((code, table) => {
         if (!faults && code === constants.SQLITE_INSERT && table === 'operations' && new Error().stack?.includes('cancelFollowups')) {
@@ -91,7 +92,7 @@ describe.runIf(nativeAuthorizer)('BDD W4: actual queued cancellation receipts su
 
   it.each(stoppers)('%s with healthy SQLite keeps both original cancellation receipts confirmed', async action => {
     const f = await siblingActivityFixture(cleanup);
-    await enqueue(f, 'user', 'healthy-user'); await enqueue(f, 'agent', 'healthy-agent');
+    await enqueue(f, 'agent', 'healthy-agent'); await enqueue(f, 'user', 'healthy-user');
     const stopped = stop(f, action); await tick(); await tick();
     for (const operationId of ['healthy-user', 'healthy-agent']) {
       expect(f.service.readOperation({ access: f.access(), groupId: f.context.groupId, operationId }))

@@ -6,6 +6,7 @@ import { MaterialRegistry } from '../../../src/runtime/task-host/material-regist
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { buildHistoryFromTaskSnapshots, InProcessTaskRuntimeHost, type TaskRunner } from '../../../src/runtime/task-host/task-runtime-host.js';
 import type { DesktopTaskEvent, MaterialRecord, TaskSnapshot } from '../../../src/runtime/task-host/types.js';
+import type { HostDeliveryReport } from '../../../src/runtime/task-host/delivery-types.js';
 
 describe('InProcessTaskRuntimeHost', () => {
   let rootDir: string;
@@ -2135,6 +2136,81 @@ describe('InProcessTaskRuntimeHost', () => {
         (event): event is Extract<DesktopTaskEvent, { type: 'assistant_delta' }> => event.type === 'assistant_delta',
       ).map(event => event.delta).join('')).toBe('取消前文本');
     });
+  });
+
+  it('has no implicit runner deadline and survives the former 30 minute watchdog', async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const runner = vi.fn<TaskRunner>(async () => pending);
+    const host = createHost(runner);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    try {
+      await host.createTask({ prompt: 'Long collaboration', materials: [] });
+      for (let i = 0; i < 100 && !runner.mock.calls.length; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      expect(runner).toHaveBeenCalledOnce();
+      const input = runner.mock.calls[0]![0];
+      expect.soft(input.deadlineMs).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      expect.soft(input.signal.aborted).toBe(false);
+      expect.soft((await host.recoverTask('task_1')).snapshot.status).toBe('running');
+    } finally {
+      finish(); vi.useRealTimers(); await host.drain();
+    }
+  });
+
+  it('starts a finite post-run delivery window after an unlimited long runner', async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const reports: Array<{ delivery: { startedAt: number; deadlineAt: number } }> = [];
+    const runner = vi.fn<TaskRunner>(async () => pending);
+    const host = new InProcessTaskRuntimeHost({ materialRegistry, snapshotStore, runner,
+      getExecutionPolicy: () => ({ deliveryRepair: 'explicit' }), authorizePreparation: () => {},
+      onDeliveryReport: async report => { reports.push(report); throw new Error('test stop after checking'); },
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    try {
+      const reservation = host.reserveTaskIdentity();
+      const task = await host.prepareTask({ prompt: 'Long collaboration', materials: [] }, { reservation,
+        marker: { groupId: 'g', rootEpoch: 1, rootTurnId: 'r', preparationId: 'p', bootId: 'b' } });
+      await host.startTask(task.taskId);
+      for (let i = 0; i < 100 && !runner.mock.calls.length; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      const endedAt = Date.now(); finish(); await host.drain();
+      expect(reports.length).toBeGreaterThan(0);
+      expect(reports[0]!.delivery.startedAt).toBeGreaterThanOrEqual(endedAt);
+      expect(Number.isFinite(reports[0]!.delivery.deadlineAt)).toBe(true);
+      expect(reports[0]!.delivery.deadlineAt).toBeGreaterThan(endedAt);
+    } finally { finish(); vi.useRealTimers(); await host.drain(); }
+  });
+
+  it('bounds default post-run delivery I/O while retaining its unsettled physical owner', async () => {
+    let releaseRead!: () => void;
+    const pending = new Promise<void>(resolve => { releaseRead = resolve; });
+    let enteredRead!: () => void;
+    const entered = new Promise<void>(resolve => { enteredRead = resolve; });
+    let armed = false;
+    const originalRead = snapshotStore.recoverTask.bind(snapshotStore);
+    vi.spyOn(snapshotStore, 'recoverTask').mockImplementation(async (...args) => {
+      if (armed) { armed = false; enteredRead(); await pending; }
+      return originalRead(...args);
+    });
+    const reports: HostDeliveryReport[] = [];
+    const host = new InProcessTaskRuntimeHost({ materialRegistry, snapshotStore, runner: async () => {},
+      getExecutionPolicy: () => ({ deliveryRepair: 'explicit' }), authorizePreparation: () => {},
+      onDeliveryReport: async report => { reports.push(report); if (report.delivery.revision === 1) armed = true; return report; },
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+    try {
+      const reservation = host.reserveTaskIdentity();
+      const task = await host.prepareTask({ prompt: 'Delivery', materials: [] }, { reservation,
+        marker: { groupId: 'g', rootEpoch: 1, rootTurnId: 'r', preparationId: 'p', bootId: 'b' } });
+      await host.startTask(task.taskId); await entered;
+      await vi.advanceTimersByTimeAsync(2 * 60_000 + 1);
+      expect(reports.at(-1)?.delivery.guardFailure?.code).toBe('delivery_timeout');
+      expect(host.inFlightTaskIds()).toContain(task.taskId);
+      releaseRead(); await host.drain();
+      expect((await host.inspectTask(task.taskId))?.status).toBe('failed');
+    } finally { releaseRead(); vi.useRealTimers(); await host.drain(); vi.restoreAllMocks(); }
   });
 
   it('aborts execution via watchdog when runner hangs beyond timeout', async () => {

@@ -39,12 +39,11 @@ describe.runIf(nativeAuthorizer)('R6 AF real service trusted IO and ordinary ref
     ['ancestor', 'agents', 'assertDescendant'],
     ['operation', 'operations', 'DesktopMultiAgentService.mutate'],
     ['wait-message', 'messages', 'unreadMessageIds'],
-    ['approval-deadline', 'agents', 'getApprovalDeadline'],
+    ['approval-deadline', 'groups', 'assertWritable'],
   ] as const)('AF6 post-admission %s real query cannot bypass the trusted IO boundary', async (stage, table, site) => {
     const f = await siblingActivityFixture(cleanup, stage === 'ancestor');
-    // An absent optional activity cache is a production-supported fallback, not
-    // a fabricated durable agent. The fallback still reads the real child row.
-    if (stage === 'approval-deadline') f.live().activities.delete(f.child.agentId);
+    // Approval no longer needs a child idle timestamp, but actor authorization
+    // still crosses the trusted group persistence boundary.
     const fault = sqliteFault(f, { table, site, column: table === 'messages' ? undefined : 'data_json' });
     const outcome = await caught(() => stage === 'approval-deadline' ? f.service.getApprovalDeadline(f.child.actor)
       : stage === 'list-page' ? f.service.list({ actor: f.context.actor, requestSource: 'agent' })

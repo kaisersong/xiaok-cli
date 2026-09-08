@@ -40,6 +40,52 @@ describe('BDD: actual Desktop provider loop and durable mailbox', () => {
     return { store, group, agentId, mailbox, send, onSeal, context };
   }
 
+  it('standard tasks can execute beyond one hundred tool rounds with the default budget', async () => {
+    const { context, onSeal } = setup();
+    let calls = 0;
+    const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() {
+      calls++;
+      if (calls <= 150) yield { type: 'tool_use', id: `call-${calls}`, name: 'read', input: {} };
+      else yield { type: 'text', delta: 'completed after 150 tools' };
+    } };
+    const result = await runDesktopToolLoop({ ...context, adapter });
+    expect(result.reply).toBe('completed after 150 tools');
+    expect(calls).toBe(151);
+    expect(onSeal).toHaveBeenCalledExactlyOnceWith('completed');
+  });
+
+  it('skill execution inherits the task iteration limit without a hidden cumulative cap', async () => {
+    const { context, onSeal } = setup();
+    let calls = 0;
+    const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() {
+      if (++calls <= 150) yield { type: 'tool_use', id: `call-${calls}`, name: 'read', input: {} };
+      else yield { type: 'text', delta: 'skill completed' };
+    } };
+    const result = await runDesktopToolLoop({ ...context, adapter,
+      skillInvocation: { primarySkill: 'fixture', stageId: 'stage', stageStartIteration: 1, traceId: 'trace', plan: {} as never } });
+    expect(result.totalToolCalls).toBe(150);
+    expect(result.reply).toBe('skill completed');
+    expect(onSeal).toHaveBeenCalledExactlyOnceWith('completed');
+  });
+
+  it('natural final on the last allowed round is completed', async () => {
+    const { context, onSeal } = setup();
+    const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() { yield { type: 'text', delta: 'complete' }; } };
+    await expect(runDesktopToolLoop({ ...context, adapter, maxIterations: 1 })).resolves.toMatchObject({ reply: 'complete' });
+    expect(onSeal).toHaveBeenCalledExactlyOnceWith('completed');
+  });
+
+  it('plain loop without a mailbox reports exhausted work as partial with its budget', async () => {
+    const { context } = setup();
+    let calls = 0;
+    const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() {
+      if (++calls === 1) yield { type: 'tool_use', id: 'call', name: 'read', input: {} };
+      else yield { type: 'text', delta: 'partial' };
+    } };
+    await expect(runDesktopToolLoop({ ...context, mailbox: undefined, adapter, maxIterations: 1 }))
+      .rejects.toMatchObject({ code: 'tool_loop_iteration_limit', partialReply: 'partial', limit: 1, used: 1, source: 'task' });
+  });
+
   it('A24/A32 Given M before the first request, When the real loop streams, Then its exact user blocks are M/P once and already confirmed', async () => {
     const { context, send, store, group, agentId, onSeal } = setup();
     send('MESSAGE_SENTINEL');
@@ -76,7 +122,7 @@ describe('BDD: actual Desktop provider loop and durable mailbox', () => {
     const { context, send, store, group, agentId, onSeal } = setup();
     let requests = 0;
     const adapter: Pick<ModelAdapter, 'stream'> = { async *stream() { requests++; send('late'); yield { type: 'text', delta: 'partial' }; } };
-    await expect(runDesktopToolLoop({ ...context, adapter, maxIterations: 1 })).rejects.toMatchObject({ code: 'multi_agent_iteration_limit', partialReply: 'partial' });
+    await expect(runDesktopToolLoop({ ...context, adapter, maxIterations: 1 })).rejects.toMatchObject({ code: 'tool_loop_iteration_limit', partialReply: 'partial' });
     expect(requests).toBe(1);
     expect(store.listMessages(group.groupId, agentId)[0]?.deliveryState).toBe('unread');
     expect(onSeal).toHaveBeenCalledExactlyOnceWith('failed');
@@ -90,7 +136,7 @@ describe('BDD: actual Desktop provider loop and durable mailbox', () => {
       if (requests === 1) yield { type: 'tool_use', id: 'call-1', name: 'read', input: {} };
       else { expect(tools).toHaveLength(0); yield { type: 'text', delta: 'partial tail' }; }
     } };
-    await expect(runDesktopToolLoop({ ...context, adapter, maxIterations: 1 })).rejects.toMatchObject({ code: 'multi_agent_iteration_limit', partialReply: 'partial tail' });
+    await expect(runDesktopToolLoop({ ...context, adapter, maxIterations: 1 })).rejects.toMatchObject({ code: 'tool_loop_iteration_limit', partialReply: 'partial tail' });
     expect(requests).toBe(2);
     expect(onSeal).toHaveBeenCalledExactlyOnceWith('failed');
   });

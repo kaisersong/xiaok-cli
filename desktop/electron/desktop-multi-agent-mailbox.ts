@@ -86,6 +86,8 @@ export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
 }
 
 export class DesktopMultiAgentIterationLimitError extends Error {
-  readonly code = 'multi_agent_iteration_limit';
-  constructor(readonly partialReply: string) { super('multi_agent_iteration_limit'); }
+  readonly code = 'tool_loop_iteration_limit';
+  constructor(readonly partialReply: string, readonly limit: number, readonly used: number, readonly source: string) {
+    super(`tool_loop_iteration_limit: used=${used}, limit=${limit}, source=${source}; configure XIAOK_AGENT_MAX_ITERATIONS or task maxToolLoopIterations`);
+  }
 }

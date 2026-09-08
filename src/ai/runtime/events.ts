@@ -8,6 +8,8 @@ export interface RuntimeActivity {
 
 export type AgentRuntimeEvent =
   | { type: 'run_started'; runId: string }
+  | { type: 'model_request_started'; runId: string }
+  | { type: 'model_recovery'; runId: string; attempt: number; delayMs: number; remainingMs: number }
   | { type: 'assistant_text'; runId: string; delta: string }
   | { type: 'tool_started'; runId: string; toolName: string; input: Record<string, unknown> }
   | { type: 'tool_finished'; runId: string; invocationId: string; toolName: string; ok: boolean }

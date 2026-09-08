@@ -27,10 +27,10 @@ describe('BDD AP service ports: real authority, group FIFO and actor lifetime', 
   // This is intentionally a service-only fixture, not a substitute approval
   // transport. Store/coordinator/core/host/context are production objects. The
   // managed model bodies merely wait at a real execution boundary until release.
-  async function setup(history = false) {
+  async function setup(history = false, multiAgentLeaseMs?: number) {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-approval-service-ports-'));
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
-    const coordinator = new DesktopExecutionCoordinator();
+    const coordinator = new DesktopExecutionCoordinator({ multiAgentLeaseMs });
     const released = barrier(), entered = barrier<DesktopAgentExecutionContext>();
     const contexts: DesktopAgentExecutionContext[] = [];
     const service = new DesktopMultiAgentService({ store, coordinator,
@@ -199,14 +199,15 @@ describe('BDD AP service ports: real authority, group FIFO and actor lifetime', 
   });
 
   it('AP actor expiry uses the real child deadline before a timer runs and never fakes member release', async () => {
-    const f = await setup(), root = await f.start(), child = await f.spawn(root), { owner } = f.bind();
+    const f = await setup(false, 60_000), root = await f.start(), child = await f.spawn(root), { owner } = f.bind();
     const deadline = f.service.getApprovalDeadline(child.actor), refs = child.memberTicket.refCount;
     const now = vi.spyOn(Date, 'now').mockReturnValue(deadline - 1);
     try {
       f.port.expireApprovalActor(owner, child); expect(child.signal.aborted).toBe(false);
       now.mockReturnValue(deadline);
       f.port.expireApprovalActor(owner, child);
-      expect(child.signal.aborted).toBe(true); expect(root.signal.aborted).toBe(false);
+      // This explicit group lease bounds both actors, unlike a removed implicit child idle budget.
+      expect(child.signal.aborted).toBe(true); expect(root.signal.aborted).toBe(true);
       expect(child.memberTicket.released).toBe(false); expect(child.memberTicket.refCount).toBe(refs);
       expect(f.store.getAgent(child.groupId, child.agentId)).toMatchObject({ resourcesReleased: false, executionActive: true });
     } finally { now.mockRestore(); }
@@ -223,7 +224,7 @@ describe('BDD AP service ports: real authority, group FIFO and actor lifetime', 
     // Controlled projection DATA only: it deliberately remains stale/pending.
     // The real service must apply its own irreversible group failure fence.
     const pending: MultiAgentPendingApproval = { approvalId: 'controlled-pending', agentId: context.agentId, turn: context.turn,
-      turnId: context.turnId, minDeadlineAt: context.effectiveDeadline, status: 'pending', persistenceState: 'confirmed',
+      turnId: context.turnId, minDeadlineAt: Math.min(Date.now() + 600_000, context.effectiveDeadline), status: 'pending', persistenceState: 'confirmed',
       canDecide: true, inputSha256: 'a'.repeat(64), inputByteLength: 2 };
     vi.spyOn(transport, 'getGroupProjection').mockImplementation(groupId => ({ pendingApprovals: groupId === context.groupId ? [pending] : [], pendingApprovalCount: groupId === context.groupId ? 1 : 0 }));
     f.port.freezeApprovalPersistence(owner, context.groupId);

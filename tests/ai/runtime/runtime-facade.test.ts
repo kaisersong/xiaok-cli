@@ -106,10 +106,11 @@ describe('RuntimeFacade', () => {
     expect(captured).toHaveLength(2);
     expect(captured[0]?.cacheKey).toBe(createPromptCacheAffinity(sessionId));
     expect(captured[1]?.cacheKey).toBe(captured[0]?.cacheKey);
-    expect(captured[1]?.signal).toBe(captured[0]?.signal);
+    expect(captured[1]?.signal?.aborted).toBe(false);
     expect(captured[0]?.signal?.aborted).toBe(false);
     controller.abort();
     expect(captured[0]?.signal?.aborted).toBe(true);
+    expect(captured[1]?.signal?.aborted).toBe(true);
   });
 
   it('leaves new-chat identity to the caller: clearHistory retains affinity while new and fork IDs change it', async () => {

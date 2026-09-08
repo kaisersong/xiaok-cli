@@ -1,3 +1,4 @@
+import { createInteractiveBashTool } from '../../ai/tools/bash.js';
 import type { ModelAdapter, Tool } from '../../types.js';
 import type { SubAgentProgressEvent } from '../../ai/agents/subagent-presentation.js';
 import { getCanonicalToolId } from '../../ai/tools/tool-identity.js';
@@ -43,6 +44,7 @@ export function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Too
 
 export interface PlatformRegistryFactoryOptions {
   notifyReminder?: (message: string) => void;
+  runInteractiveBash?: Tool['execute'];
   onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
   onMultiAgentEvent?: (event: MultiAgentEvent) => void;
   platform: PlatformRuntimeContext;
@@ -247,7 +249,10 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     );
 
     // 应用 sandbox
-    const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer, {
+    const executionTools = options.source === 'chat' && agentId === 'main' && options.runInteractiveBash
+      ? baseTools.map(tool => tool.definition.name === 'bash' ? createInteractiveBashTool(options.runInteractiveBash!) : tool)
+      : baseTools;
+    const sandboxedTools = applySandboxToTools(executionTools, options.platform.sandboxEnforcer, {
       onSandboxDenied: handleSandboxDenied,
     });
 

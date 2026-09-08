@@ -882,17 +882,21 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     });
     if (!started) return;
 
-    const watchdogMs = this.taskWatchdogs.get(taskId) ?? this.options.taskWatchdogMs ?? 30 * 60_000;
-    const deadlineMs = computeRunnerDeadlineMs(watchdogMs);
-    const deliveryDeadline = performance.now() + watchdogMs;
-    const watchdogStartedAt = this.now();
-    let watchdogTimer: ReturnType<typeof setTimeout>;
+    const configuredWatchdog = this.taskWatchdogs.get(taskId) ?? this.options.taskWatchdogMs;
+    const watchdogMs = configuredWatchdog !== undefined && Number.isFinite(configuredWatchdog) && configuredWatchdog > 0
+      ? configuredWatchdog : undefined;
+    const deadlineMs = watchdogMs === undefined ? undefined : computeRunnerDeadlineMs(watchdogMs);
+    // Runtime duration is unlimited unless explicitly bounded. Delivery is a
+    // separate finite I/O transaction, begun only after that runner returns.
+    let deliveryDeadline = watchdogMs === undefined ? undefined : performance.now() + watchdogMs;
+    let watchdogStartedAt = this.now();
+    let watchdogTimer: ReturnType<typeof setTimeout> | undefined;
     const onWatchdog = () => {
       const execution = this.activeExecutions.get(taskId);
       if (execution?.controller !== controller) return;
       // Ordinary runner timing stays unchanged. Once sealed, both watchdog
       // and verifier honor the same absolute monotonic delivery deadline.
-      if (execution.phase !== 'runner') {
+      if (deliveryDeadline !== undefined) {
         const remaining = deliveryDeadline - performance.now();
         if (remaining > 0) {
           watchdogTimer = setTimeout(onWatchdog, Math.min(2 ** 31 - 1, Math.max(1, Math.ceil(remaining))));
@@ -901,7 +905,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       }
       this.requestExecutionAbort(execution, 'task_watchdog_timeout');
     };
-    watchdogTimer = setTimeout(onWatchdog, watchdogMs);
+    if (watchdogMs !== undefined) watchdogTimer = setTimeout(onWatchdog, Math.min(2 ** 31 - 1, watchdogMs));
 
     try {
       if (this.activeExecutions.get(taskId) !== execution || controller.signal.aborted || this.cancellingTaskIds.has(taskId)) return;
@@ -922,7 +926,13 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       });
       if (policy?.deliveryRepair === 'explicit' && snapshot.multiAgentPreparation
         && !controller.signal.aborted && !this.cancellingTaskIds.has(taskId)) {
-        await this.finishExplicitDelivery(execution, snapshot, deliveryDeadline, watchdogStartedAt, watchdogMs);
+        const deliveryBudget = watchdogMs ?? RUNNER_DEADLINE_RESERVE_MS;
+        if (deliveryDeadline === undefined) {
+          watchdogStartedAt = this.now();
+          deliveryDeadline = performance.now() + deliveryBudget;
+          watchdogTimer = setTimeout(onWatchdog, deliveryBudget);
+        }
+        await this.finishExplicitDelivery(execution, snapshot, deliveryDeadline, watchdogStartedAt, deliveryBudget);
         return;
       }
       if (this.cancellingTaskIds.has(taskId)) return;

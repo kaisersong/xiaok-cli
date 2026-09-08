@@ -4,10 +4,10 @@
  * Extracted from chat.ts so they can be unit-tested without booting the full
  * chat module (which has heavy startup side-effects).
  */
-export declare const DEFAULT_AGENT_MAX_ITERATIONS = 100;
+export declare const DEFAULT_AGENT_MAX_ITERATIONS: undefined;
 export declare const DEFAULT_CLEANUP_TIMEOUT_MS = 2000;
 export declare const DEFAULT_TURN_TIMEOUT_MS: number;
-export declare function resolveAgentMaxIterations(env?: NodeJS.ProcessEnv): number;
+export declare function resolveAgentMaxIterations(env?: NodeJS.ProcessEnv): number | undefined;
 /**
  * Idle timeout for a single non-interactive (`--print` / `--auto`) turn.
  *
@@ -19,6 +19,7 @@ export declare function resolveTurnTimeoutMs(env?: NodeJS.ProcessEnv): number | 
 export interface TurnActivityWatchdog {
     signal: AbortSignal;
     noteActivity(): void;
+    suspend(): void;
     didTimeout(): boolean;
     dispose(): void;
 }

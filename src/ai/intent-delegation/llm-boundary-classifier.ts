@@ -4,6 +4,9 @@ import type { IntentType } from './types.js';
 import { randomUUID } from 'node:crypto';
 import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
 
+import { createLogger } from '../../utils/logger.js';
+const log = createLogger('intent-boundary');
+
 const INTENT_TYPES = new Set(['generate', 'revise', 'summarize', 'analyze']);
 
 export interface LlmBoundaryPromptInput {
@@ -20,7 +23,7 @@ export interface LlmBoundaryPromptInput {
 }
 
 export interface LlmBoundaryInvoker {
-  invoke(prompt: string): Promise<string>;
+  invoke(prompt: string, signal?: AbortSignal): Promise<string>;
   timeoutMs: number;
 }
 
@@ -30,7 +33,7 @@ export function createAdapterBoundaryInvoker(
 ): LlmBoundaryInvoker {
   return {
     timeoutMs: config.timeoutMs,
-    async invoke(prompt: string): Promise<string> {
+    async invoke(prompt: string, signal?: AbortSignal): Promise<string> {
       const messages: Message[] = [{
         role: 'user',
         content: [{ type: 'text', text: prompt }],
@@ -42,6 +45,7 @@ export function createAdapterBoundaryInvoker(
         tools: [],
         systemPrompt: 'Return JSON only. Do not call tools.',
         invocationId: `inv_${randomUUID()}`,
+        ...(signal ? { options: { signal } } : {}),
       })) {
         if (chunk.type === 'text') text += chunk.delta;
         if (chunk.type === 'done') break;
@@ -55,11 +59,17 @@ export async function classifyBoundaryWithLlm(
   input: LlmBoundaryPromptInput,
   invoker: LlmBoundaryInvoker,
 ): Promise<LlmBoundaryDecision> {
+  const controller = new AbortController();
+  const started = Date.now();
+  log.info('intent_boundary_invoke_start', { sessionId: input.sessionId, timeoutMs: invoker.timeoutMs });
   try {
-    const raw = await withTimeout(invoker.invoke(buildPrompt(input)), invoker.timeoutMs);
+    const raw = await withTimeout(invoker.invoke(buildPrompt(input), controller.signal), invoker.timeoutMs, () => controller.abort());
     return parseDecision(raw);
   } catch {
+    if (controller.signal.aborted) log.info('intent_boundary_timeout', { sessionId: input.sessionId, durationMs: Date.now() - started });
     return { kind: 'answer_directly', confidence: 0, reason: 'timeout_or_invoke_error' };
+  } finally {
+    log.info('intent_boundary_invoke_end', { sessionId: input.sessionId, durationMs: Date.now() - started, timedOut: controller.signal.aborted });
   }
 }
 
@@ -118,9 +128,9 @@ function buildPrompt(input: LlmBoundaryPromptInput): string {
   ].join('\n');
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+    const timer = setTimeout(() => { onTimeout(); reject(new Error('timeout')); }, timeoutMs);
     promise.then(
       (value) => {
         clearTimeout(timer);

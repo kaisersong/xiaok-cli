@@ -1,3 +1,4 @@
+import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
@@ -34,7 +35,7 @@ import { activateSkillInvocation, cloneSessionSkillExecutionState, createEmptySe
 import { resolveModelCapabilities } from '../ai/runtime/model-capabilities.js';
 import { loadAutoContext, formatLoadedContext } from '../ai/runtime/context-loader.js';
 import { assertKimiK3TargetResumeSupported, createFileSessionStore, KimiK3DurableResumeUnsupportedError, } from '../ai/runtime/session-store.js';
-import { assertKimiK3SessionModelSwitchSupported, resolveRegisteredStrictKimiK3Profile, } from '../ai/runtime/model-harness-identity.js';
+import { resolveRegisteredStrictKimiK3Profile, } from '../ai/runtime/model-harness-identity.js';
 import { formatPrintOutput } from './chat-print-mode.js';
 import { writeAssistantTextChunkInOrder } from './chat/assistant-streaming.js';
 import { runInteractiveRuntimeTurn, } from './chat/runtime-turn-runner.js';
@@ -334,6 +335,7 @@ async function runChat(initialInput, opts) {
         }
         currentTurnStageObservedSkillNames = new Map();
     };
+    let activeModelWatchdog;
     const requestCurrentTurnAbort = () => {
         if (process.env['XIAOK_NO_ESC_INTERRUPT'] === '1') {
             return;
@@ -355,10 +357,35 @@ async function runChat(initialInput, opts) {
                 externalSignal.addEventListener('abort', onExternalAbort, { once: true });
             }
         }
+        const previousWatchdog = activeModelWatchdog;
+        const watchdog = createTurnActivityWatchdog(resolveTurnTimeoutMs());
+        activeModelWatchdog = watchdog;
+        const onTimeout = () => controller.abort();
+        watchdog.signal.addEventListener('abort', onTimeout, { once: true });
+        const started = Date.now();
+        log.info('runtime_turn_start', { sessionId });
         try {
-            await runtimeFacade.runTurn(request, onChunk, controller.signal, onRuntimeActivity);
+            await runtimeFacade.runTurn(request, onChunk, controller.signal, (event) => {
+                if (event.type === 'model_request_started')
+                    watchdog.suspend();
+                if (event.type === 'model_recovery') {
+                    log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs });
+                    if (!opts.print && !opts.json)
+                        writeOrchestrationBlock(`\n模型连接中断，${Math.ceil(event.delayMs / 1000)} 秒后自动续接（第 ${event.attempt} 次，恢复窗口剩余 ${Math.ceil(event.remainingMs / 60000)} 分钟）。Esc 可中断。\n`);
+                }
+                onRuntimeActivity?.(event);
+            });
+        }
+        catch (error) {
+            if (watchdog.didTimeout())
+                throw new Error('模型长时间无响应，已取消本轮；可以继续输入或切换模型。可通过 XIAOK_TURN_TIMEOUT_MS 调整空闲超时。');
+            throw error;
         }
         finally {
+            log.info('runtime_turn_end', { sessionId, durationMs: Date.now() - started, timedOut: watchdog.didTimeout() });
+            watchdog.dispose();
+            activeModelWatchdog = previousWatchdog;
+            watchdog.signal.removeEventListener('abort', onTimeout);
             if (externalSignal && onExternalAbort) {
                 externalSignal.removeEventListener('abort', onExternalAbort);
             }
@@ -713,6 +740,7 @@ async function runChat(initialInput, opts) {
     // 嵌入式 channel 管理
     const embeddedChannels = [];
     const embeddedApprovalStore = new InMemoryApprovalStore();
+    let interactiveBashActive = false;
     const registryFactory = createPlatformRegistryFactory({
         notifyReminder: (message) => {
             const block = `\n[reminder] ${message}\n`;
@@ -724,6 +752,49 @@ async function runChat(initialInput, opts) {
             subAgentNotices.push(block);
             flushSubAgentNotices();
         },
+        runInteractiveBash: !opts.print && !opts.json && process.stdin.isTTY && process.stdout.isTTY && process.platform !== 'win32'
+            ? async (input, context) => {
+                if (interactiveBashActive)
+                    return 'Error: 本地交互终端正被另一条命令使用，请稍后重试。';
+                context?.signal?.throwIfAborted();
+                interactiveBashActive = true;
+                const busy = activeBusyCapture;
+                busy?.pause();
+                const inputLease = inputReader.suspendForExternalProcess();
+                try {
+                    return await withPausedLiveActivity(async () => {
+                        try {
+                            scrollRegion.end();
+                            originalStdoutWrite('\n[xiaok] sudo 交互终端：请在此输入密码（不回显），Ctrl+C / Esc 取消。\n');
+                            const result = await runPtyCommand(String(input.command), {
+                                cwd: typeof input.workdir === 'string' ? input.workdir : cwd,
+                                timeoutMs: typeof input.timeout_ms === 'number' ? input.timeout_ms : 120000,
+                                maxChars: typeof input.max_chars === 'number' ? input.max_chars : 12000,
+                                signal: context?.signal, write: text => { originalStdoutWrite(text); },
+                            });
+                            if (context?.toolInvocationId)
+                                context.runtimeFactSink?.emit({ invocationId: context.toolInvocationId, toolName: 'bash', factKind: 'command_result', exitCode: result.timedOut ? null : result.exitCode });
+                            if (result.timedOut)
+                                return `Error: 命令超时\n${result.output}`;
+                            return result.exitCode === 0 ? result.output || '（命令执行成功，无输出）' : `Error (exit ${result.exitCode}): ${result.output}`;
+                        }
+                        finally {
+                            originalStdoutWrite('\n');
+                            scrollRegion.resumeAfterExternalCommand({ inputPrompt: getFooterInputPrompt(), summaryLine: getCurrentIntentSummaryLine(), statusLine: statusBar.getStatusLine() });
+                        }
+                    });
+                }
+                finally {
+                    try {
+                        inputLease.resume();
+                        busy?.resume();
+                    }
+                    finally {
+                        interactiveBashActive = false;
+                        flushSubAgentNotices();
+                    }
+                }
+            } : undefined,
         platform,
         source: 'chat',
         sessionId,
@@ -889,6 +960,10 @@ async function runChat(initialInput, opts) {
         hooks: runtimeHooks,
         memoryStore,
         maxIterations: resolveAgentMaxIterations(),
+        onActivity: (activity) => {
+            // Model requests own their idle timeout and recovery window; tools own their cancellation.
+            activeModelWatchdog?.suspend();
+        },
     });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
     agent.setPromptSnapshot(initialPromptSnapshot);
@@ -2082,7 +2157,7 @@ async function runChat(initialInput, opts) {
                     if (chunk.type === 'usage') {
                         statusBar.update(chunk.usage);
                     }
-                }, turnWatchdog.signal, () => turnWatchdog.noteActivity());
+                }, turnWatchdog.signal, () => turnWatchdog.suspend());
             }
             catch (turnError) {
                 if (turnWatchdog.didTimeout()) {
@@ -3261,7 +3336,6 @@ async function runChat(initialInput, opts) {
                         const nextAdapter = createAdapter(newConfig);
                         const currentProfile = resolveRegisteredStrictKimiK3Profile(adapter);
                         const nextProfile = resolveRegisteredStrictKimiK3Profile(nextAdapter);
-                        assertKimiK3SessionModelSwitchSupported(currentProfile, nextProfile, agent.exportSession().messages.length);
                         const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
                         await saveConfig(newConfig);
                         adapter = nextAdapter;
@@ -3269,6 +3343,8 @@ async function runChat(initialInput, opts) {
                         config = newConfig;
                         intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
                         agent.setAdapter(adapter);
+                        if (currentProfile !== nextProfile)
+                            writeCommandOutput(trimmed, '模型协议已切换，历史已转换为最近的可见上下文（最多 40KB）。\n');
                         memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
                         statusBar.updateModel(adapter.getModelName(), modelCapabilities.contextLimit);
                         writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);

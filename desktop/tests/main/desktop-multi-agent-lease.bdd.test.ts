@@ -125,7 +125,7 @@ describe('BDD: desktop execution-group lease', () => {
 
   it('A18 Given a live lease near its deadline, When a new root joins, Then the deadline and epoch do not reset', async () => {
     vi.useFakeTimers();
-    const coordinator = new DesktopExecutionCoordinator();
+    const coordinator = new DesktopExecutionCoordinator({ multiAgentLeaseMs: 28 * 60_000 });
     const root = keep(await coordinator.acquireLease({ groupId: 'g1', policy: 'multiAgent' }));
     const deadline = root.deadlineAt;
     await vi.advanceTimersByTimeAsync(27 * 60_000);
@@ -167,7 +167,7 @@ describe('BDD: desktop execution-group lease', () => {
 
   it('A18 Given an expired live lease, When another member is requested, Then no work may renew or retain it', async () => {
     vi.useFakeTimers();
-    const coordinator = new DesktopExecutionCoordinator();
+    const coordinator = new DesktopExecutionCoordinator({ multiAgentLeaseMs: 28 * 60_000 });
     const root = keep(await coordinator.acquireLease({ groupId: 'g1', policy: 'multiAgent' }));
     await vi.advanceTimersByTimeAsync(28 * 60_000);
     expect(() => root.retain()).toThrow(/expired/);

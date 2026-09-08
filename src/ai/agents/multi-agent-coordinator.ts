@@ -216,7 +216,7 @@ export class MultiAgentCoordinator {
   private readonly closeSettlementTimeoutMs: number;
   private readonly idGenerator: () => string;
   private readonly idleTimeoutMs: number;
-  private readonly turnTimeoutMs: number;
+  private readonly turnTimeoutMs: number | undefined;
   private readonly onEvent?: (event: MultiAgentEvent) => void;
   private nextMessageOrdinal = 0;
   private disposed = false;
@@ -265,8 +265,9 @@ export class MultiAgentCoordinator {
       2_000,
     );
     this.idGenerator = options.idGenerator ?? (() => `agent_${randomUUID()}`);
-    this.idleTimeoutMs = clampInteger(options.idleTimeoutMs, 5 * 60_000, 10, 3_600_000);
-    this.turnTimeoutMs = clampInteger(options.turnTimeoutMs, 10 * 60_000, 10, 3_600_000);
+    this.idleTimeoutMs = options.idleTimeoutMs === 0 ? 0 : clampInteger(options.idleTimeoutMs, 5 * 60_000, 10, 3_600_000);
+    this.turnTimeoutMs = options.turnTimeoutMs !== undefined && Number.isFinite(options.turnTimeoutMs) && options.turnTimeoutMs > 0
+      ? Math.min(2 ** 31 - 1, Math.max(10, Math.floor(options.turnTimeoutMs))) : undefined;
     this.onEvent = options.onEvent;
 
     const root: AgentRecord = {
@@ -1001,12 +1002,15 @@ export class MultiAgentCoordinator {
     };
     const armIdle = () => {
       clearTimeout(idleTimer);
+      if (!this.idleTimeoutMs) return;
       idleTimer = setTimeout(() => timeout('MULTI_AGENT_IDLE_TIMEOUT'), this.idleTimeoutMs);
       idleTimer.unref?.();
     };
     armIdle();
-    totalTimer = setTimeout(() => timeout('MULTI_AGENT_TURN_TIMEOUT'), this.turnTimeoutMs);
-    totalTimer.unref?.();
+    if (this.turnTimeoutMs !== undefined) {
+      totalTimer = setTimeout(() => timeout('MULTI_AGENT_TURN_TIMEOUT'), this.turnTimeoutMs);
+      totalTimer.unref?.();
+    }
     return {
       onActivity: (activity) => {
         if (!active()) return;
@@ -1014,7 +1018,8 @@ export class MultiAgentCoordinator {
         record.phase = activity.phase;
         record.currentTool = activity.toolName;
         record.lastActivityAt = Date.now();
-        armIdle();
+        if (activity.phase === 'tool') clearTimeout(idleTimer);
+        else armIdle();
         if (changed || Date.now() - lastPublishedAt >= 1_000) {
           lastPublishedAt = Date.now();
           this.publish(record, 'activity');

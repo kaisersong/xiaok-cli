@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
 import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 import { DesktopMultiAgentService, type DesktopAgentExecutionContext, type DesktopHostDeliveryAuthority, type DesktopMultiAgentServiceOptions } from '../../electron/desktop-multi-agent-service.js';
+import { DesktopMultiAgentApprovalTransport } from '../../electron/desktop-multi-agent-approval-transport.js';
 import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
@@ -43,12 +44,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     // real runner must still fail this test, not be mistaken for product output.
     expect(capturedAssertions.splice(0)).toEqual([]);
   });
-  async function setup(createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext) => Promise<void>) {
+  async function setup(createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext) => Promise<void>, policy: { multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-multi-agent-service-'));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
     cleanup.push(() => store.close());
-    const coordinator = new DesktopExecutionCoordinator();
+    const coordinator = new DesktopExecutionCoordinator({ multiAgentLeaseMs: policy.multiAgentLeaseMs });
     const service = new DesktopMultiAgentService({ store, coordinator, createSession: async input => {
       const session = await createSession(input);
       return { ...session, run: async (...args) => {
@@ -77,6 +78,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     cleanup.push(() => host.drain());
     const start = async () => {
       const prepared = await service.prepareRoot(host, 't1', { prompt: 'run root', materials: [] });
+      if (policy.coreIdleTimeoutMs !== undefined) {
+        // Explicit test-only policy before activation. The real core timer and
+        // service event/settlement paths remain untouched; Desktop has no default.
+        const groups = (service as unknown as { groups: Map<string, { core: object }> }).groups;
+        Object.defineProperty(groups.get(store.getRootBinding(prepared.taskId)!.groupId)!.core, 'idleTimeoutMs', { value: policy.coreIdleTimeoutMs });
+      }
       await host.startTask(prepared.taskId);
       return prepared.taskId;
     };
@@ -480,14 +487,48 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await fixture.start(); await fixture.host.drain();
   });
 
-  it('A6/A33 Given the core watchdog wins before the child exception seals, When the late interruption is sealed, Then the durable failed outcome is not overwritten', async () => {
+  it('LIFE-D1 Given default root and child execution, When 31 minutes elapse, Then both stay active and expiry and approval actor ports do not impose a hidden limit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const entered = deferred<void>(), releaseChild = deferred<string>(), releaseRoot = deferred<void>();
+    let root!: DesktopAgentExecutionContext, child!: DesktopAgentExecutionContext;
+    const fixture = await setup(async input => ({ run: async () => {
+      child = input.getTurnContext(); entered.resolve(); return releaseChild.promise;
+    }, suspend: async () => {}, dispose: async () => {} }), async context => {
+      root = context;
+      await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'long-spawn', taskName: 'long_child', message: 'work' });
+      await releaseRoot.promise;
+    });
+    const transport = new DesktopMultiAgentApprovalTransport({ store: fixture.store, service: fixture.service });
+    const owner = fixture.service.bindApprovalTransport(transport);
+    try {
+      const taskId = await fixture.start(); await entered.promise;
+      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      expect(root.memberTicket.deadlineAt).toBeUndefined();
+      expect(root.effectiveDeadline).toBe(Infinity); expect(child.effectiveDeadline).toBe(Infinity);
+      await fixture.service.expireLease({ requestSource: 'scheduler', groupId: root.groupId, leaseEpoch: root.memberTicket.epoch });
+      for (const context of [root, child]) {
+        expect(fixture.service.getApprovalDeadline(context.actor)).toBe(Infinity);
+        fixture.service.expireApprovalActor(owner, context);
+        fixture.service.assertInvocation(context.actor, context);
+        expect(context.signal.aborted).toBe(false);
+        expect(fixture.store.getAgent(context.groupId, context.agentId)).toMatchObject({ status: 'running', executionActive: true });
+      }
+      expect((await fixture.host.inspectTask(taskId))?.status).toBe('running');
+      expect(fixture.coordinator.snapshot()).toMatchObject({ active: 1, waiting: 0 });
+    } finally {
+      releaseChild.resolve('done'); releaseRoot.resolve(); await fixture.host.drain();
+      await transport.dispose(); vi.useRealTimers();
+    }
+  });
+
+  it('A6/A33 Given an explicitly configured core watchdog wins before the child exception seals, When the late interruption is sealed, Then the durable failed outcome is not overwritten', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const entered = deferred<void>(); const late = deferred<string>(); const rootRelease = deferred<void>();
     let childContext: DesktopAgentExecutionContext; let observed: string | undefined;
     const fixture = await setup(async input => ({ run: async () => { childContext = input.getTurnContext(); entered.resolve(); return late.promise; }, dispose: async () => {} }), async context => {
       await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'timeout-seal', taskName: 'timeout', message: 'work' });
       await rootRelease.promise;
-    });
+    }, { coreIdleTimeoutMs: 5 * 60_000 });
     try {
       await fixture.start(); await entered.promise;
       await vi.advanceTimersByTimeAsync(5 * 60_000);
@@ -504,7 +545,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       context = current;
       await fixture.service.spawn({ actor: current.actor, requestSource: 'agent', operationId: 'lease-child', taskName: 'child', message: 'work' });
       await entered.promise;
-    });
+    }, { multiAgentLeaseMs: 30 * 60_000 });
     try {
       const taskId = await fixture.start(); await fixture.host.drain();
       const clock = vi.spyOn(Date, 'now').mockReturnValue(context.memberTicket.deadlineAt! + 1);
@@ -518,7 +559,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
 
   it('A33 Given an active root, When a stale or early lease expiry is followed by a real expiry, Then only the real deadline wins and cancels its host execution', async () => {
     const entered = deferred<void>(); const release = deferred<void>(); let context!: DesktopAgentExecutionContext;
-    const fixture = await setup(vi.fn(), async current => { context = current; entered.resolve(); await release.promise; });
+    const fixture = await setup(vi.fn(), async current => { context = current; entered.resolve(); await release.promise; }, { multiAgentLeaseMs: 30 * 60_000 });
     try {
       const taskId = await fixture.start(); await entered.promise;
       await fixture.service.expireLease({ requestSource: 'scheduler', groupId: context.groupId, leaseEpoch: context.memberTicket.epoch - 1 });
@@ -623,7 +664,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(waited).toMatchObject({ reason: 'stopping', settled: false });
   });
 
-  it('A6/A16 Given an idle-timeout child never settles, When its real core watchdog and cleanup grace expire, Then the whole runtime blocks rather than running forever behind a failed status', async () => {
+  it('A6/A16 Given an explicitly idle-limited child never settles, When its real core watchdog and cleanup grace expire, Then the whole runtime blocks rather than running forever behind a failed status', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const entered = deferred<void>(); const childRelease = deferred<string>(); const rootRelease = deferred<void>();
     let groupId = ''; let childId = '';
@@ -631,7 +672,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       groupId = context.groupId;
       const child = await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-timeout', taskName: 'timeout', message: 'work' });
       childId = child.targetAgentId!; await rootRelease.promise;
-    });
+    }, { coreIdleTimeoutMs: 5 * 60_000 });
     try {
       await fixture.start(); await entered.promise;
       await vi.advanceTimersByTimeAsync(5 * 60_000 + 20);
@@ -849,7 +890,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'actual-user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
       const user = (operationId: string) => f.service.userFollowup({ access, requestSource: 'user', groupId, agentId: childId, operationId, expectedTurn: 1, message: 'user' });
       const model = (operationId: string) => f.service.followup({ actor: context.actor, requestSource: 'agent', target: childId, operationId, message: 'model' });
-      const result = await Promise.all([model('model-1'), user('user-1'), model('model-2'), user('user-2'), user('user-excess')]);
+      const result = await Promise.all([model('model-1'), model('model-2'), user('user-1'), user('user-2'), user('user-excess')]);
       expect(result.slice(0, 4).map(item => item.state)).toEqual(Array(4).fill('queued_next_admission'));
       expect(result[4]).toMatchObject({ state: 'completed', outcome: 'rejected', error: 'multi_agent_followup_queue_full' });
       expect(f.service.readOperation({ access, groupId, operationId: 'user-excess' })?.result).toEqual(result[4]);
@@ -1196,7 +1237,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     } finally { release.resolve('cleanup'); }
   });
 
-  it('A32 Given B is busy and X waits, When root queues a followup, Then wait returns queued immediately and X runs before B in a new epoch', async () => {
+  it('LIFE-F1 Given B is busy and X waits, When root waits for its followup, Then B2 settles in the current epoch before root exits and X runs', async () => {
     const entered = deferred<void>(); const release = deferred<string>(); const followupDone = deferred<void>();
     const order: string[] = []; const epochs: number[] = [];
     let requests = 0; let ordinary!: Promise<void>;
@@ -1213,14 +1254,69 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       ordinary = fixture.coordinator.run(undefined, async () => { order.push('X'); });
       const followup = await fixture.service.followup({ actor: context.actor, requestSource: 'agent', operationId: 'follow-busy', target: child.targetAgentId!, message: 'two' });
       expect(followup).toMatchObject({ state: 'queued_next_admission', expectedTurn: 2 });
-      const waited = await fixture.service.wait({ actor: context.actor, requestSource: 'agent', targets: [child.targetAgentId!], operationId: 'follow-busy', expectedTurn: 2, timeoutMs: 1000 });
-      expect(waited).toMatchObject({ reason: 'queued', settled: false, expectedTurn: 2 });
+      const input = { actor: context.actor, requestSource: 'agent' as const, targets: [child.targetAgentId!], operationId: 'follow-busy', expectedTurn: 2, timeoutMs: 1000 };
+      let returned = false;
+      const waiting = fixture.service.wait(input).then(value => { returned = true; return value; });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(returned).toBe(false);
+      release.resolve('one result');
+      let waited = await waiting;
+      for (let attempts = 0; !waited.settled && attempts < 5; attempts++) {
+        expect(waited.reason).not.toBe('queued');
+        const batch = await context.mailbox.drainInput(); if (batch.claimId) await context.mailbox.confirmApplied(batch.claimId);
+        waited = await fixture.service.wait(input);
+      }
+      expect(waited).toMatchObject({ reason: 'settled_terminal', settled: true });
+      expect(waited.agents[0].turn).toBe(2);
+      expect(order).toEqual(['B2']);
+      await expect(fixture.service.wait({ ...input, operationId: 'spawn-busy', expectedTurn: 1 })).rejects.toThrow('multi_agent_wait_turn_superseded');
       } finally { release.resolve('one result'); }
     });
     await fixture.start(); await fixture.host.drain(); await ordinary;
     await vi.waitFor(() => expect(requests).toBe(2));
     await followupDone.promise;
-    expect(order).toEqual(['X', 'B2']); expect(epochs[1]).not.toBe(epochs[0]);
+    expect(order).toEqual(['B2', 'X']); expect(epochs[1]).toBe(epochs[0]);
+  });
+
+  it('LIFE-F2 Given a future user turn, Then agent followup is durably refused and impossible waits cannot spin', async () => {
+    const release = deferred<string>();
+    const fixture = await setup(async () => ({ run: async () => release.promise, suspend: async () => {}, dispose: async () => {} }), async context => {
+      const auth = { actor: context.actor, requestSource: 'agent' as const };
+      const child = await fixture.service.spawn({ ...auth, operationId: 'spawn-barrier', taskName: 'barrier', message: 'first' });
+      await vi.waitFor(() => expect(fixture.store.getAgent(context.groupId, child.targetAgentId!)?.sessionResident).toBe(true));
+      const access = fixture.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
+      await fixture.service.userFollowup({ access, requestSource: 'user', groupId: context.groupId, agentId: child.targetAgentId!, operationId: 'user-barrier', expectedTurn: 1, message: 'user next' });
+      const request = { ...auth, operationId: 'blocked-agent', target: child.targetAgentId!, message: 'cannot join' };
+      const denied = await fixture.service.followup(request);
+      expect(denied).toMatchObject({ state: 'completed', outcome: 'rejected', error: 'multi_agent_followup_user_barrier' });
+      expect(await fixture.service.followup(request)).toEqual(denied);
+      expect(fixture.store.getOperation(context.groupId, 'blocked-agent')?.result).toEqual(denied);
+      const wait = { ...auth, targets: [child.targetAgentId!], timeoutMs: 100 };
+      await expect(fixture.service.wait({ ...wait, expectedTurn: 9 })).rejects.toThrow('multi_agent_wait_invalid_turn');
+      await expect(fixture.service.wait({ ...wait, operationId: 'unknown' })).rejects.toThrow('multi_agent_wait_invalid_operation');
+      await expect(fixture.service.wait({ ...wait, operationId: 'spawn-barrier', expectedTurn: 2 })).rejects.toThrow('multi_agent_wait_invalid_operation');
+      await expect(fixture.service.wait({ ...wait, targets: [child.targetAgentId!, context.agentId], operationId: 'spawn-barrier' })).rejects.toThrow('multi_agent_wait_invalid_operation');
+      await expect(fixture.service.wait({ ...wait, expectedTurn: 2 })).rejects.toThrow('multi_agent_wait_user_barrier');
+      await fixture.service.interrupt({ ...auth, operationId: 'interrupt-barrier', target: child.targetAgentId! });
+      expect(fixture.store.getAgent(context.groupId, child.targetAgentId!)?.resumable).toBe(false);
+      release.resolve('done');
+    });
+    try { await fixture.start(); await fixture.host.drain(); } finally { release.resolve('done'); }
+  });
+
+  it('LIFE-F3 Given child session initialization is pending, Then followup remains queueable and interrupt removes that capability', async () => {
+    const initialized = deferred<void>();
+    const fixture = await setup(async () => { await initialized.promise; return { run: async () => 'done', suspend: async () => {}, dispose: async () => {} }; }, async context => {
+      const auth = { actor: context.actor, requestSource: 'agent' as const };
+      const child = await fixture.service.spawn({ ...auth, operationId: 'init-spawn', taskName: 'init', message: 'first' });
+      try {
+        expect(fixture.store.getAgent(context.groupId, child.targetAgentId!)).toMatchObject({ resumable: true, sessionResident: false });
+        expect(await fixture.service.followup({ ...auth, operationId: 'init-followup', target: child.targetAgentId!, message: 'next' })).toMatchObject({ state: 'queued_next_admission' });
+        await fixture.service.interrupt({ ...auth, operationId: 'init-interrupt', target: child.targetAgentId! });
+        expect(fixture.store.getAgent(context.groupId, child.targetAgentId!)?.resumable).toBe(false);
+      } finally { initialized.resolve(); }
+    });
+    try { await fixture.start(); await fixture.host.drain(); } finally { initialized.resolve(); }
   });
 
   it('A33 Given root seal committed before host terminal, When user cancellation arrives, Then host and root complete while its child keeps running', async () => {

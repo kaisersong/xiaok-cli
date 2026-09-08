@@ -225,7 +225,6 @@ function resolveCollaborativeAgentDef(agents, invocation) {
         allowedTools: invocation.tools?.length ? [...invocation.tools] : undefined,
         model: invocation.model,
         modelCapability: invocation.modelCapability,
-        maxIterations: 50,
         isolation: invocation.isolation === 'worktree' ? 'worktree' : undefined,
         cleanup: 'keep',
         source: 'project',

@@ -26,7 +26,7 @@ describe('chat terminal layout', () => {
     expect(crashReport).toBeGreaterThan(stableOutput);
   });
 
-  it('preflights strict K3 fork before mutation and blocks cross-profile model switching', () => {
+  it('preflights strict K3 fork before mutation and delegates cross-profile model switching to the runtime', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
     const forkLoad = source.indexOf('const forkSource = await sessionStore.load(opts.forkSession);');
     const forkGuard = source.indexOf('assertKimiK3TargetResumeSupported(', forkLoad);
@@ -35,13 +35,13 @@ describe('chat terminal layout', () => {
     expect(forkLoad).toBeGreaterThan(-1);
     expect(forkGuard).toBeGreaterThan(forkLoad);
     expect(forkMutation).toBeGreaterThan(forkGuard);
-    expect(source).toContain('assertKimiK3SessionModelSwitchSupported(');
+    expect(source).not.toContain('assertKimiK3SessionModelSwitchSupported(');
 
     const identitySource = readFileSync(
       join(process.cwd(), 'src', 'ai', 'runtime', 'model-harness-identity.ts'),
       'utf8',
     );
-    expect(identitySource).toContain('KIMI_K3_SESSION_MODEL_SWITCH_UNSUPPORTED');
+    expect(identitySource).not.toContain('KIMI_K3_SESSION_MODEL_SWITCH_UNSUPPORTED');
     expect(identitySource).toContain('currentProfile !== nextProfile');
   });
   it('should not use bottom-fixed input cursor positioning sequences', () => {

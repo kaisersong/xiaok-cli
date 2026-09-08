@@ -463,7 +463,7 @@ describe('AgentRuntime', () => {
       events.push(event.type);
     });
 
-    expect(events).toEqual(['run_started', 'assistant_text', 'run_completed']);
+    expect(events).toEqual(['run_started', 'model_request_started', 'assistant_text', 'run_completed']);
   });
 
   it('merges consecutive text chunks into a single text block in session', async () => {
@@ -986,6 +986,44 @@ describe('AgentRuntime', () => {
     expect(session.getCompactions()).toHaveLength(1);
   });
 
+  it.each(['to-k3', 'from-k3'])('migrates visible history on %s model switch without provider-private reasoning', async (direction) => {
+    const session = new AgentSessionState();
+    session.appendUserText('remember visible request');
+    session.appendAssistantBlocks([{ type: 'thinking', thinking: 'PRIVATE_SENTINEL' }, { type: 'text', text: 'visible answer' }]);
+    const strict = createStrictK3Adapter();
+    const generic: ModelAdapter = { getModelName: () => 'generic', stream: () => mockStream([{ type: 'text', delta: 'ok' }]) };
+    const runtime = new AgentRuntime({ adapter: direction === 'to-k3' ? generic : strict,
+      registry: createRegistryMock() as never, session, controller: new AgentRunController(), systemPrompt: 'system' });
+    runtime.setAdapter(direction === 'to-k3' ? strict : generic);
+    const history = session.getMessages();
+    expect(history).toHaveLength(1);
+    expect(history[0].role).toBe('user');
+    expect(JSON.stringify(history)).toContain('synthesized-model-switch-context');
+    expect(JSON.stringify(history)).toContain('visible answer');
+    expect(JSON.stringify(history)).not.toContain('PRIVATE_SENTINEL');
+    const nextAdapter = direction === 'to-k3' ? strict : generic;
+    const stream = vi.spyOn(nextAdapter, 'stream').mockImplementation(() => mockStream([{ type: 'text', delta: 'next answer' }]));
+    await runtime.run('continue', () => {});
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(stream.mock.calls[0][0])).not.toContain('PRIVATE_SENTINEL');
+    expect(JSON.stringify(stream.mock.calls[0][0])).toContain('visible answer');
+    if (direction === 'to-k3') expect(stream.mock.calls[0][3]?.providerConversationAuthorization).toBeDefined();
+  });
+
+  it('runs beyond 100 iterations by default and stops naturally when work finishes', async () => {
+    let calls = 0;
+    const adapter: ModelAdapter = { getModelName: () => 'long-task', stream: () => mockStream(++calls <= 150
+      ? [{ type: 'tool_use', id: `call-${calls}`, name: 'read', input: {} }]
+      : [{ type: 'text', delta: 'finished long task' }]) };
+    const events: unknown[] = [];
+    const runtime = new AgentRuntime({ adapter, registry: createRegistryMock() as never,
+      session: new AgentSessionState(), controller: new AgentRunController(), systemPrompt: 'system', contextLimit: 1_000_000 });
+    await runtime.run('long task', event => events.push(event));
+    expect(calls).toBe(151);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'run_completed' }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'max_iterations_reached' }));
+  });
+
   it('uses the replacement adapter for compaction after setAdapter', async () => {
     const session = new AgentSessionState();
     session.appendUserText(`old prefix ${'a'.repeat(10_000)}`);
@@ -1347,8 +1385,11 @@ describe('AgentRuntime', () => {
     const mainCall = captured.find((call) => !call.compact);
     expect(compactCall?.options?.cacheKey).toBe(context.cacheKey);
     expect(mainCall?.options?.cacheKey).toBe(context.cacheKey);
-    expect(compactCall?.options?.signal).toBe(mainCall?.options?.signal);
-    expect(compactCall?.options?.signal?.aborted).toBe(false);
+    // Requests own independent timeout controllers, both inherit user cancellation.
+    expect(mainCall?.options?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(mainCall?.options?.signal?.aborted).toBe(true);
+    expect(compactCall?.options?.signal?.aborted).toBe(true);
   });
 
   it('passes external abort signal into model invocation options', async () => {

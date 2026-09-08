@@ -10,6 +10,25 @@ function deferred<T>() {
 describe('multi-agent progress and bounded execution', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('allows active default turns beyond ten minutes and does not time out long tools as idle', async () => {
+    vi.useFakeTimers();
+    const gate = deferred<string>();
+    let context!: ManagedAgentRunContext;
+    const coordinator = createMultiAgentCoordinator({});
+    const child = await coordinator.spawn({ requestSource: 'agent', callerId: 'main', taskName: 'long', message: 'work',
+      createSession: async () => ({ run: (_message, _signal, ctx) => { context = ctx!; return gate.promise; }, dispose: async () => {} }) });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 15; i++) { context.onActivity({phase:'thinking'}); await vi.advanceTimersByTimeAsync(60_000); }
+    expect(coordinator.listAgents({requestSource:'user',callerId:'main'})[1].status).toBe('running');
+    context.onActivity({phase:'tool',toolName:'long_approval'});
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(coordinator.listAgents({requestSource:'user',callerId:'main'})[1].status).toBe('running');
+    context.onActivity({phase:'model'});
+    gate.resolve('done');await vi.advanceTimersByTimeAsync(0);
+    expect(coordinator.listAgents({requestSource:'user',callerId:'main'})[1].status).toBe('completed');
+    await coordinator.closeAgent({requestSource:'user',callerId:'main',target:child.id});await coordinator.dispose();
+  });
+
   it('fails an abort-insensitive run, wakes wait, and keeps resources until physical settlement', async () => {
     vi.useFakeTimers();
     const gate = deferred<string>();

@@ -149,12 +149,12 @@ describe('BDD W1–W6/W11: real root and child execution authority siblings', ()
 
   it('W4 Given both user and agent busy followups in the real child queue, Then revoke cancels both receipts and late old completion cannot start the next turn', async () => {
     const f = await pair(), groupId = f.rootContext.groupId, child = f.store.getAgent(groupId, f.childContext.agentId)!;
-    const user = await f.invoke<{ expectedTurn: number }>('followupAgent', { threadId: 'runtime-auth', groupId, agentId: child.id,
-      operationId: 'user-busy-next', expectedTurn: child.turn, message: 'user queued turn must not run' });
-    expect(user).toMatchObject({ state: 'queued_next_admission', expectedTurn: child.turn + 1 });
     const agent = JSON.parse(await f.rootScope.registry.executeTool('followup_task', { target: child.id, message: 'agent queued turn must not run' },
       { ...f.rootScope.context!, toolInvocationId: 'agent-busy-next' })) as { operationId: string; expectedTurn: number };
-    expect(agent).toMatchObject({ state: 'queued_next_admission', expectedTurn: child.turn + 2 });
+    expect(agent).toMatchObject({ state: 'queued_next_admission', expectedTurn: child.turn + 1 });
+    const user = await f.invoke<{ expectedTurn: number }>('followupAgent', { threadId: 'runtime-auth', groupId, agentId: child.id,
+      operationId: 'user-busy-next', expectedTurn: child.turn, message: 'user queued turn must not run' });
+    expect(user).toMatchObject({ state: 'queued_next_admission', expectedTurn: child.turn + 2 });
     await f.setAuthorization(authorizationRequest(await f.getAuthorization(), false, 'cancel-both-followups'));
     f.release.resolve(); await f.settled();
     expect(f.store.getAgent(groupId, child.id)?.turn).toBe(child.turn);

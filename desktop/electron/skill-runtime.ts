@@ -89,11 +89,11 @@ export interface SkillBudget {
 }
 
 const DEFAULT_BUDGET: SkillBudget = {
-  maxIterations: 25,
-  maxToolCalls: 40,
-  maxReferenceReads: 8,
+  maxIterations: Number.POSITIVE_INFINITY,
+  maxToolCalls: Number.POSITIVE_INFINITY,
+  maxReferenceReads: Number.POSITIVE_INFINITY,
   maxRepairAttempts: 1,
-  maxTotalInputTokens: 1_000_000,
+  maxTotalInputTokens: Number.POSITIVE_INFINITY,
 };
 
 function getBudget(): SkillBudget {
@@ -107,10 +107,11 @@ export function checkBudget(
   referenceReads: number,
   totalInputTokens: number,
   dataRoot: string,
+  iterationLimit?: number,
 ): { ok: true } | { ok: false; reason: string } {
-  const budget = getBudget();
+  const budget = { ...getBudget(), ...(iterationLimit !== undefined ? { maxIterations: iterationLimit } : {}) };
 
-  if (currentIteration >= budget.maxIterations) {
+  if (currentIteration > budget.maxIterations) {
     appendTrace(dataRoot, {
       ts: Date.now(), taskId: invocation.traceId, skillName: invocation.primarySkill,
       event: 'budget_warning', details: `maxIterations ${budget.maxIterations} reached`,

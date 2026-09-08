@@ -54,8 +54,8 @@ export class Agent {
         return this.session;
     }
     setAdapter(adapter) {
-        this.adapter = adapter;
         this.runtime.setAdapter(adapter);
+        this.adapter = adapter;
     }
     setSystemPrompt(systemPrompt) {
         this.systemPrompt = systemPrompt;

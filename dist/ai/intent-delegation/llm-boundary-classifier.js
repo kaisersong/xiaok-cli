@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { streamStatelessSideCallProviderConversation } from '../runtime/provider-conversation-authorization.js';
+import { createLogger } from '../../utils/logger.js';
+const log = createLogger('intent-boundary');
 const INTENT_TYPES = new Set(['generate', 'revise', 'summarize', 'analyze']);
 export function createAdapterBoundaryInvoker(adapter, config) {
     return {
         timeoutMs: config.timeoutMs,
-        async invoke(prompt) {
+        async invoke(prompt, signal) {
             const messages = [{
                     role: 'user',
                     content: [{ type: 'text', text: prompt }],
@@ -16,6 +18,7 @@ export function createAdapterBoundaryInvoker(adapter, config) {
                 tools: [],
                 systemPrompt: 'Return JSON only. Do not call tools.',
                 invocationId: `inv_${randomUUID()}`,
+                ...(signal ? { options: { signal } } : {}),
             })) {
                 if (chunk.type === 'text')
                     text += chunk.delta;
@@ -27,12 +30,20 @@ export function createAdapterBoundaryInvoker(adapter, config) {
     };
 }
 export async function classifyBoundaryWithLlm(input, invoker) {
+    const controller = new AbortController();
+    const started = Date.now();
+    log.info('intent_boundary_invoke_start', { sessionId: input.sessionId, timeoutMs: invoker.timeoutMs });
     try {
-        const raw = await withTimeout(invoker.invoke(buildPrompt(input)), invoker.timeoutMs);
+        const raw = await withTimeout(invoker.invoke(buildPrompt(input), controller.signal), invoker.timeoutMs, () => controller.abort());
         return parseDecision(raw);
     }
     catch {
+        if (controller.signal.aborted)
+            log.info('intent_boundary_timeout', { sessionId: input.sessionId, durationMs: Date.now() - started });
         return { kind: 'answer_directly', confidence: 0, reason: 'timeout_or_invoke_error' };
+    }
+    finally {
+        log.info('intent_boundary_invoke_end', { sessionId: input.sessionId, durationMs: Date.now() - started, timedOut: controller.signal.aborted });
     }
 }
 function parseDecision(raw) {
@@ -84,9 +95,9 @@ function buildPrompt(input) {
         `input=${input.input}`,
     ].join('\n');
 }
-function withTimeout(promise, timeoutMs) {
+function withTimeout(promise, timeoutMs, onTimeout) {
     return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+        const timer = setTimeout(() => { onTimeout(); reject(new Error('timeout')); }, timeoutMs);
         promise.then((value) => {
             clearTimeout(timer);
             resolve(value);

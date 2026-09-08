@@ -103,14 +103,15 @@ describe('production subagent resource lifecycle', () => {
     expect(manager.release).toHaveBeenCalledOnce();
   });
 
-  it('releases delete worktrees only after the real Agent provider run settles', async () => {
+  it('releases delete worktrees only after the real Agent tool execution settles', async () => {
     let finish!: () => void;
     let started = false;
     const gate = new Promise<void>((resolve) => { finish = resolve; });
-    const { options, manager, path } = fixture();
+    const { options, manager, path, registry } = fixture();
+    registry.registerTool({permission:'safe', definition:{name:'held_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},
+      execute:async () => {started = true; await gate; return 'done';}});
     options.adapter = () => ({ getModelName: () => 'stubborn', async *stream() {
-      started = true;
-      await gate;
+      yield {type:'tool_use' as const,id:'held',name:'held_tool',input:{}};
       yield { type: 'done' as const };
     } });
     const caller = { requestSource: 'agent' as const, callerId: 'main' };
@@ -125,6 +126,31 @@ describe('production subagent resource lifecycle', () => {
     expect(await coordinator.closeAgent({ ...caller, target: child.id })).toMatchObject({ resourcesReleased: true });
     expect(manager.release).toHaveBeenCalledOnce();
     await coordinator.dispose();
+  });
+
+  it('isolates a cancelled model reader and never executes its late tool request', async () => {
+    const {options, registry, manager} = fixture();
+    let finish!: () => void;
+    let started = false;
+    const gate = new Promise<void>(resolve => {finish = resolve;});
+    const execute = vi.fn(async () => 'unexpected');
+    registry.registerTool({permission:'safe',definition:{name:'late_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},execute});
+    options.adapter = () => ({async *stream() {
+      started = true; await gate;
+      yield {type:'tool_use' as const,id:'late',name:'late_tool',input:{}};
+      yield {type:'done' as const};
+    }});
+    const caller = {requestSource:'agent' as const,callerId:'main'};
+    const coordinator = createMultiAgentCoordinator();
+    try {
+      const child = await coordinator.spawn({...caller,taskName:'late',message:'run',createSession:() => createNamedSubAgentSession(options)});
+      await vi.waitFor(() => expect(started).toBe(true));
+      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({resourcesReleased:true});
+      finish();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(execute).not.toHaveBeenCalled();
+      expect(manager.release).toHaveBeenCalledOnce();
+    } finally {finish(); await coordinator.dispose();}
   });
 
   it('rejects model plus capability before Agent dispatch and cleans acquired resources', async () => {

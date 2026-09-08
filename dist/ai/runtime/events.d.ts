@@ -8,6 +8,15 @@ export type AgentRuntimeEvent = {
     type: 'run_started';
     runId: string;
 } | {
+    type: 'model_request_started';
+    runId: string;
+} | {
+    type: 'model_recovery';
+    runId: string;
+    attempt: number;
+    delayMs: number;
+    remainingMs: number;
+} | {
     type: 'assistant_text';
     runId: string;
     delta: string;

@@ -7,6 +7,7 @@ import type { PlatformRuntimeContext } from './context.js';
 export declare function filterWorkflowToolsForAgent(tools: Tool[], agentId: string): Tool[];
 export interface PlatformRegistryFactoryOptions {
     notifyReminder?: (message: string) => void;
+    runInteractiveBash?: Tool['execute'];
     onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
     onMultiAgentEvent?: (event: MultiAgentEvent) => void;
     platform: PlatformRuntimeContext;

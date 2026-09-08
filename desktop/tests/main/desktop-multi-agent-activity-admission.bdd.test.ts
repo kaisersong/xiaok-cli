@@ -9,13 +9,17 @@ describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission call
   const cleanup: Cleanup = [];
   afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
-  async function siblings(rootFinishes: boolean) {
+  async function siblings(rootFinishes: boolean, onBusyCall?: () => void) {
     const f = await activityFixture(cleanup), rootEntered = barrier(), busyEntered = barrier(), rootRelease = barrier(), busyRelease = barrier();
     cleanup.push(() => { rootRelease.release(); busyRelease.release(); });
     const effect = join(f.root, 'busy-next-effect.txt');
+    let busyRequestedTool = false;
     f.setProgram(async function* ({ child, system, call }) {
       if (child) {
         if (system.includes('Assigned Desktop agent: /root/idle')) { yield { type: 'text', delta: 'idle child done' }; return; }
+        onBusyCall?.();
+        if (busyRequestedTool) { yield { type: 'text', delta: 'busy child done' }; return; }
+        busyRequestedTool = true;
         busyEntered.release(); await busyRelease.wait; yield writeChunk(effect); return;
       }
       if (call === 1) { yield spawnChunk('idle'); yield spawnChunk('busy'); }
@@ -31,6 +35,18 @@ describe.runIf(nativeAuthorizer)('R6 AF6a actual direct LiveGroup admission call
     const host = (f.service as unknown as { host: InProcessTaskRuntimeHost }).host;
     return { ...f, taskId, context, idle, busy, host, rootRelease, busyRelease, effect };
   }
+
+  it('AF6a fixture released busy provider performs one write then reaches a real terminal result without an iteration watchdog', async () => {
+    let busyCalls = 0;
+    // Assert the provider protocol itself. This also exposes a hot microtask
+    // loop as an ordinary failed result instead of starving Vitest's timers.
+    const f = await siblings(false, () => { expect(++busyCalls).toBeLessThanOrEqual(2); });
+    f.busyRelease.release(); f.rootRelease.release();
+    await vi.waitFor(() => expect(f.store.getAgent(f.busy.groupId, f.busy.agentId)).toMatchObject({ status: 'completed', executionActive: false }));
+    expect(existsSync(f.effect)).toBe(true);
+    expect(f.calls.filter(call => call.child && !call.system.includes('Assigned Desktop agent: /root/idle'))).toHaveLength(2);
+    await f.settled(f.taskId);
+  });
 
   it.each(['prepare', 'root-followup', 'user-followup'].flatMap(caller => ['groups', 'thread_bindings'].map(table => ({ caller, table }))))('AF6a $caller × $table actual read failure cancels the existing sibling before new dispatch', async ({ caller, table }) => {
     const f = await siblings(caller === 'prepare');

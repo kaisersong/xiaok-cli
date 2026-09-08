@@ -85,9 +85,11 @@ describe('desktop runner finalization', () => {
     // The task host persists snapshots asynchronously after the runner returns.
     // Deleting the temp root here races Windows rename() and creates false failures.
     delete process.env.XIAOK_CONFIG_DIR;
+    vi.unstubAllEnvs();
   });
 
-  it('runs a no-tool finalization turn after exhausting tool-only iterations', async () => {
+  it('runs a no-tool finalization turn at an explicit limit but does not report the exhausted task as completed', async () => {
+    vi.stubEnv('XIAOK_AGENT_MAX_ITERATIONS', '2');
     const workFolder = join(rootDir, 'workflow-project');
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
@@ -98,7 +100,7 @@ describe('desktop runner finalization', () => {
     // config, so the finalization logic under test is never reached without it.
     await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
 
-    const result = await services.runKSwarmWorkflowNode({
+    const execution = services.runKSwarmWorkflowNode({
       handoff: {
         projectId: 'proj-finalize',
         workflowRunId: 'wf-proj-finalize-1',
@@ -114,10 +116,10 @@ describe('desktop runner finalization', () => {
       targetParticipantId: 'xiaok-worker',
     });
 
-    expect(adapterState.streamCalls).toBe(21);
-    expect(adapterState.toolCounts.slice(0, 20).every((count) => count > 0)).toBe(true);
-    expect(adapterState.toolCounts[20]).toBe(0);
-    expect(result.output?.summary).toBe('finalized from prior tool results');
+    await expect(execution).rejects.toThrow('desktop_task_failed');
+    expect(adapterState.streamCalls).toBe(3);
+    expect(adapterState.toolCounts.slice(0, 2).every((count) => count > 0)).toBe(true);
+    expect(adapterState.toolCounts[2]).toBe(0);
   });
 
   it('runs a no-tool finalization turn when the model returns an empty turn after tool results', async () => {

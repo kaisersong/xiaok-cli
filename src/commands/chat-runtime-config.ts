@@ -5,17 +5,17 @@
  * chat module (which has heavy startup side-effects).
  */
 
-export const DEFAULT_AGENT_MAX_ITERATIONS = 100;
+export const DEFAULT_AGENT_MAX_ITERATIONS = undefined;
 export const DEFAULT_CLEANUP_TIMEOUT_MS = 2_000;
 export const DEFAULT_TURN_TIMEOUT_MS = 4 * 60_000;
 
 export function resolveAgentMaxIterations(
   env: NodeJS.ProcessEnv = process.env,
-): number {
+): number | undefined {
   const raw = env.XIAOK_AGENT_MAX_ITERATIONS;
   if (!raw) return DEFAULT_AGENT_MAX_ITERATIONS;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || parsed < 1) {
     return DEFAULT_AGENT_MAX_ITERATIONS;
   }
   return Math.floor(parsed);
@@ -42,6 +42,7 @@ export function resolveTurnTimeoutMs(
 export interface TurnActivityWatchdog {
   signal: AbortSignal;
   noteActivity(): void;
+  suspend(): void;
   didTimeout(): boolean;
   dispose(): void;
 }
@@ -75,6 +76,7 @@ export function createTurnActivityWatchdog(
   return {
     signal: controller.signal,
     noteActivity: arm,
+    suspend: clearTimer,
     didTimeout: () => timedOut,
     dispose() {
       disposed = true;

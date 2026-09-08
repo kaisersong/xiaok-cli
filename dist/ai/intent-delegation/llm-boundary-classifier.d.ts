@@ -13,7 +13,7 @@ export interface LlmBoundaryPromptInput {
     };
 }
 export interface LlmBoundaryInvoker {
-    invoke(prompt: string): Promise<string>;
+    invoke(prompt: string, signal?: AbortSignal): Promise<string>;
     timeoutMs: number;
 }
 export declare function createAdapterBoundaryInvoker(adapter: ModelAdapter, config: IntentBoundaryConfig): LlmBoundaryInvoker;

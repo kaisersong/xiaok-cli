@@ -103,10 +103,10 @@ describe('BDD AP formal transport availability', () => {
 describe.skipIf(!implementationPresent)('BDD AP real transport + Service + SQLite + Registry', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
   afterEach(async () => { for (const action of cleanup.splice(0).reverse()) await action(); vi.restoreAllMocks(); });
-  async function setup(extras: { beforeOpaqueInvocation?(): void | Promise<void> } = {}) {
+  async function setup(extras: { beforeOpaqueInvocation?(): void | Promise<void>; multiAgentLeaseMs?: number } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-approval-main-')); cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite')); cleanup.push(() => store.close());
-    const service = new DesktopMultiAgentService({ store, coordinator: new DesktopExecutionCoordinator(), createSession: vi.fn() });
+    const service = new DesktopMultiAgentService({ store, coordinator: new DesktopExecutionCoordinator({ multiAgentLeaseMs: extras.multiAgentLeaseMs }), createSession: vi.fn() });
     service.registerThread({ threadId: 'thread', profileId: 'profile', workspaceId: 'workspace', cwd: root });
     const entered = deferred<DesktopAgentExecutionContext>(), release = deferred<void>();
     const host = new InProcessTaskRuntimeHost({ snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),
@@ -232,7 +232,7 @@ describe.skipIf(!implementationPresent)('BDD AP real transport + Service + SQLit
   });
 
   it.each(['approval', 'actor'] as const)('AP3/AP9 %s deadline crossed during the real BEGIN is a confirmed expiry, not a persistence failure', async deadline => {
-    const f = await setup(), running = f.execute().catch(error => error), pending = await f.pending();
+    const f = await setup({ multiAgentLeaseMs: deadline === 'actor' ? 60_000 : undefined }), running = f.execute().catch(error => error), pending = await f.pending();
     const dueAt = deadline === 'actor' ? f.context.effectiveDeadline : f.get(pending.approvalId).minDeadlineAt;
     const originalExec = f.db.exec.bind(f.db); let clock: ReturnType<typeof vi.spyOn> | undefined, boundaries = 0;
     const begin = vi.spyOn(f.db, 'exec').mockImplementation(sql => {
@@ -254,7 +254,7 @@ describe.skipIf(!implementationPresent)('BDD AP real transport + Service + SQLit
   });
 
   it.each(['approval', 'actor'] as const)('AP3/AP9 %s deadline crossed during real COMMIT preserves the approved audit without issuing a live grant or effect', async deadline => {
-    const f = await setup(), running = f.execute().catch(error => error), pending = await f.pending();
+    const f = await setup({ multiAgentLeaseMs: deadline === 'actor' ? 60_000 : undefined }), running = f.execute().catch(error => error), pending = await f.pending();
     const dueAt = deadline === 'actor' ? f.context.effectiveDeadline : f.get(pending.approvalId).minDeadlineAt;
     const originalExec = f.db.exec.bind(f.db); let clock: ReturnType<typeof vi.spyOn> | undefined, crossed = false;
     const commit = vi.spyOn(f.db, 'exec').mockImplementation(sql => {

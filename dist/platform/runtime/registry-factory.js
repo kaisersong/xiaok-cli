@@ -1,3 +1,4 @@
+import { createInteractiveBashTool } from '../../ai/tools/bash.js';
 import { getCanonicalToolId } from '../../ai/tools/tool-identity.js';
 import { ToolRegistry, buildToolList } from '../../ai/tools/index.js';
 import { createLspTool } from '../../ai/tools/lsp.js';
@@ -179,7 +180,10 @@ export function createPlatformRegistryFactory(options) {
         // 构建基础 tool list
         const baseTools = buildToolList(options.skillTool, { cwd, allowOutsideCwd: Boolean(options.platform.sandboxEnforcer) }, extraTools);
         // 应用 sandbox
-        const sandboxedTools = applySandboxToTools(baseTools, options.platform.sandboxEnforcer, {
+        const executionTools = options.source === 'chat' && agentId === 'main' && options.runInteractiveBash
+            ? baseTools.map(tool => tool.definition.name === 'bash' ? createInteractiveBashTool(options.runInteractiveBash) : tool)
+            : baseTools;
+        const sandboxedTools = applySandboxToTools(executionTools, options.platform.sandboxEnforcer, {
             onSandboxDenied: handleSandboxDenied,
         });
         // 合并 built-in 和 MCP tools（保证 ordering）

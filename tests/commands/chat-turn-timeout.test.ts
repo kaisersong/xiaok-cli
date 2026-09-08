@@ -88,3 +88,20 @@ describe('createTurnActivityWatchdog', () => {
     }
   });
 });
+
+
+describe('model watchdog suspension', () => {
+  it('pauses during tools and restarts with model activity', async () => {
+    vi.useFakeTimers();
+    try {
+      const watchdog = createTurnActivityWatchdog(1000);
+      watchdog.suspend();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(watchdog.signal.aborted).toBe(false);
+      watchdog.noteActivity();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(watchdog.didTimeout()).toBe(true);
+      watchdog.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+});

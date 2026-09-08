@@ -72,7 +72,7 @@ export function projectProviderPrivateMessages(messages: readonly Message[]): Me
 }
 
 export function buildSynthesizedProviderContext(
-  kind: 'compaction' | 'subagent',
+  kind: 'compaction' | 'subagent' | 'model-switch',
   messages: readonly Message[],
 ): string {
   assertDenseArray(messages);

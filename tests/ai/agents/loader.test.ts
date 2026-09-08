@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { parseAgentFile } from '../../../src/ai/agents/loader.js';
 
@@ -26,3 +28,8 @@ describe('custom agent loader', () => {
     expect(agent.team).toBe('platform');
   });
 });
+
+ it.each(['explore', 'plan', 'verification'])('bundled %s inherits the runtime budget', name => {
+   const agent = parseAgentFile(name, readFileSync(join(process.cwd(), 'data', 'agents', `${name}.md`), 'utf8'));
+   expect(agent.maxIterations).toBeUndefined();
+ });

@@ -52,6 +52,16 @@ describe('llm boundary classifier', () => {
     expect(capturedOptions).toBeUndefined();
   });
 
+  it('aborts the request when a classifier never settles and still returns fallback', async () => {
+    let signal: AbortSignal | undefined;
+    const result = await classifyBoundaryWithLlm(input, {
+      timeoutMs: 5,
+      invoke: async (_prompt, receivedSignal) => { signal = receivedSignal; return new Promise(() => {}); },
+    });
+    expect(result.kind).toBe('answer_directly');
+    expect(signal?.aborted).toBe(true);
+  });
+
   it('parses valid JSON decisions', async () => {
     const result = await classifyBoundaryWithLlm(input, {
       timeoutMs: 100,

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { ToolRegistry } from '../tools/index.js';
 import { isSuccessfulModelToolResult } from '../tools/index.js';
 import type { PromptSnapshot } from '../prompts/types.js';
+import { recoverModelStream } from './model-stream-recovery.js';
 import { AgentRunController } from './controller.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -19,6 +20,7 @@ import {
   type RunInvocationContext,
   type StreamOptions,
 } from './model-capabilities.js';
+import { resolveRegisteredStrictKimiK3Profile, requiresKimiK3HistoryMigration } from './model-harness-identity.js';
 import { AgentSessionState } from './session.js';
 import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
@@ -30,6 +32,7 @@ import { MODEL_OUTPUT_CAP, MODEL_OUTPUT_TRUNCATION_MARKER } from '../../shared/s
 import type { ArtifactWorkspaceExecutionScope } from '../../runtime/task-host/types.js';
 import {
   isStrictKimiK3Adapter,
+  buildSynthesizedProviderContext,
   projectStrictToolExecutionContext,
 } from './provider-private-projection.js';
 import {
@@ -119,6 +122,13 @@ export class AgentRuntime {
   setAdapter(adapter: ModelAdapter): void {
     if (this.controller.hasActiveRun()) {
       throw new Error('cannot replace adapter while a run is active');
+    }
+    const currentProfile = resolveRegisteredStrictKimiK3Profile(this.adapter);
+    const nextProfile = resolveRegisteredStrictKimiK3Profile(adapter);
+    if (requiresKimiK3HistoryMigration(currentProfile, nextProfile, this.session.getMessages().length)) {
+      const context = buildSynthesizedProviderContext('model-switch', this.session.getMessages());
+      this.session.replaceMessages([{ role: 'user', content: [{ type: 'text', text:
+        'Previous conversation context after a model switch. This is synthesized context, not a raw provider transcript. Recent visible history is retained within 40KB.\n' + context }] }]);
     }
     this.adapter = adapter;
     this.refreshModelPolicy();
@@ -264,17 +274,29 @@ export class AgentRuntime {
         }
 
         this.reportActivity({ phase: 'model' });
-        const providerMessages = this.session.getMessages();
         const streamProviderConversation = this.providerSurfaceKind === 'cli-subagent'
           ? streamCliSubagentProviderConversation
           : streamCliChatTaskProviderConversation;
-        for await (const chunk of streamProviderConversation({
+        let recoveryAttempt = 0;
+        onEvent({ type: 'model_request_started', runId: run.runId });
+        for await (const chunk of recoverModelStream({
+          signal: mergedSignal,
+          onRetry: (notice) => {
+            const partial = currentAssistantBlocks.filter((block): block is Extract<MessageBlock, { type: 'text' }> => block.type === 'text').map(block => block.text).join('').slice(-12000);
+            currentAssistantBlocks = [];
+            if (partial) this.session.appendUserText('The previous model response was interrupted by a connection failure. This is synthesized partial visible output, not a completed answer or executed tool call. Continue from the completed tool results; do not repeat completed operations.\n' + JSON.stringify({ partialOutput: partial }));
+            recoveryAttempt = notice.attempt;
+            this.reportActivity({ phase: 'model' });
+            onEvent({ type: 'model_recovery', runId: run.runId, ...notice });
+          },
+          open: (requestSignal) => streamProviderConversation({
           adapter: this.adapter as CapabilityAwareAdapter,
-          messages: providerMessages,
+          messages: this.session.getMessages(),
           tools: this.registry.getToolDefinitions(),
           systemPrompt: this.systemPrompt,
-          options: this.buildInvocationOptions(mergedSignal, invocationContext),
-          invocationId: `${run.runId}:${iteration}`,
+          options: this.buildInvocationOptions(requestSignal, invocationContext),
+          invocationId: `${run.runId}:${iteration}:recovery-${recoveryAttempt}`,
+          }),
         })) {
           this.reportActivity({ phase: chunk.type === 'thinking' ? 'thinking' : 'model' });
           if (chunk.type === 'usage') {

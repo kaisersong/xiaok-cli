@@ -58,8 +58,11 @@ export class DesktopExecutionCoordinator {
   readonly capacity: number;
   private readonly laneCapacity: Record<ExecutionLane, number>;
   private readonly laneActive: Record<ExecutionLane, number> = { foreground: 0, background: 0 };
+  private readonly multiAgentLeaseMs?: number;
 
-  constructor(options: { capacity?: number; backgroundCapacity?: number } = {}) {
+  constructor(options: { capacity?: number; backgroundCapacity?: number; multiAgentLeaseMs?: number } = {}) {
+    if (options.multiAgentLeaseMs !== undefined && (!Number.isSafeInteger(options.multiAgentLeaseMs) || options.multiAgentLeaseMs <= 0)) throw new Error('Invalid explicit lease duration');
+    this.multiAgentLeaseMs = options.multiAgentLeaseMs;
     const capacity = options.capacity ?? 1;
     if (!Number.isSafeInteger(capacity) || capacity < 1) {
       throw new Error('Desktop execution capacity must be a positive integer');
@@ -198,7 +201,7 @@ export class DesktopExecutionCoordinator {
         epoch: ++this.nextEpoch,
         policy: waiter.policy,
         acquiredAt,
-        deadlineAt: waiter.policy === 'multiAgent' ? acquiredAt + 28 * 60_000 : undefined,
+        deadlineAt: waiter.policy === 'multiAgent' && this.multiAgentLeaseMs !== undefined ? acquiredAt + this.multiAgentLeaseMs : undefined,
         refCount: 0,
         released: false,
       };

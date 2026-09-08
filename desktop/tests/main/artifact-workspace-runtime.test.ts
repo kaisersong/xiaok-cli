@@ -238,7 +238,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
     let streamCall = 0;
     const context = baseContext();
 
-    const result = await runDesktopToolLoop({
+    const execution = runDesktopToolLoop({
       ...context,
       signal: currentController.signal,
       invocationOptions: {
@@ -276,7 +276,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
       },
     });
 
-    expect(result.reply).toBe('final');
+    await expect(execution).rejects.toMatchObject({ code: 'tool_loop_iteration_limit', partialReply: 'final', limit: 2, used: 2, source: 'task' });
     expect(streamOptions).toHaveLength(3);
     expect(streamOptions[0]).toBe(streamOptions[1]);
     expect(streamOptions[1]).toBe(streamOptions[2]);

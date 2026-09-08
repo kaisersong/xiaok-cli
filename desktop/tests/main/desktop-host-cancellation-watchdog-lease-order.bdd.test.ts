@@ -7,6 +7,17 @@ import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import type { DesktopAgentExecutionContext } from '../../electron/desktop-multi-agent-service.js';
 import { authorizationFixture, deferred } from '../fixtures/multi-agent-authorization.js';
 
+// Keep the real coordinator and factory, but explicitly request the bounded
+// lease whose race this suite exercises. Production no longer supplies one.
+vi.mock('../../electron/desktop-execution-coordinator.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../electron/desktop-execution-coordinator.js')>();
+  return { ...actual, DesktopExecutionCoordinator: class extends actual.DesktopExecutionCoordinator {
+    constructor(options: ConstructorParameters<typeof actual.DesktopExecutionCoordinator>[0] = {}) {
+      super({ ...options, multiAgentLeaseMs: 28 * 60_000 });
+    }
+  } };
+});
+
 const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe('BDD: real main watchdog and lease expiry keep whichever legal terminal wins first', () => {
@@ -20,7 +31,8 @@ describe('BDD: real main watchdog and lease expiry keep whichever legal terminal
     const f = await authorizationFixture(cleanup);
     const host = (f.boundary.service as unknown as { host: InProcessTaskRuntimeHost }).host;
     const entered = deferred(), release = deferred(); cleanup.push(async () => { release.resolve(); await host.drain(); });
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    // The host watchdog uses monotonic elapsed time as well as native timers.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     let models = 0;
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       models++; entered.resolve(); await release.promise; yield { type: 'text', delta: 'Late model output must not revive execution.' };
