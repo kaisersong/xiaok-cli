@@ -9,6 +9,7 @@ import type { KSwarmArtifact } from '../../hooks/useKSwarmClient';
 import { ChatInput, type AttachedFile } from '../ChatInput';
 import { XIAOK_WORKER_SEED_ID } from '../../../../shared/kswarm-seed-contract.js';
 import { getDesktopApi } from '../../shared/desktop';
+import { RoomWorkspaceSurface } from './RoomWorkspaceSurface';
 
 export interface CollaborationRoomViewProps {
   roomId: string;
@@ -86,6 +87,7 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
 
   useEffect(() => desktop.onCollaborationRoomEvent((event: CollaborationRoomEvent) => {
     if (event.roomId !== roomId) return;
+    if (event.type === 'workspace_changed') return;
     if (event.type === 'wake_settled') {
       setPendingDiscussions((current) => (
         Object.hasOwn(current, event.roomMessageId)
@@ -117,6 +119,17 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
     label: availableAgents.find((agent) => agent.id === id)?.name ?? id,
   })), [activeAgentIds, availableAgents]);
 
+  const capabilities = useMemo(() => new Map((snapshot?.executionCapabilities ?? []).map(item => [item.logicalAgentId, item])), [snapshot?.executionCapabilities]);
+  const capabilityLabel = (id: string) => {
+    const mode = capabilities.get(id)?.mode;
+    return mode === 'workspace_worker' ? t.collaborationRoomExecutionWorker : mode === 'discussion_only' ? t.collaborationRoomExecutionDiscussion
+      : mode === 'discussion_unavailable' ? t.collaborationRoomExecutionUnavailable : t.collaborationRoomExecutionUnknown;
+  };
+  const capabilityReason = (id: string) => {
+    const capability = capabilities.get(id);
+    return capability?.mode === 'workspace_worker' || capability?.mode === 'discussion_only' ? undefined : t.collaborationRoomExecutionReason(capability?.reason ?? '');
+  };
+
   const sendMessage = async (messageText: string, files: AttachedFile[]): Promise<boolean> => {
     if ((!messageText.trim() && files.length === 0) || sending) return false;
     setSending(true);
@@ -129,12 +142,15 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
         idempotencyKey: crypto.randomUUID(),
       }) as {
         ok?: boolean;
-        wake?: { status?: string; roomMessageId?: string; logicalAgentIds?: string[] };
+        wake?: { status?: string; roomMessageId?: string; logicalAgentIds?: string[]; unavailable?: Array<{ logicalAgentId: string; reason?: string }> };
+        unavailable?: Array<{ logicalAgentId: string; reason?: string }>;
       };
       if (!result?.ok) {
         setActionError(t.collaborationRoomActionFailed);
         return false;
       }
+      const unavailable = result.wake?.unavailable ?? result.unavailable ?? [];
+      if (unavailable.length) setActionError(t.collaborationRoomUnavailableMembers(unavailable.map(item => availableAgents.find(agent => agent.id === item.logicalAgentId)?.name ?? item.logicalAgentId).join(', ')));
       if (
         result.wake?.status === 'queued'
         && typeof result.wake.roomMessageId === 'string'
@@ -254,6 +270,7 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
   const pendingReplyCount = Object.values(pendingDiscussions).reduce((total, count) => total + count, 0);
 
   return (
+    <RoomWorkspaceSurface key={roomId} roomId={roomId} refreshToken={snapshot?.room?.revision}>
     <main className="flex h-full min-w-0 flex-col bg-[var(--c-bg-page)]">
       <header className="flex items-center gap-3 border-b border-[var(--c-border)] px-6 py-4">
         <Link to="/collaboration" aria-label={t.collaborationRoomBackToList} className="rounded-md p-1.5 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><ArrowLeft size={18} /></Link>
@@ -270,13 +287,15 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
       {showMembers && !archived && (
         <section className="border-b border-[var(--c-border)] bg-[var(--c-bg-card)] px-6 py-4">
           <div className="flex flex-wrap gap-2">
-            {availableAgents.map((agent) => <label key={agent.id} className="flex items-center gap-2 rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-primary)]"><input type="checkbox" disabled={agent.id === XIAOK_WORKER_SEED_ID} checked={memberSelection.includes(agent.id) || agent.id === XIAOK_WORKER_SEED_ID} onChange={(event) => setMemberSelection((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id))} />{agent.name}</label>)}
+            {availableAgents.map((agent) => <label key={agent.id} className="flex items-center gap-2 rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-primary)]"><input type="checkbox" disabled={agent.id === XIAOK_WORKER_SEED_ID} checked={memberSelection.includes(agent.id) || agent.id === XIAOK_WORKER_SEED_ID} onChange={(event) => setMemberSelection((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id))} />{agent.name}<span title={capabilityReason(agent.id)} className="text-[var(--c-text-tertiary)]">{capabilityLabel(agent.id)}</span></label>)}
             <button type="button" onClick={() => void saveMembers()} className="rounded-full bg-[var(--c-accent)] px-4 py-1.5 text-xs font-medium text-white">{t.collaborationRoomSaveMembers}</button>
           </div>
+          <p className="mt-2 text-xs text-[var(--c-text-tertiary)]">{t.collaborationRoomExecutionObservers}</p>
+          {availableAgents.map(agent => capabilityReason(agent.id) ? <p key={agent.id} className="mt-1 text-xs text-[var(--c-text-tertiary)]">{agent.name}: {capabilityReason(agent.id)}</p> : null)}
         </section>
       )}
 
-      <section className="flex-1 overflow-y-auto px-6 py-5">
+      <section className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="room-message-scroll">
         {messages.length === 0 && <div className="py-16 text-center text-sm text-[var(--c-text-secondary)]" data-testid="room-view-empty">{t.collaborationRoomEmpty}</div>}
         <div className="mx-auto max-w-3xl space-y-3" data-testid={messages.length ? 'room-view-messages' : undefined}>
           {messages.map((message) => {
@@ -289,7 +308,10 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
             return <article key={message.messageId} data-testid="room-message" className="group rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4">
               <div className="mb-2 text-xs text-[var(--c-text-tertiary)]"><span>{sender}</span></div>
               <div className="min-w-0 overflow-hidden text-[var(--c-text-primary)]">
-                <MarkdownRenderer content={message.text ?? ''} disableLinkify />
+                <MarkdownRenderer content={message.kind === 'workspace_event'
+                  ? message.sourceRef?.eventKind === 'artifact.registered' ? t.roomWorkspace.registeredEvent
+                    : message.sourceRef?.eventKind === 'artifact.confirmed' ? t.roomWorkspace.confirmedEvent : t.roomWorkspace.updatedEvent
+                  : message.text ?? ''} disableLinkify />
               </div>
               {(message.sourceRef?.attachments ?? []).length > 0 && <div className="mt-3 flex flex-wrap gap-2">
                 {message.sourceRef?.attachments?.map((attachment) => <span key={attachment.filePath} title={attachment.filePath} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[var(--c-bg-deep)] px-3 py-2 text-xs text-[var(--c-text-secondary)]"><FileText size={14} className="shrink-0" /><span className="truncate">{attachment.name}</span></span>)}
@@ -369,5 +391,6 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
       {showProject && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" role="dialog" aria-modal="true" aria-label={t.collaborationRoomCreateProject}><div className="w-full max-w-lg space-y-4 rounded-2xl border border-[var(--c-border)] bg-[var(--c-bg-page)] p-6"><h2 className="text-lg font-semibold text-[var(--c-text-heading)]">{t.collaborationRoomCreateProject}</h2><label className="block text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomProjectName}<input value={projectName} onChange={(event) => setProjectName(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 text-[var(--c-text-primary)]" /></label><label className="block text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomProjectGoal}<textarea value={projectGoal} onChange={(event) => setProjectGoal(event.target.value)} className="mt-1 min-h-20 w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3 text-[var(--c-text-primary)]" /></label><label className="block text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomProjectOwner}<select value={projectPo} onChange={(event) => setProjectPo(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 text-[var(--c-text-primary)]">{activeAgentIds.map((id) => <option key={id} value={id}>{availableAgents.find((agent) => agent.id === id)?.name ?? id}</option>)}</select></label><fieldset><legend className="mb-2 text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomProjectMembers}</legend><div className="flex flex-wrap gap-2">{activeAgentIds.filter((id) => id !== projectPo).map((id) => <label key={id} className="flex items-center gap-2 rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs"><input type="checkbox" checked={projectMembers.includes(id)} onChange={(event) => setProjectMembers((current) => event.target.checked ? [...current, id] : current.filter((item) => item !== id))} />{availableAgents.find((agent) => agent.id === id)?.name ?? id}</label>)}</div></fieldset><div className="flex justify-end gap-2"><button type="button" onClick={() => setShowProject(false)} className="h-9 px-4 text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomCancel}</button><button type="button" disabled={!projectName.trim() || !projectGoal.trim() || !projectPo} onClick={() => void createProject()} className="h-9 rounded-lg bg-[var(--c-accent)] px-4 text-sm font-medium text-white disabled:opacity-40">{t.collaborationRoomCreateProject}</button></div></div></div>}
       {previewArtifact && <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />}
     </main>
+    </RoomWorkspaceSurface>
   );
 }

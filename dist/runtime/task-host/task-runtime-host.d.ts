@@ -54,6 +54,7 @@ export interface InProcessTaskRuntimeHostOptions {
     createTaskId?: () => string;
     createSessionId?: () => string;
     taskWatchdogMs?: number;
+    taskIdleTimeoutMs?: number;
     onPersistedEvent?: (input: PersistedTaskEvent) => Promise<void> | void;
     aheGuards?: {
         artifactEvidence?: boolean;
@@ -119,6 +120,7 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     private readonly lastCommittedSnapshots;
     private multiAgentRecovery?;
     private readonly recoveryReadSignal;
+    private readonly taskIdleTimeoutMs;
     constructor(options: InProcessTaskRuntimeHostOptions);
     /** Installed once by service.initialize, before its recovery microtask runs. */
     bindMultiAgentRecovery(ready: Promise<void>): void;

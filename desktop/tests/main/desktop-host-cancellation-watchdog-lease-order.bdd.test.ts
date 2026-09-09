@@ -33,8 +33,10 @@ describe('BDD: real main watchdog and lease expiry keep whichever legal terminal
     const f = await authorizationFixture(cleanup);
     const host = (f.boundary.service as unknown as { host: InProcessTaskRuntimeHost }).host;
     const entered = deferred(), release = deferred(); cleanup.push(async () => { release.resolve(); await host.drain(); });
-    // The host watchdog uses monotonic elapsed time as well as native timers.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    // Runner/lease deadlines use wall time; the host watchdog also uses
+    // monotonic time. Advance both clocks together, so cold initialization does
+    // not consume the short runner budget while the watchdog clock is paused.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance','Date'] });
     let models = 0;
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       models++; entered.resolve(); await release.promise; yield { type: 'text', delta: 'Late model output must not revive execution.' };

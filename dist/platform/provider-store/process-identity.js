@@ -30,7 +30,7 @@ function probeWindows(pid) {
     const result = spawnSync('powershell.exe', [
         '-NoProfile', '-NonInteractive', '-Command',
         `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate`,
-    ], { encoding: 'utf8' });
+    ], { encoding: 'utf8', windowsHide: true });
     if (result.error) {
         return { kind: 'unknown', diagnostic: `powershell failed: ${result.error.message}` };
     }

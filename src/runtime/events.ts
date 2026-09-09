@@ -1,4 +1,6 @@
 export type RuntimeEvent =
+  | { type: 'execution_progress'; sessionId: string; turnId: string }
+  | { type: 'execution_health'; invocationId?: string; sessionId: string; turnId: string; state: import('./execution-health.js').ExecutionHealthState }
   | { type: 'turn_started'; sessionId: string; turnId: string }
   | { type: 'turn_completed'; sessionId: string; turnId: string }
   | { type: 'turn_failed'; sessionId: string; turnId: string; error: Error }

@@ -86,6 +86,7 @@ export function registerKSwarmProxy(
   ipcMain: IpcHandleRegistrar,
   bridge: KSwarmStreamBridge,
   kswarmService: ProxyService | null = null,
+  workspace?:{dispatchProject(projectId:string,body:unknown):Promise<Record<string,unknown>|null>;authorize(event:unknown):boolean},
 ): void {
   ipcMain.handle('desktop:kswarm:proxy:get', (_event, path: string) =>
     executeProxyRequest(kswarmService, 'GET', path, 'json'));
@@ -93,11 +94,11 @@ export function registerKSwarmProxy(
   ipcMain.handle('desktop:kswarm:proxy:getText', (_event, path: string) =>
     executeProxyRequest(kswarmService, 'GET', path, 'text'));
 
-  ipcMain.handle('desktop:kswarm:proxy:post', (_event, path: string, body?: unknown) =>
-    executeProxyRequest(kswarmService, 'POST', path, 'json', body));
+  ipcMain.handle('desktop:kswarm:proxy:post', (event, path: string, body?: unknown) =>
+    executeProxyRequest(kswarmService, 'POST', path, 'json', body,false,workspace,event));
 
-  ipcMain.handle('desktop:kswarm:proxy:postJson', async (_event, path: string, body?: unknown) => {
-    const result = await executeProxyRequest(kswarmService, 'POST', path, 'json', body, true);
+  ipcMain.handle('desktop:kswarm:proxy:postJson', async (event, path: string, body?: unknown) => {
+    const result = await executeProxyRequest(kswarmService, 'POST', path, 'json', body, true,workspace,event);
     if (!isRecord(result) || result.data === null || result.data === undefined) return null;
     return { ...result.data as Record<string, unknown>, status: readStatus(result) };
   });
@@ -157,6 +158,8 @@ async function executeProxyRequest(
   responseKind: ProxyResponseKind,
   body?: unknown,
   includeStatus = false,
+  workspace?:{dispatchProject(projectId:string,body:unknown):Promise<Record<string,unknown>|null>;authorize(event:unknown):boolean},
+  event?:unknown,
 ): Promise<unknown> {
   const normalized = normalizeKSwarmProxyPath(rawPath);
   if (!service
@@ -167,6 +170,14 @@ async function executeProxyRequest(
   }
 
   try {
+    const dispatch=method==='POST'?normalized.pathname.match(/^\/projects\/([^/]+)\/dispatch$/):null;
+    if(dispatch&&workspace){
+      let result:Record<string,unknown>|null;
+      if(!workspace.authorize(event))result={ok:false,code:'workspace_ipc_forbidden'};
+      else try{result=await workspace.dispatchProject(decodeURIComponent(dispatch[1]),body);}
+      catch(error){result={ok:false,code:error instanceof Error?error.message:'workspace_dispatch_failed'};}
+      if(result!==null){const data=redactKSwarmPayload(result);return includeStatus?{data,status:result.ok===false?409:200}:data;}
+    }
     const options: RequestInit = {
       method,
       headers: buildKSwarmProxyHeaders(service, method),

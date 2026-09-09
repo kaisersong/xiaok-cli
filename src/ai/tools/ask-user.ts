@@ -44,6 +44,7 @@ export function createAskUserTool(options: AskUserOptions): Tool {
         required: ['question'],
       },
     },
+    executionPolicy: { waitsForUser: true },
     async execute(input) {
       const question = typeof input.question === 'string' ? input.question.trim() : '';
       const placeholder = typeof input.placeholder === 'string' ? input.placeholder : undefined;

@@ -315,7 +315,7 @@ describe('e2e: kswarm uses desktop runtime bridge for PO and worker execution', 
       });
       const runtimeBridge = {
         ...createKSwarmRuntimeBridge({
-          allowedRoots: [join(tempHome, '.kswarm', 'handoff-packages')],
+          allowedRoots: [join(tempHome, '.kswarm', 'projects'),join(tempHome, '.kswarm', 'handoff-packages')],
           runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
           submitResult: (input) => submitKSwarmRuntimeResultToBroker({
             brokerUrl,

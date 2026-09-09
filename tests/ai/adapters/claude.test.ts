@@ -23,6 +23,15 @@ vi.mock('@anthropic-ai/sdk', () => {
 });
 
 describe('ClaudeAdapter', () => {
+  it('exposes the same existing output reservation sent in the real adapter request',async()=>{
+    const {ClaudeAdapter}=await import('../../../src/ai/adapters/claude.js');
+    const Anthropic=(await import('@anthropic-ai/sdk')).default;
+    const instance=new Anthropic({apiKey:'fixture'}),adapter=new ClaudeAdapter('fixture','claude-opus-4-7');
+    (adapter as unknown as {client:typeof instance}).client=instance;
+    for await(const _ of adapter.stream([],[],'system')){/* consume actual adapter */}
+    expect(adapter.getOutputTokenReserve()).toBe(8192);
+    expect(instance.messages.stream).toHaveBeenCalledWith(expect.objectContaining({max_tokens:adapter.getOutputTokenReserve()}),expect.anything());
+  });
   it.each(['/coding/v1', '/coding/v2'])(
     'lazily applies Kimi compatibility headers for %s',
     async (path) => {

@@ -1,6 +1,8 @@
 import { A2UI_MIME_TYPE, isA2UIMimeType, summarizeRenderUiInput } from '../../a2ui/index.js';
 export function projectRuntimeEventToDesktopEvent(input) {
     const { event, taskId } = input;
+    if (event.type === 'execution_health')
+        return { type: 'execution_health', state: event.state };
     if (event.type === 'turn_started') {
         return { type: 'task_started', taskId };
     }

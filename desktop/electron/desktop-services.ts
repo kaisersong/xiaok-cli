@@ -1,3 +1,6 @@
+import {runMonitoredTool} from '../../src/runtime/tool-execution-health.js';
+import {createRoomToolRegistry,runRoomWorkspaceExecutor,ROOM_UNSUPPORTED_FILE_CAPABILITIES,type RoomWorkspaceRunOptions} from './room-workspace-executor.js';
+import {assembleRoomWorkspaceContext,resolveRoomWorkspaceContextLimit,type RoomWorkspaceContextSources} from './room-workspace-context.js';
 import { CodexTaskBridge, LOCAL_CODEX_MODEL } from './codex-task-bridge.js';
 import type { NativeActor } from './codex-native-service.js';
 import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
@@ -1657,6 +1660,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         materialRegistry,
         kswarmCreateProjectToolOptions,
         {
+          cwd:workspaceRoot,
           officeToMarkdown: input => officeDocumentParser.parse(input),
           // Each KSwarm scoped registry gets the same main-owned runtime, so the
           // report/slide gateways are reachable there too (design §6.2/§6.3).
@@ -1669,26 +1673,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     });
   };
 
-  const createCollaborationRoomTaskHost = () => {
-    return new InProcessTaskRuntimeHost({
-      materialRegistry,
-      snapshotStore,
-      runner: coordinateRunner(options.runner ?? defaultDesktopRunner),
-      now: options.now,
-      aheGuards: { artifactEvidence: false, recoveryContinuity: false },
-      createTaskId: () => `room_turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-    });
+  const createCollaborationRoomTaskRunner = () => {
+    const roomTools=buildToolList();
+    const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools});
+    return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
   };
 
-  async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string): Promise<{ text: string }> {
+  async function runCollaborationRoomAgentTask(envelope: CollaborationRoomTurnEnvelope, claimToken: string, workspace?:RoomWorkspaceRunOptions,discussionSignal?:AbortSignal): Promise<{ text: string }> {
     // design §6.2：consumer boundary runtime schema 校验。contextWindow
     // 缺失、sequence 不连续、或 message 边界/total/isComplete 不一致时
     // 拒绝执行，不退回"默认完整"——防止一个绕过 buildRoomContextWindow 的
     // 手写 producer 静默注入一个看似完整、实则残缺的上下文。
     const parsed = parseCollaborationRoomTurnEnvelope(envelope);
     if (!parsed.ok) {
+      if(workspace)await workspace.port.release(workspace.context,{executorInstanceId:workspace.context.executorInstanceId,kind:'resources-disposed',verified:true});
       throw new Error(`collaboration_room_envelope_invalid: ${parsed.error}`);
     }
+    if(workspace&&(workspace.context.roomId!==envelope.roomId||workspace.context.logicalAgentId!==envelope.logicalAgentId||JSON.stringify(workspace.context.contextScope)!==JSON.stringify(envelope.contextScope))){await workspace.port.release(workspace.context,{executorInstanceId:workspace.context.executorInstanceId,kind:'resources-disposed',verified:true});throw new Error('workspace_execution_context_mismatch');}
     const transcript = envelope.messages.map(message => {
       const sender = message.sender && typeof message.sender === 'object'
         ? ((message.sender as { kind?: string; logicalAgentId?: string; userId?: string }).logicalAgentId
@@ -1709,7 +1710,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       envelope.contextWindow.isComplete
         ? `当前上下文窗口完整：覆盖 sequence ${envelope.contextWindow.fromSequence} 到 ${envelope.contextWindow.toSequence}（共 ${envelope.contextWindow.totalMessages} 条消息中的全部）。`
         : `注意：当前上下文窗口不完整，只覆盖 sequence ${envelope.contextWindow.fromSequence} 到 ${envelope.contextWindow.toSequence}（该协作空间共有 ${envelope.contextWindow.totalMessages} 条消息，本次只看到其中一部分）。严禁断言"某人从未发言""某事没发生"这类需要完整历史才能确认的结论；如需这类结论，只能表述为"截至 sequence ${envelope.contextWindow.toSequence} 的当前快照未见"。`,
-      '你可以使用默认小 K 任务可用的 Skill、工具和本轮用户附件。直接给出一条有帮助、具体的回复；不要声称执行了未执行的操作。',
+      workspace ? `只在已授权工作目录 ${workspace.context.effectiveCwd} 执行。未支持能力：${ROOM_UNSUPPORTED_FILE_CAPABILITIES.join(', ')}；不得尝试绕过。` : '当前为无文件执行权的讨论模式，不能读取或修改工作目录、运行命令或读取私人笔记。',
       '',
       transcript,
     ].join('\n');
@@ -1729,20 +1730,37 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
     }
     let registeredTaskId: string | null = null;
+    const registeredTaskIds=new Set<string>();
     try {
-      const result = await runKSwarmRuntimeTextTask(createCollaborationRoomTaskHost(), prompt, {
-        materials,
-        onTaskCreated: taskId => {
-          registeredTaskId = taskId;
-          registerRoomHistoryCapability(taskId, { roomId: envelope.roomId, claimToken });
-        },
+      if(workspace) {
+        let modelBinding:Promise<ReturnType<typeof resolveRuntimeModelBinding>>|undefined;
+        const getModelBinding=()=>modelBinding??=loadConfig().then(config=>resolveRuntimeModelBinding(config));
+        return await runRoomWorkspaceExecutor({...workspace,prompt,
+        materials:materials.map(item=>materialRegistry.get(item.materialId)).filter((item):item is MaterialRecord=>Boolean(item)),
+        onTaskCreated:taskId=>{registeredTaskIds.add(taskId);registerRoomHistoryCapability(taskId,{roomId:envelope.roomId,claimToken});},
+        createRunner:input=>options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
+          {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}),
       });
-      return { text: result.summary.trim() };
+      }
+      const discussion=createCollaborationRoomTaskRunner();
+      registeredTaskId=`room_turn_${randomUUID()}`;
+      registerRoomHistoryCapability(registeredTaskId,{roomId:envelope.roomId,claimToken});
+      let text='';
+      try {
+        await discussion.runner({taskId:registeredTaskId,sessionId:registeredTaskId,prompt,
+          materials:materials.map(item=>materialRegistry.get(item.materialId)).filter((item):item is MaterialRecord=>Boolean(item)),
+          understanding:{goal:prompt,deliverable:'room response',taskType:'unknown',audience:'room members',inputs:[],missingInfo:[],assumptions:[],riskLevel:'low',suggestedPlan:[],nextAction:'execute'},
+          signal:discussionSignal??new AbortController().signal,history:[],permissionMode:'auto',emitUsage:async()=>{},
+          emitRuntimeEvent:async event=>{if(event.type==='receipt_emitted')text=event.note;},
+        });
+        return {text:text.trim()};
+      } finally {await discussion.registry.drain();discussion.registry.dispose();}
     } finally {
       // design §6.2 RoomHistoryReadCapability：任务结束（无论成功/失败/
       // 异常）后立即释放绑定，防止 taskId 被复用或绑定残留导致陈旧
       // capability 被误用。
       if (registeredTaskId) releaseRoomHistoryCapability(registeredTaskId);
+      for(const taskId of registeredTaskIds)releaseRoomHistoryCapability(taskId);
     }
   }
 
@@ -1752,6 +1770,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
 
   async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }) {
+    if(handoff.workspaceContext||handoff.project.requiredProtocol==='room_workspace_v1')throw new Error('workspace_runtime_protocol_required');
     const throwIfAborted = () => {
       if (signal?.aborted) {
         throw new DOMException('agent aborted', 'AbortError');
@@ -1832,6 +1851,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     } finally {
       signal?.removeEventListener('abort', cancelCreatedTask);
     }
+  }
+
+  async function runWorkspaceProjectTask({handoff,workspace,targetParticipantId}:{handoff:KSwarmTaskHandoff;workspace:RoomWorkspaceRunOptions;targetParticipantId?:string}) {
+    const context=workspace.context;
+    if(context.contextScope.kind!=='project'||context.contextScope.projectId!==handoff.project.id||context.taskId!==handoff.task.id||context.runId!==handoff.runId||handoff.workspaceContext?.claimId!==context.claimId||handoff.project.workFolder!==context.effectiveCwd||(targetParticipantId&&targetParticipantId!==context.logicalAgentId)){
+      // No registry/model/resource exists yet; report the actual pre-start
+      // evidence so the runtime can release this rejected admission.
+      await workspace.port.release(context,{executorInstanceId:context.executorInstanceId,kind:'resources-disposed',verified:true});
+      throw new Error('workspace_project_handoff_mismatch');
+    }
+    const manifests=new Map<string,{summary:string;artifacts:Array<{path:string;label?:string;kind?:string}>}>();
+    let binding:Promise<ReturnType<typeof resolveRuntimeModelBinding>>|undefined;
+    const getModelBinding=()=>binding??=loadConfig().then(config=>resolveRuntimeModelBinding(config));
+    const prompt=[`KSwarm project task ${handoff.task.id}`,`Project: ${handoff.project.name}`,`Goal: ${handoff.project.goal}`,`Task: ${handoff.task.title}`,handoff.task.brief??'',handoff.task.acceptanceCriteria??'',`Required outputs: ${JSON.stringify(handoff.task.requiredOutputs??[])}`,`Write deliverables to the administrator-selected artifacts directory: ${handoff.project.artifactsDir}. No directory name implies acceptance. Report actual output references, not success claims.`].join('\n');
+    const result=await runRoomWorkspaceExecutor({...workspace,prompt,port:{...workspace.port,
+      async submitManifest(current,manifest){
+        manifests.set(current.claimId,manifest);
+        if(current.claimId===context.claimId){
+          const artifacts=[...new Map([...manifests.values()].flatMap(m=>m.artifacts).map(a=>[resolve(context.effectiveCwd,a.path),{...a,path:resolve(context.effectiveCwd,a.path)}])).values()];
+          if(shouldRequireKSwarmArtifactEvidence(handoff.task)&&!artifacts.length)throw new Error('artifact_evidence_missing');
+          await workspace.port.submitManifest(current,{summary:manifest.summary,artifacts});
+        }
+      },
+    },createRunner:input=>options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
+      {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}),
+    });
+    return {summary:result.text,artifacts:[...manifests.values()].flatMap(m=>m.artifacts)};
   }
 
   async function runKSwarmReadinessProbe({ targetParticipantId }: { targetParticipantId?: string } = {}) {
@@ -2956,6 +3002,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return () => goalTaskPreparedListeners.delete(listener);
     },
     runKSwarmHandoffTask,
+    runWorkspaceProjectTask,
     runCollaborationRoomAgentTask,
     runKSwarmWorkflowNode,
     runKSwarmReadinessProbe,
@@ -5099,7 +5146,7 @@ async function executeDesktopTaskTool(
   },
 ): Promise<{ ok: boolean; result: string }> {
   if (toolCall.name === 'read_material' && !options.scoped) {
-    return executeReadMaterialForDesktop(toolCall.input, {
+    return runMonitoredTool({name:toolCall.name,context:options.context,run: context => executeReadMaterialForDesktop(toolCall.input, {
       taskId: options.taskId,
       materials: options.materials,
       materialRegistry: options.materialRegistry,
@@ -5108,8 +5155,8 @@ async function executeDesktopTaskTool(
         return extractPdfText(bytes);
       },
       officeToMarkdown: options.officeToMarkdown,
-      signal: options.context.signal,
-    });
+      signal: context?.signal,
+    })});
   }
   const result = await options.registry.executeTool(toolCall.name, toolCall.input, options.context);
   return { ok: isSuccessfulModelToolResult(result), result };
@@ -5289,6 +5336,7 @@ interface ToolLoopContext {
   maxIterations?: number;
   onUsage?: (inputTokens: number, outputTokens: number, usageId?: string) => void | Promise<void>;
   mailbox?: DesktopMailboxPort;
+  roomExecution?:{authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined};
   onActivity?: (activity: { phase: 'model' | 'thinking' | 'tool'; toolName?: string }) => void;
 }
 
@@ -5581,6 +5629,9 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<Awaited<
 
 async function prepareDesktopLoopRequest(ctx: ToolLoopContext, streamOptions: StreamOptions, canCompact: boolean, inputTokens: number): Promise<Message[]> {
   throwIfAborted(ctx.signal);
+  await ctx.roomExecution?.authorize();
+  const roomInput=ctx.roomExecution?.takePendingInput?.();
+  if(roomInput)ctx.messages.push({role:'user',content:[{type:'text',text:roomInput}]});
   if (Date.now() > ctx.taskDeadline) throw new Error('desktop_tool_loop_deadline_exceeded');
   if (canCompact && ctx.strategies.compact.enabled && ctx.strategies.compact.shouldCompact(inputTokens)) {
     await ctx.strategies.compact.doCompact(ctx.messages, streamOptions);
@@ -5703,7 +5754,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       deadline: ctx.taskDeadline,
       summaryOnly: summaryRecoveryMode,
       canRecover: ctx.canResumeSummary,
-      onRecovery: () => { summaryRecoveryMode = true; },
+      onRecovery: () => { summaryRecoveryMode = true; void ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'}).catch(error=>console.warn('[execution-health] recovery delivery failed',error)); },
       onInvocation: id => { providerInvocationId = id; },
     })) {
       if (chunk.type === 'usage') {
@@ -5718,6 +5769,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         continue;
       }
       throwIfAborted(ctx.signal);
+      await ctx.emitRuntimeEvent({type:'execution_progress',sessionId:ctx.sessionId,turnId:ctx.turnId});
       ctx.onActivity?.({ phase: chunk.type === 'thinking' ? 'thinking' : chunk.type === 'tool_use' ? 'tool' : 'model',
         ...(chunk.type === 'tool_use' ? { toolName: chunk.name } : {}) });
       if (chunk.type === 'text') {
@@ -5862,12 +5914,17 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       const toolContext = ctx.mailbox
         ? { ...projectedToolContext, onToolInvocationStarted: () => { invoked = true; } }
         : projectedToolContext;
+      const monitoredToolContext:ToolExecutionContext={...toolContext,
+        onExecutionHealth: state => {void ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,invocationId:toolCall.id,state}).catch(error=>console.warn('[execution-health] status delivery failed',error));},
+        executionProgress: {progress:()=>{void ctx.emitRuntimeEvent({type:'execution_progress',sessionId:ctx.sessionId,turnId:ctx.turnId}).catch(error=>console.warn('[execution-health] progress delivery failed',error));},wait:()=>{},resume:()=>{}},
+      };
+      if(Object.isFrozen(projectedToolContext))Object.freeze(monitoredToolContext);
       let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
         registry: ctx.registry,
         taskId: ctx.taskId,
         materials: ctx.materials,
         materialRegistry: ctx.materialRegistry,
-        context: toolContext,
+        context:monitoredToolContext,
         officeToMarkdown: ctx.officeToMarkdown,
         scoped: Boolean(ctx.mailbox),
       });
@@ -6936,6 +6993,10 @@ export function createDesktopModelRunnerWithRegistry(
   materialRegistry: MaterialRegistry,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
   runnerOptions: {
+    cwd?:string;
+    roomDiscussion?:boolean;
+    publishedInstructions?:string;
+    roomExecution?:{context:RoomWorkspaceContextSources;getModelBinding?:()=>Promise<ReturnType<typeof resolveRuntimeModelBinding>>;authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined};
     restrictedArtifactGeneration?: boolean;
     /** Stable provider-runtime identity captured before services exist (§4). */
     pluginProviderRuntime?: GatewayRuntimeFacade;
@@ -6943,7 +7004,7 @@ export function createDesktopModelRunnerWithRegistry(
     officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   } = {},
 ): (input: TaskRunnerInput, rootContext?: DesktopAgentExecutionContext) => Promise<void> {
-  const cwd = runnerOptions.multiAgent?.cwd ?? process.cwd();
+  const cwd = runnerOptions.cwd ?? runnerOptions.multiAgent?.cwd ?? process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let loadedSkillCatalogVersion = -1;
@@ -7004,7 +7065,7 @@ export function createDesktopModelRunnerWithRegistry(
       : undefined;
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-    if (!runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
+    if (!runnerOptions.roomDiscussion && !runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
       const targetVersion = getSkillCatalogVersion();
       try {
         const skills = await skillCatalog.reload();
@@ -7019,7 +7080,7 @@ export function createDesktopModelRunnerWithRegistry(
         loadedSkillCatalogVersion = targetVersion;
       }
     }
-    const currentSkills = runnerOptions.restrictedArtifactGeneration ? [] : skillCatalog.list();
+    const currentSkills = runnerOptions.roomDiscussion || runnerOptions.restrictedArtifactGeneration ? [] : skillCatalog.list();
     const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
     const slashMatch = parseSlashCommand(prompt);
     let effectivePrompt = prompt;
@@ -7055,7 +7116,7 @@ export function createDesktopModelRunnerWithRegistry(
       : '';
 
     const config = await loadConfig();
-    const binding = resolveRuntimeModelBinding(config);
+    const binding = await runnerOptions.roomExecution?.getModelBinding?.() ?? resolveRuntimeModelBinding(config);
     const profileId = resolveDesktopHarnessProfileId(binding);
     if (isStrictKimiK3ProfileId(profileId)) {
       validateStrictDesktopHistory(hostHistory);
@@ -7066,7 +7127,7 @@ export function createDesktopModelRunnerWithRegistry(
     // Stage analysis for debug mode
     if (skillDebugEnabled && currentSkills.length > 0) {
       try {
-        const stages = analyzeStageIntent(prompt, currentSkills, process.cwd());
+        const stages = analyzeStageIntent(prompt, currentSkills, cwd);
         const stageSummary = stages.map(s => `  ${s.id}. ${s.title} (${s.skill})`).join('\n');
         const debugText = `[stage:plan] Detected ${stages.length} stages:\n${stageSummary}`;
         await emitRuntimeEvent({ type: 'assistant_delta', sessionId, turnId, intentId, stepId, delta: `${debugText}\n\n` });
@@ -7079,8 +7140,10 @@ export function createDesktopModelRunnerWithRegistry(
     let systemPrompt = skillsContext
       ? `${BASE_SYSTEM_PROMPT}${modelIdentity}\n\nAvailable skills:\n${skillsContext}`
       : `${BASE_SYSTEM_PROMPT}${modelIdentity}`;
+    if(runnerOptions.roomExecution)systemPrompt+='\nUse standard spawn_agent/send_message/followup_task/wait_agent for collaboration. Root must actively call wait_agent to receive child messages/results; children receive pending messages at model boundaries. Unsupported capabilities: '+ROOM_UNSUPPORTED_FILE_CAPABILITIES.join(', ');
+    else if(runnerOptions.publishedInstructions)systemPrompt+=`\n\n## Published Room workspace instructions\n${runnerOptions.publishedInstructions}`;
 
-    const userText = materialsContext
+    let userText = materialsContext
       ? `${effectivePrompt}${materialsContext}`
       : effectivePrompt;
     let scopedRegistry: ReturnType<DesktopMultiAgentRuntime['bindRoot']> | undefined;
@@ -7102,6 +7165,17 @@ export function createDesktopModelRunnerWithRegistry(
       ? [...invocationRegistry.getToolDefinitions(), READ_MATERIAL_TOOL_DEFINITION]
       : invocationRegistry.getToolDefinitions();
     const imageBlocks = materials && materials.length > 0 ? buildImageBlocksForMaterials(materials) : [];
+    if(runnerOptions.roomExecution){
+      const assembled=assembleRoomWorkspaceContext({baseSystemPrompt:systemPrompt,context:runnerOptions.roomExecution.context,taskPrompt:userText,
+        history:hostHistory.map(item=>({role:item.role,content:[{type:'text',text:item.content}]})),tools:allToolDefs,currentImageBlocks:imageBlocks,
+        contextLimit:resolveRoomWorkspaceContextLimit(binding),
+        // Use only the actual adapter's declared request reservation. Other
+        // providers choose their own output cap; zero here is unknown, not a
+        // claim of exact tokenizer accounting or guaranteed total-window fit.
+        outputTokenReserve:adapter.getOutputTokenReserve?.() ?? 0,
+      });
+      systemPrompt=assembled.systemPrompt;userText=assembled.userPrompt;
+    }
     const userContent: MessageBlock[] = [
       { type: 'text', text: userText },
       ...imageBlocks,
@@ -7120,7 +7194,8 @@ export function createDesktopModelRunnerWithRegistry(
       invocationOptions,
       signal,
       taskDeadline: resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs),
-      cwd: rootContext?.cwd,
+      cwd: rootContext?.cwd ?? runnerOptions.cwd,
+      roomExecution:runnerOptions.roomExecution,
       mailbox: rootContext?.mailbox,
       canResumeSummary: rootContext ? () => runnerOptions.multiAgent!.service.canResumeSummary(rootContext) : undefined,
       onActivity: rootContext ? activity => { void runnerOptions.multiAgent!.service.recordActivity(rootContext, activity).catch(() => {}); } : undefined,

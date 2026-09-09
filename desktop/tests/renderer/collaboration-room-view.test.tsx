@@ -96,6 +96,47 @@ const activeSnapshot = {
 };
 
 describe('CollaborationRoomView states', () => {
+  it('shows authoritative execution modes and unknown observers in the existing member panel', async () => {
+    mockGetRoom.mockResolvedValue({ ...activeSnapshot, executionCapabilities: [
+      { logicalAgentId: 'a', mode: 'workspace_worker' }, { logicalAgentId: 'b', mode: 'discussion_only', runtime: 'qoder' },
+      { logicalAgentId: 'c', mode: 'discussion_unavailable', reason: 'unsupported_protocol' },
+    ] });
+    renderView({ availableAgents: ['a','b','c','d'].map(id => ({ id, name: `Agent ${id}` })) });
+    fireEvent.click(await screen.findByRole('button', { name: '参与智能体' }));
+    expect(screen.getByText('工作区执行')).toBeVisible(); expect(screen.getByText('仅讨论')).toBeVisible();
+    expect(screen.getByText('不支持讨论协议')).toBeVisible(); expect(screen.getByText('能力未确认')).toBeVisible();
+    expect(screen.getByText('能力未确认').closest('label')?.querySelector('input')).not.toBeDisabled();
+    expect(screen.getByText('不支持讨论协议').closest('label')?.querySelector('input')).not.toBeDisabled();
+    expect(screen.getByText('不可用或能力未确认的成员可作为观察者加入，但不会回复。')).toBeVisible();
+    expect(screen.getByText('Agent c: 当前执行器不支持讨论协议')).toBeVisible();
+    mockGetRoom.mockResolvedValue({ ...activeSnapshot, executionCapabilities: [{ logicalAgentId: 'b', mode: 'discussion_unavailable', reason: 'probe_failed' }] });
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => expect(screen.queryByText('仅讨论')).toBeNull());
+    expect(await screen.findByText('Agent b: 能力检查未通过，请检查执行器后刷新')).toBeVisible();
+  });
+  it('explains unavailable recipients without counting them as pending replies', async () => {
+    mockGetRoom.mockResolvedValue(activeSnapshot);
+    mockSend.mockResolvedValue({ ok: true, wake: { status: 'unavailable', roomMessageId: 'm', logicalAgentIds: [], unavailable: [{ logicalAgentId: 'agent-a', reason: 'unsupported_protocol' }] } });
+    renderView({ availableAgents: [{ id: 'agent-a', name: 'Kiro' }] });
+    const composer = await screen.findByRole('textbox', { name: '输入消息，@ 智能体协作，不 @ 默认与小 K 对话' });
+    fireEvent.change(composer, { target: { value: '@agent-a discuss' } }); fireEvent.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByText('以下成员当前无法回复：Kiro。可在成员面板查看原因。')).toBeVisible();
+  });
+  it('renders workspace projection notifications instead of blank system bubbles', async () => {
+    mockGetRoom.mockResolvedValue({ ...activeSnapshot, messages: [
+      { messageId: 'workspace-registered', kind: 'workspace_event', sender: { kind: 'system', service: 'intent-broker' }, sourceRef: { eventKind: 'artifact.registered' } },
+      { messageId: 'workspace-confirmed', kind: 'workspace_event', sender: { kind: 'system', service: 'intent-broker' }, sourceRef: { eventKind: 'artifact.confirmed' } },
+    ] }); renderView();
+    expect(await screen.findByText('成果已登记，可在文件页查看获授权的内容')).toBeVisible();
+    expect(screen.getByText('成果版本已确认')).toBeVisible();
+  });
+  it('workspace notifications do not enter discussion settlement or reload the message owner', async () => {
+    mockGetRoom.mockResolvedValue(activeSnapshot); renderView();
+    await screen.findByTestId('room-view-messages');
+    const count = mockGetRoom.mock.calls.length;
+    expect(() => roomEventHarness.listener?.({ type: 'workspace_changed', kind: 'workspace_changed', roomId: 'room-1' })).not.toThrow();
+    expect(mockGetRoom.mock.calls.length).toBe(count);
+  });
   mockOnRoomEvent.mockImplementation((listener: (event: Record<string, unknown>) => void) => {
     roomEventHarness.listener = listener;
     return () => { if (roomEventHarness.listener === listener) roomEventHarness.listener = null; };

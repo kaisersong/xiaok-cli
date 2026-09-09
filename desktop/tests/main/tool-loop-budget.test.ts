@@ -14,6 +14,6 @@ describe('Desktop tool loop budget', () => {
     expect(resolveDesktopToolLoopBudget(undefined, { XIAOK_MULTI_AGENT_MAX_ITERATIONS: '300' }).limit).toBe(300);
   });
   it.each(['0', '-1', '0.5', 'NaN', 'Infinity', '2.5', ' '])('rejects invalid budget %s', raw => {
-    expect(resolveDesktopToolLoopBudget(undefined, { XIAOK_AGENT_MAX_ITERATIONS: raw }).limit).toBeUndefined();
+    expect(()=>resolveDesktopToolLoopBudget(undefined, { XIAOK_AGENT_MAX_ITERATIONS: raw })).toThrow('iteration budget');
   });
 });

@@ -36,6 +36,12 @@ function createMockScrollRegion() {
 }
 
 describe('ScrollRegionManager activity rendering', () => {
+  it('resets terminal style and shows cursor before clearing the footer on exit', () => {
+    const {manager,resetOutput,getOutput}=createMockScrollRegion();
+    manager.begin();resetOutput();manager.end();
+    expect(getOutput()).toMatch(/^\x1b\[0m\x1b\[\?25h/);
+  });
+
   it('renders vertical agents and Working separately, preserves the draft, clears shrinking rows without scrolling each tick', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);

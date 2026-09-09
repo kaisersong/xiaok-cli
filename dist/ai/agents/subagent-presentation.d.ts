@@ -12,6 +12,7 @@ export interface SubAgentProgressEvent {
     status: 'running' | 'completed' | 'failed' | 'interrupted';
     phase?: RuntimeActivity['phase'];
     currentTool?: string;
+    executionHealth?: RuntimeActivity['executionHealth'];
     toolsCompleted: number;
     toolsFailed: number;
     toolCounts: Record<string, number>;

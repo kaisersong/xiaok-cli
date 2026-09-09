@@ -27,6 +27,7 @@ export class SubAgentRunReporter {
         if (!this.current || this.current.status !== 'running')
             return;
         this.current.phase = activity.phase;
+        this.current.executionHealth = activity.executionHealth;
         this.current.currentTool = activity.toolName && publicAgentSummary(activity.toolName, 60);
         this.emit('activity');
     }

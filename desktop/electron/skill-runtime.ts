@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
 import { homedir } from 'node:os';
 import type { SkillCatalog, SkillMeta } from '../../src/ai/skills/loader.js';
@@ -200,7 +200,10 @@ export function createSkillBundleRefsTool(skillCatalog: SkillCatalog) {
       for (const p of uniquePaths) {
         const absPath = join(skill.rootDir, p);
         try {
-          const content = readFileSync(absPath, 'utf-8');
+          const rootCanonical=realpathSync(skill.rootDir),targetCanonical=realpathSync(absPath);
+          const physicalRelative=relative(rootCanonical,targetCanonical);
+          if(physicalRelative==='..'||physicalRelative.startsWith(`..${sep}`)||isAbsolute(physicalRelative))throw new Error('skill_reference_escape');
+          const content = readFileSync(targetCanonical, 'utf-8');
           if (totalBytes + content.length > maxBytes) {
             parts.push(`\n## ${p}\n...[truncated, exceeded maxBytes]`);
             break;

@@ -30,6 +30,13 @@ interface RoomProjectSagaJournalPort {
   complete(operationId: string, options?: { outcome?: string }): unknown;
 }
 
+export interface RoomAgentExecutionCapability {
+  logicalAgentId: string;
+  mode: 'workspace_worker' | 'discussion_only' | 'discussion_unavailable';
+  runtime?: string;
+  reason?: string;
+}
+
 const LOCAL_OWNER_USER_ID = 'user.local';
 const MAX_ROOM_ATTACHMENTS = 20;
 const MAX_ROOM_ATTACHMENT_PATH_LENGTH = 4096;
@@ -111,6 +118,7 @@ export function createCollaborationRoomService({
   sagaJournal,
   wakeDispatcher,
   emitRoomEvent,
+  getExecutionCapabilities,
 }: {
   brokerClient: {
     createRoom: (input: unknown, ctx: unknown) => Promise<unknown>;
@@ -130,6 +138,7 @@ export function createCollaborationRoomService({
     dispatchMessage(input: { roomId: string; roomMessageId: string; logicalAgentIds: string[] }): Promise<unknown>;
   };
   emitRoomEvent?: (event: CollaborationRoomDispatchEvent) => void;
+  getExecutionCapabilities?: (agentIds?: string[]) => Promise<RoomAgentExecutionCapability[]>;
 }) {
   /** Renderer identity fields are transport facts — strip them, pin the owner. */
   function userCtx(): CollaborationRoomActorContext {
@@ -220,11 +229,22 @@ export function createCollaborationRoomService({
       activeAgentIds = [...activeAgentIds, XIAOK_WORKER_SEED_ID];
       route = canonicalRoomRoute(input.text.trim(), activeAgentIds);
     }
+    let logicalAgentIds = route.logicalAgentIds;
+    const unavailable: Array<{ logicalAgentId: string; reason: string }> = [];
+    if (getExecutionCapabilities) {
+      const capabilities = await getExecutionCapabilities(logicalAgentIds).catch(() => []);
+      logicalAgentIds = logicalAgentIds.filter(logicalAgentId => {
+        const capability = capabilities.find(item => item.logicalAgentId === logicalAgentId);
+        if (capability?.mode === 'workspace_worker' || capability?.mode === 'discussion_only') return true;
+        unavailable.push({ logicalAgentId, reason: capability?.reason ?? 'unsupported_protocol' });
+        return false;
+      });
+    }
     const attachments = sanitizeRoomAttachmentPaths(input.filePaths);
     const result = await callBroker('sendRoomMessage', {
       roomId: input.roomId,
       text: input.text.trim(),
-      mentions: route.mentions,
+      mentions: getExecutionCapabilities ? logicalAgentIds.map(logicalAgentId => ({ kind: 'agent', logicalAgentId })) : route.mentions,
       responsePolicy: 'mentioned',
       ...(isNonEmptyString(input.idempotencyKey) ? { idempotencyKey: input.idempotencyKey } : {}),
       ...(isNonEmptyString(input.replyToMessageId) ? { replyToMessageId: input.replyToMessageId } : {}),
@@ -237,14 +257,13 @@ export function createCollaborationRoomService({
       return result;
     }
     const message = result.message as Record<string, unknown>;
-    const logicalAgentIds = route.logicalAgentIds;
     const roomMessageId = String(message.messageId);
     const dispatchInput = {
       roomId: input.roomId,
       roomMessageId,
       logicalAgentIds,
     };
-    setImmediate(() => {
+    if (logicalAgentIds.length > 0) setImmediate(() => {
       void wakeDispatcher.dispatchMessage(dispatchInput).catch(() => {
         emitRoomEvent?.({
           type: 'discussion_settled',
@@ -258,9 +277,10 @@ export function createCollaborationRoomService({
     return {
       ...result,
       wake: {
-        status: 'queued',
+        status: logicalAgentIds.length > 0 ? 'queued' : 'unavailable',
         roomMessageId,
         logicalAgentIds,
+        ...(getExecutionCapabilities ? { unavailable } : {}),
       },
     };
   }
@@ -279,9 +299,10 @@ export function createCollaborationRoomService({
 
   interface RoomSnapshotShape {
     ok: boolean;
+    requiredProtocol?:string|null;
     code?: string;
     degraded?: boolean;
-    room?: { roomId: string; status: string; revision?: number };
+    room?: { roomId: string; status: string; revision?: number;requiredProtocol?:string|null };
     members?: unknown[];
     messages?: Array<{
       messageId: string;
@@ -336,6 +357,7 @@ export function createCollaborationRoomService({
       members: snapshot.members ?? [],
       messages: snapshot.messages ?? [],
       projects,
+      ...(getExecutionCapabilities ? { executionCapabilities: await getExecutionCapabilities().catch(() => []) } : {}),
     };
   }
 
@@ -404,6 +426,7 @@ export function createCollaborationRoomService({
         poAgent: input.poAgentId,
         members: input.memberAgentIds ?? [],
         primaryRoomId: roomId,
+        ...((snapshot.requiredProtocol??snapshot.room?.requiredProtocol)==='room_workspace_v1'?{requiredProtocol:'room_workspace_v1'}:{}),
         sourceMessageIds,
         clientRequestKey,
         expectedRoomRevision,

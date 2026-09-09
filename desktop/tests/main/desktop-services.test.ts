@@ -5095,6 +5095,15 @@ describe('desktop services', () => {
     await services.pauseGoal('thread-goal');
   });
 
+  it('passes discussion cancellation through the real service runner boundary',async()=>{
+    const controller=new AbortController();let seen:AbortSignal|undefined,settle!:()=>void;
+    const services=createDesktopServices({dataRoot:join(rootDir,'data'),kswarmService:mockKSwarmService(),runner:async({signal})=>{seen=signal;await new Promise<void>(resolve=>{settle=resolve;});}});
+    let finished=false;
+    const run=services.runCollaborationRoomAgentTask({roomId:'r',roomTitle:'Discussion',roomRevision:1,roomMessageId:'m',logicalAgentId:'xiaok-worker',contextScope:{kind:'room_only'},messages:[],attachmentPaths:[],contextWindow:{fromSequence:0,toSequence:0,totalMessages:0,isComplete:true,snapshotAt:''}},'wake',undefined,controller.signal).then(()=>{finished=true;});
+    await waitFor(async()=>Boolean(seen),5000);controller.abort();expect(seen).toBe(controller.signal);expect(seen?.aborted).toBe(true);expect(finished).toBe(false);
+    settle();await run;
+  });
+
   it('imports persisted Room attachments as materials and does not advertise a tool-less runtime', async () => {
     const attachmentPath = join(rootDir, 'room-brief.md');
     writeFileSync(attachmentPath, '# Room brief\n请核对附件。');

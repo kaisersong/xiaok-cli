@@ -18,7 +18,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 
 describe('BDD: thread deletion retains ownership until real work is settled', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
-  afterEach(async () => { vi.restoreAllMocks(); for (const action of cleanup.splice(0).reverse()) await action(); });
+  afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); for (const action of cleanup.splice(0).reverse()) await action(); });
   async function setup(options: {
     childRun?: ManagedAgentSession['run']; childDispose?: () => Promise<void>;
     body?: (context: DesktopAgentExecutionContext, service: DesktopMultiAgentService) => Promise<void>;
@@ -349,9 +349,13 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     const task = await f.host.createTask({ prompt: 'running', materials: [], context: { threadId: 'thread' } }); await entered.promise;
     const original = f.host.cancelTask.bind(f.host);
     vi.spyOn(f.host, 'cancelTask').mockImplementation(async (...args) => { await original(...args); cancelled.resolve(); await acknowledged.promise; });
+    // Keep actual host IO/drain, but order the grace after physical exit.
+    // Wall-time contention in the full suite is not an execution barrier.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'performance'] });
     const deleting = f.service.deleteThread(f.deletion('late-audit'));
     await cancelled.promise; exit.resolve(); await f.host.drain();
     expect(f.host.inFlightTaskIds()).not.toContain(task.taskId);
+    await vi.advanceTimersByTimeAsync(31);
     expect(await deleting).toMatchObject({ state: 'completed' });
     expect(await f.host.inspectTask(task.taskId)).not.toBeNull();
     acknowledged.resolve();

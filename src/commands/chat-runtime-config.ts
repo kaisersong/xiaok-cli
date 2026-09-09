@@ -13,12 +13,10 @@ export function resolveAgentMaxIterations(
   env: NodeJS.ProcessEnv = process.env,
 ): number | undefined {
   const raw = env.XIAOK_AGENT_MAX_ITERATIONS;
-  if (!raw) return DEFAULT_AGENT_MAX_ITERATIONS;
+  if (raw === undefined) return DEFAULT_AGENT_MAX_ITERATIONS;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return DEFAULT_AGENT_MAX_ITERATIONS;
-  }
-  return Math.floor(parsed);
+  if (!raw.trim() || !Number.isSafeInteger(parsed) || parsed < 1) throw new Error('Invalid XIAOK_AGENT_MAX_ITERATIONS: expected positive integer');
+  return parsed;
 }
 
 /**
@@ -42,6 +40,7 @@ export function resolveTurnTimeoutMs(
 export interface TurnActivityWatchdog {
   signal: AbortSignal;
   noteActivity(): void;
+  observeRuntimeEvent(event: {type: string}): void;
   suspend(): void;
   didTimeout(): boolean;
   dispose(): void;
@@ -54,6 +53,7 @@ export function createTurnActivityWatchdog(
   let timer: ReturnType<typeof setTimeout> | null = null;
   let timedOut = false;
   let disposed = false;
+  let delegated = false;
 
   const clearTimer = (): void => {
     if (timer) {
@@ -76,6 +76,11 @@ export function createTurnActivityWatchdog(
   return {
     signal: controller.signal,
     noteActivity: arm,
+    observeRuntimeEvent(event) {
+      if (event.type === 'model_request_started' || event.type === 'tool_started') {delegated=true;clearTimer();}
+      else if (['run_started', 'tool_finished', 'compact_triggered', 'compact_failed'].includes(event.type)) {delegated=false;arm();}
+      else if (event.type === 'execution_progress' && !delegated) arm();
+    },
     suspend: clearTimer,
     didTimeout: () => timedOut,
     dispose() {

@@ -40,6 +40,7 @@ export function createCollaborationRoomBrokerClient(options: {
 
   return {
     createRoom: (input: unknown) => json('POST', '/rooms', input),
+    cancelDiscussion: (input: unknown) => json('POST', `/rooms/${encodeURIComponent(roomIdFrom(input))}/discussion/cancel`, input),
     archiveRoom: (input: unknown) => json('POST', `/rooms/${encodeURIComponent(roomIdFrom(input))}/archive`, input),
     updateRoomMembers: (input: unknown) => json('PUT', `/rooms/${encodeURIComponent(roomIdFrom(input))}/members`, input),
     sendRoomMessage: (input: unknown) => json('POST', `/rooms/${encodeURIComponent(roomIdFrom(input))}/messages`, input),

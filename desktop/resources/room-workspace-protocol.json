@@ -1,0 +1,6 @@
+{
+  "component": "desktop",
+  "protocols": {
+    "room_workspace_v1": { "contextVersion": 1, "resultVersion": 1, "releaseVersion": 1 }
+  }
+}

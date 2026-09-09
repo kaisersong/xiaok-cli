@@ -83,6 +83,28 @@ function createKSwarmFake() {
 }
 
 describe('collaboration room semantic service', () => {
+  it('projects main capabilities and does not request wakes for unsupported observer agents', async () => {
+    const send = vi.fn(async () => ({ ok: true, message: { messageId: 'new-message' } }));
+    const broker = createBrokerFake({ sendRoomMessage: send });
+    const dispatch = vi.fn(async () => ({ ok: true }));
+    const capabilities = [
+      { logicalAgentId: 'agent-a', mode: 'discussion_unavailable' as const, runtime: 'kiro', reason: 'unsupported_protocol' },
+      { logicalAgentId: 'xiaok-worker', mode: 'workspace_worker' as const },
+      { logicalAgentId: 'candidate', mode: 'discussion_only' as const, runtime: 'qoder' },
+    ];
+    const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: createKSwarmFake(), wakeDispatcher: { dispatchMessage: dispatch }, getExecutionCapabilities: async () => capabilities });
+    expect((await service.getRoom('room-1')).executionCapabilities).toEqual(capabilities);
+    const result = await service.sendMessage({ roomId: 'room-1', text: '@all discuss' });
+    expect(result.wake).toMatchObject({ status: 'queued', logicalAgentIds: ['xiaok-worker'], unavailable: [{ logicalAgentId: 'agent-a', reason: 'unsupported_protocol' }] });
+    expect(send.mock.calls[0]?.[0]).toMatchObject({ text: '@all discuss', mentions: [{ kind: 'agent', logicalAgentId: 'xiaok-worker' }] });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(dispatch).toHaveBeenCalledWith({ roomId: 'room-1', roomMessageId: 'new-message', logicalAgentIds: ['xiaok-worker'] });
+    dispatch.mockClear();
+    const denied = await service.sendMessage({ roomId: 'room-1', text: '@agent-a discuss' });
+    expect(denied.wake).toMatchObject({ status: 'unavailable', logicalAgentIds: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(dispatch).not.toHaveBeenCalled();
+  });
   it('rejects invalid createRoom input before touching the broker', async () => {
     const broker = createBrokerFake();
     const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: createKSwarmFake() });
@@ -158,6 +180,13 @@ describe('collaboration room semantic service', () => {
     expect(result.ok).toBe(false);
     expect(result.code).toBe('room_message_not_found');
     expect(kswarm.request).not.toHaveBeenCalled();
+  });
+  it('derives the workspace protocol from the authenticated Room snapshot, never renderer overrides',async()=>{
+    const broker=createBrokerFake({getRoomSnapshot:vi.fn(async()=>({ok:true,requiredProtocol:'room_workspace_v1',room:{roomId:'room-1',revision:4},messages:[{messageId:'m'}]}))});
+    const request=vi.fn(async()=>({ok:true,json:async()=>({ok:true,project:{id:'p'}})}));
+    const service=createCollaborationRoomService({brokerClient:broker,kswarmClient:{request}});
+    await service.createProjectFromRoom({roomId:'room-1',name:'p',goal:'g',sourceMessageIds:['m'],requiredProtocol:'legacy'});
+    expect(JSON.parse(request.mock.calls[0][1].body)).toMatchObject({primaryRoomId:'room-1',requiredProtocol:'room_workspace_v1'});
   });
 
   it('forwards stable broker error codes through to the renderer', async () => {

@@ -258,6 +258,14 @@ describe('catalog only lists models the providers actually serve', () => {
     }
   });
 
+  it('registers the exact temporary DeepSeek V4.1 Flash wire ID without replacing the default', () => {
+    const profile=getProviderProfile('deepseek');
+    expect(profile?.defaultModel.model).toBe('deepseek-v4-pro');
+    expect(profile?.availableModels?.find(v=>v.modelId==='deepseek-v4.1-flash-expires-on-0910')).toEqual({
+      modelId:'deepseek-v4.1-flash-expires-on-0910',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',capabilities:['tools','thinking'],runtimeOptions:{contextLimit:128_000},
+    });
+  });
+
   it('registers the exact DeepSeek V4 Flash Vision Exp model metadata', () => {
     const profile = getProviderProfile('deepseek');
     const variant = profile?.availableModels?.find(

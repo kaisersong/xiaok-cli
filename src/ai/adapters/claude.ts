@@ -5,6 +5,7 @@ import type { CachedToolDefinition, ModelCapabilities, StreamOptions, SystemProm
 import { resolveClonedCapabilityOverrides, type AdapterCatalogIdentity } from './catalog-identity.js';
 
 const MAX_RETRIES = 3;
+const CLAUDE_REQUEST_MAX_OUTPUT_TOKENS = 8192;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
@@ -80,6 +81,7 @@ export class ClaudeAdapter implements ModelAdapter {
   getCapabilities(): Partial<ModelCapabilities> {
     return this.capabilityOverrides ?? {};
   }
+  getOutputTokenReserve(): number { return CLAUDE_REQUEST_MAX_OUTPUT_TOKENS; }
 
   cloneWithModel(model: string): ClaudeAdapter {
     return new ClaudeAdapter(
@@ -219,7 +221,7 @@ export class ClaudeAdapter implements ModelAdapter {
     const client = await this.getClient();
     const stream = client.messages.stream({
       model: this.model,
-      max_tokens: 8192,
+      max_tokens: CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
       system: (options?.promptCache?.systemPrompt ?? systemPrompt) as string | SystemPromptBlock[],
       messages: anthropicMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,

@@ -33,10 +33,7 @@ interface UpdateStatus {
   currentVersion?: string;
 }
 
-// During the ad-hoc-signing window (no Apple Developer cert yet), Squirrel.Mac
-// cannot verify the downloaded package, so quitAndInstall silently fails and the
-// button gets stuck. Until the cert lands, the reminder opens a popover that
-// points users at the GitHub release for a manual download + drag-to-replace.
+// Manual recovery is available when automatic update handoff is unconfirmed.
 const GITHUB_RELEASES_URL = 'https://github.com/kaisersong/xiaok-cli/releases/latest';
 
 interface SidebarScheduledTask {
@@ -281,18 +278,21 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const hideThreadList = activeNav === 'automations' || activeNav === 'projects' || activeNav === 'collaboration' || activeNav === 'knowledge';
   const updateVersion = updateStatus?.version || t.sidebarUpdateNewVersion;
   const currentVersion = updateStatus?.currentVersion;
-  const updateError = updateStatus?.error;
+  const updateError = updateStatus?.error === 'update_install_handoff_unconfirmed'
+    ? t.sidebarUpdateHandoffUnconfirmedHint
+    : updateStatus?.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady : updateStatus?.error;
+  const installDiagnostic = Boolean(updateError && updateStatus?.downloaded);
   const hasActiveUpdate = Boolean(updateStatus && (
     updateStatus.available ||
     updateStatus.downloading ||
     updateStatus.downloaded ||
     updateStatus.installing
   ));
-  const hasUpdateFailure = Boolean(updateError && !hasActiveUpdate);
+  const hasUpdateFailure = Boolean(updateError);
   const showUpdateReminder = Boolean(updateStatus && (hasActiveUpdate || updateError));
-  const updateReminderLabel = hasUpdateFailure ? t.sidebarUpdateCheckIncomplete : t.sidebarUpdateUpgradeTo(updateVersion);
-  const updatePopoverTitle = hasUpdateFailure ? t.sidebarUpdateCheckIncomplete : t.sidebarUpdateFoundNewVersion;
-  const updateReminderTitle = hasUpdateFailure
+  const updateReminderLabel = installDiagnostic ? t.sidebarUpdateHandoffUnconfirmed : hasUpdateFailure ? t.sidebarUpdateCheckIncomplete : t.sidebarUpdateUpgradeTo(updateVersion);
+  const updatePopoverTitle = installDiagnostic ? t.sidebarUpdateHandoffUnconfirmed : hasUpdateFailure ? t.sidebarUpdateCheckIncomplete : t.sidebarUpdateFoundNewVersion;
+  const updateReminderTitle = installDiagnostic ? t.sidebarUpdateHandoffUnconfirmedHint : hasUpdateFailure
     ? t.sidebarUpdateCheckIncompleteHint
     : t.sidebarUpdateFoundVersionHint(updateVersion);
   const updateReminderButtonClassName = hasUpdateFailure
@@ -610,7 +610,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                         )}
                       </div>
 
-                      {hasUpdateFailure && updateError && (
+                      {hasUpdateFailure && updateError && updateStatus?.error !== 'update_install_handoff_unconfirmed' && (
                         <p className="mb-3 rounded-md bg-[var(--c-bg-deep)] px-2 py-1.5 text-xs leading-relaxed text-[var(--c-text-secondary)]">
                           {updateError}
                         </p>
@@ -618,7 +618,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
                       <p className="mb-3 text-xs leading-relaxed text-[var(--c-text-secondary)]">
                         {hasUpdateFailure
-                          ? t.sidebarUpdateAutoCheckFailed
+                          ? installDiagnostic ? t.sidebarUpdateHandoffUnconfirmedHint : t.sidebarUpdateAutoCheckFailed
                           : updateStatus?.downloaded
                             ? t.sidebarUpdateReadyToInstall
                             : updateStatus?.downloading

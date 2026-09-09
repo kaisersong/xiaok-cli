@@ -199,6 +199,12 @@ describe('config commands', () => {
       expect(entry.runtimeOptions).not.toBe(variant?.runtimeOptions);
     });
 
+    it('preserves the full temporary DeepSeek V4.1 model ID from the shared catalog', async () => {
+      await freshProgram().parseAsync(['node','xiaok','config','set','model','deepseek/deepseek-v4.1-flash-expires-on-0910']);
+      const updated=await loadConfig();
+      expect(updated.models[updated.defaultModelId!]).toMatchObject({provider:'deepseek',model:'deepseek-v4.1-flash-expires-on-0910',label:'DeepSeek V4.1 Flash Preview (0910)',capabilities:['tools','thinking']});
+    });
+
     it('copies DeepSeek Vision Exp catalog metadata for an explicit deepseek/model value', async () => {
       const profile = getProviderProfile('deepseek');
       const variant = profile?.availableModels?.find(

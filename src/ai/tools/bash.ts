@@ -48,7 +48,12 @@ export const bashTool: Tool = {
   permission: 'bash',
   definition: {
     name: 'bash',
-    description: '执行 shell 命令，返回 stdout + stderr。慎用：所有 bash 命令均视为潜在危险操作。sudo 在主 CLI 的本地交互终端执行；密码只能由用户在终端输入，严禁通过聊天或工具参数索取、传递密码。',
+    get description() {
+      const shell = process.platform === 'win32'
+        ? '当前执行环境是 Windows cmd /c，命令须使用 cmd 语法。POSIX 单引号、heredoc 和 PowerShell cmdlet 不能直接使用；需要其他解释器时须显式调用并确认已安装。'
+        : '当前执行环境是 sh -c，命令须使用 POSIX sh 语法。';
+      return `执行 shell 命令，返回 stdout + stderr。${shell}文件内容搜索优先使用 grep 工具，定位文件使用 glob，读取文件使用 read。慎用：所有 shell 命令均视为潜在危险操作。sudo 在主 CLI 的本地交互终端执行；密码只能由用户在终端输入，严禁通过聊天或工具参数索取、传递密码。`;
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -78,8 +83,14 @@ export const bashTool: Tool = {
 
     return new Promise((resolve, reject) => {
       const shell = process.platform === 'win32' ? 'cmd' : 'sh';
-      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
-      const child = spawn(shell, shellArgs, { cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+      // cmd consumes shell text, not CRT-escaped argv. /s strips only our outer quotes.
+      const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', `"${command}"`] : ['-c', command];
+      const child = spawn(shell, shellArgs, {
+        cwd: workdir, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+        windowsVerbatimArguments: process.platform === 'win32',
+        // Piped stdio alone still lets PowerShell mutate the parent console.
+        windowsHide: true,
+      });
 
       let settled = false;
       let aborted = false;
@@ -117,6 +128,7 @@ export const bashTool: Tool = {
       let stdout = '';
       let stderr = '';
       const handleOutput = (stream: 'stdout' | 'stderr', data: Buffer) => {
+        context?.executionProgress?.progress();
         if (aborted || settled || terminationResult) return;
         const chunk = data.toString();
         if (stream === 'stdout') {

@@ -33,7 +33,7 @@ import {
   restoreExistingWindow,
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
-import { setupAutoUpdater, checkForUpdates, quitAndInstall, getUpdateStatus } from './updater.js';
+import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
 import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
@@ -42,7 +42,6 @@ import {
 import { DesktopShutdownGate, ShutdownAwareIpcMain } from './shutdown-aware-ipc-main.js';
 import { DesktopShutdownCoordinator } from './desktop-shutdown-coordinator.js';
 import { PluginProviderRuntimeFacade } from './plugin-provider-runtime-facade.js';
-import { UpdaterHandoffStateMachine } from './updater-handoff.js';
 import { TimedActionStore } from './timed-action-store.js';
 import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
@@ -74,10 +73,24 @@ import {
 } from './kswarm-semantic-service.js';
 import { registerSemanticDesktopIpc } from './semantic-ipc.js';
 import { createCollaborationRoomService } from './collaboration-room-service.js';
+import { randomUUID } from 'node:crypto';
 import { createCollaborationRoomBrokerClient } from './collaboration-room-broker-client.js';
 import { setRoomHistoryBrokerClient } from './room-history-page-tool.js';
 import { createRoomProjectSagaJournal } from './collaboration-room-saga-journal.js';
 import { createCollaborationRoomWakeDispatcher } from './collaboration-room-wake-dispatcher.js';
+import { RoomWorkspaceLocalStore } from './room-workspace-local.js';
+import { createRoomWorkspaceService } from './room-workspace-service.js';
+import { createRoomWorkspaceBrokerClient } from './room-workspace-broker-client.js';
+import { createRoomWorkspaceRuntime } from './room-workspace-runtime.js';
+import { createRoomExecutionRouter } from './room-execution-router.js';
+import { createRoomExternalDiscussionAdapter } from './room-external-discussion-adapter.js';
+import { createRoomWorkspaceRecovery } from './room-workspace-recovery.js';
+import { createRoomWorkspaceProjectAdapter } from './room-workspace-project-adapter.js';
+import { createRoomWorkspaceProjectDispatch } from './room-workspace-project-dispatch.js';
+import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
+import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
+import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
+import { ensureRoomWorkspaceProtocol } from './room-workspace-protocol.js';
 import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
@@ -193,16 +206,12 @@ const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
  * class: darwin instantiates `MacUpdater` (sticky pending, no retry once the
  * wrapper was entered), every other installer goes through `BaseUpdater`.
  */
-const updaterHandoff = new UpdaterHandoffStateMachine({
-  platformClass: process.platform === 'darwin' ? 'mac' : 'base',
-  invokeWrapper: () => {
-    quitAndInstall();
-  },
-});
+const updaterHandoff = createUpdaterHandoff();
 
 app.on('before-quit', (event) => {
   // A real before-quit is the only transition into irreversible cleanup.
   updaterHandoff.commitHandoffOnBeforeQuit();
+  completeUpdaterHandoff();
   const { preventDefault } = desktopShutdownCoordinator.onBeforeQuit();
   if (preventDefault) event.preventDefault();
 });
@@ -518,7 +527,7 @@ async function createReplacementWindow(): Promise<BrowserWindow> {
   configureDesktopView(window, devServer);
   setupMenuBar(window);
   if (process.env.NODE_ENV !== 'development' && !devServer) {
-    void setupAutoUpdater(window).catch(error => debugMain('setupAutoUpdater failed', String(error)));
+    void setupAutoUpdater(window, (event, diagnostic) => debugMain(`updater:${event}`, diagnostic)).catch(error => debugMain('setupAutoUpdater failed', String(error)));
   }
   if (devServer) await window.loadURL(devServer); else await window.loadFile(rendererFile);
   return window;
@@ -636,7 +645,16 @@ async function createInitialWindow(): Promise<BrowserWindow> {
 
   const kswarmStreamBridge = new KSwarmStreamBridge('ws://127.0.0.1:4400/ws');
   kswarmStreamBridge.start();
-  registerKSwarmProxy(shutdownAwareIpc, kswarmStreamBridge, kswarmService);
+  let dispatchWorkspaceProject: (projectId: string, body?: unknown) => Promise<Record<string, unknown> | null> = async () => { throw new Error('workspace_initializing'); };
+  registerKSwarmProxy(shutdownAwareIpc, kswarmStreamBridge, kswarmService, {
+    dispatchProject: (projectId, body) => dispatchWorkspaceProject(projectId, body),
+    authorize: event => {
+      const source = event as { sender?: unknown; senderFrame?: unknown };
+      return !!mainWindow && !mainWindow.isDestroyed() && source.sender === mainWindow.webContents
+        && source.senderFrame === mainWindow.webContents.mainFrame
+        && isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer });
+    },
+  });
 
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
@@ -1099,42 +1117,102 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     kswarmService,
     teamService: kswarmTeamService,
   });
-  const collaborationRoomBrokerClient = createCollaborationRoomBrokerClient({
+  const rawCollaborationRoomBrokerClient = createCollaborationRoomBrokerClient({
     token: kswarmService.getIntentBrokerRoomToken(),
   });
   // design §6.2 RoomHistoryReadCapability：getRoomMessagesPage 工具（进程级
   // 单例，desktop-services.ts 创建时已注册）需要延迟绑定这个 broker
   // client——它在 createDesktopServices 之后才创建，不能作为构造参数传入。
-  setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
   const emitCollaborationRoomEvent = (event: unknown) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('desktop:collaborationRoom:event', event);
     }
   };
+  const roomWorkspaceOwner = await acquireWorkspaceMutationOwner().catch(error => {
+    console.warn('[room-workspace] physical owner unavailable:', (error as Error).message);
+    return null;
+  });
+  const roomWorkspaceStore = new RoomWorkspaceLocalStore(join(USER_DATA_DIR, 'room-workspace.sqlite'));
+  const rawRoomWorkspaceBroker = createRoomWorkspaceBrokerClient({ token: kswarmService.getIntentBrokerRoomToken(), isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true });
+  const scopedRoomClients = createRoomProjectScopeGuard({
+    roomClient: rawCollaborationRoomBrokerClient, workspaceBroker: rawRoomWorkspaceBroker,
+    kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
+  });
+  const collaborationRoomBrokerClient = scopedRoomClients.roomClient;
+  const roomWorkspaceBroker = scopedRoomClients.workspaceBroker;
+  setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
+  const ensureWorkspaceProtocol = () => ensureRoomWorkspaceProtocol({
+    brokerProbe: () => roomWorkspaceBroker.probe(),
+    kswarmProbe: async () => { const response = await kswarmService.request('/health'); return response.ok ? response.json() : { ok: false }; },
+  });
+  const roomWorkspaceProjectAdapter = createRoomWorkspaceProjectAdapter({
+    broker: roomWorkspaceBroker, journal: roomWorkspaceStore,
+    kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
+  });
+  const roomExecutionRouter = createRoomExecutionRouter({
+    request: path => kswarmService.request(path),
+    makeAdapter: options => createRoomExternalDiscussionAdapter(options),
+  });
+  const roomWorkspaceRuntime = createRoomWorkspaceRuntime({
+    store: roomWorkspaceStore, broker: roomWorkspaceBroker, wake: collaborationRoomBrokerClient,
+    execute: (envelope, token, workspace, signal) => services.runCollaborationRoomAgentTask(envelope, token, workspace, signal),
+    projectAdapter: roomWorkspaceProjectAdapter,
+    externalDiscussion: {
+      resolve: logicalAgentId => roomExecutionRouter.resolve(logicalAgentId),
+      execute: input => roomExecutionRouter.execute(input),
+      getHostIdentity: roomId => rawRoomWorkspaceBroker.getHost(roomId),
+    },
+    executeProject: input => services.runWorkspaceProjectTask(input),
+    ensureProtocol: ensureWorkspaceProtocol, notify: emitCollaborationRoomEvent,
+    flushOutbox: () => roomWorkspaceService.flushOutbox(),
+  });
+  const roomWorkspaceService = createRoomWorkspaceService({
+    store: roomWorkspaceStore, broker: roomWorkspaceBroker, isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true,
+    ensureProtocol: ensureWorkspaceProtocol,
+    kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
+    getRoomProjects: async roomId => {
+      const snapshot = await collaborationRoomService.getRoom(roomId);
+      return ('projects' in snapshot ? snapshot.projects : []) ?? [];
+    },
+  });
+  dispatchWorkspaceProject = createRoomWorkspaceProjectDispatch({ adapter: roomWorkspaceProjectAdapter, runtime: roomWorkspaceRuntime });
+  const roomWorkspaceRecovery = createRoomWorkspaceRecovery({
+    store: roomWorkspaceStore, broker: roomWorkspaceBroker,
+    isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true,
+    flushOutbox: () => roomWorkspaceService.flushOutbox(),
+    recoverAdditional: async () => {
+      await roomWorkspaceRuntime.recoverExternalDiscussions();
+      for (const roomId of await roomWorkspaceService.recoverMappings()) emitCollaborationRoomEvent({ type: 'workspace_changed', kind: 'workspace_changed', roomId });
+      await roomWorkspaceProjectAdapter.retryPending();
+    },
+    notify: roomId => emitCollaborationRoomEvent({ type: 'workspace_changed', kind: 'workspace_changed', roomId }),
+  });
+  roomWorkspaceRecovery.start();
+  registerLifetimeDisposerStep('room-workspace', async () => {
+    await roomWorkspaceRecovery.stop();
+    await roomWorkspaceRuntime.shutdown();
+    roomWorkspaceStore.close();
+    await roomWorkspaceOwner?.close();
+  });
+  registerRoomWorkspaceIpc(shutdownAwareIpc, roomWorkspaceService, event => {
+    const source = event as { sender?: unknown; senderFrame?: unknown };
+    return !!mainWindow && !mainWindow.isDestroyed() && source.sender === mainWindow.webContents
+      && source.senderFrame === mainWindow.webContents.mainFrame
+      && isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, { rendererFile, devServer });
+  }, emitCollaborationRoomEvent);
   const collaborationRoomWakeDispatcher = createCollaborationRoomWakeDispatcher({
     brokerClient: collaborationRoomBrokerClient,
     canExecute: async logicalAgentId => {
-      if (logicalAgentId === 'xiaok-po' || logicalAgentId === XIAOK_WORKER_SEED_ID) return true;
-      try {
-        const response = await kswarmService.request('/agents');
-        if (!response.ok) return false;
-        const body = await response.json() as { agents?: Array<Record<string, unknown>> };
-        const agent = body.agents?.find(candidate => candidate.id === logicalAgentId);
-        if (!agent) return false;
-        const execution = agent.execution && typeof agent.execution === 'object'
-          ? agent.execution as { mode?: unknown; hostParticipantId?: unknown }
-          : null;
-        return agent.runtimeSource === 'desktop-agent-runtime'
-          || (execution?.mode === 'hosted' && execution.hostParticipantId === XIAOK_DESKTOP_HOST_PARTICIPANT_ID);
-      } catch {
-        return false;
-      }
+      const external = await roomExecutionRouter.resolve(logicalAgentId);
+      return external === null || external.supported;
     },
     execute: (input, claimToken) => services.runCollaborationRoomAgentTask(input, claimToken),
+    executeTurn: input => roomWorkspaceRuntime.run(input),
     onEvent: emitCollaborationRoomEvent,
   });
   const collaborationRoomService = createCollaborationRoomService({
     brokerClient: collaborationRoomBrokerClient,
+    getExecutionCapabilities: agentIds => roomExecutionRouter.capabilities(agentIds),
     kswarmClient: {
       request: (path, init) => kswarmService.request(path, {
         ...(init as RequestInit | undefined),
@@ -1153,7 +1231,17 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
     kswarm: kswarmSemanticService,
-    collaborationRooms: collaborationRoomService,
+    collaborationRooms: {
+      ...collaborationRoomService,
+      cancelDiscussion: async (input: unknown) => {
+        const value = input as { roomId?: unknown; requestId?: unknown };
+        if (typeof value?.roomId !== 'string') return { ok: false, code: 'room_input_invalid' };
+        const localCancel = roomWorkspaceRuntime.cancelRoom(value.roomId);
+        const outcome = await collaborationRoomService.cancelDiscussion({ ...value, requestId: typeof value.requestId === 'string' ? value.requestId : randomUUID() });
+        await localCancel.catch(() => undefined);
+        return outcome;
+      },
+    },
   });
   await registerDesktopIpc(shutdownAwareIpc, window, services, {
     loopRuntime: { ...loopRuntime, runner: assistantAwareRunner },
@@ -1216,11 +1304,12 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
       const brokerUrl = 'http://127.0.0.1:4318';
-      const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages')];
+      const kswarmHandoffRoots = [join(app.getPath('home'), '.kswarm', 'handoff-packages'), join(app.getPath('home'), '.kswarm', 'projects')];
       const runtimeBridge = {
         ...createKSwarmRuntimeBridge({
         allowedRoots: kswarmHandoffRoots,
         runDesktopTask: (input) => services.runKSwarmHandoffTask(input),
+        runWorkspaceTask: input => roomWorkspaceRuntime.runProjectTask(input),
         runWorkflowNode: (input) => services.runKSwarmWorkflowNode(input),
         submitResult: (input) => submitKSwarmRuntimeResultToBroker({
           brokerUrl,
@@ -1541,7 +1630,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
 
   // Setup auto-updater (production only)
   if (process.env.NODE_ENV !== 'development' && !process.env.XIAOK_DESKTOP_DEV_SERVER) {
-    setupAutoUpdater(window).catch((err) => {
+    setupAutoUpdater(window, (event, diagnostic) => debugMain(`updater:${event}`, diagnostic)).catch((err) => {
       debugMain('setupAutoUpdater failed', err instanceof Error ? err.message : String(err));
     });
   }

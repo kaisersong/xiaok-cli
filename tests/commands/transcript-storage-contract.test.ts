@@ -37,11 +37,21 @@ describe('transcript storage contracts', () => {
 
   it('restores transcript stream wrappers before SIGINT closes the logger', () => {
     const source = readFileSync(join(process.cwd(), 'src/commands/chat.ts'), 'utf8');
-    const handler = source.slice(source.indexOf('// SIGINT 处理'), source.indexOf('const handleCompletedIntentFeedbackResult'));
+    const shutdownStart = source.indexOf('const shutdownTerminal = async');
+    const interruptStart = source.indexOf('const onInterrupt =', shutdownStart);
+    expect(shutdownStart).toBeGreaterThan(0);
+    expect(interruptStart).toBeGreaterThan(shutdownStart);
+    const handler = source.slice(shutdownStart, interruptStart);
+    const interrupt = source.slice(interruptStart, source.indexOf('const onHangup =', interruptStart));
+    expect(interrupt).toContain("shutdownTerminal('sigint')");
+    expect(source).toContain("process.on('SIGINT', onInterrupt)");
     const restoreIndex = handler.indexOf('process.stdout.write = originalStdoutWrite;');
+    const restoreStderrIndex = handler.indexOf('process.stderr.write = originalStderrWrite;');
     const cleanupIndex = handler.indexOf('await cleanupRuntimeResourcesWithTimeout();');
     expect(restoreIndex).toBeGreaterThan(0);
     expect(restoreIndex).toBeLessThan(cleanupIndex);
+    expect(restoreStderrIndex).toBeGreaterThan(0);
+    expect(restoreStderrIndex).toBeLessThan(cleanupIndex);
   });
 });
 

@@ -6,6 +6,7 @@ import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { type WorkspaceToolOptions } from './read.js';
 export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
 export interface RegistryOptions {
+    toolIdleTimeoutMs?: number;
     capabilityRegistry?: CapabilityRegistry;
     /** Child discovery must not advertise tools owned only by other registries. */
     capabilitySearch?: boolean;
@@ -43,6 +44,7 @@ export declare class ToolRegistry {
     private options;
     private allowedToolsFilter;
     private disposed;
+    private readonly toolIdleTimeoutMs;
     setAllowedTools(names: string[] | null): void;
     constructor(options: RegistryOptions, tools?: Tool[]);
     getToolDefinitions(): ToolDefinition[];

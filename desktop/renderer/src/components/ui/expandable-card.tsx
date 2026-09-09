@@ -8,7 +8,7 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../lib/utils';
 
-interface ExpandableCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children'> {
+interface ExpandableCardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'onToggle'> {
   expanded?: boolean;
   defaultExpanded?: boolean;
   onToggle?: (next: boolean) => void;

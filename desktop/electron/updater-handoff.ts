@@ -108,6 +108,9 @@ export class UpdaterHandoffStateMachine {
     try {
       result = this.adapter.invokeWrapper();
     } catch (error) {
+      // The wrapper can synchronously emit before-quit before it throws.
+      // Irreversible handoff must never be rolled back by the returning stack.
+      if (this.snapshot().kind === 'handed_off') return { status: 'already_handed_off' };
       if (this.adapter.platformClass === 'mac') {
         // The anonymous update-downloaded listener may already be installed and
         // cannot be withdrawn: no second wrapper call in this process.
@@ -118,6 +121,7 @@ export class UpdaterHandoffStateMachine {
       return { status: 'rejected_sync', diagnostic: describe(error) };
     }
 
+    if (this.snapshot().kind === 'handed_off') return { status: 'already_handed_off' };
     const syncError = result && 'syncError' in result ? result.syncError : undefined;
     if (syncError) {
       if (this.adapter.platformClass === 'mac') {

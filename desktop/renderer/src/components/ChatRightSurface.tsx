@@ -3,9 +3,12 @@ import { isFocusable, tabbable, type FocusableElement } from 'tabbable';
 import { useLocale } from '../contexts/LocaleContext';
 import './chat-right-surface.css';
 
-type View = 'task' | 'agents' | 'canvas';
+type View = 'task' | 'agents' | 'files' | 'instructions' | 'canvas';
+const views = ['task', 'agents', 'files', 'instructions', 'canvas'] as const;
 interface Props {
   threadId: string; agentCount: number; taskContent?: ReactNode; agentsContent: ReactNode; canvasContent?: ReactNode;
+  filesContent?: ReactNode; instructionsContent?: ReactNode;
+  viewRequest?: { view: 'task' | 'files' | 'instructions'; requestId: number };
   hasAgentHistory?: boolean; needsRecovery?: boolean; historicalSelection?: boolean; deleted?: boolean;
   pendingApprovalCount?: number;
   canvasOpen: boolean; canvasRequestId: number; canvasExpanded: boolean; children: ReactNode;
@@ -23,8 +26,8 @@ export function ChatRightSurface(props: Props) {
   const previousNonCanvas = useRef<View | null | undefined>(undefined);
   const narrow = width === null || width < 900;
   const pending = props.deleted ? 0 : props.pendingApprovalCount ?? 0;
-  const available = { task: Boolean(props.taskContent), agents: !props.deleted && Boolean(props.agentCount || props.hasAgentHistory || props.needsRecovery || pending), canvas: Boolean(props.canvasContent) };
-  const fallback = (['task', 'agents', 'canvas'] as const).find(view => available[view]) ?? null;
+  const available = { task: Boolean(props.taskContent), agents: !props.deleted && Boolean(props.agentCount || props.hasAgentHistory || props.needsRecovery || pending), files: Boolean(props.filesContent), instructions: Boolean(props.instructionsContent), canvas: Boolean(props.canvasContent) };
+  const fallback = views.find(view => available[view]) ?? null;
   // Null remembers an explicitly closed surface; only an absent return record
   // uses the initial wide-screen Task default. Resolve the closing target before
   // availability normalization can replace the Canvas request with another tab.
@@ -35,12 +38,12 @@ export function ChatRightSurface(props: Props) {
   const seenChild = useRef(false); const interacted = useRef(false); const initialTask = useRef(false);
   const modal = width !== null && narrow && active !== null;
   const recoveryOnly = !props.agentCount && !props.hasAgentHistory && (props.needsRecovery || pending > 0);
-  const names = { task: labels.taskTab, agents: recoveryOnly ? labels.executionState : labels.agentsTab, canvas: labels.canvasTab };
+  const names = { task: labels.taskTab, agents: recoveryOnly ? labels.executionState : labels.agentsTab, files: t.roomWorkspace.filesTab, instructions: t.roomWorkspace.instructionsTab, canvas: labels.canvasTab };
   // History keeps its readable tab, but never creates a standalone capsule.
   // Counts from a selected historical group are not current execution facts.
   const currentChildren = !props.historicalSelection && props.agentCount > 0;
   const agentsEntry = !props.deleted && (currentChildren || props.needsRecovery || pending > 0);
-  const contentEntry = available.task ? 'task' : available.canvas ? 'canvas' : null;
+  const contentEntry = available.task ? 'task' : available.files ? 'files' : available.instructions ? 'instructions' : available.canvas ? 'canvas' : null;
   const entryView = active && (active !== 'agents' || agentsEntry) ? active : agentsEntry ? 'agents' : contentEntry;
   const entryLabel = entryView ? labels.openPanel(entryView === 'agents' && !currentChildren ? labels.executionState : names[entryView],
     entryView === 'agents' && currentChildren ? props.agentCount : 0) : '';
@@ -144,6 +147,9 @@ export function ChatRightSurface(props: Props) {
     if (view === 'canvas' && active !== 'canvas') previousNonCanvas.current = active;
     setActive(view);
   };
+  useEffect(() => {
+    if (props.viewRequest) { interacted.current = true; setActive(props.viewRequest.view); }
+  }, [props.viewRequest?.requestId]);
   function onKeys(event: Pick<KeyboardEvent, 'defaultPrevented' | 'key' | 'target' | 'shiftKey' | 'preventDefault' | 'stopPropagation'>) {
     if (event.defaultPrevented) { if (event.key === 'Escape') event.stopPropagation(); return; }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
@@ -177,14 +183,14 @@ export function ChatRightSurface(props: Props) {
       onFocusCapture={event => { focusedWithin.current = event.target as HTMLElement; }}
       onBlurCapture={trackBlur}>
       <div ref={tablist} className="chat-right-tabs" role="tablist">
-        {(['task', 'agents', 'canvas'] as const).filter(view => view !== 'agents' || available.agents).map(view => <button key={view} type="button" role="tab" id={`right-${props.threadId}-${view}-tab`}
+        {views.filter(view => !['agents', 'files', 'instructions'].includes(view) || available[view]).map(view => <button key={view} type="button" role="tab" id={`right-${props.threadId}-${view}-tab`}
           aria-controls={`right-${props.threadId}-${view}`} aria-selected={active === view} disabled={!available[view]} tabIndex={active === view ? 0 : -1}
           onClick={() => select(view)}>{names[view]}{view === 'agents' && pending > 0 ? <span aria-label={labels.approvals.pending(pending)}> · {pending}</span> : null}</button>)}
         <button ref={closeButton} type="button" className="chat-right-close" aria-label={labels.closePanel} onClick={close}>×</button>
       </div>
-      {(['task', 'agents', 'canvas'] as const).map(view => <div key={view} role="tabpanel" id={`right-${props.threadId}-${view}`}
+      {views.map(view => <div key={view} role="tabpanel" id={`right-${props.threadId}-${view}`}
         aria-labelledby={`right-${props.threadId}-${view}-tab`} className="chat-right-body" hidden={active !== view} inert={active !== view}>
-        {view === 'task' ? props.taskContent : view === 'agents' ? props.agentsContent : props.canvasContent}
+        {view === 'task' ? props.taskContent : view === 'agents' ? props.agentsContent : view === 'files' ? props.filesContent : view === 'instructions' ? props.instructionsContent : props.canvasContent}
       </div>)}
     </section>
   </div>;

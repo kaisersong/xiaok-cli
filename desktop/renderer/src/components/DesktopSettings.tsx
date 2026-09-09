@@ -4215,7 +4215,13 @@ function AboutPane() {
   };
 
   const handleInstallUpdate = async () => {
-    await api.quitAndInstall();
+    try {
+      await api.quitAndInstall();
+    } catch (error) {
+      setUpdateStatus((previous) => previous ? {
+        ...previous, installing: false, error: error instanceof Error ? error.message : String(error),
+      } : previous);
+    }
   };
 
   return (
@@ -4250,22 +4256,25 @@ function AboutPane() {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">
-                {updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
+                {updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmed : updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
               </div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
-                {updateStatus?.installing ? t.desktopSettings.aboutInstallingVersion(updateStatus.version || '') :
+                {updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmedHint :
+                 updateStatus?.installing ? t.desktopSettings.aboutInstallingVersion(updateStatus.version || '') :
                  updateStatus?.downloaded ? t.desktopSettings.aboutDownloadedVersion(updateStatus.version || '') :
                  updateStatus?.downloading ? t.desktopSettings.aboutDownloadProgress(updateStatus.progress) :
                  updateStatus?.available ? t.desktopSettings.aboutVersionAvailable(updateStatus.version || '') :
                  updateStatus?.checking || checking ? t.desktopSettings.aboutChecking :
                  `v${__APP_VERSION__}`}
               </div>
-              {updateStatus?.error && (
-                <div className="text-xs text-red-500 mt-1">{updateStatus.error}</div>
+              {updateStatus?.error && updateStatus.error !== 'update_install_handoff_unconfirmed' && (
+                <div className="text-xs text-red-500 mt-1">{updateStatus.error === 'update_install_handoff_unconfirmed' ? t.sidebarUpdateHandoffUnconfirmedHint : updateStatus.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady : updateStatus.error}</div>
               )}
             </div>
             <div className="flex gap-2">
-              {updateStatus?.downloaded ? (
+              {updateStatus?.error && updateStatus.downloaded ? (
+                <a href="https://github.com/kaisersong/xiaok-cli/releases/latest" target="_blank" rel="noopener noreferrer" className={btnPrimary}>{t.sidebarUpdateGoToGithub}</a>
+              ) : updateStatus?.downloaded ? (
                 <button type="button" onClick={handleInstallUpdate} disabled={updateStatus.installing} className={btnPrimary}>
                   {updateStatus.installing ? t.desktopSettings.aboutInstallProgress : t.desktopSettings.aboutInstallRestart}
                 </button>

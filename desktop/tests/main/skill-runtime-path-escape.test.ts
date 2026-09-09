@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { referenceEscapesSkillRoot } from '../../electron/skill-runtime.js'
+import { referenceEscapesSkillRoot, createSkillBundleRefsTool } from '../../electron/skill-runtime.js'
+import { mkdtempSync, writeFileSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { SkillCatalog } from '../../../src/ai/skills/loader.js'
 
 // Use a platform-appropriate skill root so resolve()/relative() behave like the
 // real host. The helper must still reject foreign-style absolute paths.
 const ROOT = process.platform === 'win32' ? 'C:\\Users\\song\\.xiaok\\skills\\demo' : '/home/song/.xiaok/skills/demo'
 
 describe('referenceEscapesSkillRoot', () => {
+  it('real bundle tool refuses symlink references outside the installed skill root', async () => {
+    const root=mkdtempSync(join(tmpdir(),'skill-root-')),outside=mkdtempSync(join(tmpdir(),'skill-secret-'));
+    writeFileSync(join(root,'safe.md'),'safe reference');writeFileSync(join(outside,'private.md'),'PRIVATE_OUTSIDE');
+    symlinkSync(outside,join(root,'escape'),'dir');
+    const tool=createSkillBundleRefsTool({list:()=>[{name:'fixture',rootDir:root}]} as unknown as SkillCatalog);
+    expect(await tool.execute({skillName:'fixture',paths:['safe.md']})).toContain('safe reference');
+    expect(await tool.execute({skillName:'fixture',paths:['escape/private.md']})).not.toContain('PRIVATE_OUTSIDE');
+  })
   it('allows ordinary relative references inside the skill root', () => {
     expect(referenceEscapesSkillRoot(ROOT, 'SKILL.md')).toBe(false)
     expect(referenceEscapesSkillRoot(ROOT, 'stages/plan.md')).toBe(false)

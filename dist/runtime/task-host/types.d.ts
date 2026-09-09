@@ -116,6 +116,9 @@ export interface SalvageSummary {
     reason?: string;
 }
 export type DesktopTaskEvent = {
+    type: 'execution_health';
+    state: import('../execution-health.js').ExecutionHealthState;
+} | {
     type: 'task_started';
     taskId: string;
 } | {

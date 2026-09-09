@@ -102,6 +102,8 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       // https://api-docs.deepseek.com/news/news260821 与 /guides/vision：
       // 官方 wire model 为 deepseek-v4-flash-vision-exp，使用现有 API 端点，
       // 通过 OpenAI-compatible image_url 接受图片；1M 上下文，支持工具与思考。
+      // User-requested temporary wire ID; conservative limits until its model card is published.
+      { modelId: 'deepseek-v4.1-flash-expires-on-0910', model: 'deepseek-v4.1-flash-expires-on-0910', label: 'DeepSeek V4.1 Flash Preview (0910)', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 128_000 } },
       { modelId: 'deepseek-v4-flash-vision-exp', model: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision Exp', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },
       { modelId: 'deepseek-v4-flash', model: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_000_000 } },

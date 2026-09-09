@@ -39,6 +39,7 @@ export interface MultiAgentSnapshot {
     lastActivityAt?: number;
     phase?: RuntimeActivity['phase'];
     currentTool?: string;
+    executionHealth?: RuntimeActivity['executionHealth'];
     executionActive: boolean;
     resourcesReleased: boolean;
     runtimeResident: boolean;

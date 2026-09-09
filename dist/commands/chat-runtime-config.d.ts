@@ -19,6 +19,9 @@ export declare function resolveTurnTimeoutMs(env?: NodeJS.ProcessEnv): number | 
 export interface TurnActivityWatchdog {
     signal: AbortSignal;
     noteActivity(): void;
+    observeRuntimeEvent(event: {
+        type: string;
+    }): void;
     suspend(): void;
     didTimeout(): boolean;
     dispose(): void;

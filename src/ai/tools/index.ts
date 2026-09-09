@@ -1,3 +1,5 @@
+import {resolveExecutionIdleMs} from '../../runtime/execution-health.js';
+import { runMonitoredTool } from '../../runtime/tool-execution-health.js';
 import type { Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../types.js';
 import { PermissionManager } from '../permissions/manager.js';
 import type { HooksRunner } from '../../runtime/hooks-runner.js';
@@ -57,6 +59,7 @@ export function buildToolList(
 }
 
 export interface RegistryOptions {
+  toolIdleTimeoutMs?: number;
   capabilityRegistry?: CapabilityRegistry;
   /** Child discovery must not advertise tools owned only by other registries. */
   capabilitySearch?: boolean;
@@ -92,12 +95,14 @@ export class ToolRegistry {
   private options: Required<Pick<RegistryOptions, 'dryRun' | 'onPrompt'>> & RegistryOptions;
   private allowedToolsFilter: Set<string> | null = null;
   private disposed = false;
+  private readonly toolIdleTimeoutMs: number;
 
   setAllowedTools(names: string[] | null): void {
     this.allowedToolsFilter = names ? new Set(names.map((name) => getCanonicalToolId(name))) : null;
   }
 
   constructor(options: RegistryOptions, tools?: Tool[]) {
+    this.toolIdleTimeoutMs = resolveExecutionIdleMs(options.toolIdleTimeoutMs === undefined ? process.env.XIAOK_TOOL_IDLE_TIMEOUT_MS : String(options.toolIdleTimeoutMs));
     const mode = options.permissionManager
       ? options.permissionManager.getMode()
       : options.autoMode
@@ -382,8 +387,13 @@ export class ToolRegistry {
         const assertPermissionApproval = () => assertSynchronousGrantResult(grant.assertCurrent());
         assertPermissionApproval();
         invocationContext = { ...context, assertPermissionApproval };
+        if(Object.isFrozen(context))Object.freeze(invocationContext);
       }
-      const rawResult = await tool.execute(input, invocationContext);
+      const rawResult = await runMonitoredTool({name,context:invocationContext,
+        idleMs:tool.executionPolicy?.idleTimeoutMs ?? this.toolIdleTimeoutMs,
+        waitsForUser:tool.executionPolicy?.waitsForUser,
+        run: ctx => tool.execute(input,ctx),
+      });
       context?.signal?.throwIfAborted();
 
       // Append hook-provided additional context
@@ -411,7 +421,7 @@ export class ToolRegistry {
       return appendToolWarnings(modelOutput.text, [...modelOutput.warnings, ...warnings]);
     } catch (e) {
       context?.signal?.throwIfAborted();
-      if (isAbortError(e)) throw e;
+      if (isAbortError(e) || (e instanceof Error && e.message.startsWith('TOOL_IDLE_TIMEOUT'))) throw e;
       const errorMessage = formatErrorText(String(e));
       await this.options.hooksRunner?.runHooks('PostToolUseFailure', {
         tool_name: tool.definition.name,

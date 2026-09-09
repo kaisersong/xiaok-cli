@@ -62,8 +62,15 @@ describe('BDD AP6: real store/sender pending metadata fits the existing wire bud
         const { [prior]: count, ...rest } = row.toolCounts!;
         const candidate = { ...row, toolCounts: { ...rest, [next]: count } };
         if (bytes(candidate) > ceiling) break outer;
-        row = f.store.putAgent(groupId, candidate, true);
+        row = candidate;
       }
+      // Intermediate candidates are fixture sizing, not business mutations.
+      // Persist once through the real store and prove normalization/readback
+      // did not alter the measured near-limit row.
+      const persisted = f.store.putAgent(groupId, row, true);
+      expect(persisted).toEqual(row);
+      expect(f.store.getAgent(groupId, id)).toEqual(row);
+      expect(bytes(persisted)).toBeLessThanOrEqual(ceiling);
       expect(bytes(row)).toBeLessThanOrEqual(4096);
     }
     for (const agent of originals.filter(row => row.parentId !== null)) {

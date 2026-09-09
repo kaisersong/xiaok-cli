@@ -15,6 +15,7 @@ function requireDesktopApi() {
 }
 
 export interface RoomUiSnapshot {
+  executionCapabilities?: Array<{ logicalAgentId: string; mode: 'workspace_worker' | 'discussion_only' | 'discussion_unavailable'; runtime?: string; reason?: string }>;
   ok: boolean;
   code?: string;
   degraded?: boolean;
@@ -36,6 +37,7 @@ export interface RoomUiSnapshot {
       projectId?: string;
       projectRevision?: number;
       eventType?: string;
+      eventKind?: string;
       projectionEventId?: string;
       taskId?: string;
       artifactId?: string;
@@ -57,6 +59,7 @@ export interface RoomListResult {
 }
 
 export type CollaborationRoomEvent =
+  | { type: 'workspace_changed'; kind?: 'workspace_changed'; roomId: string }
   | {
       type: 'wake_settled';
       roomId: string;

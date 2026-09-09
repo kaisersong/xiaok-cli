@@ -2,6 +2,38 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCollaborationRoomWakeDispatcher } from '../../electron/collaboration-room-wake-dispatcher.js';
 
 describe('collaboration room wake dispatcher', () => {
+  it.each(['execute', 'complete', 'success'])('settles only its held wake after %s without rerunning work', async failure => {
+    const brokerClient = { getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'r' }, messages: [{ roomId: 'r', messageId: 'm', text: 'work' }] })), claimWake: vi.fn(async () => ({ ok: true, claimToken: 'owned-token' })), completeWake: vi.fn(async () => ({ ok: failure !== 'complete' })), abandonWake: vi.fn(async () => ({ ok: true })) };
+    const execute = vi.fn(async () => { if (failure === 'execute') throw new Error('stream failed'); return { text: 'done' }; });
+    const result = await createCollaborationRoomWakeDispatcher({ brokerClient, execute }).dispatchMessage({ roomId: 'r', roomMessageId: 'm', logicalAgentIds: ['a'] });
+    expect(execute).toHaveBeenCalledTimes(1);
+    if (failure === 'success') { expect(brokerClient.abandonWake).not.toHaveBeenCalled(); expect(result.completed).toEqual(['a']); }
+    else { expect(result.failed).toEqual(['a']); expect(brokerClient.abandonWake).toHaveBeenCalledExactlyOnceWith({ roomId: 'r', claimToken: 'owned-token', reason: 'execution_failed' }); }
+  });
+  it.each([false, true])('filters source-bound project context before either executor, modern=%s', async modern => {
+    const messages = [{ roomId: 'r', messageId: 'source', text: 'same-project', contextScope: { kind: 'project', projectId: 'p1' } }, { roomId: 'r', messageId: 'other', text: 'PRIVATE-P2', contextScope: { kind: 'project', projectId: 'p2' } }, { roomId: 'r', messageId: 'ordinary', text: 'PRIVATE-ROOM' }];
+    const brokerClient = { getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'r' }, messages })), claimWake: vi.fn(async () => ({ ok: true, claimToken: 'token' })), completeWake: vi.fn(async () => ({ ok: true })) };
+    const execute = vi.fn(async () => ({ text: 'done' })), executeTurn = vi.fn(async () => ({ ok: true }));
+    await createCollaborationRoomWakeDispatcher({ brokerClient, execute, ...(modern ? { executeTurn } : {}) }).dispatchMessage({ roomId: 'r', roomMessageId: 'source', logicalAgentIds: ['a'] });
+    const input = (modern ? executeTurn : execute).mock.calls[0][0];
+    expect(input.messages.map((m: any) => m.messageId)).toEqual(['source']); expect(JSON.stringify(input)).not.toContain('PRIVATE');
+  });
+  it('starts two admitted room turns concurrently without waiting for the first result', async () => {
+    const brokerClient = { getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'r', title: 'r' }, messages: [{ roomId: 'r', messageId: 'm', kind: 'text', text: 'work' }] })), claimWake: vi.fn(), completeWake: vi.fn() };
+    let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve; }); const started: string[] = [];
+    const dispatcher = createCollaborationRoomWakeDispatcher({ brokerClient, execute: vi.fn(), executeTurn: async input => { started.push(input.logicalAgentId); await pending; return { ok: true }; } });
+    const result = dispatcher.dispatchMessage({ roomId: 'r', roomMessageId: 'm', logicalAgentIds: ['a', 'b'] });
+    await vi.waitFor(() => expect(started).toEqual(['a', 'b'])); release();
+    expect((await result).completed).toEqual(['a', 'b']);
+  });
+  it('routes v1 through its admission owner without also claiming a legacy wake', async () => {
+    const brokerClient = { getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'r', title: 'r' }, messages: [{ roomId: 'r', messageId: 'm', kind: 'text', text: 'work' }] })), claimWake: vi.fn(), completeWake: vi.fn() };
+    const executeTurn = vi.fn(async () => ({ ok: true })); const execute = vi.fn();
+    const dispatcher = createCollaborationRoomWakeDispatcher({ brokerClient, execute, executeTurn });
+    expect(await dispatcher.dispatchMessage({ roomId: 'r', roomMessageId: 'm', logicalAgentIds: ['a'] })).toEqual({ ok: true, completed: ['a'], failed: [] });
+    expect(executeTurn).toHaveBeenCalledWith(expect.objectContaining({ roomId: 'r', logicalAgentId: 'a' }));
+    expect(execute).not.toHaveBeenCalled(); expect(brokerClient.claimWake).not.toHaveBeenCalled();
+  });
   it('claims a durable wake, passes only the current room snapshot to the isolated executor, and completes once', async () => {
     const brokerClient = {
       getRoomSnapshot: vi.fn(async () => ({
@@ -32,6 +64,7 @@ describe('collaboration room wake dispatcher', () => {
     expect(envelope.messages.map((message: { messageId: string }) => message.messageId)).toEqual(['msg-1']);
     expect(JSON.stringify(envelope)).not.toContain('must not leak');
     expect(brokerClient.completeWake).toHaveBeenCalledWith({
+      roomId: 'room-a',
       claimToken: 'claim-1',
       reply: { kind: 'text', text: 'Boundaries reviewed.' },
     });
@@ -148,16 +181,16 @@ describe('collaboration room wake dispatcher', () => {
         type: 'wake_settled',
         roomId: 'room-a',
         roomMessageId: 'msg-1',
-        logicalAgentId: 'agent-a',
-        outcome: 'completed',
+        logicalAgentId: 'agent-b',
+        outcome: 'failed',
         remaining: 1,
       },
       {
         type: 'wake_settled',
         roomId: 'room-a',
         roomMessageId: 'msg-1',
-        logicalAgentId: 'agent-b',
-        outcome: 'failed',
+        logicalAgentId: 'agent-a',
+        outcome: 'completed',
         remaining: 0,
       },
       {

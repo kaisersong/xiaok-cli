@@ -507,7 +507,7 @@ function readProcessStartToken(pid) {
                 '-NonInteractive',
                 '-Command',
                 `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CreationDate.ToUniversalTime().ToString("o")`,
-            ], { encoding: 'utf8' }).trim() || null;
+            ], { encoding: 'utf8', windowsHide: true }).trim() || null;
         }
         catch {
             return null;

@@ -97,7 +97,11 @@ export declare class InputReader {
     private onToggleTranscript?;
     private suspendHooks;
     private suspendDepth;
+    private onInterrupt?;
+    private onOtherInput?;
     constructor(renderer?: ReplRenderer | undefined);
+    setInterruptHandler(handler?: () => void, onOtherInput?: () => void): void;
+    private dispatchInput;
     setToggleTranscriptHandler(handler: (() => void | Promise<void>) | undefined): void;
     /**
      * Hands fd 0 to an external process while a read loop is active. done()'s

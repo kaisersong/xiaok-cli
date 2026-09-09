@@ -5,6 +5,7 @@ import { isAbortError } from '../../src/ai/runtime/abort-utils.js';
 export interface KSwarmTaskHandoff {
   kind: 'kswarm_task_handoff_v1';
   runId: string;
+  workspaceContext?:Record<string,unknown>;
   project: {
     id: string;
     name: string;
@@ -12,6 +13,7 @@ export interface KSwarmTaskHandoff {
     requirements?: string;
     workFolder?: string | null;
     artifactsDir?: string | null;
+    requiredProtocol?:string;
   };
   task: {
     id: string;
@@ -46,6 +48,7 @@ export interface KSwarmWorkflowNodeHandoff {
 }
 
 export interface KSwarmRuntimeBridgeOptions {
+  runWorkspaceTask?(input:{handoff:KSwarmTaskHandoff;targetParticipantId?:string;signal?:AbortSignal}):Promise<{ok:true}|{ok:false;error:string}>;
   allowedRoots?: string[];
   runDesktopTask(input: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }): Promise<{
     summary: string;
@@ -73,15 +76,31 @@ export interface KSwarmRuntimeBridgeOptions {
 
 export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
   const activeTaskControllers = new Map<string, AbortController>();
+  const activeHandoffs=new Map<string,{identity:string;controller:AbortController;promise:Promise<{ok:true}|{ok:false;error:string}>}>();
 
-  async function handleTaskHandoff(input: {
+  function handleTaskHandoff(input:Parameters<typeof executeTaskHandoff>[0]){
+    const identity=JSON.stringify([input.projectId,input.taskId,input.runId,input.handoffPath,input.targetParticipantId??null]);
+    const prior=activeHandoffs.get(input.taskId);
+    if(prior&&prior.identity!==identity)return Promise.resolve({ok:false as const,error:'task_handoff_conflict'});
+    const controller=prior?.controller??new AbortController();
+    const abort=()=>controller.abort(input.signal?.reason);
+    if(input.signal?.aborted)abort();else input.signal?.addEventListener('abort',abort,{once:true});
+    const promise=prior?.promise??executeTaskHandoff(input,controller);
+    if(!prior){
+      activeTaskControllers.set(input.taskId,controller);activeHandoffs.set(input.taskId,{identity,controller,promise});
+      void promise.finally(()=>{activeTaskControllers.delete(input.taskId);activeHandoffs.delete(input.taskId);}).catch(()=>{});
+    }
+    void promise.finally(()=>input.signal?.removeEventListener('abort',abort)).catch(()=>{});
+    return promise;
+  }
+  async function executeTaskHandoff(input: {
     handoffPath: string;
     projectId: string;
     taskId: string;
     runId: string;
     targetParticipantId?: string;
     signal?: AbortSignal;
-  }): Promise<{ ok: true } | { ok: false; error: string }> {
+  },controller:AbortController): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!isAllowedPath(input.handoffPath, options.allowedRoots)) {
       return { ok: false, error: 'handoff_path_outside_allowed_roots' };
     }
@@ -89,11 +108,14 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     const handoff = JSON.parse(raw) as KSwarmTaskHandoff;
     if (handoff.kind !== 'kswarm_task_handoff_v1') return { ok: false, error: 'invalid_handoff_kind' };
     if (handoff.runId !== input.runId) return { ok: false, error: 'run_id_mismatch' };
+    if(handoff.project.id!==input.projectId||handoff.task.id!==input.taskId)return {ok:false,error:'handoff_scope_mismatch'};
 
-    const controller = new AbortController();
-    activeTaskControllers.set(input.taskId, controller);
     const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
     try {
+      if(handoff.workspaceContext||handoff.project.requiredProtocol==='room_workspace_v1'){
+        if(handoff.workspaceContext?.protocolVersion!==1||!options.runWorkspaceTask)return {ok:false,error:'workspace_runtime_protocol_required'};
+        return await options.runWorkspaceTask({handoff,targetParticipantId:input.targetParticipantId,signal});
+      }
       const executed = await options.runDesktopTask({
         handoff,
         targetParticipantId: input.targetParticipantId,
@@ -122,8 +144,6 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
         return { ok: false, error: 'task_cancelled:user_aborted' };
       }
       throw error;
-    } finally {
-      activeTaskControllers.delete(input.taskId);
     }
   }
 
@@ -334,6 +354,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
   const maxConcurrentTasks = options.maxConcurrentTasks ?? 3;
   let activeTaskCount = 0;
   const activeTaskControllers = new Map<string, AbortController>();
+  const activeTaskRequests=new Map<string,{identity:string;promise:Promise<void>}>();
 
   async function start(): Promise<void> {
     if (socket) return;
@@ -474,7 +495,19 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     });
   }
 
-  async function handleRequestTask(event: BrokerEvent): Promise<void> {
+  function handleRequestTask(event:BrokerEvent):Promise<void>{
+    const payload=event.payload??{},taskId=asNonEmptyString(payload.taskId)||asNonEmptyString(event.taskId);
+    if(!taskId)return executeRequestTask(event);
+    const identity=JSON.stringify([payload.projectId,payload.runId,payload.handoffPath,resolveEventTargetParticipantId(event,payload)]);
+    const prior=activeTaskRequests.get(taskId);
+    if(prior){
+      if(prior.identity===identity)return prior.promise;
+      return sendTaskFailed(event,{projectId:asNonEmptyString(payload.projectId),taskId,runId:asNonEmptyString(payload.runId),failureReason:'task_handoff_conflict',errorMessage:'An unsettled task handoff already owns this task'},resolveEventTargetParticipantId(event,payload));
+    }
+    const promise=executeRequestTask(event);activeTaskRequests.set(taskId,{identity,promise});
+    void promise.finally(()=>activeTaskRequests.delete(taskId)).catch(()=>{});return promise;
+  }
+  async function executeRequestTask(event: BrokerEvent): Promise<void> {
     const payload = event.payload ?? {};
     const targetParticipantId = resolveEventTargetParticipantId(event, payload);
     const projectId = asNonEmptyString(payload.projectId);

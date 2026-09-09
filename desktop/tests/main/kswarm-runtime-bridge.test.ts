@@ -62,6 +62,26 @@ describe('kswarm runtime bridge', () => {
       }),
     }));
   });
+  it('routes v1 workspace handoffs only through the claim owner and never old submission',async()=>{
+    const handoffPath=join(rootDir,'workspace.json');
+    writeFileSync(handoffPath,JSON.stringify({kind:'kswarm_task_handoff_v1',runId:'run',project:{id:'p'},task:{id:'p__t'},workspaceContext:{protocolVersion:1,claimId:'c'}}));
+    const runDesktopTask=vi.fn(),submitResult=vi.fn(),runWorkspaceTask=vi.fn(async()=>({ok:true as const}));
+    const bridge=createKSwarmRuntimeBridge({allowedRoots:[rootDir],runDesktopTask,submitResult,runWorkspaceTask});
+    expect(await bridge.handleTaskHandoff({handoffPath,projectId:'p',taskId:'p__t',runId:'run'})).toEqual({ok:true});
+    expect(runWorkspaceTask).toHaveBeenCalledTimes(1);expect(runDesktopTask).not.toHaveBeenCalled();expect(submitResult).not.toHaveBeenCalled();
+  });
+  it('single-flights duplicate handoffs and forwards duplicate caller cancellation to the physical runner',async()=>{
+    const handoffPath=join(rootDir,'workspace.json');writeFileSync(handoffPath,JSON.stringify({kind:'kswarm_task_handoff_v1',runId:'run',project:{id:'p'},task:{id:'p__t'},workspaceContext:{protocolVersion:1,claimId:'c'}}));
+    let signal:AbortSignal|undefined,finish!:()=>void;
+    const runWorkspaceTask=vi.fn(async(input)=>{signal=input.signal;await new Promise<void>(resolve=>{finish=resolve;});return {ok:true as const};});
+    const bridge=createKSwarmRuntimeBridge({runDesktopTask:vi.fn(),submitResult:vi.fn(),runWorkspaceTask});
+    const input={handoffPath,projectId:'p',taskId:'p__t',runId:'run'};
+    const first=bridge.handleTaskHandoff(input);await vi.waitFor(()=>expect(runWorkspaceTask).toHaveBeenCalledOnce());
+    const duplicateController=new AbortController();const second=bridge.handleTaskHandoff({...input,signal:duplicateController.signal});
+    duplicateController.abort();await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+    let settled=false;void second.then(()=>{settled=true;});await Promise.resolve();expect(settled).toBe(false);
+    finish();await Promise.all([first,second]);expect(runWorkspaceTask).toHaveBeenCalledOnce();
+  });
 
   it('aborts an active desktop handoff when the bridge task is cancelled', async () => {
     const handoffPath = join(rootDir, 'request.json');
@@ -279,6 +299,9 @@ describe('kswarm runtime bridge', () => {
     });
     await nextTick();
     expect(capturedSignal?.aborted).toBe(false);
+
+    FakeWebSocket.instances[0].emitMessage({type:'new_intent',event:{kind:'request_task',fromParticipantId:'kswarm-hub',taskId:'task-1',threadId:'thread-task-1',payload:{projectId:'proj-1',taskId:'task-1',runId:'run-1',handoffPath:join(rootDir,'handoffs','run-1','request.json')}}});
+    await nextTick();expect(handled).toHaveBeenCalledTimes(1);
 
     FakeWebSocket.instances[0].emitMessage({
       type: 'new_intent',

@@ -153,6 +153,19 @@ describe('production subagent resource lifecycle', () => {
     } finally {finish(); await coordinator.dispose();}
   });
 
+  it('publishes actual stalled tool health while retaining the SubAgent execution owner',async()=>{
+    const {options,registry}=fixture();let finish!:(s:string)=>void;
+    registry.registerTool({permission:'safe',definition:{name:'stalled',description:'test',inputSchema:{}},executionPolicy:{idleTimeoutMs:50},execute:async()=>new Promise(resolve=>{finish=resolve;})});
+    options.adapter=()=>({async *stream(){yield {type:'tool_use' as const,id:'held',name:'stalled',input:{}};yield {type:'done' as const};}});
+    const caller={requestSource:'agent' as const,callerId:'main'};const coordinator=createMultiAgentCoordinator();
+    try {
+      const child=await coordinator.spawn({...caller,taskName:'health',message:'work',createSession:()=>createNamedSubAgentSession(options)});
+      await vi.waitFor(()=>expect(coordinator.listAgents(caller)).toContainEqual(expect.objectContaining({id:child.id,executionHealth:'cleanup_pending',executionActive:true,resourcesReleased:false})));
+      finish('exited');
+      await vi.waitFor(()=>expect(coordinator.listAgents(caller).find(a=>a.id===child.id)?.executionActive).toBe(false));
+    }finally{finish?.('exit');await coordinator.dispose();}
+  });
+
   it('rejects model plus capability before Agent dispatch and cleans acquired resources', async () => {
     const { options, manager } = fixture();
     await expect(createNamedSubAgentSession({ ...options, agentDef: { ...options.agentDef, model: 'one', modelCapability: 'two' } })).rejects.toThrow('mutually exclusive');

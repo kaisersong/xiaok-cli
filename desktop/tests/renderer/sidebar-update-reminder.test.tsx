@@ -209,6 +209,17 @@ describe('Sidebar update reminder', () => {
     expect(mockApi.checkForUpdates).not.toHaveBeenCalled();
   });
 
+  it('shows handoff diagnostics even when the update is still downloaded', async () => {
+    renderSidebar({ checking: false, available: true, downloading: false, downloaded: true,
+      installing: false, progress: 100, version: '1.5.3', currentVersion: '1.5.2',
+      error: 'update_install_handoff_unconfirmed' });
+    fireEvent.click(await screen.findByRole('button', { name: '安装交接未确认' }));
+    expect(screen.queryByRole('button', { name: /立即重启安装/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /前往 GitHub 下载/ })).toBeInTheDocument();
+    expect(screen.queryByText('update_install_handoff_unconfirmed')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/尚未确认系统接管安装，后台仍可能继续/)).toHaveLength(1);
+  });
+
   it('shows a quiet manual download hint when update checks do not complete', async () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
 

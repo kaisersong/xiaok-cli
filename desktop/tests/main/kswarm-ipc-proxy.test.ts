@@ -15,6 +15,16 @@ function createIpcMainMock() {
 }
 
 describe('kswarm ipc proxy', () => {
+  it.each(['post','postJson'])('routes %s workspace dispatch through one trusted semantic owner without legacy fallback',async channel=>{
+    const {ipcMain,handlers}=createIpcMainMock(),request=vi.fn();
+    const dispatchProject=vi.fn(async()=>({ok:false,code:'workspace_mapping_required'}));
+    registerKSwarmProxy(ipcMain as never,{} as never,{request},{dispatchProject,authorize:event=>(event as any).trusted===true});
+    const call=handlers.get(`desktop:kswarm:proxy:${channel}`)!;
+    expect(await call({trusted:false},'/projects/p/dispatch',{})).toMatchObject({ok:false});
+    expect(dispatchProject).not.toHaveBeenCalled();
+    expect(await call({trusted:true},'/projects/p/dispatch',{})).toMatchObject({ok:false,code:'workspace_mapping_required'});
+    expect(dispatchProject).toHaveBeenCalledTimes(1);expect(request).not.toHaveBeenCalled();
+  });
   it('routes write requests through the managed kswarm service gateway', async () => {
     const { ipcMain, handlers } = createIpcMainMock();
     const request = vi.fn(async () => new Response(JSON.stringify({ ok: true, project: { id: 'proj-1' } }), { status: 200 }));

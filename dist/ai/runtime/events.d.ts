@@ -3,10 +3,19 @@ import type { StreamChunk, UsageStats } from '../../types.js';
 export interface RuntimeActivity {
     phase: 'starting' | 'model' | 'thinking' | 'tool';
     toolName?: string;
+    executionHealth?: import('../../runtime/execution-health.js').ExecutionHealthState;
 }
 export type AgentRuntimeEvent = {
+    type: 'execution_progress';
+    runId: string;
+} | {
     type: 'run_started';
     runId: string;
+} | {
+    type: 'execution_health';
+    invocationId?: string;
+    runId: string;
+    state: import('../../runtime/execution-health.js').ExecutionHealthState;
 } | {
     type: 'model_request_started';
     runId: string;

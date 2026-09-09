@@ -48,7 +48,10 @@ describe('MCP R1 CUA actual outer continuation cancellation boundary', () => {
         expect.soft(await outcome).toEqual({ error: reason });
         expect.soft(onRecoverableError).not.toHaveBeenCalled();
         expect(callToolResult).toHaveBeenCalledTimes(target + 1);
-        for (const call of callToolResult.mock.calls) expect(call[2]?.signal).toBe(controller.signal);
+        for (const call of callToolResult.mock.calls) {
+          expect(call[2]?.signal?.aborted).toBe(true);
+          expect(call[2]?.signal?.reason).toBe(reason);
+        }
 
         // Probe the real tool's private Set through its public next-turn result;
         // do not read or substitute a test-owned recovery-state implementation.

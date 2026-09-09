@@ -1,6 +1,7 @@
 import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { StringDecoder } from 'node:string_decoder';
+import { pauseInputForHandoff } from './input-mode.js';
 import { boldCyan, dim } from './render.js';
 import { getSkillCommandNames, type SkillMeta } from '../ai/skills/loader.js';
 import { appendFileSync } from 'fs';
@@ -312,7 +313,26 @@ export class InputReader {
   private onToggleTranscript?: () => void | Promise<void>;
   private suspendHooks: { detach(): void; attach(): void } | null = null;
   private suspendDepth = 0;
+  private onInterrupt?: () => void;
+  private onOtherInput?: () => void;
   constructor(private readonly renderer?: ReplRenderer) {}
+
+  setInterruptHandler(handler?: () => void, onOtherInput?: () => void): void {
+    this.onInterrupt = handler;
+    this.onOtherInput = onOtherInput;
+  }
+
+  private dispatchInput(data: Buffer, consume: (data: Buffer) => void): void {
+    const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    if (!this.onInterrupt) { consume(bytes); return; }
+    let start = 0;
+    for (let i = 0; i <= bytes.length; i++) {
+      if (i !== bytes.length && bytes[i] !== 3) continue;
+      if (i > start) { this.onOtherInput?.(); consume(bytes.subarray(start, i)); }
+      if (i < bytes.length) this.onInterrupt?.();
+      start = i + 1;
+    }
+  }
 
   setToggleTranscriptHandler(handler: (() => void | Promise<void>) | undefined): void {
     this.onToggleTranscript = handler;
@@ -555,12 +575,13 @@ export class InputReader {
     });
 
     const decoder = new StringDecoder('utf8');
-    const onData = (data: Buffer) => {
+    const consumeData = (data: Buffer) => {
       const key = decoder.write(data);
       if (!key) return;
       this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
       inputEngine.handleChunk(key);
     };
+    const onData = (data: Buffer) => this.dispatchInput(data, consumeData);
 
     const attach = () => {
       if (!active || paused || attached) return;
@@ -599,8 +620,7 @@ export class InputReader {
           reader.busyCapture = null;
         }
         try {
-          stdin.setRawMode(false);
-          stdin.pause();
+          pauseInputForHandoff();
         } catch {}
         options.onDeactivate?.('stopped');
       },
@@ -1038,8 +1058,7 @@ export class InputReader {
         closeMenu();
         resolved = true;
         stdin.removeListener('data', onData);
-        stdin.setRawMode(false);
-        stdin.pause();
+        pauseInputForHandoff();
         this.readActive = false;
         this.suspendHooks = null;
         this.suspendDepth = 0;
@@ -1053,7 +1072,7 @@ export class InputReader {
       };
 
       const inputDecoder = new StringDecoder('utf8');
-      const onData = (data: Buffer) => {
+      const consumeData = (data: Buffer) => {
         const key = inputDecoder.write(data);
         if (!key) return;
         log(`RAW KEY pressed: ${JSON.stringify(key)} bytes=${data.length} hex=${data.toString('hex')} input=${JSON.stringify(input)} cursor=${cursor}`);
@@ -1456,6 +1475,7 @@ export class InputReader {
         }
       };
 
+      const onData = (data: Buffer) => this.dispatchInput(data, consumeData);
       stdin.on('data', onData);
       this.suspendHooks = {
         detach: () => {

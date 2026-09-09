@@ -1,3 +1,5 @@
+import {ToolRegistry} from '../../../src/ai/tools/index.js';
+import {AgentSessionState} from '../../../src/ai/runtime/session.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +15,13 @@ describe('InProcessTaskRuntimeHost', () => {
   let materialRegistry: MaterialRegistry;
   let snapshotStore: FileTaskSnapshotStore;
   let material: MaterialRecord;
+
+  it.each([[0.5,0.25],[1,0.5],[60_000,30_000],[239_999,119_999.5],[240_000,120_000],[240_001,120_001],[600_000,480_000],[undefined,undefined]])('passes explicit watchdog %s through the real host with runner budget %s',async(watchdogMs,expected)=>{
+    let captured:number|undefined;let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});
+    const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,runner:async input=>{captured=input.deadlineMs;entered();}});
+    await host.createTask({prompt:'Short bounded answer',materials:[],...(watchdogMs===undefined?{}:{watchdogMs})});
+    await ready;expect(captured).toBe(expected);await host.drain();
+  });
 
   beforeEach(async () => {
     rootDir = join(tmpdir(), `xiaok-task-runtime-host-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -35,6 +44,44 @@ describe('InProcessTaskRuntimeHost', () => {
 
   afterEach(() => {
     rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('delegates liveness to a real tool budget without imposing the shorter host idle timeout', async () => {
+    let finish!:(value:string)=>void;
+    let toolSignal!:AbortSignal;
+    let rootSignal!:AbortSignal;
+    const registry=new ToolRegistry({autoMode:true,toolIdleTimeoutMs:400},[{permission:'safe',definition:{name:'long',description:'test',inputSchema:{}},execute:async(_input,ctx)=>{toolSignal=ctx!.signal!;return new Promise(resolve=>{finish=resolve;});}}]);
+    const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,taskIdleTimeoutMs:150,createTaskId:()=> 'delegated',runner:async input=>{
+      rootSignal=input.signal;
+      await registry.executeTool('long',{}, {taskId:input.taskId,signal:input.signal,session:new AgentSessionState().exportSnapshot(),messages:[],systemPrompt:'',toolDefinitions:[],
+        onExecutionHealth:state=>{void input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:'turn',invocationId:'tool',state});}});
+    }});
+    try {
+      await host.createTask({prompt:'long tool',materials:[]});
+      await vi.waitFor(()=>expect(toolSignal).toBeDefined());
+      await new Promise(resolve=>setTimeout(resolve,200));
+      expect(rootSignal.aborted).toBe(false);expect(toolSignal.aborted).toBe(false);
+      await vi.waitFor(()=>expect(toolSignal.aborted).toBe(true));
+      expect(host.isExecutingForTest('delegated')).toBe(true);
+    }finally{finish?.('settled');await host.drain();registry.dispose();}
+  });
+
+  it('detects a stalled runner, preserves executing ownership until settlement, and excludes approval waits', async () => {
+    let input!: Parameters<TaskRunner>[0];
+    let finish!: () => void;
+    const host = new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,taskIdleTimeoutMs:500,
+      createTaskId:()=> 'health_task',runner:async value => {input=value; await new Promise<void>(resolve=>{finish=resolve;}); value.signal.throwIfAborted();}});
+    await host.createTask({prompt:'health test',materials:[]});
+    await vi.waitFor(()=>expect(input).toBeDefined());
+    await input.emitRuntimeEvent({type:'approval_required',sessionId:input.sessionId,turnId:'one',approvalId:'a'});
+    await new Promise(resolve=>setTimeout(resolve,650));
+    expect(input.signal.aborted).toBe(false);
+    await input.emitRuntimeEvent({type:'approval_resolved',sessionId:input.sessionId,turnId:'one',approvalId:'a'});
+    await vi.waitFor(()=>expect(input.signal.aborted).toBe(true));
+    expect(host.isExecutingForTest('health_task')).toBe(true);
+    await vi.waitFor(async()=>expect((await host.recoverTask('health_task')).snapshot.events).toContainEqual(expect.objectContaining({type:'execution_health',state:'cleanup_pending'})));
+    finish();
+    await vi.waitFor(()=>expect(host.isExecutingForTest('health_task')).toBe(false));
   });
 
   it('creates understanding, starts running immediately, and replays events for late subscribers', async () => {
@@ -2150,7 +2197,9 @@ describe('InProcessTaskRuntimeHost', () => {
       expect(runner).toHaveBeenCalledOnce();
       const input = runner.mock.calls[0]![0];
       expect.soft(input.deadlineMs).toBeUndefined();
-      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      await input.emitRuntimeEvent({type:'execution_progress',sessionId:input.sessionId,turnId:'long'});
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
       expect.soft(input.signal.aborted).toBe(false);
       expect.soft((await host.recoverTask('task_1')).snapshot.status).toBe('running');
     } finally {
@@ -2174,7 +2223,10 @@ describe('InProcessTaskRuntimeHost', () => {
         marker: { groupId: 'g', rootEpoch: 1, rootTurnId: 'r', preparationId: 'p', bootId: 'b' } });
       await host.startTask(task.taskId);
       for (let i = 0; i < 100 && !runner.mock.calls.length; i++) await new Promise<void>(resolve => setImmediate(resolve));
-      await vi.advanceTimersByTimeAsync(31 * 60_000);
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      const activeInput=runner.mock.calls[0]![0];
+      await activeInput.emitRuntimeEvent({type:'execution_progress',sessionId:activeInput.sessionId,turnId:'long'});
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
       const endedAt = Date.now(); finish(); await host.drain();
       expect(reports.length).toBeGreaterThan(0);
       expect(reports[0]!.delivery.startedAt).toBeGreaterThanOrEqual(endedAt);

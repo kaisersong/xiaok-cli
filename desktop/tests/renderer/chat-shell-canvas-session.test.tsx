@@ -31,6 +31,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onToggleCanvas: () => void;
     messages: Array<{
       role: string;
+      content?: string;
       result?: {
         artifacts?: Array<{
           artifactId: string;
@@ -48,6 +49,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     ) => void;
   }) => (
     <div>
+      <div data-testid="health-progress">{messages.filter(m=>m.role === 'progress').map(m=>m.content).join(' ' )}</div>
       <div data-testid="canvas-open">{canvasOpen ? 'open' : 'closed'}</div>
       <button type="button" onClick={() => onToggleCanvas()}>toggle-canvas</button>
       <button
@@ -152,6 +154,17 @@ afterEach(() => {
 });
 
 describe('ChatShell canvas is scoped per session', () => {
+  it('renders main-owned cleanup state through the real task subscription', async () => {
+    mockGetThread.mockImplementation(async (id:string)=>({...thread(id),currentTaskId:'health',taskIds:['health']}));
+    mockRecoverTask.mockResolvedValue({snapshot:{taskId:'health',status:'running',events:[],prompt:'work',materials:[]}});
+    let deliver!:(event:unknown)=>void;
+    mockSubscribeTask.mockImplementation((...args:unknown[])=>{deliver=args[1] as typeof deliver;return ()=>{};});
+    render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(()=>expect(deliver).toBeDefined());
+    await act(async()=>deliver({type:'execution_health',state:'cleanup_pending'}));
+    expect(screen.getByTestId('health-progress')).toHaveTextContent('等待实际执行退出');
+  });
+
   it('the real parent reopens a retained Canvas after the surface close button through its existing request id even when canvasOpen is already true', async () => {
     mockGetThread.mockImplementation(async (id: string) => thread(id));
     await act(async () => { render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider>

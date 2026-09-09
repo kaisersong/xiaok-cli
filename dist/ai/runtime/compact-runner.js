@@ -10,7 +10,7 @@ export class CompactRunner {
     constructor(adapter) {
         this.adapter = adapter;
     }
-    async run(messages, streamOptions) {
+    async run(messages, streamOptions, onProgress) {
         const summaryRequest = {
             role: 'user',
             content: [{
@@ -36,6 +36,7 @@ export class CompactRunner {
             options: streamOptions,
             invocationId: `inv_${randomUUID()}`,
         })) {
+            onProgress?.();
             if (chunk.type === 'text')
                 chunks.push(chunk.delta);
         }

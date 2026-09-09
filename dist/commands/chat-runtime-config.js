@@ -9,13 +9,12 @@ export const DEFAULT_CLEANUP_TIMEOUT_MS = 2_000;
 export const DEFAULT_TURN_TIMEOUT_MS = 4 * 60_000;
 export function resolveAgentMaxIterations(env = process.env) {
     const raw = env.XIAOK_AGENT_MAX_ITERATIONS;
-    if (!raw)
+    if (raw === undefined)
         return DEFAULT_AGENT_MAX_ITERATIONS;
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-        return DEFAULT_AGENT_MAX_ITERATIONS;
-    }
-    return Math.floor(parsed);
+    if (!raw.trim() || !Number.isSafeInteger(parsed) || parsed < 1)
+        throw new Error('Invalid XIAOK_AGENT_MAX_ITERATIONS: expected positive integer');
+    return parsed;
 }
 /**
  * Idle timeout for a single non-interactive (`--print` / `--auto`) turn.
@@ -40,6 +39,7 @@ export function createTurnActivityWatchdog(timeoutMs) {
     let timer = null;
     let timedOut = false;
     let disposed = false;
+    let delegated = false;
     const clearTimer = () => {
         if (timer) {
             clearTimeout(timer);
@@ -60,6 +60,18 @@ export function createTurnActivityWatchdog(timeoutMs) {
     return {
         signal: controller.signal,
         noteActivity: arm,
+        observeRuntimeEvent(event) {
+            if (event.type === 'model_request_started' || event.type === 'tool_started') {
+                delegated = true;
+                clearTimer();
+            }
+            else if (['run_started', 'tool_finished', 'compact_triggered', 'compact_failed'].includes(event.type)) {
+                delegated = false;
+                arm();
+            }
+            else if (event.type === 'execution_progress' && !delegated)
+                arm();
+        },
         suspend: clearTimer,
         didTimeout: () => timedOut,
         dispose() {

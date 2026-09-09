@@ -89,13 +89,13 @@ export class MultiAgentProgressView {
       if (run.status !== 'running' || this.agents.has(run.agentId)) continue;
       agents.push({ id: run.agentId, taskName: run.taskName, canonicalName: '', parentId: 'main', depth: 1,
         status: 'running', unreadMessages: 0, turn: run.turn, startedAt: run.startedAt,
-        lastActivityAt: run.timestamp, phase: run.phase, currentTool: run.currentTool,
+        lastActivityAt: run.timestamp, phase: run.phase, currentTool: run.currentTool, executionHealth:run.executionHealth,
         executionActive: true, resourcesReleased: false, runtimeResident: true });
     }
     if (agents.length === 0) return '';
     agents.sort((left, right) => Number(right.executionActive) - Number(left.executionActive));
     const pieces = agents.map((agent) => {
-      const label = agent.status === 'running'
+      const label = agent.executionActive && agent.executionHealth === 'cleanup_pending' ? labels.stalled : agent.status === 'running'
         ? (agent.currentTool ? inline(agent.currentTool) : labels.phases[agent.phase ?? 'starting'])
         : agent.status === 'closed' && !agent.resourcesReleased ? labels.cleaning : labels.statuses[agent.status];
       const elapsed = agent.startedAt === undefined ? '' : ` ${age((agent.endedAt ?? now) - agent.startedAt)}`;

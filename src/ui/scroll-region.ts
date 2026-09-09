@@ -555,7 +555,7 @@ export class ScrollRegionManager {
     this.active = false;
 
     // Reset scroll region to full terminal
-    this.stream.write(RESET_SCROLL_REGION);
+    this.stream.write(`\x1b[0m\x1b[?25h${RESET_SCROLL_REGION}`);
 
     // Clear footer area: status row plus currently expanded input rows.
     this.stream.write(CURSOR_DOWN_999);

@@ -1,6 +1,7 @@
 import { isAbortError } from '../runtime/abort-utils.js';
 import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
 const MAX_RETRIES = 3;
+const CLAUDE_REQUEST_MAX_OUTPUT_TOKENS = 8192;
 const STREAM_TIMEOUT_MS = 5 * 60_000; // 5 min per stream call
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 529]);
 const KIMI_CODING_COMPAT_USER_AGENT = 'claude-cli/1.0.0 (external, cli)';
@@ -68,6 +69,7 @@ export class ClaudeAdapter {
     getCapabilities() {
         return this.capabilityOverrides ?? {};
     }
+    getOutputTokenReserve() { return CLAUDE_REQUEST_MAX_OUTPUT_TOKENS; }
     cloneWithModel(model) {
         return new ClaudeAdapter(this.apiKey, model, this.baseUrl, resolveClonedCapabilityOverrides(model, this.capabilityOverrides, this.catalogIdentity), this.catalogIdentity);
     }
@@ -179,7 +181,7 @@ export class ClaudeAdapter {
         const client = await this.getClient();
         const stream = client.messages.stream({
             model: this.model,
-            max_tokens: 8192,
+            max_tokens: CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
             system: (options?.promptCache?.systemPrompt ?? systemPrompt),
             messages: anthropicMessages,
             tools: anthropicTools.length > 0 ? anthropicTools : undefined,

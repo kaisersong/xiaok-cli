@@ -9,6 +9,7 @@
  */
 
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { assertRoomWorkspaceSidecarProtocol, assertRoomWorkspaceStartupProtocol } from './room-workspace-protocol.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join, posix, relative, resolve } from 'node:path';
@@ -683,7 +684,21 @@ export function findPidOnPort(port: number): Promise<number | null> {
   });
 }
 
+/** Authentication failure never proves that an external listener is ours. */
+export async function recoverOwnedBrokerAuthentication(options: {
+  ownedPid: number | null;
+  findOwner: () => Promise<number | null>;
+  stopOwned: () => Promise<void>;
+}): Promise<'external' | 'stopped'> {
+  if (!Number.isSafeInteger(options.ownedPid) || !options.ownedPid || options.ownedPid <= 0) return 'external';
+  const owner = await options.findOwner().catch(() => null);
+  if (owner !== options.ownedPid) return 'external';
+  await options.stopOwned();
+  return 'stopped';
+}
+
 export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): KSwarmService {
+  assertRoomWorkspaceStartupProtocol();
   const spawnProcess = options.spawnProcess ?? spawn;
   const findPortOwner = options.findPortOwner ?? findPidOnPort;
   const killStalePortOwner = options.killStalePortOwner ?? killStaleServiceOnPort;
@@ -1008,10 +1023,8 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   async function ensureBroker(): Promise<boolean> {
     // Check if broker is already running
     if (await brokerHealthCheck()) {
-      // A healthy broker may still be running with a *stale* auth token from an
-      // earlier launch that we merely reused. Verify the desktop token is accepted;
-      // if not, kill the stale broker and respawn it under the persisted token.
-      // Otherwise every room call would return `room_authentication_required`.
+      // A stale token can belong to an external installation. Authentication
+      // failure is not permission to kill the listener or take over its data.
       if (stopping) return false;
       let brokerLaunch: ServiceLaunchSpec | null;
       try {
@@ -1027,17 +1040,17 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         return true;
       }
       if (await brokerDesktopTokenAccepted()) return true;
-      logKSwarmServiceLine('broker', 'lifecycle', 'stale broker auth token detected; respawning broker');
-      const killed = await killStaleServiceOnPort(BROKER_PORT);
+      const recovery = await recoverOwnedBrokerAuthentication({
+        ownedPid: brokerChild?.pid ?? null,
+        findOwner: () => findPortOwner(BROKER_PORT),
+        stopOwned: stopOwnedBroker,
+      });
       if (stopping) return false;
-      if (!killed && await brokerHealthCheck()) {
-        // Could not reclaim the port and the broker is still healthy — reuse to
-        // avoid a live-respawn loop.
-        console.warn('[kswarm-service] Could not reclaim broker port; reusing existing broker');
+      if (recovery === 'external') {
+        logKSwarmServiceLine('broker', 'lifecycle', 'unowned broker rejects desktop authentication; preserving listener, workspace unavailable');
         return true;
       }
-      // Fall through to spawn below so the broker is (re)started with the
-      // current, persisted token.
+      logKSwarmServiceLine('broker', 'lifecycle', 'owned broker stopped after stale authentication; restarting with persisted token');
     } else if (stopping) {
       return false;
     }
@@ -1064,6 +1077,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       `spawn command=${nodeRuntime.command} entryPath=${brokerLaunch.entryPath} cwd=${brokerLaunch.cwd}`,
     );
     mkdirSync(brokerLaunch.cwd, { recursive: true });
+    assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
     const spawnedBroker = spawnProcess(nodeRuntime.command, brokerLaunch.nodeArgs, buildBackgroundNodeSpawnOptions({
       cwd: brokerLaunch.cwd,
       env: nodeRuntime.env,
@@ -1246,6 +1260,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       'lifecycle',
       `spawn command=${nodeRuntime.command} entryPath=${serverPath}`,
     );
+    assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
     const serverChild = spawnProcess(nodeRuntime.command, [serverPath], buildBackgroundNodeSpawnOptions({
       env: nodeRuntime.env,
     }));

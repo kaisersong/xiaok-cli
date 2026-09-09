@@ -1,3 +1,5 @@
+import { resolveExecutionIdleMs } from '../../runtime/execution-health.js';
+import { runMonitoredTool } from '../../runtime/tool-execution-health.js';
 import { PermissionManager } from '../permissions/manager.js';
 import { formatErrorText } from '../../utils/ui.js';
 import { isAbortError } from '../runtime/abort-utils.js';
@@ -47,10 +49,12 @@ export class ToolRegistry {
     options;
     allowedToolsFilter = null;
     disposed = false;
+    toolIdleTimeoutMs;
     setAllowedTools(names) {
         this.allowedToolsFilter = names ? new Set(names.map((name) => getCanonicalToolId(name))) : null;
     }
     constructor(options, tools) {
+        this.toolIdleTimeoutMs = resolveExecutionIdleMs(options.toolIdleTimeoutMs === undefined ? process.env.XIAOK_TOOL_IDLE_TIMEOUT_MS : String(options.toolIdleTimeoutMs));
         const mode = options.permissionManager
             ? options.permissionManager.getMode()
             : options.autoMode
@@ -305,8 +309,14 @@ export class ToolRegistry {
                 const assertPermissionApproval = () => assertSynchronousGrantResult(grant.assertCurrent());
                 assertPermissionApproval();
                 invocationContext = { ...context, assertPermissionApproval };
+                if (Object.isFrozen(context))
+                    Object.freeze(invocationContext);
             }
-            const rawResult = await tool.execute(input, invocationContext);
+            const rawResult = await runMonitoredTool({ name, context: invocationContext,
+                idleMs: tool.executionPolicy?.idleTimeoutMs ?? this.toolIdleTimeoutMs,
+                waitsForUser: tool.executionPolicy?.waitsForUser,
+                run: ctx => tool.execute(input, ctx),
+            });
             context?.signal?.throwIfAborted();
             // Append hook-provided additional context
             let result = rawResult;
@@ -331,7 +341,7 @@ export class ToolRegistry {
         }
         catch (e) {
             context?.signal?.throwIfAborted();
-            if (isAbortError(e))
+            if (isAbortError(e) || (e instanceof Error && e.message.startsWith('TOOL_IDLE_TIMEOUT')))
                 throw e;
             const errorMessage = formatErrorText(String(e));
             await this.options.hooksRunner?.runHooks('PostToolUseFailure', {

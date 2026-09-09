@@ -9,6 +9,15 @@ import { waitFor } from '../support/wait-for.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
 
+const watchdogEvents = vi.hoisted(() => [] as string[]);
+vi.mock('../../src/commands/chat-runtime-config.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/commands/chat-runtime-config.js')>();
+  return {...actual,createTurnActivityWatchdog:(timeout:number|null)=>{
+    const watchdog=actual.createTurnActivityWatchdog(timeout);
+    return {...watchdog,observeRuntimeEvent:(event:{type:string})=>{watchdogEvents.push(event.type);watchdog.observeRuntimeEvent(event);}};
+  }};
+});
+
 interface FakeAdapterCall {
   model: string;
   systemPrompt: string;
@@ -1139,6 +1148,7 @@ describe('chat interactive runtime', () => {
 
   beforeEach(() => {
     resetAdapterState();
+    watchdogEvents.length=0;
     mockSelectModel.mockReset();
     originalConfigDir = process.env.XIAOK_CONFIG_DIR;
     originalHome = process.env.HOME;
@@ -1893,6 +1903,9 @@ describe('chat interactive runtime', () => {
       harness.send('/exit');
       harness.send('\r');
       await pending;
+      expect(watchdogEvents).toEqual(expect.arrayContaining(['model_request_started','tool_started','tool_finished']));
+      const finishIndex=watchdogEvents.indexOf('tool_finished');
+      expect(watchdogEvents.slice(finishIndex+1)).toContain('model_request_started');
     } finally {
       delete process.env.XIAOK_TEST_EXTERNAL_FILE_A;
       for (const listener of process.listeners('SIGINT')) {
@@ -2505,6 +2518,11 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
 
       harness.send('\x03');
+      expect(harness.output.normalized).toContain('2 秒内再按 Ctrl+C 退出');
+      expect(harness.output.normalized).not.toContain('已退出。');
+      // Clear the retained draft before Ctrl+D; double Ctrl+C process exit is covered by tmux E2E.
+      harness.send('\x15');
+      harness.send('\x04');
       await pending;
     } finally {
       for (const listener of process.listeners('SIGINT')) {
@@ -2592,6 +2610,11 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 3_000 });
 
       harness.send('\x03');
+      expect(harness.output.normalized).toContain('2 秒内再按 Ctrl+C 退出');
+      expect(harness.output.normalized).not.toContain('已退出。');
+      // Clear the retained draft before Ctrl+D; double Ctrl+C process exit is covered by tmux E2E.
+      harness.send('\x15');
+      harness.send('\x04');
       await pending;
     } finally {
       for (const listener of process.listeners('SIGINT')) {
@@ -5543,7 +5566,7 @@ describe('chat interactive runtime', () => {
     }
   }, 20_000);
 
-  it('exits cleanly when ctrl+c is pressed after completed intent with feedback disabled', async () => {
+  it('confirms ctrl+c before exiting after completed intent with feedback disabled', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-feedback-ctrlc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const sessionId = 'sess_feedback_prompt_ctrlc';
     const { configDir, projectDir } = writeCompletedFeedbackResumeSessionFixture(rootDir, sessionId);
@@ -5576,6 +5599,11 @@ describe('chat interactive runtime', () => {
 
       await waitForInputTurnReady(harness);
       harness.send('\x03');
+      expect(harness.output.normalized).toContain('2 秒内再按 Ctrl+C 退出');
+      expect(harness.output.normalized).not.toContain('已退出。');
+      // Clear the retained draft before Ctrl+D; double Ctrl+C process exit is covered by tmux E2E.
+      harness.send('\x15');
+      harness.send('\x04');
       await pending;
 
       expect(harness.output.normalized).toMatch(/已退出。|再见！/u);

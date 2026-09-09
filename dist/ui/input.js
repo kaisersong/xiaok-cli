@@ -1,6 +1,7 @@
 import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { StringDecoder } from 'node:string_decoder';
+import { pauseInputForHandoff } from './input-mode.js';
 import { boldCyan, dim } from './render.js';
 import { getSkillCommandNames } from '../ai/skills/loader.js';
 import { appendFileSync } from 'fs';
@@ -224,8 +225,33 @@ export class InputReader {
     onToggleTranscript;
     suspendHooks = null;
     suspendDepth = 0;
+    onInterrupt;
+    onOtherInput;
     constructor(renderer) {
         this.renderer = renderer;
+    }
+    setInterruptHandler(handler, onOtherInput) {
+        this.onInterrupt = handler;
+        this.onOtherInput = onOtherInput;
+    }
+    dispatchInput(data, consume) {
+        const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        if (!this.onInterrupt) {
+            consume(bytes);
+            return;
+        }
+        let start = 0;
+        for (let i = 0; i <= bytes.length; i++) {
+            if (i !== bytes.length && bytes[i] !== 3)
+                continue;
+            if (i > start) {
+                this.onOtherInput?.();
+                consume(bytes.subarray(start, i));
+            }
+            if (i < bytes.length)
+                this.onInterrupt?.();
+            start = i + 1;
+        }
     }
     setToggleTranscriptHandler(handler) {
         this.onToggleTranscript = handler;
@@ -452,13 +478,14 @@ export class InputReader {
             },
         });
         const decoder = new StringDecoder('utf8');
-        const onData = (data) => {
+        const consumeData = (data) => {
             const key = decoder.write(data);
             if (!key)
                 return;
             this.transcriptLogger?.record({ type: 'input_key', key, timestamp: Date.now() });
             inputEngine.handleChunk(key);
         };
+        const onData = (data) => this.dispatchInput(data, consumeData);
         const attach = () => {
             if (!active || paused || attached)
                 return;
@@ -499,8 +526,7 @@ export class InputReader {
                     reader.busyCapture = null;
                 }
                 try {
-                    stdin.setRawMode(false);
-                    stdin.pause();
+                    pauseInputForHandoff();
                 }
                 catch { }
                 options.onDeactivate?.('stopped');
@@ -900,8 +926,7 @@ export class InputReader {
                 closeMenu();
                 resolved = true;
                 stdin.removeListener('data', onData);
-                stdin.setRawMode(false);
-                stdin.pause();
+                pauseInputForHandoff();
                 this.readActive = false;
                 this.suspendHooks = null;
                 this.suspendDepth = 0;
@@ -913,7 +938,7 @@ export class InputReader {
                 resolve(result);
             };
             const inputDecoder = new StringDecoder('utf8');
-            const onData = (data) => {
+            const consumeData = (data) => {
                 const key = inputDecoder.write(data);
                 if (!key)
                     return;
@@ -1298,6 +1323,7 @@ export class InputReader {
                     }
                 }
             };
+            const onData = (data) => this.dispatchInput(data, consumeData);
             stdin.on('data', onData);
             this.suspendHooks = {
                 detach: () => {

@@ -13,6 +13,7 @@ export declare class ClaudeAdapter implements ModelAdapter {
     constructor(apiKey: string, model?: string, baseUrl?: string, capabilityOverrides?: Partial<ModelCapabilities>, catalogIdentity?: AdapterCatalogIdentity);
     getModelName(): string;
     getCapabilities(): Partial<ModelCapabilities>;
+    getOutputTokenReserve(): number;
     cloneWithModel(model: string): ClaudeAdapter;
     private getClient;
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;

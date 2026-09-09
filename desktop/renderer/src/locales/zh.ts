@@ -1,7 +1,10 @@
 import type { LocaleStrings } from "./index";
+import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  roomWorkspace: roomWorkspaceZh,
+  executionHealth: {running:'执行中',waiting:'等待确认后继续',recovering:'连接恢复中',cleanup_pending:'已请求停止，等待实际执行退出并清理资源'},
   localCodex: "本地 Codex",
   multiAgent: {
     approvals: { title: '工具审批', pending: count => `${count} 项待审批`, approve: '仅批准本次', deny: '拒绝本次', query: '查询审批操作',
@@ -95,6 +98,13 @@ export const zh: LocaleStrings = {
   collaborationRoomSending: "发送中...",
   collaborationRoomWaitingForReplies: (count) => `正在等待 ${count} 个成员回复…`,
   collaborationRoomRepliesPartiallyFailed: (count) => `${count} 个成员未能完成回复，可稍后重试`,
+  collaborationRoomExecutionWorker: '工作区执行',
+  collaborationRoomExecutionDiscussion: '仅讨论',
+  collaborationRoomExecutionUnavailable: '不支持讨论协议',
+  collaborationRoomExecutionUnknown: '能力未确认',
+  collaborationRoomExecutionObservers: '不可用或能力未确认的成员可作为观察者加入，但不会回复。',
+  collaborationRoomExecutionReason: (reason) => ({ not_installed: '未安装所需执行器', probe_failed: '能力检查未通过，请检查执行器后刷新', unsupported_protocol: '当前执行器不支持讨论协议', fresh_session_unverified: '无法确认使用全新会话', tools_not_disabled: '无法确认工具、MCP 和 hooks 已关闭' }[reason] ?? '执行能力未确认，请刷新后重试'),
+  collaborationRoomUnavailableMembers: (names) => `以下成员当前无法回复：${names}。可在成员面板查看原因。`,
   collaborationRoomRefresh: "刷新",
   collaborationRoomArchive: "归档",
   collaborationRoomTeamDiscussion: "全员讨论一次",
@@ -2589,6 +2599,9 @@ export const zh: LocaleStrings = {
   sidebarUpdateClosePopover: "关闭弹窗",
   sidebarUpdateClose: "关闭",
   sidebarUpdateAutoCheckFailed: "自动更新检查暂时没有完成。需要更新时，可前往 GitHub 下载最新版，下载后将应用拖入「应用程序」覆盖安装即可。",
+  sidebarUpdateHandoffUnconfirmed: "安装交接未确认",
+  sidebarUpdateHandoffUnconfirmedHint: "尚未确认系统接管安装，后台仍可能继续。请勿重复安装；如需手动更新，请先正常退出应用，再从 GitHub 下载并替换安装。",
+  sidebarUpdateInstallNotReady: "更新尚未准备好，请先检查更新并完成下载。",
   sidebarUpdateManualDownload: "请前往 GitHub 下载最新版本，下载后将应用拖入「应用程序」覆盖安装即可。",
   sidebarUpdateGoToGithub: "前往 GitHub 下载",
   sidebarUpdateDownloadHint: "发现新版本，将自动下载并提示安装。",

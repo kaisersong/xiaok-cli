@@ -33,7 +33,7 @@ function getClipboardCommands() {
 export function hasImageInClipboard() {
     const { commands } = getClipboardCommands();
     try {
-        execSync(commands.checkImage, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        execSync(commands.checkImage, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         return true;
     }
     catch {
@@ -48,9 +48,9 @@ export function getImageFromClipboard() {
     const { commands, screenshotPath } = getClipboardCommands();
     try {
         // Check if clipboard has image
-        execSync(commands.checkImage, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        execSync(commands.checkImage, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         // Save the image to temp file
-        execSync(commands.saveImage, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        execSync(commands.saveImage, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
         // Read the image file
         const imageBuffer = readFileSync(screenshotPath);
         if (imageBuffer.length === 0) {

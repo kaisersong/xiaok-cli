@@ -35,7 +35,7 @@ const UI_COPY = {
   'zh-CN': {
     approvalTitle: 'xiaok 想要执行以下操作',
     subAgents: {
-      title: 'SubAgent', idle: '无活动', cleaning: '关闭·清理中',
+      title: 'SubAgent', idle: '无活动', cleaning: '关闭·清理中', stalled: '等待退出·清理中',
       collaboration: 'SubAgent 协作', arranging: '安排 SubAgent', started: '开始', assignment: '分工', result: '交付摘要', elapsed: '耗时',
       tools: (count: number) => `${count} 次工具调用`, failures: (count: number) => `${count} 次失败`,
       round: (turn: number) => `第 ${turn} 轮`,
@@ -56,7 +56,7 @@ const UI_COPY = {
   en: {
     approvalTitle: 'xiaok wants to run',
     subAgents: {
-      title: 'SubAgent', idle: 'idle ', cleaning: 'closed·cleaning',
+      title: 'SubAgent', idle: 'idle ', cleaning: 'closed·cleaning', stalled: 'awaiting exit·cleaning',
       collaboration: 'SubAgent collaboration', arranging: 'Arrange SubAgent', started: 'started', assignment: 'Assignment', result: 'Result summary', elapsed: 'elapsed',
       tools: (count: number) => `${count} tool calls`, failures: (count: number) => `${count} failed`,
       round: (turn: number) => `turn ${turn}`,

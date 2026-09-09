@@ -155,7 +155,7 @@ export class AgentRuntime {
                             signal: mergedSignal,
                             trigger: { kind: 'threshold' },
                         }, {
-                            summarizePrefix: (messages, signal) => this.compactRunner.run([...messages], this.buildInvocationOptions(signal, invocationContext)),
+                            summarizePrefix: (messages, signal) => this.compactRunner.run([...messages], this.buildInvocationOptions(signal, invocationContext), () => onEvent({ type: 'execution_progress', runId: run.runId })),
                             applyPlan: (frozenPlan, summaryText) => this.session.applyCompaction(frozenPlan, summaryText),
                         });
                         if (outcome.summaryModelFailed
@@ -315,7 +315,10 @@ export class AgentRuntime {
                             }),
                         },
                     };
-                    const result = await this.registry.executeTool(toolCall.name, toolCall.input, toolExecutionContext);
+                    const result = await this.registry.executeTool(toolCall.name, toolCall.input, { ...toolExecutionContext,
+                        onExecutionHealth: state => { this.reportActivity({ phase: 'tool', toolName: toolCall.name, executionHealth: state }); onEvent({ type: 'execution_health', runId: run.runId, invocationId: toolCall.id, state }); },
+                        executionProgress: { progress: () => { this.reportActivity({ phase: 'tool', toolName: toolCall.name }); onEvent({ type: 'execution_progress', runId: run.runId }); }, wait: () => { }, resume: () => { } },
+                    });
                     mergedSignal.throwIfAborted();
                     this.reportActivity({ phase: 'model' });
                     const ok = isSuccessfulModelToolResult(result);

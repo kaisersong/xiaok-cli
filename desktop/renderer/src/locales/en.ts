@@ -1,7 +1,10 @@
 import type { LocaleStrings } from "./index";
+import { roomWorkspaceEn } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  roomWorkspace: roomWorkspaceEn,
+  executionHealth: {running:'Running',waiting:'Waiting for confirmation',recovering:'Recovering connection',cleanup_pending:'Stop requested; waiting for execution to exit and resources to be released'},
   localCodex: "Local Codex",
   multiAgent: {
     approvals: { title: 'Tool approval', pending: count => `${count} pending approvals`, approve: 'Approve this invocation only', deny: 'Deny this invocation', query: 'Query approval operation',
@@ -95,6 +98,13 @@ export const en: LocaleStrings = {
   collaborationRoomSending: "Sending...",
   collaborationRoomWaitingForReplies: (count) => `Waiting for ${count} member${count === 1 ? '' : 's'} to reply…`,
   collaborationRoomRepliesPartiallyFailed: (count) => `${count} member${count === 1 ? '' : 's'} could not reply. You can try again later.`,
+  collaborationRoomExecutionWorker: 'Workspace execution',
+  collaborationRoomExecutionDiscussion: 'Discussion only',
+  collaborationRoomExecutionUnavailable: 'Discussion protocol unsupported',
+  collaborationRoomExecutionUnknown: 'Capability unconfirmed',
+  collaborationRoomExecutionObservers: 'Unavailable or unconfirmed members may join as observers, but will not reply.',
+  collaborationRoomExecutionReason: (reason) => ({ not_installed: 'Required executor is not installed', probe_failed: 'Capability check failed; check the executor and refresh', unsupported_protocol: 'This executor does not support the discussion protocol', fresh_session_unverified: 'A fresh session could not be verified', tools_not_disabled: 'Disabling tools, MCP and hooks could not be verified' }[reason] ?? 'Execution capability is unconfirmed; refresh and retry'),
+  collaborationRoomUnavailableMembers: (names) => `These members cannot reply right now: ${names}. See the members panel for details.`,
   collaborationRoomRefresh: "Refresh",
   collaborationRoomArchive: "Archive",
   collaborationRoomTeamDiscussion: "Ask the whole team once",
@@ -2609,6 +2619,9 @@ export const en: LocaleStrings = {
   sidebarUpdateClosePopover: "Close popover",
   sidebarUpdateClose: "Close",
   sidebarUpdateAutoCheckFailed: "Auto-update check did not complete. To update, download the latest version from GitHub and drag it into Applications to replace the existing app.",
+  sidebarUpdateHandoffUnconfirmed: "Install handoff unconfirmed",
+  sidebarUpdateHandoffUnconfirmedHint: "The system has not confirmed install handoff and may still continue in the background. Do not retry installation. For a manual update, quit the app normally first, then download and replace it from GitHub.",
+  sidebarUpdateInstallNotReady: "The update is not ready. Check for updates and finish downloading first.",
   sidebarUpdateManualDownload: "Please download the latest version from GitHub and drag it into Applications to replace the existing app.",
   sidebarUpdateGoToGithub: "Download from GitHub",
   sidebarUpdateDownloadHint: "A new version was found. It will download automatically.",

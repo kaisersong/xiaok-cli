@@ -1,4 +1,5 @@
 import type { PromptInjectionTexts } from "../shared/components/prompt-injection";
+import type { RoomWorkspaceLabels } from './room-workspace';
 import { zh } from "./zh";
 import { en } from "./en";
 import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/task-host/delivery-types';
@@ -6,7 +7,9 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
+  executionHealth: Record<'running' | 'waiting' | 'recovering' | 'cleanup_pending', string>;
   multiAgent: {
     approvals: { title: string; pending: (count: number) => string; approve: string; deny: string; query: string;
       viewInput: string; nextInput: string; inputLoading: string; inputFailed: string; metadataFailed: string; retryMetadata: string;
@@ -87,6 +90,13 @@ export interface LocaleStrings {
   collaborationRoomSending: string;
   collaborationRoomWaitingForReplies: (count: number) => string;
   collaborationRoomRepliesPartiallyFailed: (count: number) => string;
+  collaborationRoomExecutionWorker: string;
+  collaborationRoomExecutionDiscussion: string;
+  collaborationRoomExecutionUnavailable: string;
+  collaborationRoomExecutionUnknown: string;
+  collaborationRoomExecutionObservers: string;
+  collaborationRoomExecutionReason: (reason: string) => string;
+  collaborationRoomUnavailableMembers: (names: string) => string;
   collaborationRoomRefresh: string;
   collaborationRoomArchive: string;
   collaborationRoomTeamDiscussion: string;
@@ -2522,6 +2532,9 @@ export interface LocaleStrings {
   sidebarUpdateClosePopover: string;
   sidebarUpdateClose: string;
   sidebarUpdateAutoCheckFailed: string;
+  sidebarUpdateHandoffUnconfirmed: string;
+  sidebarUpdateHandoffUnconfirmedHint: string;
+  sidebarUpdateInstallNotReady: string;
   sidebarUpdateManualDownload: string;
   sidebarUpdateGoToGithub: string;
   sidebarUpdateDownloadHint: string;

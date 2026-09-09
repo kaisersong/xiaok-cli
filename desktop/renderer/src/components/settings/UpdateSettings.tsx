@@ -242,7 +242,9 @@ export function UpdateSettingsContent() {
       case 'installing':
         return t.desktopSettings.appUpdateInstalling
       case 'error':
-        return appUpdateState.error ?? t.desktopSettings.appUpdateError
+        return appUpdateState.error === 'update_install_handoff_unconfirmed' ? t.sidebarUpdateHandoffUnconfirmedHint
+          : appUpdateState.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady
+          : appUpdateState.error ?? t.desktopSettings.appUpdateError
       default:
         return null
     }

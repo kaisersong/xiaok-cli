@@ -26,6 +26,10 @@
   ],
   "extraResources": [
     {
+      "from": "resources/room-workspace-protocol.json",
+      "to": "room-workspace-protocol.json"
+    },
+    {
       "from": "../../kswarm/src",
       "to": "services/kswarm/src",
       "filter": [

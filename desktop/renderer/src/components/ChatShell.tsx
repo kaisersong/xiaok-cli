@@ -406,6 +406,11 @@ export function ChatShell() {
         setPlanSteps(ev.steps);
         break;
       }
+      case 'execution_health': {
+        if (!live) break;
+        setMessages(prev => [...prev.filter(m => m.role !== 'progress'), {id:'execution-health',role:'progress',content:t.executionHealth[event.state],stage:event.state}]);
+        break;
+      }
       case 'progress': {
         const prog = (event as { type: 'progress'; message: string; stage?: string; eventId: string });
         // Suppress tool-related progress when tool_steps is active
@@ -884,7 +889,7 @@ export function ChatShell() {
 
   // Replay events from a single snapshot into messages
   // Returns { msgs, result, events } where events is for Canvas (not pushed to ref during replay)
-  const replaySnapshot = useCallback((snapshot: { taskId?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
+  const replaySnapshot = useCallback((snapshot: { taskId?: string; status?: string; events?: DesktopTaskEvent[]; prompt?: string; materials?: DisplayFileRef[] }, addPromptAsUser: boolean): { msgs: ChatMessage[]; result: TaskResult | null; events: DesktopTaskEvent[]; toolStepsMsgId: string | null } => {
     const msgs: ChatMessage[] = [];
     let lastResult: TaskResult | null = null;
     const replayEvents: DesktopTaskEvent[] = []; // Local array for Canvas, not ref
@@ -964,7 +969,9 @@ export function ChatShell() {
           }
           continue;
         }
-        if (ev.type === 'progress') {
+        if (ev.type === 'execution_health' && (snapshot.status === 'running' || snapshot.status === 'waiting_user')) {
+          lastProgress = {id:'execution-health',role:'progress',content:t.executionHealth[ev.state],stage:ev.state};
+        } else if (ev.type === 'progress') {
           const prog = (ev as { type: 'progress'; message: string; stage?: string; eventId: string });
           if ((prog.stage === 'tool' || prog.stage === 'completed' || prog.stage === 'failed') && replayToolSteps.length > 0) { continue; }
           lastProgress = {

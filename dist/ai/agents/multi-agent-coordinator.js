@@ -442,6 +442,7 @@ export class MultiAgentCoordinator {
             record.endedAt = undefined;
             record.phase = 'starting';
             record.currentTool = undefined;
+            record.executionHealth = undefined;
             record.lastResult = undefined;
             record.error = undefined;
             record.timedOut = false;
@@ -504,6 +505,7 @@ export class MultiAgentCoordinator {
             }
             finally {
                 record.stopWatchdog?.();
+                record.executionHealth = undefined;
                 record.endedAt ??= Date.now();
                 if (record.controller === controller)
                     record.controller = undefined;
@@ -743,6 +745,7 @@ export class MultiAgentCoordinator {
             lastActivityAt: record.lastActivityAt,
             phase: record.phase,
             currentTool: record.currentTool,
+            ...(record.executionHealth ? { executionHealth: record.executionHealth } : {}),
             executionActive: Boolean(record.execution || record.controller),
             resourcesReleased: record.resourcesReleased,
             runtimeResident: record.runtimeResident,
@@ -801,9 +804,10 @@ export class MultiAgentCoordinator {
             onActivity: (activity) => {
                 if (!active())
                     return;
-                const changed = record.phase !== activity.phase || record.currentTool !== activity.toolName;
+                const changed = record.phase !== activity.phase || record.currentTool !== activity.toolName || record.executionHealth !== activity.executionHealth;
                 record.phase = activity.phase;
                 record.currentTool = activity.toolName;
+                record.executionHealth = activity.executionHealth;
                 record.lastActivityAt = Date.now();
                 if (activity.phase === 'tool')
                     clearTimeout(idleTimer);

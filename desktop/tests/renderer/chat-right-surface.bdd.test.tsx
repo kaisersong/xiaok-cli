@@ -42,6 +42,18 @@ function setup(width = 1200) {
 }
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('BDD: one Task / Agents / Canvas right surface', () => {
+  it('room files and instructions share the existing surface and preserve canvas', () => {
+    const { mount } = setup(1200);
+    render(mount({ taskContent: <span>room tasks</span>, filesContent: <span>directory listing</span>, instructionsContent: <span>published instructions</span>, canvasContent: <span>room canvas</span> }));
+    expect(screen.getAllByTestId('chat-right-panel')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('tab', { name: '文件' }));
+    expect(screen.getByText('directory listing')).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
+    expect(screen.getByText('published instructions')).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: '画布' }));
+    expect(screen.getByText('room canvas')).toBeVisible();
+    expect(document.querySelectorAll('.chat-right-entry')).toHaveLength(1);
+  });
   it('external pointer followed by its real null blur relinquishes Canvas focus before a later Canvas unmount', () => {
     const { mount } = setup(900);
     const tree = (open: boolean) => <><div data-testid="outside-blank">external blank</div>{mount({ canvasOpen: open, canvasContent: open ? <input aria-label="canvas focus" /> : null })}</>;

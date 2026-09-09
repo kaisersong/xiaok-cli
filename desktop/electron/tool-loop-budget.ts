@@ -10,8 +10,14 @@ export function resolveDesktopToolLoopBudget(taskOverride?: number, env: NodeJS.
   limit: number | undefined; source: 'task' | 'environment' | 'default';
 } {
   const valid = (value: number) => Number.isSafeInteger(value) && value >= 1;
-  if (taskOverride !== undefined && valid(taskOverride)) return { limit: taskOverride, source: 'task' };
+  if (taskOverride !== undefined) {
+    if (!valid(taskOverride)) throw new Error('Invalid iteration budget');
+    return {limit:taskOverride,source:'task'};
+  }
   const raw = env.XIAOK_AGENT_MAX_ITERATIONS ?? env.XIAOK_MULTI_AGENT_MAX_ITERATIONS;
-  if (raw?.trim() && valid(Number(raw))) return { limit: Number(raw), source: 'environment' };
+  if (raw !== undefined) {
+    if (!raw.trim() || !valid(Number(raw))) throw new Error('Invalid iteration budget');
+    return {limit:Number(raw),source:'environment'};
+  }
   return { limit: DEFAULT_DESKTOP_TOOL_LOOP_ITERATIONS, source: 'default' };
 }

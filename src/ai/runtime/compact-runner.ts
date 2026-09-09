@@ -15,7 +15,7 @@ Write in past tense. Be concise but complete.`;
 export class CompactRunner {
   constructor(private readonly adapter: ModelAdapter) {}
 
-  async run(messages: Message[], streamOptions?: StreamOptions): Promise<string> {
+  async run(messages: Message[], streamOptions?: StreamOptions, onProgress?: () => void): Promise<string> {
     const summaryRequest: Message = {
       role: 'user',
       content: [{
@@ -42,6 +42,7 @@ export class CompactRunner {
       options: streamOptions,
       invocationId: `inv_${randomUUID()}`,
     })) {
+      onProgress?.();
       if (chunk.type === 'text') chunks.push(chunk.delta);
     }
 

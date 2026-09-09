@@ -2,6 +2,7 @@ interface RoomWakeBrokerPort {
   getRoomSnapshot(roomId: string): Promise<unknown>;
   claimWake(input: unknown): Promise<unknown>;
   completeWake(input: unknown): Promise<unknown>;
+  abandonWake?(input: { roomId: string; claimToken: string; reason: string }): Promise<unknown>;
   /**
    * design §6.2：agent-only 受控按需补取。不是每次唤醒都调用——默认低成本
    * 窗口仍由 getRoomSnapshot + buildRoomContextWindow 在内存中截取。这个方法
@@ -161,6 +162,7 @@ function asString(value: unknown): string {
 export function createCollaborationRoomWakeDispatcher({
   brokerClient,
   execute,
+  executeTurn,
   canExecute = async () => true,
   onEvent,
 }: {
@@ -172,6 +174,7 @@ export function createCollaborationRoomWakeDispatcher({
   // runCollaborationRoomAgentTask）用这个参数在 host.createTask 产出真实
   // taskId 后调用 registerRoomHistoryCapability，任务结束后释放。
   execute(input: CollaborationRoomTurnEnvelope, claimToken: string): Promise<{ text: string }>;
+  executeTurn?(input: CollaborationRoomTurnEnvelope): Promise<{ ok: boolean }>;
   canExecute?(logicalAgentId: string): Promise<boolean>;
   onEvent?(event: CollaborationRoomDispatchEvent): void | Promise<void>;
 }) {
@@ -230,6 +233,11 @@ export function createCollaborationRoomWakeDispatcher({
       await finish();
       return { ok: false, code: 'room_message_not_found' };
     }
+    const sourceScope = isRecord(source.contextScope) ? source.contextScope : { kind: 'room_only' };
+    const scopedMessages = roomMessages.filter(message => {
+      const scope = isRecord(message.contextScope) ? message.contextScope : { kind: 'room_only' };
+      return scope.kind === sourceScope.kind && (scope.kind !== 'project' || scope.projectId === sourceScope.projectId);
+    });
     const sourceRef = isRecord(source.sourceRef) ? source.sourceRef : null;
     const attachmentPaths = sourceRef?.kind === 'user_attachments' && Array.isArray(sourceRef.attachments)
       ? sourceRef.attachments.flatMap((attachment) => (
@@ -239,22 +247,42 @@ export function createCollaborationRoomWakeDispatcher({
         ))
       : [];
 
-    for (const logicalAgentId of logicalAgentIds) {
+    await Promise.all(logicalAgentIds.map(async logicalAgentId => {
       if (!(await canExecute(logicalAgentId))) {
         await settleAgent(logicalAgentId, 'failed');
-        continue;
+        return;
+      }
+      if (executeTurn) {
+        try {
+          const { window: contextWindow, windowedMessages } = buildRoomContextWindow(scopedMessages);
+          const outcome = await executeTurn({
+            roomId: input.roomId, roomTitle: asString(room.title), roomRevision: Number(room.revision || 0),
+            roomMessageId: input.roomMessageId, logicalAgentId, attachmentPaths,
+            contextScope: isRecord(source.contextScope) ? source.contextScope as { kind: string; projectId?: string } : { kind: 'room_only' },
+            contextWindow,
+            messages: windowedMessages.map(message => ({ messageId: asString(message.messageId), sender: message.sender, kind: asString(message.kind),
+              ...(asString(message.text) ? { text: asString(message.text) } : {}),
+              ...(asString(message.replyToMessageId) ? { replyToMessageId: asString(message.replyToMessageId) } : {}),
+              ...(isRecord(message.contextScope) ? { contextScope: message.contextScope as { kind: string; projectId?: string } } : {}),
+            })),
+          });
+          await settleAgent(logicalAgentId, outcome.ok ? 'completed' : 'failed');
+        } catch { await settleAgent(logicalAgentId, 'failed'); }
+        return;
       }
       const claim = await brokerClient.claimWake({
+        roomId: input.roomId,
         roomMessageId: input.roomMessageId,
         logicalAgentId,
         hostParticipantId: 'xiaok-desktop',
       });
       if (!isRecord(claim) || claim.ok === false || !asString(claim.claimToken)) {
         await settleAgent(logicalAgentId, 'failed');
-        continue;
+        return;
       }
+      let wakeCompleted = false;
       try {
-        const { window: contextWindow, windowedMessages } = buildRoomContextWindow(roomMessages);
+        const { window: contextWindow, windowedMessages } = buildRoomContextWindow(scopedMessages);
         const output = await execute({
           roomId: input.roomId,
           roomTitle: asString(room.title),
@@ -279,18 +307,23 @@ export function createCollaborationRoomWakeDispatcher({
         }, asString(claim.claimToken));
         const text = asString(output?.text).trim();
         const settled = await brokerClient.completeWake({
+          roomId: input.roomId,
           claimToken: claim.claimToken,
           reply: text ? { kind: 'text', text } : { kind: 'pass' },
         });
         if (!isRecord(settled) || settled.ok === false) {
           await settleAgent(logicalAgentId, 'failed');
-          continue;
+          return;
         }
+        wakeCompleted = true;
         await settleAgent(logicalAgentId, 'completed');
       } catch {
         await settleAgent(logicalAgentId, 'failed');
+      } finally {
+        if (!wakeCompleted) await brokerClient.abandonWake?.({ roomId: input.roomId, claimToken: asString(claim.claimToken), reason: 'execution_failed' }).catch(() => undefined);
       }
-    }
+    }));
+    completed.sort(); failed.sort();
     await finish();
     return { ok: true, completed, failed };
   }

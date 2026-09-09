@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.3 (September 9, 2026).** CLI and Desktop metadata are aligned at **1.5.3**. This update removes default Desktop execution time limits, fixes follow-up scheduling and resumability, and includes local Codex integration and CLI reliability improvements. The latest published Desktop baseline is **1.5.2** until the new build and asset checks succeed; a version bump is not an npm publication. See [Version History](#version-history).
+**Release target: 1.5.4 (September 10, 2026).** CLI and Desktop metadata are aligned at **1.5.4**. This update adds collaboration room workspaces, execution health tracking, updater handoff recovery, and CLI input fixes. The latest published Desktop baseline is **1.5.3** until the new build and asset checks succeed; a version bump is not an npm publication. See [Version History](#version-history).
 
 ---
 
@@ -552,6 +552,14 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.4 — Release preparation, September 10, 2026
+
+- Collaboration room workspaces support administrator-selected roots, frozen instructions, file handoffs, and KSwarm project mappings with durable authorization and recovery.
+- External Qoder and Xiaok CLI members can join supported discussion-only paths. Kiro and Windows external CLI discussion remain unavailable.
+- Execution health tracking distinguishes model, tool, and cancellation phases; CLI fixes cover interrupt/exit confirmation, Windows console isolation, input handoff, and shell quoting.
+- Desktop updater handoff failures preserve recovery information and provide retry feedback.
+- All three bundled sidecar repositories are pinned to reproducible `desktop-v1.5.4` tags.
 
 ### v1.5.3 — Release preparation, September 9, 2026
 

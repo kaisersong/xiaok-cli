@@ -8,6 +8,10 @@ function event(id: string, taskName: string, status = 'running'): MultiAgentEven
 }
 
 describe('multi-agent progress view', () => {
+  it('shows unsettled tool cleanup without pretending the agent is closed',()=>{
+    const view=new MultiAgentProgressView();const update=event('held','held');update.agent.executionHealth='cleanup_pending';view.update(update);
+    expect(view.summary()).toContain('等待退出·清理中');expect(view.summary()).not.toContain('已关闭');
+  });
   it('shows both children and current tool while main is waiting, with live elapsed/idle ages', () => {
     const view = new MultiAgentProgressView();
     view.update(event('a', 'review_runtime'));

@@ -6,6 +6,7 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly title: "SubAgent";
         readonly idle: "无活动";
         readonly cleaning: "关闭·清理中";
+        readonly stalled: "等待退出·清理中";
         readonly collaboration: "SubAgent 协作";
         readonly arranging: "安排 SubAgent";
         readonly started: "开始";
@@ -46,6 +47,7 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly title: "SubAgent";
         readonly idle: "idle ";
         readonly cleaning: "closed·cleaning";
+        readonly stalled: "awaiting exit·cleaning";
         readonly collaboration: "SubAgent collaboration";
         readonly arranging: "Arrange SubAgent";
         readonly started: "started";

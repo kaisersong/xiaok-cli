@@ -1,5 +1,6 @@
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
+import { registerRoomWorkspaceIpc } from '../../electron/room-workspace-ipc.js';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -285,6 +286,10 @@ describe('preload API contract', () => {
       'createProjectFromRoom',
       'createTaskFromRoomMessage',
       'onCollaborationRoomEvent',
+      'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
+      'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
+      'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
+      'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange',
     ]);
   });
 
@@ -950,6 +955,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   // registrar instead of duplicating its command table in this source scanner.
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
+  registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:ipcMain|shutdownAwareIpc)\.handle\(\s*'([^']+)'/g;

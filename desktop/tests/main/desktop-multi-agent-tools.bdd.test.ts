@@ -48,9 +48,13 @@ describe('BDD: Desktop tool surface is scoped and cannot route through the CLI c
   });
   it('A14/A24 Given a real invocation context, When the model spawns, Then the trusted actor/source and stable invocation operation bind the captured child seed', async () => {
     const { registry, context, seed, methods, createSeed } = fixture();
-    const toolContext = { toolInvocationId: 'call-42', signal: context.signal, messages: [], session: { cwd: 'ignored' } } as unknown as ToolExecutionContext;
+    const callerController=new AbortController();
+    const toolContext = Object.freeze({ toolInvocationId: 'call-42', signal: AbortSignal.any([context.signal,callerController.signal]), messages: [], session: { cwd: 'ignored' } }) as unknown as ToolExecutionContext;
     await registry.executeTool('spawn_agent', { task_name: 'child', message: 'work', fork_context: false }, toolContext);
-    expect(createSeed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ forkContext: false, agentDef: expect.objectContaining({ name: 'child' }) }), toolContext);
+    expect(createSeed).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ forkContext: false, agentDef: expect.objectContaining({ name: 'child' }) }), expect.objectContaining({toolInvocationId:'call-42',messages:toolContext.messages,session:toolContext.session,executionProgress:expect.any(Object),signal:expect.any(AbortSignal)}));
+    const captured=createSeed.mock.calls[0][1] as ToolExecutionContext;
+    expect(Object.isFrozen(captured)).toBe(true);expect(captured.signal?.aborted).toBe(false);
+    callerController.abort();expect(captured.signal?.aborted).toBe(true);
     expect(methods.spawn).toHaveBeenCalledExactlyOnceWith({ actor: context.actor, requestSource: 'agent', operationId: 'turn:call-42', taskName: 'child', message: 'work', sessionSeed: seed });
   });
   it('A43 Given a model tries to forge caller/group/source or submit oversize input, When invoking controls, Then schema validation rejects before service effects', async () => {

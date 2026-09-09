@@ -2624,7 +2624,7 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         welcome = tmux.wait_for(lambda text: has_welcome_screen(text) and has_input_prompt(text), timeout=12)
         assert_welcome_screen(welcome, "resume welcome screen did not render before the feedback ctrl+c exit flow")
 
-        print("--- E2E 20: ctrl+c exits after completed intent with feedback disabled ---")
+        print("--- E2E 20: two ctrl+c presses exit after completed intent with feedback disabled ---")
         tmux.send_text("输出30行")
         time.sleep(0.15)
         tmux.send_key("Enter")
@@ -2635,6 +2635,9 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         )
         assert_footer_chrome_is_singular(no_feedback_prompt)
 
+        tmux.send_key("C-c")
+        confirmation = tmux.wait_for(lambda text: "2 秒内再按 Ctrl+C" in text, timeout=5)
+        assert_true("已退出。" not in confirmation, "first Ctrl+C unexpectedly exited")
         tmux.send_key("C-c")
         after_ctrlc = tmux.wait_for(
             lambda text: "已退出。" in text,

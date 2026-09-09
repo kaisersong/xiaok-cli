@@ -86,6 +86,8 @@ import { selectModel } from '../ui/model-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand, type ShellCommandResult, type ShellEscapeExecutor } from './chat-shell-escape.js';
+import { retainRawInputModeForSession } from '../ui/input-mode.js';
+import { createExitConfirmation } from '../ui/exit-confirmation.js';
 import { createTurnActivityWatchdog, resolveAgentMaxIterations, resolveTurnTimeoutMs, runCleanupWithTimeout } from './chat-runtime-config.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
@@ -522,7 +524,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     log.info('runtime_turn_start', { sessionId });
     try {
       await runtimeFacade!.runTurn(request, onChunk, controller.signal, (event) => {
-        if (event.type === 'model_request_started') watchdog.suspend();
+        watchdog.observeRuntimeEvent(event);
+        if (event.type === 'execution_health' && event.state === 'cleanup_pending' && !opts.print && !opts.json) writeOrchestrationBlock('\n执行长时间无进展或已取消，正在等待工具实际退出并清理资源。\n');
         if (event.type === 'model_recovery') {
           log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs });
           if (!opts.print && !opts.json) writeOrchestrationBlock(`\n模型连接中断，${Math.ceil(event.delayMs / 1000)} 秒后自动续接（第 ${event.attempt} 次，恢复窗口剩余 ${Math.ceil(event.remainingMs / 60000)} 分钟）。Esc 可中断。\n`);
@@ -1134,10 +1137,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     hooks: runtimeHooks,
     memoryStore,
     maxIterations: resolveAgentMaxIterations(),
-    onActivity: (activity) => {
-      // Model requests own their idle timeout and recovery window; tools own their cancellation.
-      activeModelWatchdog?.suspend();
-    },
   });
   agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
   agent.setPromptSnapshot(initialPromptSnapshot);
@@ -2557,7 +2556,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           if (chunk.type === 'usage') {
             statusBar.update(chunk.usage);
           }
-        }, turnWatchdog.signal, () => turnWatchdog.suspend());
+        }, turnWatchdog.signal, (event) => turnWatchdog.observeRuntimeEvent(event));
       } catch (turnError) {
         if (turnWatchdog.didTimeout()) {
           const partialText = printChunks.join('');
@@ -2705,6 +2704,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
   }) as typeof process.stderr.write;
 
+  const releaseRawInputMode = retainRawInputModeForSession();
+  let disposeInterruptHandlers = () => {};
   try {
     // 激活 scroll region（必须在欢迎屏幕之前）
     // 这样欢迎内容自然填充到 scroll region 内，footer 固定在底部
@@ -3010,6 +3011,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
     };
 
+    let externalShellActive = false;
     const runLocalShellEscape = async (command: string, commandText: string): Promise<void> => {
       dismissWelcomeScreen();
       stopBusyCapture();
@@ -3037,7 +3039,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
       const executor = shellEscapeExecutorForTests
         ?? ((input: { command: string; cwd: string }) => runInteractiveShellCommand(input.command, { cwd: input.cwd }));
-      const result = await executor({ command, cwd });
+      externalShellActive = true;
+      let result: ShellCommandResult;
+      try { result = await executor({ command, cwd }); }
+      finally { externalShellActive = false; }
       const replayOutput = (result.output ?? '') + formatShellCommandResult(result);
       restoreTerminalAfterShellCommand();
       replayShellCommandOutput(replayOutput);
@@ -3366,27 +3371,60 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
   process.stdout.on('resize', handleResize);
 
-  // SIGINT 处理
-  process.on('SIGINT', () => {
-    void (async () => {
+  const exitConfirmation = createExitConfirmation();
+  let exiting = false;
+  const shutdownTerminal = async (reason: 'sigint' | 'sighup' | 'sigterm' | 'stdin_end') => {
+    if (exiting) return;
+    exiting = true;
+    currentTurnAbortController?.abort();
+    try {
       stopBusyCapture();
       stopActivity();
+      try { scrollRegion.end(); } catch {}
+      try { releaseRawInputMode(); } catch {}
       if (handleResize) {
         process.stdout.off('resize', handleResize);
       }
       skillCatalogWatcher?.close();
       clearTurnIntentContext();
       await releaseSessionOwnershipForExit();
-      await lifecycleHooks.runHooks('SessionEnd', { reason: 'sigint' });
+      await lifecycleHooks.runHooks('SessionEnd', { reason });
+    } catch (error) {
+      log.warn('terminal shutdown cleanup failed', { error: String(error) });
+    } finally {
       setStreamErrorHandler(null);
       process.stdout.write = originalStdoutWrite;
       process.stderr.write = originalStderrWrite;
-      await cleanupRuntimeResourcesWithTimeout();
-      statusBar.destroy();
-      process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
-      process.exit(0);
-    })();
-  });
+      try { await cleanupRuntimeResourcesWithTimeout(); } catch {}
+      try { statusBar.destroy(); } catch {}
+      if (reason === 'sigint') {
+        try { process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`); } catch {}
+      }
+      disposeInterruptHandlers();
+      process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
+    }
+  };
+  const onInterrupt = () => {
+    if (exiting || interactiveBashActive || externalShellActive) return;
+    if (exitConfirmation.press()) { void shutdownTerminal('sigint'); return; }
+    currentTurnAbortController?.abort();
+    writeProgressTranscriptNote('2 秒内再按 Ctrl+C 退出；继续输入可取消退出。');
+  };
+  const onHangup = () => { void shutdownTerminal('sighup'); };
+  const onTerminate = () => { void shutdownTerminal('sigterm'); };
+  const onInputEnd = () => { void shutdownTerminal('stdin_end'); };
+  inputReader.setInterruptHandler(onInterrupt, () => exitConfirmation.reset());
+  process.on('SIGINT', onInterrupt);
+  process.on('SIGHUP', onHangup);
+  process.on('SIGTERM', onTerminate);
+  process.stdin.on('end', onInputEnd);
+  disposeInterruptHandlers = () => {
+    inputReader.setInterruptHandler();
+    process.off('SIGINT', onInterrupt);
+    process.off('SIGHUP', onHangup);
+    process.off('SIGTERM', onTerminate);
+    process.stdin.off('end', onInputEnd);
+  };
 
   const handleCompletedIntentFeedbackResult = async (
     result: CompletedIntentFeedbackResult,
@@ -4171,8 +4209,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // the activity row again here; that row may now contain assistant text.
     }
   } finally {
+    disposeInterruptHandlers();
     disarmGoal();
     stopBusyCapture();
+    releaseRawInputMode();
     stopActivity();
     if (handleResize) {
       process.stdout.off('resize', handleResize);

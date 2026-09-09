@@ -12,6 +12,8 @@ export interface ModelAdapter {
     stream(messages: Message[], tools: ToolDefinition[], systemPrompt: string, options?: StreamOptions): AsyncIterable<StreamChunk>;
     getModelName(): string;
     getHarnessProfileId?(): string;
+    /** Explicit output tokens reserved by this adapter's actual request, if known. */
+    getOutputTokenReserve?(): number;
 }
 export type StreamChunk = {
     type: 'text';
@@ -62,6 +64,12 @@ export interface ToolExecutionContext {
         };
     };
     signal?: AbortSignal;
+    onExecutionHealth?: (state: import('./runtime/execution-health.js').ExecutionHealthState) => void;
+    executionProgress?: {
+        progress(): void;
+        wait(id: string): void;
+        resume(id: string): void;
+    };
     /** Main-only, one-invocation guard installed by ToolRegistry after approval.
      * Never tool input, an IPC credential, or a reusable permission grant. */
     assertPermissionApproval?: () => void;
@@ -93,6 +101,10 @@ export interface Tool {
     definition: ToolDefinition;
     permission: PermissionClass;
     companionTools?: Tool[];
+    executionPolicy?: {
+        idleTimeoutMs?: number;
+        waitsForUser?: boolean;
+    };
     execute(input: Record<string, unknown>, context?: ToolExecutionContext): Promise<string>;
 }
 export interface RuntimeHookSink {

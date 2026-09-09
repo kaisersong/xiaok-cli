@@ -119,6 +119,7 @@ export interface SalvageSummary {
 }
 
 export type DesktopTaskEvent =
+  | { type: 'execution_health'; state: import('../execution-health.js').ExecutionHealthState }
   | { type: 'task_started'; taskId: string }
   | { type: 'task_terminal'; status: Extract<TaskSnapshotStatus, 'completed' | 'failed' | 'cancelled'> }
   | { type: 'understanding_updated'; understanding: TaskUnderstanding }

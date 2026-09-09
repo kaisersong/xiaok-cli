@@ -139,6 +139,12 @@ export class Agent {
       return;
     }
 
+    if (event.type === 'execution_progress') {this.options.hooks.emit({type:'execution_progress',sessionId:this.sessionId,turnId});return;}
+    if (event.type === 'execution_health' || event.type === 'model_recovery') {
+      this.options.hooks.emit({type:'execution_health',sessionId:this.sessionId,turnId,...(event.type === 'execution_health' ? {invocationId:event.invocationId} : {}),state:event.type === 'model_recovery' ? 'recovering' : event.state});
+      return;
+    }
+
     if (event.type === 'run_started') {
       this.options.hooks.emit({
         type: 'turn_started',

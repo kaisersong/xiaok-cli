@@ -14,6 +14,7 @@ export interface SubAgentProgressEvent {
   status: 'running' | 'completed' | 'failed' | 'interrupted';
   phase?: RuntimeActivity['phase'];
   currentTool?: string;
+  executionHealth?: RuntimeActivity['executionHealth'];
   toolsCompleted: number;
   toolsFailed: number;
   toolCounts: Record<string, number>;
@@ -48,6 +49,7 @@ export class SubAgentRunReporter {
   activity(activity: RuntimeActivity): void {
     if (!this.current || this.current.status !== 'running') return;
     this.current.phase = activity.phase;
+    this.current.executionHealth = activity.executionHealth;
     this.current.currentTool = activity.toolName && publicAgentSummary(activity.toolName, 60);
     this.emit('activity');
   }

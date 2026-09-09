@@ -1,4 +1,5 @@
 import type { IpcRenderer } from 'electron';
+import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
 import type { GoalAttachmentRequest, GoalAttachmentSource } from '../shared/goal-attachment.js';
 export type { GoalAttachmentRequest, GoalAttachmentSource } from '../shared/goal-attachment.js';
@@ -297,6 +298,10 @@ export const PRELOAD_API_KEYS = [
   'onMeetingRecordingSaved',
   'onMeetingLiveTranscriptionUpdate',
   ...["listCollaborationRooms", "getCollaborationRoom", "createCollaborationRoom", "archiveCollaborationRoom", "updateCollaborationRoomMembers", "sendCollaborationRoomMessage", "markCollaborationRoomSeen", "cancelRoomDiscussion", "createProjectFromRoom", "createTaskFromRoomMessage", "onCollaborationRoomEvent"]
+  , 'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
+  'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
+  'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
+  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange'
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -612,6 +617,17 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   meetingProcessRecording: 'desktop:meeting:processRecording',
   meetingSaveTranscript: 'desktop:meeting:saveTranscript',
   listCollaborationRooms: 'desktop:collaborationRoom:listRooms',
+  getCollaborationRoomWorkspace: 'desktop:roomWorkspace:get',
+  previewCollaborationRoomWorkspace: 'desktop:roomWorkspace:preview',
+  commitCollaborationRoomWorkspace: 'desktop:roomWorkspace:commit',
+  cancelCollaborationRoomWorkspaceChange: 'desktop:roomWorkspace:cancelChange',
+  listCollaborationRoomWorkspaceFiles: 'desktop:roomWorkspace:listFiles',
+  previewCollaborationRoomWorkspaceFile: 'desktop:roomWorkspace:previewFile',
+  publishCollaborationRoomWorkspaceInstructions: 'desktop:roomWorkspace:publishInstructions',
+  confirmCollaborationRoomWorkspaceArtifact: 'desktop:roomWorkspace:confirmArtifact',
+  registerCollaborationRoomWorkspaceArtifact: 'desktop:roomWorkspace:registerArtifact',
+  mapCollaborationRoomWorkspaceProject: 'desktop:roomWorkspace:mapProject',
+  retryCollaborationRoomWorkspaceChange: 'desktop:roomWorkspace:retryChange',
   getCollaborationRoom: 'desktop:collaborationRoom:getRoom',
   createCollaborationRoom: 'desktop:collaborationRoom:createRoom',
   archiveCollaborationRoom: 'desktop:collaborationRoom:archiveRoom',
@@ -1235,7 +1251,7 @@ export interface DesktopGoalChangedEvent {
   goal: DesktopGoalProjection;
 }
 
-export interface DesktopApi extends MultiAgentDesktopAPI {
+export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
@@ -2018,6 +2034,17 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<unknown>,
     meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<unknown>,
     listCollaborationRooms: () => ipcRenderer.invoke('desktop:collaborationRoom:listRooms') as Promise<unknown>,
+    getCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:get', input) as ReturnType<RoomWorkspaceApi['getCollaborationRoomWorkspace']>,
+    previewCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:preview', input) as ReturnType<RoomWorkspaceApi['previewCollaborationRoomWorkspace']>,
+    commitCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:commit', input) as ReturnType<RoomWorkspaceApi['commitCollaborationRoomWorkspace']>,
+    cancelCollaborationRoomWorkspaceChange: (input) => ipcRenderer.invoke('desktop:roomWorkspace:cancelChange', input) as ReturnType<RoomWorkspaceApi['cancelCollaborationRoomWorkspaceChange']>,
+    listCollaborationRoomWorkspaceFiles: (input) => ipcRenderer.invoke('desktop:roomWorkspace:listFiles', input) as ReturnType<RoomWorkspaceApi['listCollaborationRoomWorkspaceFiles']>,
+    previewCollaborationRoomWorkspaceFile: (input) => ipcRenderer.invoke('desktop:roomWorkspace:previewFile', input) as ReturnType<RoomWorkspaceApi['previewCollaborationRoomWorkspaceFile']>,
+    publishCollaborationRoomWorkspaceInstructions: (input) => ipcRenderer.invoke('desktop:roomWorkspace:publishInstructions', input) as ReturnType<RoomWorkspaceApi['publishCollaborationRoomWorkspaceInstructions']>,
+    confirmCollaborationRoomWorkspaceArtifact: (input) => ipcRenderer.invoke('desktop:roomWorkspace:confirmArtifact', input) as ReturnType<RoomWorkspaceApi['confirmCollaborationRoomWorkspaceArtifact']>,
+    registerCollaborationRoomWorkspaceArtifact: (input) => ipcRenderer.invoke('desktop:roomWorkspace:registerArtifact', input) as ReturnType<RoomWorkspaceApi['registerCollaborationRoomWorkspaceArtifact']>,
+    mapCollaborationRoomWorkspaceProject: (input) => ipcRenderer.invoke('desktop:roomWorkspace:mapProject', input) as ReturnType<RoomWorkspaceApi['mapCollaborationRoomWorkspaceProject']>,
+    retryCollaborationRoomWorkspaceChange: (input) => ipcRenderer.invoke('desktop:roomWorkspace:retryChange', input) as ReturnType<RoomWorkspaceApi['retryCollaborationRoomWorkspaceChange']>,
     getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as Promise<unknown>,
     createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,
     archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,

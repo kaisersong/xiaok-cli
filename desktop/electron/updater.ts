@@ -1,6 +1,7 @@
 import type { BrowserWindow } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { UpdaterHandoffStateMachine } from './updater-handoff.js';
 
 export interface UpdateStatus {
   checking: boolean;
@@ -26,11 +27,81 @@ let isDevMode = false;
 let autoUpdater: any = null;
 let autoUpdaterEventsRegistered = false;
 const STARTUP_UPDATE_RETRY_DELAY_MS = 60_000;
+let handoff: UpdaterHandoffStateMachine | null = null;
+let observationTimer: ReturnType<typeof setTimeout> | undefined;
+let wrapperInProgress = false;
+let syncWrapperError: Error | undefined;
+let logUpdater: (event: string, diagnostic?: string) => void = () => {};
+
+function attemptLocked(): boolean {
+  return Boolean(handoff?.hasPendingIntent || handoff?.snapshot().kind === 'handed_off');
+}
+
+function clearObservation(): void {
+  if (observationTimer !== undefined) clearTimeout(observationTimer);
+  observationTimer = undefined;
+}
+
+function reportUpdaterError(error: unknown): void {
+  const message = toError(error).message;
+  logUpdater('error', message.replace(/https?:\/\/[^\s]+/gi, '[URL omitted]'));
+  if (handoff?.snapshot().kind === 'handed_off') return;
+  if (wrapperInProgress) syncWrapperError = toError(error);
+  else handoff?.observeAsyncUpdaterError(error);
+  clearObservation();
+  setUpdateStatus({ checking: false, downloading: false, installing: false, error: message }, true);
+}
+
+/** Shared by the IPC owner and production-wiring tests; no renderer timer. */
+export function createUpdaterHandoff(platform: NodeJS.Platform = process.platform): UpdaterHandoffStateMachine {
+  if (handoff) return handoff;
+  handoff = new UpdaterHandoffStateMachine({
+    platformClass: platform === 'darwin' ? 'mac' : 'base',
+    preflight: () => {
+      if (updateStatus.error) throw new Error(updateStatus.error);
+      if (!updateStatus.downloaded || !autoUpdater || typeof autoUpdater.quitAndInstall !== 'function') {
+        const error = new Error('update_install_not_ready');
+        reportUpdaterError(error);
+        throw error;
+      }
+    },
+    invokeWrapper: () => {
+      syncWrapperError = undefined;
+      wrapperInProgress = true;
+      setUpdateStatus({ installing: true }, true);
+      logUpdater('install-wrapper-entered');
+      try {
+        if (!callAutoUpdaterQuitAndInstall(autoUpdater)) throw new Error('update_install_not_ready');
+      } catch (error) {
+        reportUpdaterError(error);
+        throw error;
+      } finally {
+        wrapperInProgress = false;
+      }
+      if (!syncWrapperError && handoff?.hasPendingIntent) {
+        observationTimer = setTimeout(() => {
+          observationTimer = undefined;
+          if (handoff?.hasPendingIntent) reportUpdaterError(new Error('update_install_handoff_unconfirmed'));
+        }, 30_000);
+        observationTimer.unref?.();
+      }
+      return { syncError: syncWrapperError };
+    },
+  });
+  return handoff;
+}
+
+/** Called only after the real before-quit transition, never by the install IPC. */
+export function completeUpdaterHandoff(): void {
+  clearObservation();
+  logUpdater('before-quit');
+}
 
 interface StartupUpdateCheckOptions {
   retryDelayMs?: number;
   onError: (error: Error) => void;
   setTimer?: (callback: () => void | Promise<void>, delayMs: number) => unknown;
+  shouldCheck?: () => boolean;
 }
 
 interface StartupAutoUpdater {
@@ -46,7 +117,8 @@ export function resolveAutoUpdaterExport(module: unknown): any | null {
   return candidate;
 }
 
-function setUpdateStatus(patch: Partial<UpdateStatus>): void {
+function setUpdateStatus(patch: Partial<UpdateStatus>, installTransition = false): void {
+  if (!installTransition && attemptLocked()) return;
   updateStatus = { ...updateStatus, ...patch };
   sendUpdateStatus();
 }
@@ -78,11 +150,13 @@ export async function runStartupUpdateCheck(
   const setTimer = options.setTimer ?? ((callback, delayMs) => setTimeout(callback, delayMs));
 
   try {
+    if (options.shouldCheck && !options.shouldCheck()) return;
     await updater.checkForUpdatesAndNotify();
   } catch (error) {
     options.onError(toError(error));
     setTimer(async () => {
       try {
+        if (options.shouldCheck && !options.shouldCheck()) return;
         await updater.checkForUpdatesAndNotify();
       } catch (retryError) {
         options.onError(toError(retryError));
@@ -141,6 +215,7 @@ function registerAutoUpdaterEvents(): void {
   });
 
   autoUpdater.on('update-downloaded', (info: { version: string }) => {
+    logUpdater('update-downloaded');
     setUpdateStatus({
       downloading: false,
       downloaded: true,
@@ -151,17 +226,13 @@ function registerAutoUpdaterEvents(): void {
   });
 
   autoUpdater.on('error', (error: Error) => {
-    setUpdateStatus({
-      checking: false,
-      downloading: false,
-      installing: false,
-      error: error.message,
-    });
+    reportUpdaterError(error);
   });
 }
 
-export async function setupAutoUpdater(window: BrowserWindow): Promise<void> {
+export async function setupAutoUpdater(window: BrowserWindow, logger?: typeof logUpdater): Promise<void> {
   mainWindow = window;
+  if (logger) logUpdater = logger;
   isDevMode = isDevelopmentMode();
 
   // Skip in development mode
@@ -182,19 +253,15 @@ export async function setupAutoUpdater(window: BrowserWindow): Promise<void> {
   // Check for updates immediately on startup
   void runStartupUpdateCheck(autoUpdater, {
     retryDelayMs: STARTUP_UPDATE_RETRY_DELAY_MS,
+    shouldCheck: () => !attemptLocked(),
     onError: (error) => {
-      setUpdateStatus({
-        checking: false,
-        downloading: false,
-        installing: false,
-        error: error.message,
-      });
+      if (!attemptLocked()) reportUpdaterError(error);
     },
   });
 
   // Also check periodically (every 4 hours)
   setInterval(() => {
-    if (autoUpdater) {
+    if (autoUpdater && !attemptLocked()) {
       autoUpdater.checkForUpdates().catch((error: Error) => {
         setUpdateStatus({
           checking: false,
@@ -229,6 +296,7 @@ export function getUpdateStatus(): UpdateStatus {
 }
 
 export async function checkForUpdates(): Promise<void> {
+  if (attemptLocked()) return;
   // Skip in development mode - app-update.yml doesn't exist
   if (isDevMode || isDevelopmentMode()) {
     setUpdateStatus({
@@ -263,16 +331,7 @@ export async function checkForUpdates(): Promise<void> {
 }
 
 export function quitAndInstall(): void {
-  setUpdateStatus({ installing: true, error: undefined });
-  try {
-    if (!callAutoUpdaterQuitAndInstall(autoUpdater)) {
-      throw new Error('更新器未初始化，无法安装更新');
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateStatus({ installing: false, error: message });
-    throw error;
-  }
+  createUpdaterHandoff().begin();
 }
 
 export function callAutoUpdaterQuitAndInstall(updater: unknown): boolean {

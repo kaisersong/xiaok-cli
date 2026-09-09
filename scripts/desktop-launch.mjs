@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertWorkspaceLaunchProtocol } from './room-workspace-launch-guard.mjs';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const platform = process.platform;
@@ -103,6 +104,7 @@ function resolveLaunchBundlePath(currentPlatform) {
 
 if (isCodexShell) {
   ensureDesktopBuild();
+  assertWorkspaceLaunchProtocol({ bundlePath: join(repoRoot, 'desktop'), platform, development: true });
 
   const electronPath = getDevElectronPath(platform);
   if (!existsSync(electronPath)) {
@@ -140,6 +142,7 @@ if (!existsSync(executablePath)) {
   process.exit(1);
 }
 
+assertWorkspaceLaunchProtocol({ bundlePath: launchTarget, platform });
 const opened = spawn(executablePath, [], {
   cwd: repoRoot,
   env: buildCodexRuntimeEnv(process.env),

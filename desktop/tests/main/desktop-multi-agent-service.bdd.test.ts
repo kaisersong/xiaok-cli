@@ -10,6 +10,7 @@ import { DesktopMultiAgentApprovalTransport } from '../../electron/desktop-multi
 import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-runtime-host.js';
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
+import type {TaskRunnerInput} from '../../../src/runtime/task-host/types.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
 
 // Source-mode Vitest does not emit the fixed .js Worker entry. Map only that
@@ -44,7 +45,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     // real runner must still fail this test, not be mistaken for product output.
     expect(capturedAssertions.splice(0)).toEqual([]);
   });
-  async function setup(createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext) => Promise<void>, policy: { multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number } = {}) {
+  async function setup(createSession: DesktopMultiAgentServiceOptions['createSession'], body: (context: DesktopAgentExecutionContext,input:TaskRunnerInput) => Promise<void>, policy: { multiAgentLeaseMs?: number; coreIdleTimeoutMs?: number } = {}) {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-multi-agent-service-'));
     cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
@@ -64,7 +65,7 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       snapshotStore: new FileTaskSnapshotStore(join(root, 'tasks')),
       materialRegistry: new MaterialRegistry({ workspaceRoot: join(root, 'materials'), maxBytes: 1024 * 1024 }),
       runner: input => service.runRoot(input, async context => {
-        try { return await body(context); }
+        try { return await body(context,input); }
         catch (error) { capturedAssertions.push(error); throw error; }
       }),
       authorizePreparation: (taskId, marker) => service.assertHostPreparation(taskId, marker),
@@ -487,14 +488,15 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     await fixture.start(); await fixture.host.drain();
   });
 
-  it('LIFE-D1 Given default root and child execution, When 31 minutes elapse, Then both stay active and expiry and approval actor ports do not impose a hidden limit', async () => {
+  it('LIFE-D1 Given root and child execution explicitly waiting for approval, When 31 minutes elapse, Then total duration does not expire lease or approval actors', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const entered = deferred<void>(), releaseChild = deferred<string>(), releaseRoot = deferred<void>();
     let root!: DesktopAgentExecutionContext, child!: DesktopAgentExecutionContext;
     const fixture = await setup(async input => ({ run: async () => {
       child = input.getTurnContext(); entered.resolve(); return releaseChild.promise;
-    }, suspend: async () => {}, dispose: async () => {} }), async context => {
+    }, suspend: async () => {}, dispose: async () => {} }), async (context,input) => {
       root = context;
+      await input.emitRuntimeEvent({type:'approval_required',sessionId:input.sessionId,turnId:'long-turn',approvalId:'long-user-approval'});
       await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'long-spawn', taskName: 'long_child', message: 'work' });
       await releaseRoot.promise;
     });

@@ -50,7 +50,8 @@ function buildShellInvocation(
   if (platform === 'win32') {
     return {
       shell: options.shell ?? process.env.ComSpec ?? 'cmd.exe',
-      args: ['/d', '/s', '/c', command],
+      // Keep inner cmd quotes intact; /s consumes this outer pair.
+      args: ['/d', '/s', '/c', `"${command}"`],
     };
   }
 
@@ -89,6 +90,7 @@ export function runInteractiveShellCommand(
       cwd: options.cwd ?? process.cwd(),
       env: options.env ?? process.env,
       stdio: ['inherit', 'pipe', 'pipe'],
+      windowsVerbatimArguments: (options.platform ?? process.platform) === 'win32',
     });
 
     child.stdout?.on('data', (chunk: Buffer) => {

@@ -1,3 +1,4 @@
+import { createExecutionHealthMonitor, resolveExecutionIdleMs } from '../execution-health.js';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluateArtifactEvidenceGuard } from '../guards/artifact-evidence-guard.js';
@@ -41,7 +42,9 @@ function normalizeUsageValue(value) {
     return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0;
 }
 function computeRunnerDeadlineMs(watchdogMs) {
-    return Math.max(1, watchdogMs - RUNNER_DEADLINE_RESERVE_MS);
+    // A delivery reserve cannot consume virtually all of an explicit short
+    // budget. This never extends the host's original absolute watchdog deadline.
+    return watchdogMs - Math.min(RUNNER_DEADLINE_RESERVE_MS, watchdogMs / 2);
 }
 export function buildHistoryFromTaskSnapshots(snapshots, options = {}) {
     const maxTasks = options.maxTasks ?? DEFAULT_CONTEXT_MAX_TASKS;
@@ -123,8 +126,10 @@ export class InProcessTaskRuntimeHost {
     lastCommittedSnapshots = new Map();
     multiAgentRecovery;
     recoveryReadSignal = new AbortController().signal;
+    taskIdleTimeoutMs;
     constructor(options) {
         this.options = options;
+        this.taskIdleTimeoutMs = resolveExecutionIdleMs(options.taskIdleTimeoutMs === undefined ? process.env.XIAOK_TASK_IDLE_TIMEOUT_MS : String(options.taskIdleTimeoutMs));
     }
     /** Installed once by service.initialize, before its recovery microtask runs. */
     bindMultiAgentRecovery(ready) {
@@ -731,6 +736,23 @@ export class InProcessTaskRuntimeHost {
         });
         if (!started)
             return;
+        execution.health = createExecutionHealthMonitor({
+            idleMs: this.taskIdleTimeoutMs,
+            onStalled: () => { if (this.activeExecutions.get(taskId) === execution)
+                this.requestExecutionAbort(execution, 'task_idle_timeout'); },
+            onState: state => {
+                if (this.activeExecutions.get(taskId) !== execution)
+                    return;
+                // Health is a later observation, never a shortcut around an already
+                // buffered model event and its checkpoint/publication receipt.
+                void this.flushPendingAssistantDelta(taskId)
+                    .then(() => this.activeExecutions.get(taskId) === execution
+                    ? this.appendEvent(taskId, { type: 'execution_health', state }, { runtimeOrigin: true }) : undefined)
+                    .catch(error => this.runtimeEventErrors.set(taskId, error));
+            },
+        });
+        const onHealthAbort = () => execution.health?.cancel();
+        controller.signal.addEventListener('abort', onHealthAbort, { once: true });
         const configuredWatchdog = this.taskWatchdogs.get(taskId) ?? this.options.taskWatchdogMs;
         const watchdogMs = configuredWatchdog !== undefined && Number.isFinite(configuredWatchdog) && configuredWatchdog > 0
             ? configuredWatchdog : undefined;
@@ -772,9 +794,10 @@ export class InProcessTaskRuntimeHost {
                 permissionMode: this.permissionModes.get(taskId),
                 maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                 executionScope: snapshot.executionScope,
-                emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
+                emitRuntimeEvent: (event) => this.activeExecutions.get(taskId) === execution ? this.appendRuntimeEvent(taskId, event) : Promise.resolve(),
                 emitUsage: (usage) => this.appendUsage(taskId, usage),
             });
+            controller.signal.throwIfAborted();
             if (policy?.deliveryRepair === 'explicit' && snapshot.multiAgentPreparation
                 && !controller.signal.aborted && !this.cancellingTaskIds.has(taskId)) {
                 const deliveryBudget = watchdogMs ?? RUNNER_DEADLINE_RESERVE_MS;
@@ -811,7 +834,7 @@ export class InProcessTaskRuntimeHost {
                         permissionMode: this.permissionModes.get(taskId),
                         maxToolLoopIterations: this.maxToolLoopIterations.get(taskId),
                         executionScope: snapshot.executionScope,
-                        emitRuntimeEvent: (event) => this.appendRuntimeEvent(taskId, event),
+                        emitRuntimeEvent: (event) => this.activeExecutions.get(taskId) === execution ? this.appendRuntimeEvent(taskId, event) : Promise.resolve(),
                         emitUsage: (usage) => this.appendUsage(taskId, usage),
                     });
                     await this.flushRuntimeEvents(taskId);
@@ -874,12 +897,15 @@ export class InProcessTaskRuntimeHost {
         }
         finally {
             clearTimeout(watchdogTimer);
+            execution.health?.dispose();
+            controller.signal.removeEventListener('abort', onHealthAbort);
         }
     }
     async finishExplicitDelivery(execution, initial, deadline, startedAt, watchdogMs) {
         const taskId = execution.taskId;
         const delivery = new HostDeliveryAttempt({ sourceTaskId: taskId, ...initial.multiAgentPreparation }, deadline, startedAt, startedAt + watchdogMs, () => this.now(), this.options.onDeliveryReport);
         execution.delivery = delivery;
+        execution.health?.dispose();
         execution.phase = 'delivery';
         // Buffer timers belong to the runner. Do not let a previously scheduled
         // delta flush cross the durable checking handoff ahead of its ACK.
@@ -1128,6 +1154,29 @@ export class InProcessTaskRuntimeHost {
     }
     async appendRuntimeEvent(taskId, event) {
         this.throwRuntimeEventError(taskId);
+        const health = this.activeExecutions.get(taskId)?.health;
+        if (event.type === 'tool_finished') {
+            health?.resume(`managed:${event.invocationId}`);
+            health?.resume(`tool:${event.invocationId}`);
+        }
+        if (event.type === 'approval_required')
+            health?.wait(event.approvalId);
+        else if (event.type === 'approval_resolved')
+            health?.resume(event.approvalId);
+        else if (event.type === 'execution_health') {
+            if (event.state === 'running' && event.invocationId)
+                health?.delegate(`managed:${event.invocationId}`);
+            if (event.state === 'cleanup_pending')
+                health?.cancel();
+            else if (event.state === 'waiting')
+                health?.wait(`tool:${event.invocationId ?? event.turnId}`);
+            else {
+                health?.resume(`tool:${event.invocationId ?? event.turnId}`);
+                health?.progress(event.state === 'recovering');
+            }
+        }
+        else if (['execution_progress', 'assistant_delta', 'tool_started', 'tool_finished', 'artifact_recorded', 'receipt_emitted', 'step_activated', 'turn_started'].includes(event.type))
+            health?.progress();
         const desktopEvents = projectRuntimeEventsToDesktopEvents({ taskId, events: [event] });
         for (const desktopEvent of desktopEvents) {
             if (desktopEvent.type === 'assistant_delta') {
