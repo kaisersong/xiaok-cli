@@ -16,6 +16,7 @@ import { registerPluginCommands } from './commands/plugin.js';
 import { registerMemoryCommands } from './commands/memory.js';
 import { registerDiagnoseCommands } from './commands/diagnose.js';
 import { registerTraceCommands } from './commands/trace-export.js';
+import { registerSkillCommands } from './commands/skill.js';
 import { registerUpdateCommand } from './commands/update.js';
 import { installGlobalCrashHandlers, reportCrash, setCrashContext } from './utils/crash-reporter.js';
 
@@ -45,6 +46,7 @@ registerTranscriptCommands(program);
 registerChatCommands(program);
 registerYZJCommands(program);
 registerPluginCommands(program);
+registerSkillCommands(program);
 registerMemoryCommands(program);
 registerTraceCommands(program);
 registerDiagnoseCommands(program);
