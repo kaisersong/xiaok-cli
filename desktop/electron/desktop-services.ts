@@ -1,5 +1,6 @@
+import { createProjectAgentModel, validateProjectAgentModelSelection, type ProjectAgentModel } from './project-agent-model.js';
 import {runMonitoredTool} from '../../src/runtime/tool-execution-health.js';
-import {createRoomToolRegistry,runRoomWorkspaceExecutor,ROOM_UNSUPPORTED_FILE_CAPABILITIES,type RoomWorkspaceRunOptions} from './room-workspace-executor.js';
+import {createRoomToolRegistry,runRoomWorkspaceExecutor,roomUnsupportedCapabilities,type RoomWorkspaceRunOptions} from './room-workspace-executor.js';
 import {assembleRoomWorkspaceContext,resolveRoomWorkspaceContextLimit,type RoomWorkspaceContextSources} from './room-workspace-context.js';
 import { CodexTaskBridge, LOCAL_CODEX_MODEL } from './codex-task-bridge.js';
 import type { NativeActor } from './codex-native-service.js';
@@ -678,6 +679,26 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
   ];
 }
 
+export function createRoomTimedActionTools(service:TimedActionService, scope:{roomId:string;logicalAgentId:string;bindingId:string;generation:number}):Tool[] {
+  const ownerId=JSON.stringify([scope.roomId,scope.logicalAgentId]);
+  const ownActions=()=>service.getActions().filter(action=>action.executor.kind==='agent_task'&&action.executor.roomTarget?.roomId===scope.roomId&&action.executor.roomTarget.logicalAgentId===scope.logicalAgentId&&action.ownerId===ownerId);
+  return createTimedActionTools(service).filter(tool=>tool.definition.name.startsWith('scheduled_task_')).map(tool=>({...tool,
+    definition:{...tool.definition,description:tool.definition.description+' Only the current collaboration room and current agent are in scope. Due tasks return to this room. Never manage other rooms or user-owned tasks.'},
+    async execute(input){
+      if(tool.definition.name==='scheduled_task_list')return JSON.stringify(ownActions());
+      if(tool.definition.name==='scheduled_task_cancel'){
+        const id=String(input.task_id??'');
+        if(!ownActions().some(action=>action.id===id))return 'Error: room_schedule_forbidden';
+        return JSON.stringify({ok:service.cancelScheduledTask(id,String(input.reason??''),{requestSource:'agent',ownerId})});
+      }
+      try {
+        const name=String(input.name??'').trim(),prompt=String(input.prompt??'').trim();
+        if(!name||!prompt)throw new Error('name and prompt required');
+        const task=service.createRoomScheduledTask({name,prompt,trigger:parseScheduledTaskTrigger(input),policy:{maxRuns:input.max_runs===undefined?undefined:Number(input.max_runs),expiresAt:input.expires_at===undefined?undefined:Number(input.expires_at)}},scope,{requestSource:'agent',ownerId});
+        return JSON.stringify({ok:true,taskId:task.id,nextRunAt:task.nextRunAt,roomId:scope.roomId});
+      }catch(error){return `Error: ${error instanceof Error?error.message:String(error)}`;}
+    }}));
+}
 function parseScheduledTaskTrigger(input: Record<string, unknown>): TimedActionTrigger {
   const frequency = String(input.frequency ?? '').trim();
   if (frequency === 'once') {
@@ -718,6 +739,7 @@ export interface DesktopModelProviderView {
 }
 
 export interface DesktopModelEntryView {
+  projectAgentSelectable?: boolean;
   id: string;
   provider: string;
   model: string;
@@ -750,6 +772,7 @@ export interface DesktopAvailableModelView {
 }
 
 export interface DesktopModelConfigSnapshot {
+  configuredDefaultModelId?: string;
   configPath: string;
   defaultProvider: string;
   defaultModelId: string;
@@ -774,6 +797,7 @@ export interface DesktopUpdateModelRuntimeOptionsInput {
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
+  let roomTimedActions:TimedActionService|undefined;
   const getManagedPythonCommand = options.getManagedPythonCommand;
   const officeDocumentParser = createOfficeDocumentParser({
     onDiagnostic: diagnostic => console.info('[office-parser]', JSON.stringify(diagnostic)),
@@ -815,8 +839,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   } });
   const modelSnapshot = (config: Config): DesktopModelConfigSnapshot => {
     const snapshot = createModelConfigSnapshot(config);
+    snapshot.configuredDefaultModelId = config.defaultModelId;
     snapshot.providers.push({ id: LOCAL_CODEX_MODEL, label: 'Codex', type: 'custom', protocol: 'openai_responses', apiKeyConfigured: false });
-    snapshot.models.push({ id: LOCAL_CODEX_MODEL, provider: LOCAL_CODEX_MODEL, model: LOCAL_CODEX_MODEL, label: 'Codex', isDefault: codexTasks.selected() });
+    snapshot.models.push({ projectAgentSelectable: false, id: LOCAL_CODEX_MODEL, provider: LOCAL_CODEX_MODEL, model: LOCAL_CODEX_MODEL, label: 'Codex', isDefault: codexTasks.selected() });
     if (codexTasks.selected()) { snapshot.defaultModelId=LOCAL_CODEX_MODEL; snapshot.defaultProvider=LOCAL_CODEX_MODEL; for (const model of snapshot.models) model.isDefault=model.id===LOCAL_CODEX_MODEL; }
     return snapshot;
   };
@@ -1646,7 +1671,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     artifactGenerationRegistry.registerTool(tool);
   }
 
-  const createKSwarmTaskHost = (workspaceRoot: string) => {
+  const resolveProjectAgentModel = async (participantId?: string) => {
+    const response = await requestKSwarmJson(options.kswarmService, '/agents');
+    const agents = isRecord(response) && Array.isArray(response.agents) ? response.agents : [];
+    const agent = agents.find((entry: any) => entry.id === (participantId || 'xiaok-worker'));
+    const modelId = agent?.runtimeType === 'xiaok' && typeof agent.desktopModelId === 'string' ? agent.desktopModelId : null;
+    return createProjectAgentModel({ modelId, loadConfig });
+  };
+
+  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string) => {
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     return new InProcessTaskRuntimeHost({
@@ -1661,6 +1694,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         kswarmCreateProjectToolOptions,
         {
           cwd:workspaceRoot,
+          getProjectModel: () => resolveProjectAgentModel(participantId),
           officeToMarkdown: input => officeDocumentParser.parse(input),
           // Each KSwarm scoped registry gets the same main-owned runtime, so the
           // report/slide gateways are reachable there too (design §6.2/§6.3).
@@ -1676,6 +1710,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const createCollaborationRoomTaskRunner = () => {
     const roomTools=buildToolList();
     const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools});
+    connectorsService.bindTools(roomRegistry);
     return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
   };
 
@@ -1710,7 +1745,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       envelope.contextWindow.isComplete
         ? `当前上下文窗口完整：覆盖 sequence ${envelope.contextWindow.fromSequence} 到 ${envelope.contextWindow.toSequence}（共 ${envelope.contextWindow.totalMessages} 条消息中的全部）。`
         : `注意：当前上下文窗口不完整，只覆盖 sequence ${envelope.contextWindow.fromSequence} 到 ${envelope.contextWindow.toSequence}（该协作空间共有 ${envelope.contextWindow.totalMessages} 条消息，本次只看到其中一部分）。严禁断言"某人从未发言""某事没发生"这类需要完整历史才能确认的结论；如需这类结论，只能表述为"截至 sequence ${envelope.contextWindow.toSequence} 的当前快照未见"。`,
-      workspace ? `只在已授权工作目录 ${workspace.context.effectiveCwd} 执行。未支持能力：${ROOM_UNSUPPORTED_FILE_CAPABILITIES.join(', ')}；不得尝试绕过。` : '当前为无文件执行权的讨论模式，不能读取或修改工作目录、运行命令或读取私人笔记。',
+      workspace ? `工作目录：${workspace.context.effectiveCwd}。文件工具限定当前工作目录；技能参考文件使用 skillFetchAssets，目录内图片和文档使用 read_workspace_material。${workspace.context.localCommandsAllowed ? '本机命令已授权，可调用已安装 CLI 及其登录配置；先读取 CLI --help 或 skills 文档，不猜参数，不要求用户提供凭据。' : '本机命令尚未开启；需要运行 CLI 时，说明可在本空间的工作区设置开启“允许本机命令执行”。不要推荐用 CUA、launchd 或手工复制命令绕过授权。'} 周期任务使用 scheduled_task_create，未来执行回到当前空间。未支持能力：${roomUnsupportedCapabilities(workspace.context).join(', ')}；不得尝试绕过。` : '当前为无文件执行权的讨论模式，不能读取或修改工作目录、运行命令或读取私人笔记。',
       '',
       transcript,
     ].join('\n');
@@ -1738,8 +1773,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         return await runRoomWorkspaceExecutor({...workspace,prompt,
         materials:materials.map(item=>materialRegistry.get(item.materialId)).filter((item):item is MaterialRecord=>Boolean(item)),
         onTaskCreated:taskId=>{registeredTaskIds.add(taskId);registerRoomHistoryCapability(taskId,{roomId:envelope.roomId,claimToken});},
-        createRunner:input=>options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
-          {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}),
+        createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
+          {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
       });
       }
       const discussion=createCollaborationRoomTaskRunner();
@@ -1780,7 +1815,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     throwIfAborted();
     const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
     const workspaceRoot = handoff.project.workFolder || (artifactsDir ? dirname(artifactsDir) : process.cwd());
-    const taskHost = createKSwarmTaskHost(workspaceRoot);
+    const taskHost = createKSwarmTaskHost(workspaceRoot, targetParticipantId);
     const runStartedAt = Date.now();
     const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
     const requiredOutputsText = formatKSwarmRequiredOutputs(handoff.task.requiredOutputs);
@@ -1863,7 +1898,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
     const manifests=new Map<string,{summary:string;artifacts:Array<{path:string;label?:string;kind?:string}>}>();
     let binding:Promise<ReturnType<typeof resolveRuntimeModelBinding>>|undefined;
-    const getModelBinding=()=>binding??=loadConfig().then(config=>resolveRuntimeModelBinding(config));
+    const getProjectModel = () => resolveProjectAgentModel(targetParticipantId || context.logicalAgentId);
+    const getModelBinding=()=>binding??=getProjectModel().then(model=>model.binding);
     const prompt=[`KSwarm project task ${handoff.task.id}`,`Project: ${handoff.project.name}`,`Goal: ${handoff.project.goal}`,`Task: ${handoff.task.title}`,handoff.task.brief??'',handoff.task.acceptanceCriteria??'',`Required outputs: ${JSON.stringify(handoff.task.requiredOutputs??[])}`,`Write deliverables to the administrator-selected artifacts directory: ${handoff.project.artifactsDir}. No directory name implies acceptance. Report actual output references, not success claims.`].join('\n');
     const result=await runRoomWorkspaceExecutor({...workspace,prompt,port:{...workspace.port,
       async submitManifest(current,manifest){
@@ -1874,8 +1910,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           await workspace.port.submitManifest(current,{summary:manifest.summary,artifacts});
         }
       },
-    },createRunner:input=>options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
-      {cwd:input.cwd,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}),
+    },createRunner:input=>{ connectorsService.bindTools(input.registry); if(roomTimedActions&&input.context.contextScope.kind==='room_only')for(const tool of createRoomTimedActionTools(roomTimedActions,input.context))input.registry.registerTool(tool); return options.runner??createDesktopModelRunnerWithRegistry(input.registry,input.tools,options.dataRoot,options.kswarmService,materialRegistry,{},
+      {cwd:input.cwd,getProjectModel,roomExecution:{context:input.context,getModelBinding,authorize:input.authorize,takePendingInput:input.takePendingInput}}); },
     });
     return {summary:result.text,artifacts:[...manifests.values()].flatMap(m=>m.artifacts)};
   }
@@ -1897,25 +1933,19 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     };
 
     try {
-      const config = await loadConfig();
-      const model = config.models?.[config.defaultModelId];
-      const provider = config.providers?.[config.defaultProvider];
-      if (!config.defaultProvider || !config.defaultModelId || !model || !provider) {
-        return { ...base, ok: false as const, reason: 'model_config_missing' };
-      }
-
+      const readinessConfig = await loadConfig();
+      if (!Object.keys(readinessConfig.models ?? {}).length) return { ...base, ok: false as const, reason: 'model_config_missing' };
       if (options.readinessModelProbe) {
         const result = await options.readinessModelProbe();
         if (!result.ok) throw new Error(result.error || 'provider_connection_failed');
       } else {
-        const binding = resolveRuntimeModelBinding(config, config.defaultModelId);
-        const adapter = createAdapterFromBinding(binding);
+        const projectModel = await resolveProjectAgentModel(participantId);
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(new DOMException('agent readiness model timeout', 'TimeoutError')), 30_000);
         let sawProtocolResponse = false;
         try {
-          for await (const chunk of streamStatelessSideCallProviderConversation({
-            adapter,
+          for await (const chunk of projectModel.stream({
+            deadline: Date.now() + 30_000,
             messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }] }],
             tools: [],
             systemPrompt: 'Reply with "ok" to verify the current Desktop model connection. Do not use tools.',
@@ -1956,7 +1986,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const projectDeliverableNode = isKSwarmProjectDeliverableWorkflowNode(handoff);
     const deliverableNode = taskDeliverableNode || projectDeliverableNode;
     if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
-    const taskHost = createKSwarmTaskHost(workspaceRoot);
+    const taskHost = createKSwarmTaskHost(workspaceRoot, targetParticipantId);
     const runStartedAt = Date.now();
     const prompt = buildKSwarmWorkflowNodePrompt(handoff, targetParticipantId || 'xiaok-worker', { artifactsDir });
     const runtimeResult = await runKSwarmRuntimeTextTask(taskHost, prompt, {
@@ -2032,7 +2062,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const members = readStringArray(payload.members);
       const fallbackWorkerId = members[0] || 'xiaok-worker';
       const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
-      const runtimeResult = await runKSwarmRuntimeTextTask(host, prompt);
+      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent), prompt);
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
         userGoal: readString(payload.goal),
@@ -2127,7 +2157,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const reviewPrompt = buildKSwarmReviewPrompt(payload);
-      const runtimeResult = await runKSwarmRuntimeTextTask(host, reviewPrompt);
+      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent), reviewPrompt);
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
@@ -2141,7 +2171,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
         if (shouldSynthesizeKSwarmProject(detail)) {
           const synthesisPrompt = buildKSwarmSynthesisPrompt(detail);
-          const synthesis = (await runKSwarmRuntimeTextTask(host, synthesisPrompt)).summary;
+          const synthesis = (await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent), synthesisPrompt)).summary;
           await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/synthesize`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -2232,6 +2262,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return officeDocumentParser.parse(input);
     },
     registerTimedActionService(service: TimedActionService) {
+      roomTimedActions=service;
       for (const tool of createTimedActionTools(service)) {
         registry.registerTool(tool);
       }
@@ -2809,19 +2840,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       capabilities?: string[];
       instructions?: string;
       maxConcurrentTasks?: number;
-    }) {
+      desktopModelId?: string | null;
+    }, context?: { requestSource: 'user' | 'agent' | 'scheduler' }) {
       const config = await loadConfig();
+      if (input.desktopModelId !== undefined) validateProjectAgentModelSelection(input.desktopModelId, 'xiaok', config, context?.requestSource);
       const payload = buildManagedXiaokAgentPayload(input, config);
-      const response = await fetch('http://127.0.0.1:4400/agents', {
+      const semanticPayload = Object.fromEntries(['id', 'name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'outputCapabilities', 'runtimeType', 'runtimeSource', 'runtimeModel', 'runtimeHealth', 'maxConcurrentTasks', 'desktopModelId']
+        .flatMap(key => (payload as unknown as Record<string, unknown>)[key] === undefined ? [] : [[key, (payload as unknown as Record<string, unknown>)[key]]]));
+      return requestKSwarmJson(options.kswarmService, '/agents', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json', 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
+        body: JSON.stringify(semanticPayload),
       });
-      if (!response.ok) {
-        const message = await response.text().catch(() => '');
-        throw new Error(message || `Failed to create managed xiaok agent: ${response.status}`);
-      }
-      return response.json();
     },
     async getSkillDebugConfig() {
       const config = await loadConfig();
@@ -2921,44 +2951,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       return [];
     },
-    async deleteProvider(providerId: string): Promise<void> {
+    async deleteProvider(providerId: string, context?: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
+      if (context?.requestSource !== 'user') throw new Error('model_config_user_required');
       const config = await loadConfig();
       delete config.providers[providerId];
-      // Delete associated models
       for (const [modelId, model] of Object.entries(config.models)) {
-        if (model.provider === providerId) {
-          delete config.models[modelId];
-        }
+        if (model.provider === providerId) delete config.models[modelId];
       }
-      if (config.defaultProvider === providerId) {
-        const remaining = Object.keys(config.providers);
-        config.defaultProvider = remaining[0] ?? 'anthropic';
-        if (remaining.length === 0) {
-          // Ensure at least one provider exists
-          const profile = getProviderProfile('anthropic')!;
-          config.providers['anthropic'] = {
-            type: 'first_party',
-            protocol: profile.protocol,
-            baseUrl: profile.baseUrl,
-            apiKey: undefined,
-          };
-        }
-      }
-      if (config.defaultModelId && config.models[config.defaultModelId]?.provider === providerId) {
-        // Reset to default model of new default provider
-        const profile = getProviderProfile(config.defaultProvider);
-        config.defaultModelId = profile?.defaultModel.modelId ?? `${config.defaultProvider}-default`;
-      }
+      repairModelConfigDefault(config);
       await saveConfig(config);
     },
-    async deleteModel(modelId: string): Promise<void> {
+    async deleteModel(modelId: string, context?: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
+      if (context?.requestSource !== 'user') throw new Error('model_config_user_required');
       const config = await loadConfig();
       delete config.models[modelId];
-      if (config.defaultModelId === modelId) {
-        // Reset to provider default
-        const profile = getProviderProfile(config.defaultProvider);
-        config.defaultModelId = profile?.defaultModel.modelId ?? `${config.defaultProvider}-default`;
-      }
+      repairModelConfigDefault(config);
       await saveConfig(config);
     },
     createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
@@ -4433,6 +4440,19 @@ function ensureDefaultModel(config: Config, providerId: string): string {
   return modelId;
 }
 
+function repairModelConfigDefault(config: Config): void {
+  const current = config.models[config.defaultModelId];
+  if (current && config.providers[current.provider]) {
+    config.defaultProvider = current.provider;
+    return;
+  }
+  const remaining = Object.entries(config.models).filter(([, model]) => config.providers[model.provider]);
+  const next = remaining.find(([, model]) => model.provider === config.defaultProvider) ?? remaining[0];
+  config.defaultModelId = next?.[0] ?? '';
+  config.defaultProvider = next?.[1].provider
+    ?? (config.providers[config.defaultProvider] ? config.defaultProvider : Object.keys(config.providers)[0] ?? '');
+}
+
 function createModelConfigSnapshot(config: Config): DesktopModelConfigSnapshot {
   return {
     configPath: getConfigPath(),
@@ -5229,6 +5249,9 @@ const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
 ].join('\n');
 
 async function streamDesktopToolLoopFinalization(input: {
+  projectModel?: ProjectAgentModel;
+  beforeRequest?: () => Promise<void>;
+  deadline?: number;
   adapter: Pick<ModelAdapter, 'stream'>;
   apiMessages: Message[];
   systemPrompt: string;
@@ -5243,7 +5266,9 @@ async function streamDesktopToolLoopFinalization(input: {
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
-  for await (const chunk of streamDesktopTaskProviderConversation({
+  for await (const chunk of (input.projectModel ? input.projectModel.stream : streamDesktopTaskProviderConversation)({
+    deadline: input.deadline ?? Infinity,
+    beforeRequest: input.beforeRequest,
     adapter: input.adapter,
     messages: input.apiMessages,
     tools: [],
@@ -5307,6 +5332,7 @@ interface ToolLoopStrategies {
 }
 
 interface ToolLoopContext {
+  projectModel?: ProjectAgentModel;
   canResumeSummary?: () => boolean;
   adapter: Pick<ModelAdapter, 'stream'>;
   systemPrompt: string;
@@ -5336,7 +5362,7 @@ interface ToolLoopContext {
   maxIterations?: number;
   onUsage?: (inputTokens: number, outputTokens: number, usageId?: string) => void | Promise<void>;
   mailbox?: DesktopMailboxPort;
-  roomExecution?:{authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined};
+  roomExecution?:{authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined;takePendingImages?:()=>MessageBlock[]};
   onActivity?: (activity: { phase: 'model' | 'thinking' | 'tool'; toolName?: string }) => void;
 }
 
@@ -5744,8 +5770,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     const apiMessages = await prepareDesktopLoopRequest(ctx, streamOptions, iteration > 1, lastRequestInputTokens);
     lastRequestInputTokens = 0;
     let providerInvocationId = `inv_${randomUUID()}`;
-    for await (const chunk of streamDesktopSummaryRecovery({
+    for await (const chunk of (ctx.projectModel ? ctx.projectModel.stream : streamDesktopSummaryRecovery)({
       adapter: ctx.adapter,
+      beforeRequest: ctx.roomExecution?.authorize,
       messages: apiMessages,
       tools: ctx.allToolDefs,
       systemPrompt: ctx.systemPrompt,
@@ -6072,6 +6099,8 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       ctx.signal.throwIfAborted();
       const resultContent = ctx.strategies.processToolResult(result, toolCall.name, toolCall.id);
       toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
+      const materialImages=ctx.roomExecution?.takePendingImages?.()??[];
+      if(ok)toolResults.push(...materialImages);
     }
     ctx.messages.push({ role: 'user', content: toolResults });
     toolResultsAwaitingFinalResponse = true;
@@ -6090,6 +6119,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
     });
     const finalized = await streamDesktopToolLoopFinalization({
+      projectModel: ctx.projectModel,
+      beforeRequest: ctx.roomExecution?.authorize,
+      deadline: ctx.taskDeadline,
       adapter: ctx.adapter,
       apiMessages: await prepareDesktopLoopRequest(ctx, streamOptions, true, lastRequestInputTokens),
       systemPrompt: ctx.systemPrompt,
@@ -6994,6 +7026,7 @@ export function createDesktopModelRunnerWithRegistry(
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
   runnerOptions: {
     cwd?:string;
+    getProjectModel?: () => Promise<ProjectAgentModel>;
     roomDiscussion?:boolean;
     publishedInstructions?:string;
     roomExecution?:{context:RoomWorkspaceContextSources;getModelBinding?:()=>Promise<ReturnType<typeof resolveRuntimeModelBinding>>;authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined};
@@ -7051,6 +7084,13 @@ export function createDesktopModelRunnerWithRegistry(
   }
 
   return async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }, rootContext) => {
+    const pendingRoomImages:MessageBlock[]=[];
+    if(runnerOptions.roomExecution)registry.registerTool({permission:'safe',definition:{name:'read_workspace_material',description:'Read a document or image downloaded into the current collaboration workspace. Use file_path relative to the workspace. Images are supplied to the model visually; documents return extracted text. Paths outside the workspace are forbidden.',inputSchema:{type:'object',properties:{file_path:{type:'string'},maxChars:{type:'number'}},required:['file_path']}},async execute(input,context){
+      const record=await materialRegistry.importMaterial({taskId,sourcePath:String(input.file_path),role:'customer_material',roleSource:'auto'});
+      const result=await executeReadMaterialForDesktop({materialId:record.materialId,maxChars:input.maxChars},{taskId,materials:[record],materialRegistry,signal:context?.signal,officeToMarkdown:runnerOptions.officeToMarkdown,pdfToText:async bytes=>(await import('./pdf-text.js')).extractPdfText(bytes)});
+      if(result.ok)pendingRoomImages.push(...buildImageBlocksForMaterials([record]));
+      return result.result;
+    }});
     if (rootContext && !runnerOptions.multiAgent) throw new Error('unsupported multi-agent runner context');
     if (rootContext) runnerOptions.multiAgent!.service.assertInvocation(rootContext.actor);
     const signal = rootContext?.signal ?? hostSignal;
@@ -7116,12 +7156,13 @@ export function createDesktopModelRunnerWithRegistry(
       : '';
 
     const config = await loadConfig();
-    const binding = await runnerOptions.roomExecution?.getModelBinding?.() ?? resolveRuntimeModelBinding(config);
+    const projectModel = await runnerOptions.getProjectModel?.();
+    const binding = projectModel?.binding ?? await runnerOptions.roomExecution?.getModelBinding?.() ?? resolveRuntimeModelBinding(config);
     const profileId = resolveDesktopHarnessProfileId(binding);
     if (isStrictKimiK3ProfileId(profileId)) {
       validateStrictDesktopHistory(hostHistory);
     }
-    const adapter = createAdapterFromBinding(binding);
+    const adapter = projectModel?.adapter ?? createAdapterFromBinding(binding);
     const skillDebugEnabled = config.skillDebug ?? false;
 
     // Stage analysis for debug mode
@@ -7140,7 +7181,7 @@ export function createDesktopModelRunnerWithRegistry(
     let systemPrompt = skillsContext
       ? `${BASE_SYSTEM_PROMPT}${modelIdentity}\n\nAvailable skills:\n${skillsContext}`
       : `${BASE_SYSTEM_PROMPT}${modelIdentity}`;
-    if(runnerOptions.roomExecution)systemPrompt+='\nUse standard spawn_agent/send_message/followup_task/wait_agent for collaboration. Root must actively call wait_agent to receive child messages/results; children receive pending messages at model boundaries. Unsupported capabilities: '+ROOM_UNSUPPORTED_FILE_CAPABILITIES.join(', ');
+    if(runnerOptions.roomExecution)systemPrompt+='\nUse standard spawn_agent/send_message/followup_task/wait_agent for collaboration. Root must actively call wait_agent to receive child messages/results; children receive pending messages at model boundaries. Unsupported capabilities: '+roomUnsupportedCapabilities(runnerOptions.roomExecution.context as {localCommandsAllowed?:boolean}).join(', ');
     else if(runnerOptions.publishedInstructions)systemPrompt+=`\n\n## Published Room workspace instructions\n${runnerOptions.publishedInstructions}`;
 
     let userText = materialsContext
@@ -7187,6 +7228,7 @@ export function createDesktopModelRunnerWithRegistry(
     try {
       loopResult = await runDesktopToolLoop({
       adapter,
+      projectModel,
       systemPrompt,
       messages,
       allToolDefs,
@@ -7195,7 +7237,7 @@ export function createDesktopModelRunnerWithRegistry(
       signal,
       taskDeadline: resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs),
       cwd: rootContext?.cwd ?? runnerOptions.cwd,
-      roomExecution:runnerOptions.roomExecution,
+      roomExecution:runnerOptions.roomExecution?{...runnerOptions.roomExecution,takePendingImages:()=>pendingRoomImages.splice(0)}:undefined,
       mailbox: rootContext?.mailbox,
       canResumeSummary: rootContext ? () => runnerOptions.multiAgent!.service.canResumeSummary(rootContext) : undefined,
       onActivity: rootContext ? activity => { void runnerOptions.multiAgent!.service.recordActivity(rootContext, activity).catch(() => {}); } : undefined,

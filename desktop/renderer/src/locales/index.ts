@@ -16,7 +16,7 @@ export interface LocaleStrings {
       viewInput: string; nextInput: string; inputLoading: string; inputFailed: string; metadataFailed: string; retryMetadata: string;
       failure: string; deadline: (seconds: number) => string; unknown: string; received: string; currentPending: (count: number) => string;
       inputProgress: (start: number, read: number, total: number) => string; statuses: Record<string, string> };
-    authorization: { title: string; scope: string; warning: string; pathUnavailable: string; unavailable: string;
+    authorization: { workspaceLabel: string; title: string; scope: string; warning: string; pathUnavailable: string; unavailable: string;
       unknown: string; allowed: string; denied: string; operationUnknown: string; query: string; restore: string;
       pause: string; grant: string; confirmPause: string; confirmGrant: string; openSettings: string };
     executionCompleted: string; deliveryCleanupPending: string; deliveryFollowup: string; deliveryHistory: (sourceTaskId: string) => string;
@@ -85,6 +85,11 @@ export interface LocaleStrings {
   collaborationRoomDescriptionLabel: string;
   collaborationRoomMembersLabel: string;
   collaborationRoomSaveMembers: string;
+  collaborationRoomAliasLabel: (name: string) => string;
+  collaborationRoomAliasHint: string;
+  collaborationRoomAliasPlaceholder: string;
+  collaborationRoomAliasFailed: string;
+  collaborationRoomMentionUnknown: string;
   collaborationRoomCreateSubmit: string;
   collaborationRoomCancel: string;
   collaborationRoomSend: string;
@@ -124,6 +129,9 @@ export interface LocaleStrings {
   collaborationRoomNoMembers: string;
   collaborationRoomLinkedProjects: string;
   collaborationRoomMessageByYou: string;
+  collaborationRoomScheduledTrigger: string;
+  collaborationRoomScheduledReply: string;
+  collaborationRoomActivityNotice: string;
   collaborationRoomSystemMessage: string;
   collaborationRoomCreateFailed: string;
   collaborationRoomActionFailed: string;
@@ -2430,6 +2438,12 @@ export interface LocaleStrings {
   projectsEditAgentSave: string;
   projectsEditAgentFallbackToDesktopModel: string;
   projectsEditAgentFallbackToDesktopModelHint: string;
+  projectsAgentModelFollowCurrent: string;
+  projectsAgentModelUnavailable: string;
+  projectsAgentModelVision: string;
+  projectsAgentModelNoVision: string;
+  projectsAgentModelFallbackHint: string;
+  projectsAgentModelLoadFailed: string;
   projectsEditAgentAlreadyUsesDesktopModel: string;
 
   // projects - agents tab
@@ -2513,6 +2527,18 @@ export interface LocaleStrings {
 
   // sidebar - desktop
   sidebarSearch: string;
+  sidebarCategories: string;
+  sidebarTabTasks: string;
+  sidebarTabScheduled: string;
+  sidebarTabProjects: string;
+  sidebarTabCollaboration: string;
+  sidebarAllProjects: string;
+  sidebarAllRooms: string;
+  sidebarEmptyScheduled: string;
+  sidebarEmptyProjects: string;
+  sidebarEmptyRooms: string;
+  sidebarRoomsUnavailable: string;
+  sidebarRetry: string;
   sidebarAutomations: string;
   sidebarScheduled: string;
   sidebarProjects: string;

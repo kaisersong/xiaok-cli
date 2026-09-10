@@ -147,15 +147,15 @@ async function fixture(scenario: Scenario) {
     // Existing Sidebar settings button has no accessible name. Select its
     // actual Bolt icon; do not add a production probe or click a fake settings UI.
     await page.locator('aside button').filter({ has: page.locator('svg.lucide-bolt') }).click();
-    const card = page.getByRole('region', { name: '本地聊天与 Goal 执行', exact: true });
+    const card = page.getByRole('region', { name: '允许聊天与 Goal 执行任务', exact: true });
     await expect(card).toBeVisible(); await expect(card).toContainText(workspace); return card;
   };
   const changeAuthorization = async (allowed: boolean) => {
     const before = await authorization(); const card = await openSettings();
-    await card.getByRole('button', { name: allowed ? '重新授权本地执行' : '暂停本地执行', exact: true }).click();
-    await card.getByRole('button', { name: allowed ? '确认重新授权' : '确认暂停', exact: true }).click();
+    await card.getByRole('button', { name: allowed ? '重新允许执行' : '暂停执行任务', exact: true }).click();
+    await card.getByRole('button', { name: allowed ? '确认允许' : '确认暂停', exact: true }).click();
     await expect.poll(authorization).toMatchObject({ permissionRevision: before.permissionRevision + 1, executionAllowed: allowed, persistenceState: 'confirmed', bootId: before.bootId });
-    await expect(card).toContainText(allowed ? '已允许本地执行' : '本地执行已暂停');
+    await expect(card).toContainText(allowed ? '已允许执行任务' : '任务执行已暂停');
     await page.screenshot({ path: join(root, allowed ? 'settings-allowed.png' : 'settings-denied.png') });
     await page.getByRole('button', { name: '返回', exact: true }).click(); mark(allowed ? 'regranted' : 'denied');
   };

@@ -1,3 +1,4 @@
+import { ProjectAgentModelSelect } from './ProjectAgentModelSelect';
 /**
  * EditAgentModal — edit an existing kswarm agent's configuration.
  * Native CLI runtimes own their provider/model/login configuration.
@@ -18,6 +19,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
   const { updateAgent } = useKSwarm();
   const { t } = useLocale();
 
+  const [desktopModelId, setDesktopModelId] = useState(agent.desktopModelId || '');
   const [name, setName] = useState(agent.name);
   const [instructions, setInstructions] = useState(agent.instructions || '');
   const [fallbackToDesktopModel, setFallbackToDesktopModel] = useState(agent.fallbackToDesktopModel === true);
@@ -30,6 +32,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
     setLoading(true);
     try {
       await updateAgent(agent.id, {
+        ...(agent.runtimeType === 'xiaok' && desktopModelId !== (agent.desktopModelId || '') ? { desktopModelId: desktopModelId || null } : {}),
         name: name.trim(),
         instructions: instructions || undefined,
         fallbackToDesktopModel,
@@ -113,9 +116,7 @@ export function EditAgentModal({ agent, onClose }: EditAgentModalProps) {
           </div>
 
           {agent.runtimeType === 'xiaok' ? (
-            <p className="rounded-lg bg-[var(--c-bg-sub)] px-3 py-2 text-xs text-[var(--c-text-tertiary)]">
-              {t.projectsEditAgentAlreadyUsesDesktopModel}
-            </p>
+            <ProjectAgentModelSelect value={desktopModelId} onChange={setDesktopModelId} />
           ) : (
             <label className="flex items-start gap-2 rounded-lg border border-[var(--c-border-subtle)] p-3">
               <input

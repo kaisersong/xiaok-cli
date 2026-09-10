@@ -29,7 +29,7 @@ describe('semantic desktop IPC', () => {
     expect(assistant.acceptCandidate).toHaveBeenCalledWith({ candidateId: 'candidate-1', requestSource: 'user', collectionId: undefined });
     expect(assistant.rejectCandidate).toHaveBeenCalledWith({ candidateId: 'candidate-1', requestSource: 'user' });
     expect(assistant.activate).toHaveBeenCalledWith({ requestSource: 'user' });
-    expect(kswarm.updateKSwarmAgent).toHaveBeenCalledWith({ id: 'agent-1', changes: { name: 'New' } });
+    expect(kswarm.updateKSwarmAgent).toHaveBeenCalledWith({ id: 'agent-1', changes: { name: 'New' } }, { requestSource: 'user' });
     expect([...handlers.keys()]).not.toContain('desktop:assistant:store');
     expect([...handlers.keys()]).not.toContain('desktop:kswarm:request');
   });

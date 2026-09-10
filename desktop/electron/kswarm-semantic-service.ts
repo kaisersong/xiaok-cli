@@ -1,3 +1,7 @@
+import { loadConfig } from '../../src/utils/config.js';
+import type { Config } from '../../src/types.js';
+import { validateProjectAgentModelSelection } from './project-agent-model.js';
+type MutationContext = { requestSource: 'user' | 'agent' | 'scheduler' };
 import type { LoopLLMPort } from './loop-llm-port.js';
 import type { KSwarmService } from './kswarm-service.js';
 import type {
@@ -14,8 +18,8 @@ export interface KSwarmSemanticService {
   createKSwarmProject(input: Record<string, unknown>): Promise<unknown>;
   updateKSwarmProjectExecutionMode(input: { projectId: string; executionMode: 'direct' | 'auto' | 'workflow_preferred' }): Promise<unknown>;
   deleteKSwarmProject(input: { projectId: string }): Promise<unknown>;
-  createKSwarmAgent(input: Record<string, unknown>): Promise<unknown>;
-  updateKSwarmAgent(input: { id: string; changes: Record<string, unknown> }): Promise<unknown>;
+  createKSwarmAgent(input: Record<string, unknown>, context?: MutationContext): Promise<unknown>;
+  updateKSwarmAgent(input: { id: string; changes: Record<string, unknown> }, context?: MutationContext): Promise<unknown>;
   archiveKSwarmAgent(input: { id: string }): Promise<boolean>;
   startKSwarmAgent(input: { id: string }): Promise<boolean>;
   stopKSwarmAgent(input: { id: string }): Promise<boolean>;
@@ -48,6 +52,7 @@ export function createProjectCapabilityNeedsProposalPort(
 export function createKSwarmSemanticService(options: {
   kswarmService: Gateway;
   teamService: KSwarmTeamService;
+  loadModelConfig?: () => Promise<Config>;
 }): KSwarmSemanticService {
   const { kswarmService, teamService } = options;
 
@@ -104,11 +109,12 @@ export function createKSwarmSemanticService(options: {
     async deleteKSwarmProject(input) {
       return request(`/projects/${encodeSegment(input.projectId)}`, 'DELETE');
     },
-    async createKSwarmAgent(input) {
+    async createKSwarmAgent(input, context) {
       assertAgentPayload(input);
       const runtimeType = typeof input.runtimeType === 'string' && input.runtimeType.trim()
         ? input.runtimeType.trim()
         : 'xiaok';
+      if (input.desktopModelId !== undefined) validateProjectAgentModelSelection(input.desktopModelId, runtimeType, await (options.loadModelConfig ?? loadConfig)(), context?.requestSource);
       const payload: Record<string, unknown> = {
         ...pickAgentPayload(input),
         runtimeType,
@@ -119,8 +125,13 @@ export function createKSwarmSemanticService(options: {
       if (runtimeType === 'xiaok') payload.runtimeSource = 'desktop-agent-runtime';
       return unwrapRecord(await request('/agents', 'POST', payload), 'agent');
     },
-    async updateKSwarmAgent(input) {
+    async updateKSwarmAgent(input, context) {
       assertAgentPayload(input.changes);
+      if (input.changes.desktopModelId !== undefined) {
+        if (context?.requestSource !== 'user') throw new Error('project_agent_model_user_required');
+        const current = unwrapRecord(await request(`/agents/${encodeSegment(input.id)}`, 'GET'), 'agent');
+        validateProjectAgentModelSelection(input.changes.desktopModelId, current.runtimeType, await (options.loadModelConfig ?? loadConfig)(), context.requestSource);
+      }
       return unwrapRecord(await request(`/agents/${encodeSegment(input.id)}`, 'PUT', pickAgentPayload(input.changes)), 'agent');
     },
     async archiveKSwarmAgent(input) {
@@ -180,7 +191,7 @@ function pickProjectPayload(input: Record<string, unknown>): Record<string, unkn
 }
 
 function pickAgentPayload(input: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(['name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'runtimeType', 'customArgs', 'fallbackToDesktopModel']
+  return Object.fromEntries(['name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'runtimeType', 'customArgs', 'fallbackToDesktopModel', 'desktopModelId']
     .flatMap(key => input[key] === undefined ? [] : [[key, input[key]]]));
 }
 

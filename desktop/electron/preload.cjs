@@ -124,6 +124,7 @@ function sanitizeKSwarmSemanticInput(kind, input) {
     capabilities: candidate?.capabilities,
     instructions: candidate?.instructions,
     runtimeType: candidate?.runtimeType,
+    desktopModelId: typeof candidate?.desktopModelId === 'string' || candidate?.desktopModelId === null ? candidate.desktopModelId : undefined,
     maxConcurrentTasks: candidate?.maxConcurrentTasks,
     fallbackToDesktopModel: typeof candidate?.fallbackToDesktopModel === 'boolean' ? candidate.fallbackToDesktopModel : undefined,
   });
@@ -446,6 +447,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   confirmCollaborationRoomWorkspaceArtifact: (input) => ipcRenderer.invoke('desktop:roomWorkspace:confirmArtifact', input),
   registerCollaborationRoomWorkspaceArtifact: (input) => ipcRenderer.invoke('desktop:roomWorkspace:registerArtifact', input),
   mapCollaborationRoomWorkspaceProject: (input) => ipcRenderer.invoke('desktop:roomWorkspace:mapProject', input),
+  setCollaborationRoomLocalCommands: (input) => ipcRenderer.invoke('desktop:roomWorkspace:localCommands', input),
   retryCollaborationRoomWorkspaceChange: (input) => ipcRenderer.invoke('desktop:roomWorkspace:retryChange', input),
   getCollaborationRoom: (roomId) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId),
   createCollaborationRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input),

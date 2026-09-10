@@ -39,6 +39,7 @@ export function createCollaborationRoomBrokerClient(options: {
   );
 
   return {
+    sendScheduledRoomWake: (input:unknown)=>json('POST',`/rooms/${encodeURIComponent(roomIdFrom(input))}/scheduled-wakes`,input),
     createRoom: (input: unknown) => json('POST', '/rooms', input),
     cancelDiscussion: (input: unknown) => json('POST', `/rooms/${encodeURIComponent(roomIdFrom(input))}/discussion/cancel`, input),
     archiveRoom: (input: unknown) => json('POST', `/rooms/${encodeURIComponent(roomIdFrom(input))}/archive`, input),

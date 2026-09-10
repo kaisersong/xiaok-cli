@@ -8,6 +8,7 @@ const { bridge } = vi.hoisted(() => ({ bridge: {} as Record<string, any> }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => bridge }));
 const snapshot = (extra: Partial<RoomWorkspaceSnapshot> = {}): RoomWorkspaceSnapshot => ({ ok: true, phase: 'unbound', revision: 3, permissions: { canManage: true, canRead: true }, claims: [], artifacts: [], ...extra });
 beforeEach(() => {
+  delete bridge.setCollaborationRoomLocalCommands;
   bridge.getCollaborationRoomWorkspace = vi.fn().mockResolvedValue(snapshot());
   bridge.previewCollaborationRoomWorkspace = vi.fn().mockResolvedValue({ ok: true, previewId: 'preview-1', canCommit: true, changes: [{ relativePath: 'my files', kind: 'directory', action: 'create' }], conflicts: [], overlaps: [] });
   bridge.commitCollaborationRoomWorkspace = vi.fn().mockResolvedValue({ ok: true });
@@ -21,6 +22,55 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); window.l
 function mount(roomId = 'r1') { return render(<LocaleProvider><RoomWorkspaceSurface roomId={roomId}><main><textarea aria-label="message" /></main></RoomWorkspaceSurface></LocaleProvider>); }
 async function settings() { fireEvent.click(await screen.findByRole('button', { name: '工作区设置' })); }
 describe('Room workspace real component interaction', () => {
+  it('shows per-room local command consent in settings and sends only the current binding',async()=>{
+    let allowed=false;
+    bridge.getCollaborationRoomWorkspace=vi.fn(async()=>snapshot({phase:'active',bindingId:'b',generation:1,localCommandsAllowed:allowed}));
+    bridge.setCollaborationRoomLocalCommands=vi.fn(async(input:any)=>{allowed=input.enabled;return {ok:true};});
+    mount();await settings();
+    const checkbox=screen.getByRole('checkbox',{name:'允许本机命令执行'});
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByText(/命令拥有当前电脑账户的权限/)).toBeVisible();
+    fireEvent.click(checkbox);
+    await waitFor(()=>expect(bridge.setCollaborationRoomLocalCommands).toHaveBeenCalledWith({roomId:'r1',bindingId:'b',generation:1,enabled:true,requestSource:'user'}));
+    await waitFor(()=>expect(screen.getByRole('checkbox',{name:'允许本机命令执行'})).toBeChecked());
+  });
+  it('keeps a failed instruction draft across explicit refresh and workspace events', async () => {
+    let listener!: (event: any) => void;
+    bridge.onCollaborationRoomEvent = vi.fn(handler => { listener = handler; return () => {}; });
+    bridge.publishCollaborationRoomWorkspaceInstructions.mockResolvedValue({ ok: false, code: 'room_revision_conflict' });
+    mount(); await screen.findByRole('button', { name: '工作区设置' });
+    fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
+    fireEvent.change(screen.getByLabelText('编辑说明'), { target: { value: 'keep my instruction' } });
+    fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
+    await screen.findByRole('alert');
+    listener({ roomId: 'r1', kind: 'workspace_changed' });
+    await waitFor(() => expect(screen.getByLabelText('编辑说明')).toHaveValue('keep my instruction'));
+    expect(screen.getByRole('alert')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
+    await waitFor(() => expect(screen.getByLabelText('编辑说明')).toHaveValue('keep my instruction'));
+  });
+  it('shows the published version and location only after a matching authoritative snapshot', async () => {
+    bridge.publishCollaborationRoomWorkspaceInstructions.mockResolvedValue({ ok: true, snapshot: snapshot({ revision: 4, instructions: { revision: 1, publishedText: 'saved instruction' } }) });
+    mount(); await screen.findByRole('button', { name: '工作区设置' });
+    fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
+    fireEvent.change(screen.getByLabelText('编辑说明'), { target: { value: 'saved instruction' } });
+    fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
+    expect(await screen.findByText('工作说明已发布（版本 1）')).toBeVisible();
+    expect(screen.getByText('说明保存在本协作空间的“工作说明”中，供后续协作任务使用。')).toBeVisible();
+    expect(screen.getAllByText('saved instruction').some(node => node.tagName === 'PRE')).toBe(true);
+    expect(screen.getByLabelText('编辑说明')).toHaveValue('saved instruction');
+  });
+  it('does not discard a draft or report success for an unconfirmed publish snapshot', async () => {
+    bridge.publishCollaborationRoomWorkspaceInstructions.mockResolvedValue({ ok: true, snapshot: snapshot() });
+    mount(); await screen.findByRole('button', { name: '工作区设置' });
+    fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
+    fireEvent.change(screen.getByLabelText('编辑说明'), { target: { value: 'unconfirmed instruction' } });
+    fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '重新读取' }));
+    await waitFor(() => expect(screen.getByLabelText('编辑说明')).toHaveValue('unconfirmed instruction'));
+    expect(screen.queryByText(/工作说明已发布/)).toBeNull();
+  });
   it('keeps optional templates collapsed and preserves the draft across keyboard toggles', async () => {
     mount(); await settings();
     const templateToggle = screen.getByRole('button', { name: '自定义目录模板' });
@@ -90,7 +140,7 @@ describe('Room workspace real component interaction', () => {
   it.each(['workspace_operation_unknown', 'workspace_mapping_pending', 'workspace_drain_pending', 'workspace_activation_pending', 'broker_unavailable'])('blocks another mutation until an authoritative reload after %s', async code => {
     bridge.publishCollaborationRoomWorkspaceInstructions.mockResolvedValue({ ok: false, code });
     mount(); await screen.findByRole('button', { name: '工作区设置' }); fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
-    fireEvent.change(screen.getByLabelText('已发布说明'), { target: { value: 'new rule' } }); fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
+    fireEvent.change(screen.getByLabelText('编辑说明'), { target: { value: 'new rule' } }); fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('操作回执未确认');
     expect(screen.queryByRole('button', { name: '发布新版本' })).not.toBeInTheDocument(); expect(bridge.publishCollaborationRoomWorkspaceInstructions).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: '重新读取' })); await screen.findByRole('button', { name: '工作区设置' });
@@ -146,7 +196,7 @@ describe('Room workspace real component interaction', () => {
     mount(); await screen.findByRole('button', { name: '工作区设置' }); fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
     expect(screen.getAllByText('old published').find(node => node.tagName === 'PRE')).toBeVisible(); expect(screen.getByText('new file')).toBeVisible(); expect(bridge.publishCollaborationRoomWorkspaceInstructions).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText('直接填写说明'));
-    fireEvent.change(screen.getByLabelText('已发布说明'), { target: { value: 'complete edited instruction' } });
+    fireEvent.change(screen.getByLabelText('编辑说明'), { target: { value: 'complete edited instruction' } });
     fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
     await waitFor(() => expect(bridge.publishCollaborationRoomWorkspaceInstructions).toHaveBeenCalledWith(expect.objectContaining({ roomId: 'r1', expectedRevision: 3, publishedText: 'complete edited instruction' })));
   });
@@ -198,10 +248,10 @@ describe('Room workspace real component interaction', () => {
     bridge.onCollaborationRoomEvent = vi.fn(handler => { listener = handler; return () => {}; });
     bridge.getCollaborationRoomWorkspace.mockResolvedValue(snapshot({ bindingId: 'b', generation: 1, phase: 'active', instructions: { revision: 2, publishedText: 'old' } }));
     mount(); await screen.findByRole('button', { name: '工作区设置' }); fireEvent.click(screen.getByRole('tab', { name: '工作说明' }));
-    fireEvent.change(screen.getByLabelText('已发布说明'), { target: { value: 'unsaved draft' } });
+    fireEvent.change(screen.getByLabelText('编辑说明'), { target: { value: 'unsaved draft' } });
     bridge.getCollaborationRoomWorkspace.mockResolvedValue(snapshot({ revision: 4, bindingId: 'b', generation: 1, phase: 'active', instructions: { revision: 3, publishedText: 'new remote' } }));
     listener({ roomId: 'r1', kind: 'workspace_changed' });
-    await screen.findByText('new remote'); expect(screen.getByLabelText('已发布说明')).toHaveValue('unsaved draft');
+    await screen.findByText('new remote'); expect(screen.getByLabelText('编辑说明')).toHaveValue('unsaved draft');
     fireEvent.click(screen.getByRole('button', { name: '发布新版本' }));
     await waitFor(() => expect(bridge.publishCollaborationRoomWorkspaceInstructions).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 3, publishedText: 'unsaved draft' })));
   });

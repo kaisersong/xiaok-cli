@@ -931,7 +931,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:createManagedXiaokAgent', async (_event, input) => {
     log('info', 'createManagedXiaokAgent', { name: input?.name, roles: input?.roles });
-    const r = await services.createManagedXiaokAgent(input);
+    const r = await services.createManagedXiaokAgent(input, { requestSource: 'user' });
     log('info', 'createManagedXiaokAgent ok');
     return r;
   });
@@ -949,12 +949,12 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:deleteProvider', async (_event, providerId) => {
     log('info', 'deleteProvider', { providerId });
-    await services.deleteProvider(providerId);
+    await services.deleteProvider(providerId, { requestSource: 'user' });
     log('info', 'deleteProvider ok');
   });
   ipcMain.handle('desktop:deleteModel', async (_event, modelId) => {
     log('info', 'deleteModel', { modelId });
-    await services.deleteModel(modelId);
+    await services.deleteModel(modelId, { requestSource: 'user' });
     log('info', 'deleteModel ok');
   });
   ipcMain.handle('desktop:kswarm:startProjectPlanning', async (_event, input) => {

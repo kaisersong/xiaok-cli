@@ -18,6 +18,7 @@ export interface AskUserQuestionToolOptions {
 export function createAskUserQuestionTool(options: AskUserQuestionToolOptions = {}): Tool {
   return {
     permission: 'safe',
+    executionPolicy: { waitsForUser: true },
     definition: {
       name: 'AskUserQuestion',
       description: `${options.interactive === false ? 'Unavailable in this non-interactive CLI: no user answer can be collected. Do the work without optional delegation or report the missing decision.\n\n' : ''}Use this tool when you need to ask the user questions during execution. This allows you to:

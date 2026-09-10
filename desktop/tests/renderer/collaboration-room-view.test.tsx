@@ -82,6 +82,17 @@ function renderView(props = {}) {
   );
 }
 
+it('edits a room-local alias and uses its readable name for mentions and senders', async () => {
+  mockGetRoom.mockResolvedValue({ ...activeSnapshot, members: activeSnapshot.members.map(m => m.subject.kind === 'agent' ? { ...m, alias: '研究员', displayName: '研究员' } : m), messages: [{ messageId: 'alias-msg', kind: 'text', text: 'result', sender: { kind: 'agent', logicalAgentId: 'agent-a' } }] });
+  mockUpdateMembers.mockResolvedValue({ ok: true });
+  renderView({ availableAgents: [{ id: 'agent-a', name: 'Agent A' }] });
+  expect(await screen.findByText('研究员')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '参与智能体' }));
+  fireEvent.change(screen.getByLabelText('Agent A 的空间别名'), { target: { value: '评审员' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存成员' }));
+  await waitFor(() => expect(mockUpdateMembers).toHaveBeenCalledWith(expect.objectContaining({ aliasChanges: [{ logicalAgentId: 'agent-a', alias: '评审员' }] })));
+});
+
 const activeSnapshot = {
   ok: true,
   room: { roomId: 'room-1', title: '项目讨论', status: 'active', revision: 3 },
@@ -316,7 +327,7 @@ describe('CollaborationRoomView states', () => {
     const composer = screen.getByRole('textbox', { name: '输入消息，@ 智能体协作，不 @ 默认与小 K 对话' });
     fireEvent.change(composer, { target: { value: '@' } });
     expect(await screen.findByRole('button', { name: /@all/ })).toBeDefined();
-    expect(screen.getByRole('button', { name: /@agent-a.*Agent A/ })).toBeDefined();
+    expect(screen.getByRole('button', { name: /@Agent A/ })).toBeDefined();
   });
 
   it('submits raw text and attachment paths without renderer-owned response policy', async () => {
@@ -582,4 +593,26 @@ describe('CollaborationRoomView states', () => {
     const keys = Object.keys(window.localStorage);
     expect(keys.filter((key) => key.toLowerCase().includes('room'))).toEqual([]);
   });
+});
+
+it('folds scheduled instructions and historical replies while preserving ordinary messages', async () => {
+  mockGetRoom.mockResolvedValue({ ...activeSnapshot, messages: [
+    { messageId: 'tick', kind: 'text', text: '定时指令全文', sender: { kind: 'system' }, sourceRef: { kind: 'scheduled_task' } },
+    { messageId: 'report', kind: 'text', text: '本轮发现新的业务产物\n完整执行记录', sender: { kind: 'agent', logicalAgentId: 'agent-a' }, idempotencyKey: 'wake:tick|agent-a|0|2026-09-11' },
+    { messageId: 'notice', kind: 'workspace_event', sender: { kind: 'system' }, sourceRef: { eventKind: 'artifact.registered' } },
+    { messageId: 'normal', kind: 'text', text: '正常业务讨论', sender: { kind: 'agent', logicalAgentId: 'agent-a' } },
+    { messageId: 'user', kind: 'text', text: '用户追问', sender: { kind: 'user' }, replyToMessageId: 'tick' },
+    { messageId: 'missing', kind: 'text', text: '无法确定来源的回复', sender: { kind: 'agent' }, idempotencyKey: 'wake:missing-source|agent-a|0|date' },
+  ] });
+  renderView();
+  await screen.findByText('正常业务讨论');
+  const cards = screen.getAllByTestId('room-message');
+  for (const index of [0, 1, 2]) expect(cards[index].querySelector('details')).not.toBeNull();
+  for (const index of [0, 1, 2]) expect(cards[index].querySelector('details')).not.toHaveAttribute('open');
+  for (const index of [3, 4, 5]) expect(cards[index].querySelector('details')).toBeNull();
+  expect(cards[1].querySelector('summary')).toHaveTextContent('本轮发现新的业务产物');
+  fireEvent.click(cards[1].querySelector('summary')!);
+  expect(cards[1].querySelector('details')).toHaveAttribute('open');
+  expect(screen.getByText(/完整执行记录/)).toBeVisible();
+  expect(screen.getByTestId('room-message-actions-report')).toBeInTheDocument();
 });

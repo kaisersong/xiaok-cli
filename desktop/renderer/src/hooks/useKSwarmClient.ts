@@ -179,6 +179,7 @@ export interface KSwarmProjectDeliverable {
 }
 
 export interface KSwarmAgent {
+  desktopModelId?: string | null;
   id: string;
   name: string;
   description?: string;
@@ -246,6 +247,7 @@ export interface KSwarmEvent {
 }
 
 export interface CreateAgentInput {
+  desktopModelId?: string | null;
   name: string;
   description?: string;
   roles?: string[];
@@ -798,6 +800,7 @@ function readPrincipleEntries(value: unknown): PrincipleEntry[] {
 function toSemanticAgentInput(input: Partial<CreateAgentInput>): Partial<KSwarmAgentSemanticInput> {
   return Object.fromEntries(Object.entries({
     name: input.name,
+    desktopModelId: input.desktopModelId,
     description: input.description,
     roles: input.roles,
     capabilities: input.capabilities,

@@ -8,6 +8,7 @@ import type {
   TimedActionOwnerKind,
   TimedActionSource,
   TimedActionTrigger,
+  TimedActionRoomTarget,
 } from './timed-action-types.js';
 
 export interface ReminderDeliveryEvent {
@@ -169,6 +170,14 @@ export class TimedActionService {
   }
 
   createScheduledTask(input: CreateScheduledTaskInput): ScheduledTaskRecord {
+    return this.createScheduledTaskRecord(input);
+  }
+  createRoomScheduledTask(input:CreateScheduledTaskInput, target:TimedActionRoomTarget, request:TimedActionMutationRequest):ScheduledTaskRecord {
+    const ownerId=JSON.stringify([target.roomId,target.logicalAgentId]);
+    if(request.requestSource!=='agent'||request.ownerId!==ownerId||!target.roomId||!target.logicalAgentId||!target.bindingId||!Number.isSafeInteger(target.generation)||target.generation<1)throw new Error('room_schedule_forbidden');
+    return this.createScheduledTaskRecord({...input,source:'agent',createdByTaskId:ownerId},target);
+  }
+  private createScheduledTaskRecord(input:CreateScheduledTaskInput,roomTarget?:TimedActionRoomTarget):ScheduledTaskRecord {
     const now = input.now ?? this.now();
     const source = input.source ?? 'user';
     const policy = this.withScheduledTaskDefaults(input.trigger, input.policy, source, now);
@@ -177,7 +186,8 @@ export class TimedActionService {
       title: input.name,
       description: input.description ?? '',
       trigger: input.trigger,
-      executor: { kind: 'agent_task', prompt: input.prompt },
+      executor: { kind: 'agent_task', prompt: input.prompt, ...(roomTarget?{roomTarget:{...roomTarget}}:{}) },
+      userApprovedAuto: roomTarget ? true : undefined,
       policy,
       source,
       createdByTaskId: input.createdByTaskId,
@@ -297,7 +307,7 @@ export class TimedActionService {
       trigger: input.trigger,
       executor: current.executor.kind === 'loop'
         ? current.executor
-        : { kind: 'agent_task', prompt: input.prompt },
+        : { ...current.executor, prompt: input.prompt },
       policy,
       nextDueAt: input.nextDueAt,
       now,

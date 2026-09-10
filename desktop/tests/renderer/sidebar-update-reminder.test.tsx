@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { SidebarComponent } from '../../renderer/src/components/Sidebar';
@@ -42,6 +42,8 @@ vi.mock('../../renderer/src/contexts/thread-list', () => ({
   useThreadList: () => mockThreadList,
 }));
 
+function LocationProbe() { return <output data-testid="sidebar-location">{useLocation().pathname}</output>; }
+
 function renderSidebar(status: {
   checking: boolean;
   available: boolean;
@@ -72,6 +74,7 @@ function renderSidebar(status: {
     <MemoryRouter initialEntries={[initialEntry]}>
       <LocaleProvider>
         <SidebarComponent onOpenSettings={() => {}} />
+        <LocationProbe />
       </LocaleProvider>
     </MemoryRouter>,
   );
@@ -122,6 +125,7 @@ describe('Sidebar update reminder', () => {
       progress: 0,
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true }));
     expect(await screen.findByRole('button', { name: '每日助理晨间建议 daily' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '每日助理晚间整理 daily' })).toBeInTheDocument();
     expect(screen.queryByText('Personal assistant morning briefing')).not.toBeInTheDocument();
@@ -278,7 +282,7 @@ describe('Sidebar update reminder', () => {
     expect(screen.getByText('定时任务 1')).toBeInTheDocument();
     expect(list).toBeTruthy();
     expect(list?.className).not.toContain('max-h-');
-    expect(list?.className).not.toContain('overflow-y-auto');
+    expect(list?.className).toContain('overflow-y-auto');
   });
 
   it('lists active projects without a capped nested scroll container on projects page', async () => {
@@ -304,7 +308,7 @@ describe('Sidebar update reminder', () => {
     expect(screen.getByText('项目 1')).toBeInTheDocument();
     expect(list).toBeTruthy();
     expect(list?.className).not.toContain('max-h-');
-    expect(list?.className).not.toContain('overflow-y-auto');
+    expect(list?.className).toContain('overflow-y-auto');
   });
 
   it('keeps sidebar project id and status hidden until the delayed hover details appear', async () => {
@@ -458,7 +462,7 @@ describe('Sidebar update reminder', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
-  it('keeps scheduled tasks and projects capped as compact summaries on the main page', async () => {
+  it('separates lists into ordered tabs without capped summaries', async () => {
     localStorage.setItem('xiaok:scheduled-tasks', JSON.stringify([
       { id: 'task-1', name: '主界面定时任务 1', frequency: '每天' },
       { id: 'task-2', name: '主界面定时任务 2', frequency: '每天' },
@@ -480,13 +484,19 @@ describe('Sidebar update reminder', () => {
       progress: 0,
     }, '/');
 
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['任务', '定时', '项目', '协作']);
+    expect(screen.queryByText('主界面定时任务 4')).toBeNull();
+    expect(screen.queryByText('主界面项目 4')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true }));
     const scheduledList = (await screen.findByText('主界面定时任务 4')).closest('button')?.parentElement;
-    const projectList = (await screen.findByText('主界面项目 4')).closest('button')?.parentElement;
-
-    expect(scheduledList?.className).toContain('max-h-[90px]');
-    expect(scheduledList?.className).toContain('overflow-y-auto');
-    expect(projectList?.className).toContain('max-h-[150px]');
-    expect(projectList?.className).toContain('overflow-y-auto');
+    expect(scheduledList?.className).not.toContain('max-h-');
+    expect(screen.queryByText('主界面项目 4')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true }));
+    expect(screen.getByTestId('sidebar-location')).toHaveTextContent('/');
+    expect(await screen.findByText('主界面项目 4')).toBeVisible();
+    expect(screen.queryByText('主界面定时任务 4')).toBeNull();
+    fireEvent.keyDown(screen.getByRole('tab', { name: '项目', exact: true }), { key: 'Home' });
+    expect(screen.getByRole('tab', { name: '任务', exact: true })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('keeps every runtime thread for a scheduled task out of the recent list and shows the scheduled entry', async () => {
@@ -558,11 +568,40 @@ describe('Sidebar update reminder', () => {
       progress: 0,
     }, '/', [latestThread, normalThread, oldThread]);
 
-    expect(await screen.findByText('Dream')).toBeInTheDocument();
     expect(await screen.findByTestId('thread-item-thread-normal')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByTestId('thread-item-thread-old-dream')).toBeNull();
       expect(screen.queryByTestId('thread-item-thread-latest-dream')).toBeNull();
     });
+    fireEvent.click(screen.getByRole('tab', { name: '定时', exact: true }));
+    expect(await screen.findByText('Dream')).toBeInTheDocument();
   });
+});
+
+it('lists collaboration rooms in their own tab and shows a retry for read failures', async () => {
+  const listRooms = vi.fn().mockResolvedValueOnce({ ok: false }).mockResolvedValue({ ok: true, rooms: [{ roomId: 'room-a', title: 'Agentic Working 验证', status: 'active' }] });
+  Object.defineProperty(window, 'xiaokDesktop', { configurable: true, value: { listCollaborationRooms: listRooms } });
+  renderSidebar({ checking: false, available: false, downloading: false, downloaded: false, progress: 0 });
+  fireEvent.click(screen.getByRole('tab', { name: '协作', exact: true }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('无法读取协作空间');
+  fireEvent.click(screen.getByRole('button', { name: '重试', exact: true }));
+  expect(await screen.findByRole('button', { name: 'Agentic Working 验证', exact: true })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Agentic Working 验证', exact: true }));
+  expect(screen.getByTestId('sidebar-location')).toHaveTextContent('/collaboration/room-a');
+  expect(screen.getByRole('tab', { name: '协作', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+it('keeps five primary destinations above instance tabs and navigates independently', async () => {
+  renderSidebar({ checking: false, available: false, downloading: false, downloaded: false, progress: 0 });
+  const nav = await screen.findByTestId('sidebar-main-navigation');
+  expect(Array.from(nav.querySelectorAll('button')).map(button => button.textContent)).toEqual(['新建任务', '自动化', '项目', '协作空间', '知识库']);
+  expect(nav.compareDocumentPosition(screen.getByRole('tablist')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  for (const [label, path, tab] of [['自动化','/automations','定时'], ['项目','/projects','项目'], ['协作空间','/collaboration','协作'], ['知识库','/knowledge',null], ['新建任务','/','任务']] as const) {
+    fireEvent.click(Array.from(nav.querySelectorAll('button')).find(button => button.textContent === label)!);
+    expect(screen.getByTestId('sidebar-location')).toHaveTextContent(path);
+    if (tab) expect(screen.getByRole('tab', { name: tab, exact: true })).toHaveAttribute('aria-selected', 'true');
+  }
+  fireEvent.click(screen.getByRole('tab', { name: '项目', exact: true }));
+  expect(screen.getByTestId('sidebar-location').textContent).toBe('/');
+  expect(nav.querySelectorAll('button')).toHaveLength(5);
 });

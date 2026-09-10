@@ -2,6 +2,7 @@ import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
 export const ROOM_WORKSPACE_CHANNELS = {
+  setCollaborationRoomLocalCommands: 'desktop:roomWorkspace:localCommands',
   getCollaborationRoomWorkspace: 'desktop:roomWorkspace:get',
   previewCollaborationRoomWorkspace: 'desktop:roomWorkspace:preview',
   commitCollaborationRoomWorkspace: 'desktop:roomWorkspace:commit',

@@ -87,7 +87,12 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
         `${copy.toolLabel}: ${boldCyan(toolName)}`,
     ];
     if (target) {
-        lines.push(`${target.key}: ${dim(target.value)}`);
+        lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
+    }
+    if (typeof input.command === 'string') {
+        const rule = deriveRule(toolName, input);
+        if (rule.endsWith(' *)'))
+            lines.push(dim(copy.commandApprovalScope(rule)));
     }
     for (let i = 0; i < options.length; i++) {
         const option = options[i];

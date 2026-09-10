@@ -89,7 +89,8 @@ export function createRoomWorkspaceRuntime(options: {
     const scoped = (item: Record<string, unknown>) => item.bindingId === claim.bindingId && item.generation === claim.generation && JSON.stringify(item.contextScope) === JSON.stringify(claim.contextScope);
     const effectiveCwd=project?await resolveWorkspacePath(binding,relative(binding.canonicalRoot,project.mapping.workFolder)):await resolveWorkspacePath(binding,'');
     if(project&&!pathWithin(binding.canonicalRoot,project.mapping.artifactsDir))throw new Error('workspace_project_mapping_outside_root');
-    const context: RoomWorkspaceExecutionContext = { ...claim, effectiveCwd, workspaceRoot:{canonicalRoot:binding.canonicalRoot,identity:binding.identity}, publishedInstructions, confirmedDecisions,
+    const localCommandsAllowed=store.localCommandsAllowed({bindingId:binding.bindingId,roomId:claim.roomId,generation:claim.generation});
+    const context: RoomWorkspaceExecutionContext = { ...claim, effectiveCwd, localCommandsAllowed, workspaceRoot:{canonicalRoot:binding.canonicalRoot,identity:binding.identity}, publishedInstructions, confirmedDecisions,
       artifactRefs: parent?.artifactRefs ?? store.listArtifacts(claim.roomId).filter(scoped),
       handoffRefs: parent?.handoffRefs ?? store.listHandoffs(claim.roomId).filter(scoped),
       ...(childName ? { agentName: childName } : {}) };
@@ -201,8 +202,11 @@ export function createRoomWorkspaceRuntime(options: {
     let rootProof: PhysicalProof | undefined;
     let entered = false;
     const port: WorkspaceExecutionPort = {
-      async authorize(current) {
+      async authorize(current,toolName) {
         controller.signal.throwIfAborted();
+        if(toolName==='bash'){
+          if(!current.localCommandsAllowed||!store.localCommandsAllowed(current))throw new Error('room_command_not_authorized');
+        }
         const binding = bindingFor(current); await resolveWorkspacePath(binding, '');
         await request(current.roomId, 'agent-authorize-read', { ...echo(current), contextScope: current.contextScope, relativePath: '' });
       },

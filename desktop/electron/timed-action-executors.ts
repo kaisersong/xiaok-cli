@@ -24,6 +24,7 @@ export interface NotifyExecutorOptions {
 }
 
 export interface AgentTaskExecutorOptions {
+  executeRoomTask?: (action:TimedActionRecord,context:OverdueRecoveryContext)=>Promise<{taskId:string}>;
   createTask: (input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
@@ -54,6 +55,7 @@ export function createDesktopTimedActionExecutors(
       : options.loopRuntime.executor,
     agent_task: createAgentTaskExecutor({
       createTask: options.createTask,
+      executeRoomTask: options.executeRoomTask,
     }),
   };
 }
@@ -117,6 +119,11 @@ export function createAgentTaskExecutor(options: AgentTaskExecutorOptions): Time
       return { action: 'execute', reason: context.overdueMs > 0 ? 'overdue scheduled task' : 'due scheduled task' };
     },
     async execute(action, context) {
+      if(action.executor.kind==='agent_task'&&action.executor.roomTarget){
+        if(!options.executeRoomTask)throw new Error('room_schedule_executor_unavailable');
+        const result=await options.executeRoomTask(action,context);
+        return {runtimeTaskId:result.taskId};
+      }
       const planMode = shouldRunInPlanMode(action);
       const prompt = buildScheduledExecutionPrompt(action, context, { planMode });
       const result = await options.createTask({

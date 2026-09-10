@@ -21,6 +21,8 @@ export interface RoomUiSnapshot {
   degraded?: boolean;
   room?: { roomId: string; title?: string; description?: string; status: string; revision?: number };
   members?: Array<{
+    alias?: string;
+    displayName?: string;
     subject: { kind: 'user'; userId: string } | { kind: 'agent'; logicalAgentId: string };
     role: string;
     status: string;
@@ -31,6 +33,9 @@ export interface RoomUiSnapshot {
     kind: string;
     sender?: { kind: string; userId?: string; logicalAgentId?: string; service?: string };
     roomSequence?: number;
+    replyToMessageId?: string;
+    idempotencyKey?: string;
+    createdAt?: string;
     sourceRef?: {
       kind?: string;
       attachments?: Array<{ filePath: string; name: string }>;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 
-export type SettingsSelectOption = { value: string; label: string }
+export type SettingsSelectOption = { value: string; label: string; icon?: React.ReactNode }
 
 type Props = {
   value: string
@@ -10,9 +10,10 @@ type Props = {
   onChange: (value: string) => void
   disabled?: boolean
   placeholder?: string
+  id?: string
 }
 
-export function SettingsSelect({ value, options, onChange, disabled, placeholder }: Props) {
+export function SettingsSelect({ value, options, onChange, disabled, placeholder, id }: Props) {
   const [open, setOpen] = useState(false)
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
   const menuRef = useRef<HTMLDivElement>(null)
@@ -49,10 +50,13 @@ export function SettingsSelect({ value, options, onChange, disabled, placeholder
   }
 
   const currentLabel = options.find((o) => o.value === value)?.label ?? placeholder ?? value
+  const currentIcon = options.find((o) => o.value === value)?.icon
 
   const menu = open ? (
     <div
+      role="group"
       ref={menuRef}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); btnRef.current?.focus() } }}
       className="dropdown-menu"
       style={{
         ...menuStyle,
@@ -69,14 +73,14 @@ export function SettingsSelect({ value, options, onChange, disabled, placeholder
         <button
           key={opt.value}
           type="button"
-          onClick={() => { onChange(opt.value); setOpen(false) }}
+          onClick={() => { onChange(opt.value); setOpen(false); btnRef.current?.focus() }}
           className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors bg-[var(--c-bg-menu)] hover:bg-[var(--c-bg-deep)]"
           style={{
             color: value === opt.value ? 'var(--c-text-heading)' : 'var(--c-text-secondary)',
             fontWeight: value === opt.value ? 500 : 400,
           }}
         >
-          <span>{opt.label}</span>
+          <span className="flex min-w-0 items-center gap-2"><span className="truncate">{opt.label}</span>{opt.icon}</span>
           {value === opt.value && <Check size={13} className="shrink-0" />}
         </button>
       ))}
@@ -87,13 +91,15 @@ export function SettingsSelect({ value, options, onChange, disabled, placeholder
     <div className="relative">
       <button
         ref={btnRef}
+        id={id}
+        aria-expanded={open}
         type="button"
         disabled={disabled}
         onClick={handleOpen}
         className="flex w-full items-center justify-between rounded-lg bg-[var(--c-bg-input)] px-3 py-1.5 text-sm text-[var(--c-text-primary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-50"
         style={{ border: '1px solid var(--c-border-subtle)' }}
       >
-        <span className="truncate">{currentLabel}</span>
+        <span className="flex min-w-0 items-center gap-2"><span className="truncate">{currentLabel}</span>{currentIcon}</span>
         <ChevronDown size={13} className="ml-2 shrink-0 text-[var(--c-text-muted)]" />
       </button>
       {menu && createPortal(menu, document.body)}

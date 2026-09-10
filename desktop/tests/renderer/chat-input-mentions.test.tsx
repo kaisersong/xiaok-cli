@@ -39,15 +39,15 @@ function renderInput(onSubmit = vi.fn()) {
 }
 
 describe('ChatInput mention routing UI', () => {
-  it('shows @all and selectable agents, then inserts the stable agent id', async () => {
+  it('shows @all and selectable agents, then inserts the readable agent name', async () => {
     renderInput();
     const textbox = screen.getByRole('textbox');
 
     fireEvent.change(textbox, { target: { value: '@', selectionStart: 1 } });
 
     expect(await screen.findByRole('button', { name: /@all.*所有智能体/ })).toBeDefined();
-    fireEvent.click(screen.getByRole('button', { name: /@agent-a.*Agent A/ }));
-    expect(textbox).toHaveValue('@agent-a ');
+    fireEvent.click(screen.getByRole('button', { name: /@Agent A/ }));
+    expect(textbox).toHaveValue('@Agent A ');
   });
 
   it('keeps the slash Skill menu and @ menu mutually exclusive', async () => {
@@ -58,7 +58,7 @@ describe('ChatInput mention routing UI', () => {
     expect(await screen.findByRole('button', { name: /report.*生成报告/ })).toBeDefined();
 
     fireEvent.change(textbox, { target: { value: '@a', selectionStart: 2 } });
-    expect(await screen.findByRole('button', { name: /@agent-a.*Agent A/ })).toBeDefined();
+    expect(await screen.findByRole('button', { name: /@Agent A/ })).toBeDefined();
     expect(screen.queryByRole('button', { name: /report.*生成报告/ })).toBeNull();
   });
 

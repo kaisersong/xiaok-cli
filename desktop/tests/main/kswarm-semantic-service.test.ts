@@ -103,3 +103,17 @@ describe('KSwarm semantic service', () => {
     ]);
   });
 });
+
+describe('project model reference mutation', () => {
+  it('preserves a user-selected reference and rejects non-user and native CLI changes', async () => {
+    const request = vi.fn(async (path: string, init?: RequestInit) => new Response(JSON.stringify({agent:{id:'a1',runtimeType:'xiaok',...JSON.parse(String(init?.body || '{}'))}})));
+    const service = createKSwarmSemanticService({kswarmService:{request,getDesktopMutationToken:()=> 'token'},teamService:{} as never,
+      loadModelConfig: async()=>({models:{vision:{}},providers:{}} as any)});
+    await expect(service.updateKSwarmAgent({id:'a1',changes:{desktopModelId:'vision'}}, {requestSource:'user'})).resolves.toMatchObject({desktopModelId:'vision'});
+    request.mockClear();
+    await expect(service.updateKSwarmAgent({id:'a1',changes:{desktopModelId:'vision'}}, {requestSource:'agent'})).rejects.toThrow('user_required');
+    expect(request.mock.calls.some(([, init])=>init?.method==='PUT')).toBe(false);
+    await expect(service.createKSwarmAgent({name:'native',runtimeType:'kimi',desktopModelId:'vision'},{requestSource:'user'})).rejects.toThrow('xiaok_required');
+    await expect(service.createKSwarmAgent({name:'missing',runtimeType:'xiaok',desktopModelId:'removed'},{requestSource:'user'})).rejects.toThrow('not_configured');
+  });
+});

@@ -39,6 +39,57 @@ export class AgentSessionState {
     replaceMessages(messages) {
         this.graph.replaceMessages(messages);
     }
+    /** Call only at settled run boundaries, never while a tool is still executing. */
+    repairIncompleteToolCalls() {
+        const messages = this.getMessages();
+        const repaired = [];
+        let changed = false;
+        for (let index = 0; index < messages.length; index += 1) {
+            const message = messages[index];
+            repaired.push(message);
+            if (message.role !== 'assistant')
+                continue;
+            const pending = new Set(message.content.flatMap(block => block.type === 'tool_use' ? [block.id] : []));
+            if (!pending.size)
+                continue;
+            const results = [];
+            let resultMessages = 0;
+            let remainingMessage;
+            // Results may occupy several consecutive messages. Preserve every real result.
+            while (index + 1 < messages.length) {
+                const next = messages[index + 1];
+                if (next.role !== 'user' || !next.content.some(block => block.type === 'tool_result'))
+                    break;
+                for (const block of next.content) {
+                    if (block.type === 'tool_result')
+                        pending.delete(block.tool_use_id);
+                }
+                results.push(...next.content.filter(block => block.type === 'tool_result'));
+                resultMessages += 1;
+                index += 1;
+                const remaining = next.content.filter(block => block.type !== 'tool_result');
+                if (remaining.length) {
+                    remainingMessage = { ...next, content: remaining };
+                    break;
+                }
+            }
+            if (pending.size) {
+                results.push(...[...pending].map(id => ({
+                    type: 'tool_result', tool_use_id: id, is_error: true,
+                    content: '[run-interrupted] Tool result unavailable. Execution may have been interrupted or not started; do not assume no side effects or repeat the operation without checking its state.',
+                })));
+                changed = true;
+            }
+            // OpenAI conversion pairs one result message with the preceding assistant.
+            if (resultMessages > 1)
+                changed = true;
+            repaired.push({ role: 'user', content: results });
+            if (remainingMessage)
+                repaired.push(remainingMessage);
+        }
+        if (changed)
+            this.replaceMessages(repaired);
+    }
     replaceUsage(usage) {
         this.graph.replaceUsage(usage);
     }

@@ -1,4 +1,6 @@
 export interface RoomWorkspaceLabels {
+  localCommands: string; localCommandsHint: string;
+  editInstructions: string; instructionsLocation: string; publishSuccess: (revision: number) => string;
   technicalDetails: string; shortVersion: (id: string) => string; agentAuthor: string;
   registeredEvent: string; confirmedEvent: string; updatedEvent: string;
   retryChange: string;
@@ -16,6 +18,8 @@ export interface RoomWorkspaceLabels {
   operationPending: string; cancelChange: string; phases: Record<string, string>; artifactStates: Record<string, string>;
 }
 export const roomWorkspaceZh: RoomWorkspaceLabels = {
+  localCommands: '允许本机命令执行', localCommandsHint: '允许此空间调用已安装的命令行工具及登录配置。命令拥有当前电脑账户的权限，不受工作目录限制。关闭后停止正在执行的空间任务；开启后对新任务生效。',
+  editInstructions: '编辑说明', instructionsLocation: '说明保存在本协作空间的“工作说明”中，供后续协作任务使用。', publishSuccess: revision => `工作说明已发布（版本 ${revision}）`,
   technicalDetails: '技术详情', shortVersion: id => `版本 ${id}`, agentAuthor: '智能体输出',
   registeredEvent: '成果已登记，可在文件页查看获授权的内容', confirmedEvent: '成果版本已确认', updatedEvent: '工作区状态已更新',
   retryChange: '重试原绑定变更',
@@ -34,6 +38,8 @@ export const roomWorkspaceZh: RoomWorkspaceLabels = {
   artifactStates: { draft: '待确认', confirmed: '已确认', superseded: '已有新版本', missing: '文件已缺失', changed: '文件已变化', pending: '登记待完成', project: '项目验收由 KSwarm 管理' },
 };
 export const roomWorkspaceEn: RoomWorkspaceLabels = {
+  localCommands: 'Allow local commands', localCommandsHint: 'Allow this room to use installed CLI tools and their login configuration. Commands run with your computer account permissions, beyond the workspace directory. Turning this off stops active room tasks; turning it on applies to new tasks.',
+  editInstructions: 'Edit instructions', instructionsLocation: 'Instructions are saved in this room’s Instructions tab for future collaboration tasks.', publishSuccess: revision => `Instructions published (version ${revision})`,
   technicalDetails: 'Technical details', shortVersion: id => `Version ${id}`, agentAuthor: 'Agent output',
   registeredEvent: 'Artifact registered. Authorized content is available in Files.', confirmedEvent: 'Artifact version confirmed', updatedEvent: 'Workspace state updated',
   retryChange: 'Retry original binding change',

@@ -2889,15 +2889,13 @@ describe('desktop services', () => {
     writeFileSync(join(npmDir, 'xiaok.ps1'), '# stub');
     process.env.APPDATA = appDataRoot;
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true, agent: { id: 'xiaok-po' } }),
-    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, agent: { id: 'xiaok-po' } })));
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
     try {
       const services = createDesktopServices({
         dataRoot: join(rootDir, 'data'),
+        kswarmService: { ...mockKSwarmService(), request: fetchMock, getDesktopMutationToken: () => 'user-token' } as any,
         now: () => 300,
       });
 
@@ -2915,9 +2913,9 @@ describe('desktop services', () => {
 
       expect(result).toEqual({ ok: true, agent: { id: 'xiaok-po' } });
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:4400/agents', expect.objectContaining({
+      expect(fetchMock).toHaveBeenCalledWith('/agents', expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-kswarm-mutation-token': 'user-token' },
       }));
       const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
       expect(payload).toMatchObject({
@@ -2927,12 +2925,8 @@ describe('desktop services', () => {
         runtimeSource: 'desktop-agent-runtime',
         roles: ['project_owner'],
         runtimeModel: 'claude-opus-4-7',
-        provider: null,
-        model: null,
-        baseUrl: null,
-        apiKey: null,
-        runtimePath: null,
       });
+      for (const key of ['provider', 'model', 'baseUrl', 'apiKey', 'runtimePath', 'execution']) expect(payload).not.toHaveProperty(key);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -2965,6 +2959,42 @@ describe('desktop services', () => {
     expect(models).toEqual([]);
   });
 
+  it('deletes built-in providers, repairs defaults, and keeps an empty configuration deleted', async () => {
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'test' });
+    await services.deleteProvider('kimi', { requestSource: 'user' });
+    let snapshot = await services.getModelConfig();
+    expect(snapshot.models.some(model => model.id === snapshot.defaultModelId && model.provider === snapshot.defaultProvider)).toBe(true);
+    await services.deleteProvider('anthropic', { requestSource: 'user' });
+    snapshot = await services.getModelConfig();
+    expect(snapshot.providers.filter(provider => provider.id !== 'local-codex')).toEqual([]);
+    expect(snapshot.models.filter(model => model.projectAgentSelectable !== false)).toEqual([]);
+    expect(snapshot.defaultProvider).toBe('');
+    expect(snapshot.defaultModelId).toBe('');
+    expect((await services.getModelConfig()).providers.filter(provider => provider.id !== 'local-codex')).toEqual([]);
+    const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf-8'));
+    expect(persisted.providers).toEqual({});
+    expect(persisted.models).toEqual({});
+  });
+
+  it('clears the default after deleting the last configured model without recreating it', async () => {
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    await services.deleteModel('anthropic-default', { requestSource: 'user' });
+    const snapshot = await services.getModelConfig();
+    expect(snapshot.defaultModelId).toBe('');
+    expect(snapshot.models.filter(model => model.projectAgentSelectable !== false)).toEqual([]);
+  });
+
+  it('rejects non-user provider and model deletion', async () => {
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    for (const requestSource of ['agent', 'scheduler'] as const) {
+      await expect(services.deleteProvider('anthropic', { requestSource })).rejects.toThrow('model_config_user_required');
+      await expect(services.deleteModel('anthropic-default', { requestSource })).rejects.toThrow('model_config_user_required');
+    }
+    await expect(services.deleteProvider('anthropic')).rejects.toThrow('model_config_user_required');
+    expect((await services.getModelConfig()).providers.some(provider => provider.id === 'anthropic')).toBe(true);
+  });
+
   it('deletes a provider and its associated models', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
@@ -2986,7 +3016,7 @@ describe('desktop services', () => {
     expect(snapshot.models.find(m => m.provider === 'custom-test')).toBeDefined();
 
     // Delete the provider
-    await services.deleteProvider('custom-test');
+    await services.deleteProvider('custom-test', { requestSource: 'user' });
 
     snapshot = await services.getModelConfig();
     expect(snapshot.providers.find(p => p.id === 'custom-test')).toBeUndefined();
@@ -3012,7 +3042,7 @@ describe('desktop services', () => {
     expect(testModel).toBeDefined();
 
     // Delete the model
-    await services.deleteModel(testModel!.id);
+    await services.deleteModel(testModel!.id, { requestSource: 'user' });
 
     snapshot = await services.getModelConfig();
     expect(snapshot.models.find(m => m.model === 'claude-test-model')).toBeUndefined();
@@ -3073,7 +3103,7 @@ describe('desktop services', () => {
     expect(snapshot.defaultProvider).toBe('kimi');
 
     // Delete kimi
-    await services.deleteProvider('kimi');
+    await services.deleteProvider('kimi', { requestSource: 'user' });
 
     snapshot = await services.getModelConfig();
     expect(snapshot.defaultProvider).not.toBe('kimi');

@@ -48,7 +48,10 @@ export function LocalExecutionAuthorizationCard() {
   return <section role="region" aria-label={labels.title} className="mb-6 space-y-3 rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4">
     <h3 className="font-medium">{labels.title}</h3>
     <p className="text-sm">{labels.scope}</p>
-    <p className="break-all text-xs">{state.workspace.state === 'ready' ? state.workspace.cwd : state.workspace.state === 'error' ? labels.pathUnavailable : t.loading}</p>
+    <div className="space-y-1 text-xs text-[var(--c-text-secondary)]">
+      <p>{labels.workspaceLabel}</p>
+      <p className="break-all">{state.workspace.state === 'ready' ? state.workspace.cwd : state.workspace.state === 'error' ? labels.pathUnavailable : t.loading}</p>
+    </div>
     <p className="text-sm">{labels.warning}</p>
     <p role="status">{state.phase === 'loading' ? t.loading : state.phase === 'error' ? labels.unavailable : uncertain ? labels.unknown : auth?.executionAllowed ? labels.allowed : labels.denied}</p>
     {failed && <p role="alert">{labels.operationUnknown}</p>}

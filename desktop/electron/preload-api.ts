@@ -301,7 +301,7 @@ export const PRELOAD_API_KEYS = [
   , 'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
   'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
   'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
-  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange'
+  'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands'
 ] as const;
 
 export const KSWARM_PROXY_KEYS = [
@@ -627,6 +627,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   confirmCollaborationRoomWorkspaceArtifact: 'desktop:roomWorkspace:confirmArtifact',
   registerCollaborationRoomWorkspaceArtifact: 'desktop:roomWorkspace:registerArtifact',
   mapCollaborationRoomWorkspaceProject: 'desktop:roomWorkspace:mapProject',
+  setCollaborationRoomLocalCommands: 'desktop:roomWorkspace:localCommands',
   retryCollaborationRoomWorkspaceChange: 'desktop:roomWorkspace:retryChange',
   getCollaborationRoom: 'desktop:collaborationRoom:getRoom',
   createCollaborationRoom: 'desktop:collaborationRoom:createRoom',
@@ -697,6 +698,7 @@ export interface DesktopModelProviderView {
 }
 
 export interface DesktopModelEntryView {
+  projectAgentSelectable?: boolean;
   id: string;
   provider: string;
   model: string;
@@ -720,6 +722,7 @@ export interface DesktopProviderProfileView {
 }
 
 export interface DesktopModelConfigSnapshot {
+  configuredDefaultModelId?: string;
   configPath: string;
   defaultProvider: string;
   defaultModelId: string;
@@ -1154,6 +1157,7 @@ export function sanitizeKSwarmSemanticInput(
     capabilities: candidate?.capabilities,
     instructions: candidate?.instructions,
     runtimeType: candidate?.runtimeType,
+    desktopModelId: typeof candidate?.desktopModelId === 'string' || candidate?.desktopModelId === null ? candidate.desktopModelId : undefined,
     maxConcurrentTasks: candidate?.maxConcurrentTasks,
     fallbackToDesktopModel: typeof candidate?.fallbackToDesktopModel === 'boolean' ? candidate.fallbackToDesktopModel : undefined,
   });
@@ -1215,6 +1219,7 @@ export interface CreateKSwarmProjectSemanticInput {
 }
 
 export interface KSwarmAgentSemanticInput {
+  desktopModelId?: string | null;
   name: string;
   description?: string;
   roles?: string[];
@@ -1262,6 +1267,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
     capabilities?: string[];
     instructions?: string;
     maxConcurrentTasks?: number;
+    desktopModelId?: string | null;
   }): Promise<unknown>;
   testProviderConnection(input: { providerId: string; modelId?: string }): Promise<TestProviderConnectionResult>;
   listAvailableModelsForProvider(providerId: string): Promise<AvailableModelView[]>;
@@ -2044,6 +2050,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     confirmCollaborationRoomWorkspaceArtifact: (input) => ipcRenderer.invoke('desktop:roomWorkspace:confirmArtifact', input) as ReturnType<RoomWorkspaceApi['confirmCollaborationRoomWorkspaceArtifact']>,
     registerCollaborationRoomWorkspaceArtifact: (input) => ipcRenderer.invoke('desktop:roomWorkspace:registerArtifact', input) as ReturnType<RoomWorkspaceApi['registerCollaborationRoomWorkspaceArtifact']>,
     mapCollaborationRoomWorkspaceProject: (input) => ipcRenderer.invoke('desktop:roomWorkspace:mapProject', input) as ReturnType<RoomWorkspaceApi['mapCollaborationRoomWorkspaceProject']>,
+    setCollaborationRoomLocalCommands: (input) => ipcRenderer.invoke('desktop:roomWorkspace:localCommands', input) as ReturnType<RoomWorkspaceApi['setCollaborationRoomLocalCommands']>,
     retryCollaborationRoomWorkspaceChange: (input) => ipcRenderer.invoke('desktop:roomWorkspace:retryChange', input) as ReturnType<RoomWorkspaceApi['retryCollaborationRoomWorkspaceChange']>,
     getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as Promise<unknown>,
     createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,

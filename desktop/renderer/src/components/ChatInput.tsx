@@ -397,7 +397,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
 
   const selectMention = (mention: MentionItem) => {
     if (!mentionTrigger) return;
-    const newValue = `${internalValue.slice(0, mentionTrigger.start)}@${mention.id} ${internalValue.slice(mentionTrigger.end)}`;
+    const newValue = `${internalValue.slice(0, mentionTrigger.start)}@${mention.id === 'all' ? 'all' : mention.label} ${internalValue.slice(mentionTrigger.end)}`;
     setInternalValue(newValue);
     onChange?.(newValue);
     setMentionTrigger(null);
@@ -465,8 +465,8 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
                 onClick={() => selectMention(mention)}
                 className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${index === selectedIndex ? 'bg-[var(--c-accent)]/10' : 'hover:bg-[var(--c-bg-deep)]'}`}
               >
-                <span className="shrink-0 font-mono text-[var(--c-accent)]">@{mention.id}</span>
-                <span className="truncate text-[var(--c-text-secondary)]">{mention.label}</span>
+                <span className="truncate text-[var(--c-accent)]">@{mention.id === 'all' ? 'all' : mention.label}</span>
+                {mention.id === 'all' ? <span className="truncate text-[var(--c-text-secondary)]">{mention.label}</span> : null}
               </button>
             ))}
           </div>

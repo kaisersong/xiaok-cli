@@ -1225,8 +1225,8 @@ function ModelPane() {
       await api.deleteProvider(providerId);
       const updated = await api.getModelConfig();
       setConfig(updated);
-      if (selectedProvider === providerId && updated.providers.length > 0) {
-        setSelectedProvider(updated.providers[0].id);
+      if (selectedProvider === providerId) {
+        setSelectedProvider(updated.providers[0]?.id ?? '');
       }
       setSuccess(t.desktopSettings.providerDeleted);
     } catch (e) {
@@ -1364,7 +1364,7 @@ function ModelPane() {
                             : testResult.error}
                         </span>
                       )}
-                      {provider.type === 'custom' && (
+                      {(
                         <button type="button"
                           onClick={() => handleDeleteProvider(provider.id)}
                           disabled={modelMutationPending}
@@ -3835,7 +3835,6 @@ function GeneralPane() {
 
   return (
     <>
-      <LocalExecutionAuthorizationCard />
       <Section>
         <SectionHeader icon={User}>{t.desktopSettings.profileTitle}</SectionHeader>
         <Card>
@@ -4016,6 +4015,7 @@ function GeneralPane() {
           </div>
         </Card>
       </Section>
+      <LocalExecutionAuthorizationCard />
     </>
   );
 }

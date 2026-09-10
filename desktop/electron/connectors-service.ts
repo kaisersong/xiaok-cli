@@ -41,7 +41,7 @@ export class ConnectorsService {
     const loaded = this.store.load();
     this.loadStatus = loaded.status;
     this.registry = new ConnectorRegistry(loaded.config);
-    this.installTools(this.registry);
+    this.bindTools(this.toolRegistry);
   }
 
   getConfig(): ConnectorsConfigSnapshot {
@@ -99,10 +99,11 @@ export class ConnectorsService {
     };
   }
 
-  private installTools(registry: ConnectorRegistry): void {
-    const search: Tool = createWebSearchTool({ registry });
-    const fetchTool: Tool = createWebFetchTool({ registry });
-    this.toolRegistry.registerTool(search);
-    this.toolRegistry.registerTool(fetchTool);
+  /** Each invocation owns its wrappers; provider configuration stays main-owned. */
+  bindTools(target: ToolRegistry): void {
+    const search: Tool = createWebSearchTool({ registry: this.registry });
+    const fetchTool: Tool = createWebFetchTool({ registry: this.registry });
+    target.registerTool(search);
+    target.registerTool(fetchTool);
   }
 }

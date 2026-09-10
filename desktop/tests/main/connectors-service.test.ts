@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,7 +21,20 @@ describe('ConnectorsService', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     rmSync(dataRoot, { recursive: true, force: true });
+  });
+
+  it('binds scoped registries to the same live desktop connector settings', async () => {
+    const scoped = new ToolRegistry({ autoMode: true }, []);
+    service.bindTools(scoped);
+    const fetchMock=vi.fn(async()=>new Response(JSON.stringify({results:[{title:'Configured search',url:'https://example.com',content:'desktop provider'}]}),{status:200}));
+    vi.stubGlobal('fetch',fetchMock);
+    await service.setConfig({search:{provider:'tavily',tavilyApiKey:'fixture'},fetch:{provider:'basic'}});
+    expect(await scoped.executeTool('web_search',{query:'cli reference'})).toContain('Configured search');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('tavily');
+    scoped.dispose();
+    expect(await toolRegistry.executeTool('web_search',{query:'still live'})).toContain('Configured search');
   });
 
   it('initializes with default config and registers web tools', () => {

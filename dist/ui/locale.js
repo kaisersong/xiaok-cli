@@ -31,6 +31,8 @@ const TOOL_LABELS = {
 const UI_COPY = {
     'zh-CN': {
         approvalTitle: 'xiaok 想要执行以下操作',
+        currentCommandLabel: '本次执行命令',
+        commandApprovalScope: (rule) => `始终允许的范围: ${rule}（* 表示任意参数，参数变化无需重复确认）`,
         subAgents: {
             title: 'SubAgent', idle: '无活动', cleaning: '关闭·清理中', stalled: '等待退出·清理中',
             collaboration: 'SubAgent 协作', arranging: '安排 SubAgent', started: '开始', assignment: '分工', result: '交付摘要', elapsed: '耗时',
@@ -52,6 +54,8 @@ const UI_COPY = {
     },
     en: {
         approvalTitle: 'xiaok wants to run',
+        currentCommandLabel: 'Command to run now',
+        commandApprovalScope: (rule) => `Always-allow scope: ${rule} (* means any arguments; argument changes need no new approval)`,
         subAgents: {
             title: 'SubAgent', idle: 'idle ', cleaning: 'closed·cleaning', stalled: 'awaiting exit·cleaning',
             collaboration: 'SubAgent collaboration', arranging: 'Arrange SubAgent', started: 'started', assignment: 'Assignment', result: 'Result summary', elapsed: 'elapsed',

@@ -8,6 +8,7 @@ export interface RoomWorkspaceArtifact {
   projectId?: string; synchronization?: 'pending' | 'synced';
 }
 export interface RoomWorkspaceSnapshot {
+  localCommandsAllowed?: boolean;
   ok: boolean; code?: string; phase: string; revision: number;
   permissions: { canManage: boolean; canRead: boolean; canReadArtifacts?: boolean; canRegister?: boolean };
   workspaceId?: string; bindingId?: string; generation?: number; rootDisplayPath?: string; operationId?: string;
@@ -33,6 +34,7 @@ export interface RoomWorkspaceFileRequest extends RoomWorkspaceRequest { binding
 export interface RoomWorkspaceFilePage { ok: boolean; code?: string; entries: Array<{ relativePath: string; name: string; kind: 'directory' | 'file'; size?: number; state?: string }>; nextCursor?: string }
 export interface RoomWorkspaceFilePreview { ok: boolean; code?: string; state?: 'current' | 'changed' | 'missing'; text?: string; truncated?: boolean; mimeType?: string; contentHash?: string }
 export interface RoomWorkspaceApi {
+  setCollaborationRoomLocalCommands(input: RoomWorkspaceRequest & { bindingId: string; generation: number; enabled: boolean; requestSource: 'user' }): Promise<RoomWorkspaceMutationResult>;
   retryCollaborationRoomWorkspaceChange(input: RoomWorkspaceRequest & { operationId: string; expectedRevision: number; idempotencyKey: string }): Promise<RoomWorkspaceMutationResult>;
   mapCollaborationRoomWorkspaceProject(input: RoomWorkspaceRequest & { projectId: string; expectedRevision: number; expectedProjectRevision: number; idempotencyKey: string; workFolderRelativePath: string; artifactsRelativePath: string }): Promise<RoomWorkspaceMutationResult>;
   getCollaborationRoomWorkspace(input: RoomWorkspaceRequest): Promise<RoomWorkspaceSnapshot>;

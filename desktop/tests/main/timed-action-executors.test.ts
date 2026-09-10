@@ -250,3 +250,11 @@ describe('timed action executors', () => {
     }
   });
 });
+
+it('room schedules never fall through to ordinary chat execution',async()=>{
+  const createTask=vi.fn(),executeRoomTask=vi.fn(async()=>({taskId:'room-message'}));
+  const action:TimedActionRecord={...baseAction,userApprovedAuto:true,executor:{kind:'agent_task',prompt:'room work',roomTarget:{roomId:'r',logicalAgentId:'a',bindingId:'b',generation:1}}};
+  expect(await createAgentTaskExecutor({createTask,executeRoomTask}).execute(action,baseContext)).toEqual({runtimeTaskId:'room-message'});
+  expect(executeRoomTask).toHaveBeenCalledWith(action,baseContext);expect(createTask).not.toHaveBeenCalled();
+  await expect(createAgentTaskExecutor({createTask}).execute(action,baseContext)).rejects.toThrow('room_schedule_executor_unavailable');
+});

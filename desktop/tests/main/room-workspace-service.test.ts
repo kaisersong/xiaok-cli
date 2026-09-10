@@ -17,6 +17,25 @@ function setup(state: Record<string, unknown> = {}) {
   return { root, selected, store, get, request, service };
 }
 describe('R3 workspace main service production boundary', () => {
+  it('local command grants require a user manager, match the active binding, and persist locally', async () => {
+    const {selected,store,get,request,service}=setup();
+    const physical=await prepareWorkspaceRoot(selected);
+    store.prepareBinding({...physical,roomId:'r',workspaceId:'w',bindingId:'b',generation:1,hostId:'h',requestId:'binding',createdBy:'user.local',payloadDigest:workspaceDigest('binding',physical)});
+    store.activateBinding('b',{workspaceId:'w',activeBindingId:'b',generation:1});
+    const state={ok:true,config:{workspaceId:'w',activeBindingId:'b',generation:1,originHostId:'h',phase:'active',revision:2},permissions:{canManage:true,canRead:true},claims:[]};
+    get.mockResolvedValue(state as never);request.mockResolvedValue({ok:true} as never);
+    expect((await service.getCollaborationRoomWorkspace({roomId:'r'})).localCommandsAllowed).toBe(true);
+    const input={roomId:'r',bindingId:'b',generation:1,enabled:true,requestSource:'user' as const};
+    expect((await service.setCollaborationRoomLocalCommands({...input,requestSource:'agent' as never})).ok).toBe(false);
+    expect((await service.setCollaborationRoomLocalCommands({...input,bindingId:'stale'})).ok).toBe(false);
+    expect((await service.setCollaborationRoomLocalCommands(input)).ok).toBe(true);
+    expect((await service.getCollaborationRoomWorkspace({roomId:'r'})).localCommandsAllowed).toBe(true);
+    get.mockResolvedValue({...state,permissions:{canManage:false,canRead:true}} as never);
+    expect((await service.setCollaborationRoomLocalCommands({...input,enabled:false})).ok).toBe(false);
+    get.mockResolvedValue(state as never);
+    expect((await service.setCollaborationRoomLocalCommands({...input,enabled:false})).ok).toBe(true);
+    expect((await service.getCollaborationRoomWorkspace({roomId:'r'})).localCommandsAllowed).toBe(false);
+  });
   it('preserves authoritative management recovery when the local binding is unavailable', async () => {
     const { service } = setup({ config: { workspaceId: 'w1', activeBindingId: 'missing', generation: 2, phase: 'activation_failed', revision: 7, operationId: 'change-1' }, permissions: { canManage: true, canRead: true } });
     const snapshot = await service.getCollaborationRoomWorkspace({ roomId: 'r1' });

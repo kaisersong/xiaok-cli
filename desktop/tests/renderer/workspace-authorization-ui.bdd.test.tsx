@@ -48,7 +48,7 @@ async function mount() {
   await act(async () => { mounted = render(<MemoryRouter><LocaleProvider><DesktopSettings onClose={vi.fn()} /></LocaleProvider></MemoryRouter>); });
   return mounted;
 }
-function card() { return screen.getByRole('region', { name: '本地聊天与 Goal 执行' }); }
+function card() { return screen.getByRole('region', { name: '允许聊天与 Goal 执行任务' }); }
 function ReadConsumer() {
   const state = useLocalExecutionAuthorization(desktop.api);
   return <output data-testid="shared-authorization">{state.authorization?.persistenceState}</output>;
@@ -62,11 +62,13 @@ afterEach(() => { cleanup(); desktop.api = undefined; vi.restoreAllMocks(); });
 describe('W12/W16: actual GeneralPane execution authorization card', () => {
   it('is accessible without a thread or children and requires an explicit inline revoke confirmation', async () => {
     const f = apiFixture(); await mount(); const controls = within(card());
+    expect(card().parentElement?.lastElementChild).toBe(card());
+    expect(controls.getByText('当前工作目录')).toBeVisible();
     expect(controls.getByText(/项目.*自动化.*不受/)).toBeVisible();
     expect(document.querySelector('.chat-right-panel')).toBeNull();
-    fireEvent.click(controls.getByRole('button', { name: '暂停本地执行' }));
+    fireEvent.click(controls.getByRole('button', { name: '暂停执行任务' }));
     expect(f.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
-    expect(controls.getByText(/重新授权不会续跑旧组/)).toBeVisible();
+    expect(controls.getByText(/旧任务不会自动继续/)).toBeVisible();
     fireEvent.click(controls.getByRole('button', { name: '确认暂停' }));
     await act(async () => {});
     expect(f.api.setLocalExecutionAuthorization).toHaveBeenCalledTimes(1);
@@ -77,22 +79,22 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
 
   it.each([true, false])('unknown desired=%s is restored only by explicitly resending all four original main fields', async desired => {
     const f = apiFixture(unknown(desired)); await mount(); const controls = within(card());
-    expect(controls.queryByRole('button', { name: '重新授权本地执行' })).toBeNull();
-    expect(controls.queryByRole('button', { name: '暂停本地执行' })).toBeNull();
+    expect(controls.queryByRole('button', { name: '重新允许执行' })).toBeNull();
+    expect(controls.queryByRole('button', { name: '暂停执行任务' })).toBeNull();
     expect(f.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
-    fireEvent.click(controls.getByRole('button', { name: '只读查询' })); await act(async () => {});
+    fireEvent.click(controls.getByRole('button', { name: '查看状态' })); await act(async () => {});
     expect(f.api.getLocalExecutionAuthorizationOperation).toHaveBeenCalledWith({ operationId: retry(desired).operationId });
     expect(f.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
-    fireEvent.click(controls.getByRole('button', { name: '核对并恢复记录' })); await act(async () => {});
+    fireEvent.click(controls.getByRole('button', { name: '重新核对设置' })); await act(async () => {});
     expect(f.api.setLocalExecutionAuthorization).toHaveBeenCalledExactlyOnceWith(retry(desired));
   });
 
   it('unknown without a readable pending record cannot guess parameters or offer a fresh grant', async () => {
     const { pendingOperation: _pending, ...snapshot } = unknown(); const f = apiFixture(snapshot); await mount();
     const controls = within(card());
-    expect(controls.queryByRole('button', { name: '核对并恢复记录' })).toBeNull();
-    expect(controls.queryByRole('button', { name: '重新授权本地执行' })).toBeNull();
-    fireEvent.click(controls.getByRole('button', { name: '只读查询' })); await act(async () => {});
+    expect(controls.queryByRole('button', { name: '重新核对设置' })).toBeNull();
+    expect(controls.queryByRole('button', { name: '重新允许执行' })).toBeNull();
+    fireEvent.click(controls.getByRole('button', { name: '查看状态' })); await act(async () => {});
     expect(f.api.getLocalExecutionAuthorization).toHaveBeenCalled();
     expect(f.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
   });
@@ -101,28 +103,28 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
     const f = apiFixture(unknown()); await mount(); expect(card()).toBeVisible();
     await act(async () => { f.publish(allowed(5, resultAllowed)); });
     const controls = within(card());
-    expect(controls.queryByRole('button', { name: '核对并恢复记录' })).toBeNull();
-    const expected = resultAllowed ? '暂停本地执行' : '重新授权本地执行';
+    expect(controls.queryByRole('button', { name: '重新核对设置' })).toBeNull();
+    const expected = resultAllowed ? '暂停执行任务' : '重新允许执行';
     expect(controls.getByRole('button', { name: expected })).toBeEnabled();
     await act(async () => { f.publish(unknown()); f.publish(allowed(4, !resultAllowed)); f.publish(allowed(5, !resultAllowed)); });
     expect(controls.getByRole('button', { name: expected })).toBeEnabled();
-    expect(controls.queryByRole('button', { name: '核对并恢复记录' })).toBeNull();
+    expect(controls.queryByRole('button', { name: '重新核对设置' })).toBeNull();
     expect(f.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
   });
 
   it('same-revision unknown cannot replace the original operation identity or desired value', async () => {
     const f = apiFixture(unknown()); await mount(); expect(card()).toBeVisible();
     await act(async () => { f.publish({ ...unknown(false), pendingOperation: { ...retry(false), operationId: 'exec-auth:boot-a:4:other' } }); });
-    fireEvent.click(within(card()).getByRole('button', { name: '核对并恢复记录' })); await act(async () => {});
+    fireEvent.click(within(card()).getByRole('button', { name: '重新核对设置' })); await act(async () => {});
     expect(f.api.setLocalExecutionAuthorization).toHaveBeenCalledExactlyOnceWith(retry());
   });
 
   it('a mutation transport failure preserves its operation for read-only query and does not retry on render', async () => {
     const f = apiFixture(); f.api.setLocalExecutionAuthorization.mockRejectedValue(new Error('ACK lost'));
-    await mount(); fireEvent.click(within(card()).getByRole('button', { name: '暂停本地执行' }));
+    await mount(); fireEvent.click(within(card()).getByRole('button', { name: '暂停执行任务' }));
     fireEvent.click(within(card()).getByRole('button', { name: '确认暂停' })); await act(async () => {});
     const original = f.api.setLocalExecutionAuthorization.mock.calls[0]![0];
-    fireEvent.click(within(card()).getByRole('button', { name: '只读查询' })); await act(async () => {});
+    fireEvent.click(within(card()).getByRole('button', { name: '查看状态' })); await act(async () => {});
     expect(f.api.getLocalExecutionAuthorizationOperation).toHaveBeenCalledWith({ operationId: original.operationId });
     expect(f.api.setLocalExecutionAuthorization).toHaveBeenCalledTimes(1);
   });
@@ -134,7 +136,7 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
     });
     await mount(); expect(card()).toBeVisible();
     await act(async () => { f.publish(unknown()); initial.resolve({ subscriptionId: f.subscriptions[0]!.id, authorization: allowed() }); });
-    fireEvent.click(within(card()).getByRole('button', { name: '核对并恢复记录' })); await act(async () => {});
+    fireEvent.click(within(card()).getByRole('button', { name: '重新核对设置' })); await act(async () => {});
     expect(f.api.setLocalExecutionAuthorization).toHaveBeenCalledExactlyOnceWith(retry());
   });
 
@@ -142,14 +144,14 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
     const first = apiFixture(unknown()), mounted = await mount(); expect(card()).toBeVisible();
     const response = deferred<Awaited<ReturnType<MultiAgentDesktopAPI['setLocalExecutionAuthorization']>>>();
     first.api.setLocalExecutionAuthorization.mockReturnValue(response.promise);
-    fireEvent.click(within(card()).getByRole('button', { name: '核对并恢复记录' }));
+    fireEvent.click(within(card()).getByRole('button', { name: '重新核对设置' }));
     mounted.unmount();
     const second = apiFixture({ ...allowed(0, false), bootId: 'boot-b' }); await mount();
     await act(async () => {
       first.publish(unknown()); response.resolve({ operationId: retry().operationId, state: 'applied', permissionRevision: 5, executionAllowed: true, persistenceState: 'confirmed' });
     });
-    expect(within(card()).getByRole('button', { name: '重新授权本地执行' })).toBeEnabled();
-    expect(within(card()).queryByRole('button', { name: '核对并恢复记录' })).toBeNull();
+    expect(within(card()).getByRole('button', { name: '重新允许执行' })).toBeEnabled();
+    expect(within(card()).queryByRole('button', { name: '重新核对设置' })).toBeNull();
     expect(first.api.unsubscribeLocalExecutionAuthorization).toHaveBeenCalled();
     expect(second.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
     expect(localStorage.getItem('pendingOperation')).toBeNull();
@@ -157,8 +159,8 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
 
   it('English labels are semantic and do not reuse tool approval or Task answer controls', async () => {
     localStorage.setItem('xiaok:locale', 'en'); apiFixture(); await mount();
-    const controls = within(screen.getByRole('region', { name: 'Local chat and Goal execution' }));
-    expect(controls.getByRole('button', { name: 'Pause local execution' })).toBeVisible();
+    const controls = within(screen.getByRole('region', { name: 'Allow chat and Goal tasks to run' }));
+    expect(controls.getByRole('button', { name: 'Pause task execution' })).toBeVisible();
     expect(controls.queryByRole('button', { name: 'Approve this invocation only' })).toBeNull();
   });
 
@@ -174,8 +176,8 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
   it('a failed workspace-path read is explicit and does not turn a valid authorization snapshot into a guessed path or grant', async () => {
     const f = apiFixture(); f.api.getLocalExecutionWorkspace.mockRejectedValue(new Error('path unavailable'));
     await mount();
-    expect(within(card()).getByText('执行工作区路径不可用')).toBeVisible();
-    expect(within(card()).getByRole('button', { name: '暂停本地执行' })).toBeEnabled();
+    expect(within(card()).getByText('无法读取当前工作目录')).toBeVisible();
+    expect(within(card()).getByRole('button', { name: '暂停执行任务' })).toBeEnabled();
     expect(f.api.setLocalExecutionAuthorization).not.toHaveBeenCalled();
   });
 
@@ -191,12 +193,12 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
     const first = apiFixture(unknown()), refresh = deferred<ExecutionAuthorizationUserSnapshot>();
     first.api.getLocalExecutionAuthorization.mockReturnValue(refresh.promise);
     const mounted = await mount();
-    fireEvent.click(within(card()).getByRole('button', { name: '只读查询' }));
+    fireEvent.click(within(card()).getByRole('button', { name: '查看状态' }));
     await vi.waitFor(() => expect(first.api.getLocalExecutionAuthorization).toHaveBeenCalledTimes(1));
     const second = apiFixture({ ...allowed(), bootId: 'boot-b' });
     second.api.setLocalExecutionAuthorization.mockRejectedValue(new Error('B ACK lost'));
     await act(async () => mounted.rerender(<MemoryRouter><LocaleProvider><DesktopSettings onClose={vi.fn()} /></LocaleProvider></MemoryRouter>));
-    fireEvent.click(within(card()).getByRole('button', { name: '暂停本地执行' })); fireEvent.click(within(card()).getByRole('button', { name: '确认暂停' })); await act(async () => {});
+    fireEvent.click(within(card()).getByRole('button', { name: '暂停执行任务' })); fireEvent.click(within(card()).getByRole('button', { name: '确认暂停' })); await act(async () => {});
     expect(within(card()).getByRole('alert')).toHaveTextContent('尚不能确认操作结果');
     await act(async () => refresh.resolve(allowed(5)));
     expect(within(card()).getByRole('alert')).toHaveTextContent('尚不能确认操作结果');
@@ -215,18 +217,18 @@ describe('W12/W16: actual GeneralPane execution authorization card', () => {
   it('a pending original revoke cannot be completed by a conflicting same-revision allowed projection', async () => {
     const f = apiFixture(unknown(false)); await mount();
     await act(async () => f.publish(allowed(5, true)));
-    expect(within(card()).queryByRole('button', { name: '暂停本地执行' })).toBeNull();
-    fireEvent.click(within(card()).getByRole('button', { name: '核对并恢复记录' })); await act(async () => {});
+    expect(within(card()).queryByRole('button', { name: '暂停执行任务' })).toBeNull();
+    fireEvent.click(within(card()).getByRole('button', { name: '重新核对设置' })); await act(async () => {});
     expect(f.api.setLocalExecutionAuthorization).toHaveBeenCalledExactlyOnceWith(retry(false));
   });
   it('an API replacement does not inherit the outgoing card operation error', async () => {
     const first = apiFixture(); first.api.setLocalExecutionAuthorization.mockRejectedValue(new Error('old error'));
-    const mounted = await mount(); fireEvent.click(within(card()).getByRole('button', { name: '暂停本地执行' }));
+    const mounted = await mount(); fireEvent.click(within(card()).getByRole('button', { name: '暂停执行任务' }));
     fireEvent.click(within(card()).getByRole('button', { name: '确认暂停' })); await act(async () => {});
     expect(within(card()).getByRole('alert')).toBeVisible();
     apiFixture({ ...allowed(), bootId: 'new-boot' });
     await act(async () => mounted.rerender(<MemoryRouter><LocaleProvider><DesktopSettings onClose={vi.fn()} /></LocaleProvider></MemoryRouter>));
     expect(within(card()).queryByRole('alert')).toBeNull();
-    expect(within(card()).getByRole('button', { name: '暂停本地执行' })).toBeEnabled();
+    expect(within(card()).getByRole('button', { name: '暂停执行任务' })).toBeEnabled();
   });
 });

@@ -26,6 +26,8 @@ export declare class AgentSessionState {
     appendAssistantBlocks(blocks: MessageBlock[]): void;
     appendUserToolResults(blocks: MessageBlock[]): void;
     replaceMessages(messages: Message[]): void;
+    /** Call only at settled run boundaries, never while a tool is still executing. */
+    repairIncompleteToolCalls(): void;
     replaceUsage(usage: UsageStats): void;
     replaceCompactions(compactions: CompactionRecord[]): void;
     attachPromptSnapshot(promptSnapshotId: string, memoryRefs: string[], cwd?: string): void;

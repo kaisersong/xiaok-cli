@@ -82,10 +82,10 @@ export function registerSemanticDesktopIpc(
     executionMode: readExecutionMode(input?.executionMode),
   }));
   ipcMain.handle('desktop:kswarm:project:delete', (_event, input) => kswarm.deleteKSwarmProject({ projectId: readId(input?.projectId) }));
-  ipcMain.handle('desktop:kswarm:agent:create', (_event, input) => kswarm.createKSwarmAgent(readRecord(input)));
+  ipcMain.handle('desktop:kswarm:agent:create', (_event, input) => kswarm.createKSwarmAgent(readRecord(input), { requestSource: 'user' }));
   ipcMain.handle('desktop:kswarm:agent:update', (_event, input) => kswarm.updateKSwarmAgent({
     id: readId(input?.agentId), changes: readRecord(input?.patch),
-  }));
+  }, { requestSource: 'user' }));
   ipcMain.handle('desktop:kswarm:agent:archive', (_event, input) => kswarm.archiveKSwarmAgent({ id: readId(input?.agentId) }));
   ipcMain.handle('desktop:kswarm:agent:start', (_event, input) => kswarm.startKSwarmAgent({ id: readId(input?.agentId) }));
   ipcMain.handle('desktop:kswarm:agent:stop', (_event, input) => kswarm.stopKSwarmAgent({ id: readId(input?.agentId) }));

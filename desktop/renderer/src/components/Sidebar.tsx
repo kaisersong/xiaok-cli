@@ -8,6 +8,7 @@ import { useThreadList } from '../contexts/thread-list';
 import { useKSwarm } from '../contexts/KSwarmContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { getDesktopApi } from '../shared/desktop';
+import { SidebarRooms } from './SidebarRooms';
 import { threadDeletionError } from '../lib/thread-deletion';
 import {
   collectScheduledRuntimeTaskIds,
@@ -44,7 +45,8 @@ interface SidebarScheduledTask {
   runtimeTaskId?: string;
 }
 
-type NavSection = 'new' | 'automations' | 'projects' | 'collaboration' | 'knowledge';
+type SidebarTab = 'tasks' | 'scheduled' | 'projects' | 'collaboration';
+const SIDEBAR_TABS: SidebarTab[] = ['tasks', 'scheduled', 'projects', 'collaboration'];
 
 interface SidebarProps {
   onOpenSettings?: () => void;
@@ -86,7 +88,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const [showUpdatePopover, setShowUpdatePopover] = useState(false);
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const updateButtonRef = useRef<HTMLButtonElement>(null);
-  const [activeNav, setActiveNav] = useState<NavSection>('new');
+  const [activeTab, setActiveTab] = useState<SidebarTab>('tasks');
   const [sidebarTasks, setSidebarTasks] = useState<SidebarScheduledTask[]>([]);
   const [scheduledThreadIds, setScheduledThreadIds] = useState<Set<string>>(new Set());
   const [scheduledRuntimeTaskIds, setScheduledRuntimeTaskIds] = useState<Set<string>>(new Set());
@@ -202,20 +204,13 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     return unsub;
   }, []);
 
-  // Sync activeNav with route
-  useEffect(() => {
-    if (routerLocation.pathname === '/scheduled' || routerLocation.pathname.startsWith('/automations')) {
-      setActiveNav('automations');
-    } else if (routerLocation.pathname.startsWith('/projects')) {
-      setActiveNav('projects');
-    } else if (routerLocation.pathname.startsWith('/collaboration')) {
-      setActiveNav('collaboration');
-    } else if (routerLocation.pathname.startsWith('/knowledge')) {
-      setActiveNav('knowledge');
-    } else {
-      setActiveNav('new');
-    }
-  }, [routerLocation.pathname]);
+  const routeTab: SidebarTab = routerLocation.pathname === '/scheduled' || routerLocation.pathname.startsWith('/automations')
+    || [...scheduledThreadIds].some(id => routerLocation.pathname === `/t/${id}`) ? 'scheduled'
+    : routerLocation.pathname.startsWith('/projects') ? 'projects'
+    : routerLocation.pathname.startsWith('/collaboration') ? 'collaboration' : 'tasks';
+  useEffect(() => { setActiveTab(routeTab); }, [routerLocation.pathname, routeTab]);
+  const tabLabels: Record<SidebarTab, string> = { tasks: t.sidebarTabTasks, scheduled: t.sidebarTabScheduled, projects: t.sidebarTabProjects, collaboration: t.sidebarTabCollaboration };
+  const selectTab = (tab: SidebarTab) => { setActiveTab(tab); setEditingId(null); };
 
   const filteredThreads = (searchQuery
     ? threads.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -274,8 +269,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
     }
   };
 
-  const isOnScheduled = activeNav === 'automations';
-  const hideThreadList = activeNav === 'automations' || activeNav === 'projects' || activeNav === 'collaboration' || activeNav === 'knowledge';
   const updateVersion = updateStatus?.version || t.sidebarUpdateNewVersion;
   const currentVersion = updateStatus?.currentVersion;
   const updateError = updateStatus?.error === 'update_install_handoff_unconfirmed'
@@ -298,13 +291,6 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const updateReminderButtonClassName = hasUpdateFailure
     ? 'inline-flex h-8 items-center rounded-md px-1.5 text-[11px] font-medium text-[var(--c-text-tertiary)] transition-[background-color,color,transform] duration-[60ms] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-secondary)] active:scale-[0.96]'
     : 'inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--c-accent)] px-2 text-xs font-medium text-white transition-[background-color,color,transform] duration-[60ms] hover:opacity-90 active:scale-[0.96]';
-  const scheduledListClassName = activeNav === 'automations'
-    ? 'flex flex-col gap-0'
-    : 'flex flex-col gap-0 max-h-[90px] overflow-y-auto sidebar-scroll';
-  const projectListClassName = activeNav === 'projects'
-    ? 'flex flex-col gap-0'
-    : 'flex flex-col gap-0 max-h-[150px] overflow-y-auto sidebar-scroll';
-
   const handleUpdateReminderClick = () => {
     setShowUpdatePopover(prev => {
       const next = !prev;
@@ -329,93 +315,43 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
 
   return (
     <aside
-      className="relative flex w-60 flex-col border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
+      className="relative flex min-h-0 w-60 shrink-0 flex-col overflow-hidden border-r border-[var(--c-border)] bg-[var(--c-bg-sidebar)]"
       style={{ paddingTop: 12 }}
     >
       {deleteError && <p role="alert" className="mx-3 mb-2 text-xs text-[var(--c-text-secondary)]">{deleteError}</p>}
-      {/* Main navigation */}
-      <div className="px-2">
-        <div className="flex flex-col gap-0.5">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
-              activeNav === 'new'
-                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
-                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
-            }`}
-            title={t.sidebarNewTask}
-          >
-            <Plus size={16} className="shrink-0" />
-            <span>{t.sidebarNewTask}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/automations')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
-              isOnScheduled
-                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
-                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
-            }`}
-            title={t.sidebarAutomations}
-          >
-            <Workflow size={16} className="shrink-0" />
-            <span>{t.sidebarAutomations}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/projects')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
-              activeNav === 'projects'
-                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
-                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
-            }`}
-            title={t.sidebarProjects}
-          >
-            <FolderKanban size={16} className="shrink-0" />
-            <span>{t.sidebarProjects}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/collaboration')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
-              activeNav === 'collaboration'
-                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
-                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
-            }`}
-            title={t.sidebarCollaboration}
-          >
-            <MessagesSquare size={16} className="shrink-0" />
-            <span>{t.sidebarCollaboration}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/knowledge')}
-            className={`flex h-[36px] items-center gap-2.5 rounded-lg px-3 text-sm transition-colors ${
-              activeNav === 'knowledge'
-                ? 'bg-[var(--c-bg-deep)] text-[var(--c-text-primary)]'
-                : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)]'
-            }`}
-            title={t.sidebarKnowledge}
-          >
-            <BookOpen size={16} className="shrink-0" />
-            <span>{t.sidebarKnowledge}</span>
-          </button>
-        </div>
+      <nav data-testid="sidebar-main-navigation" className="mx-2 mb-3 flex shrink-0 flex-col gap-0.5 border-b border-[var(--c-border)] pb-3">
+        {[
+          { label: t.sidebarNewTask, path: '/', icon: Plus, tab: 'tasks' as const },
+          { label: t.sidebarAutomations, path: '/automations', icon: Workflow, tab: 'scheduled' as const },
+          { label: t.sidebarProjects, path: '/projects', icon: FolderKanban, tab: 'projects' as const },
+          { label: t.sidebarCollaboration, path: '/collaboration', icon: MessagesSquare, tab: 'collaboration' as const },
+          { label: t.sidebarKnowledge, path: '/knowledge', icon: BookOpen },
+        ].map(({ label, path, icon: Icon, tab }) => {
+          const current = path === '/' ? routerLocation.pathname === '/' : routerLocation.pathname === path || routerLocation.pathname.startsWith(`${path}/`);
+          return <button key={path} type="button" aria-current={current ? 'page' : undefined}
+            onClick={() => { if (tab) selectTab(tab); navigate(path); }}
+            className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--c-accent)] ${current ? 'bg-[var(--c-bg-card)] font-medium text-[var(--c-text-primary)]' : 'text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]'}`}>
+            <Icon size={16} className="shrink-0" /><span>{label}</span>
+          </button>;
+        })}
+      </nav>
+      <div role="tablist" aria-label={t.sidebarCategories} className="mx-2 mb-2 grid shrink-0 grid-cols-4 gap-0.5 rounded-lg bg-[var(--c-bg-deep)] p-1">
+        {SIDEBAR_TABS.map(tab => <button key={tab} id={`sidebar-tab-${tab}`} type="button" role="tab" aria-selected={activeTab === tab} aria-controls={`sidebar-panel-${tab}`} tabIndex={activeTab === tab ? 0 : -1}
+          onClick={() => selectTab(tab)} onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? 3 : (SIDEBAR_TABS.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : 3)) % 4;
+            selectTab(SIDEBAR_TABS[next]);
+            document.getElementById(`sidebar-tab-${SIDEBAR_TABS[next]}`)?.focus();
+          }}
+          className={`h-8 min-w-0 rounded-md text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--c-accent)] ${activeTab === tab ? 'bg-[var(--c-bg-card)] text-[var(--c-text-primary)] shadow-sm' : 'text-[var(--c-text-tertiary)] hover:text-[var(--c-text-primary)]'}`}>{tabLabels[tab]}</button>)}
       </div>
-
-      {/* Divider */}
-      <div className="px-4">
-        <div className="h-px bg-[var(--c-border)]" />
-      </div>
-
+      <div role="tabpanel" id={`sidebar-panel-${activeTab}`} aria-labelledby={`sidebar-tab-${activeTab}`} className="flex min-h-0 flex-1 flex-col">
       {/* Scheduled tasks list */}
-      {sidebarTasks.length > 0 && (activeNav === 'new' || activeNav === 'automations') && (
-        <div className="py-2">
-          <div className="px-3 p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
-            {t.sidebarScheduled}
-          </div>
-          <div className={scheduledListClassName}>
+      {activeTab === 'scheduled' && (
+        <div className="flex min-h-0 flex-1 flex-col py-1">
+          {sidebarTasks.length === 0 ? <p className="px-4 py-6 text-center text-xs text-[var(--c-text-tertiary)]">{t.sidebarEmptyScheduled}</p> : null}
+          <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto px-2 sidebar-scroll">
             {sidebarTasks.map(task => (
               <SidebarScheduledTaskListItem
                 key={task.id}
@@ -429,12 +365,10 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       )}
 
       {/* Active projects list */}
-      {activeProjects.length > 0 && (activeNav === 'new' || activeNav === 'projects') && (
-        <div className="py-2">
-          <div className="px-3 p-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--c-text-tertiary)]">
-            {t.sidebarProjects}
-          </div>
-          <div className={projectListClassName}>
+      {activeTab === 'projects' && (
+        <div className="flex min-h-0 flex-1 flex-col py-1">
+          {activeProjects.length === 0 ? <p className="px-4 py-6 text-center text-xs text-[var(--c-text-tertiary)]">{t.sidebarEmptyProjects}</p> : null}
+          <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto px-2 sidebar-scroll">
             {activeProjects.map(project => (
               <SidebarProjectListItem
                 key={project.id}
@@ -447,7 +381,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       )}
 
       {/* Search + Thread list */}
-      {!hideThreadList && (
+      {activeTab === 'tasks' && (
         <>
           <div className="px-3 py-2">
             <div className="flex items-center gap-2 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-2 py-1.5">
@@ -457,7 +391,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder={t.sidebarSearch}
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--c-text-secondary)]"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--c-text-secondary)]"
               />
               {searchQuery && (
                 <button type="button" onClick={() => setSearchQuery('')} className="text-[var(--c-text-secondary)]">
@@ -467,7 +401,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-2 py-1 sidebar-scroll">
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1 sidebar-scroll">
             {!gtdEnabled && (
               <div className="p-1 text-xs font-medium text-[var(--c-text-secondary)]">
                 {t.sidebarRecent}
@@ -549,11 +483,11 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
         </>
       )}
 
-      {/* Spacer for scheduled/projects page view */}
-      {hideThreadList && <div className="flex-1" />}
+      {activeTab === 'collaboration' ? <SidebarRooms activePath={routerLocation.pathname} onOpen={id => navigate(`/collaboration/${id}`)} /> : null}
+      </div>
 
       {/* Footer with user profile and settings button */}
-      <div className="border-t border-[var(--c-border)] p-3">
+      <div className="shrink-0 border-t border-[var(--c-border)] p-3">
         <div className="flex items-center justify-between">
           <SidebarUserProfile />
           <div className="flex items-center gap-1">

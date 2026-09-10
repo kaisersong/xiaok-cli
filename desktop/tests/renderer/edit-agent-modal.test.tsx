@@ -7,6 +7,8 @@ vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
   useKSwarm: () => ({ updateAgent: mockUpdateAgent }),
 }));
 
+vi.mock('../../renderer/src/api', () => ({api: {getModelConfig: async () => ({defaultModelId: 'text', models: [{id:'vision', label:'Vision', capabilities:['image_in']} ]})}}));
+
 import { EditAgentModal } from '../../renderer/src/components/projects/EditAgentModal';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 
@@ -60,5 +62,21 @@ describe('EditAgentModal: native CLI runtime owns its provider configuration', (
         fallbackToDesktopModel: false,
       });
     });
+  });
+});
+
+describe('EditAgentModal: local Xiaok configured model', () => {
+  it('saves an explicit model reference and can reset it to follow current', async () => {
+    renderModal({...MOCK_AGENT,runtimeType:'xiaok'});
+    fireEvent.click(screen.getByLabelText('模型'));
+    fireEvent.click(await screen.findByRole('button',{name:/Vision/}));
+    fireEvent.click(screen.getByRole('button',{name:'保存',exact:true}));
+    await waitFor(()=>expect(mockUpdateAgent).toHaveBeenCalledWith('agent-001',expect.objectContaining({desktopModelId:'vision'})));
+    cleanup();mockUpdateAgent.mockClear();
+    renderModal({...MOCK_AGENT,runtimeType:'xiaok',desktopModelId:'vision'} as any);
+    fireEvent.click(screen.getByLabelText('模型'));
+    fireEvent.click(await screen.findByRole('button',{name:/跟随小 K 当前模型/}));
+    fireEvent.click(screen.getByRole('button',{name:'保存',exact:true}));
+    await waitFor(()=>expect(mockUpdateAgent).toHaveBeenCalledWith('agent-001',expect.objectContaining({desktopModelId:null})));
   });
 });

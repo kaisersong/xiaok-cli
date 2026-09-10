@@ -2,6 +2,8 @@ export type UiLocale = 'zh-CN' | 'en';
 export declare function getToolActivityLabel(toolName: string, locale?: UiLocale): string;
 export declare function getUiCopy(locale?: UiLocale): {
     readonly approvalTitle: "xiaok 想要执行以下操作";
+    readonly currentCommandLabel: "本次执行命令";
+    readonly commandApprovalScope: (rule: string) => string;
     readonly subAgents: {
         readonly title: "SubAgent";
         readonly idle: "无活动";
@@ -43,6 +45,8 @@ export declare function getUiCopy(locale?: UiLocale): {
     readonly hint: "数字直选  ↑↓ 切换  Enter 确认  Esc 取消";
 } | {
     readonly approvalTitle: "xiaok wants to run";
+    readonly currentCommandLabel: "Command to run now";
+    readonly commandApprovalScope: (rule: string) => string;
     readonly subAgents: {
         readonly title: "SubAgent";
         readonly idle: "idle ";

@@ -5,9 +5,10 @@ export type TimedActionTrigger =
   | { kind: 'weekdays'; hour: number; minute: number }
   | { kind: 'weekly'; dayOfWeek: number; hour: number; minute: number };
 
+export interface TimedActionRoomTarget {roomId:string;logicalAgentId:string;bindingId:string;generation:number}
 export type TimedActionExecutor =
   | { kind: 'notify'; message: string }
-  | { kind: 'agent_task'; prompt: string; materials?: unknown[] }
+  | { kind: 'agent_task'; prompt: string; materials?: unknown[]; roomTarget?:TimedActionRoomTarget }
   | { kind: 'loop'; loopId: string };
 
 export interface TimedActionPolicy {

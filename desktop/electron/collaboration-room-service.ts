@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import type { CollaborationRoomDispatchEvent } from './collaboration-room-wake-dispatcher.js';
 import { XIAOK_WORKER_SEED_ID } from '../shared/kswarm-seed-contract.js';
+import { roomAgentNames } from '../shared/room-agent-names.js';
 
 export interface CollaborationRoomActorContext {
   sessionId: string;
@@ -75,7 +76,7 @@ function containsRoomMention(text: string, logicalAgentId: string): boolean {
   return new RegExp(`(^|\\s)@${escapeRegExp(logicalAgentId)}(?=$|${ROOM_MENTION_BOUNDARY})`, 'u').test(text);
 }
 
-function canonicalRoomRoute(text: string, activeAgentIds: string[]): {
+function canonicalRoomRoute(text: string, activeAgentIds: string[], names = new Map<string, string>()): {
   mentions: Array<{ kind: 'all' } | { kind: 'agent'; logicalAgentId: string }>;
   logicalAgentIds: string[];
   usedDefault: boolean;
@@ -84,7 +85,11 @@ function canonicalRoomRoute(text: string, activeAgentIds: string[]): {
   if (containsRoomMention(text, 'all')) {
     return { mentions: [{ kind: 'all' }], logicalAgentIds: sortedActiveAgentIds, usedDefault: false };
   }
-  const mentionedAgentIds = sortedActiveAgentIds.filter(logicalAgentId => containsRoomMention(text, logicalAgentId));
+  const handles = new Map(sortedActiveAgentIds.map(id => [id, id]));
+  for (const [id, label] of names) handles.set(label, id);
+  const pattern = [...handles.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|');
+  const matched = new Set(pattern ? [...text.matchAll(new RegExp(`(^|\\s)@(${pattern})(?=$|${ROOM_MENTION_BOUNDARY})`, 'gu'))].map(match => handles.get(match[2])) : []);
+  const mentionedAgentIds = sortedActiveAgentIds.filter(id => matched.has(id));
   if (mentionedAgentIds.length > 0) {
     return {
       mentions: mentionedAgentIds.map(logicalAgentId => ({ kind: 'agent' as const, logicalAgentId })),
@@ -145,6 +150,16 @@ export function createCollaborationRoomService({
     return localOwnerContext();
   }
 
+  async function resolveAgentNames(snapshot: unknown) {
+    const members = (snapshot as { members?: Array<{ alias?: string; status?: string; subject?: { kind?: string; logicalAgentId?: string } }> }).members ?? [];
+    let agents: Array<{ id: string; name?: string }> = [];
+    try {
+      const response = await kswarmClient.request('/agents');
+      if (response.ok) { const body = await response.json() as { agents?: typeof agents }; if (Array.isArray(body.agents)) agents = body.agents; }
+    } catch { /* Stable readable fallback when the catalog is unavailable. */ }
+    return roomAgentNames(members.filter(m => m.status === 'active' && m.subject?.kind === 'agent' && m.subject.logicalAgentId).map(m => ({ id: m.subject!.logicalAgentId!, alias: m.alias, name: agents.find(a => a.id === m.subject!.logicalAgentId)?.name })));
+  }
+
   async function callBroker(method: keyof typeof brokerClient, input: unknown) {
     const fn = brokerClient[method] as (input: unknown, ctx: unknown) => Promise<Record<string, unknown>>;
     try {
@@ -197,6 +212,7 @@ export function createCollaborationRoomService({
       expectedRoomRevision: input.expectedRoomRevision,
       addAgentIds,
       removeAgentIds,
+      ...(input.aliasChanges !== undefined ? { aliasChanges: input.aliasChanges } : {}),
     });
   }
 
@@ -214,7 +230,9 @@ export function createCollaborationRoomService({
       return { ok: false, code: (snapshot as { code?: unknown })?.code ?? 'room_not_found' };
     }
     let activeAgentIds = activeAgentIdsFromSnapshot(snapshot);
-    let route = canonicalRoomRoute(input.text.trim(), activeAgentIds);
+    const agentNames = await resolveAgentNames(snapshot);
+    let route = canonicalRoomRoute(input.text.trim(), activeAgentIds, agentNames);
+    if (route.usedDefault && /(^|\s)@\S/u.test(input.text)) return { ok: false, code: 'room_mention_unknown' };
     if (route.usedDefault && !activeAgentIds.includes(XIAOK_WORKER_SEED_ID)) {
       const room = (snapshot as { room?: { revision?: unknown } }).room;
       const backfill = await callBroker('updateRoomMembers', {
@@ -227,7 +245,7 @@ export function createCollaborationRoomService({
         return { ok: false, code: 'room_default_agent_unavailable', cause: backfill?.code };
       }
       activeAgentIds = [...activeAgentIds, XIAOK_WORKER_SEED_ID];
-      route = canonicalRoomRoute(input.text.trim(), activeAgentIds);
+      route = canonicalRoomRoute(input.text.trim(), activeAgentIds, agentNames);
     }
     let logicalAgentIds = route.logicalAgentIds;
     const unavailable: Array<{ logicalAgentId: string; reason: string }> = [];
@@ -351,10 +369,14 @@ export function createCollaborationRoomService({
       }
     }
 
+    const agentNames = await resolveAgentNames(snapshot);
     return {
       ok: true,
       room: snapshot.room,
-      members: snapshot.members ?? [],
+      members: (snapshot.members ?? []).map(member => {
+        const item = member as { subject?: { logicalAgentId?: string } };
+        return { ...item, displayName: agentNames.get(item.subject?.logicalAgentId ?? '') };
+      }),
       messages: snapshot.messages ?? [],
       projects,
       ...(getExecutionCapabilities ? { executionCapabilities: await getExecutionCapabilities().catch(() => []) } : {}),

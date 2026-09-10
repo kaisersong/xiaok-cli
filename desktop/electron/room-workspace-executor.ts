@@ -1,6 +1,7 @@
 import { isAbsolute, resolve, relative } from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { createRoomLocalCommandTool } from './room-local-command.js';
 import { managedWorkspaceWrite, observeWorkspaceFile, resolveWorkspacePath, type WorkspaceRoot } from './room-workspace-local.js';
 import fg from 'fast-glob';
 import { assertWorkspacePath } from '../../src/ai/permissions/workspace.js';
@@ -12,6 +13,7 @@ import type { Tool, ToolExecutionContext } from '../../src/types.js';
 import type { TaskRunner, TaskRunnerInput, HistoryMessage } from '../../src/runtime/task-host/task-runtime-host.js';
 import type { MaterialRecord } from '../../src/runtime/task-host/types.js';
 export interface RoomWorkspaceExecutionContext {
+    localCommandsAllowed?: boolean;
     roomId: string;
     logicalAgentId: string;
     claimId: string;
@@ -76,12 +78,16 @@ export interface RoomRunnerFactoryInput {
     authorize: () => Promise<void>;
 }
 export const ROOM_UNSUPPORTED_FILE_CAPABILITIES = ['bash', 'grep', 'native coding bridge', 'external MCP', 'untracked background processes'] as const;
+export function roomUnsupportedCapabilities(context?:{localCommandsAllowed?:boolean}):readonly string[] {
+    return context?.localCommandsAllowed&&process.platform!=='win32'?ROOM_UNSUPPORTED_FILE_CAPABILITIES.filter(name=>name!=='bash'):ROOM_UNSUPPORTED_FILE_CAPABILITIES;
+}
 const discussionNames = new Set(['web_search', 'web_fetch', 'tool_search', 'get_room_messages_page']);
-const workspaceNames = new Set([...discussionNames, 'read', 'write', 'edit', 'glob', 'skill', 'skill_bundle_refs', 'report_progress', ...MULTI_AGENT_TOOL_NAMES]);
+const workspaceNames = new Set([...discussionNames, 'read', 'write', 'edit', 'read_workspace_material', 'glob', 'skill', 'skillFetchAssets', 'scheduled_task_create', 'scheduled_task_list', 'scheduled_task_cancel', 'skill_bundle_refs', 'report_progress', ...MULTI_AGENT_TOOL_NAMES]);
 /** Every additional runner registration passes the same allowlist. Private
  * notebook, global project mutation, shell and external plugin paths cannot
  * quietly reappear through a shared runner's augmentation step. */
 class RoomToolRegistry extends ToolRegistry {
+    private cleanupPending = false;
     private allowed?: Set<string>;
     private readonly pending = new Set<Promise<unknown>>();
     private readonly observedHashes = new Map<string, string>();
@@ -93,13 +99,15 @@ class RoomToolRegistry extends ToolRegistry {
         allowedTools?: string[];
     }) {
         super({ autoMode: true }, []);
-        this.allowed = roomOptions.mode === 'workspace' ? workspaceNames : discussionNames;
+        this.allowed = new Set(roomOptions.mode === 'workspace' ? workspaceNames : discussionNames);
+        if(roomOptions.mode==='workspace'&&roomOptions.context?.localCommandsAllowed&&process.platform!=='win32')this.allowed.add('bash');
         if (roomOptions.allowedTools !== undefined) {
             const ceiling = new Set([...roomOptions.allowedTools, ...CHILD_COMMUNICATION_TOOL_NAMES, 'tool_search']);
             this.allowed = new Set([...this.allowed].filter(name => ceiling.has(name)));
         }
         for (const tool of roomOptions.tools)
             this.registerTool(tool);
+        if(this.allowed.has('bash'))this.registerTool(createRoomLocalCommandTool({cwd:roomOptions.context!.effectiveCwd,onCleanupPending:()=>{this.cleanupPending=true;}}));
     }
     override registerTool(tool: Tool): void {
         // ToolRegistry registers its local search tool inside super().
@@ -110,6 +118,7 @@ class RoomToolRegistry extends ToolRegistry {
         }
         if (!this.allowed.has(tool.definition.name))
             return;
+        if(tool.definition.name==='bash')tool=createRoomLocalCommandTool({cwd:this.roomOptions.context!.effectiveCwd,onCleanupPending:()=>{this.cleanupPending=true;}});
         const definition = ['write','edit'].includes(tool.definition.name) ? { ...tool.definition, inputSchema: { ...tool.definition.inputSchema, properties: { ...(tool.definition.inputSchema.properties as Record<string,unknown>), expectedHash: { type: ['string','null'], description: 'Expected SHA256 of the last observed file; null permits creation only. Omit to use this runner\'s last successful read.' } } } } : tool.definition;
         super.registerTool({ ...tool, definition, execute: (input, context) => {
                 const operation = (async () => {
@@ -119,15 +128,15 @@ class RoomToolRegistry extends ToolRegistry {
                         context?.signal?.throwIfAborted();
                     }
                     let bound = input;
-                    if (c && ['read', 'write', 'edit'].includes(tool.definition.name))
+                    if (c && ['read', 'write', 'edit', 'read_workspace_material'].includes(tool.definition.name))
                         bound = { ...input, file_path: assertWorkspacePath(resolve(c.effectiveCwd, String(input.file_path)), c.effectiveCwd, 'write') };
-                    if (c && ['read','write','edit'].includes(tool.definition.name)) {
+                    if (c && ['read','write','edit','read_workspace_material'].includes(tool.definition.name)) {
                         const root=c.workspaceRoot as WorkspaceRoot | undefined;
                         if(!root?.canonicalRoot||!root.identity)throw new Error('workspace_root_identity_required');
                         const filePath=resolve(await realpath(c.effectiveCwd),relative(c.effectiveCwd,String(bound.file_path))), relativePath=relative(root.canonicalRoot,filePath);
                         const target=await resolveWorkspacePath(root,relativePath,tool.definition.name==='write');
                         const key=process.platform==='win32'?target.toLowerCase():target;
-                        if(tool.definition.name==='read') {
+                        if(tool.definition.name==='read'||tool.definition.name==='read_workspace_material') {
                             const before=await observeWorkspaceFile(root,relativePath);
                             const result=await tool.execute(bound,c&&context?{...context,session:{...context.session,cwd:c.effectiveCwd}}:context);
                             const after=await observeWorkspaceFile(root,relativePath);
@@ -183,7 +192,9 @@ class RoomToolRegistry extends ToolRegistry {
         return operation;
     }
     async drain(): Promise<void> { while (this.pending.size)
-        await Promise.allSettled([...this.pending]); }
+        await Promise.allSettled([...this.pending]);
+        if(this.cleanupPending)throw new Error('room_command_cleanup_pending');
+    }
 }
 export function createRoomToolRegistry(options: ConstructorParameters<typeof RoomToolRegistry>[0]): RoomToolRegistry {
     if (options.mode === 'workspace' && (!options.context || !options.port || !isAbsolute(options.context.effectiveCwd)))
@@ -247,7 +258,7 @@ export async function runRoomWorkspaceExecutor(options: RoomWorkspaceRunOptions 
                         const acquired = await options.port.acquireChild({ parent, agentId: identity.id, taskName: identity.taskName, turn: ++turnNumber, prompt: message });
                         // A transport bug cannot silently retarget a child to a different scope.
                         try {
-                            for (const key of ['roomId', 'logicalAgentId', 'workspaceId', 'bindingId', 'generation', 'instructionsRevision', 'effectiveCwd', 'protocolVersion', 'originHostId', 'hostIncarnation', 'workspaceRevision', 'instructionsDigest', 'membershipRevision', 'mappingRevision'] as const)
+                            for (const key of ['roomId', 'logicalAgentId', 'workspaceId', 'bindingId', 'generation', 'instructionsRevision', 'effectiveCwd', 'protocolVersion', 'originHostId', 'hostIncarnation', 'workspaceRevision', 'instructionsDigest', 'membershipRevision', 'mappingRevision', 'localCommandsAllowed'] as const)
                                 if (acquired[key] !== parent[key])
                                     throw new Error('workspace_child_context_mismatch');
                             if ([...contexts.values()].some(active => active.claimId === acquired.claimId || active.runId === acquired.runId))
@@ -273,7 +284,7 @@ export async function runRoomWorkspaceExecutor(options: RoomWorkspaceRunOptions 
         try {
             await options.port.authorize(context);
             combined.throwIfAborted();
-            const runner = options.createRunner({ context, registry, tools, cwd: context.effectiveCwd, publishedInstructions: context.publishedInstructions + '\nUse standard spawn_agent/send_message/followup_task/wait_agent for collaboration. The root must actively call wait_agent to receive child messages and results; children receive pending messages at model boundaries. Unsupported: ' + ROOM_UNSUPPORTED_FILE_CAPABILITIES.join(', '),
+            const runner = options.createRunner({ context, registry, tools, cwd: context.effectiveCwd, publishedInstructions: context.publishedInstructions + '\nUse standard spawn_agent/send_message/followup_task/wait_agent for collaboration. The root must actively call wait_agent to receive child messages and results; children receive pending messages at model boundaries. Unsupported: ' + roomUnsupportedCapabilities(context).join(', '),
                 authorize: () => options.port.authorize(context), takePendingInput: runContext?.takePendingInput });
             options.onTaskCreated?.(context.runId);
             const input: TaskRunnerInput = { taskId: context.runId, sessionId: `room_${context.roomId}_${agentId}`, prompt, materials: options.materials ?? [],

@@ -1,3 +1,4 @@
+import { ProjectAgentModelSelect } from './ProjectAgentModelSelect';
 /**
  * CreateAgentModal — 2-step wizard to create a new kswarm agent.
  * Runtime = detected local agent platforms. xiaok 运行时由桌面端主进程
@@ -40,6 +41,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const [name, setName] = useState('');
   const [runtimeType, setRuntimeType] = useState('xiaok');
   const [runtimes, setRuntimes] = useState<RuntimeOption[]>([]);
+  const [desktopModelId, setDesktopModelId] = useState('');
   const [instructions, setInstructions] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -55,7 +57,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
 
   const reset = () => {
     setStep(1); setAgentType('worker'); setName(''); setRuntimeType('xiaok');
-    setInstructions('');
+    setInstructions(''); setDesktopModelId('');
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -67,6 +69,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
     try {
       const result = isXiaok
         ? await api.createManagedXiaokAgent({
+            ...(desktopModelId ? { desktopModelId } : {}),
             name: name.trim(),
             roles,
             instructions: instructions || undefined,
@@ -176,6 +179,8 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
                 })}
               </div>
             </div>
+
+            {isXiaok && <ProjectAgentModelSelect value={desktopModelId} onChange={setDesktopModelId} />}
 
             {isXiaok ? (
               <div className="rounded-xl border border-[var(--c-border-subtle)] bg-[var(--c-bg-sub)] p-3">

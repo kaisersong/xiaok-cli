@@ -1,4 +1,6 @@
-import { mkdtempSync, readFileSync, writeFileSync, symlinkSync, lstatSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, lstatSync, realpathSync } from 'node:fs';
+import { createSkillTool } from '../../../src/ai/skills/tool.js';
+import { loadSkills } from '../../../src/ai/skills/loader.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, it, expect, vi } from 'vitest';
@@ -8,6 +10,32 @@ import type { ToolExecutionContext } from '../../../src/types.js';
 const context = (cwd: string): RoomWorkspaceExecutionContext => { const canonicalRoot=realpathSync(cwd),s=lstatSync(canonicalRoot,{bigint:true});return { roomId: 'r', logicalAgentId: 'a', runId: 'run', claimId: 'claim', executorInstanceId: 'ex', workspaceId: 'w', bindingId: 'b', generation: 1, instructionsRevision: 2, effectiveCwd: cwd, workspaceRoot:{canonicalRoot,identity:{dev:String(s.dev),ino:String(s.ino),birthtimeNs:String(s.birthtimeNs)}}, publishedInstructions: '已发布规则', contextScope: { kind: 'room_only' } }; };
 const port = (): WorkspaceExecutionPort => ({ authorize: vi.fn(async () => { }), acquireChild: vi.fn(async ({ parent, turn, agentId }) => ({ ...parent, runId: `${agentId}-${turn}`, claimId: `claim-${agentId}-${turn}`, executorInstanceId: agentId })), release: vi.fn(async () => { }), submitManifest: vi.fn(async () => { }) });
 describe('room runner physical execution and scoped tools', () => {
+    it.skipIf(process.platform==='win32')('only an explicitly enabled binding exposes commands and revocation denies launch',async()=>{
+        const cwd=mkdtempSync(join(tmpdir(),'room-enabled-command-')),p=port();
+        const r=createRoomToolRegistry({mode:'workspace',tools:buildToolList(undefined,{cwd}),context:{...context(cwd),localCommandsAllowed:true},port:p});
+        expect(r.getToolDefinitions().map(t=>t.name)).toContain('bash');
+        expect(await r.executeTool('bash',{command:'echo local-command-ok',workdir:'/'})).toContain('local-command-ok');
+        vi.mocked(p.authorize).mockRejectedValue(new Error('revoked'));
+        expect(await r.executeTool('bash',{command:'echo forbidden'})).not.toContain('forbidden');
+        await r.drain();r.dispose();
+    });
+    it('reads registered skill references outside the workspace without opening arbitrary files', async () => {
+        const cwd=mkdtempSync(join(tmpdir(),'room-skill-work-')),config=mkdtempSync(join(tmpdir(),'room-skill-config-'));
+        const skillDir=join(config,'skills','cli-guide');
+        mkdirSync(join(skillDir,'references'),{recursive:true});
+        writeFileSync(join(skillDir,'SKILL.md'),'---\nname: cli-guide\ndescription: CLI reference\n---\nRead references/usage.md.');
+        writeFileSync(join(skillDir,'references','usage.md'),'verified CLI usage');
+        const skills=await loadSkills(config,cwd,{builtinRoots:[]});
+        const p=port(),r=createRoomToolRegistry({mode:'workspace',tools:[],context:context(cwd),port:p});
+        r.registerTool(createSkillTool(skills));
+        expect(r.getToolDefinitions().map(t=>t.name)).toContain('skillFetchAssets');
+        expect(await r.executeTool('skillFetchAssets',{skillName:'cli-guide',kind:'references',paths:['references/usage.md']})).toContain('verified CLI usage');
+        expect(await r.executeTool('skillFetchAssets',{skillName:'cli-guide',kind:'references',paths:['../../secret']})).toContain('not_in_manifest');
+        vi.mocked(p.authorize).mockRejectedValue(new Error('revoked'));
+        expect(await r.executeTool('skillFetchAssets',{skillName:'cli-guide',kind:'references',paths:['references/usage.md']})).not.toContain('verified CLI usage');
+        const discussion=createRoomToolRegistry({mode:'discussion',tools:[createSkillTool(skills)]});
+        expect(discussion.getToolDefinitions().map(t=>t.name)).not.toContain('skillFetchAssets');
+    });
     it('real managed write creates requested business parents but never follows an outside parent link',async()=>{
         const cwd=mkdtempSync(join(tmpdir(),'room-nested-')),outside=mkdtempSync(join(tmpdir(),'room-nested-outside-'));
         const r=createRoomToolRegistry({mode:'workspace',tools:buildToolList(undefined,{cwd}),context:context(cwd),port:port()});

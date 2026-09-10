@@ -188,6 +188,10 @@ export class RoomWorkspaceLocalStore {
       CREATE TABLE IF NOT EXISTS room_workspace_outbox (event_id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL, event_kind TEXT NOT NULL, data TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0, UNIQUE(ticket_id,event_kind));`);
   }
   close() { this.db.close(); }
+  localCommandsAllowed(scope: {bindingId:string;roomId:string;generation:number}):boolean {
+    const grant=this.getRecord<{enabled:boolean;roomId:string;generation:number}>('local-command-grant',scope.bindingId);
+    return grant===null || grant.enabled===true&&grant.roomId===scope.roomId&&grant.generation===scope.generation;
+  }
   getRecord<T>(kind: string, key: string): T | null {
     const row = this.db.prepare('SELECT data FROM room_workspace_local_journal WHERE kind=? AND key=?').get(kind, key) as { data: string } | undefined;
     return row ? JSON.parse(row.data) as T : null;

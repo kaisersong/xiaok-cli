@@ -31,6 +31,7 @@ export function createRoomWorkspaceService(options: {
   ensureProtocol?: () => Promise<void>;
   kswarmRequest?: (path: string, init?: RequestInit) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
   getRoomProjects?: (roomId: string) => Promise<Array<Record<string, unknown>>>;
+  cancelRoomExecution?: (roomId: string) => Promise<unknown>;
 }) {
   const { store, broker } = options;
   const mappingRecovery = options.kswarmRequest ? createRoomWorkspaceMappingRecovery({ store, broker, isMutationOwner: options.isMutationOwner, kswarmRequest: options.kswarmRequest }) : undefined;
@@ -121,6 +122,19 @@ export function createRoomWorkspaceService(options: {
         return { ok: true, operationId: input.idempotencyKey, snapshot: await api.getCollaborationRoomWorkspace(input) };
       } catch (error) { return { ok: false, code: failureCode(error) }; }
     },
+    async setCollaborationRoomLocalCommands(input) {
+      try {
+        if(input.requestSource!=='user'||typeof input.enabled!=='boolean')throw new Error('room_actor_forbidden');
+        if(!options.isMutationOwner())throw new Error('workspace_mutation_owner_busy');
+        const snapshot=await state(input.roomId,true),config=snapshot.config;
+        if(!config||config.phase!=='active'||config.activeBindingId!==input.bindingId||config.generation!==input.generation)throw new Error('workspace_binding_mismatch');
+        const binding=activeBinding(config,input.roomId);
+        await resolveWorkspacePath(binding,'');
+        store.saveRecord('local-command-grant',binding.bindingId,{enabled:input.enabled,roomId:input.roomId,generation:input.generation});
+        if(!input.enabled)await options.cancelRoomExecution?.(input.roomId);
+        return {ok:true,snapshot:await api.getCollaborationRoomWorkspace(input)};
+      } catch(error) {return {ok:false,code:failureCode(error)};}
+    },
     async getCollaborationRoomWorkspace({ roomId }) {
       try {
         const snapshot = await state(roomId);
@@ -133,6 +147,7 @@ export function createRoomWorkspaceService(options: {
           try {
           const binding = await authorizeFile({ roomId, bindingId: config.activeBindingId, generation: config.generation, relativePath: '' });
           base.rootDisplayPath = binding.canonicalRoot;
+          base.localCommandsAllowed=store.localCommandsAllowed(binding);
           const artifacts = store.listArtifacts(roomId).filter(item => item.bindingId === binding.bindingId && (item.contextScope as { kind?: string } | undefined)?.kind === 'room_only');
           for (const artifact of artifacts) {
             try { if ((await observeWorkspaceFile(binding, String(artifact.relativePath))).contentHash !== artifact.contentHash) artifact.state = 'changed'; }

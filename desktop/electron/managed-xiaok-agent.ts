@@ -37,6 +37,7 @@ const HOSTED_XIAOK_EXECUTION = {
 } as const;
 
 export interface ManagedXiaokAgentInput {
+  desktopModelId?: string | null;
   id?: string;
   name: string;
   description?: string;
@@ -47,6 +48,7 @@ export interface ManagedXiaokAgentInput {
 }
 
 export interface ManagedXiaokAgentPayload {
+  desktopModelId?: string | null;
   id?: string;
   name: string;
   description: string;
@@ -104,13 +106,14 @@ export function buildManagedXiaokAgentPayload(
   config: Config,
   options: { runtimePath?: string | null; modelId?: string } = {},
 ): ManagedXiaokAgentPayload {
-  const binding = resolveConfiguredModelBinding(config, options.modelId ?? config.defaultModelId);
+  const binding = resolveConfiguredModelBinding(config, input.desktopModelId ?? options.modelId ?? config.defaultModelId);
   const runtimePath = options.runtimePath === undefined ? null : options.runtimePath;
   const taskCapabilities = input.capabilities ?? [...DEFAULT_CAPABILITIES];
   const outputCapabilities = [...DEFAULT_OUTPUT_CAPABILITIES];
 
   return {
     id: input.id,
+    ...(input.desktopModelId !== undefined ? { desktopModelId: input.desktopModelId } : {}),
     name: input.name,
     description: input.description ?? `xiaok desktop 智能体 (${binding.providerId}/${binding.modelEntry.model})`,
     instructions: input.instructions ?? '',

@@ -88,6 +88,12 @@ describe('R3 actual broker HTTP + Desktop SQLite + user filesystem', () => {
       expect(pending.phase).toBe('draining');
       expect((await service.cancelCollaborationRoomWorkspaceChange({ roomId, operationId: pending.operationId!, expectedRevision: pending.revision, idempotencyKey: 'cancel-crash' })).ok).toBe(true);
       expect(readFileSync(join(selected, 'created-before-crash', 'preserve.txt'), 'utf8')).toBe('user intervened');
+      const published = await service.publishCollaborationRoomWorkspaceInstructions({ roomId, expectedRevision: (await service.getCollaborationRoomWorkspace({ roomId })).revision, idempotencyKey: 'direct-publish', publishedText: 'Directly entered room instructions' });
+      expect(published.ok, JSON.stringify(published)).toBe(true);
+      expect(published.snapshot?.instructions?.publishedText).toBe('Directly entered room instructions');
+      expect(published.snapshot?.instructions?.revision).toBe(2);
+      service = createRoomWorkspaceService({ store, broker: client, isMutationOwner: () => true, ensureProtocol: async () => {} });
+      expect((await service.getCollaborationRoomWorkspace({ roomId })).instructions?.publishedText).toBe('Directly entered room instructions');
     } finally { await server.close(); broker.close(); store.close(); rmSync(root, { recursive: true, force: true, maxRetries: 5 }); }
   });
 });

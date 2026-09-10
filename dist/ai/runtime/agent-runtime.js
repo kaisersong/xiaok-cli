@@ -103,6 +103,7 @@ export class AgentRuntime {
         let executedToolIds = new Set();
         try {
             mergedSignal.throwIfAborted();
+            this.session.repairIncompleteToolCalls();
             if (typeof input === 'string') {
                 this.session.appendUserText(input);
                 if (this.memoryStore?.writeRawMessage) {
@@ -319,9 +320,16 @@ export class AgentRuntime {
                         onExecutionHealth: state => { this.reportActivity({ phase: 'tool', toolName: toolCall.name, executionHealth: state }); onEvent({ type: 'execution_health', runId: run.runId, invocationId: toolCall.id, state }); },
                         executionProgress: { progress: () => { this.reportActivity({ phase: 'tool', toolName: toolCall.name }); onEvent({ type: 'execution_progress', runId: run.runId }); }, wait: () => { }, resume: () => { } },
                     });
+                    const ok = isSuccessfulModelToolResult(result);
+                    const sessionSnapshot = this.session.exportSnapshot();
+                    const truncated = truncateToolResult(result, MODEL_OUTPUT_CAP + MODEL_OUTPUT_TRUNCATION_MARKER.length, {
+                        sessionId: sessionSnapshot.sessionId,
+                        toolCallId: toolCall.id,
+                        spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),
+                    });
+                    toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: truncated.content, is_error: !ok });
                     mergedSignal.throwIfAborted();
                     this.reportActivity({ phase: 'model' });
-                    const ok = isSuccessfulModelToolResult(result);
                     executedToolIds.add(toolCall.id);
                     verificationToolCalls.push({
                         id: toolCall.id,
@@ -339,18 +347,6 @@ export class AgentRuntime {
                         invocationId: toolCall.id,
                         toolName: toolCall.name,
                         ok,
-                    });
-                    const sessionSnapshot = this.session.exportSnapshot();
-                    const truncated = truncateToolResult(result, MODEL_OUTPUT_CAP + MODEL_OUTPUT_TRUNCATION_MARKER.length, {
-                        sessionId: sessionSnapshot.sessionId,
-                        toolCallId: toolCall.id,
-                        spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),
-                    });
-                    toolResults.push({
-                        type: 'tool_result',
-                        tool_use_id: toolCall.id,
-                        content: truncated.content,
-                        is_error: !ok,
                     });
                 }
                 this.session.appendUserToolResults(toolResults);
@@ -409,6 +405,10 @@ export class AgentRuntime {
                 throw normalizeRuntimeAbortReason(mergedSignal.reason);
             }
             const normalized = error instanceof Error ? error : new Error(String(error));
+            if (assistantBlocksCommitted && toolResults.length > 0) {
+                this.session.appendUserToolResults(toolResults);
+            }
+            this.session.repairIncompleteToolCalls();
             onEvent({ type: 'run_failed', runId: run.runId, error: normalized });
             throw normalized;
         }

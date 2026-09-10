@@ -104,7 +104,7 @@ describe('W1: new commands require a live confirmed authorization, not a cached 
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '发送消息' })));
     const original = f.api.sendAgentMessage.mock.calls[0]![0];
     await act(async () => failHandshake());
-    expect(screen.getByText('无法读取本地执行授权')).toBeVisible();
+    expect(screen.getByText('无法读取任务执行设置')).toBeVisible();
     expect(screen.getByRole('button', { name: '查询操作状态' })).toBeEnabled();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '查询操作状态' })));
     expect(f.api.getMultiAgentOperation).toHaveBeenCalledExactlyOnceWith({ threadId: 'thread', groupId: 'g', operationId: original.operationId });
@@ -123,9 +123,9 @@ describe('W1: new commands require a live confirmed authorization, not a cached 
       for (const name of ['发送消息', '继续执行', '新建执行组']) {
         expect.soft(screen.getByRole('button', { name })).toBeDisabled();
       }
-      expect(screen.getByText(mode.endsWith('loading') ? '加载中...' : '无法读取本地执行授权')).toBeVisible();
+      expect(screen.getByText(mode.endsWith('loading') ? '加载中...' : '无法读取任务执行设置')).toBeVisible();
       expect(screen.queryByText('本地执行已暂停')).toBeNull();
-      expect(screen.queryByText('授权记录未确认，当前禁止执行')).toBeNull();
+      expect(screen.queryByText('暂时无法确认设置，已阻止启动任务')).toBeNull();
       expect(screen.getByLabelText('补充说明')).toBeEnabled();
       expect(screen.getByLabelText('补充说明')).toHaveValue('preserve unsent followup');
       expect(screen.getByRole('button', { name: '工作树与清理状态' })).toBeEnabled();
@@ -168,7 +168,7 @@ describe('W1: new commands require a live confirmed authorization, not a cached 
     await fixture('allowed');
     fireEvent.change(screen.getByLabelText('补充说明'), { target: { value: 'confirmed command' } });
     for (const name of ['发送消息', '继续执行', '新建执行组']) expect(screen.getByRole('button', { name })).toBeEnabled();
-    expect(screen.queryByText('无法读取本地执行授权')).toBeNull();
+    expect(screen.queryByText('无法读取任务执行设置')).toBeNull();
   });
 
   it('the actual stalled + cleanupPending + runtime_blocked projection already advises a restart and keeps execution readonly', async () => {

@@ -289,7 +289,7 @@ describe('preload API contract', () => {
       'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
       'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
       'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
-      'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange',
+      'registerCollaborationRoomWorkspaceArtifact', 'mapCollaborationRoomWorkspaceProject', 'retryCollaborationRoomWorkspaceChange', 'setCollaborationRoomLocalCommands',
     ]);
   });
 
@@ -765,6 +765,18 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:archive', { agentId: 'agent-1' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:start', { agentId: 'agent-1' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:kswarm:agent:stop', { agentId: 'agent-1' });
+  });
+
+  it.each(['typed', 'runtime'])('preserves project model references and reset through the %s preload boundary', async (kind) => {
+    const ipcRenderer = { invoke: vi.fn().mockResolvedValue({ ok: true }), on: vi.fn(), off: vi.fn() };
+    const loaded = kind === 'runtime' ? loadRuntimePreloadApi() : { api: createPreloadApi(ipcRenderer), ipcRenderer };
+    const api = loaded.api as ReturnType<typeof createPreloadApi>;
+    await api.createKSwarmAgent({ name: 'Vision', runtimeType: 'xiaok', desktopModelId: 'vision' });
+    await api.updateKSwarmAgent({ agentId: 'worker', patch: { desktopModelId: 'vision' } });
+    await api.updateKSwarmAgent({ agentId: 'worker', patch: { desktopModelId: null } });
+    expect(loaded.ipcRenderer.invoke).toHaveBeenNthCalledWith(1, 'desktop:kswarm:agent:create', { name: 'Vision', runtimeType: 'xiaok', desktopModelId: 'vision' });
+    expect(loaded.ipcRenderer.invoke).toHaveBeenNthCalledWith(2, 'desktop:kswarm:agent:update', { agentId: 'worker', patch: { desktopModelId: 'vision' } });
+    expect(loaded.ipcRenderer.invoke).toHaveBeenNthCalledWith(3, 'desktop:kswarm:agent:update', { agentId: 'worker', patch: { desktopModelId: null } });
   });
 
   it('routes createTask thread context through semantic IPC channel', async () => {

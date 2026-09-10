@@ -570,6 +570,7 @@ export const api = {
     capabilities?: string[];
     instructions?: string;
     maxConcurrentTasks?: number;
+    desktopModelId?: string | null;
   }): Promise<unknown> {
     log.info('createManagedXiaokAgent', JSON.stringify({ name: input.name, roles: input.roles }));
     const r = await window.xiaokDesktop.createManagedXiaokAgent(input);

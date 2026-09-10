@@ -10,6 +10,10 @@ import { ChatInput, type AttachedFile } from '../ChatInput';
 import { XIAOK_WORKER_SEED_ID } from '../../../../shared/kswarm-seed-contract.js';
 import { getDesktopApi } from '../../shared/desktop';
 import { RoomWorkspaceSurface } from './RoomWorkspaceSurface';
+import { RoomMessageList } from './RoomMessageList';
+import { RoomMessageFrame } from './RoomMessageFrame';
+import { roomMessageFoldKind } from './room-message-fold';
+import { roomAgentNames } from '../../../../shared/room-agent-names';
 
 export interface CollaborationRoomViewProps {
   roomId: string;
@@ -54,6 +58,8 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
   const [projectPo, setProjectPo] = useState('');
   const [projectMembers, setProjectMembers] = useState<string[]>([]);
   const [memberSelection, setMemberSelection] = useState<string[]>([]);
+  const [memberAliases, setMemberAliases] = useState<Record<string, string>>({});
+  const [savingMembers, setSavingMembers] = useState(false);
   const [previewArtifact, setPreviewArtifact] = useState<KSwarmArtifact | null>(null);
   const [pendingDiscussions, setPendingDiscussions] = useState<Record<string, number>>({});
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -114,10 +120,16 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
 
   useEffect(() => { setMemberSelection(activeAgentIds); }, [activeAgentIds.join('|')]);
 
-  const mentionItems = useMemo(() => activeAgentIds.map((id) => ({
-    id,
-    label: availableAgents.find((agent) => agent.id === id)?.name ?? id,
-  })), [activeAgentIds, availableAgents]);
+  const agentNames = useMemo(() => {
+    const names = roomAgentNames(activeAgentIds.map(id => ({ id, name: availableAgents.find(a => a.id === id)?.name, alias: snapshot?.members?.find(m => m.subject.kind === 'agent' && m.subject.logicalAgentId === id)?.alias })));
+    for (const member of snapshot?.members ?? []) if (member.subject.kind === 'agent' && member.displayName) names.set(member.subject.logicalAgentId, member.displayName);
+    return names;
+  }, [activeAgentIds, availableAgents, snapshot]);
+  const mentionItems = useMemo(() => activeAgentIds.map(id => ({ id, label: agentNames.get(id)! })), [activeAgentIds, agentNames]);
+  const toggleMembers = () => {
+    if (!showMembers) setMemberAliases(Object.fromEntries((snapshot?.members ?? []).flatMap(m => m.subject.kind === 'agent' ? [[m.subject.logicalAgentId, m.alias ?? '']] : [])));
+    setShowMembers(value => !value);
+  };
 
   const capabilities = useMemo(() => new Map((snapshot?.executionCapabilities ?? []).map(item => [item.logicalAgentId, item])), [snapshot?.executionCapabilities]);
   const capabilityLabel = (id: string) => {
@@ -142,11 +154,12 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
         idempotencyKey: crypto.randomUUID(),
       }) as {
         ok?: boolean;
+        code?: string;
         wake?: { status?: string; roomMessageId?: string; logicalAgentIds?: string[]; unavailable?: Array<{ logicalAgentId: string; reason?: string }> };
         unavailable?: Array<{ logicalAgentId: string; reason?: string }>;
       };
       if (!result?.ok) {
-        setActionError(t.collaborationRoomActionFailed);
+        setActionError(result?.code === 'room_mention_unknown' ? t.collaborationRoomMentionUnknown : t.collaborationRoomActionFailed);
         return false;
       }
       const unavailable = result.wake?.unavailable ?? result.unavailable ?? [];
@@ -179,6 +192,9 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
   };
 
   const saveMembers = async () => {
+    if (savingMembers) return;
+    setSavingMembers(true);
+    try {
     const canonicalSelection = [...new Set([...memberSelection, XIAOK_WORKER_SEED_ID])];
     const addAgentIds = canonicalSelection.filter((id) => !activeAgentIds.includes(id));
     const removeAgentIds = activeAgentIds.filter((id) => id !== XIAOK_WORKER_SEED_ID && !canonicalSelection.includes(id));
@@ -187,10 +203,13 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
       expectedRoomRevision: snapshot?.room?.revision,
       addAgentIds,
       removeAgentIds,
+      aliasChanges: Object.entries(memberAliases).filter(([id, alias]) => canonicalSelection.includes(id) && alias !== (snapshot?.members?.find(m => m.subject.kind === 'agent' && m.subject.logicalAgentId === id)?.alias ?? '')).map(([logicalAgentId, alias]) => ({ logicalAgentId, alias })),
     }) as { ok?: boolean };
-    if (!result?.ok) setActionError(t.collaborationRoomActionFailed);
+    if (!result?.ok) { setActionError(t.collaborationRoomAliasFailed); return; }
     setShowMembers(false);
     await load();
+    } catch { setActionError(t.collaborationRoomAliasFailed); }
+    finally { setSavingMembers(false); }
   };
 
   const createProject = async () => {
@@ -267,6 +286,7 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
 
   const archived = snapshot?.room?.status === 'archived' || snapshot?.room?.status === 'archiving';
   const messages = snapshot?.messages ?? [];
+  const messagesById = new Map(messages.map(message => [message.messageId, message]));
   const pendingReplyCount = Object.values(pendingDiscussions).reduce((total, count) => total + count, 0);
 
   return (
@@ -278,7 +298,7 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
           <h1 className="truncate text-lg font-semibold text-[var(--c-text-heading)]">{snapshot?.room?.title}</h1>
           <div className="mt-1 flex items-center gap-2 text-xs text-[var(--c-text-tertiary)]"><Users size={13} />{activeAgentIds.length}</div>
         </div>
-        <button type="button" onClick={() => setShowMembers((value) => !value)} className="rounded-lg border border-[var(--c-border)] px-3 py-2 text-xs text-[var(--c-text-secondary)]">{t.collaborationRoomMembersLabel}</button>
+        <button type="button" onClick={toggleMembers} className="rounded-lg border border-[var(--c-border)] px-3 py-2 text-xs text-[var(--c-text-secondary)]">{t.collaborationRoomMembersLabel}</button>
         <button type="button" aria-label={t.collaborationRoomRefresh} onClick={() => void load()} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><RefreshCw size={16} /></button>
         {!archived && <button type="button" aria-label={t.collaborationRoomArchive} onClick={() => void archiveRoom()} className="rounded-lg p-2 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><Archive size={16} /></button>}
       </header>
@@ -288,30 +308,39 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
         <section className="border-b border-[var(--c-border)] bg-[var(--c-bg-card)] px-6 py-4">
           <div className="flex flex-wrap gap-2">
             {availableAgents.map((agent) => <label key={agent.id} className="flex items-center gap-2 rounded-full border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-primary)]"><input type="checkbox" disabled={agent.id === XIAOK_WORKER_SEED_ID} checked={memberSelection.includes(agent.id) || agent.id === XIAOK_WORKER_SEED_ID} onChange={(event) => setMemberSelection((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id))} />{agent.name}<span title={capabilityReason(agent.id)} className="text-[var(--c-text-tertiary)]">{capabilityLabel(agent.id)}</span></label>)}
-            <button type="button" onClick={() => void saveMembers()} className="rounded-full bg-[var(--c-accent)] px-4 py-1.5 text-xs font-medium text-white">{t.collaborationRoomSaveMembers}</button>
+            <button type="button" disabled={savingMembers} onClick={() => void saveMembers()} className="rounded-full bg-[var(--c-accent)] px-4 py-1.5 text-xs font-medium text-white">{t.collaborationRoomSaveMembers}</button>
+          </div>
+          <p className="mt-3 text-xs text-[var(--c-text-secondary)]">{t.collaborationRoomAliasHint}</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {activeAgentIds.filter(id => memberSelection.includes(id)).map(id => <label key={id} className="flex min-w-0 items-center gap-2 text-xs text-[var(--c-text-secondary)]">
+              <span className="truncate">{availableAgents.find(a => a.id === id)?.name ?? agentNames.get(id)}</span>
+              <input aria-label={t.collaborationRoomAliasLabel(availableAgents.find(a => a.id === id)?.name ?? agentNames.get(id)!)} disabled={savingMembers} maxLength={48} value={memberAliases[id] ?? ''} placeholder={t.collaborationRoomAliasPlaceholder} onChange={event => setMemberAliases(current => ({ ...current, [id]: event.target.value }))} className="min-w-0 flex-1 rounded-md border border-[var(--c-border)] bg-[var(--c-bg-deep)] px-2 py-1.5 text-[var(--c-text-primary)]" />
+            </label>)}
           </div>
           <p className="mt-2 text-xs text-[var(--c-text-tertiary)]">{t.collaborationRoomExecutionObservers}</p>
           {availableAgents.map(agent => capabilityReason(agent.id) ? <p key={agent.id} className="mt-1 text-xs text-[var(--c-text-tertiary)]">{agent.name}: {capabilityReason(agent.id)}</p> : null)}
         </section>
       )}
 
-      <section className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="room-message-scroll">
+      <RoomMessageList key={roomId} revision={messages}>
         {messages.length === 0 && <div className="py-16 text-center text-sm text-[var(--c-text-secondary)]" data-testid="room-view-empty">{t.collaborationRoomEmpty}</div>}
         <div className="mx-auto max-w-3xl space-y-3" data-testid={messages.length ? 'room-view-messages' : undefined}>
           {messages.map((message) => {
-            const sender = message.sender?.kind === 'user' ? t.collaborationRoomMessageByYou : message.sender?.logicalAgentId ?? t.collaborationRoomSystemMessage;
+            const sender = message.sender?.kind === 'user' ? t.collaborationRoomMessageByYou : message.sender?.logicalAgentId ? agentNames.get(message.sender.logicalAgentId) ?? availableAgents.find(a => a.id === message.sender?.logicalAgentId)?.name ?? t.roomWorkspace.agentAuthor : t.collaborationRoomSystemMessage;
             const artifact = artifactFromRoomMessage(message);
+            const messageContent = message.kind === 'workspace_event'
+                  ? message.sourceRef?.eventKind === 'artifact.registered' ? t.roomWorkspace.registeredEvent
+                    : message.sourceRef?.eventKind === 'artifact.confirmed' ? t.roomWorkspace.confirmedEvent : t.roomWorkspace.updatedEvent
+                  : message.text ?? '';
+            const foldKind = roomMessageFoldKind(message, messagesById);
+            const foldLabel = foldKind === 'scheduled' ? t.collaborationRoomScheduledTrigger : foldKind === 'reply' ? t.collaborationRoomScheduledReply : foldKind === 'event' ? t.collaborationRoomActivityNotice : undefined;
             const selectedForProject = selectedMessages.includes(message.messageId);
             const copied = copiedMessageId === message.messageId;
             const saving = savingMessageId === message.messageId;
             const saved = savedMessageId === message.messageId;
-            return <article key={message.messageId} data-testid="room-message" className="group rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4">
-              <div className="mb-2 text-xs text-[var(--c-text-tertiary)]"><span>{sender}</span></div>
+            return <RoomMessageFrame key={`${roomId}:${message.messageId}`} sender={sender} label={foldLabel} createdAt={message.createdAt} preview={messageContent.split(/\r?\n/).find(line => line.trim())?.slice(0, 100)}>
               <div className="min-w-0 overflow-hidden text-[var(--c-text-primary)]">
-                <MarkdownRenderer content={message.kind === 'workspace_event'
-                  ? message.sourceRef?.eventKind === 'artifact.registered' ? t.roomWorkspace.registeredEvent
-                    : message.sourceRef?.eventKind === 'artifact.confirmed' ? t.roomWorkspace.confirmedEvent : t.roomWorkspace.updatedEvent
-                  : message.text ?? ''} disableLinkify />
+                <MarkdownRenderer content={messageContent} disableLinkify />
               </div>
               {(message.sourceRef?.attachments ?? []).length > 0 && <div className="mt-3 flex flex-wrap gap-2">
                 {message.sourceRef?.attachments?.map((attachment) => <span key={attachment.filePath} title={attachment.filePath} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[var(--c-bg-deep)] px-3 py-2 text-xs text-[var(--c-text-secondary)]"><FileText size={14} className="shrink-0" /><span className="truncate">{attachment.name}</span></span>)}
@@ -365,11 +394,11 @@ export function CollaborationRoomView({ roomId, degradedProjects, availableAgent
                   {saved ? <Check size={14} /> : <BookOpen size={14} />}
                 </button>
               </div>}
-            </article>;
+            </RoomMessageFrame>;
           })}
         </div>
         {(snapshot?.projects ?? []).length > 0 && <div className="mx-auto mt-5 max-w-3xl"><h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--c-text-tertiary)]">{t.collaborationRoomLinkedProjects}</h2>{snapshot?.projects?.map((project) => <Link key={project.id} to={`/projects/${project.id}`} className="mr-2 inline-flex rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-sm text-[var(--c-text-primary)]">{project.name ?? project.id}</Link>)}</div>}
-      </section>
+      </RoomMessageList>
 
       {!archived && <footer className="px-6 py-4" data-testid="room-composer">
         <div className="mx-auto max-w-3xl">

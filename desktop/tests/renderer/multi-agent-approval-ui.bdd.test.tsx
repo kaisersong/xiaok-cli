@@ -320,9 +320,9 @@ describe('AP7: actual inline approval cards and the single right surface', () =>
     await mount(f);
     expect(screen.getByRole('button', { name: '新建执行组' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '工作树与清理状态' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '前往执行授权设置' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '前往任务执行设置' })).toBeVisible();
     const listener = vi.fn(); window.addEventListener('xiaok:app:open-settings', listener);
-    fireEvent.click(screen.getByRole('button', { name: '前往执行授权设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '前往任务执行设置' }));
     expect(listener).toHaveBeenCalledTimes(1); window.removeEventListener('xiaok:app:open-settings', listener);
     expect(screen.getByRole('button', { name: '仅批准本次' })).toBeDisabled();
   });

@@ -65,7 +65,7 @@ function mockKSwarmService(): KSwarmService {
     restart: async () => {},
     getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {},
-    request: async () => new Response('{"error":"mock"}', { status: 501 }),
+    request: async (path: string) => path === '/agents' ? new Response('{"agents":[]}') : new Response('{"error":"mock"}', { status: 501 }),
   };
 }
 

@@ -47,6 +47,7 @@ import { ThreadMetaStore } from './thread-meta-store.js';
 import { TimedActionService } from './timed-action-service.js';
 import { TimedActionScheduler } from './timed-action-scheduler.js';
 import { createDesktopTimedActionExecutors } from './timed-action-executors.js';
+import {createRoomScheduledTaskDispatch} from './room-scheduled-task.js';
 import { createElectronDesktopNotificationPort } from './desktop-notifications.js';
 import {
   createMeetingRecorderWindowController,
@@ -1167,6 +1168,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     flushOutbox: () => roomWorkspaceService.flushOutbox(),
   });
   const roomWorkspaceService = createRoomWorkspaceService({
+    cancelRoomExecution: roomId => roomWorkspaceRuntime.cancelRoom(roomId),
     store: roomWorkspaceStore, broker: roomWorkspaceBroker, isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true,
     ensureProtocol: ensureWorkspaceProtocol,
     kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
@@ -1407,6 +1409,12 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       loopRuntime,
       assistantRuntime,
       createTask: (input) => services.createBackgroundTask(input),
+      executeRoomTask: createRoomScheduledTaskDispatch({
+        getWorkspace: roomId=>roomWorkspaceService.getCollaborationRoomWorkspace({roomId}),
+        sendWake: collaborationRoomBrokerClient.sendScheduledRoomWake,
+        dispatch: input=>collaborationRoomWakeDispatcher.dispatchMessage(input),
+        onError: error=>debugMain('room-scheduled-task:dispatch-failed',String(error)),
+      }),
     }),
     isGlobalBackgroundAutoRunEnabled: () => globalBackgroundAutoRunEnabled,
     resolveLinkedLoopRun: ({ action, timedActionRunId }) => loopRuntime.resolveTimedActionLoopRun({

@@ -509,3 +509,37 @@ describe('createTaskFromRoomMessage (design §7.2)', () => {
     expect(result.ok).toBe(true);
   });
 });
+
+describe('room name routing', () => {
+  it('does not send an unknown or retired alias to the default agent', async () => {
+    const sendRoomMessage = vi.fn();
+    const service = createCollaborationRoomService({ brokerClient: createBrokerFake({ sendRoomMessage }), kswarmClient: createKSwarmFake() });
+    expect(await service.sendMessage({ roomId: 'room-1', text: '@旧别名 请检查' })).toMatchObject({ ok: false, code: 'room_mention_unknown' });
+    expect(sendRoomMessage).not.toHaveBeenCalled();
+  });
+  it('projects readable duplicate names and resolves the longer handle to one member', async () => {
+    const sendRoomMessage = vi.fn(async () => ({ ok: true, message: { messageId: 'named-message' } }));
+    const broker = createBrokerFake({ sendRoomMessage, getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'room-1', status: 'active' }, members: ['a', 'b'].map(id => ({ status: 'active', subject: { kind: 'agent', logicalAgentId: id } })), projects: [] })) });
+    const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: { request: vi.fn(async () => ({ ok: true, json: async () => ({ agents: [{ id: 'a', name: 'Research Agent' }, { id: 'b', name: 'Research Agent' }] }) })) } });
+    const result = await service.getRoom('room-1');
+    expect(result.members?.map(m => m.displayName)).toEqual(['Research Agent', 'Research Agent (2)']);
+    await service.sendMessage({ roomId: 'room-1', text: '@Research Agent (2) please review' });
+    expect(sendRoomMessage).toHaveBeenCalledWith(expect.objectContaining({ mentions: [{ kind: 'agent', logicalAgentId: 'b' }] }), expect.anything());
+  });
+  it('forwards alias changes through the existing member API with pinned user identity', async () => {
+    const updateRoomMembers = vi.fn(async () => ({ ok: true }));
+    const service = createCollaborationRoomService({ brokerClient: createBrokerFake({ updateRoomMembers }), kswarmClient: createKSwarmFake() });
+    await service.updateRoomMembers({ roomId: 'room-1', expectedRoomRevision: 4, aliasChanges: [{ logicalAgentId: 'agent-a', alias: 'Reviewer' }], requestSource: 'agent', actor: { kind: 'agent' } });
+    expect(updateRoomMembers).toHaveBeenCalledWith(expect.objectContaining({ aliasChanges: [{ logicalAgentId: 'agent-a', alias: 'Reviewer' }] }), expect.objectContaining({ requestSource: 'user', actor: { kind: 'user', userId: 'user.local' } }));
+  });
+  it('routes an alias from the trusted room snapshot, preserving readable message text', async () => {
+    const sendRoomMessage = vi.fn(async () => ({ ok: true, message: { messageId: 'alias-message' } }));
+    const broker = createBrokerFake({ sendRoomMessage, getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'room-1', status: 'active' }, members: [
+      { status: 'active', alias: '研究员', subject: { kind: 'agent', logicalAgentId: 'agent-a' } },
+      { status: 'active', subject: { kind: 'agent', logicalAgentId: 'xiaok-worker' } },
+    ] })) });
+    const service = createCollaborationRoomService({ brokerClient: broker, kswarmClient: createKSwarmFake() });
+    await service.sendMessage({ roomId: 'room-1', text: '@研究员 请检查', mentions: [{ kind: 'all' }] });
+    expect(sendRoomMessage).toHaveBeenCalledWith(expect.objectContaining({ text: '@研究员 请检查', mentions: [{ kind: 'agent', logicalAgentId: 'agent-a' }] }), expect.anything());
+  });
+});

@@ -753,6 +753,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-service-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let nextPid = 41_000;
@@ -845,6 +846,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-health-restart-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     const children: FakeKSwarmChild[] = [];
@@ -895,6 +897,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-orphan-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     const findPortOwner = vi.fn(async () => 43_210);
@@ -929,6 +932,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-backoff-race-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     const children: FakeKSwarmChild[] = [];
@@ -971,6 +975,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-spawn-race-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let blockNextHealth = false;
@@ -1028,6 +1033,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-stop-race-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let releaseBlockedHealth: (() => void) | null = null;
     let signalBlockedHealth: (() => void) | null = null;
@@ -1063,6 +1069,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-startup-timeout-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let allowReadyOnSpawn = false;
@@ -1107,6 +1114,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-restart-join-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let releaseBlockedHealth: (() => void) | null = null;
@@ -1157,6 +1165,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-stop-start-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let releaseFirstExit: (() => void) | null = null;
@@ -1213,6 +1222,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-request-startup-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let signalChildSpawned: (() => void) | null = null;
@@ -1250,6 +1260,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-stop-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let blockSeedReconciliation = true;
     let releaseSeedReconciliation: (() => void) | null = null;
@@ -1307,6 +1318,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-broker-stop-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let brokerHealthChecks = 0;
     let brokerAvailable = false;
@@ -1367,6 +1379,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-ready-stop-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     let blockReadyProbe = true;
@@ -1420,6 +1433,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-restart-error-'));
     const serverPath = join(serviceRoot, 'server.js');
     writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
     let kswarmHealthy = false;
     const firstChild = new FakeKSwarmChild(50_000);

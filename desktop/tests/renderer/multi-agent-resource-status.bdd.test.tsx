@@ -82,7 +82,7 @@ describe('U1/AP7: real Panel resource facts do not invent a stop request', () =>
       f.api.subscribeLocalExecutionAuthorization.mockImplementation(async input => ({ subscriptionId: input.subscriptionId, authorization }));
     });
     expect(screen.queryByText('本地执行已暂停')).toBeNull();
-    expect(screen.getByText('授权记录未确认，当前禁止执行')).toBeVisible();
+    expect(screen.getByText('暂时无法确认设置，已阻止启动任务')).toBeVisible();
     fireEvent.change(screen.getByLabelText('补充说明'), { target: { value: 'keep followup draft' } });
     for (const name of ['发送消息', '继续执行', '新建执行组']) expect(screen.getByRole('button', { name })).toBeDisabled();
     expect(screen.getByRole('button', { name: '工作树与清理状态' })).toBeEnabled();

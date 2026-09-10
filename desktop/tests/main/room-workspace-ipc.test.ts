@@ -6,7 +6,7 @@ describe('workspace semantic IPC', () => {
     const service = Object.fromEntries(Object.keys(ROOM_WORKSPACE_CHANNELS).map(key => [key, invoke]));
     registerRoomWorkspaceIpc({ handle: (name: string, callback: Function) => handlers.set(name, callback) } as never, service as never, () => false);
     for (const handler of handlers.values()) expect(await handler({}, { roomId: 'r', requestSource: 'user' })).toMatchObject({ ok: false, code: 'workspace_ipc_forbidden' });
-    expect(invoke).not.toHaveBeenCalled(); expect(handlers.size).toBe(11);
+    expect(invoke).not.toHaveBeenCalled(); expect(handlers.size).toBe(12);
   });
   it('uses fixed semantic channels only and emits a refresh after completed mutation', async () => {
     const handlers = new Map<string, Function>(); const notify = vi.fn();

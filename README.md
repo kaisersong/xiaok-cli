@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.4 (September 10, 2026).** CLI and Desktop metadata are aligned at **1.5.4**. This update adds collaboration room workspaces, execution health tracking, updater handoff recovery, and CLI input fixes. The latest published Desktop baseline is **1.5.3** until the new build and asset checks succeed; a version bump is not an npm publication. See [Version History](#version-history).
+**Release target: 1.5.5 (September 11, 2026).** CLI and Desktop metadata are aligned at **1.5.5**. This update improves collaboration room execution and navigation, adds room aliases, and makes automated message history easier to read. The latest published Desktop baseline is **1.5.4** until the 1.5.5 build and asset checks succeed. See [Version History](#version-history).
 
 ---
 
@@ -552,6 +552,16 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.5 — Release preparation, September 11, 2026
+
+- **Room execution:** local commands default on for authorized workspaces while preserving explicit opt-outs; room-scoped scheduled tasks, configured connectors, and workspace material reading are available. Local commands use the current OS account permissions; the workspace directory is not an OS sandbox. Managed command execution currently supports macOS/POSIX; Windows command execution remains unavailable.
+- **Room collaboration:** readable agent names and room aliases, clearer instruction publication feedback, and project-agent model selection with current-model fallback.
+- **Desktop navigation:** primary entries for New task, Automations, Projects, Collaboration spaces, and Knowledge; separate Tasks / Scheduled / Projects / Collaboration tabs browse instances.
+- **Message reading:** scheduled triggers, their agent replies, and workspace notifications default to collapsed previews. Rooms open at the latest message, with a jump-to-latest arrow while reading history.
+- **Execution recovery:** interrupted tool calls retain completed results and repair incomplete history; interactive questions are exempt from ordinary tool timeouts.
+- CLI and Desktop versions are aligned at `1.5.5`; bundled sidecars are pinned to `desktop-v1.5.5`. Updating metadata does not publish the npm package.
+
 
 ### v1.5.4 — Release preparation, September 10, 2026
 

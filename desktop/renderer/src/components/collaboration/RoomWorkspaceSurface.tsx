@@ -23,6 +23,7 @@ export function RoomWorkspaceSurface({ roomId, children, refreshToken }: { roomI
   const [fileMode, setFileMode] = useState<'directory' | 'registered'>('directory'); const [directory, setDirectory] = useState('');
   const [files, setFiles] = useState<RoomWorkspaceFilePage | null>(null); const [filePreview, setFilePreview] = useState<RoomWorkspaceFilePreview | null>(null);
   const [instructions, setInstructions] = useState(''); const [sourcePath, setSourcePath] = useState('');
+  const [publishedRevision, setPublishedRevision] = useState<number | null>(null);
   const [instructionMode, setInstructionMode] = useState<'inline' | 'file'>('inline');
   const [sourcePreview, setSourcePreview] = useState<RoomWorkspaceFilePreview | null>(null);
   const instructionDraft = useRef<{ dirty: boolean; revision: number }>({ dirty: false, revision: 0 });
@@ -35,11 +36,11 @@ export function RoomWorkspaceSurface({ roomId, children, refreshToken }: { roomI
   const visibleFileMode = denied ? 'registered' : fileMode;
   const canManage = Boolean(!loading && !unknownCommit && snapshot?.ok && snapshot.permissions.canManage && !['offline', 'unauthorized'].includes(snapshot.phase));
   const canRegister = Boolean(!loading && !unknownCommit && snapshot?.ok && snapshot.permissions.canRegister && !['offline', 'unauthorized'].includes(snapshot.phase));
-  const load = useCallback(async (discardDraft = false) => {
-    const token = ++epoch.current; filesEpoch.current++; setLoading(true); setError('');
+  const load = useCallback(async (discardDraft = false, confirmedSnapshot?: RoomWorkspaceSnapshot) => {
+    const token = ++epoch.current; filesEpoch.current++; setLoading(true);
     try {
       if (!apiRef.current?.getCollaborationRoomWorkspace) throw new Error('unavailable');
-      const next = await apiRef.current.getCollaborationRoomWorkspace({ roomId });
+      const next = confirmedSnapshot ?? await apiRef.current.getCollaborationRoomWorkspace({ roomId });
       if (!alive.current || token !== epoch.current) return;
       setSnapshot(next); setUnknownCommit(false); setPreview(null);
       if (!next.ok || !next.permissions.canRead) { setFiles(null); setFilePreview(null); setPreview(null); setSettings(false); }
@@ -53,9 +54,22 @@ export function RoomWorkspaceSurface({ roomId, children, refreshToken }: { roomI
   }, [roomId]);
   useEffect(() => { void load(); }, [load, refreshToken]);
   useEffect(() => apiRef.current?.onCollaborationRoomEvent?.(event => { if (event.roomId === roomId && (event.kind === 'workspace_changed' || event.type === 'workspace_changed')) void load(); }), [load, roomId]);
-  const mutate = async (action: () => Promise<RoomWorkspaceMutationResult>, registration = false) => {
-    if (busy || !(registration ? canRegister : canManage)) return; setBusy(true); setError('');
-    try { const result = await action(); if (!alive.current) return; if (!result.ok) { const unknown = unknownMutationCodes.has(result.code ?? '') || /timeout|timed.?out/i.test(result.code ?? ''); setError(unknown ? 'unknown' : result.code ?? 'error'); setUnknownCommit(unknown); setPreview(null); return; } setSettings(false); setPreview(null); await load(true); }
+  const mutate = async (action: () => Promise<RoomWorkspaceMutationResult>, registration = false, publication?: { text: string; previousRevision: number }, keepSettings = false) => {
+    if (busy || !(registration ? canRegister : canManage)) return; setBusy(true); setError(''); setPublishedRevision(null);
+    try {
+      const result = await action();
+      if (!alive.current) return;
+      if (!result.ok) { const unknown = unknownMutationCodes.has(result.code ?? '') || /timeout|timed.?out/i.test(result.code ?? ''); setError(unknown ? 'unknown' : result.code ?? 'error'); setUnknownCommit(unknown); setPreview(null); return; }
+      if (publication) {
+        const confirmed = result.snapshot;
+        if (!confirmed?.ok || !confirmed.permissions.canRead || !confirmed.instructions || confirmed.instructions.publishedText !== publication.text || confirmed.instructions.revision <= publication.previousRevision) {
+          setError('unknown'); setUnknownCommit(true); return;
+        }
+        await load(true, confirmed);
+        setPublishedRevision(confirmed.instructions.revision);
+      } else await load();
+      if (!keepSettings) setSettings(false); setPreview(null);
+    }
     catch { if (alive.current) { setError('unknown'); setUnknownCommit(true); } }
     finally { if (alive.current) setBusy(false); }
   };
@@ -103,6 +117,7 @@ export function RoomWorkspaceSurface({ roomId, children, refreshToken }: { roomI
   const failureText = error === 'unknown' ? l.operationPending : /permission|unauthor|denied|revoked/.test(error) ? l.permissionDenied : error === 'unavailable' ? l.unavailable : l.error;
   const settingContent = <section className="room-workspace-section" aria-label={l.settings}>
     <h3 className="room-workspace-heading"><SlidersHorizontal size={17} aria-hidden="true" />{l.settings}</h3>
+    {snapshot?.bindingId && snapshot.phase === 'active' && apiRef.current?.setCollaborationRoomLocalCommands ? <div><label><input type="checkbox" disabled={busy} checked={Boolean(snapshot.localCommandsAllowed)} onChange={event => { const enabled=event.target.checked; void mutate(() => apiRef.current!.setCollaborationRoomLocalCommands!({roomId,bindingId:snapshot.bindingId!,generation:snapshot.generation!,enabled,requestSource:'user'}), false, undefined, true); }} />{l.localCommands}</label><p className="room-workspace-hint">{l.localCommandsHint}</p></div> : null}
     <fieldset className="room-workspace-form" disabled={busy}>
     {!preview ? <>
       <fieldset className="room-workspace-modes" disabled={busy}><legend>{l.root}</legend>{(['existing', 'create', ...(snapshot?.bindingId ? [] : ['unset'])] as Array<typeof mode>).map(value => <label key={value}><input type="radio" name={`workspace-mode-${roomId}`} checked={mode === value} onChange={() => setMode(value)} /><span>{l[value]}</span></label>)}</fieldset>
@@ -147,11 +162,11 @@ export function RoomWorkspaceSurface({ roomId, children, refreshToken }: { roomI
     <p className="room-workspace-hint">{l.noSandbox}</p>
   </div>;
   const instructionsContent = <div className="room-workspace-content">
-    {!denied ? <><p>{l.version(snapshot?.instructions?.revision ?? 0)}</p>{!snapshot?.instructions?.sourceChanged ? <pre>{snapshot?.instructions?.publishedText || l.empty}</pre> : null}
+    {!denied ? <>{publishedRevision !== null ? <p role="status">{l.publishSuccess(publishedRevision)}</p> : null}<p>{l.instructionsLocation}</p><h3>{l.published}</h3><p>{l.version(snapshot?.instructions?.revision ?? 0)}</p>{!snapshot?.instructions?.sourceChanged ? <pre>{snapshot?.instructions?.publishedText || l.empty}</pre> : null}
       {snapshot?.instructions?.sourceChanged ? <section><p>{l.sourceChanged}</p><h4>{l.sourceBefore}</h4><pre>{snapshot.instructions.publishedText}</pre><h4>{l.sourceAfter}</h4><pre>{snapshot.instructions.candidateText}</pre></section> : null}
-      {canManage ? <><fieldset><label><input type="radio" name={`instructions-${roomId}`} checked={instructionMode === 'inline'} onChange={() => { instructionDraft.current.dirty = true; setInstructionMode('inline'); }} />{l.inlineInstructions}</label><label><input type="radio" name={`instructions-${roomId}`} checked={instructionMode === 'file'} onChange={() => { instructionDraft.current.dirty = true; setInstructionMode('file'); }} />{l.fileInstructions}</label></fieldset>
-        {instructionMode === 'inline' ? <label>{l.published}<textarea value={instructions} onChange={event => { instructionDraft.current.dirty = true; setInstructions(event.target.value); }} /></label> : <><label>{l.sourceFile}<input value={sourcePath} onChange={event => { instructionDraft.current.dirty = true; filesEpoch.current++; setSourcePath(event.target.value); setSourcePreview(null); }} /></label><button type="button" disabled={!sourcePath || busy} onClick={() => void readSource()}>{l.readSource}</button>{sourcePreview?.ok ? <><pre>{sourcePreview.text}</pre>{sourcePreview.truncated ? <p>{l.previewIncomplete}</p> : null}</> : null}</>}
-        <button disabled={busy || instructionMode === 'file' && (!sourcePreview?.ok || sourcePreview.truncated || !sourcePreview.contentHash || sourcePreview.text === undefined || sourcePreview.state === 'changed' || sourcePreview.state === 'missing')} type="button" onClick={() => void mutate(() => apiRef.current!.publishCollaborationRoomWorkspaceInstructions!({ roomId, expectedRevision: instructionDraft.current.revision, idempotencyKey: crypto.randomUUID(), publishedText: instructionMode === 'file' ? sourcePreview!.text! : instructions, ...(instructionMode === 'file' ? { sourceRelativePath: sourcePath, sourceHash: sourcePreview!.contentHash } : {}) }))}>{l.publish}</button></> : <p>{l.readOnly}</p>}
+      {canManage ? <><fieldset><label><input type="radio" disabled={busy} name={`instructions-${roomId}`} checked={instructionMode === 'inline'} onChange={() => { instructionDraft.current.dirty = true; setInstructionMode('inline'); }} />{l.inlineInstructions}</label><label><input type="radio" disabled={busy} name={`instructions-${roomId}`} checked={instructionMode === 'file'} onChange={() => { instructionDraft.current.dirty = true; setInstructionMode('file'); }} />{l.fileInstructions}</label></fieldset>
+        {instructionMode === 'inline' ? <label>{l.editInstructions}<textarea disabled={busy} value={instructions} onChange={event => { instructionDraft.current.dirty = true; setPublishedRevision(null); setInstructions(event.target.value); }} /></label> : <><label>{l.sourceFile}<input disabled={busy} value={sourcePath} onChange={event => { instructionDraft.current.dirty = true; filesEpoch.current++; setSourcePath(event.target.value); setSourcePreview(null); }} /></label><button type="button" disabled={!sourcePath || busy} onClick={() => void readSource()}>{l.readSource}</button>{sourcePreview?.ok ? <><pre>{sourcePreview.text}</pre>{sourcePreview.truncated ? <p>{l.previewIncomplete}</p> : null}</> : null}</>}
+        <button disabled={busy || instructionMode === 'file' && (!sourcePreview?.ok || sourcePreview.truncated || !sourcePreview.contentHash || sourcePreview.text === undefined || sourcePreview.state === 'changed' || sourcePreview.state === 'missing')} type="button" onClick={() => void mutate(() => apiRef.current!.publishCollaborationRoomWorkspaceInstructions!({ roomId, expectedRevision: instructionDraft.current.revision, idempotencyKey: crypto.randomUUID(), publishedText: instructionMode === 'file' ? sourcePreview!.text! : instructions, ...(instructionMode === 'file' ? { sourceRelativePath: sourcePath, sourceHash: sourcePreview!.contentHash } : {}) }), false, { text: instructionMode === 'file' ? sourcePreview!.text! : instructions, previousRevision: snapshot?.instructions?.revision ?? 0 })}>{l.publish}</button></> : <p>{l.readOnly}</p>}
     </> : <p>{l.permissionDenied}</p>}
   </div>;
   const taskContent = <div className="room-workspace-content">{!denied ? <>
@@ -165,7 +180,7 @@ export function RoomWorkspaceSurface({ roomId, children, refreshToken }: { roomI
   return <div className="room-workspace-host">
     <div className="room-workspace-bar"><span title={!denied ? snapshot?.rootDisplayPath : undefined}>{l.root}: {!denied ? snapshot?.rootDisplayPath ?? l.phases.unbound : l.unavailable}</span>{!denied && snapshot?.instructions ? <span>{l.version(snapshot.instructions.revision)}</span> : null}
       <span role="status">{loading ? l.loading : snapshot ? l.phases[snapshot.phase] ?? l.unavailable : l.unavailable}</span>
-      {canManage ? <button type="button" disabled={busy || !['active', 'unconfigured', 'unbound'].includes(snapshot!.phase)} onClick={openSettings}>{l.settings}</button> : null}<button type="button" onClick={() => void load(true)}>{l.retry}</button>
+      {canManage ? <button type="button" disabled={busy || !['active', 'unconfigured', 'unbound'].includes(snapshot!.phase)} onClick={openSettings}>{l.settings}</button> : null}<button type="button" onClick={() => { setError(''); void load(); }}>{l.retry}</button>
     </div>
     {!loading && snapshot && denied ? <div role="alert">{snapshot.phase === 'unauthorized' || /permission|denied|revoked/.test(snapshot.code ?? '') ? l.permissionDenied : l.unavailable}</div> : null}
     {error ? <div role="alert">{failureText}</div> : null}

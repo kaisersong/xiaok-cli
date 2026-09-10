@@ -96,6 +96,8 @@ describe('permission-prompt', () => {
 
       const commandLine = lines.find((line) => line.includes('命令:'));
       expect(commandLine).toBeDefined();
+      expect(strip(commandLine!)).toContain('本次执行命令:');
+      expect(stripAll(lines)).toContain('始终允许的范围: bash(python3 *)（* 表示任意参数，参数变化无需重复确认）');
       expect(commandLine).toContain("python3 - <<'PY' import importlib print('ok') PY");
       expect(commandLine?.includes('\n')).toBe(false);
     });
@@ -121,7 +123,8 @@ describe('permission-prompt', () => {
 
       expect(lines[0]).toContain('xiaok wants to run');
       expect(lines).toContain('Tool: bash');
-      expect(lines).toContain('Command: ls');
+      expect(lines).toContain('Command to run now: ls');
+      expect(lines).toContain('Always-allow scope: bash(ls *) (* means any arguments; argument changes need no new approval)');
       expect(lines.at(-1)).toContain('1-5 select  Up/Down navigate  Enter confirm  Esc cancel');
     });
   });

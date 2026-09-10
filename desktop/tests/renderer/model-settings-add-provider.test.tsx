@@ -545,3 +545,13 @@ describe('Model Settings — Add Provider', () => {
     })
   })
 })
+
+it('allows deleting a built-in provider after confirmation', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  renderSettings();
+  fireEvent.click(screen.getByText('模型设置'));
+  fireEvent.click(await screen.findByRole('button', { name: '删除', exact: true }));
+  await waitFor(() => expect(api.deleteProvider).toHaveBeenCalledWith('anthropic'));
+  expect(confirm).toHaveBeenCalled();
+  confirm.mockRestore();
+});

@@ -15,11 +15,15 @@ import { createRoomWorkspaceRuntime } from '../../electron/room-workspace-runtim
 it('real broker HTTP + SQLite binding + main runtime + SSE provider complete scoped concurrent child turns', async () => {
     const root = mkdtempSync(join(tmpdir(), 'room-provider-')), cwd = join(root, 'work');
     mkdirSync(cwd);
+    const attachmentPath=join(root,'brief.txt'), imagePath=join(root,'pixel.png');
+    writeFileSync(attachmentPath,'ROOM_ATTACHMENT_BODY');
+    writeFileSync(imagePath,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aY9sAAAAASUVORK5CYII=','base64'));
+    writeFileSync(join(cwd,'downloaded.png'),readFileSync(imagePath));
     const previous = process.env.XIAOK_CONFIG_DIR;
     process.env.XIAOK_CONFIG_DIR = join(root, 'config');
     mkdirSync(process.env.XIAOK_CONFIG_DIR);
     const requests: any[] = [];
-    let readObserved=false,childHashObserved=false;
+    let readObserved=false,childHashObserved=false,materialReads=0;
     let serial = 0;
     const server = createServer(async (req, res) => {
         let raw = '';
@@ -30,10 +34,22 @@ it('real broker HTTP + SQLite binding + main runtime + SSE provider complete sco
         const messages = body.messages ?? [], text = JSON.stringify(messages), rootTurn = text.includes('ROOT_FLOW');
         const called = messages.flatMap((m: any) => (m.tool_calls ?? []).map((t: any) => t.function.name));
         const toolResults=messages.filter((m:any)=>m.role==='tool').map((m:any)=>String(m.content));
+        if(toolResults.some((value:string)=>value.includes('ROOM_ATTACHMENT_BODY')))materialReads++;
         if(!rootTurn&&toolResults.some((value:string)=>value.includes(createHash('sha256').update('child physical output').digest('hex'))))childHashObserved=true;
         if(rootTurn&&called.includes('read')){expect(toolResults.some((value:string)=>value.includes('child physical output'))).toBe(true);readObserved=true;}
         let name: string | undefined, input: Record<string, unknown> = {};
-        if (rootTurn) {
+        if (!called.includes('read_material')) {
+            name='read_material';
+            const materialId=text.match(/materialId: (mat_[a-zA-Z0-9_-]+)/)?.[1];
+            expect(materialId).toBeTruthy();input={materialId};
+        }
+        else if(rootTurn&&!called.includes('read_workspace_material')){
+            name='read_workspace_material';input={file_path:'downloaded.png'};
+        }
+        else if(rootTurn&&!called.includes('bash')){
+            name='bash';input={command:'printf ROOM_COMMAND_CONFIRMED'};
+        }
+        else if (rootTurn) {
             if (!called.includes('spawn_agent')) {
                 name = 'spawn_agent';
                 input = { task_name: 'helper', message: 'CHILD_ONE' };
@@ -98,17 +114,19 @@ it('real broker HTTP + SQLite binding + main runtime + SSE provider complete sco
         expect(preview.ok, JSON.stringify(preview)).toBe(true);
         const bound = await workspaceService.commitCollaborationRoomWorkspace({ roomId, previewId: preview.previewId!, expectedRevision: 0, idempotencyKey: 'bind-fixture', confirmOverlap: true, confirmSharedReadGrant: true });
         expect(bound.ok, JSON.stringify(bound)).toBe(true);
+        expect(bound.snapshot!.localCommandsAllowed).toBe(true);
         const sent = await roomClient.sendRoomMessage({ roomId, text: 'ROOT_FLOW', idempotencyKey: 'message-fixture', responsePolicy: 'mentioned', mentions: [{ kind: 'agent', logicalAgentId: 'agent' }] });
         expect(sent.ok, JSON.stringify(sent)).toBe(true);
         const message = sent.message as any;
         const services = createDesktopServices({ dataRoot: join(root, 'data'), kswarmService: { request: async () => new Response('{}'), getDesktopMutationToken: () => 'fixture' } as any });
         const runtime = createRoomWorkspaceRuntime({ store, broker: client, wake: roomClient, execute: services.runCollaborationRoomAgentTask, ensureProtocol: async () => { }, flushOutbox: workspaceService.flushOutbox });
-        const result = await runtime.run({ roomId, roomTitle: 'Fixture', roomRevision: 1, roomMessageId: message.messageId, logicalAgentId: 'agent', contextScope: { kind: 'room_only' }, messages: [message], contextWindow: { fromSequence: message.roomSequence, toSequence: message.roomSequence, totalMessages: 1, isComplete: true, snapshotAt: new Date().toISOString() } });
+        const result = await runtime.run({ roomId, roomTitle: 'Fixture', roomRevision: 1, roomMessageId: message.messageId, logicalAgentId: 'agent', contextScope: { kind: 'room_only' }, messages: [message], attachmentPaths:[attachmentPath,imagePath], contextWindow: { fromSequence: message.roomSequence, toSequence: message.roomSequence, totalMessages: 1, isComplete: true, snapshotAt: new Date().toISOString() } });
         expect(result.ok).toBe(true);
         expect(readObserved).toBe(true);expect(childHashObserved).toBe(true);
+        expect(materialReads).toBeGreaterThan(2);
         for (const file of ['root.txt', 'child.txt', 'child2.txt'])
             expect(readFileSync(join(cwd, file), 'utf8')).toContain('physical output');
-        expect(readdirSync(cwd).sort()).toEqual(['child.txt','child2.txt','root.txt']);
+        expect(readdirSync(cwd).sort()).toEqual(['child.txt','child2.txt','downloaded.png','root.txt']);
         const state = await client.get(roomId), claims = state.claims as any[];
         expect(claims).toHaveLength(3);
         expect(new Set(claims.map(c => c.claimId)).size).toBe(3);
@@ -120,10 +138,14 @@ it('real broker HTTP + SQLite binding + main runtime + SSE provider complete sco
             expect(JSON.stringify(request.messages)).toContain('FROZEN_ROOM_RULES');
             const tools = request.tools.map((tool: any) => tool.function.name);
             expect(tools).toContain('spawn_agent');
-            expect(tools).not.toContain('bash');
+            expect(tools).toContain('read_material');
+            expect(JSON.stringify(request.messages)).toContain('data:image/png;base64,');
+            expect(tools).toContain('bash');
             expect(tools).not.toContain('grep');
             expect(tools.some((n: string) => n.startsWith('notebook'))).toBe(false);
         }
+        expect(requests.some(request=>JSON.stringify(request.messages).includes('ROOM_COMMAND_CONFIRMED'))).toBe(true);
+        expect(requests.some(request=>JSON.stringify(request.messages).split('data:image/png;base64,').length>=3)).toBe(true);
         const files = await workspaceService.getCollaborationRoomWorkspace({ roomId });
         expect(files.artifacts.map(a => a.relativePath).sort()).toEqual(['child.txt', 'child2.txt', 'root.txt']);
         expect(store.pendingOutbox()).toHaveLength(0);
@@ -138,6 +160,11 @@ it('real broker HTTP + SQLite binding + main runtime + SSE provider complete sco
         const afterRefusal=await client.get(roomId);
         expect((afterRefusal.claims as any[])).toHaveLength(4);
         expect((afterRefusal.claims as any[]).every(claim=>claim.executionState==='released')).toBe(true);
+        const scheduled=await roomClient.sendScheduledRoomWake({roomId,targetAgentId:'agent',text:'Scheduled room check',scheduleId:'schedule-fixture',idempotencyKey:'due-fixture'});
+        expect(scheduled.ok,JSON.stringify(scheduled)).toBe(true);
+        expect((scheduled.message as any).sender).toEqual({kind:'system',service:'desktop'});
+        const pending=await roomClient.listPendingWakes('agent');
+        expect(JSON.stringify(pending)).toContain((scheduled.message as any).messageId);
     }
     finally {
         await brokerServer.close();
