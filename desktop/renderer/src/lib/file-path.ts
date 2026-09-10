@@ -64,3 +64,22 @@ export function relativizePaths(absPaths: string[]): string[] {
   if (prefixLen === 0) return normalized;
   return splitParts.map(parts => parts.slice(prefixLen).join('/'));
 }
+
+/** Normalize clipboard quoting and file URLs without assuming the host platform. */
+export function normalizeClipboardFilePath(value: string): string {
+  let path = value.trim();
+  if ((path.startsWith('"') && path.endsWith('"')) || (path.startsWith("'") && path.endsWith("'"))) path = path.slice(1, -1);
+  if (!/^file:\/\//i.test(path)) return path;
+  try {
+    const url = new URL(path);
+    const decoded = decodeURIComponent(url.pathname);
+    if (url.hostname && url.hostname !== 'localhost') return `\\\\${url.hostname}${decoded.replace(/\//g, '\\')}`;
+    if (/^\/[a-zA-Z]:\//.test(decoded)) return decoded.slice(1).replace(/\//g, '\\');
+    return decoded;
+  } catch { return path; }
+}
+
+export function filePathIdentity(path: string): string {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('\\\\')
+    ? path.replace(/\//g, '\\').toLowerCase() : path;
+}

@@ -3,6 +3,7 @@ import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  diffView: { showFull: '展开完整差异' },
   roomWorkspace: roomWorkspaceZh,
   executionHealth: {running:'执行中',waiting:'等待确认后继续',recovering:'连接恢复中',cleanup_pending:'已请求停止，等待实际执行退出并清理资源'},
   localCodex: "本地 Codex",

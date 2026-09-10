@@ -3,7 +3,7 @@ import { Send, Square, X, Plus } from 'lucide-react';
 import { api } from '../api';
 import { useLocale } from '../contexts/LocaleContext';
 import { ChatModelPicker } from './ChatModelPicker';
-import { toFileUrl } from '../lib/file-path';
+import { toFileUrl, fileBasename as basename, normalizeClipboardFilePath, filePathIdentity, isAbsoluteFilePath } from '../lib/file-path';
 
 export interface AttachedFile {
   filePath: string;
@@ -43,15 +43,11 @@ interface ChatInputProps {
 
 const TEXTAREA_MAX_HEIGHT = 220;
 
-function basename(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() || filePath;
-}
-
 function appendUniqueFiles(prev: AttachedFile[], next: AttachedFile[]): AttachedFile[] {
-  const seen = new Set(prev.map(f => f.filePath));
+  const seen = new Set(prev.map(f => filePathIdentity(f.filePath)));
   const added = next.filter(f => {
-    if (seen.has(f.filePath)) return false;
-    seen.add(f.filePath);
+    if (seen.has(filePathIdentity(f.filePath))) return false;
+    seen.add(filePathIdentity(f.filePath));
     return true;
   });
   return added.length > 0 ? [...prev, ...added] : prev;
@@ -128,7 +124,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // so we don't mistake a copied image file for a screenshot paste.
       const plainText = e.clipboardData?.getData('text/plain') ?? '';
       const lines = plainText.split(/\r?\n/).flatMap(l => { const t = l.trim(); return t ? [t] : []; });
-      const pathLines = lines.filter(l => /^\/[\w./ -]+$/.test(l) || /^[A-Z]:\\[\w.\\ -]+$/i.test(l));
+      const pathLines = lines.filter(l => isAbsoluteFilePath(normalizeClipboardFilePath(l)));
       const allLinesArePaths = pathLines.length > 0 && pathLines.length === lines.length;
       const hasFileItems = clipItems.some(item => item.kind === 'file');
       const hasImage = clipItems.some(item => item.type.startsWith('image/'));
@@ -139,7 +135,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
       // fetching a duplicate batch of attachment chips.
       if (finderFilesPendingRef.current) {
         finderFilesPendingRef.current = false;
-        if (hasFileItems || hasImage || allLinesArePaths) {
+        if (hasFileItems || hasImage || allLinesArePaths || (!plainText && clipItems.length === 0)) {
           e.preventDefault();
           return;
         }
@@ -254,11 +250,12 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
     const v = e.target.value;
     // If paste detected file paths, strip them from the textarea and add as chips
     if (pastePathsRef.current) {
-      const paths = pastePathsRef.current;
+      const rawPaths = pastePathsRef.current;
+      const paths = rawPaths.map(normalizeClipboardFilePath);
       pastePathsRef.current = null;
       // Strip the pasted path text from the new value
       let stripped = v;
-      for (const p of paths) stripped = stripped.replace(p, '');
+      for (const p of rawPaths) stripped = stripped.replace(p, '');
       stripped = stripped.replace(/\n+/g, '\n').trimEnd();
       const newFiles = paths.map(p => {
         const name = basename(p);
@@ -300,7 +297,7 @@ export function ChatInput({ value, onChange, onSubmit, onQueue, queuedText, onCa
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Intercept Cmd+V to catch Finder file copies where clipboard has no text/plain path.
     // readClipboardFilePaths reads NSFilenamesPboardType which Finder always populates.
-    if (e.key === 'v' && e.metaKey && !e.shiftKey && !e.altKey && !e.repeat && !isComposingRef.current && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
+    if (e.key.toLowerCase() === 'v' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && !e.repeat && !isComposingRef.current && !finderFilesPendingRef.current && window.xiaokDesktop?.readClipboardFilePaths) {
       const valueBeforePaste = internalValue;
       finderFilesPendingRef.current = true;
       // The flag is consumed by the matching paste event. If that event never

@@ -1,3 +1,4 @@
+import { normalizeClipboardFilePath, filePathIdentity } from '../../renderer/src/lib/file-path';
 import { describe, expect, it } from 'vitest'
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../../renderer/src/lib/file-path'
 
@@ -66,3 +67,15 @@ describe('toFileUrl', () => {
     expect(decodeURIComponent(url.pathname)).toBe('/D:/projects/my reports/x.html')
   })
 })
+
+describe('clipboard path normalization', () => {
+  it('normalizes drive and UNC URLs on any renderer host', () => {
+    expect(normalizeClipboardFilePath('file:///C:/a%20b/c.txt')).toBe('C:\\a b\\c.txt');
+    expect(normalizeClipboardFilePath('file://server/share/a.txt')).toBe('\\\\server\\share\\a.txt');
+    expect(normalizeClipboardFilePath('"C:\\项目\\a.txt"')).toBe('C:\\项目\\a.txt');
+  });
+  it('dedupes Windows spellings without folding POSIX case', () => {
+    expect(filePathIdentity('C:/A.txt')).toBe(filePathIdentity('c:\\a.txt'));
+    expect(filePathIdentity('/tmp/A')).not.toBe(filePathIdentity('/tmp/a'));
+  });
+});

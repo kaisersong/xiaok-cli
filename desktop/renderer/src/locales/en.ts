@@ -3,6 +3,7 @@ import { roomWorkspaceEn } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  diffView: { showFull: 'Show full diff' },
   roomWorkspace: roomWorkspaceEn,
   executionHealth: {running:'Running',waiting:'Waiting for confirmation',recovering:'Recovering connection',cleanup_pending:'Stop requested; waiting for execution to exit and resources to be released'},
   localCodex: "Local Codex",

@@ -1,7 +1,9 @@
 import React from 'react'
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { render, screen, fireEvent, cleanup } from '@testing-library/react'
 import { DiffView } from '../../renderer/src/components/DiffView'
+
+vi.mock('../../renderer/src/contexts/LocaleContext', () => ({ useLocale: () => ({ t: { diffView: { showFull: 'Show full diff' } } }) }))
 
 vi.mock('../../renderer/src/contexts/AppearanceContext', () => ({
   AppearanceContext: {
@@ -14,6 +16,7 @@ vi.mock('../../renderer/src/contexts/AppearanceContext', () => ({
 // We verify: component renders without crashing, container exists, fallback works.
 
 describe('DiffView', () => {
+  afterEach(cleanup)
   it('renders valid single-file unified diff without crashing', () => {
     const diff = `diff --git a/src/file.ts b/src/file.ts
 index 123..456 100644
@@ -42,7 +45,7 @@ diff --git a/b.ts b/b.ts
 -old
 +new`
     const { container } = render(<DiffView diff={diff} />)
-    expect(container.querySelector('diffs-container')).toBeTruthy()
+    expect(container.querySelectorAll('diffs-container')).toHaveLength(2)
   })
 
   it('handles renamed files without crashing', () => {
@@ -101,6 +104,9 @@ ${hugeLines.join('\n')}`
     const fallbackText = 'Diff too large - showing preview only'
     render(<DiffView diff={hugeDiff} fallbackText={fallbackText} />)
     expect(screen.getByText(fallbackText)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.queryByText(fallbackText)).not.toBeInTheDocument()
+    expect(document.querySelector('diffs-container')).toBeTruthy()
   })
 
   it('handles CRLF line endings without crashing', () => {
@@ -163,4 +169,15 @@ ${hugeLines.join('\n')}`
     const wrapper = container.querySelector('diffs-container') as HTMLElement
     expect(wrapper?.getAttribute('style')).toContain('500px')
   })
+  it('resets expansion when the patch changes, including invalid-to-valid transitions', () => {
+    const large = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -0,0 +1,600 @@\n' + '+line\n'.repeat(600)
+    const { rerender, container } = render(<DiffView diff="" />)
+    rerender(<DiffView diff={large} />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(container.querySelector('diffs-container')).toBeTruthy()
+    rerender(<DiffView diff={large.replace('a/x b/x', 'a/y b/y')} />)
+    expect(container.querySelector('diffs-container')).toBeNull()
+    expect(screen.getByRole('button')).toBeInTheDocument()
+  })
+
 })

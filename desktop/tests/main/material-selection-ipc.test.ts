@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const electronMocks = vi.hoisted(() => ({
   clipboardRead: vi.fn(),
+  clipboardReadBuffer: vi.fn(),
   openExternal: vi.fn(),
   openPath: vi.fn(),
   showItemInFolder: vi.fn(),
@@ -13,7 +14,7 @@ const electronMocks = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/xiaok-electron-test' },
-  clipboard: { read: electronMocks.clipboardRead },
+  clipboard: { read: electronMocks.clipboardRead, readBuffer: electronMocks.clipboardReadBuffer },
   dialog: { showOpenDialog: electronMocks.showOpenDialog },
   shell: {
     openExternal: electronMocks.openExternal,
@@ -31,6 +32,7 @@ describe('desktop material selection IPC', () => {
     rootDir = join(tmpdir(), `xiaok-material-selection-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
     electronMocks.showOpenDialog.mockReset();
+    electronMocks.clipboardReadBuffer.mockReset();
   });
 
   afterEach(() => {
@@ -86,4 +88,15 @@ describe('desktop material selection IPC', () => {
 
     await expect(expandSelectedMaterialPaths([filePath, dir])).resolves.toEqual([filePath]);
   });
+  it('routes native wide clipboard paths through actual material validation', async () => {
+    const filePath = join(rootDir, 'clipboard.txt');
+    writeFileSync(filePath, 'clipboard');
+    electronMocks.clipboardReadBuffer.mockImplementation((format: string) => format === 'FileNameW'
+      ? Buffer.from(`${filePath}\0${join(rootDir, 'missing.txt')}\0`, 'utf16le') : Buffer.alloc(0));
+    const handlers = new Map<string, (...args: unknown[]) => unknown>();
+    await registerDesktopIpc({ handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler) } as never,
+      { isDestroyed: () => false, webContents: { send: vi.fn() } } as never, { getDataRoot: () => join(rootDir, 'data') } as never);
+    await expect(handlers.get('desktop:readClipboardFilePaths')?.({})).resolves.toEqual([filePath]);
+  });
+
 });

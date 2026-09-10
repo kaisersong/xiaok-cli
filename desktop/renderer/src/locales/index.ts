@@ -7,6 +7,7 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  diffView: { showFull: string };
   roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
   executionHealth: Record<'running' | 'waiting' | 'recovering' | 'cleanup_pending', string>;

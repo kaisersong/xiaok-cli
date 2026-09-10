@@ -1,7 +1,6 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { PatchDiff } from '@pierre/diffs/react'
-// @ts-expect-error FileDiffOptions is exported from @pierre/diffs internal but not react
-import type { FileDiffOptions } from '@pierre/diffs/react'
+import { useLocale } from '../contexts/LocaleContext'
 
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace'
 
@@ -47,19 +46,11 @@ function isValidPatch(text: string): boolean {
   return true
 }
 
-function countFileDiffs(text: string): number {
-  const matches = text.match(/^diff --git /gm)
-  return matches ? matches.length : 0
+export function DiffView(props: DiffViewProps) {
+  return <DiffViewContent key={props.diff} {...props} />
 }
 
-/** Extract the first file's diff from a multi-file patch */
-function extractFirstFile(patch: string): string {
-  const secondIdx = patch.indexOf('\ndiff --git ', 1)
-  if (secondIdx === -1) return patch
-  return patch.substring(0, secondIdx)
-}
-
-export function DiffView({
+function DiffViewContent({
   diff,
   maxHeight = 280,
   layout = 'unified',
@@ -68,18 +59,28 @@ export function DiffView({
   hideHeader = true,
   fallbackText,
 }: DiffViewProps) {
+  const { t } = useLocale()
+  const [expanded, setExpanded] = useState(false)
   const isDark = typeof window !== 'undefined' &&
     window.matchMedia?.('(prefers-color-scheme: dark)').matches
 
   const analysis = useMemo(() => {
-    if (!diff) return { valid: false, fileCount: 0, patch: '' }
+    if (!diff) return { valid: false, oversized: false, patch: '' }
     const patch = extractDiffPatch(diff)
-    if (!isValidPatch(patch)) return { valid: false, fileCount: 0, patch }
+    if (!isValidPatch(patch)) return { valid: false, oversized: false, patch }
     const bytes = new Blob([patch]).size
     const lines = patch.split('\n').length
-    if (bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES) return { valid: false, fileCount: 0, patch }
-    return { valid: true, fileCount: countFileDiffs(patch), patch }
+    return { valid: true, oversized: bytes > MAX_DIFF_BYTES || lines > MAX_DIFF_LINES, patch }
   }, [diff])
+
+  if (analysis.valid && analysis.oversized && !expanded) {
+    return <div>
+      {fallbackText && <pre style={{ maxHeight, overflow: 'auto', whiteSpace: 'pre-wrap' }}>{fallbackText}</pre>}
+      <button type="button" onClick={() => setExpanded(true)} className="rounded border border-[var(--c-border-subtle)] px-3 py-1 text-xs text-[var(--c-text-secondary)]">
+        {t.diffView.showFull}
+      </button>
+    </div>
+  }
 
   if (!analysis.valid) {
     if (fallbackText) {
@@ -111,18 +112,12 @@ export function DiffView({
 
   const style: React.CSSProperties = { maxHeight, overflow: 'auto', fontFamily: MONO }
 
-  // Multi-file: render first file with PatchDiff, note additional files
-  if (analysis.fileCount > 1) {
-    const firstFile = extractFirstFile(analysis.patch)
-    return (
-      <div>
-        <PatchDiff patch={firstFile} options={options} style={style} />
-        <div style={{ padding: '4px 10px', fontSize: 11, color: 'var(--c-text-muted)', borderTop: '0.5px solid var(--c-border-subtle)' }}>
-          +{analysis.fileCount - 1} more file{analysis.fileCount > 2 ? 's' : ''}
-        </div>
-      </div>
-    )
+  // Split only at file boundaries; never truncate a hunk before passing it to Pierre.
+  const patches = analysis.patch.split(/\n(?=diff --git )/)
+  if (patches.length > 1) {
+    return <div style={style}>{patches.map((patch, index) =>
+      <PatchDiff key={index} patch={patch} options={options} style={style} />
+    )}</div>
   }
-
   return <PatchDiff patch={analysis.patch} options={options} style={style} />
 }

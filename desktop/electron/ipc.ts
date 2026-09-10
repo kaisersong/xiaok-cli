@@ -1,3 +1,4 @@
+import { readClipboardPathCandidates } from './clipboard-file-paths.js';
 import { app, BrowserWindow, clipboard, dialog, shell, systemPreferences, type IpcMain, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
@@ -962,19 +963,7 @@ export async function registerDesktopIpc(
     log('info', 'startProjectPlanning ok', { ok: r?.ok });
     return r;
   });
-  ipcMain.handle('desktop:readClipboardFilePaths', async () => {
-    // macOS Finder copy puts file URLs in 'public.file-url' pasteboard type
-    // Electron clipboard.read('NSFilenamesPboardType') returns newline-separated paths
-    try {
-      const raw = clipboard.read('NSFilenamesPboardType');
-      if (raw) {
-        // NSFilenamesPboardType returns a plist XML string; extract paths from it
-        const paths = raw.match(/<string>(.*?)<\/string>/g)?.map(m => m.replace(/<\/?string>/g, '')) ?? [];
-        return paths.filter(p => p.startsWith('/'));
-      }
-    } catch { /* not available on this platform */ }
-    return [];
-  });
+  ipcMain.handle('desktop:readClipboardFilePaths', async () => expandSelectedMaterialPaths(readClipboardPathCandidates(clipboard)));
   ipcMain.handle('desktop:readClipboardImage', async () => {
     try {
       const img = clipboard.readImage();
