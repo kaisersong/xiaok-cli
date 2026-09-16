@@ -144,10 +144,16 @@ The package is `xiaokcode`; the command is `xiaok`. Update with `xiaok update`.
 > **npm >= 11.16 users:** npm blocks dependency install/postinstall scripts by default. If you see a warning like `install scripts not yet covered by allowScripts`, install with:
 >
 > ```bash
-> npm install -g --allow-scripts=nodejieba,onnxruntime-node xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode
 > ```
 >
-> The `onnxruntime-node` script places the native binaries required for local embedding inference; `nodejieba` provides Chinese word segmentation. When the scripts are blocked the CLI still starts, but those capabilities degrade silently (embeddings off, Chinese text indexed as whole segments). To allow them permanently: `npm config set allow-scripts=nodejieba,onnxruntime-node --location=user`. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
+> The `onnxruntime-node` script places the native binaries required for local embedding inference; `nodejieba` provides Chinese word segmentation. When the scripts are blocked the CLI still starts, but those capabilities degrade silently (embeddings off, Chinese text indexed as whole segments). The example also allows the CLI health check, `node-pty` and SQLite install scripts. For persistent policy, merge the required package names into your existing allowlist; do not overwrite unrelated entries. `xiaok login` offers provider selection and hidden key input, with optional live verification. If no provider is configured, interactive chat can offer the same setup flow.
+
+#### Linux sudo / node-pty troubleshooting
+
+`node-pty@1.1.0` has no Linux prebuilt binaries. Its install script needs Python, make and a C++ compiler. If npm blocks that script, reinstalling with the same policy will leave sudo interaction unavailable. The global install example above grants permission for that invocation; a dependency's own `allowScripts` is not a substitute for the global install policy ([npm documentation](https://docs.npmjs.com/cli/install/)).
+
+The CLI postinstall checks native loading and warns with the original error. If postinstall itself is blocked, the same diagnosis is available at runtime and in `~/.xiaok/logs/xiaok.log` (or `XIAOK_CONFIG_DIR/logs/xiaok.log`). Once you have approved the script and have the build tools, you can run `node-gyp rebuild` in the installed `node-pty` package directory, or use `node <path-to-npm-bundled-node-gyp.js> rebuild`. The npm path varies by installation. Meanwhile, execute the command in your own terminal, or manually enter `!<command>` in the CLI; never send passwords in chat.
 
 ### From Source (Development)
 

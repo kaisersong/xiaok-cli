@@ -144,10 +144,16 @@ npm 包名是 `xiaokcode`，命令是 `xiaok`。使用 `xiaok update` 更新。
 > **npm ≥ 11.16 用户**：npm 默认拦截依赖包的 install/postinstall 脚本。若安装时出现 `install scripts not yet covered by allowScripts` 警告，请改用：
 >
 > ```bash
-> npm install -g --allow-scripts=nodejieba,onnxruntime-node xiaokcode
+> npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode
 > ```
 >
-> `onnxruntime-node` 的脚本用于放置本地 embedding 推理所需的原生二进制，`nodejieba` 用于中文分词。脚本被拦截时 CLI 仍可正常启动，但这两项能力会静默降级（embedding 关闭、中文按整段索引）。也可以全局一次性放行：`npm config set allow-scripts=nodejieba,onnxruntime-node --location=user`。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
+> `onnxruntime-node` 的脚本用于放置本地 embedding 推理所需的原生二进制，`nodejieba` 用于中文分词。脚本被拦截时 CLI 仍可正常启动，但这两项能力会静默降级（embedding 关闭、中文按整段索引）。上述命令同时允许 CLI 安装检查、`node-pty` 与 SQLite 的安装脚本，仅对本次全局安装生效。若需持久配置，请把需要的包名合并到已有名单，不要覆盖其他条目。`xiaok login` 提供 provider 选择、隐藏 key 输入和可选实时验证；首次交互式聊天没有配置 provider 时，也可进入同一引导。
+
+#### Linux sudo / node-pty 排障
+
+`node-pty@1.1.0` 没有 Linux 预编译产物，安装脚本需要 Python、make 和 C++ 编译器。脚本被 npm 拦截时，按相同策略重装仍无法使用 sudo 密码交互。上面的全局安装示例提供本次授权；依赖包内的 `allowScripts` 不能代替全局安装策略（[npm 文档](https://docs.npmjs.com/cli/install/)）。
+
+CLI postinstall 会探测真实加载并输出原始错误；若 postinstall 本身也被禁用，运行时报错与 `~/.xiaok/logs/xiaok.log`（或 `XIAOK_CONFIG_DIR/logs/xiaok.log`）仍可用于诊断。确认允许脚本且工具链齐备后，可进入安装的 `node-pty` 包目录执行 `node-gyp rebuild`；如果它不在 PATH，使用 `node <npm 自带的 node-gyp.js 路径> rebuild`，该路径取决于 npm 的安装位置。暂时可在自己的终端执行命令，或在 CLI 中手动输入 `!<command>`；不要在对话中发送密码。
 
 ### 源码安装（开发用）
 

@@ -195,6 +195,24 @@ describe('crash reporter', () => {
     expect(existsSync(crashDir) ? readdirSync(crashDir) : []).toEqual([]);
   }, 10_000);
 
+  itIfCanSpawn('exits after one crash report even when printing the report throws EPIPE', () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-broken-stderr-'));
+    tempDirs.push(configDir);
+    const entry = join(process.cwd(), '.test-dist', 'src', 'utils', 'crash-reporter.js');
+    const script = `
+      import { installGlobalCrashHandlers } from ${JSON.stringify(entry)};
+      installGlobalCrashHandlers();
+      process.stderr.write = () => { throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }); };
+      process.emit('uncaughtException', new Error('initial failure'));
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, XIAOK_CONFIG_DIR: configDir }, encoding: 'utf8', timeout: 1500,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(readdirSync(join(configDir, 'crashes'))).toHaveLength(1);
+  });
+
   itIfCanSpawn('records only allowlisted command context for a failing top-level CLI command', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-cli-'));
     tempDirs.push(configDir);

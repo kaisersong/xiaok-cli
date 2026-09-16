@@ -71,6 +71,7 @@ import { openTranscriptPager, spawnPagerProcess } from '../ui/transcript-pager.j
 import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { createLogger } from '../utils/logger.js';
+import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
@@ -273,7 +274,7 @@ async function runChat(initialInput, opts) {
     let terminalUiSuspended = false;
     let terminalUiFailureNoted = false;
     let terminalUiFallbackStream = null;
-    let stdoutFallbackToStderr = false;
+    const terminalLog = createLogger('chat', { stderr: false });
     let suspendInteractiveUi = (_context, _error, _fallbackStream) => {
         terminalUiSuspended = true;
     };
@@ -768,12 +769,12 @@ async function runChat(initialInput, opts) {
                     return await withPausedLiveActivity(async () => {
                         try {
                             scrollRegion.end();
-                            originalStdoutWrite('\n[xiaok] sudo 交互终端：请在此输入密码（不回显），Ctrl+C / Esc 取消。\n');
+                            terminalOutput.write('stdout', '\n[xiaok] sudo 交互终端：请在此输入密码（不回显），Ctrl+C / Esc 取消。\n');
                             const result = await runPtyCommand(String(input.command), {
                                 cwd: typeof input.workdir === 'string' ? input.workdir : cwd,
                                 timeoutMs: typeof input.timeout_ms === 'number' ? input.timeout_ms : 120000,
                                 maxChars: typeof input.max_chars === 'number' ? input.max_chars : 12000,
-                                signal: context?.signal, write: text => { originalStdoutWrite(text); },
+                                signal: context?.signal, write: text => { terminalOutput.write('stdout', text); },
                             });
                             if (context?.toolInvocationId)
                                 context.runtimeFactSink?.emit({ invocationId: context.toolInvocationId, toolName: 'bash', factKind: 'command_result', exitCode: result.timedOut ? null : result.exitCode });
@@ -782,7 +783,7 @@ async function runChat(initialInput, opts) {
                             return result.exitCode === 0 ? result.output || '（命令执行成功，无输出）' : `Error (exit ${result.exitCode}): ${result.output}`;
                         }
                         finally {
-                            originalStdoutWrite('\n');
+                            terminalOutput.write('stdout', '\n');
                             scrollRegion.resumeAfterExternalCommand({ inputPrompt: getFooterInputPrompt(), summaryLine: getCurrentIntentSummaryLine(), statusLine: statusBar.getStatusLine() });
                         }
                     });
@@ -1080,9 +1081,9 @@ async function runChat(initialInput, opts) {
         if (terminalUiSuspended) {
             return;
         }
-        log.warn('UI suspended', { context, fallbackStream });
         terminalUiSuspended = true;
         terminalUiFallbackStream = fallbackStream;
+        terminalLog.warn('UI suspended', { context, fallbackStream });
         runtimeState.deactivateTurn();
         inputReader.setForcePlainMode(false);
         if (!terminalUiFailureNoted) {
@@ -1095,12 +1096,7 @@ async function runChat(initialInput, opts) {
             catch { }
             if (!isBrokenPipe) {
                 try {
-                    if (fallbackStream === 'stdout') {
-                        originalStdoutWrite(rawMessage);
-                    }
-                    else {
-                        originalStderrWrite(rawMessage);
-                    }
+                    terminalOutput.write(fallbackStream === 'stdout' ? 'stdout' : 'stderr', rawMessage);
                 }
                 catch { }
             }
@@ -1117,7 +1113,7 @@ async function runChat(initialInput, opts) {
             scrollRegion.end();
         }
         catch (e) {
-            log.warn('scrollRegion.end failed in suspendInteractiveUi', e.message);
+            terminalLog.warn('scrollRegion.end failed in suspendInteractiveUi', e.message);
         }
     };
     const runtimeState = new TuiRuntimeState({
@@ -2237,77 +2233,34 @@ async function runChat(initialInput, opts) {
         && error !== null
         && 'code' in error
         && error.code === 'EPIPE');
-    const activateStdoutFallback = (error) => {
-        if (!isBrokenPipeError(error)) {
-            return false;
-        }
-        stdoutFallbackToStderr = true;
-        terminalUiFallbackStream = 'stderr';
-        return true;
-    };
-    const getFallbackWriter = () => {
-        if (terminalUiFallbackStream === 'stderr') {
-            return originalStderrWrite;
-        }
-        if (terminalUiFallbackStream === 'stdout') {
-            return originalStdoutWrite;
-        }
-        return null;
-    };
+    const terminalOutput = createTerminalOutputRouter({
+        stdout: originalStdoutWrite,
+        stderr: originalStderrWrite,
+        onFailure: (stream, error, fallback) => {
+            terminalLog.error('stream_error', { stream, error: String(error), fallback });
+            terminalUiFallbackStream = fallback;
+            if (stream === 'stdout' && isBrokenPipeError(error) && fallback === 'stderr')
+                return;
+            suspendInteractiveUi(stream + '_stream_error', error, fallback);
+        },
+    });
     process.stdout.write = ((chunk, ...args) => {
+        if (!terminalOutput.hasOutput())
+            return true;
         const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
         transcriptLogger.recordOutput('stdout', text);
-        if (terminalUiSuspended) {
-            const fallbackWriter = getFallbackWriter();
-            if (fallbackWriter) {
-                try {
-                    return fallbackWriter(chunk, ...args);
-                }
-                catch {
-                    return true;
-                }
-            }
+        if (terminalUiSuspended && !terminalUiFallbackStream)
             return true;
-        }
-        try {
-            const writer = stdoutFallbackToStderr ? originalStderrWrite : originalStdoutWrite;
-            return writer(chunk, ...args);
-        }
-        catch (error) {
-            if (activateStdoutFallback(error)) {
-                try {
-                    return originalStderrWrite(chunk, ...args);
-                }
-                catch {
-                    return true;
-                }
-            }
-            suspendInteractiveUi('stdout_write', error);
-            return true;
-        }
+        return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stdout', chunk, ...args);
     });
     process.stderr.write = ((chunk, ...args) => {
+        if (!terminalOutput.hasOutput())
+            return true;
         const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
         transcriptLogger.recordOutput('stderr', text);
-        if (terminalUiSuspended) {
-            const fallbackWriter = getFallbackWriter();
-            if (fallbackWriter) {
-                try {
-                    return fallbackWriter(chunk, ...args);
-                }
-                catch {
-                    return true;
-                }
-            }
+        if (terminalUiSuspended && !terminalUiFallbackStream)
             return true;
-        }
-        try {
-            return originalStderrWrite(chunk, ...args);
-        }
-        catch (error) {
-            suspendInteractiveUi('stderr_write', error);
-            return true;
-        }
+        return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stderr', chunk, ...args);
     });
     const releaseRawInputMode = retainRawInputModeForSession();
     let disposeInterruptHandlers = () => { };
@@ -2649,14 +2602,9 @@ async function runChat(initialInput, opts) {
             replayShellCommandOutput(replayOutput);
         };
         setStreamErrorHandler((error, stream) => {
-            log.error('stream_error', JSON.stringify({ stream: stream?.constructor?.name, error: String(error) }));
-            if (stream !== process.stdout && stream !== process.stderr) {
+            if (stream !== process.stdout && stream !== process.stderr)
                 return false;
-            }
-            if (stream === process.stdout && activateStdoutFallback(error)) {
-                return true;
-            }
-            suspendInteractiveUi(stream === process.stdout ? 'stdout_stream_error' : 'stderr_stream_error', error, stream === process.stdout ? 'stderr' : 'stdout');
+            terminalOutput.fail(stream === process.stdout ? 'stdout' : 'stderr', error);
             return true;
         });
         // 创建输入读取器

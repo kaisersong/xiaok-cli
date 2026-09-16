@@ -16,7 +16,7 @@ const minLevel = resolveLevel();
 
 // Log file: ~/.xiaok/logs/xiaok.log
 function logFilePath(): string {
-  const xiaokDir = join(homedir(), '.xiaok');
+  const xiaokDir = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
   const logsDir = join(xiaokDir, 'logs');
   if (!existsSync(logsDir)) {
     try { mkdirSync(logsDir, { recursive: true }); } catch {}
@@ -41,23 +41,13 @@ function format(level: Level, module: string, args: unknown[]): string {
   return `[${ts}] [${level}] [${module}] ${payload}`;
 }
 
-function write(level: Level, module: string, args: unknown[]) {
+export interface LoggerOptions { stderr?: boolean }
+
+function write(level: Level, module: string, args: unknown[], options: LoggerOptions) {
   if (levels[level] < levels[minLevel]) return;
   const line = format(level, module, args);
 
-  // Always print to stderr for terminal apps (stdout is for content)
-  if (levels[level] >= 3) {
-    process.stderr.write(line + '\n');
-  } else if (levels[level] >= 2) {
-    process.stderr.write(line + '\n');
-  } else {
-    // debug/info only when XIAOK_LOG is set
-    if (process.env.XIAOK_LOG) {
-      process.stderr.write(line + '\n');
-    }
-  }
-
-  // Append to log file
+  // Persist before touching a potentially broken terminal.
   try {
     appendFileSync(logFilePath(), line + '\n');
     // Also keep a recent copy in /tmp for quick access
@@ -65,15 +55,18 @@ function write(level: Level, module: string, args: unknown[]) {
   } catch {
     // Log file write failure is not fatal
   }
+  if (options.stderr !== false && (levels[level] >= 2 || process.env.XIAOK_LOG)) {
+    try { process.stderr.write(line + '\n'); } catch { /* diagnostics must not throw */ }
+  }
 }
 
-export function createLogger(module: string) {
+export function createLogger(module: string, options: LoggerOptions = {}) {
   return {
-    debug: (...args: unknown[]) => write('debug', module, args),
-    info: (...args: unknown[]) => write('info', module, args),
-    warn: (...args: unknown[]) => write('warn', module, args),
-    error: (...args: unknown[]) => write('error', module, args),
-    child: (childModule: string) => createLogger(`${module}:${childModule}`),
+    debug: (...args: unknown[]) => write('debug', module, args, options),
+    info: (...args: unknown[]) => write('info', module, args, options),
+    warn: (...args: unknown[]) => write('warn', module, args, options),
+    error: (...args: unknown[]) => write('error', module, args, options),
+    child: (childModule: string) => createLogger(`${module}:${childModule}`, options),
   };
 }
 

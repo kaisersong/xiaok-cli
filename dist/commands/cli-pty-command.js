@@ -1,3 +1,6 @@
+import { createRequire } from 'node:module';
+import { createLogger } from '../utils/logger.js';
+const log = createLogger('cli-pty', { stderr: false });
 /** Local terminal input is forwarded only; it is never returned or recorded. */
 export async function runPtyCommand(command, options) {
     options.signal?.throwIfAborted();
@@ -10,8 +13,26 @@ export async function runPtyCommand(command, options) {
     try {
         backend = await import('node-pty');
     }
-    catch {
-        throw new Error('交互终端组件 node-pty 不可用，请重新安装小 K CLI。');
+    catch (cause) {
+        options.signal?.throwIfAborted();
+        const code = cause && typeof cause === 'object' && 'code' in cause ? String(cause.code) : '';
+        const detail = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+        let modulePath = 'not resolved';
+        try {
+            modulePath = createRequire(import.meta.url).resolve('node-pty');
+        }
+        catch { /* optional dependency */ }
+        log.error('node-pty load failed', {
+            modulePath, platform: options.platform ?? process.platform, arch: process.arch,
+            node: process.version, abi: process.versions.modules, code, detail,
+        });
+        throw new Error(`交互终端组件 node-pty 加载失败，命令尚未执行。请检查可选依赖是否安装及原生模块是否兼容当前 Node。\n`
+            + `请在你自己的终端执行该命令，或在 CLI 中手动输入 !<command>；不要在对话中发送密码。\n`
+            + `若 npm 阻止了安装脚本，可一次性授权：npm install -g --include=optional --allow-scripts=xiaokcode,node-pty,better-sqlite3,nodejieba,onnxruntime-node xiaokcode\n`
+            + ((options.platform ?? process.platform) === 'linux'
+                ? `Linux 缺少 pty.node 时需要 Python、make 和 C++ 工具链；确认脚本策略允许后，可在 node-pty 包目录使用 node-gyp rebuild（或 node <npm 自带的 node-gyp.js 路径> rebuild）。\n` : '')
+            + `运行环境：${options.platform ?? process.platform}/${process.arch}, Node ${process.version}, ABI ${process.versions.modules}\n`
+            + `原始错误${code ? ` (${code})` : ''}：${detail}`, { cause });
     }
     options.signal?.throwIfAborted();
     const proc = backend.spawn('/bin/sh', ['-c',

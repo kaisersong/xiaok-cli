@@ -3670,7 +3670,7 @@ describe('chat interactive runtime', () => {
     }
   }, 15_000);
 
-  it('keeps the scroll-region footer active after stdout EPIPE by falling back to stderr', async () => {
+  it.each(['sync', 'async'] as const)('keeps the scroll-region footer active after stdout EPIPE by falling back to stderr (%s)', async (failureMode) => {
     const rootDir = join(tmpdir(), `xiaok-chat-stdout-epipe-footer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
     const projectDir = join(rootDir, 'project');
@@ -3691,6 +3691,8 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_CONFIG_DIR = configDir;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    const crashReporter = await import('../../src/utils/crash-reporter.js');
+    const handlerSpy = vi.spyOn(crashReporter, 'setStreamErrorHandler');
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(72, 13, { captureStderr: true });
     const sigintListeners = process.listeners('SIGINT');
@@ -3713,7 +3715,12 @@ describe('chat interactive runtime', () => {
       await waitForInputTurnReady(harness);
 
       harness.send('file:///Users/song/Downloads/%E9%87%91%E8%9D%B6%E7%81%B5%E5%9F%BA-V1.9-%E7%A0%94%E5%8F%91%E8%AE%A1%E5%88%92%E6%8A%A5%E5%91%8A.html 是 report-creator生成的吗');
-      harness.failNextStdoutWrite(epipe);
+      if (failureMode === 'sync') harness.failNextStdoutWrite(epipe);
+      else {
+        const handler = handlerSpy.mock.calls.find(([handler]) => handler !== null)?.[0];
+        expect(handler).toBeTypeOf('function');
+        for (let i = 0; i < 1000; i++) handler!(epipe, process.stdout);
+      }
       harness.send('\r');
 
       await waitFor(() => {
@@ -3733,6 +3740,15 @@ describe('chat interactive runtime', () => {
       }, { timeoutMs: 4_000 });
       await waitForInputTurnReady(harness);
 
+      if (failureMode === 'async') {
+        const handler = handlerSpy.mock.calls.find(([handler]) => handler !== null)![0]!;
+        const before = harness.output.raw.length;
+        for (let i = 0; i < 1000; i++) handler(epipe, process.stderr);
+        for (let i = 0; i < 100; i++) process.stdout.write('must not reach broken streams');
+        expect(harness.output.raw.length).toBe(before);
+        const log = readFileSync(join(configDir, 'logs', 'xiaok.log'), 'utf8');
+        expect(log.match(/stream_error.*write EPIPE/g)).toHaveLength(2);
+      }
       harness.send('/exit');
       harness.send('\r');
       await pending;
@@ -3747,6 +3763,7 @@ describe('chat interactive runtime', () => {
           process.stdout.removeListener('resize', listener);
         }
       }
+      handlerSpy.mockRestore();
       harness.restore();
     }
   }, 15_000);

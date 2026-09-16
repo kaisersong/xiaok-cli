@@ -12,7 +12,7 @@ function resolveLevel() {
 const minLevel = resolveLevel();
 // Log file: ~/.xiaok/logs/xiaok.log
 function logFilePath() {
-    const xiaokDir = join(homedir(), '.xiaok');
+    const xiaokDir = process.env.XIAOK_CONFIG_DIR ?? join(homedir(), '.xiaok');
     const logsDir = join(xiaokDir, 'logs');
     if (!existsSync(logsDir)) {
         try {
@@ -43,24 +43,11 @@ function format(level, module, args) {
     }).join(' ');
     return `[${ts}] [${level}] [${module}] ${payload}`;
 }
-function write(level, module, args) {
+function write(level, module, args, options) {
     if (levels[level] < levels[minLevel])
         return;
     const line = format(level, module, args);
-    // Always print to stderr for terminal apps (stdout is for content)
-    if (levels[level] >= 3) {
-        process.stderr.write(line + '\n');
-    }
-    else if (levels[level] >= 2) {
-        process.stderr.write(line + '\n');
-    }
-    else {
-        // debug/info only when XIAOK_LOG is set
-        if (process.env.XIAOK_LOG) {
-            process.stderr.write(line + '\n');
-        }
-    }
-    // Append to log file
+    // Persist before touching a potentially broken terminal.
     try {
         appendFileSync(logFilePath(), line + '\n');
         // Also keep a recent copy in /tmp for quick access
@@ -69,14 +56,20 @@ function write(level, module, args) {
     catch {
         // Log file write failure is not fatal
     }
+    if (options.stderr !== false && (levels[level] >= 2 || process.env.XIAOK_LOG)) {
+        try {
+            process.stderr.write(line + '\n');
+        }
+        catch { /* diagnostics must not throw */ }
+    }
 }
-export function createLogger(module) {
+export function createLogger(module, options = {}) {
     return {
-        debug: (...args) => write('debug', module, args),
-        info: (...args) => write('info', module, args),
-        warn: (...args) => write('warn', module, args),
-        error: (...args) => write('error', module, args),
-        child: (childModule) => createLogger(`${module}:${childModule}`),
+        debug: (...args) => write('debug', module, args, options),
+        info: (...args) => write('info', module, args, options),
+        warn: (...args) => write('warn', module, args, options),
+        error: (...args) => write('error', module, args, options),
+        child: (childModule) => createLogger(`${module}:${childModule}`, options),
     };
 }
 // Top-level logger for modules that don't use createLogger
