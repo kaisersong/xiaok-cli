@@ -11,10 +11,16 @@ export interface UpdateProcessResult {
     stderr: string;
 }
 export type UpdateProcessRunner = (invocation: UpdateProcessInvocation) => Promise<UpdateProcessResult>;
+export interface UpdateDaemonController {
+    isRunning(): Promise<boolean>;
+    stop(): Promise<boolean>;
+    start(): Promise<void>;
+}
 interface UpdateDependencies {
     run?: UpdateProcessRunner;
     log?: (message: string) => void;
     platform?: NodeJS.Platform;
+    daemon?: UpdateDaemonController;
 }
 export type UpdateResult = {
     status: 'current' | 'newer' | 'updated';

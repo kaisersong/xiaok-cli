@@ -1,7 +1,12 @@
 import { spawn } from 'node:child_process';
 import type { Command } from 'commander';
+import { queryXiaokDaemonStatus, stopXiaokDaemon } from '../runtime/daemon/control.js';
+import { spawnXiaokDaemonDetached, waitForXiaokDaemon } from '../runtime/daemon/launcher.js';
+import { resolveXiaokDaemonSocketPath } from '../runtime/reminder/ipc.js';
 
 const PACKAGE_SPEC = 'xiaokcode@latest';
+const DAEMON_STOP_TIMEOUT_MS = 5_000;
+const DAEMON_STOP_POLL_MS = 100;
 
 export interface UpdateProcessInvocation {
   command: string;
@@ -20,10 +25,17 @@ export type UpdateProcessRunner = (
   invocation: UpdateProcessInvocation,
 ) => Promise<UpdateProcessResult>;
 
+export interface UpdateDaemonController {
+  isRunning(): Promise<boolean>;
+  stop(): Promise<boolean>;
+  start(): Promise<void>;
+}
+
 interface UpdateDependencies {
   run?: UpdateProcessRunner;
   log?: (message: string) => void;
   platform?: NodeJS.Platform;
+  daemon?: UpdateDaemonController;
 }
 
 export type UpdateResult = {
@@ -125,6 +137,79 @@ const defaultRunner: UpdateProcessRunner = async (invocation) => new Promise((re
   child.once('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
 });
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// npm 需要替换整个全局包目录。Windows 上运行中的 daemon 持有原生模块文件
+// （如 onnxruntime.dll），会让移动/复制旧包目录的步骤以 EBUSY 失败，
+// 留下半新半旧的安装目录，所以更新前先停、更新后按新版本重启。
+const defaultDaemonController: UpdateDaemonController = {
+  async isRunning() {
+    const status = await queryXiaokDaemonStatus(resolveXiaokDaemonSocketPath());
+    return status?.running === true;
+  },
+  async stop() {
+    const socketPath = resolveXiaokDaemonSocketPath();
+    await stopXiaokDaemon(socketPath);
+    // shutdown RPC 先返回，daemon 进程随后才退出并释放文件句柄；
+    // 确认 socket 不再可达（即进程已退出）再继续，避免 npm 仍撞上 EBUSY。
+    const deadline = Date.now() + DAEMON_STOP_TIMEOUT_MS;
+    do {
+      if ((await queryXiaokDaemonStatus(socketPath)) === null) return true;
+      await delay(DAEMON_STOP_POLL_MS);
+    } while (Date.now() < deadline);
+    return false;
+  },
+  async start() {
+    const socketPath = resolveXiaokDaemonSocketPath();
+    await spawnXiaokDaemonDetached(socketPath);
+    await waitForXiaokDaemon(socketPath);
+  },
+};
+
+async function readDaemonRunning(
+  daemon: UpdateDaemonController,
+  log: (message: string) => void,
+): Promise<boolean> {
+  try {
+    return await daemon.isRunning();
+  } catch {
+    log('警告：无法确认 xiaok daemon 状态，跳过 daemon 处理。');
+    return false;
+  }
+}
+
+async function stopDaemonForUpdate(
+  daemon: UpdateDaemonController,
+  log: (message: string) => void,
+): Promise<void> {
+  log('检测到 xiaok daemon 正在运行，先停止以避免安装目录文件被占用...');
+  try {
+    if (await daemon.stop()) {
+      log('xiaok daemon 已停止。');
+      return;
+    }
+  } catch {
+    // 落到下面的统一告警
+  }
+  log('警告：未能确认 xiaok daemon 已停止，npm 可能因文件占用（EBUSY）失败。');
+}
+
+async function startDaemonAfterUpdate(
+  daemon: UpdateDaemonController,
+  log: (message: string) => void,
+  reason: 'restart' | 'recover',
+): Promise<void> {
+  try {
+    await daemon.start();
+    log(reason === 'restart' ? 'xiaok daemon 已按新版本重启。' : 'xiaok daemon 已恢复运行。');
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(`警告：xiaok daemon 未能自动启动（${detail}），请运行 xiaok daemon start 恢复。`);
+  }
+}
+
 export async function runUpdateCommand(
   currentVersion: string,
   dependencies: UpdateDependencies = {},
@@ -132,6 +217,7 @@ export async function runUpdateCommand(
   const run = dependencies.run ?? defaultRunner;
   const log = dependencies.log ?? console.log;
   const platform = dependencies.platform ?? process.platform;
+  const daemon = dependencies.daemon ?? defaultDaemonController;
 
   log(`正在检查 xiaok 更新（当前 ${currentVersion}）...`);
   const lookup = await run(buildNpmUpdateInvocation('view', platform));
@@ -152,13 +238,28 @@ export async function runUpdateCommand(
   }
 
   log(`发现新版本 ${latestVersion}，正在更新 xiaok...`);
+  const daemonWasRunning = await readDaemonRunning(daemon, log);
+  if (daemonWasRunning) {
+    await stopDaemonForUpdate(daemon, log);
+  }
+
   const install = await run(buildNpmUpdateInvocation('install', platform));
   if (install.exitCode !== 0) {
     const detail = install.stderr.trim() || `npm exited with code ${install.exitCode}`;
+    if (daemonWasRunning) {
+      await startDaemonAfterUpdate(daemon, log, 'recover');
+    }
     if (/EACCES|EPERM|permission/i.test(detail)) {
       throw new Error(`更新失败：npm 全局目录无写权限。请修复 npm prefix 或目录权限后重试。${detail}`);
     }
+    if (/EBUSY|resource busy or locked/i.test(detail)) {
+      throw new Error(`更新失败：安装目录文件被占用（EBUSY）。请先运行 xiaok daemon stop，确认占用进程退出后重试。${detail}`);
+    }
     throw new Error(`更新失败：${detail}`);
+  }
+
+  if (daemonWasRunning) {
+    await startDaemonAfterUpdate(daemon, log, 'restart');
   }
 
   log(`更新命令已完成：${currentVersion} → latest（查询时为 ${latestVersion}）。请运行 xiaok --version 验证。`);
