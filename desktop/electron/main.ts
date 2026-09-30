@@ -1134,6 +1134,9 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     return null;
   });
   const roomWorkspaceStore = new RoomWorkspaceLocalStore(join(USER_DATA_DIR, 'room-workspace.sqlite'));
+  // macOS volume device ids drift across OS updates; without this sweep every
+  // room binding would fail verifyRoot as "identity changed" after an update.
+  void roomWorkspaceStore.healBindingRoots().then(healed => { if (healed.length) debugMain('room-workspace:identity-healed', healed); }).catch(() => undefined);
   const rawRoomWorkspaceBroker = createRoomWorkspaceBrokerClient({ token: kswarmService.getIntentBrokerRoomToken(), isMutationOwner: () => roomWorkspaceOwner?.isOwner() === true });
   const scopedRoomClients = createRoomProjectScopeGuard({
     roomClient: rawCollaborationRoomBrokerClient, workspaceBroker: rawRoomWorkspaceBroker,
@@ -1209,7 +1212,16 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       return external === null || external.supported;
     },
     execute: (input, claimToken) => services.runCollaborationRoomAgentTask(input, claimToken),
-    executeTurn: input => roomWorkspaceRuntime.run(input),
+    // Wake failures are otherwise invisible (dispatcher settles silently); keep
+    // a main-debug trace so stalls like a drifted workspace root stay diagnosable.
+    executeTurn: async input => {
+      try {
+        return await roomWorkspaceRuntime.run(input);
+      } catch (error) {
+        debugMain('room-wake:turn-failed', { roomId: input.roomId, roomMessageId: input.roomMessageId, logicalAgentId: input.logicalAgentId, error: String(error) });
+        throw error;
+      }
+    },
     onEvent: emitCollaborationRoomEvent,
   });
   const collaborationRoomService = createCollaborationRoomService({

@@ -368,6 +368,11 @@ export class TimedActionStore {
       if (actionUpdate.changes > 0 || runUpdated) {
         this.bumpAutomationStoreVersion();
       }
+      if (shouldPause) {
+        // Without this, an auto-paused task silently looks "still scheduled" —
+        // a broken scheduled task then stalls unnoticed for weeks.
+        console.warn(`[timed-action] auto-paused ${actionId} after ${consecutiveFailures} consecutive failures: ${error}`);
+      }
     });
   }
 
@@ -404,6 +409,9 @@ export class TimedActionStore {
       const runUpdated = this.updateRun(runId, decision.action, now, undefined, decision.reason, runDecision);
       if (actionUpdate.changes > 0 || runUpdated) {
         this.bumpAutomationStoreVersion();
+      }
+      if (decision.action === 'pause') {
+        console.warn(`[timed-action] paused ${actionId}: ${decision.reason}`);
       }
     });
   }
