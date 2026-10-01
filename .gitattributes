@@ -1,0 +1,9 @@
+# The Windows absence manifest records the SHA-256 of the native sources as raw
+# bytes, so a checkout that rewrites line endings makes the recorded digest
+# depend on the machine that built the payload. The Windows runner checks these
+# sources out with its own core.autocrlf, which is why the first payloads
+# committed from CI bound themselves to CRLF bytes and failed verification on
+# every LF checkout. Pin the two hashed sources so the bytes are the same
+# everywhere.
+src/runtime/verification/native/windows-installation-absence.c text eol=lf
+src/runtime/verification/native/windows-installation-absence-core.h text eol=lf
