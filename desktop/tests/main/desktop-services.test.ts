@@ -1,3 +1,5 @@
+import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-compatibility.js';
+import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
@@ -2458,7 +2460,6 @@ describe('desktop services', () => {
       .not.toHaveProperty('runtimeOptions');
     expect(snapshot.models.find(model => model.id === 'acme-k3')?.runtimeOptions).toEqual({
       contextLimit: 128_000,
-      reasoningEffort: 'low',
     });
   });
 
@@ -2540,6 +2541,114 @@ describe('desktop services', () => {
         reasoningEfforts: ['low', 'high', 'max'],
       },
     });
+  });
+
+  it.each(OLD_MODEL_EFFORT_CONFIGS)('keeps old strength-free config compatible with CLI and reload: $name', async ({ config, wireModel, effort, contextLimit }) => {
+    const configDir = join(rootDir, 'config');
+    mkdirSync(configDir, { recursive: true });
+    const path = join(configDir, 'config.json');
+    const oldContent = JSON.stringify(config, null, 2);
+    writeFileSync(path, oldContent);
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    const snapshot = await services.getModelConfig();
+    const current = snapshot.models.find(model => model.id === snapshot.defaultModelId)!;
+    expect(current.model).toBe(wireModel);
+    expect(current.runtimeOptions?.reasoningEffort).toBe(effort);
+    expect(current.runtimeOptions?.contextLimit).toBe(contextLimit);
+    expect(Boolean(current.runtimeConstraints?.reasoningEfforts?.length)).toBe(Boolean(effort));
+    expect(readFileSync(path, 'utf8')).toBe(oldContent);
+    const binding = resolveRuntimeModelBinding(await loadConfig());
+    expect(binding.runtimeOptions).toEqual(current.runtimeOptions);
+    const selected = await services.saveModelConfig({ providerId: current.provider, modelId: current.id });
+    expect(selected.defaultModelId).toBe(current.id);
+    expect(selected.models.find(model => model.id === current.id)?.runtimeOptions).toEqual(current.runtimeOptions);
+    const reloaded = await services.getModelConfig();
+    expect(reloaded.models.find(model => model.id === current.id)?.runtimeOptions).toEqual(current.runtimeOptions);
+    const persisted = JSON.parse(readFileSync(path, 'utf8'));
+    if (config.schemaVersion === 2) {
+      expect(persisted.providers).toEqual(JSON.parse(JSON.stringify(config.providers)));
+      expect(persisted.models[current.id].label).toBe(config.models[current.id].label);
+      expect(persisted.models[current.id].runtimeOptions?.contextLimit).toBe(config.models[current.id].runtimeOptions?.contextLimit);
+    }
+  });
+
+  it('adds effort to a context-only old model without overwriting the pinned context limit', async () => {
+    const config = OLD_MODEL_EFFORT_CONFIGS.find(entry => entry.name.startsWith('kimi/k3: context-only'))!.config;
+    mkdirSync(join(rootDir, 'config'), { recursive: true });
+    writeFileSync(join(rootDir, 'config', 'config.json'), JSON.stringify(config));
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    const snapshot = await services.updateModelRuntimeOptions({ modelId: 'old-pinned-model', runtimeOptions: { reasoningEffort: 'max' } });
+    expect(snapshot.models.find(model => model.id === 'old-pinned-model')?.runtimeOptions).toEqual({ contextLimit: 128_000, reasoningEffort: 'max' });
+    expect((await services.getModelConfig()).models.find(model => model.id === 'old-pinned-model')?.runtimeOptions).toEqual({ contextLimit: 128_000, reasoningEffort: 'max' });
+  });
+
+  it('selects and persists the middle GLM default, preserving an explicit choice on reselection', async () => {
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    const snapshot = await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' });
+    const model = snapshot.models.find(entry => entry.model === 'GLM-5.3')!;
+    expect(model.runtimeOptions?.reasoningEffort).toBe('high');
+    const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf-8'));
+    expect(persisted.models[model.id].runtimeOptions.reasoningEffort).toBe('high');
+    await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' } });
+    const reselected = await services.saveModelConfig({ providerId: 'glm', modelId: model.id });
+    expect(reselected.models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('max');
+  });
+
+  it('hides effort for unsupported protocols and unknown endpoints without losing the context window', async () => {
+    const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
+    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' });
+    const configPath = join(rootDir, 'config', 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    for (const override of [{ protocol: 'openai_responses', baseUrl: 'https://api.openai.com/v1' }, { protocol: 'openai_legacy', baseUrl: 'https://proxy.example.com/v1' }]) {
+      Object.assign(config.providers.openai, override);
+      writeFileSync(configPath, JSON.stringify(config));
+      const model = (await services.getModelConfig()).models.find(entry => entry.model === 'gpt-5.5')!;
+      expect(model.runtimeConstraints?.reasoningEfforts ?? []).toEqual([]);
+      expect(model.runtimeOptions).toEqual({ contextLimit: 1_050_000 });
+      await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'high' } })).rejects.toThrow();
+    }
+  });
+
+  it('updates the declared GLM effort while preserving its context limit', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' });
+    const before = await services.getModelConfig();
+    const model = before.models.find(entry => entry.model === 'GLM-5.3');
+    expect(model?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
+    const after = await services.updateModelRuntimeOptions({
+      modelId: model!.id,
+      runtimeOptions: { ...model!.runtimeOptions, reasoningEffort: 'low' },
+    });
+    expect(after.models.find(entry => entry.id === model!.id)?.runtimeOptions).toEqual({
+      contextLimit: 1_048_576,
+      reasoningEffort: 'low',
+    });
+    expect((await services.getModelConfig()).models.find(entry => entry.id === model!.id)?.runtimeOptions?.reasoningEffort).toBe('low');
+  });
+
+  it('keeps GPT-5.5 effort choices distinct from GPT-5 and rejects an unsupported tier', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' });
+    const snapshot = await services.getModelConfig();
+    const model = snapshot.models.find(entry => entry.model === 'gpt-5.5')!;
+    expect(model.runtimeConstraints?.reasoningEfforts).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    const updated = await services.updateModelRuntimeOptions({
+      modelId: model.id,
+      runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'xhigh' },
+    });
+    expect(updated.models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('xhigh');
+    await expect(services.updateModelRuntimeOptions({
+      modelId: model.id,
+      runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' },
+    })).rejects.toThrow(/reasoningEffort/);
   });
 
   it('rejects invalid or out-of-scope runtime policy updates without mutating config', async () => {
@@ -3243,7 +3352,7 @@ describe('desktop services', () => {
       capabilities: ['tools', 'thinking', 'image_in'],
       runtimeOptions: {
         contextLimit: 1_048_576,
-        reasoningEffort: 'max',
+        reasoningEffort: 'high',
       },
     });
   });

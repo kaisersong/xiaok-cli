@@ -320,6 +320,9 @@ export class AgentRuntime {
                         onExecutionHealth: state => { this.reportActivity({ phase: 'tool', toolName: toolCall.name, executionHealth: state }); onEvent({ type: 'execution_health', runId: run.runId, invocationId: toolCall.id, state }); },
                         executionProgress: { progress: () => { this.reportActivity({ phase: 'tool', toolName: toolCall.name }); onEvent({ type: 'execution_progress', runId: run.runId }); }, wait: () => { }, resume: () => { } },
                     });
+                    // Registry guards cannot cover the microtask before this await resumes.
+                    // Reject cancellation before spilling or retaining a successful result.
+                    mergedSignal.throwIfAborted();
                     const ok = isSuccessfulModelToolResult(result);
                     const sessionSnapshot = this.session.exportSnapshot();
                     const truncated = truncateToolResult(result, MODEL_OUTPUT_CAP + MODEL_OUTPUT_TRUNCATION_MARKER.length, {

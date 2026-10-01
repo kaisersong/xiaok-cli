@@ -2,6 +2,9 @@ import { stdin, stdout } from 'process';
 import { boldCyan, dim } from './render.js';
 import type { Config } from '../types.js';
 import { getProviderProfile } from '../ai/providers/registry.js';
+import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../ai/providers/model-reasoning-effort.js';
+import { resolveProviderTransport } from '../ai/providers/auth-resolver.js';
+import type { ModelReasoningEffort } from '../ai/providers/types.js';
 import type { ReplRenderer } from './repl-renderer.js';
 
 interface ModelOption {
@@ -14,6 +17,15 @@ interface ModelOption {
 
 interface ModelSelectorOptions {
   renderer?: ReplRenderer;
+}
+
+type SelectedModel = { modelId: string; provider: string; model: string; label: string; reasoningEffort?: ModelReasoningEffort };
+
+function availableEfforts(config: Config, option: ModelOption): ModelReasoningEffort[] {
+  const provider = config.providers[option.provider];
+  if (!provider) return [];
+  return getSupportedModelReasoningEfforts({ providerId: option.provider, providerType: provider.type,
+    protocol: provider.protocol, wireModel: option.model, baseUrl: resolveProviderTransport(config, option.provider).baseUrl });
 }
 
 export function buildModelOptions(config: Config): ModelOption[] {
@@ -62,8 +74,11 @@ export function buildModelOptions(config: Config): ModelOption[] {
   return result;
 }
 
-function formatModelSelectorLines(models: ModelOption[], selectedIdx: number): string[] {
-  const lines = ['选择模型'];
+function formatModelSelectorLines(
+  models: ModelOption[], selectedIdx: number,
+  efforts: Map<string, ModelReasoningEffort>,
+): string[] {
+  const lines = ['选择模型（强度仅在当前模型内比较）'];
 
   for (let i = 0; i < models.length; i += 1) {
     const model = models[i]!;
@@ -72,17 +87,18 @@ function formatModelSelectorLines(models: ModelOption[], selectedIdx: number): s
     const modelStr = selected
       ? boldCyan(`[${model.provider}] ${model.label}`)
       : dim(`[${model.provider}] ${model.label}`);
-    lines.push(`  ${prefix} ${modelStr} - ${dim(model.desc)}`);
+    const effort = efforts.get(model.id);
+    lines.push(`  ${prefix} ${modelStr} - ${dim(model.desc)}${effort ? `  ${selected ? boldCyan(`← ${effort.toUpperCase()} →`) : dim(effort.toUpperCase())}` : ''}`);
   }
 
-  lines.push(dim('↑↓ 选择  Enter 确认  Esc 取消'));
+  lines.push(dim('↑↓ 选择  ←→ 强度  Enter 确认  Esc 取消'));
   return lines;
 }
 
 export async function selectModel(
   config: Config,
   options: ModelSelectorOptions = {},
-): Promise<{ modelId: string; provider: string; model: string; label: string } | null> {
+): Promise<SelectedModel | null> {
   const models = buildModelOptions(config);
 
   if (models.length === 0) {
@@ -93,6 +109,17 @@ export async function selectModel(
   const currentModelId = config.defaultModelId;
   let selectedIdx = models.findIndex(m => m.id === currentModelId);
   if (selectedIdx === -1) selectedIdx = 0;
+  const effortChoices = new Map(models.map(model => [model.id, availableEfforts(config, model)]));
+  const efforts = new Map<string, ModelReasoningEffort>();
+  for (const model of models) {
+    const choices = effortChoices.get(model.id) ?? [];
+    if (choices.length === 0) continue;
+    const configured = config.models[model.id]?.runtimeOptions?.reasoningEffort;
+    const initial = configured && choices.includes(configured)
+      ? configured
+      : getDefaultModelReasoningEffort(choices);
+    efforts.set(model.id, initial && choices.includes(initial) ? initial : choices[0]!);
+  }
   const renderer = options.renderer;
   const useRenderer = Boolean(
     renderer
@@ -108,7 +135,7 @@ export async function selectModel(
     let renderWithRenderer = useRenderer;
 
     const renderMenu = () => {
-      const lines = formatModelSelectorLines(models, selectedIdx);
+      const lines = formatModelSelectorLines(models, selectedIdx, efforts);
 
       if (renderWithRenderer && renderer) {
         const currentState = renderer.getState();
@@ -128,7 +155,8 @@ export async function selectModel(
         const prefix = isSelected ? boldCyan('❯') : ' ';
         const modelStr = isSelected ? boldCyan(`[${m.provider}] ${m.label}`) : dim(`[${m.provider}] ${m.label}`);
         const descStr = dim(m.desc);
-        stdout.write(`\n  ${prefix} ${modelStr} - ${descStr}`);
+        const effort = efforts.get(m.id);
+        stdout.write(`\n  ${prefix} ${modelStr} - ${descStr}${effort ? `  ${effort.toUpperCase()}` : ''}`);
       }
       stdout.write(`\x1b[${models.length}A`);
     };
@@ -145,7 +173,7 @@ export async function selectModel(
       stdout.write('\x1b8');
     };
 
-    const done = (result: { modelId: string; provider: string; model: string; label: string } | null) => {
+    const done = (result: SelectedModel | null) => {
       if (resolved) return;
       resolved = true;
       clearMenu();
@@ -168,7 +196,20 @@ export async function selectModel(
 
       if (key === '\r' || key === '\n') {
         const selected = models[selectedIdx];
-        done({ modelId: selected.id, provider: selected.provider, model: selected.model, label: selected.label });
+        done({ modelId: selected.id, provider: selected.provider, model: selected.model, label: selected.label,
+          ...(efforts.has(selected.id) ? { reasoningEffort: efforts.get(selected.id) } : {}) });
+        return;
+      }
+
+      if (key === '\x1b[C' || key === '\x1b[D') {
+        const selected = models[selectedIdx]!;
+        const choices = effortChoices.get(selected.id) ?? [];
+        if (choices.length === 0) return;
+        const current = choices.indexOf(efforts.get(selected.id)!);
+        const direction = key === '\x1b[C' ? 1 : -1;
+        efforts.set(selected.id, choices[(current + direction + choices.length) % choices.length]!);
+        clearMenu();
+        renderMenu();
         return;
       }
 
@@ -188,7 +229,7 @@ export async function selectModel(
     };
 
     if (!renderWithRenderer) {
-      stdout.write('\n选择模型 (↑↓ 选择, Enter 确认, Esc 取消):\n');
+      stdout.write('\n选择模型 (↑↓ 选择, ←→ 强度, Enter 确认, Esc 取消):\n');
     }
     renderMenu();
     stdin.setRawMode?.(true);

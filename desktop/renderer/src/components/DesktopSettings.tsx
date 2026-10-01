@@ -1051,9 +1051,7 @@ function ModelPane() {
     );
     const nextEffort = currentModel?.runtimeOptions?.reasoningEffort;
     setRuntimeReasoningEffort(
-      nextEffort && KIMI_K3_REASONING_EFFORTS.includes(nextEffort)
-        ? nextEffort
-        : 'high',
+      KIMI_K3_REASONING_EFFORTS.find(effort => effort === nextEffort) ?? 'high',
     );
   }, [currentModel?.id, currentModel?.runtimeOptions?.contextLimit, currentModel?.runtimeOptions?.reasoningEffort]);
 

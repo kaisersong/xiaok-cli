@@ -1,3 +1,4 @@
+import { getSupportedModelReasoningEfforts } from './model-reasoning-effort.js';
 import type { Config, LegacyConfig } from '../../types.js';
 import { normalizeConfig } from './normalize.js';
 import { findCatalogModel, getProviderProfile } from './registry.js';
@@ -85,6 +86,7 @@ export function resolveRuntimeModelBinding(rawConfig: Config | LegacyConfig, req
     catalogOptions: catalogRuntimeModel?.runtimeOptions,
     catalogConstraints: catalogRuntimeModel?.runtimeConstraints,
     configuredOptions: configuredRuntimeOptions,
+    reasoningEfforts: getSupportedModelReasoningEfforts({ providerId, providerType: providerConfig.type, protocol: providerConfig.protocol, wireModel, baseUrl: transport.baseUrl }),
   });
 
   return {

@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.5 (September 11, 2026).** CLI and Desktop metadata are aligned at **1.5.5**. This update improves collaboration room execution and navigation, adds room aliases, and makes automated message history easier to read. The latest published Desktop baseline is **1.5.4** until the 1.5.5 build and asset checks succeed. See [Version History](#version-history).
+**Release target: 1.5.6 (October 1, 2026).** CLI and Desktop metadata are aligned at **1.5.6**. This update adds active/archived collaboration room lists, last-active timestamps and room management, improves terminal readability and model reasoning controls, and checks runtime dependencies in packaged apps. Get currently available installers from the [latest published release](https://github.com/kaisersong/xiaok-cli/releases/latest); 1.5.6 becomes downloadable after the [release build](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) and publication checks complete. See [Version History](#version-history).
 
 ---
 
@@ -249,11 +249,11 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get the current published build from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The listed `desktop-v1.5.2` assets are:
+Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). Version `desktop-v1.5.6` provides these assets once release CI completes:
 
-- `xiaok-1.5.2-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.2-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.2.exe` — Windows x64 installer.
+- `xiaok-1.5.6-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.6-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.6.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
@@ -467,7 +467,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins all three siblings to `desktop-v1.5.2`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
+Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins all three siblings to `desktop-v1.5.6`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
 
 ---
 
@@ -558,6 +558,15 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.6 — Release preparation, October 1, 2026
+
+- **Collaboration room management:** separate Active / Archived lists, ordered by last message activity, with last-active timestamp pills. Each room has a “…” menu for archiving or deleting; deletion requires confirmation and retains linked projects, working directories, and files. Ownership and revision checks prevent unauthorized or stale deletion, and ongoing execution must settle first.
+- **Readable controls:** create, category, menu, error and delete-confirmation controls use consistent light/dark theme colors. Destructive confirmation uses a red background and white text.
+- **Model reasoning controls:** CLI `/models` uses left/right arrows to choose supported effort levels; Desktop exposes them in the chat model picker. Supported official model/endpoint combinations use their middle tier by default, preserve saved valid choices and context limits, and send the selected value on subsequent requests. Unsupported models, protocols and custom endpoints do not gain an effort parameter.
+- **Terminal experience:** aligned Chinese Markdown tables, a labeled-record fallback in narrow windows, preserved drafts during streaming and clearer spacing around activity. Logs rotate and transcript output has a size cap to limit runaway growth.
+- **Startup and recovery:** packaged runtime dependency checks include direct Ajv and cross-spawn declarations; SQLite v2-to-v3 migration creates missing indexes transactionally while retaining rows. Workspace roots survive macOS device-id changes; CLI updates stop the daemon before npm installation, and PTY/EPIPE failures have clearer handling. Cancellation is checked immediately after awaiting tools, preserving earlier completed results.
+- CLI and Desktop are `1.5.6`; bundled sibling repositories are pinned to `desktop-v1.5.6`. Experimental semantic tool recommendation remains disabled. In-progress SOL-PI changes are excluded from this release. See [release notes](release-notes/1.5.6.md) for validation and boundaries; metadata changes do not publish the npm package.
 
 ### v1.5.5 — Release preparation, September 11, 2026
 

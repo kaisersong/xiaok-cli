@@ -22,7 +22,7 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     } finally { registry.dispose(); }
   });
 
-  it('rejects the real Registry post-hook resolve / CLI await microtask gap before successful tool history', async () => {
+  it('preserves cancellation during real Registry post-hook settlement before successful tool history', async () => {
     const entered = barrier(); let release!: (warnings: string[]) => void;
     const postHook = new Promise<string[]>(resolve => { release = resolve; });
     const controller = new AbortController(); const reason = new Error('between actual registry and CLI');
@@ -37,8 +37,8 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     const outcome = runtime.run('fixture', event => events.push(event.type), controller.signal).catch(error => error);
     try {
       await entered.wait;
-      release([]); // Enqueues the real Registry continuation, which checks then resolves.
-      queueMicrotask(() => controller.abort(reason)); // Wins before its caller resumes.
+      release([]); // Enqueues the inner Registry continuation; its outer guard still runs.
+      queueMicrotask(() => controller.abort(reason)); // Cancellation is observed by the real Registry outer guard.
       const error = await outcome;
       expect.soft(error).toMatchObject({ name: 'AbortError' }); expect.soft(error.cause).toBe(reason);
       expect.soft(events).not.toContain('tool_finished'); expect.soft(events.filter(type => type === 'run_aborted')).toHaveLength(1);
@@ -61,25 +61,30 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     } finally { registry.dispose(); }
   });
 
-  it('rechecks the final Registry Promise even when its own inner preflight and outcome guards have passed', async () => {
+  it.each([false, true])('rechecks the final Registry Promise and preserves prior successful tools (%s)', async (withPriorSuccess) => {
     const controller = new AbortController(); const reason = new Error('after final registry outcome'); const events: string[] = [];
     const session = new AgentSessionState(); let calls = 0;
     const registry = new ToolRegistry({ autoMode: true }, [{ permission: 'safe', definition: { name: 'probe', description: 'fixture', inputSchema: { type: 'object' } }, execute: async () => 'FINAL_REGISTRY_SUCCESS' }]);
     const original = registry.executeTool.bind(registry);
     vi.spyOn(registry, 'executeTool').mockImplementation(async (...args) => {
       const actualResult = await original(...args);
-      queueMicrotask(() => controller.abort(reason));
+      if (!(args[1] as { prior?: boolean }).prior) queueMicrotask(() => controller.abort(reason));
       return actualResult;
     });
     const runtime = new AgentRuntime({ adapter: { getModelName: () => 'fixture', async *stream(): AsyncIterable<StreamChunk> {
-      calls++; yield { type: 'tool_use', id: 'final-call', name: 'probe', input: {} }; yield { type: 'done' };
+      calls++;
+      if (withPriorSuccess) yield { type: 'tool_use', id: 'prior-call', name: 'probe', input: { prior: true } };
+      yield { type: 'tool_use', id: 'final-call', name: 'probe', input: {} }; yield { type: 'done' };
     } } as ModelAdapter, registry, session, controller: new AgentRunController(), systemPrompt: 'fixture', maxIterations: 2 });
     try {
       const error = await runtime.run('fixture', event => events.push(event.type), controller.signal).catch(error => error);
-      expect(error).toMatchObject({ name: 'AbortError', cause: reason }); expect(events).not.toContain('tool_finished');
+      expect(error).toMatchObject({ name: 'AbortError', cause: reason }); expect(events.filter(type => type === 'tool_finished')).toHaveLength(withPriorSuccess ? 1 : 0);
       expect(events.filter(type => type === 'run_aborted')).toHaveLength(1); expect(calls).toBe(1);
       expect(session.getMessages().flatMap(message => message.content).filter(block => block.type === 'tool_result'))
-        .toEqual([{ type: 'tool_result', tool_use_id: 'final-call', content: '[user-cancelled]', is_error: true }]);
+        .toEqual([
+          ...(withPriorSuccess ? [{ type: 'tool_result', tool_use_id: 'prior-call', content: 'FINAL_REGISTRY_SUCCESS', is_error: false }] : []),
+          { type: 'tool_result', tool_use_id: 'final-call', content: '[user-cancelled]', is_error: true },
+        ]);
     } finally { registry.dispose(); }
   });
 

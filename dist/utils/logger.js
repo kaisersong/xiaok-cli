@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, statSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 const levels = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -26,6 +26,40 @@ function logFilePath() {
 function recentLogPath() {
     return join(tmpdir(), 'xiaok-recent.log');
 }
+const DEFAULT_LOG_ROTATE_MAX_BYTES = 32 * 1024 * 1024;
+function resolveMaxLogBytes() {
+    const raw = process.env.XIAOK_LOG_MAX_BYTES;
+    if (raw !== undefined && raw !== '') {
+        const parsed = Number.parseInt(raw, 10);
+        if (Number.isFinite(parsed) && parsed > 0)
+            return parsed;
+    }
+    return DEFAULT_LOG_ROTATE_MAX_BYTES;
+}
+// Cap runaway log growth (a 2026-09 EIO feedback loop wrote a 129GB xiaok.log):
+// rotate to `<path>.1`, keeping a single previous generation; truncate in place
+// when rename fails. Checked per write because the log file is shared across
+// concurrent xiaok processes, so an in-process byte counter would drift.
+function enforceLogSizeCap(path) {
+    let size;
+    try {
+        size = statSync(path).size;
+    }
+    catch {
+        return;
+    }
+    if (size <= resolveMaxLogBytes())
+        return;
+    try {
+        renameSync(path, `${path}.1`);
+    }
+    catch {
+        try {
+            writeFileSync(path, '');
+        }
+        catch { /* best effort */ }
+    }
+}
 function format(level, module, args) {
     const ts = new Date().toISOString();
     const payload = args.map(a => {
@@ -49,8 +83,10 @@ function write(level, module, args, options) {
     const line = format(level, module, args);
     // Persist before touching a potentially broken terminal.
     try {
+        enforceLogSizeCap(logFilePath());
         appendFileSync(logFilePath(), line + '\n');
         // Also keep a recent copy in /tmp for quick access
+        enforceLogSizeCap(recentLogPath());
         appendFileSync(recentLogPath(), line + '\n');
     }
     catch {

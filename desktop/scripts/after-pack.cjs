@@ -6,9 +6,11 @@
  */
 
 const verifyPackagedMainFreshness = require('./verify-packaged-main-freshness.cjs');
+const verifyPackagedRuntimeDependencies = require('./verify-packaged-runtime-dependencies.cjs');
 const packBundledRuntimes = require('./pack-bundled-runtimes.cjs');
 
 module.exports = async function afterPack(context) {
   await verifyPackagedMainFreshness(context);
+  await verifyPackagedRuntimeDependencies(context);
   await packBundledRuntimes(context);
 };

@@ -12,6 +12,7 @@ export interface CollaborationRoomSemanticController {
   getRoom(roomId: string): unknown | Promise<unknown>;
   createRoom(input: unknown): unknown | Promise<unknown>;
   archiveRoom(input: unknown): unknown | Promise<unknown>;
+  deleteRoom?(input: unknown, authority: {requestSource: 'user'}): unknown | Promise<unknown>;
   updateRoomMembers(input: unknown): unknown | Promise<unknown>;
   sendMessage(input: unknown): unknown | Promise<unknown>;
   markRoomSeen(input: unknown): unknown | Promise<unknown>;
@@ -33,6 +34,7 @@ export function registerSemanticDesktopIpc(
   ipcMain: IpcHandleRegistrar,
   options: {
     assistant: AssistantSemanticController;
+    authorizeRoomDeletion?: (event: unknown) => boolean;
     kswarm: KSwarmSemanticService;
     collaborationRooms?: CollaborationRoomSemanticController | null;
   },
@@ -64,6 +66,10 @@ export function registerSemanticDesktopIpc(
   ipcMain.handle('desktop:collaborationRoom:getRoom', (_event, roomId: string) => roomHandler((controller) => controller.getRoom(roomId))(roomId));
   ipcMain.handle('desktop:collaborationRoom:createRoom', (_event, input: unknown) => roomHandler((controller) => controller.createRoom(input))(input));
   ipcMain.handle('desktop:collaborationRoom:archiveRoom', (_event, input: unknown) => roomHandler((controller) => controller.archiveRoom(input))(input));
+  ipcMain.handle('desktop:collaborationRoom:deleteRoom', (event, input: unknown) => {
+    if (options.authorizeRoomDeletion?.(event) !== true) return {ok: false, code: 'room_actor_forbidden'};
+    return rooms?.deleteRoom ? rooms.deleteRoom(input, {requestSource: 'user'}) : unavailable();
+  });
   ipcMain.handle('desktop:collaborationRoom:updateMembers', (_event, input: unknown) => roomHandler((controller) => controller.updateRoomMembers(input))(input));
   ipcMain.handle('desktop:collaborationRoom:sendMessage', (_event, input: unknown) => roomHandler((controller) => controller.sendMessage(input))(input));
   ipcMain.handle('desktop:collaborationRoom:markSeen', (_event, input: unknown) => roomHandler((controller) => controller.markRoomSeen(input))(input));

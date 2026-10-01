@@ -1,3 +1,4 @@
+import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
 import OpenAI from 'openai';
 import type {
   ModelAdapter,
@@ -10,7 +11,7 @@ import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
-import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
+import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import {
   buildOpenAIHarnessContext,
   isOwnedStrictOpenAIHarnessContext,
@@ -97,7 +98,7 @@ const RAW_THINK_CLOSE_TAG = '</think>';
 const MAX_OPENAI_STREAM_TEXT_CHARS = 2 * 1024 * 1024;
 const MAX_OPENAI_STREAM_TOOL_ARGUMENT_CHARS = 2 * 1024 * 1024;
 
-interface KimiReasoningEffortRequestExtension {
+interface ReasoningEffortRequestExtension {
   reasoning_effort: ModelReasoningEffort;
 }
 
@@ -483,6 +484,7 @@ export class OpenAIAdapter implements ModelAdapter {
           wireModel: newWireModel,
           catalogOptions: catalogVariant?.runtimeOptions,
           catalogConstraints: catalogVariant?.runtimeConstraints,
+          reasoningEfforts: getSupportedModelReasoningEfforts({ ...currentIdentity, wireModel: newWireModel, baseUrl: currentIdentity.canonicalBaseUrl }),
         }).runtimeOptions;
     const nextIdentity = {
       ...currentIdentity,
@@ -900,17 +902,12 @@ export class OpenAIAdapter implements ModelAdapter {
       );
     }
 
-    if (
-      (
-        this.harnessContext.identity.wireModel === 'k3'
-        || this.harnessContext.identity.wireModel === 'k3-256k'
-      )
-      && isOfficialKimiK3OpenAIEndpoint(this.harnessContext.identity.canonicalBaseUrl)
-      && this.harnessContext.runtimeOptions?.reasoningEffort
-    ) {
-      Object.assign(request, {
-        reasoning_effort: this.harnessContext.runtimeOptions.reasoningEffort,
-      } satisfies KimiReasoningEffortRequestExtension);
+    const identity = this.harnessContext.identity;
+    const supportedEfforts = getSupportedModelReasoningEfforts({ ...identity, baseUrl: identity.canonicalBaseUrl });
+    const selectedEffort = this.harnessContext.runtimeOptions?.reasoningEffort
+      ?? getDefaultModelReasoningEffort(supportedEfforts);
+    if (selectedEffort && supportedEfforts.includes(selectedEffort)) {
+      Object.assign(request, { reasoning_effort: selectedEffort } satisfies ReasoningEffortRequestExtension);
     }
 
     const strictKimiK3 = this.harnessContext.profile.id !== 'generic-openai';

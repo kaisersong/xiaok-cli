@@ -191,6 +191,7 @@ export declare class ScrollRegionManager {
      * When showing user input, cursor goes to the actual cursor position.
      */
     private positionCursorForInput;
+    private getInputCursorSequence;
     /**
      * Clear the last input value.
      * Call this after user submits input so the footer shows placeholder during turn.

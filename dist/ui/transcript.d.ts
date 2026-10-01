@@ -96,6 +96,7 @@ export declare class FileTranscriptLogger implements TranscriptLogger {
     private readonly lease;
     private suppressDepth;
     private closed;
+    private outputCapWarned;
     private readonly exitHandler;
     private constructor();
     static open(sessionId: string, rootDir?: string): Promise<FileTranscriptLogger>;
@@ -103,6 +104,7 @@ export declare class FileTranscriptLogger implements TranscriptLogger {
     beginSuppress(): void;
     endSuppress(): void;
     record(event: TranscriptEvent): void;
+    private transcriptAtOutputCap;
     recordOutput(stream: 'stdout' | 'stderr', chunk: string): void;
     close(): void;
     private getFilePath;

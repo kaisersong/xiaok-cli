@@ -1,8 +1,20 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, statSync } from 'node:fs';
+import { createLogger } from '../utils/logger.js';
 import { acquireTranscriptLease, archiveTranscript, defaultTranscriptRoot, isIncompleteJsonTail, iterateTranscriptLines, prepareTranscriptWriter, readTranscriptJsonValues, sealTranscriptWriter, transcriptPaths, TranscriptStorageError, } from './transcript-storage.js';
 export { archiveTranscript, TranscriptStorageError, };
 export function normalizeTranscriptChunk(chunk) {
     return chunk.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+}
+const transcriptCapLogger = createLogger('transcript', { stderr: false });
+const DEFAULT_TRANSCRIPT_MAX_BYTES = 256 * 1024 * 1024;
+function resolveTranscriptMaxBytes() {
+    const raw = process.env.XIAOK_TRANSCRIPT_MAX_BYTES;
+    if (raw !== undefined && raw !== '') {
+        const parsed = Number.parseInt(raw, 10);
+        if (Number.isFinite(parsed) && parsed > 0)
+            return parsed;
+    }
+    return DEFAULT_TRANSCRIPT_MAX_BYTES;
 }
 export class FileTranscriptLogger {
     sessionId;
@@ -10,6 +22,7 @@ export class FileTranscriptLogger {
     lease;
     suppressDepth = 0;
     closed = false;
+    outputCapWarned = false;
     exitHandler;
     constructor(sessionId, rootDir, lease) {
         this.sessionId = sessionId;
@@ -46,7 +59,29 @@ export class FileTranscriptLogger {
     record(event) {
         if (this.closed)
             throw new TranscriptStorageError('transcript_writer_closed', `writer is closed: ${this.sessionId}`);
+        // Output chunks are the runaway-growth vector (a 2026-09 EIO feedback loop
+        // produced a 384GB transcript). Structural events stay small, so they keep
+        // recording after the cap trips and the session remains readable.
+        if (event.type === 'output' && this.transcriptAtOutputCap()) {
+            if (!this.outputCapWarned) {
+                this.outputCapWarned = true;
+                transcriptCapLogger.warn('transcript output recording disabled after reaching size cap', {
+                    sessionId: this.sessionId,
+                    path: this.getFilePath(),
+                    capBytes: resolveTranscriptMaxBytes(),
+                });
+            }
+            return;
+        }
         appendFileSync(this.getFilePath(), `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+    }
+    transcriptAtOutputCap() {
+        try {
+            return statSync(this.getFilePath()).size >= resolveTranscriptMaxBytes();
+        }
+        catch {
+            return false;
+        }
     }
     recordOutput(stream, chunk) {
         if (!chunk)

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.5.5)'
+        description: 'Tag to release (e.g. desktop-v1.5.6)'
         required: true
-        default: 'desktop-v1.5.5'
+        default: 'desktop-v1.5.6'
 
 permissions:
   contents: write
@@ -45,6 +45,9 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
+      - name: Test packaged runtime dependency gate
+        run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
+
       - name: Verify native SQLite binding loads
         # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
         # node-gyp source build when it does not see gypfile:false. Either path is
@@ -57,9 +60,9 @@ jobs:
 
       - name: Clone desktop sidecar repositories
         run: |
-          git clone --depth 1 --branch desktop-v1.5.5 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git clone --depth 1 --branch desktop-v1.5.5 https://github.com/kaisersong/kswarm.git ../kswarm
-          git clone --depth 1 --branch desktop-v1.5.5 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git clone --depth 1 --branch desktop-v1.5.6 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 --branch desktop-v1.5.6 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 --branch desktop-v1.5.6 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
       - name: Install sidecar dependencies
         run: |
@@ -244,6 +247,9 @@ jobs:
       - name: Install desktop dependencies
         run: cd desktop && npm ci
 
+      - name: Test packaged runtime dependency gate
+        run: cd desktop && npm run test -- --run tests/main/packaged-runtime-imports.test.ts tests/main/packaged-runtime-dependencies.test.ts
+
       - name: Verify native SQLite binding loads
         # better-sqlite3 13 relies on shipped N-API prebuilds; npm falls back to a
         # node-gyp source build when it does not see gypfile:false. Either path is
@@ -256,9 +262,9 @@ jobs:
 
       - name: Clone desktop sidecar repositories
         run: |
-          git clone --depth 1 --branch desktop-v1.5.5 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git clone --depth 1 --branch desktop-v1.5.5 https://github.com/kaisersong/kswarm.git ../kswarm
-          git clone --depth 1 --branch desktop-v1.5.5 https://github.com/kaisersong/intent-broker.git ../intent-broker
+          git clone --depth 1 --branch desktop-v1.5.6 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --depth 1 --branch desktop-v1.5.6 https://github.com/kaisersong/kswarm.git ../kswarm
+          git clone --depth 1 --branch desktop-v1.5.6 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
       - name: Install sidecar dependencies
         run: |

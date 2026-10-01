@@ -1,5 +1,5 @@
 export type ProtocolId = 'anthropic' | 'openai_legacy' | 'openai_responses' | 'system_one';
-export type ModelReasoningEffort = 'low' | 'high' | 'max';
+export type ModelReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export interface ModelRuntimeOptions {
     contextLimit?: number;
     reasoningEffort?: ModelReasoningEffort;

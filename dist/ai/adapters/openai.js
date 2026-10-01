@@ -1,8 +1,9 @@
+import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
 import OpenAI from 'openai';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { estimateTokens } from '../runtime/usage.js';
-import { isOfficialKimiK3OpenAIEndpoint, resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
+import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import { buildOpenAIHarnessContext, isOwnedStrictOpenAIHarnessContext, observeReasoningDialect, } from '../providers/model-harness-profile.js';
 import { KIMI_SCHEMA_LIMITS, KimiToolSchemaError, } from '../providers/kimi-tool-schema.js';
 import { getProviderProfile, resolveProviderModelVariant } from '../providers/registry.js';
@@ -356,6 +357,7 @@ export class OpenAIAdapter {
                 wireModel: newWireModel,
                 catalogOptions: catalogVariant?.runtimeOptions,
                 catalogConstraints: catalogVariant?.runtimeConstraints,
+                reasoningEfforts: getSupportedModelReasoningEfforts({ ...currentIdentity, wireModel: newWireModel, baseUrl: currentIdentity.canonicalBaseUrl }),
             }).runtimeOptions;
         const nextIdentity = {
             ...currentIdentity,
@@ -706,13 +708,12 @@ export class OpenAIAdapter {
             && /^pc1_[0-9a-f]{64}$/.test(cacheKey)) {
             Object.assign(request, this.harnessContext.profile.encodeCacheKey(cacheKey));
         }
-        if ((this.harnessContext.identity.wireModel === 'k3'
-            || this.harnessContext.identity.wireModel === 'k3-256k')
-            && isOfficialKimiK3OpenAIEndpoint(this.harnessContext.identity.canonicalBaseUrl)
-            && this.harnessContext.runtimeOptions?.reasoningEffort) {
-            Object.assign(request, {
-                reasoning_effort: this.harnessContext.runtimeOptions.reasoningEffort,
-            });
+        const identity = this.harnessContext.identity;
+        const supportedEfforts = getSupportedModelReasoningEfforts({ ...identity, baseUrl: identity.canonicalBaseUrl });
+        const selectedEffort = this.harnessContext.runtimeOptions?.reasoningEffort
+            ?? getDefaultModelReasoningEffort(supportedEfforts);
+        if (selectedEffort && supportedEfforts.includes(selectedEffort)) {
+            Object.assign(request, { reasoning_effort: selectedEffort });
         }
         const strictKimiK3 = this.harnessContext.profile.id !== 'generic-openai';
         authorizeDispatch?.();

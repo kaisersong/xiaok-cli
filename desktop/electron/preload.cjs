@@ -454,6 +454,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   getCollaborationRoom: (roomId) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId),
   createCollaborationRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input),
   archiveCollaborationRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input),
+  deleteCollaborationRoom: (input) => ipcRenderer.invoke('desktop:collaborationRoom:deleteRoom', input),
   updateCollaborationRoomMembers: (input) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input),
   sendCollaborationRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input),
   markCollaborationRoomSeen: (input) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input),

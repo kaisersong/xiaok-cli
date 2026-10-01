@@ -124,10 +124,12 @@ export function createCollaborationRoomService({
   wakeDispatcher,
   emitRoomEvent,
   getExecutionCapabilities,
+  stopRoomExecution,
 }: {
   brokerClient: {
     createRoom: (input: unknown, ctx: unknown) => Promise<unknown>;
     archiveRoom: (input: unknown, ctx: unknown) => Promise<unknown>;
+    deleteRoom?: (input: unknown, ctx: unknown) => Promise<unknown>;
     updateRoomMembers: (input: unknown, ctx: unknown) => Promise<unknown>;
     sendRoomMessage: (input: unknown, ctx: unknown) => Promise<unknown>;
     markRoomSeen: (input: unknown, ctx: unknown) => Promise<unknown>;
@@ -144,6 +146,7 @@ export function createCollaborationRoomService({
   };
   emitRoomEvent?: (event: CollaborationRoomDispatchEvent) => void;
   getExecutionCapabilities?: (agentIds?: string[]) => Promise<RoomAgentExecutionCapability[]>;
+  stopRoomExecution?: (roomId: string) => Promise<unknown>;
 }) {
   /** Renderer identity fields are transport facts — strip them, pin the owner. */
   function userCtx(): CollaborationRoomActorContext {
@@ -196,6 +199,28 @@ export function createCollaborationRoomService({
       roomId: input.roomId,
       expectedRoomRevision: input.expectedRoomRevision,
     });
+  }
+
+  async function deleteRoom(input: unknown, authority?: { requestSource: 'user' | 'agent' | 'scheduler' }) {
+    if (authority?.requestSource !== 'user') return {ok: false, code: 'room_actor_forbidden'};
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return {ok: false, code: 'room_input_invalid'};
+    const value = input as Record<string, unknown>;
+    if (!isNonEmptyString(value.roomId) || !Number.isSafeInteger(value.expectedRoomRevision) || (value.expectedRoomRevision as number) < 1) return {ok: false, code: 'room_input_invalid'};
+    const canonical = {roomId: value.roomId, expectedRoomRevision: value.expectedRoomRevision};
+    const result = await callBroker('deleteRoom', canonical);
+    if (result?.ok === false && result.code === 'room_delete_pending' && stopRoomExecution) {
+      // A pending disclosure on an active room must not stop execution. Only
+      // settle work after the broker has authorized and fenced this revision.
+      try {
+        const snapshot = await brokerClient.getRoomSnapshot(value.roomId) as {ok?: boolean; room?: {status?: string; revision?: number}};
+        if (snapshot?.ok && snapshot.room?.revision === value.expectedRoomRevision
+          && ['archiving', 'archived'].includes(snapshot.room?.status ?? '')) {
+          await stopRoomExecution(value.roomId);
+          return callBroker('deleteRoom', canonical);
+        }
+      } catch { /* Keep the broker's honest pending result; never hide the room. */ }
+    }
+    return result;
   }
 
   async function updateRoomMembers(input: Record<string, unknown>) {
@@ -514,6 +539,7 @@ export function createCollaborationRoomService({
   return {
     createRoom,
     archiveRoom,
+    deleteRoom,
     updateRoomMembers,
     sendMessage,
     markRoomSeen,

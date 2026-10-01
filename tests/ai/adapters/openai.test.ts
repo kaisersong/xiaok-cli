@@ -1,3 +1,5 @@
+import { OLD_MODEL_EFFORT_CONFIGS } from '../../support/model-effort-compatibility.js';
+import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
 // tests/ai/adapters/openai.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
@@ -1305,6 +1307,7 @@ describe('OpenAIAdapter', () => {
     ]);
     expect(capturedRequest).toEqual({
       model: 'k3',
+      reasoning_effort: 'high',
       messages: [
         { role: 'system', content: 'system' },
         {
@@ -1580,6 +1583,58 @@ describe('OpenAIAdapter', () => {
       });
     },
   );
+
+  it.each(OLD_MODEL_EFFORT_CONFIGS.filter(entry => resolveRuntimeModelBinding(entry.config).protocol === 'openai_legacy'))('constructs a valid completion request from a strength-free old config: $name', async ({ config, wireModel, effort }) => {
+    const adapter = createAdapterFromBinding(resolveRuntimeModelBinding(config));
+    const request = await captureChatCompletionRequest(adapter);
+    expect(request.model).toBe(wireModel);
+    if (effort) expect(request.reasoning_effort).toBe(effort);
+    else expect(request).not.toHaveProperty('reasoning_effort');
+  });
+
+  it.each([
+    ['glm', 'GLM-5.3', 'https://open.bigmodel.cn/api/paas/v4', 'high'],
+    ['openai', 'gpt-5', 'https://api.openai.com/v1', 'medium'],
+    ['openai', 'gpt-5.5', 'https://api.openai.com/v1', 'medium'],
+  ] as const)('explicitly sends the middle default for %s/%s', async (providerId, wireModel, baseUrl, effort) => {
+    const request = await captureChatCompletionRequest(createTestAdapter({ providerId, providerType: 'first_party', wireModel, baseUrl }));
+    expect(request.reasoning_effort).toBe(effort);
+  });
+
+  it.each([
+    ['kimi', 'custom', 'k3', 'https://api.kimi.com/coding/v1', 'high'],
+    ['kimi', 'first_party', 'k3', 'https://api.kimi.com/coding/v1', 'medium'],
+    ['openai', 'first_party', 'gpt-5.5', 'https://proxy.example.com/v1', 'high'],
+    ['openai', 'custom', 'gpt-5.5', 'https://api.openai.com/v1', 'high'],
+    ['glm', 'first_party', 'GLM-5.2', 'https://open.bigmodel.cn/api/paas/v4', 'high'],
+  ] as const)('never sends an unsupported effort for %s/%s/%s/%s/%s', async (providerId, providerType, wireModel, baseUrl, reasoningEffort) => {
+    const request = await captureChatCompletionRequest(createTestAdapter({ providerId, providerType, wireModel, baseUrl, runtimeOptions: { reasoningEffort } }));
+    expect(request).not.toHaveProperty('reasoning_effort');
+  });
+
+  it('sends the selected GLM 5.3 effort on the actual completion request', async () => {
+    const adapter = createTestAdapter({
+      providerId: 'glm',
+      providerType: 'first_party',
+      wireModel: 'GLM-5.3',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'low' },
+    });
+    const request = await captureChatCompletionRequest(adapter);
+    expect(request).toMatchObject({ model: 'GLM-5.3', reasoning_effort: 'low' });
+  });
+
+  it('sends the catalog-supported GPT-5.5 xhigh effort on the completion request', async () => {
+    const adapter = createTestAdapter({
+      providerId: 'openai',
+      providerType: 'first_party',
+      wireModel: 'gpt-5.5',
+      baseUrl: 'https://api.openai.com/v1',
+      runtimeOptions: { contextLimit: 1_050_000, reasoningEffort: 'xhigh' },
+    });
+    const request = await captureChatCompletionRequest(adapter);
+    expect(request).toMatchObject({ model: 'gpt-5.5', reasoning_effort: 'xhigh' });
+  });
 
   it.each([
     ['Kimi K2.7', 'kimi-k2.7', 'https://api.kimi.com/coding/v1'],

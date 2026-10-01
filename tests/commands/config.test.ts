@@ -192,7 +192,7 @@ describe('config commands', () => {
         capabilities: ['tools', 'thinking', 'image_in'],
         runtimeOptions: {
           contextLimit: 1_048_576,
-          reasoningEffort: 'max',
+          reasoningEffort: 'high',
         },
       });
       expect(entry.capabilities).not.toBe(variant?.capabilities);

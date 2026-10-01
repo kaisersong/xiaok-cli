@@ -60,7 +60,7 @@ export interface RoomUiSnapshot {
 export interface RoomListResult {
   ok: boolean;
   code?: string;
-  rooms?: Array<{ roomId: string; title: string; description?: string; status: string; updatedAt?: string }>;
+  rooms?: Array<{ roomId: string; title: string; description?: string; status: string; revision?: number; lastActivityAt?: string; createdAt?: string; updatedAt?: string }>;
 }
 
 export type CollaborationRoomEvent =
@@ -103,6 +103,9 @@ export const desktop = {
   },
   async createCollaborationRoom(input: unknown): Promise<unknown> {
     return requireDesktopApi().createCollaborationRoom(input);
+  },
+  async deleteCollaborationRoom(input: {roomId: string; expectedRoomRevision: number}): Promise<unknown> {
+    return requireDesktopApi().deleteCollaborationRoom(input);
   },
   async archiveCollaborationRoom(input: unknown): Promise<unknown> {
     return requireDesktopApi().archiveCollaborationRoom(input);

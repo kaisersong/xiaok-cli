@@ -1612,12 +1612,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     return line;
   };
 
-  function writeProgressTranscriptNote(note: string): void {
+  function writeProgressTranscriptNote(note: string, leadingGap = false): void {
     if (!note) {
       return;
     }
 
-    const block = formatProgressNote(note);
+    const block = `${leadingGap ? '\n' : ''}${formatProgressNote(note)}`;
     endStreamingPhaseForInterrupt();
     if (scrollRegion.isActive()) {
       try {
@@ -1648,7 +1648,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
       turnThinkingOnlyToolNoticeWritten = true;
       turnLayout.noteProgressNote();
-      writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE);
+      writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE, true);
       return;
     }
   };
@@ -3774,7 +3774,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             }).runtimeOptions
           : undefined;
         const nextModels = config.models[selected.modelId]
-          ? config.models
+          ? selected.reasoningEffort
+            ? {
+                ...config.models,
+                [selected.modelId]: {
+                  ...config.models[selected.modelId],
+                  runtimeOptions: {
+                    ...config.models[selected.modelId].runtimeOptions,
+                    reasoningEffort: selected.reasoningEffort,
+                  },
+                },
+              }
+            : config.models
           : {
               ...config.models,
               [selected.modelId]: {
@@ -3782,7 +3793,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
                 model: variant?.model ?? selected.model,
                 label: variant?.label ?? selected.label,
                 capabilities: variant?.capabilities,
-                runtimeOptions: variantRuntimeOptions ? { ...variantRuntimeOptions } : undefined,
+                runtimeOptions: variantRuntimeOptions || selected.reasoningEffort
+                  ? { ...variantRuntimeOptions, ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}) }
+                  : undefined,
               },
             };
         const newConfig = {

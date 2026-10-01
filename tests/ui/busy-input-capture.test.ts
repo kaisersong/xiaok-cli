@@ -2,6 +2,7 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
 import { InputReader } from '../../src/ui/input.js';
 import type { TranscriptLogger } from '../../src/ui/transcript.js';
 import { ReplRenderer } from '../../src/ui/repl-renderer.js';
@@ -11,6 +12,28 @@ import { clearPastedImagePaths, parseInputBlocks } from '../../src/ui/image-inpu
 const tempDirs: string[] = [];
 
 describe('InputReader busy capture', () => {
+  it('keeps typed text visible and editable across streaming and activity transitions', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const reader = new InputReader();
+    reader.setScrollPromptRenderer(frame => { manager.renderPromptFrame(frame); return true; });
+    manager.begin();
+    const capture = reader.startBusyCapture();
+    try {
+      manager.beginContentStreaming();
+      harness.send('draft');
+      manager.endContentStreaming();
+      manager.renderActivity('Working');
+      manager.updateStatusLine('model');
+      expect(harness.screen.text()).toContain('draft');
+      expect(capture.getSnapshot().draft).toBe('draft');
+      harness.send(' continues');
+      expect(harness.screen.text()).toContain('draft continues');
+      harness.send('\r');
+      expect(capture.consumeQueued()).toBe('draft continues');
+    } finally { capture.stop(); manager.end(); harness.restore(); }
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     clearPastedImagePaths();

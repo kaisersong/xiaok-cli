@@ -38,8 +38,8 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
       runtimeOptions: { contextLimit: 128_000 },
     },
     availableModels: [
-      { modelId: 'openai-gpt-5.5', model: 'gpt-5.5', label: 'GPT-5.5', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_050_000 } },
-      { modelId: 'openai-gpt-5', model: 'gpt-5', label: 'GPT-5', capabilities: ['tools'], runtimeOptions: { contextLimit: 400_000 } },
+      { modelId: 'openai-gpt-5.5', model: 'gpt-5.5', label: 'GPT-5.5', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_050_000, reasoningEffort: 'medium' }, runtimeConstraints: { reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'] } },
+      { modelId: 'openai-gpt-5', model: 'gpt-5', label: 'GPT-5', capabilities: ['tools'], runtimeOptions: { contextLimit: 400_000, reasoningEffort: 'medium' }, runtimeConstraints: { reasoningEfforts: ['minimal', 'low', 'medium', 'high'] } },
       // 与 defaultModel 共享 wireModel，元数据必须逐字一致
       { modelId: 'openai-gpt-4o', model: 'gpt-4o', label: 'GPT-4o', capabilities: ['tools'], runtimeOptions: { contextLimit: 128_000 } },
       { modelId: 'openai-gpt-4.1', model: 'gpt-4.1', label: 'GPT-4.1', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_047_576 } },
@@ -126,13 +126,13 @@ const PROVIDER_REGISTRY: Record<FirstPartyProviderId, ProviderProfile> = {
     availableModels: [
       // GLM-5.3-Flash（https://docs.z.ai/guides/vlm/glm-5.3-flash，2026-08-26 查证）：
       // 官方 wire model 为全小写 `glm-5.3-flash`；1M 上下文，原生多模态，
-      // 支持工具调用且思考始终开启。reasoning_effort 支持 low/high/max，推荐 max。
-      { modelId: 'glm-5.3-flash', model: 'glm-5.3-flash', label: 'GLM 5.3 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
+      // 支持工具调用且思考始终开启。reasoning_effort 支持 low/high/max，厂商推荐 max，xiaok 默认中档 high。
+      { modelId: 'glm-5.3-flash', model: 'glm-5.3-flash', label: 'GLM 5.3 Flash', capabilities: ['tools', 'thinking', 'image_in'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
       // GLM-5.3（https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3，2026-08-16 查证）：
       // 与 GLM-5.2 同底座，纯 post-training 提升。1M 上下文窗口，128K 最大输出。
       // 思考功能始终启用，不支持 thinking.type: disabled；reasoning_effort 仅
-      // low/high/max 三档，默认 max（与 5.2 及以下版本不同，那些没有思考控制）。
-      { modelId: 'glm-5.3', model: 'GLM-5.3', label: 'GLM 5.3', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
+      // low/high/max 三档，厂商默认 max；xiaok 默认中档 high（与 5.2 及以下版本不同，那些没有思考控制）。
+      { modelId: 'glm-5.3', model: 'GLM-5.3', label: 'GLM 5.3', capabilities: ['tools', 'thinking'], runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'high' }, runtimeConstraints: { reasoningEfforts: ['low', 'high', 'max'] } },
       // 与 defaultModel 共享 wireModel，元数据必须逐字一致，否则
       // resolveProviderModelVariant 会抛 MODEL_VARIANT_AMBIGUOUS。
       { modelId: 'glm-5.2', model: 'GLM-5.2', label: 'GLM 5.2', capabilities: ['tools'], runtimeOptions: { contextLimit: 1_000_000 } },

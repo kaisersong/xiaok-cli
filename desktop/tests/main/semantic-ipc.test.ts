@@ -34,3 +34,19 @@ describe('semantic desktop IPC', () => {
     expect([...handlers.keys()]).not.toContain('desktop:kswarm:request');
   });
 });
+
+it('room deletion defaults to deny and supplies authority only for the trusted sender', async () => {
+  const handlers = new Map<string, (...args: any[]) => unknown>();
+  const deleteRoom = vi.fn(() => ({ok: true}));
+  const options = {assistant: {} as never, kswarm: {} as never, collaborationRooms: {deleteRoom} as never};
+  const ipc = {handle: (channel: string, fn: (...args: any[]) => unknown) => handlers.set(channel, fn)} as never;
+  registerSemanticDesktopIpc(ipc, options);
+  const input = {roomId: 'room-1', expectedRoomRevision: 1, requestSource: 'user'};
+  expect(await handlers.get('desktop:collaborationRoom:deleteRoom')!({}, input)).toMatchObject({ok: false});
+  expect(deleteRoom).not.toHaveBeenCalled();
+  const event = {};
+  registerSemanticDesktopIpc(ipc, {...options, authorizeRoomDeletion: caller => caller === event});
+  expect(await handlers.get('desktop:collaborationRoom:deleteRoom')!({}, input)).toMatchObject({ok: false});
+  expect(await handlers.get('desktop:collaborationRoom:deleteRoom')!(event, input)).toMatchObject({ok: true});
+  expect(deleteRoom).toHaveBeenCalledWith(input, {requestSource: 'user'});
+});

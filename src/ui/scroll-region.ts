@@ -211,9 +211,9 @@ export class ScrollRegionManager {
 
   private getActivityRow(): number {
     const scrollBottom = this.getScrollBottom();
-    if (!shouldCompactSubmittedInputForWindowsTmux()) {
-      return scrollBottom;
-    }
+    // Use the existing footer gap: content ends at B, B+1 stays blank,
+    // activity occupies B+2, and B+3 separates it from the input frame.
+    // Never shrink or scroll the transcript merely to make this spacing.
     return Math.min(this.getInputStartRow() - 2, scrollBottom + 2);
   }
 
@@ -341,9 +341,10 @@ export class ScrollRegionManager {
   }
 
   private clearActivityIfContentWillUseRow(row: number): void {
-    if (this.lastActivityRow !== null && row >= this.lastActivityRow && row < this.lastActivityRow + this.lastActivityRows) {
-      this.clearActivity();
-    }
+    if (this.lastActivityRow === null) return;
+    const overlapsActivity = row >= this.lastActivityRow && row < this.lastActivityRow + this.lastActivityRows;
+    const resumesAtContentBoundary = row >= this.getScrollBottom() && this.lastActivityRow > this.getScrollBottom();
+    if (overlapsActivity || resumesAtContentBoundary) this.clearActivity();
   }
 
   private clearRenderedFooterRows(): void {
@@ -755,6 +756,9 @@ export class ScrollRegionManager {
     this._footerVisible = true;
     // Clear the old multi-row footprint before drawing a resized input/footer.
     if (this.lastActivityRows > 1) this.stream.write(this.composeActivityClear());
+    // Clear the previous position before painting summary/footer rows: activity
+    // now shares the reserved gap, and a layout change may reuse its old row.
+    const previousActivityClear = this.lastActivityRows === 1 ? this.composeActivityClear() : '';
 
     const cols = this.config.columns;
     const previousInputRows = this.lastInputRenderRows;
@@ -795,7 +799,7 @@ export class ScrollRegionManager {
 
     // Reset scroll region to allow writing to footer area. Batch the footer
     // redraw into a single terminal write so prompt/status don't flicker apart.
-    let footerOutput = `${RESET_SCROLL_REGION}${SHOW_CURSOR}`;
+    let footerOutput = `${RESET_SCROLL_REGION}${SHOW_CURSOR}${previousActivityClear}`;
 
     // Clear previous and current editor rows. This prevents stale rows when
     // the input grows or shrinks between redraws.
@@ -825,18 +829,20 @@ export class ScrollRegionManager {
       : Math.max(1, Math.min(previousOverlayStartRow, footerClearStartRow, transientClearStartRow));
     this.reserveTranscriptRows(nextScrollBottom, previousScrollBottom);
     for (let row = clearStartRow; row <= inputEndRow; row += 1) {
-      footerOutput += this.getClearScreenRowSequence(row);
+      // Current editor rows are overwritten below and erased to end-of-line.
+      // Clearing them first exposes a blank draft on every activity tick.
+      if (row < inputStartRow) footerOutput += this.getClearScreenRowSequence(row);
     }
     if (shouldCompactSubmittedInputForWindowsTmux()) {
       footerOutput += SET_SCROLL_REGION.replace('%d', String(this.getScrollBottom()));
       for (let row = clearStartRow; row <= statusBarRow; row += 1) {
-        footerOutput += this.getClearScreenRowSequence(row);
+        if (row < inputStartRow || row > inputEndRow) footerOutput += this.getClearScreenRowSequence(row);
       }
     }
 
     for (let index = 0; index < INPUT_PADDING_ROWS; index += 1) {
       const row = inputStartRow + index;
-      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
+      footerOutput += `\x1b[${row};1H`;
       footerOutput += this.padBackgroundRow(cols);
     }
 
@@ -851,7 +857,7 @@ export class ScrollRegionManager {
       const prefix = index === 0
         ? `${INPUT_BG}${PROMPT_FG}${getFooterPromptGlyph()}${RESET_FG} `
         : `${INPUT_BG}  `;
-      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
+      footerOutput += `\x1b[${row};1H`;
       if (isPlaceholder) {
         footerOutput += this.padLineWithBg(`${prefix}${DIM}${line}`, cols);
       } else {
@@ -861,7 +867,7 @@ export class ScrollRegionManager {
 
     for (let index = 0; index < INPUT_BOTTOM_PADDING_ROWS; index += 1) {
       const row = inputTextStartRow + inputLines.length + index;
-      footerOutput += `\x1b[${row};1H${CLEAR_LINE}`;
+      footerOutput += `\x1b[${row};1H`;
       footerOutput += this.padBackgroundRow(cols);
     }
 
@@ -888,11 +894,10 @@ export class ScrollRegionManager {
       footerOutput += this.composeActivityLineRender(this.lastActivityLine);
     }
 
+    // Keep the final cursor move in the same write as the editor frame so the
+    // visible cursor cannot linger on the status/activity row between writes.
+    footerOutput += this.getInputCursorSequence();
     this.stream.write(footerOutput);
-
-    // Position cursor after restoring the scroll region. Some terminals move
-    // the cursor when DECSTBM is applied, so this must be the final cursor op.
-    this.positionCursorForInput();
   }
 
   renderFooter(options?: {
@@ -1094,9 +1099,12 @@ export class ScrollRegionManager {
    * When showing user input, cursor goes to the actual cursor position.
    */
   private positionCursorForInput(): void {
+    this.stream.write(this.getInputCursorSequence());
+  }
+
+  private getInputCursorSequence(): string {
     if (!this.lastInputValue) {
-      this.stream.write(`\x1b[${this.getInputTextStartRow(1)};${this.getCursorBase()}H`);
-      return;
+      return `\x1b[${this.getInputTextStartRow(1)};${this.getCursorBase()}H`;
     }
 
     const state = this.getFooterInputState(this.lastInputValue, this.lastInputCursor);
@@ -1107,7 +1115,7 @@ export class ScrollRegionManager {
     const cursorRow = this.getInputTextStartRow(state.visibleLines.length) + cursorVisibleLine;
     const cursorCol = this.getCursorBase() + state.cursorColumn;
 
-    this.stream.write(`\x1b[${cursorRow};${cursorCol}H`);
+    return `\x1b[${cursorRow};${cursorCol}H`;
   }
 
   /**
@@ -1249,9 +1257,8 @@ export class ScrollRegionManager {
       this.getNewlineCallback()();
     }
     this._contentStreaming = false;
-    this.lastInputValue = '';
-    this.lastInputCursor = 0;
-
+    // Busy capture still owns this draft. Only explicit submission/clear may
+    // reset it; a streaming boundary must not hide text that remains editable.
     this.renderFooter(options);
     if (shouldCompactSubmittedInputForWindowsTmux()) {
       this.renderFooter(options);
@@ -1372,7 +1379,7 @@ export class ScrollRegionManager {
         inputPrompt: this.lastInputPrompt || 'Type your message...',
         summaryLine: this.lastSummaryLine || undefined,
         statusLine,
-      }, false, true);
+      }, true, true);
     }
   }
 

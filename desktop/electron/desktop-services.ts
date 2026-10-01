@@ -1,3 +1,5 @@
+import { getSupportedModelReasoningEfforts } from '../../src/ai/providers/model-reasoning-effort.js';
+import { resolveProviderTransport } from '../../src/ai/providers/auth-resolver.js';
 import { createProjectAgentModel, validateProjectAgentModelSelection, type ProjectAgentModel } from './project-agent-model.js';
 import {runMonitoredTool} from '../../src/runtime/tool-execution-health.js';
 import {createRoomToolRegistry,runRoomWorkspaceExecutor,roomUnsupportedCapabilities,type RoomWorkspaceRunOptions} from './room-workspace-executor.js';
@@ -2814,7 +2816,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       const config = await loadConfig();
       const providerId = normalizeProviderId(input.providerId);
-      ensureProvider(config, providerId, input);
+      const existingModel = input.modelId ? config.models[input.modelId] : undefined;
+      const hasProviderPatch = input.apiKey !== undefined || input.baseUrl !== undefined || input.protocol !== undefined;
+      if (!existingModel || !config.providers[existingModel.provider] || hasProviderPatch) {
+        ensureProvider(config, providerId, input);
+      }
 
       if (input.modelId && config.models[input.modelId]) {
         config.defaultModelId = input.modelId;
@@ -2842,6 +2848,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         config.defaultModelId = modelId;
       }
 
+      const selectedModel = config.models[config.defaultModelId];
+      if (selectedModel) {
+        const metadata = resolveDesktopModelRuntimeMetadata(config, config.defaultModelId, selectedModel);
+        const effort = metadata.runtimeOptions?.reasoningEffort;
+        if (effort) selectedModel.runtimeOptions = { ...selectedModel.runtimeOptions, reasoningEffort: effort };
+        else if (selectedModel.runtimeOptions) {
+          const { reasoningEffort: _effort, ...otherOptions } = selectedModel.runtimeOptions;
+          selectedModel.runtimeOptions = otherOptions;
+        }
+      }
       await saveConfig(config);
       codexTasks.select(false);return modelSnapshot(config);
     },
@@ -2853,33 +2869,32 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
 
       const provider = config.providers[model.provider];
-      if (
-        model.provider !== 'kimi'
-        || model.model !== 'k3'
-        || provider?.protocol !== 'openai_legacy'
-        || !isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
-      ) {
-        throw new Error('Runtime options can only be updated for Kimi K3 on the official endpoint.');
-      }
-      if (!input.runtimeOptions || typeof input.runtimeOptions !== 'object') {
-        throw new Error('runtimeOptions are required.');
-      }
-
-      const runtimeOptions = sanitizeDesktopModelRuntimeOptions(input.runtimeOptions);
-
       const catalogModel = findApplicableCatalogModel(
         config,
         model.provider,
         input.modelId,
         model.model,
       );
+      if (
+        provider?.protocol !== 'openai_legacy'
+        || !getSupportedModelReasoningEfforts({ providerId: model.provider, providerType: provider.type, protocol: provider.protocol, wireModel: model.model, baseUrl: resolveProviderTransport(config, model.provider).baseUrl }).length
+      ) {
+        throw new Error('Runtime options can only be updated for a catalog-supported model such as Kimi K3.');
+      }
+      if (!input.runtimeOptions || typeof input.runtimeOptions !== 'object') {
+        throw new Error('runtimeOptions are required.');
+      }
+
+      const runtimeOptions = { ...model.runtimeOptions, ...sanitizeDesktopModelRuntimeOptions(input.runtimeOptions) };
+
       resolveModelRuntimeOptions({
         protocol: provider.protocol,
-        baseUrl: provider.baseUrl,
+        baseUrl: resolveProviderTransport(config, model.provider).baseUrl,
         wireModel: model.model,
         catalogOptions: catalogModel?.runtimeOptions,
         catalogConstraints: catalogModel?.runtimeConstraints,
         configuredOptions: runtimeOptions,
+        reasoningEfforts: getSupportedModelReasoningEfforts({ providerId: model.provider, providerType: provider.type, protocol: provider.protocol, wireModel: model.model, baseUrl: resolveProviderTransport(config, model.provider).baseUrl }),
       });
 
       model.runtimeOptions = runtimeOptions;
@@ -4631,7 +4646,7 @@ function findApplicableCatalogModel(
     const provider = config.providers[providerId];
     if (
       provider?.protocol !== 'openai_legacy'
-      || !isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
+      || !isOfficialKimiK3OpenAIEndpoint(resolveProviderTransport(config, providerId).baseUrl)
     ) {
       return undefined;
     }
@@ -4652,22 +4667,24 @@ function resolveDesktopModelRuntimeMetadata(
       : {};
   }
 
+  const transport = resolveProviderTransport(config, model.provider);
   const catalogModel = findApplicableCatalogModel(config, model.provider, modelId, model.model);
   const acceptsConfiguredRuntimeOptions = model.provider !== 'kimi' || (
     (model.model === 'k3' || model.model === 'k3-256k')
     && provider.protocol === 'openai_legacy'
-    && isOfficialKimiK3OpenAIEndpoint(provider.baseUrl)
+    && isOfficialKimiK3OpenAIEndpoint(transport.baseUrl)
   );
   const configuredRuntimeOptions = acceptsConfiguredRuntimeOptions
     ? model.runtimeOptions
     : undefined;
   return resolveModelRuntimeOptions({
     protocol: provider.protocol,
-    baseUrl: provider.baseUrl,
+    baseUrl: transport.baseUrl,
     wireModel: model.model,
     catalogOptions: catalogModel?.runtimeOptions,
     catalogConstraints: catalogModel?.runtimeConstraints,
     configuredOptions: configuredRuntimeOptions,
+    reasoningEfforts: getSupportedModelReasoningEfforts({ providerId: model.provider, providerType: provider.type, protocol: provider.protocol, wireModel: model.model, baseUrl: transport.baseUrl }),
   });
 }
 

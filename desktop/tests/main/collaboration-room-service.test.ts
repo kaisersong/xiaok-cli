@@ -543,3 +543,31 @@ describe('room name routing', () => {
     expect(sendRoomMessage).toHaveBeenCalledWith(expect.objectContaining({ text: '@研究员 请检查', mentions: [{ kind: 'agent', logicalAgentId: 'agent-a' }] }), expect.anything());
   });
 });
+
+describe('room deletion authority', () => {
+  it('denies non-user authority and forwards only room identity and revision', async () => {
+    const remove = vi.fn(async () => ({ ok: true }));
+    const service = createCollaborationRoomService({ brokerClient: createBrokerFake({ deleteRoom: remove }) as never, kswarmClient: createKSwarmFake() });
+    const input = { roomId: 'room-1', expectedRoomRevision: 4, requestSource: 'user', actor: { kind: 'user', userId: 'forged' } };
+    for (const authority of [undefined, {requestSource: 'agent'}, {requestSource: 'scheduler'}]) {
+      expect((await service.deleteRoom(input, authority as never)).ok).toBe(false);
+    }
+    expect(remove).not.toHaveBeenCalled();
+    expect((await service.deleteRoom({roomId: 'room-1'}, {requestSource: 'user'})).code).toBe('room_input_invalid');
+    expect((await service.deleteRoom(input, {requestSource: 'user'})).ok).toBe(true);
+    expect(remove).toHaveBeenCalledWith({roomId: 'room-1', expectedRoomRevision: 4}, expect.objectContaining({requestSource: 'user', actor: {kind: 'user', userId: 'user.local'}}));
+  });
+});
+
+it('settles local execution only after broker deletion has fenced the same room revision', async () => {
+  const stop = vi.fn(async () => undefined);
+  const remove = vi.fn().mockResolvedValueOnce({ok: false, code: 'room_delete_pending'}).mockResolvedValue({ok: true});
+  const broker = createBrokerFake({deleteRoom: remove, getRoomSnapshot: vi.fn(async () => ({ok: true, room: {status: 'archiving', revision: 4}}))});
+  const service = createCollaborationRoomService({brokerClient: broker as never, kswarmClient: createKSwarmFake(), stopRoomExecution: stop});
+  expect((await service.deleteRoom({roomId: 'room-1', expectedRoomRevision: 4}, {requestSource: 'user'})).ok).toBe(true);
+  expect(stop).toHaveBeenCalledWith('room-1'); expect(remove).toHaveBeenCalledTimes(2);
+  stop.mockClear(); remove.mockResolvedValue({ok: false, code: 'room_delete_pending'});
+  broker.getRoomSnapshot.mockResolvedValue({ok: true, room: {status: 'active', revision: 4}});
+  await service.deleteRoom({roomId: 'room-1', expectedRoomRevision: 4}, {requestSource: 'user'});
+  expect(stop).not.toHaveBeenCalled();
+});

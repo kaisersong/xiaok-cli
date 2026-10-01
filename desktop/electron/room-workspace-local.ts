@@ -46,9 +46,19 @@ export async function prepareWorkspaceRoot(selected: string): Promise<WorkspaceR
   return { canonicalRoot, identity: { dev: stat.dev.toString(), ino: stat.ino.toString(), birthtimeNs: stat.birthtimeNs.toString() } };
 }
 
+/**
+ * Same-directory evidence rests on canonicalRoot + inode + birthtime. The
+ * device id alone may drift: macOS reallocates APFS volume device numbers
+ * across OS updates and remounts (observed 16777232 → 16777234 with inode
+ * and birthtime unchanged), which must not read as a replaced workspace.
+ */
+function samePhysicalRoot(observed: WorkspaceRoot['identity'], binding: WorkspaceRoot['identity']): boolean {
+  return observed.ino === binding.ino && observed.birthtimeNs === binding.birthtimeNs;
+}
+
 async function verifyRoot(binding: WorkspaceRoot): Promise<void> {
   const observed = await prepareWorkspaceRoot(binding.canonicalRoot);
-  if (observed.canonicalRoot !== binding.canonicalRoot || canonicalWorkspaceJson(observed.identity) !== canonicalWorkspaceJson(binding.identity)) throw new Error('workspace_identity_changed');
+  if (observed.canonicalRoot !== binding.canonicalRoot || !samePhysicalRoot(observed.identity, binding.identity)) throw new Error('workspace_identity_changed');
 }
 
 /** Validate each existing component, including a terminal symlink/junction. */
@@ -231,6 +241,34 @@ export class RoomWorkspaceLocalStore {
     });
   }
   markActivationFailed(bindingId: string) { this.db.prepare("UPDATE room_workspace_bindings SET state='activation_failed' WHERE binding_id=?").run(bindingId); }
+  /**
+   * Device-id drift heal (macOS reallocates APFS volume device numbers across
+   * OS updates/remounts). Only dev may be rewritten; inode or birthtime drift
+   * still means a replaced directory and requires the change flow. The journal
+   * record audits the transition.
+   */
+  healBindingIdentity(bindingId: string, observed: WorkspaceRoot['identity']): boolean {
+    return this.transaction(() => {
+      const binding = this.getBinding(bindingId);
+      if (!binding || binding.identity.ino !== observed.ino || binding.identity.birthtimeNs !== observed.birthtimeNs || binding.identity.dev === observed.dev) return false;
+      const { state: _state, ...stored } = binding;
+      this.db.prepare('UPDATE room_workspace_bindings SET data=? WHERE binding_id=?').run(canonicalWorkspaceJson({ ...stored, identity: { ...binding.identity, dev: observed.dev } }), bindingId);
+      this.saveRecord('identity-heal', bindingId, { bindingId, roomId: binding.roomId, from: binding.identity.dev, to: observed.dev, healedAt: new Date().toISOString() });
+      return true;
+    });
+  }
+  /** Sweep every stored binding root and persist benign dev drift. Best-effort. */
+  async healBindingRoots(): Promise<Array<{ bindingId: string; roomId: string; from: string; to: string }>> {
+    const healed: Array<{ bindingId: string; roomId: string; from: string; to: string }> = [];
+    for (const binding of this.listBindings()) {
+      try {
+        const observed = await prepareWorkspaceRoot(binding.canonicalRoot);
+        if (observed.canonicalRoot !== binding.canonicalRoot) continue;
+        if (this.healBindingIdentity(binding.bindingId, observed.identity)) healed.push({ bindingId: binding.bindingId, roomId: binding.roomId, from: binding.identity.dev, to: observed.identity.dev });
+      } catch { /* verifyRoot keeps enforcing on real access */ }
+    }
+    return healed;
+  }
   prepareSubmission(input: LocalSubmission) {
     this.transaction(() => {
       const old = this.db.prepare('SELECT digest,data FROM room_workspace_submissions WHERE subject_key=? AND submission_id=?').get(input.subjectKey, input.submissionId) as { digest: string; data: string } | undefined;

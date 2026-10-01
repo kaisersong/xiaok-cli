@@ -1,4 +1,4 @@
-import type { ModelRuntimeConstraints, ModelRuntimeOptions, ProtocolId } from './types.js';
+import type { ModelReasoningEffort, ModelRuntimeConstraints, ModelRuntimeOptions, ProtocolId } from './types.js';
 interface ResolveModelRuntimeOptionsInput {
     protocol: ProtocolId;
     baseUrl?: string;
@@ -6,6 +6,7 @@ interface ResolveModelRuntimeOptionsInput {
     catalogOptions?: ModelRuntimeOptions;
     catalogConstraints?: ModelRuntimeConstraints;
     configuredOptions?: ModelRuntimeOptions;
+    reasoningEfforts?: ModelReasoningEffort[];
 }
 interface ResolvedModelRuntimeOptions {
     runtimeOptions?: ModelRuntimeOptions;
@@ -13,5 +14,7 @@ interface ResolvedModelRuntimeOptions {
 }
 export declare function isOfficialKimiK3OpenAIEndpoint(baseUrl?: string): boolean;
 export declare function canonicalizeOfficialKimiK3OpenAIEndpoint(baseUrl?: string): string | undefined;
+/** Ordered native tiers; for an even count, choose the upper middle tier. */
+export declare function getDefaultModelReasoningEffort(efforts: readonly ModelReasoningEffort[]): ModelReasoningEffort | undefined;
 export declare function resolveModelRuntimeOptions(input: ResolveModelRuntimeOptionsInput): ResolvedModelRuntimeOptions;
 export {};

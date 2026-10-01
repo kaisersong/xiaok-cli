@@ -1,3 +1,4 @@
+import { OLD_MODEL_EFFORT_CONFIGS } from '../../support/model-effort-compatibility.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config, LegacyConfig } from '../../../src/types.js';
 import type { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
@@ -54,6 +55,25 @@ describe('resolveRuntimeModelBinding', () => {
 
   afterEach(() => {
     process.env = OLD_ENV;
+  });
+
+  it.each(OLD_MODEL_EFFORT_CONFIGS)('loads old strength-free config without mutating it: $name', ({ config, wireModel, effort, contextLimit }) => {
+    const before = structuredClone(config);
+    const binding = resolveRuntimeModelBinding(config);
+    expect(binding.wireModel).toBe(wireModel);
+    expect(binding.runtimeOptions?.reasoningEffort).toBe(effort);
+    expect(binding.runtimeOptions?.contextLimit).toBe(contextLimit);
+    expect(config).toEqual(before);
+    expect(createAdapterFromBinding(binding).getModelName()).toBe(wireModel);
+  });
+
+  it('resolves the middle GLM tier and strips stale tiers for an unsupported protocol', () => {
+    const config = createOpenAICompatibleConfig({ providerId: 'glm', providerType: 'first_party', modelId: 'glm-5.3', wireModel: 'GLM-5.3', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' });
+    expect(resolveRuntimeModelBinding(config).runtimeOptions?.reasoningEffort).toBe('high');
+    config.models['glm-5.3'].runtimeOptions = { reasoningEffort: 'max' };
+    expect(resolveRuntimeModelBinding(config).runtimeOptions?.reasoningEffort).toBe('max');
+    config.providers.glm.protocol = 'openai_responses';
+    expect(resolveRuntimeModelBinding(config).runtimeOptions).toEqual({ contextLimit: 1_048_576 });
   });
 
   it('throws a typed missing-key error whose primary recovery is xiaok login', () => {
@@ -211,9 +231,10 @@ describe('resolveRuntimeModelBinding', () => {
     expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
   });
 
-  it('applies safe K3 defaults to a manual official binding without a catalog model id', () => {
+  it('applies safe K3 defaults to an official provider binding without a catalog model id', () => {
     const config = createOpenAICompatibleConfig({
-      providerId: 'manual-kimi',
+      providerId: 'kimi',
+      providerType: 'first_party',
       modelId: 'manual-k3',
       wireModel: 'k3',
       baseUrl: 'https://api.kimi.com/coding/v1',
@@ -227,7 +248,8 @@ describe('resolveRuntimeModelBinding', () => {
 
   it('preserves configured K3 1M context and max reasoning in the resolved binding', () => {
     const config = createOpenAICompatibleConfig({
-      providerId: 'manual-kimi',
+      providerId: 'kimi',
+      providerType: 'first_party',
       modelId: 'manual-k3',
       wireModel: 'k3',
       baseUrl: 'https://api.kimi.com/coding/v1',
@@ -287,7 +309,7 @@ describe('resolveRuntimeModelBinding', () => {
     expect(resolveRuntimeModelBinding(config)).not.toHaveProperty('runtimeOptions');
   });
 
-  it('preserves provider-neutral runtime options for a custom provider model named K3', () => {
+  it('preserves context but removes an unusable effort for a custom provider named K3', () => {
     const config = createOpenAICompatibleConfig({
       providerId: 'acme',
       providerType: 'custom',
@@ -302,7 +324,6 @@ describe('resolveRuntimeModelBinding', () => {
 
     expect(resolveRuntimeModelBinding(config).runtimeOptions).toEqual({
       contextLimit: 128_000,
-      reasoningEffort: 'low',
     });
   });
 

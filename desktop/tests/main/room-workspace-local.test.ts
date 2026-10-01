@@ -107,3 +107,37 @@ describe('R3 durable local bindings and ticket outbox', () => {
     } finally { store.close(); }
   });
 });
+
+describe('workspace root identity across macOS device-id drift', () => {
+  it('accepts drifted dev with same ino+birthtime and still rejects replaced roots', async () => {
+    const root = fixture(); const selected = join(root, 'chosen'); mkdirSync(selected);
+    const physical = await prepareWorkspaceRoot(selected);
+    const drifted = { ...physical, identity: { ...physical.identity, dev: '16777232' } };
+    await expect(resolveWorkspacePath(drifted, '')).resolves.toBe(physical.canonicalRoot);
+    writeFileSync(join(selected, 'a.txt'), 'x');
+    await expect(observeWorkspaceFile(drifted, 'a.txt')).resolves.toMatchObject({ relativePath: 'a.txt' });
+    const replacedIno = { ...physical, identity: { ...physical.identity, ino: String(BigInt(physical.identity.ino) + 1n) } };
+    await expect(resolveWorkspacePath(replacedIno, '')).rejects.toThrow('workspace_identity_changed');
+    const replacedBirth = { ...physical, identity: { ...physical.identity, birthtimeNs: String(BigInt(physical.identity.birthtimeNs) + 1n) } };
+    await expect(resolveWorkspacePath(replacedBirth, '')).rejects.toThrow('workspace_identity_changed');
+  });
+  it('heals stored dev drift with an audit journal and refuses any other identity change', async () => {
+    const root = fixture(); const dbPath = join(root, 'internal.db'); const selected = join(root, 'user'); mkdirSync(selected);
+    const physical = await prepareWorkspaceRoot(selected);
+    const staleInput = { ...physical, identity: { ...physical.identity, dev: '16777232' }, roomId: 'r1', workspaceId: 'w1', hostId: 'h1', generation: 1, bindingId: 'b1', requestId: 'req1', createdBy: 'u1', payloadDigest: workspaceDigest('binding', physical) };
+    const store = new RoomWorkspaceLocalStore(dbPath);
+    try {
+      store.prepareBinding(staleInput);
+      store.activateBinding('b1', { workspaceId: 'w1', activeBindingId: 'b1', generation: 1 });
+      expect(await store.healBindingRoots()).toEqual([{ bindingId: 'b1', roomId: 'r1', from: '16777232', to: physical.identity.dev }]);
+      expect(store.getBinding('b1')?.identity.dev).toBe(physical.identity.dev);
+      expect(store.getBinding('b1')?.state).toBe('active');
+      expect(store.getRecord<{ from: string; to: string }>('identity-heal', 'b1')).toMatchObject({ from: '16777232', to: physical.identity.dev });
+      expect(await store.healBindingRoots()).toEqual([]);
+      expect(store.healBindingIdentity('b1', { ...physical.identity, ino: '999' })).toBe(false);
+      expect(store.healBindingIdentity('b1', { ...physical.identity, birthtimeNs: '1' })).toBe(false);
+      expect(store.healBindingIdentity('missing', physical.identity)).toBe(false);
+      expect(store.getBinding('b1')?.identity.ino).toBe(physical.identity.ino);
+    } finally { store.close(); }
+  });
+});

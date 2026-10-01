@@ -1,0 +1,9 @@
+**PASS**
+
+R3 阻断已闭合：
+
+- 生产 `stream` AST 结构与授权条件精确匹配：`project-agent-model.ts:23,46,49,85-87`。
+- class 或其他函数的 `stream` 不会授权：`model-stream-consumers.ts:56-63`。
+- 真实 factory fixture、间接调用、常量 key 与全根扫描均已覆盖：`model-stream-consumer-contract.test.ts:42-120`。
+
+具体问题：无。
