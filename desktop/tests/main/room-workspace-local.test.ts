@@ -112,7 +112,11 @@ describe('workspace root identity across macOS device-id drift', () => {
   it('accepts drifted dev with same ino+birthtime and still rejects replaced roots', async () => {
     const root = fixture(); const selected = join(root, 'chosen'); mkdirSync(selected);
     const physical = await prepareWorkspaceRoot(selected);
-    const drifted = { ...physical, identity: { ...physical.identity, dev: '16777232' } };
+    // Derive the drifted dev from this host's real root dev instead of a literal:
+    // 16777232 is the real dev of macOS APFS tmpdirs, so a hardcoded constant makes
+    // "drifted" identical to the observed root and this case verifies nothing. +2
+    // matches the drift actually observed across OS updates (16777232 -> 16777234).
+    const drifted = { ...physical, identity: { ...physical.identity, dev: String(BigInt(physical.identity.dev) + 2n) } };
     await expect(resolveWorkspacePath(drifted, '')).resolves.toBe(physical.canonicalRoot);
     writeFileSync(join(selected, 'a.txt'), 'x');
     await expect(observeWorkspaceFile(drifted, 'a.txt')).resolves.toMatchObject({ relativePath: 'a.txt' });
