@@ -1,18 +1,34 @@
 import type { Command } from 'commander';
 import type { ModelConfigEntry, ProviderConfig, ProviderModelVariant } from '../ai/providers/types.js';
 import { loadConfig, saveConfig } from '../utils/config.js';
-import { getProviderModelVariant, getProviderProfile } from '../ai/providers/registry.js';
+import { getProviderModelVariant, getProviderProfile, listProviderProfiles } from '../ai/providers/registry.js';
+import {
+  resolveSystemOneConfig,
+  setSystemOneConfig,
+  SYSTEM_ONE_DEFAULT_BASE_URL,
+  SYSTEM_ONE_DEFAULT_MODEL,
+} from '../ai/providers/system-one-config.js';
 import { isOfficialKimiK3OpenAIEndpoint } from '../ai/providers/model-runtime-options.js';
 
 function normalizeProviderId(value: string): string | null {
   if (value === 'claude') return 'anthropic';
-  if (value === 'anthropic') return 'anthropic';
-  if (value === 'openai') return 'openai';
   if (value === 'custom') return 'custom-default';
-  if (value === 'kimi' || value === 'deepseek' || value === 'glm' || value === 'minimax' || value === 'gemini') {
-    return value;
-  }
-  return null;
+  // 白名单直接从 registry 派生，避免新增 first-party provider 时漏掉这里，
+  // 导致 `config set model <provider>` 被拒、`config set api-key --provider <id>`
+  // 把 Key 静默写到当前默认 provider 上。
+  return getProviderProfile(value) ? value : null;
+}
+
+/**
+ * Jev 已经不在推理 provider 注册表里，但 `config set model jev` 和
+ * `config set api-key <key> --provider jev` 这两种写法在别处看起来很合理。
+ * 直接说不认识会让人以为配置没生效，这里给出真正该用的入口。
+ */
+function systemOneMisdirectionHint(value: string): string | null {
+  return value.trim().toLowerCase() === 'jev'
+    ? 'Jev（System One）是辅助决策模型，不参与默认模型选择。'
+      + '请改用: xiaok config set system-one-api-key <key>'
+    : null;
 }
 
 function sanitizeModelIdPart(value: string): string {
@@ -173,6 +189,12 @@ export function registerConfigCommands(program: Command): void {
         return;
       }
 
+      const hint = systemOneMisdirectionHint(value);
+      if (hint) {
+        console.error(hint);
+        return;
+      }
+
       console.error(`未知模型: ${value}。支持: modelId、provider、provider/model`);
     });
 
@@ -182,7 +204,23 @@ export function registerConfigCommands(program: Command): void {
     .option('--provider <provider>', '指定提供商（默认当前默认模型）')
     .action(async (key: string, opts: { provider?: string }) => {
       const cfg = await loadConfig();
-      const provider = normalizeProviderId(opts.provider ?? cfg.defaultProvider) ?? cfg.defaultProvider;
+      const requested = opts.provider?.trim();
+      if (requested) {
+        // 显式指定 provider 时必须认得它：以前这里会对不认识的 id 静默回退到
+        // 当前默认 provider，把 Key 写到完全不相干的 provider 上。
+        const misdirection = systemOneMisdirectionHint(requested);
+        if (misdirection) {
+          console.error(misdirection);
+          return;
+        }
+        if (!normalizeProviderId(requested)) {
+          console.error(
+            `未知 provider: ${requested}。可用: ${listProviderProfiles().map((item) => item.id).join(', ')}`,
+          );
+          return;
+        }
+      }
+      const provider = normalizeProviderId(requested ?? cfg.defaultProvider) ?? cfg.defaultProvider;
       ensureProviderConfig(cfg, provider);
       if (provider === 'custom-default' && !cfg.providers[provider].baseUrl) {
         console.error('请先设置 baseUrl：xiaok config set model custom --base-url <url>');
@@ -197,6 +235,41 @@ export function registerConfigCommands(program: Command): void {
       }
       await saveConfig(cfg);
       console.log(`已为 ${provider} 设置 API Key${switched ? `，并切换为默认提供商` : ''}`);
+    });
+
+  // System One（Jev）是辅助决策模型，不走 providers/models，单独一组命令。
+  configSet
+    .command('system-one-api-key <key>')
+    .description('设置 System One（Jev）辅助决策模型的 API Key（传空串可清除）')
+    .action(async (key: string) => {
+      const cfg = await loadConfig();
+      setSystemOneConfig(cfg, { apiKey: key });
+      await saveConfig(cfg);
+      console.log(key.trim() ? '已设置 systemOne.apiKey' : '已清除 systemOne.apiKey');
+    });
+
+  configSet
+    .command('system-one-model <model>')
+    .description('设置 System One（Jev）模型名（传空串回退默认 jev-latest）')
+    .action(async (model: string) => {
+      const cfg = await loadConfig();
+      setSystemOneConfig(cfg, { model });
+      await saveConfig(cfg);
+      console.log(model.trim()
+        ? `已设置 systemOne.model = ${model.trim()}`
+        : `已清除 systemOne.model（回退默认 ${SYSTEM_ONE_DEFAULT_MODEL}）`);
+    });
+
+  configSet
+    .command('system-one-base-url <url>')
+    .description('设置 System One（Jev）端点 base URL（传空串回退默认值）')
+    .action(async (url: string) => {
+      const cfg = await loadConfig();
+      setSystemOneConfig(cfg, { baseUrl: url });
+      await saveConfig(cfg);
+      console.log(url.trim()
+        ? `已设置 systemOne.baseUrl = ${url.trim()}`
+        : `已清除 systemOne.baseUrl（回退默认 ${SYSTEM_ONE_DEFAULT_BASE_URL}）`);
     });
 
   configSet
@@ -316,6 +389,16 @@ export function registerConfigCommands(program: Command): void {
         console.log(cfg.channels?.yzj?.webhookPath ?? '');
       } else if (key === 'yzj.webhook-port') {
         console.log(cfg.channels?.yzj?.webhookPort ?? '');
+      } else if (key === 'system-one' || key === 'systemOne') {
+        // 永远不打印明文 Key，只回报来源与生效参数。
+        const resolved = resolveSystemOneConfig(cfg);
+        console.log(JSON.stringify({
+          configured: resolved.configured,
+          keySource: resolved.keySource,
+          keyEnvVar: resolved.keyEnvVar,
+          baseUrl: resolved.baseUrl,
+          model: resolved.model,
+        }, null, 2));
       } else {
         console.log(JSON.stringify((cfg as unknown as Record<string, unknown>)[key] ?? null, null, 2));
       }

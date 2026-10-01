@@ -929,6 +929,18 @@ export async function registerDesktopIpc(
     log('info', 'updateModelRuntimeOptions ok', { modelId: input?.modelId });
     return r;
   });
+  ipcMain.handle('desktop:getSystemOneConfig', async () => {
+    log('info', 'getSystemOneConfig');
+    const r = await services.getSystemOneConfig();
+    log('info', 'getSystemOneConfig ok', { configured: r?.configured });
+    return r;
+  });
+  ipcMain.handle('desktop:saveSystemOneConfig', async (_event, input) => {
+    log('info', 'saveSystemOneConfig');
+    const r = await services.saveSystemOneConfig(input);
+    log('info', 'saveSystemOneConfig ok', { configured: r?.configured });
+    return r;
+  });
   ipcMain.handle('desktop:createManagedXiaokAgent', async (_event, input) => {
     log('info', 'createManagedXiaokAgent', { name: input?.name, roles: input?.roles });
     const r = await services.createManagedXiaokAgent(input, { requestSource: 'user' });

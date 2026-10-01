@@ -3133,6 +3133,99 @@ describe('desktop services', () => {
     }
   });
 
+  it('stores the Jev (System One) key in the top-level systemOne block', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    const before = await services.getSystemOneConfig();
+    expect(before).toEqual({
+      configured: false,
+      keySource: 'none',
+      keyEnvVar: null,
+      baseUrl: 'https://api.typesafe.ai',
+      model: 'jev-latest',
+      apiKeyMasked: null,
+    });
+
+    const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-desktop-1234' });
+    expect(saved).toEqual({
+      configured: true,
+      keySource: 'config',
+      keyEnvVar: null,
+      baseUrl: 'https://api.typesafe.ai',
+      model: 'jev-latest',
+      apiKeyMasked: expect.stringMatching(/^k-je•+1234$/),
+    });
+    // 明文 Key 不得离开主进程。
+    expect(JSON.stringify(saved)).not.toContain('k-jev-desktop-1234');
+
+    // 真落盘到 config.json 顶层的 systemOne，而不是 providers/models。
+    const raw = JSON.parse(readFileSync(join(process.env.XIAOK_CONFIG_DIR!, 'config.json'), 'utf8')) as Record<string, unknown>;
+    expect(raw.systemOne).toEqual({ apiKey: 'k-jev-desktop-1234' });
+    expect(Object.keys((raw.providers ?? {}) as Record<string, unknown>)).not.toContain('jev');
+    expect(Object.keys((raw.models ?? {}) as Record<string, unknown>)).not.toContain('jev-latest');
+    expect(raw.defaultProvider).not.toBe('jev');
+    expect(raw.defaultModelId).not.toBe('jev-latest');
+
+    const reopened = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+    expect(await reopened.getSystemOneConfig()).toEqual(saved);
+  });
+
+  it('falls back to the env var only while no systemOne key is saved', async () => {
+    process.env.XIAOK_TYPESAFE_API_KEY = 'env-jev-key-9999';
+    try {
+      const services = createDesktopServices({
+        dataRoot: join(rootDir, 'data'),
+        kswarmService: mockKSwarmService(),
+        now: () => 300,
+      });
+
+      const fromEnv = await services.getSystemOneConfig();
+      expect(fromEnv.configured).toBe(true);
+      expect(fromEnv.keySource).toBe('env');
+      expect(fromEnv.keyEnvVar).toBe('XIAOK_TYPESAFE_API_KEY');
+      expect(fromEnv.apiKeyMasked).toMatch(/^env-•+9999$/);
+      expect(JSON.stringify(fromEnv)).not.toContain('env-jev-key-9999');
+
+      // 显式保存的配置优先于环境变量。
+      const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-config-0001' });
+      expect(saved.keySource).toBe('config');
+      expect(saved.keyEnvVar).toBeNull();
+
+      // 清空后整块删除，回落到环境变量。
+      const cleared = await services.saveSystemOneConfig({ apiKey: '' });
+      expect(cleared.keySource).toBe('env');
+      const raw = JSON.parse(readFileSync(join(process.env.XIAOK_CONFIG_DIR!, 'config.json'), 'utf8')) as Record<string, unknown>;
+      expect(raw.systemOne).toBeUndefined();
+    } finally {
+      delete process.env.XIAOK_TYPESAFE_API_KEY;
+    }
+  });
+
+  it('keeps Jev out of the desktop model catalog, model list and default model', async () => {
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: mockKSwarmService(),
+      now: () => 300,
+    });
+
+    await services.saveSystemOneConfig({ apiKey: 'k-jev-isolation' });
+    const snapshot = await services.getModelConfig();
+
+    expect(snapshot.providers.map((provider) => provider.id)).not.toContain('jev');
+    expect(snapshot.providerProfiles.map((profile) => profile.id)).not.toContain('jev');
+    expect(snapshot.models.map((model) => model.id).filter((id) => id.includes('jev'))).toEqual([]);
+    expect(snapshot.defaultProvider).not.toBe('jev');
+    expect(snapshot.defaultModelId).not.toBe('jev-latest');
+  });
+
   it('projects GLM-5.3-Flash into the Desktop provider profile', async () => {
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),

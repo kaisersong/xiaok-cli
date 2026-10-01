@@ -38,7 +38,9 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // status mutation, task start, or caller-controlled authority fields.
     // Room workspace adds 11 semantic configuration, file projection, and
     // artifact operations; it does not expose generic filesystem access.
-    expect(keys.length).toMatchInlineSnapshot(`292`);
+    // SystemOne adds exactly two auxiliary-decision-model keys
+    // (getSystemOneConfig / saveSystemOneConfig); they never touch providers.
+    expect(keys.length).toMatchInlineSnapshot(`294`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

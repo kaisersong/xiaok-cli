@@ -53,6 +53,9 @@ describe('preload API contract', () => {
       'getModelConfig',
       'saveModelConfig',
       'updateModelRuntimeOptions',
+      // SystemOne（Jev）辅助决策模型：独立于 providers/models 的一组键。
+      'getSystemOneConfig',
+      'saveSystemOneConfig',
       'createManagedXiaokAgent',
       'testProviderConnection',
       'listAvailableModelsForProvider',

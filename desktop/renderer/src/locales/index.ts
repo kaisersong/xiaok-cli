@@ -1904,6 +1904,26 @@ export interface LocaleStrings {
     connectorChangeKey: string;
     connectorCancelEdit: string;
     connectorTestConnection: string;
+    // System One decision model (tools pane)
+    systemOneTitle: string;
+    systemOneDesc: string;
+    jevKeyName: string;
+    jevKeyDesc: string;
+    jevKeySteps: string;
+    jevKeyEndpoint: string;
+    jevKeyEndpointValue: (baseUrl: string) => string;
+    jevKeyModel: string;
+    jevKeyModelValue: (model: string) => string;
+    jevKeyAuth: string;
+    jevKeyIsolationNote: string;
+    jevKeyFromEnv: (envVar: string) => string;
+    jevApiKeyPlaceholder: string;
+    jevKeyConfigured: (masked: string) => string;
+    jevKeyNotConfigured: string;
+    jevSaveBtn: string;
+    jevClearBtn: string;
+    jevClearEnvHint: string;
+    systemOneLoadFailed: string;
     // embedding model settings
     embeddingModelTitle: string;
     embeddingModelDesc: string;

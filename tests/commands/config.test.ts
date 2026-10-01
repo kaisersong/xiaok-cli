@@ -617,6 +617,126 @@ describe('config commands', () => {
     });
   });
 
+  // ─── config set system-one-* ──────────────────────────────────────
+
+  describe('config set system-one', () => {
+    it('writes the key into the dedicated systemOne block instead of a provider', async () => {
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-api-key', 'apikey_jev_test',
+      ]);
+
+      const updated = await loadConfig();
+      expect(updated.systemOne).toEqual({ apiKey: 'apikey_jev_test' });
+      // 反向断言：辅助决策模型绝不能混进推理 provider / 模型列表。
+      expect(updated.providers.jev).toBeUndefined();
+      expect(Object.keys(updated.models)).toEqual(['anthropic-default']);
+      expect(updated.defaultModelId).toBe('anthropic-default');
+    });
+
+    it('leaves the chat provider and default model untouched', async () => {
+      seedConfig(testDir, {
+        schemaVersion: 2,
+        defaultProvider: 'anthropic',
+        defaultModelId: 'anthropic-default',
+        providers: {
+          anthropic: { type: 'first_party', protocol: 'anthropic', apiKey: 'sk-ant', baseUrl: 'https://api.anthropic.com' },
+        },
+        models: {
+          'anthropic-default': { provider: 'anthropic', model: 'claude-opus-4-6', label: 'Anthropic Default' },
+        },
+        defaultMode: 'interactive',
+        channels: {},
+      });
+
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-api-key', 'apikey_jev_test',
+      ]);
+
+      const updated = await loadConfig();
+      expect(updated.systemOne?.apiKey).toBe('apikey_jev_test');
+      expect(updated.providers.anthropic?.apiKey).toBe('sk-ant');
+      expect(updated.defaultModelId).toBe('anthropic-default');
+    });
+
+    it('clears the key when given an empty string', async () => {
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-api-key', 'apikey_jev_test',
+      ]);
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-api-key', '',
+      ]);
+
+      const updated = await loadConfig();
+      expect(updated.systemOne).toBeUndefined();
+    });
+
+    it('stores model and baseUrl overrides', async () => {
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-api-key', 'apikey_jev_test',
+      ]);
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-model', 'jev-1.13.0',
+      ]);
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'system-one-base-url', 'https://proxy.example.com',
+      ]);
+
+      const updated = await loadConfig();
+      expect(updated.systemOne).toEqual({
+        apiKey: 'apikey_jev_test',
+        model: 'jev-1.13.0',
+        baseUrl: 'https://proxy.example.com',
+      });
+    });
+
+    it('refuses to make Jev the default chat model and points at the right command', async () => {
+      await freshProgram().parseAsync(['node', 'xiaok', 'config', 'set', 'model', 'jev']);
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Jev（System One）是辅助决策模型，不参与默认模型选择。请改用: xiaok config set system-one-api-key <key>',
+      );
+      const updated = await loadConfig();
+      expect(updated.providers.jev).toBeUndefined();
+      expect(updated.defaultModelId).toBe('anthropic-default');
+    });
+
+    it('never writes a Jev key onto the current default provider', async () => {
+      seedConfig(testDir, {
+        schemaVersion: 2,
+        defaultProvider: 'anthropic',
+        defaultModelId: 'anthropic-default',
+        providers: {
+          anthropic: { type: 'first_party', protocol: 'anthropic', apiKey: 'sk-ant', baseUrl: 'https://api.anthropic.com' },
+        },
+        models: {
+          'anthropic-default': { provider: 'anthropic', model: 'claude-opus-4-6', label: 'Anthropic Default' },
+        },
+        defaultMode: 'interactive',
+        channels: {},
+      });
+
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'api-key', 'apikey_jev_should_not_land', '--provider', 'jev',
+      ]);
+
+      // 关键：不能静默回退到默认 provider 把 Key 覆盖掉。
+      const updated = await loadConfig();
+      expect(updated.providers.anthropic?.apiKey).toBe('sk-ant');
+      expect(updated.systemOne).toBeUndefined();
+    });
+
+    it('rejects an unknown explicit provider instead of silently falling back', async () => {
+      await freshProgram().parseAsync([
+        'node', 'xiaok', 'config', 'set', 'api-key', 'some-key', '--provider', 'not-a-provider',
+      ]);
+
+      const output = consoleErrorSpy.mock.calls.map(([v]) => String(v)).join('');
+      expect(output).toContain('未知 provider: not-a-provider');
+      const updated = await loadConfig();
+      expect(updated.providers['not-a-provider']).toBeUndefined();
+    });
+  });
+
   // ─── config get ────────────────────────────────────────────────────
 
   describe('config get', () => {
@@ -737,6 +857,43 @@ describe('config commands', () => {
       await freshProgram().parseAsync(['node', 'xiaok', 'config', 'get', 'nonexistent']);
 
       expect(consoleLogSpy).toHaveBeenCalledWith('null');
+    });
+
+    it('prints system-one status without leaking the key', async () => {
+      seedConfig(testDir, {
+        ...baseConfig,
+        systemOne: { apiKey: 'apikey_secret_test', model: 'jev-1.13.0' },
+      });
+      await freshProgram().parseAsync(['node', 'xiaok', 'config', 'get', 'system-one']);
+
+      const output = String(consoleLogSpy.mock.calls[0][0]);
+      expect(JSON.parse(output)).toEqual({
+        configured: true,
+        keySource: 'config',
+        keyEnvVar: null,
+        baseUrl: 'https://api.typesafe.ai',
+        model: 'jev-1.13.0',
+      });
+      // 明文 Key 绝不出现在输出里。
+      expect(output).not.toContain('apikey_secret_test');
+    });
+
+    it('reports system-one as unconfigured when neither config nor env has a key', async () => {
+      const savedXiaok = process.env.XIAOK_TYPESAFE_API_KEY;
+      const savedPlain = process.env.TYPESAFE_API_KEY;
+      delete process.env.XIAOK_TYPESAFE_API_KEY;
+      delete process.env.TYPESAFE_API_KEY;
+      try {
+        seedConfig(testDir, baseConfig);
+        await freshProgram().parseAsync(['node', 'xiaok', 'config', 'get', 'system-one']);
+
+        const parsed = JSON.parse(String(consoleLogSpy.mock.calls[0][0])) as Record<string, unknown>;
+        expect(parsed.configured).toBe(false);
+        expect(parsed.keySource).toBe('none');
+      } finally {
+        if (savedXiaok !== undefined) process.env.XIAOK_TYPESAFE_API_KEY = savedXiaok;
+        if (savedPlain !== undefined) process.env.TYPESAFE_API_KEY = savedPlain;
+      }
     });
   });
 

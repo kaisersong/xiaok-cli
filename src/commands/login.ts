@@ -27,12 +27,16 @@ import { listProviderProfiles } from '../ai/providers/registry.js';
 import { listCandidateApiKeys } from '../ai/providers/auth-resolver.js';
 import { probeApiKey } from '../ai/providers/key-probe.js';
 import { writeLine } from '../utils/ui.js';
+import { getProviderLoginPlans } from '../ai/providers/login-plans.js';
+import { pauseInputForHandoff, retainRawInputModeForSession } from '../ui/input-mode.js';
 
 export interface LoginOptions {
   provider?: string;
   apiKey?: string;
   setDefault?: boolean;
   skipVerify?: boolean;
+  plan?: string;
+  baseUrl?: string;
 }
 
 export type LoginCommandResult =
@@ -51,9 +55,20 @@ const KEY_PORTAL_HINTS: Record<string, string> = {
   gemini: 'https://aistudio.google.com/app/apikey',
 };
 
-function prompt(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+class LoginCancelledError extends Error {}
+
+function prompt(question: string): Promise<string> {
+  if (typeof process.stdin.setRawMode === 'function') return readRawPrompt(question, false);
+  return new Promise((resolve, reject) => {
+    const rl = readline.createInterface({input:process.stdin,output:process.stdout,terminal:false});
+    const cancel = () => {rl.close(); reject(new LoginCancelledError());};
+    rl.once('SIGINT', cancel);
+    rl.once('close', () => reject(new LoginCancelledError()));
+    rl.question(question, answer => {
+      resolve(answer.trim());
+      rl.removeListener('SIGINT', cancel);
+      rl.close();
+    });
   });
 }
 
@@ -69,7 +84,7 @@ export function consumeSecretInputChunk(value: string, chunk: Buffer): SecretInp
     if (character === '\r' || character === '\n') {
       return { action: 'submit', value: nextValue };
     }
-    if (character === '\u0003') {
+    if (character === '\u0003' || character === '\u0004') {
       return { action: 'abort', value: nextValue };
     }
     if (character === '\u007f' || character === '\b') {
@@ -82,35 +97,52 @@ export function consumeSecretInputChunk(value: string, chunk: Buffer): SecretInp
 }
 
 /** Hidden input: raw-mode char capture so the key is never echoed. */
-function promptSecret(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    const stdin = (rl as unknown as { input: NodeJS.ReadStream }).input;
+function promptSecret(question: string): Promise<string> {
+  return readRawPrompt(question, true);
+}
+
+function readRawPrompt(question: string, hidden: boolean): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
     if (typeof stdin.setRawMode !== 'function') {
       // non-TTY (piped stdin): fall back to a plain line read
-      prompt(rl, question).then(resolve);
+      prompt(question).then(resolve, reject);
       return;
     }
     process.stdout.write(question);
     let value = '';
     const wasRaw = stdin.isRaw;
+    let finished = false;
+    const finish = (cancelled: boolean) => {
+      if (finished) return;
+      finished = true;
+      stdin.removeListener('data', onData);
+      stdin.removeListener('end', onEnd);
+      pauseInputForHandoff();
+      if (wasRaw) stdin.setRawMode(true);
+      process.stdout.write('\n');
+      if (cancelled) reject(new LoginCancelledError());
+      else resolve(value.trim());
+    };
+    const onEnd = () => finish(true);
     stdin.setRawMode(true);
     stdin.resume();
     const onData = (ch: Buffer) => {
-      const result = consumeSecretInputChunk(value, ch);
-      value = result.value;
-      if (result.action === 'submit') {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener('data', onData);
-        process.stdout.write('\n');
-        resolve(value.trim());
-      } else if (result.action === 'abort') {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener('data', onData);
-        process.stdout.write('\n');
-        process.exit(130);
+      for (const character of ch.toString('utf8')) {
+        const previous=value;
+        const result = consumeSecretInputChunk(value, Buffer.from(character));
+        value = result.value;
+        if (result.action === 'submit') {finish(false); return;}
+        if (result.action === 'abort') {finish(true); return;}
+        if (!hidden) {
+          if (value.length < previous.length) process.stdout.write('\b \b');
+          else if (value.length > previous.length) process.stdout.write(character);
+        }
       }
     };
     stdin.on('data', onData);
+    stdin.once('end', onEnd);
+    if (stdin.readableEnded) finish(true);
   });
 }
 
@@ -118,12 +150,7 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
   const config = await loadConfig();
   const profiles = listProviderProfiles();
   const interactive = Boolean(process.stdin.isTTY);
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: interactive,
-  });
+  const releaseRawInput = retainRawInputModeForSession();
 
   try {
     // 1. provider selection
@@ -143,7 +170,7 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       profiles.forEach((item, index) => {
         writeLine(`  ${index + 1}. ${item.label} (${item.id})`);
       });
-      const answer = await prompt(rl, '输入编号或 provider id：');
+      const answer = await prompt('输入编号或 provider id：');
       const index = Number(answer) - 1;
       const selected = Number.isInteger(index) && index >= 0 && index < profiles.length
         ? profiles[index]
@@ -156,8 +183,25 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
     }
     const chosen = profiles.find((item) => item.id === providerId)!;
 
+    const plans = getProviderLoginPlans(chosen.id);
+    let planId = options.plan?.trim().toLowerCase();
+    if (!planId && interactive && plans.length > 0) {
+      writeLine('选择 Key 所属服务（普通 API 与 Coding Plan 的 Key/额度可能不通用）：');
+      plans.forEach((plan,index) => writeLine(`  ${index+1}. ${plan.label} (${plan.id})`));
+      const answer = await prompt('输入编号或服务 id：');
+      planId = plans[Number(answer)-1]?.id ?? answer.toLowerCase();
+    }
+    const plan = plans.find(item => item.id === planId);
+    if (planId !== undefined && !plan) {
+      writeLine(`不支持的服务：${planId}。可用：${plans.map(item => item.id).join(', ') || '标准 API'}`);
+      return {status:'cancelled'};
+    }
+    const existing = config.providers[chosen.id];
+    const baseUrl = options.baseUrl?.trim() || plan?.baseUrl || existing?.baseUrl || chosen.baseUrl;
+    const defaultModel = plan?.defaultModel ?? chosen.defaultModel;
+
     // 2. portal hint + existing env candidates
-    const portal = KEY_PORTAL_HINTS[chosen.id];
+    const portal = plan?.keyPortal ?? (chosen.id === 'kimi' && baseUrl?.includes('/coding') ? 'https://www.kimi.com/code/console' : KEY_PORTAL_HINTS[chosen.id]);
     if (portal) {
       writeLine(`获取 API key：${portal}`);
     }
@@ -180,7 +224,7 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       }
     }
     if (!apiKey) {
-      apiKey = await promptSecret(rl, `输入 ${chosen.label} API key（${envCandidates.length > 0 ? '回车复用环境变量中的 key' : '输入时不可见'}）：`);
+      apiKey = await promptSecret(`输入 ${chosen.label} API key（${envCandidates.length > 0 ? '回车复用环境变量中的 key' : '输入时不可见'}）：`);
       if (!apiKey && envCandidates.length > 0) {
         apiKey = envCandidates[0].apiKey;
       }
@@ -193,26 +237,24 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
     // 4. optional live verification (explicit opt-out only skips network)
     if (!options.skipVerify) {
       writeLine('正在验证 key（只读模型列表请求，不消耗生成 token）…');
-      const probe = await probeApiKey(chosen.protocol, chosen.baseUrl, apiKey);
+      const probe = await probeApiKey(chosen.protocol, baseUrl, apiKey);
       if (probe.status === 'valid') {
         writeLine('验证通过。');
       } else if (probe.status === 'network_error') {
-        writeLine('网络不可达，跳过验证（key 已保存，可稍后用 xiaok doctor --check-keys 复查）。');
+        writeLine(`暂未验证通过（${probe.detail ?? probe.httpStatus ?? '网络不可达'}）；将保存配置，可稍后用 xiaok doctor --check-keys 复查。`);
       } else if (probe.status === 'unknown_protocol') {
         writeLine('该 provider 协议暂不支持在线验证，key 已保存。');
       } else {
-        writeLine(`验证失败（${probe.detail ?? probe.httpStatus ?? 'invalid'}）。key 仍会保存；如确认输错可重新运行 xiaok login。`);
+        writeLine(`验证失败（${probe.detail ?? probe.httpStatus ?? 'invalid'}）。请检查 Key 是否属于所选服务以及访问权限；key 仍会保存，可重新运行 xiaok login。`);
       }
     }
 
     // 5. persist
     config.providers = config.providers ?? {};
-    const existing = config.providers[chosen.id];
     config.providers[chosen.id] = {
       type: 'first_party',
       protocol: chosen.protocol,
-      ...(chosen.baseUrl ? { baseUrl: chosen.baseUrl } : {}),
-      ...(existing?.baseUrl ? { baseUrl: existing.baseUrl } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
       ...(existing?.headers ? { headers: existing.headers } : {}),
       apiKey,
     };
@@ -223,32 +265,35 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
     //    interactive runs ask.
     const setDefault = options.setDefault
       ?? (interactive
-        ? (await prompt(rl, `切换默认模型到 ${chosen.defaultModel.label}？(y/N)：`)).toLowerCase() === 'y'
+        ? (await prompt(`切换默认模型到 ${defaultModel.label}？(y/N)：`)).toLowerCase() === 'y'
         : false);
     if (setDefault) {
       config.models = config.models ?? {};
-      const modelId = chosen.defaultModel.modelId;
-      if (!config.models[modelId]) {
+      const modelId = defaultModel.modelId;
+      if (plan || !config.models[modelId]) {
         config.models[modelId] = {
           provider: chosen.id,
-          model: chosen.defaultModel.model,
-          label: chosen.defaultModel.label,
-          ...(chosen.defaultModel.capabilities ? { capabilities: [...chosen.defaultModel.capabilities] } : {}),
-          ...(chosen.defaultModel.runtimeOptions
-            ? { runtimeOptions: { ...chosen.defaultModel.runtimeOptions } }
+          model: defaultModel.model,
+          label: defaultModel.label,
+          ...(defaultModel.capabilities ? { capabilities: [...defaultModel.capabilities] } : {}),
+          ...(defaultModel.runtimeOptions
+            ? { runtimeOptions: { ...defaultModel.runtimeOptions } }
             : {}),
         };
       }
       config.defaultProvider = chosen.id;
       config.defaultModelId = modelId;
       await saveConfig(config);
-      writeLine(`默认模型已切换为 [${chosen.id}] ${chosen.defaultModel.label}。`);
+      writeLine(`默认模型已切换为 [${chosen.id}] ${defaultModel.label}。`);
     }
 
     writeLine('完成。运行 xiaok chat 开始使用。');
     return { status: 'saved', providerId: chosen.id };
+  } catch (error) {
+    if (error instanceof LoginCancelledError) return {status:'cancelled'};
+    throw error;
   } finally {
-    rl.close();
+    releaseRawInput();
   }
 }
 
@@ -260,6 +305,8 @@ export function registerLoginCommand(program: Command): void {
     .option('--api-key <key>', 'API key（省略则进入交互输入；配合 --provider 用于脚本化）')
     .option('--set-default', '验证后直接把默认模型切换到该 provider，不再询问')
     .option('--skip-verify', '跳过在线 key 验证（不发网络请求）')
+    .option('--plan <id>', 'Key 所属服务：api 或 coding（Kimi/GLM/MiniMax）')
+    .option('--base-url <url>', '覆盖所选服务地址（国际服务或自定义代理）')
     .action(async (opts: LoginOptions) => {
       await runLoginCommand(opts);
     });

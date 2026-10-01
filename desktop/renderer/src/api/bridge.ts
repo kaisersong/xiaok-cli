@@ -8,6 +8,8 @@ import type {
   DesktopMobilePairingInfo,
   DesktopMobileRelayStatus,
   DesktopSaveModelConfigInput,
+  DesktopSaveSystemOneConfigInput,
+  DesktopSystemOneConfigSnapshot,
   DesktopUpdateModelRuntimeOptionsInput,
   MaterialView,
   MaterialRole,
@@ -553,6 +555,22 @@ export const api = {
     log.info('saveModelConfig', JSON.stringify({ providerId: input.providerId }));
     const r = await window.xiaokDesktop.saveModelConfig(input);
     log.info('saveModelConfig ok');
+    return r;
+  },
+
+  async getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot> {
+    log.debug('getSystemOneConfig');
+    const r = await window.xiaokDesktop.getSystemOneConfig();
+    log.debug('getSystemOneConfig ok', JSON.stringify({ configured: r?.configured, keySource: r?.keySource }));
+    return r;
+  },
+
+  async saveSystemOneConfig(input: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot> {
+    // 只记录写过哪些字段，绝不记录 Key 内容。
+    const fields = Object.keys(input).filter(key => (input as Record<string, unknown>)[key] !== undefined);
+    log.info('saveSystemOneConfig', JSON.stringify({ fields }));
+    const r = await window.xiaokDesktop.saveSystemOneConfig(input);
+    log.info('saveSystemOneConfig ok', JSON.stringify({ configured: r?.configured }));
     return r;
   },
 

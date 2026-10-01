@@ -3,7 +3,13 @@ import type { Config, LegacyConfig } from '../types.js';
 import { ClaudeAdapter } from './adapters/claude.js';
 import { OpenAIAdapter } from './adapters/openai.js';
 import { OpenAIResponsesAdapter } from './adapters/openai-responses.js';
+import { SystemOneAdapter } from './adapters/system-one.js';
 import { resolveRuntimeModelBinding, type ResolvedModelBinding } from './providers/control-plane.js';
+import {
+  resolveSystemOneConfig,
+  SYSTEM_ONE_CONTEXT_LIMIT,
+  SYSTEM_ONE_KEY_ENV_VARS,
+} from './providers/system-one-config.js';
 import { modelCapabilitiesFromFlags } from './runtime/model-capabilities.js';
 import {
   buildOpenAIHarnessContext,
@@ -121,4 +127,32 @@ export function createAdapterFromBinding(binding: ResolvedModelBinding): ModelAd
 
 export function createAdapter(rawConfig: Config | LegacyConfig): ModelAdapter {
   return createAdapterFromBinding(resolveRuntimeModelBinding(rawConfig));
+}
+
+/**
+ * 构造 System One（Jev）辅助决策模型适配器。
+ *
+ * Jev 不参与 `config.models` / `config.defaultModelId` 的推理模型选择，
+ * 所以这里直接从 `config.systemOne` 解析，而不是走 `createAdapterFromBinding`
+ * —— 后者要求 provider 出现在 first-party registry 里。
+ */
+export function createSystemOneAdapter(
+  config: Pick<Config, 'systemOne'> | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): SystemOneAdapter {
+  const resolved = resolveSystemOneConfig(config, env);
+  if (!resolved.apiKey) {
+    throw new Error(
+      '未配置 System One（Jev）API Key。'
+      + '可运行 `xiaok config set system-one-api-key <key>`，'
+      + `或设置环境变量 ${SYSTEM_ONE_KEY_ENV_VARS.join(' / ')}。`,
+    );
+  }
+
+  return new SystemOneAdapter({
+    apiKey: resolved.apiKey,
+    baseUrl: resolved.baseUrl,
+    model: resolved.model,
+    capabilityOverrides: { contextLimit: SYSTEM_ONE_CONTEXT_LIMIT },
+  });
 }

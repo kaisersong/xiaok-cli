@@ -1,5 +1,6 @@
 import type { ProtocolId } from './types.js';
 import type { CandidateApiKey } from './auth-resolver.js';
+import { SYSTEM_ONE_DEFAULT_MODEL, systemOneEndpointUrl } from './system-one-config.js';
 
 const PROBE_TIMEOUT_MS = 8_000;
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -14,13 +15,19 @@ export interface KeyProbeResult {
   detail?: string;
 }
 
-export type { CandidateApiKey };
+export type { CandidateApiKey};
+
+interface ProbeRequest {
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+}
 
 function buildProbeRequest(
   protocol: ProtocolId,
   baseUrl: string | undefined,
   apiKey: string,
-): { url: string; headers: Record<string, string> } | null {
+): ProbeRequest | null {
   if (protocol === 'anthropic') {
     const base = baseUrl ?? 'https://api.anthropic.com';
     return {
@@ -29,6 +36,27 @@ function buildProbeRequest(
         'x-api-key': apiKey,
         'anthropic-version': ANTHROPIC_VERSION,
       },
+    };
+  }
+
+  // System One 端点没有 GET /models，只能用最小白名单问题体做一次 POST 探活。
+  if (protocol === 'system_one') {
+    return {
+      url: systemOneEndpointUrl(baseUrl),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: SYSTEM_ONE_DEFAULT_MODEL,
+        state: 'probe',
+        questions: {
+          probe: {
+            type: 'noul',
+            instructions: 'Is this a probe request?',
+          },
+        },
+      }),
     };
   }
 
@@ -67,8 +95,9 @@ export async function probeApiKey(
 
   try {
     const resp = await fetch(request.url, {
-      method: 'GET',
+      method: request.body ? 'POST' : 'GET',
       headers: request.headers,
+      ...(request.body ? { body: request.body } : {}),
       signal: controller.signal,
     });
 

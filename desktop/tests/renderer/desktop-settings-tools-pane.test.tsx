@@ -18,6 +18,16 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     saveConnectorsConfig: mocks.saveConnectorsConfig,
     listConnectorRuntimes: mocks.listConnectorRuntimes,
     testConnectorProvider: mocks.testConnectorProvider,
+    // SystemOne 区块是工具管理的一部分，这里显式 mock，避免靠异常路径通过。
+    getSystemOneConfig: vi.fn().mockResolvedValue({
+      configured: false,
+      keySource: 'none',
+      keyEnvVar: null,
+      baseUrl: 'https://api.typesafe.ai',
+      model: 'jev-latest',
+      apiKeyMasked: null,
+    }),
+    saveSystemOneConfig: vi.fn(),
     getSkillDebugConfig: vi.fn().mockResolvedValue({ enabled: false }),
     saveSkillDebugConfig: vi.fn().mockResolvedValue({ enabled: false }),
     getKswarmConfig: vi.fn().mockResolvedValue({ maxConcurrentTasks: 3 }),

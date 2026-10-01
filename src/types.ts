@@ -139,6 +139,22 @@ export interface YZJChannelConfig {
   extra_allowed_tools?: string[];
 }
 
+/**
+ * TypeSafe System One（Jev）配置。
+ *
+ * Jev 不是 xiaok 的推理模型，而是辅助决策模型：它不参与 `models` /
+ * `defaultModelId` 的模型选择，也不出现在 `providers` 里，因此单独占一个
+ * 顶层配置块，避免被 `config set model` 抢成默认聊天模型。
+ */
+export interface SystemOneConfig {
+  /** TypeSafe API Key。 */
+  apiKey?: string;
+  /** 端点 base URL，默认 https://api.typesafe.ai。 */
+  baseUrl?: string;
+  /** 模型名，默认 jev-latest。 */
+  model?: string;
+}
+
 // legacy config.json schema (schemaVersion 1)
 export interface LegacyConfig {
   schemaVersion: 1;
@@ -192,6 +208,8 @@ export interface Config {
   automations?: {
     globalBackgroundAutoRunEnabled?: boolean;
   };
+  /** TypeSafe System One（Jev）辅助决策模型配置。 */
+  systemOne?: SystemOneConfig;
   meeting?: {
     asr?: {
       defaultProvider?: 'sherpa-onnx-paraformer' | 'whisper' | 'volcengine-asr' | 'aliyun-asr';

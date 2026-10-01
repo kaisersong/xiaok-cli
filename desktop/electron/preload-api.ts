@@ -59,6 +59,8 @@ export const PRELOAD_API_KEYS = [
   'getModelConfig',
   'saveModelConfig',
   'updateModelRuntimeOptions',
+  'getSystemOneConfig',
+  'saveSystemOneConfig',
   'createManagedXiaokAgent',
   'testProviderConnection',
   'listAvailableModelsForProvider',
@@ -423,6 +425,8 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getModelConfig: 'desktop:getModelConfig',
   saveModelConfig: 'desktop:saveModelConfig',
   updateModelRuntimeOptions: 'desktop:updateModelRuntimeOptions',
+  getSystemOneConfig: 'desktop:getSystemOneConfig',
+  saveSystemOneConfig: 'desktop:saveSystemOneConfig',
   createManagedXiaokAgent: 'desktop:createManagedXiaokAgent',
   testProviderConnection: 'desktop:testProviderConnection',
   listAvailableModelsForProvider: 'desktop:listAvailableModelsForProvider',
@@ -744,6 +748,34 @@ export interface DesktopSaveModelConfigInput {
 export interface DesktopUpdateModelRuntimeOptionsInput {
   modelId: string;
   runtimeOptions: ModelRuntimeOptions;
+}
+
+/**
+ * TypeSafe System One（Jev）辅助决策模型配置快照。
+ *
+ * Jev 不是推理 provider：它不出现在 `providers` / `models` / `defaultModelId`
+ * 里，所以单独走这一对 IPC。主进程只回传掩码，明文 Key 永不进入 renderer。
+ */
+export interface DesktopSystemOneConfigSnapshot {
+  /** 是否已有可用 Key（config.json 或环境变量）。 */
+  configured: boolean;
+  /** Key 来源：配置文件 / 环境变量 / 都没有。 */
+  keySource: 'config' | 'env' | 'none';
+  /** 命中环境变量时的变量名，便于 UI 说明来源。 */
+  keyEnvVar: string | null;
+  /** 生效的端点 base URL（已含默认值）。 */
+  baseUrl: string;
+  /** 生效的模型名（已含默认值）。 */
+  model: string;
+  /** 掩码后的 Key；未配置时为 null。 */
+  apiKeyMasked: string | null;
+}
+
+/** `undefined` = 不变更，空串 = 清除该字段。 */
+export interface DesktopSaveSystemOneConfigInput {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
 }
 
 export interface AvailableModelView {
@@ -1260,6 +1292,8 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getModelConfig(): Promise<DesktopModelConfigSnapshot>;
   saveModelConfig(input: DesktopSaveModelConfigInput): Promise<DesktopModelConfigSnapshot>;
   updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput): Promise<DesktopModelConfigSnapshot>;
+  getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot>;
+  saveSystemOneConfig(input: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot>;
   createManagedXiaokAgent(input: {
     name: string;
     description?: string;
@@ -1657,6 +1691,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getModelConfig: () => ipcRenderer.invoke('desktop:getModelConfig') as ReturnType<DesktopApi['getModelConfig']>,
     saveModelConfig: (input) => ipcRenderer.invoke('desktop:saveModelConfig', input) as ReturnType<DesktopApi['saveModelConfig']>,
     updateModelRuntimeOptions: (input) => ipcRenderer.invoke('desktop:updateModelRuntimeOptions', input) as ReturnType<DesktopApi['updateModelRuntimeOptions']>,
+    getSystemOneConfig: () => ipcRenderer.invoke('desktop:getSystemOneConfig') as ReturnType<DesktopApi['getSystemOneConfig']>,
+    saveSystemOneConfig: (input) => ipcRenderer.invoke('desktop:saveSystemOneConfig', input) as ReturnType<DesktopApi['saveSystemOneConfig']>,
     createManagedXiaokAgent: (input) => ipcRenderer.invoke('desktop:createManagedXiaokAgent', input) as ReturnType<DesktopApi['createManagedXiaokAgent']>,
     testProviderConnection: (input) => ipcRenderer.invoke('desktop:testProviderConnection', input) as ReturnType<DesktopApi['testProviderConnection']>,
     listAvailableModelsForProvider: (providerId) => ipcRenderer.invoke('desktop:listAvailableModelsForProvider', providerId) as ReturnType<DesktopApi['listAvailableModelsForProvider']>,

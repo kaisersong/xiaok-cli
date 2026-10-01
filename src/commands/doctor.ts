@@ -4,8 +4,9 @@ import { loadConfig, getConfigPath } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
 import { getCurrentBranch, isGitDirty } from '../utils/git.js';
 import { listCandidateApiKeys } from '../ai/providers/auth-resolver.js';
-import { probeApiKey } from '../ai/providers/key-probe.js';
+import { probeApiKey, type KeyProbeResult } from '../ai/providers/key-probe.js';
 import { listProviderProfiles } from '../ai/providers/registry.js';
+import { resolveSystemOneConfig } from '../ai/providers/system-one-config.js';
 
 export async function runDoctorCommand(cwd: string): Promise<string> {
   const config = await loadConfig();
@@ -40,6 +41,13 @@ const SOURCE_LABEL: Record<string, string> = {
   config: '配置文件',
 };
 
+function describeProbeResult(result: KeyProbeResult): string {
+  if (result.status === 'valid') return '✓ 可用';
+  if (result.status === 'invalid') return '✗ 无效（鉴权失败）';
+  if (result.status === 'network_error') return `? 无法确认（${result.detail ?? '网络错误'}）`;
+  return '? 未知协议';
+}
+
 /**
  * 逐个 provider 扫描候选 API Key（XIAOK_ 前缀 / 标准环境变量 / 配置文件），
  * 对每个候选发起最小化只读请求验证是否真正可用。
@@ -66,16 +74,24 @@ export async function runCheckKeysCommand(): Promise<string> {
       const masked = maskApiKey(candidate.apiKey);
       const result = await probeApiKey(profile.protocol, profile.baseUrl, candidate.apiKey);
 
-      const statusLabel = result.status === 'valid'
-        ? '✓ 可用'
-        : result.status === 'invalid'
-          ? '✗ 无效（鉴权失败）'
-          : result.status === 'network_error'
-            ? `? 无法确认（${result.detail ?? '网络错误'}）`
-            : '? 未知协议';
-
-      lines.push(`  - ${label}${varSuffix} ${masked}: ${statusLabel}`);
+      lines.push(`  - ${label}${varSuffix} ${masked}: ${describeProbeResult(result)}`);
     }
+    lines.push('');
+  }
+
+  // System One（Jev）是辅助决策模型，不在 registry 里，因此单独检查一次。
+  const systemOne = resolveSystemOneConfig(config);
+  if (systemOne.configured && systemOne.apiKey) {
+    totalCandidates += 1;
+    lines.push('System One（Jev，辅助决策模型）');
+    const label = systemOne.keySource === 'config'
+      ? SOURCE_LABEL.config
+      : SOURCE_LABEL.standard_env;
+    const varSuffix = systemOne.keyEnvVar ? ` [${systemOne.keyEnvVar}]` : '';
+    const result = await probeApiKey('system_one', systemOne.baseUrl, systemOne.apiKey);
+    lines.push(
+      `  - ${label}${varSuffix} ${maskApiKey(systemOne.apiKey)}: ${describeProbeResult(result)}`,
+    );
     lines.push('');
   }
 

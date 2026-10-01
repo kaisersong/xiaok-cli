@@ -75,6 +75,8 @@ import type { GoalInput } from '../../src/runtime/goal/types.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
 import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
+import { resolveSystemOneConfig, setSystemOneConfig } from '../../src/ai/providers/system-one-config.js';
+import type { SystemOneConfig } from '../../src/types.js';
 import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
 import { analyzeIntent as analyzeStageIntent } from '../../src/runtime/stage/executor.js';
 import { createEmptySessionIntentLedger, cloneSessionIntentLedger, createIntentLedgerRecord, type SessionIntentLedger, type IntentPlanDraft, type IntentLedgerRecord } from '../../src/runtime/intent-delegation/types.js';
@@ -794,6 +796,57 @@ export interface DesktopSaveModelConfigInput {
 export interface DesktopUpdateModelRuntimeOptionsInput {
   modelId: string;
   runtimeOptions: ModelRuntimeOptions;
+}
+
+export interface DesktopSystemOneConfigSnapshot {
+  configured: boolean;
+  keySource: 'config' | 'env' | 'none';
+  keyEnvVar: string | null;
+  baseUrl: string;
+  model: string;
+  apiKeyMasked: string | null;
+}
+
+export interface DesktopSaveSystemOneConfigInput {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+}
+
+/**
+ * 展示用掩码：与 CLI `doctor` 的 maskApiKey 同形。明文 Key 永不离开主进程，
+ * renderer 只拿得到掩码后的字符串。
+ */
+function maskSystemOneKey(key: string): string {
+  if (key.length <= 8) return '••••••••';
+  return `${key.slice(0, 4)}${'•'.repeat(Math.min(key.length - 8, 12))}${key.slice(-4)}`;
+}
+
+function systemOneSnapshot(config: Pick<Config, 'systemOne'>): DesktopSystemOneConfigSnapshot {
+  const resolved = resolveSystemOneConfig(config);
+  return {
+    configured: resolved.configured,
+    keySource: resolved.keySource,
+    keyEnvVar: resolved.keyEnvVar,
+    baseUrl: resolved.baseUrl,
+    model: resolved.model,
+    apiKeyMasked: resolved.apiKey ? maskSystemOneKey(resolved.apiKey) : null,
+  };
+}
+
+/**
+ * `undefined` = 不变更，空串 = 清除该字段（与 `setSystemOneConfig` 语义一致）。
+ * 只接受这三个已知字段，renderer 无法借这个入口写 providers/models。
+ */
+function sanitizeSystemOnePatch(input: DesktopSaveSystemOneConfigInput | undefined): SystemOneConfig {
+  const patch: SystemOneConfig = {};
+  for (const field of ['apiKey', 'baseUrl', 'model'] as const) {
+    const value = input?.[field];
+    if (value === undefined) continue;
+    if (typeof value !== 'string') throw new Error(`systemOne.${field} 必须是字符串`);
+    patch[field] = value;
+  }
+  return patch;
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
@@ -2832,6 +2885,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       model.runtimeOptions = runtimeOptions;
       await saveConfig(config);
       return createModelConfigSnapshot(config);
+    },
+    async getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot> {
+      return systemOneSnapshot(await loadConfig());
+    },
+    async saveSystemOneConfig(input: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot> {
+      const config = await loadConfig();
+      setSystemOneConfig(config, sanitizeSystemOnePatch(input));
+      await saveConfig(config);
+      return systemOneSnapshot(config);
     },
     async createManagedXiaokAgent(input: {
       name: string;
