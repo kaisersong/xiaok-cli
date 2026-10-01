@@ -165,23 +165,23 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A data/verification/windows/win32-x64 data/verification/windows/win32-arm64
-          if git diff --cached --quiet; then
-            echo 'the committed payloads already match the payloads this run produced'
-            exit 0
-          fi
-          git commit -m 'chore(verification): refresh the Windows absence payloads [skip ci]'
-          # A push that lands while the build jobs run leaves this checkout behind
-          # master, so rebase onto the current tip instead of losing the refresh.
+          # Two runs can refresh the same payload files, and a replay of this
+          # commit then conflicts on those binaries, so rebuild the commit on top
+          # of the current tip instead of rebasing onto it. The payloads in the
+          # worktree stay the ones this run produced either way.
           for attempt in 1 2 3; do
-            if git push origin HEAD:master; then
+            git fetch --quiet origin master
+            git reset --quiet --soft FETCH_HEAD
+            git add -A data/verification/windows/win32-x64 data/verification/windows/win32-arm64
+            if git diff --cached --quiet; then
+              echo 'the committed payloads already match the payloads this run produced'
+              exit 0
+            fi
+            git commit --quiet -m 'chore(verification): refresh the Windows absence payloads [skip ci]'
+            if git push --quiet origin HEAD:master; then
               echo "pushed the refreshed payloads on attempt $attempt"
               exit 0
             fi
-            git fetch origin master
-            # FETCH_HEAD, not origin/master: checkout does not guarantee the
-            # remote-tracking ref is refreshed by this fetch.
-            git rebase FETCH_HEAD
           done
           echo 'the refreshed payloads could not be pushed'
           exit 1
