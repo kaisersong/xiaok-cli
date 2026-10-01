@@ -3,13 +3,19 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - src/runtime/verification/windows-installation-absence.ts
       - src/runtime/verification/native/windows-installation-absence*
+      - data/verification/windows/**
       - scripts/verification/*windows-absence.mjs
+      - tests/scripts/windows-absence*.test.mjs
       - .github/workflows/windows-absence.yml
   pull_request:
     paths:
+      - src/runtime/verification/windows-installation-absence.ts
       - src/runtime/verification/native/windows-installation-absence*
+      - data/verification/windows/**
       - scripts/verification/*windows-absence.mjs
+      - tests/scripts/windows-absence*.test.mjs
       - .github/workflows/windows-absence.yml
 jobs:
   native-x64:
@@ -88,3 +94,62 @@ jobs:
         with:
           name: windows-absence-arm64
           path: data/verification/windows/win32-arm64/windows-installation-absence.*
+  packaging-gate:
+    # The prepack hook in package.json refuses to package a reader without a
+    # native payload for every architecture it ships. Nothing used to run that
+    # hook, so it stayed a silent no-op and the missing reader went unnoticed.
+    # This job stages the artifacts the two jobs above actually produced and
+    # runs the hook exactly as npm does, with no --arch override.
+    needs: [native-x64, native-arm64]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: windows-absence-*
+          path: data/verification/windows
+      - name: Stage the produced artifacts where the hook reads them
+        shell: pwsh
+        run: |
+          foreach ($arch in 'x64','arm64') {
+            $from = Join-Path $PWD "data/verification/windows/windows-absence-$arch"
+            $to = Join-Path $PWD "data/verification/windows/win32-$arch"
+            New-Item -ItemType Directory -Force -Path $to | Out-Null
+            Copy-Item (Join-Path $from 'windows-installation-absence.*') $to -Force
+          }
+      - name: Run the packaging hook exactly as npm run prepack does
+        shell: cmd
+        run: |
+          node scripts\verification\copy-windows-absence.mjs
+          if errorlevel 1 (
+            echo The prepack hook rejected the produced artifacts
+            exit /b 1
+          )
+      - name: Assert both native payloads reached dist
+        shell: pwsh
+        run: |
+          $missing = @()
+          foreach ($arch in 'x64','arm64') {
+            foreach ($name in 'windows-installation-absence.exe','windows-installation-absence.json') {
+              $path = Join-Path $PWD "dist/runtime/verification/native/win32-$arch/$name"
+              if (-not (Test-Path $path)) { $missing += "win32-$arch/$name" }
+            }
+          }
+          if ($missing.Count) { throw "Packaging hook left native payloads missing: $($missing -join ', ')" }
+          Write-Host 'both windows architectures staged under dist/runtime/verification/native'
+      - name: Report which architecture payloads are tracked
+        # A clean checkout can only run npm pack when both payloads are committed,
+        # so this surfaces that gap without failing the build while it is open.
+        shell: pwsh
+        run: |
+          foreach ($arch in 'x64','arm64') {
+            $tracked = git ls-files "data/verification/windows/win32-$arch"
+            if ($tracked) {
+              Write-Host "tracked packaging input: win32-$arch"
+            } else {
+              Write-Host "::warning title=Untracked packaging input::data/verification/windows/win32-$arch is not tracked, so a clean checkout cannot run npm pack"
+            }
+          }
