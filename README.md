@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.6 (October 1, 2026).** CLI and Desktop metadata are aligned at **1.5.6**. This update adds active/archived collaboration room lists, last-active timestamps and room management, improves terminal readability and model reasoning controls, and checks runtime dependencies in packaged apps. The latest published Desktop baseline is **1.5.5**; follow the [release build](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) for 1.5.6 artifact availability. See [Version History](#version-history).
+**Release target: 1.5.6 (October 1, 2026).** CLI and Desktop metadata are aligned at **1.5.6**. This update adds active/archived collaboration room lists, last-active timestamps and room management, improves terminal readability and model reasoning controls, and checks runtime dependencies in packaged apps. Get currently available installers from the [latest published release](https://github.com/kaisersong/xiaok-cli/releases/latest); 1.5.6 becomes downloadable after the [release build](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) and publication checks complete. See [Version History](#version-history).
 
 ---
 
@@ -249,11 +249,11 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get the current published build from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The listed `desktop-v1.5.5` assets are:
+Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). Version `desktop-v1.5.6` provides these assets once release CI completes:
 
-- `xiaok-1.5.5-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.5-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.5.exe` — Windows x64 installer.
+- `xiaok-1.5.6-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.6-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.6.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 

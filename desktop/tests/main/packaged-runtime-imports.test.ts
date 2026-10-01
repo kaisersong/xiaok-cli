@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { finished } from 'node:stream/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createPackageWithOptions } from '@electron/asar';
@@ -25,7 +26,9 @@ async function fixture(code: string, dependencies = {}, extra = {}, unpack = fal
   write('package.json', JSON.stringify({ type: 'module', dependencies, ...extra }));
   write('dist/main/main.js', code);
   const asarPath = join(root, 'app.asar');
-  await createPackageWithOptions(input, asarPath, unpack ? { unpackDir: 'node_modules' } : {});
+  // ASAR resolves with an ending Writable; wait for its payload to flush.
+  const output = await createPackageWithOptions(input, asarPath, unpack ? { unpackDir: 'node_modules' } : {});
+  await finished(output, { cleanup: true });
   return { asarPath, electronPath };
 }
 function verify(options: object) {

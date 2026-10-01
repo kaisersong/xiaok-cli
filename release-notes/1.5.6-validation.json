@@ -52,7 +52,7 @@
     "kswarm": "fba8287b81c32e6fc779d661a53451a3932d93f3",
     "kai-xiaok-plugins": "c318f144e1e01a762af7aaa80fd730735a8529f0"
   },
-  "ci": "local preflight and repair complete; replacement cloud build pending",
+  "ci": "local repair preflight; final cloud build tracked in docs release receipts",
   "adversarialReview": {
     "integration": "Qoder PASS",
     "streamContract": "Qoder R4 PASS"
@@ -68,5 +68,14 @@
       "build-mac",
       "build-windows"
     ]
+  },
+  "ciFixtureFix": {
+    "previousRun": 36820038158,
+    "macSignedNotarizedAssets": "pass - draft only",
+    "windows": "21 passed, 1 fixture read before Writable finish",
+    "fix": "await finished(ASAR output) before production verifier",
+    "productionInputsUnchanged": true,
+    "node22Passed": 22,
+    "node26PassedWithPathGuards": 26
   }
 }

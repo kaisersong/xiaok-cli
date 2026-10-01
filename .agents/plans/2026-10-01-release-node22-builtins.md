@@ -35,3 +35,11 @@
 真实 Node 22.23.2 来自官方 tar.gz，SHA256 对照官方 SHASUMS256.txt。生产入口先复现 5 failed/17 passed，修订后 22/22 passed；本机 Node26 + cross-platform-path-guard 26/26 passed。对保留的真实 1.5.6 macOS app.asar 用 Node22 检查脚本并启动其实际 Electron，7 个外部静态 imports 全部通过。未降低声明/ASAR 边界，未改主进程产物。原 Desktop Cross-Platform Tests 36818593077 success；原发布 run 36818598748 所有 job 已停止，Mac/Windows 两项失败均有日志留存，草稿 assets 为空。
 
 独立 Qoder 只读对抗性复审 R1、R2 均 PASS，未发现真实阻断。
+
+## 第二轮 Windows fixture 写入时序
+
+重建 run 36820038158 的 Mac gate、signed package 均通过并进入公证；两平台 cross-platform tests 36820028534 success。Windows regression 21/22通过，最后一份临时 ASAR 的 package.json 读到了 NUL。检查 @electron/asar 真实实现与 d.ts：createPackageWithOptions 返回 Promise<WritableStream>，streamFilesystem 返回 out.end()，并未等待 Writable finish；readFileSync 对短读返回零填充的 buffer。因此不能把 archive Promise resolve 误作 payload 已落盘。fixture 改为获取 output 后 await node:stream/promises.finished(output,{cleanup:true})，不重试、不剥 NUL、不放松生产 JSON/声明/目录边界，不改产品 payload。此为测试时序修复；所有真实 ASAR 回归继续走生产 gate。单个 Windows job 重跑 API 因 parent Mac 公证仍运行返回403，不能绕过。
+
+第二轮最终状态：Mac 签名、公证、stapler 与 ZIP/DMG/updater 三件 draft assets 均通过；Windows fixture失败使verify-release跳过，正式发布未发生。fixture 修改只影响 tests，不改变package manifest、main/renderer源码或关联资源；旧Mac资产保留在草稿直到新run覆盖。主tag仍仅在draft下以旧tag object精确lease更新，最终publish必须等待新run两平台全部通过，不使用旧成功job代替。
+
+fixture 输出流完成修订经独立 Qoder只读复审PASS；Node22 22/22、Node26含路径guard26/26复测通过。README下载入口改用动态 latest 发布页与明确1.5.6待CI的资源名，避免发布后仍指向旧版静态文案。
