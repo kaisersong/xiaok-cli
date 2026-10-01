@@ -43,6 +43,7 @@
   --color-accent-foreground: #ffffff;
   --color-destructive: #b91c1c;
   --color-destructive-foreground: #ffffff;
+  --color-destructive-text: #b91c1c;
   --color-popover: var(--c-bg-card);
   --color-popover-foreground: var(--c-text-primary);
   --color-border: var(--c-border);
@@ -106,6 +107,7 @@ html[data-theme='dark'] {
   --c-input-shadow-focus: 0 4px 10px -2px rgba(0,0,0,0.4);
   --c-placeholder: #6e6b66;
   color-scheme: dark;
+  --color-destructive-text: #f87171;
 
   /* DAG graph dark overrides */
   --c-status-success-text: #22c55e;

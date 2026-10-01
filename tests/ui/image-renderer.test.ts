@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { getTheme, setColorsEnabled, setTheme } from '../../src/ui/render.js';
+import { stripAnsi } from '../../src/ui/text-metrics.js';
 import {
   detectImageProtocol,
   readImageDimensions,
@@ -137,15 +139,19 @@ describe('readImageDimensions', () => {
   });
 });
 
-describe('formatImageFallbackLine', () => {
+describe.each([false, true])('formatImageFallbackLine (colors: %s)', (colors) => {
+  const previousTheme = getTheme();
+  afterEach(() => setTheme(previousTheme));
   it('includes the parsed pixel dimensions', () => {
-    const line = formatImageFallbackLine({ width: 1388, height: 278 });
+    setColorsEnabled(colors);
+    const line = stripAnsi(formatImageFallbackLine({ width: 1388, height: 278 }));
     expect(line).toContain('│ [Image 1388×278]');
     expect(line).not.toContain('↳');
   });
 
   it('omits dimensions when the header could not be parsed', () => {
-    expect(formatImageFallbackLine(null)).toContain('│ [Image]');
+    setColorsEnabled(colors);
+    expect(stripAnsi(formatImageFallbackLine(null))).toContain('│ [Image]');
     expect(formatImageFallbackLine(null)).not.toContain('↳');
   });
 });

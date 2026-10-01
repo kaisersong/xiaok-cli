@@ -13,6 +13,18 @@ function resolveVariant(profile: ProviderProfile, wireModel: string): ProviderMo
 }
 
 describe('getProviderProfile', () => {
+  it('declares each OpenAI GPT reasoning model own supported effort levels', () => {
+    const variants = getProviderProfile('openai')?.availableModels ?? [];
+    expect(variants.find(model => model.model === 'gpt-5.5')).toMatchObject({
+      runtimeOptions: { reasoningEffort: 'medium' },
+      runtimeConstraints: { reasoningEfforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
+    });
+    expect(variants.find(model => model.model === 'gpt-5')).toMatchObject({
+      runtimeOptions: { reasoningEffort: 'medium' },
+      runtimeConstraints: { reasoningEfforts: ['minimal', 'low', 'medium', 'high'] },
+    });
+  });
+
   it('returns known first-party profiles with explicit protocols', () => {
     expect(getProviderProfile('kimi')).toMatchObject({
       protocol: 'openai_legacy',
@@ -342,7 +354,7 @@ describe('GLM catalog context windows', () => {
     expect(variant?.capabilities).toContain('thinking');
     expect(variant?.capabilities).toContain('tools');
     expect(variant?.runtimeOptions?.contextLimit).toBe(1_048_576);
-    expect(variant?.runtimeOptions?.reasoningEffort).toBe('max');
+    expect(variant?.runtimeOptions?.reasoningEffort).toBe('high');
     expect(variant?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
   });
 
@@ -358,7 +370,7 @@ describe('GLM catalog context windows', () => {
     expect(variant?.capabilities).toEqual(['tools', 'thinking', 'image_in']);
     expect(variant?.runtimeOptions).toEqual({
       contextLimit: 1_048_576,
-      reasoningEffort: 'max',
+      reasoningEffort: 'high',
     });
     expect(variant?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
   });

@@ -65,6 +65,18 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
 
   const modelLabel = (model: DesktopModelEntryView) => model.id === 'local-codex' ? t.localCodex : model.label;
   const buttonLabel = currentModel ? modelLabel(currentModel) : t.chatInput.modelPicker.empty;
+  const effortLabels = {
+    none: t.chatInput.modelPicker.effortNone,
+    minimal: t.chatInput.modelPicker.effortMinimal,
+    low: t.chatInput.modelPicker.effortLow,
+    medium: t.chatInput.modelPicker.effortMedium,
+    high: t.chatInput.modelPicker.effortHigh,
+    xhigh: t.chatInput.modelPicker.effortXhigh,
+    max: t.chatInput.modelPicker.effortMax,
+  };
+  const currentEfforts = currentModel?.runtimeConstraints?.reasoningEfforts ?? [];
+  const defaultEffort = currentEfforts[Math.floor(currentEfforts.length / 2)];
+  const currentEffort = currentModel?.runtimeOptions?.reasoningEffort;
 
   const handleOpen = () => {
     if (disabled || saving) return;
@@ -83,17 +95,34 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
   };
 
   const handleSelect = async (model: DesktopModelEntryView) => {
-    if (!config) return;
+    if (!config || saving) return;
     if (config.defaultModelId === model.id) {
-      setOpen(false);
+      setOpen(Boolean(model.runtimeConstraints?.reasoningEfforts?.length));
       return;
     }
-    setOpen(false);
+    setOpen(Boolean(model.runtimeConstraints?.reasoningEfforts?.length));
     setSaving(true);
     try {
       const updated = await api.saveModelConfig({
         providerId: model.provider,
         modelId: model.id,
+      });
+      setConfig(updated);
+    } catch {
+      void loadConfig();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEffortSelect = async (effort: NonNullable<NonNullable<DesktopModelEntryView['runtimeOptions']>['reasoningEffort']>) => {
+    if (!currentModel || !currentEfforts.includes(effort) || saving) return;
+    if (currentEffort === effort) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateModelRuntimeOptions({
+        modelId: currentModel.id,
+        runtimeOptions: { ...currentModel.runtimeOptions, reasoningEffort: effort },
       });
       setConfig(updated);
     } catch {
@@ -155,6 +184,7 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
                 <button
                   key={model.id}
                   type="button"
+                  disabled={saving}
                   onClick={() => { void handleSelect(model); }}
                   className="flex w-full items-center justify-between px-3 py-2 text-sm transition-colors bg-[var(--c-bg-menu)] hover:bg-[var(--c-bg-deep)]"
                   style={{
@@ -177,6 +207,33 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
             })}
           </div>
         ))
+      )}
+      {currentEfforts.length > 0 && (
+        <div style={{ borderTop: '0.5px solid var(--c-border-subtle)', marginTop: '4px', padding: '8px 8px 4px' }}>
+          <div className="px-1 pb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--c-text-tertiary)' }}>
+            {t.chatInput.modelPicker.effortLabel}
+          </div>
+          <p className="px-1 pb-2 text-[10px]" style={{ color: 'var(--c-text-tertiary)' }}>{t.chatInput.modelPicker.effortHint}</p>
+          <div className="grid grid-cols-3 gap-1">
+            {currentEfforts.map(effort => (
+              <button
+                key={effort}
+                type="button"
+                disabled={saving}
+                aria-pressed={effort === currentEffort}
+                onClick={() => { void handleEffortSelect(effort); }}
+                className="flex-1 rounded-md px-2 py-1.5 text-xs disabled:opacity-50"
+                style={{
+                  background: effort === currentEffort ? 'var(--c-bg-deep)' : 'transparent',
+                  color: effort === currentEffort ? 'var(--c-text-heading)' : 'var(--c-text-secondary)',
+                  fontWeight: effort === currentEffort ? 600 : 400,
+                }}
+              >
+                {effortLabels[effort]} ({effort}){effort === defaultEffort ? ` · ${t.chatInput.modelPicker.effortDefault}` : ''}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   ) : null;
@@ -202,6 +259,9 @@ export function ChatModelPicker({ disabled }: ChatModelPickerProps) {
       >
         <Cpu size={12} className="shrink-0 opacity-70" />
         <span className="truncate" style={{ fontWeight: 400 }}>{buttonLabel}</span>
+        {currentEfforts.length > 0 && currentEffort && (
+          <span className="shrink-0 opacity-70">· {effortLabels[currentEffort]}</span>
+        )}
         <ChevronDown size={12} className="shrink-0 opacity-70" />
       </button>
       {menu && createPortal(menu, document.body)}

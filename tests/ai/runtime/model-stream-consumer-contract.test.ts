@@ -1,5 +1,7 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { findUnauthorizedStreamConsumers } from '../../support/model-stream-consumers.js';
+import { dirname, join, resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDesktopLoopLLMPort } from '../../../desktop/electron/loop-llm-port-impl.js';
 import { DesktopExecutionCoordinator } from '../../../desktop/electron/desktop-execution-coordinator.js';
@@ -30,33 +32,92 @@ function listTypeScriptFiles(root: string): string[] {
     });
 }
 
-function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/');
-}
-
 function findAdapterStreamConsumers(): string[] {
-  const consumerPattern = /for\s+await\s*\([\s\S]{0,180}?\bof\b[\s\S]{0,220}?\.stream\s*\(/g;
-  const consumers: string[] = [];
-
-  for (const root of PRODUCTION_ROOTS) {
-    for (const path of listTypeScriptFiles(root)) {
-      const source = readFileSync(path, 'utf8');
-      const count = [...source.matchAll(consumerPattern)].length;
-      for (let occurrence = 1; occurrence <= count; occurrence += 1) {
-        consumers.push(`${normalizePath(relative(process.cwd(), path))}#${occurrence}`);
-      }
-    }
-  }
-
-  return consumers.sort();
+  return findUnauthorizedStreamConsumers(PRODUCTION_ROOTS.flatMap(listTypeScriptFiles));
 }
 
 describe('production ModelAdapter.stream consumer contract', () => {
   beforeEach(() => { provider.stream.mockReset(); });
 
+  it('distinguishes the authorized method from raw adapters, including aliases and bracket calls', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stream-contract-'));
+    const path = join(root, 'probe.ts');
+    try {
+      writeFileSync(path, `
+        import type { ProjectAgentModel } from ${JSON.stringify(resolve('desktop/electron/project-agent-model.ts'))};
+        import type { ModelAdapter } from ${JSON.stringify(resolve('src/types.ts'))};
+        async function probe(project: ProjectAgentModel, adapter: ModelAdapter, input: any) {
+          for await (const chunk of project.stream(input)) {}
+          const approvedAlias = project;
+          for await (const chunk of approvedAlias['stream'](input)) {}
+          for await (const chunk of adapter.stream([], [], '')) {}
+          const rawAlias = adapter;
+          for await (const chunk of (rawAlias['stream']([], [], ''))) {}
+          for await (const chunk of (input.flag ? project.stream(input) : adapter.stream([], [], ''))) {}
+          for await (const chunk of (input.flag ? project.stream : adapter.stream)(input)) {}
+          const iterator = adapter.stream([], [], '');
+          for await (const chunk of iterator) {}
+          const method = adapter.stream;
+          for await (const chunk of method.call(adapter, [], [], '')) {}
+          async function* delegated() { yield* adapter.stream([], [], ''); }
+          const approvedMethod = project.stream;
+          approvedMethod.call(project, input);
+          const metadata: {stream: string} = {stream: 'stdout'};
+          metadata.stream;
+          const key = 'stream';
+          adapter[key]([], [], '');
+        }
+      `);
+      expect(findUnauthorizedStreamConsumers([path])).toHaveLength(8);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }, 20_000);
+
+  it('permits only the audited owner and deny functions, rejecting same-file siblings and nested functions', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stream-authority-'));
+    try {
+      const owner = join(root, 'src/ai/runtime/provider-conversation-authorization.ts');
+      const smoke = join(root, 'desktop/electron/kimi-packaged-smoke.ts');
+      mkdirSync(dirname(owner), {recursive: true}); mkdirSync(dirname(smoke), {recursive: true});
+      writeFileSync(owner, `
+        function streamOwnedProviderConversation(input: any) {
+          input.adapter.stream([], [], '');
+          const nested = () => input.adapter.stream([], [], '');
+        }
+        function sibling(input: any) { return input.adapter.stream([], [], ''); }
+      `);
+      writeFileSync(smoke, `
+        function verifyAuthorizationDeny(adapter: any) { adapter.stream([], [], ''); }
+        function sibling(adapter: any) { return adapter.stream([], [], ''); }
+      `);
+      expect(findUnauthorizedStreamConsumers([owner, smoke], root)).toHaveLength(3);
+    } finally { rmSync(root, {recursive: true, force: true}); }
+  });
+
+  it('rejects an unrelated stream method in the wrapper file instead of granting the whole file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'stream-wrapper-'));
+    try {
+      const wrapper = join(root, 'desktop/electron/project-agent-model.ts');
+      const probe = join(root, 'probe.ts');
+      mkdirSync(dirname(wrapper), {recursive: true});
+      writeFileSync(wrapper, `
+        export async function createProjectAgentModel() { return {async *stream() {}}; }
+        export class Unrelated { stream() {} }
+      `);
+      writeFileSync(probe, `
+        import { createProjectAgentModel, Unrelated } from './desktop/electron/project-agent-model';
+        async function check() {
+          const model = await createProjectAgentModel();
+          model.stream();
+          new Unrelated().stream();
+        }
+      `);
+      expect(findUnauthorizedStreamConsumers([wrapper, probe], root)).toHaveLength(1);
+    } finally {rmSync(root, {recursive: true, force: true});}
+  });
+
   it('keeps every production async stream consumer behind the authorization owner', () => {
     expect(findAdapterStreamConsumers()).toEqual([]);
-  });
+  }, 30_000);
 
   it('consumes text across usage chunks and closes the provider iterator at done', async () => {
     const closed = vi.fn();

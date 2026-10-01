@@ -279,6 +279,7 @@ describe('preload API contract', () => {
       'getCollaborationRoom',
       'createCollaborationRoom',
       'archiveCollaborationRoom',
+      'deleteCollaborationRoom',
       'updateCollaborationRoomMembers',
       'sendCollaborationRoomMessage',
       'markCollaborationRoomSeen',

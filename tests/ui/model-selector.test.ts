@@ -1,3 +1,5 @@
+import { OLD_MODEL_EFFORT_CONFIGS } from '../support/model-effort-compatibility.js';
+import { normalizeConfig } from '../../src/ai/providers/normalize.js';
 import { describe, expect, it } from 'vitest';
 import { buildModelOptions, selectModel } from '../../src/ui/model-selector.js';
 import { createTtyHarness } from '../support/tty.js';
@@ -40,6 +42,111 @@ const configFixture = {
 };
 
 describe('buildModelOptions', () => {
+  it('changes only a supported model effort with left/right and returns it on confirmation', async () => {
+    const config = {
+      ...configFixture,
+      defaultModelId: 'kimi-k3',
+      models: {
+        'kimi-k3': {
+          provider: 'kimi', model: 'k3', label: 'Kimi K3',
+          runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' as const },
+        },
+      },
+    };
+    const harness = createTtyHarness(80, 24);
+    const renderer = new ReplRenderer(process.stdout);
+    const scrollRegion = new ScrollRegionManager(process.stdout);
+    try {
+      scrollRegion.begin();
+      scrollRegion.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'Kimi K3' });
+      renderer.setScrollRegion(scrollRegion);
+      const pending = selectModel(config, { renderer });
+      await waitFor(() => expect(harness.screen.lines().some(line => line.includes('HIGH'))).toBe(true));
+      harness.send('\x1b[C');
+      await waitFor(() => expect(harness.screen.lines().some(line => line.includes('MAX'))).toBe(true));
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({ modelId: 'kimi-k3', reasoningEffort: 'max' });
+      expect(config.models['kimi-k3'].runtimeOptions.reasoningEffort).toBe('high');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it.each(OLD_MODEL_EFFORT_CONFIGS)('can confirm or cancel a strength-free old config: $name', async ({ config, wireModel, effort }) => {
+    const normalized = normalizeConfig(config);
+    const before = structuredClone(normalized);
+    const harness = createTtyHarness(120, 40);
+    try {
+      let pending = selectModel(normalized);
+      harness.send('\x1b');
+      await expect(pending).resolves.toBeNull();
+      expect(normalized).toEqual(before);
+      pending = selectModel(normalized);
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({ model: wireModel, ...(effort ? { reasoningEffort: effort } : {}) });
+      expect(normalized).toEqual(before);
+    } finally { harness.restore(); }
+  });
+
+  it('confirms the middle GLM tier without requiring any arrow key', async () => {
+    const config = { ...configFixture, defaultProvider: 'glm', defaultModelId: 'glm-5.3', providers: { glm: { type: 'first_party' as const, protocol: 'openai_legacy' as const, baseUrl: 'https://open.bigmodel.cn/api/paas/v4' } }, models: { 'glm-5.3': { provider: 'glm', model: 'GLM-5.3', label: 'GLM 5.3' } } };
+    const harness = createTtyHarness(100, 24);
+    try {
+      const pending = selectModel(config);
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({ reasoningEffort: 'high' });
+    } finally { harness.restore(); }
+  });
+
+  it('does not offer effort for a model without declared effort constraints', async () => {
+    const harness = createTtyHarness(80, 24);
+    const renderer = new ReplRenderer(process.stdout);
+    const scrollRegion = new ScrollRegionManager(process.stdout);
+    try {
+      scrollRegion.begin();
+      scrollRegion.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'Kimi Coding' });
+      renderer.setScrollRegion(scrollRegion);
+      const pending = selectModel(configFixture, { renderer });
+      harness.send('\x1b[C');
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({
+        modelId: 'kimi-coding', provider: 'kimi', model: 'kimi-for-coding', label: 'Kimi Default',
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('does not offer a catalog effort on a protocol that cannot send it', async () => {
+    const config = {
+      ...configFixture,
+      defaultProvider: 'glm',
+      defaultModelId: 'glm-5.3',
+      providers: {
+        glm: { type: 'first_party' as const, protocol: 'openai_responses' as const, apiKey: 'sk-glm' },
+      },
+      models: {
+        'glm-5.3': { provider: 'glm', model: 'GLM-5.3', label: 'GLM 5.3' },
+      },
+    };
+    const harness = createTtyHarness(80, 24);
+    const renderer = new ReplRenderer(process.stdout);
+    const scrollRegion = new ScrollRegionManager(process.stdout);
+    try {
+      scrollRegion.begin();
+      scrollRegion.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'GLM 5.3' });
+      renderer.setScrollRegion(scrollRegion);
+      const pending = selectModel(config, { renderer });
+      harness.send('\x1b[C');
+      harness.send('\r');
+      await expect(pending).resolves.toEqual({
+        modelId: 'glm-5.3', provider: 'glm', model: 'GLM-5.3', label: 'GLM 5.3',
+      });
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('lists every configured model entry instead of one model per provider', () => {
     const options = buildModelOptions({
       ...configFixture,
@@ -151,7 +258,7 @@ describe('buildModelOptions', () => {
         expect(lines.some((line) => line.includes('Kimi Default'))).toBe(true);
         expect(lines.some((line) => line.includes('Kimi K2 Thinking'))).toBe(true);
         expect(lines.some((line) => line.includes('Kimi K2 Fast'))).toBe(true);
-        expect(lines.some((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'))).toBe(true);
+        expect(lines.some((line) => line.includes('↑↓ 选择  ←→ 强度  Enter 确认  Esc 取消'))).toBe(true);
         expect(lines.some((line) => line.includes('❯ Type your message...'))).toBe(true);
       });
 
@@ -162,7 +269,7 @@ describe('buildModelOptions', () => {
         const lines = harness.screen.lines();
         expect(lines.some((line) => line.includes('选择模型'))).toBe(false);
         expect(lines.some((line) => line.includes('Kimi Default'))).toBe(false);
-        expect(lines.some((line) => line.includes('↑↓ 选择  Enter 确认  Esc 取消'))).toBe(false);
+        expect(lines.some((line) => line.includes('↑↓ 选择  ←→ 强度  Enter 确认  Esc 取消'))).toBe(false);
         expect(lines.some((line) => line.includes('❯ Type your message...'))).toBe(true);
       });
     } finally {

@@ -7,7 +7,9 @@ const KIMI_K3_RUNTIME_CONSTRAINTS = {
     maxContextLimit: 1_048_576,
     reasoningEfforts: ['low', 'high', 'max'],
 };
-const MODEL_REASONING_EFFORTS = ['low', 'high', 'max'];
+const MODEL_REASONING_EFFORTS = [
+    'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+];
 export function isOfficialKimiK3OpenAIEndpoint(baseUrl) {
     if (!baseUrl || baseUrl.includes('?') || baseUrl.includes('#'))
         return false;
@@ -77,20 +79,44 @@ function validateRuntimeOptions(options, constraints) {
         }
     }
 }
+/** Ordered native tiers; for an even count, choose the upper middle tier. */
+export function getDefaultModelReasoningEffort(efforts) {
+    return efforts[Math.floor(efforts.length / 2)];
+}
 export function resolveModelRuntimeOptions(input) {
     const useKimiK3Fallback = input.protocol === 'openai_legacy'
         && (input.wireModel === 'k3' || input.wireModel === 'k3-256k')
         && isOfficialKimiK3OpenAIEndpoint(input.baseUrl);
     const fallbackOptions = useKimiK3Fallback ? KIMI_K3_RUNTIME_OPTIONS : undefined;
     const fallbackConstraints = useKimiK3Fallback ? KIMI_K3_RUNTIME_CONSTRAINTS : undefined;
-    const runtimeOptions = fallbackOptions || input.catalogOptions || input.configuredOptions
+    let runtimeOptions = fallbackOptions || input.catalogOptions || input.configuredOptions
         ? {
             ...fallbackOptions,
             ...input.catalogOptions,
             ...input.configuredOptions,
         }
         : undefined;
-    const runtimeConstraints = mergeConstraints(fallbackConstraints, input.catalogConstraints);
+    let runtimeConstraints = mergeConstraints(fallbackConstraints, input.catalogConstraints);
+    if (input.reasoningEfforts !== undefined) {
+        const defaultEffort = getDefaultModelReasoningEffort(input.reasoningEfforts);
+        if (runtimeOptions) {
+            const { reasoningEffort: _effort, ...otherOptions } = runtimeOptions;
+            runtimeOptions = {
+                ...otherOptions,
+                ...(defaultEffort ? { reasoningEffort: input.configuredOptions?.reasoningEffort ?? defaultEffort } : {}),
+            };
+        }
+        else if (defaultEffort) {
+            runtimeOptions = { reasoningEffort: defaultEffort };
+        }
+        if (runtimeConstraints) {
+            const { reasoningEfforts: _efforts, ...otherConstraints } = runtimeConstraints;
+            runtimeConstraints = {
+                ...otherConstraints,
+                ...(defaultEffort ? { reasoningEfforts: [...input.reasoningEfforts] } : {}),
+            };
+        }
+    }
     if (runtimeOptions) {
         validateRuntimeOptions(runtimeOptions, runtimeConstraints);
     }

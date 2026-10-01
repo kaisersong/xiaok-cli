@@ -233,8 +233,10 @@ describe('chat terminal layout', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
 
     expect(source).toContain('terminalUiFallbackStream');
-    expect(source).toContain('getFallbackWriter');
-    expect(source).toContain("stream === process.stdout ? 'stderr' : 'stdout'");
+    expect(source).toContain('createTerminalOutputRouter({');
+    expect(source).toContain('terminalOutput.fail(');
+    expect(source).toContain('if (!terminalOutput.hasOutput()) return true;');
+    expect(source).toContain("stream === process.stdout ? 'stdout' : 'stderr'");
     expect(source).toContain("inputReader.setForcePlainMode(false);");
     expect(source).not.toContain("终端的富交互刷新出了问题，已退回普通输出模式");
   });
@@ -482,7 +484,7 @@ describe('chat terminal layout', () => {
 
   it('should keep orchestration and progress transcript writes local and after streaming interruption flush', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'commands', 'chat.ts'), 'utf8');
-    const progressStart = source.indexOf('function writeProgressTranscriptNote(note: string): void {');
+    const progressStart = source.indexOf('function writeProgressTranscriptNote(');
     const progressEnd = source.indexOf('const maybeWriteThinkingOnlyToolNotice = (): void => {', progressStart);
     const progressSource = source.slice(progressStart, progressEnd);
     const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): void => {');
@@ -495,7 +497,7 @@ describe('chat terminal layout', () => {
 
     expect(progressStart).toBeGreaterThan(-1);
     expect(progressEnd).toBeGreaterThan(progressStart);
-    const progressBlock = progressSource.indexOf('const block = formatProgressNote(note);');
+    const progressBlock = progressSource.indexOf('formatProgressNote(note)');
     const progressFlush = progressSource.indexOf('endStreamingPhaseForInterrupt();');
     const progressScrollWrite = progressSource.indexOf('scrollRegion.writeAtContentCursor(block);');
     const progressStdoutWrite = progressSource.indexOf('process.stdout.write(block);');

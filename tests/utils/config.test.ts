@@ -1,6 +1,8 @@
+import { OLD_MODEL_EFFORT_CONFIGS } from '../support/model-effort-compatibility.js';
+import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 // tests/utils/config.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { loadConfig, saveConfig, getConfigPath, getConfigDir } from '../../src/utils/config.js';
@@ -19,6 +21,26 @@ describe('config', () => {
   afterEach(() => {
     rmSync(testDir, { recursive: true, force: true });
     delete process.env.XIAOK_CONFIG_DIR;
+  });
+
+  it.each(OLD_MODEL_EFFORT_CONFIGS)('loads and saves a strength-free old config without backup or loss: $name', async ({ config, wireModel, effort, contextLimit }) => {
+    const path = getConfigPath();
+    const oldContent = JSON.stringify(config, null, 2);
+    writeFileSync(path, oldContent);
+    const loaded = await loadConfig();
+    const binding = resolveRuntimeModelBinding(loaded);
+    expect(binding.wireModel).toBe(wireModel);
+    expect(binding.runtimeOptions?.reasoningEffort).toBe(effort);
+    expect(binding.runtimeOptions?.contextLimit).toBe(contextLimit);
+    expect(readFileSync(path, 'utf8')).toBe(oldContent);
+    expect(existsSync(path + '.bak')).toBe(false);
+    await saveConfig(loaded);
+    const reloaded = await loadConfig();
+    expect(resolveRuntimeModelBinding(reloaded)).toEqual(binding);
+    if (config.schemaVersion === 2) {
+      expect(reloaded.providers).toEqual(config.providers);
+      expect(reloaded.models).toEqual(config.models);
+    }
   });
 
   it('returns DEFAULT_CONFIG when no config file exists', async () => {

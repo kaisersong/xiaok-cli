@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**发布目标：1.5.5（2026-09-11）。** CLI 与 Desktop 版本统一为 **1.5.5**。本次改进协作空间执行能力、主菜单与实例导航，加入空间别名，并减少自动执行记录对阅读的干扰。1.5.5 构建及产物校验完成前，最新 Desktop 正式版仍为 **1.5.4**。详见[版本日志](#版本日志)。
+**发布目标：1.5.6（2026-10-01）。** CLI 与 Desktop 版本统一为 **1.5.6**。本次增加协作空间活跃／归档分类、最后活跃时间和管理菜单，优化终端阅读与模型思考强度选择，并在打包时验证运行依赖。最新已发布 Desktop 基线为 **1.5.5**；1.5.6 安装包进度见[发布构建](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml)。详见[版本日志](#版本日志)。
 
 ---
 
@@ -249,11 +249,11 @@ Desktop 是基于 Electron 与 React 的主要图形工作台。主进程 servic
 
 ### 下载
 
-从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest) 获取当前正式版。`desktop-v1.5.2` 已列出：
+从 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest) 获取当前正式版。`desktop-v1.5.5` 已列出：
 
-- `xiaok-1.5.2-arm64.dmg` — macOS Apple Silicon 安装包。
-- `xiaok-1.5.2-arm64-mac.zip` — macOS Apple Silicon 压缩包。
-- `xiaok-setup-1.5.2.exe` — Windows x64 安装程序。
+- `xiaok-1.5.5-arm64.dmg` — macOS Apple Silicon 安装包。
+- `xiaok-1.5.5-arm64-mac.zip` — macOS Apple Silicon 压缩包。
+- `xiaok-setup-1.5.5.exe` — Windows x64 安装程序。
 
 自动更新使用 `latest-mac.yml` 与 `latest.yml`。本文标记为近期源码的改动，需要源码构建或后续正式发布后使用。
 
@@ -467,7 +467,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 将三个关联仓库固定到 `desktop-v1.5.2`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
+在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 将三个关联仓库固定到 `desktop-v1.5.6`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
 
 ---
 
@@ -558,6 +558,15 @@ npm run test --prefix desktop -- --run \
 ---
 
 ## 版本日志
+
+### v1.5.6 — 发布准备，2026-10-01
+
+- **协作空间管理**：活跃／归档分类浏览，按最后消息活动时间倒序，胶囊显示最后活跃时间；空间“…”菜单提供归档和删除。删除须确认，关联项目、工作目录与文件保留；后端校验属主与版本，正在执行的协作须先结束。
+- **按钮可读性**：统一新建、分类、更多菜单、错误提示和删除确认在浅色／深色主题下的颜色，危险操作确认使用红底白字。
+- **模型思考强度**：CLI `/models` 用左右键选择已支持的档位，Desktop 聊天模型菜单可直接设置。已支持的官方模型与端点默认中间档，保留已保存的合法选择和上下文窗口，并在后续请求发送所选值；不支持的模型、协议和自定义端点不会额外收到强度参数。
+- **终端体验**：中文 Markdown 表格对齐，窄窗口改为字段展示；输出期间保留输入草稿，活动行周围间距更清楚。日志轮转与 transcript 输出大小限制抑制异常增长。
+- **启动与恢复**：打包检查真实运行依赖，直接声明 Ajv、cross-spawn；SQLite v2→v3 事务迁移补齐索引并保留用户行。工作区根兼容 macOS device-id 漂移；CLI 更新先停止 daemon，改善 PTY／EPIPE 错误处理；工具 await 返回后立即核对取消，保留此前已完成结果。
+- CLI／Desktop 均为 `1.5.6`，内置关联仓库固定到 `desktop-v1.5.6`。实验性语义工具推荐继续关闭；在途 SOL-PI 改动未纳入本次发布。验证范围见[发布说明](release-notes/1.5.6.md)；更新元数据不等于发布 npm。
 
 ### v1.5.5 — 发布准备，2026-09-11
 

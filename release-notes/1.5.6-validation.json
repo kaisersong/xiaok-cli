@@ -1,0 +1,60 @@
+{
+  "version": "1.5.6",
+  "date": "2026-10-01",
+  "cliFocused": {
+    "passed": 581
+  },
+  "cliCorrections": {
+    "passed": 210
+  },
+  "cliContracts": {
+    "passed": 18,
+    "status": "pass"
+  },
+  "cliFull": {
+    "passed": 3953,
+    "skipped": 8,
+    "failed": 1,
+    "failure": "platform plugin integration timeout",
+    "suiteRetryPassed": 17
+  },
+  "desktopFocused": {
+    "passed": 339
+  },
+  "desktopPackaging": {
+    "passed": 52
+  },
+  "desktopRuntime": {
+    "passed": 15
+  },
+  "broker": {
+    "passed": 553,
+    "skipped": 14,
+    "collaborationSmoke": "pass"
+  },
+  "terminal": {
+    "scenarios": 31,
+    "fakeRequests": 97,
+    "status": "pass"
+  },
+  "macPackage": {
+    "signed": false,
+    "runtimeImports": 7,
+    "pythonEntries": 659,
+    "asarSha256": "bbf4641aa5eddb6e5fbcf6193c9a492099e1c16ebf62bbc85470d5f40e30b8fd"
+  },
+  "excluded": [
+    "unfinished SOL-PI/verification and KSwarm lifecycle development",
+    "real request corpora",
+    "user databases and private backups"
+  ],
+  "sidecars": {
+    "kswarm": "fba8287b81c32e6fc779d661a53451a3932d93f3",
+    "kai-xiaok-plugins": "c318f144e1e01a762af7aaa80fd730735a8529f0"
+  },
+  "ci": "not triggered yet",
+  "adversarialReview": {
+    "integration": "Qoder PASS",
+    "streamContract": "Qoder R4 PASS"
+  }
+}

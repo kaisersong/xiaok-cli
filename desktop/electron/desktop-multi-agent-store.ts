@@ -163,6 +163,11 @@ const APPROVAL_INDEX_SQL = `CREATE INDEX operations_approval_requests ON operati
   group_id, json_extract(data_json, '$.result.approval.bootId'), operation_id) WHERE json_extract(data_json, '$.command') = 'approval_request';`;
 const THREAD_DELETION_COLUMNS = ["delete_state TEXT NOT NULL DEFAULT 'none' CHECK(delete_state IN ('none','delete_pending','deleted'))", 'delete_json TEXT'];
 const APPROVAL_COUNT_COLUMN = 'pending_approval_count INTEGER NOT NULL DEFAULT 0 CHECK (pending_approval_count >= 0)';
+const PRESENTATION_RESERVATION_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS operations_presentation_ordinal ON operations(group_id,json_extract(data_json,'$.presentationReservation.ordinal')) WHERE json_extract(data_json,'$.presentationReservation.ordinal') IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS operations_presentation_agent ON operations(group_id,json_extract(data_json,'$.presentationReservation.agentId')) WHERE json_extract(data_json,'$.presentationReservation.agentId') IS NOT NULL;
+`;
+const PRESENTATION_RESERVATION_INDEX_NAMES = new Set(['operations_presentation_ordinal', 'operations_presentation_agent']);
 /** Keep quoted JSON paths/literals case- and whitespace-sensitive. */
 function schemaSql(sql: string): string {
   return (sql.match(/'(?:''|[^'])*'|"(?:""|[^"])*"|[^\s'"]+/g) ?? []).map(token => token.startsWith("'") ? token
@@ -193,7 +198,7 @@ export class DesktopMultiAgentStore {
     this.db = new DatabaseSync(dbPath);
     try {
       const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-      if (![0, 1, 2].includes(version.user_version)) throw new Error(`unsupported multi-agent schema version ${version.user_version}`);
+      if (![0, 1, 2, 3].includes(version.user_version)) throw new Error(`unsupported multi-agent schema version ${version.user_version}`);
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=0;');
       this.applySchema(version.user_version);
     } catch (error) { this.db.close(); this.closed = true; throw error; }
@@ -967,38 +972,45 @@ export class DesktopMultiAgentStore {
       CREATE TABLE IF NOT EXISTS root_turns(source_task_id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(group_id),preparation_id TEXT NOT NULL UNIQUE,boot_id TEXT NOT NULL,data_json TEXT NOT NULL,logical_bytes INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS managed_resources(resource_id TEXT PRIMARY KEY,group_id TEXT NOT NULL,agent_id TEXT NOT NULL,data_json TEXT NOT NULL,logical_bytes INTEGER NOT NULL,FOREIGN KEY(group_id,agent_id) REFERENCES agents(group_id,agent_id));
       CREATE INDEX IF NOT EXISTS agents_page ON agents(group_id,created_at,agent_id);
+      ${PRESENTATION_RESERVATION_INDEX_SQL}
       CREATE UNIQUE INDEX IF NOT EXISTS agents_presentation_ordinal ON agents(group_id,json_extract(data_json,'$.presentationOrdinal')) WHERE json_extract(data_json,'$.presentationOrdinal') IS NOT NULL;
       CREATE INDEX IF NOT EXISTS messages_receiver ON messages(group_id,receiver_id,created_at);
       CREATE INDEX IF NOT EXISTS messages_claim ON messages(group_id,claim_id);
       CREATE INDEX IF NOT EXISTS root_turns_boot ON root_turns(boot_id);
       CREATE INDEX IF NOT EXISTS groups_page ON groups(thread_id,created_at,group_id);
     `;
-    if (version === 2) { this.validateSchema(2, base); return; }
+    if (version === 3) { this.validateSchema(3, base); return; }
     this.transaction(() => {
-      if (version === 0) this.db.exec(base); else this.validateSchema(1, base);
-      const columns = new Set((this.db.prepare('PRAGMA table_info(thread_bindings)').all() as unknown as Array<{ name: string }>).map(column => column.name));
-      for (const column of THREAD_DELETION_COLUMNS) if (!columns.has(column.split(' ')[0])) this.db.exec(`ALTER TABLE thread_bindings ADD COLUMN ${column}`);
-      this.db.exec(WORKSPACE_AUTHORIZATION_SQL);
-      this.db.exec(`ALTER TABLE thread_bindings ADD COLUMN ${APPROVAL_COUNT_COLUMN}`);
-      this.db.exec(APPROVAL_INDEX_SQL);
-      this.db.exec('PRAGMA user_version=2');
-      this.validateSchema(2, base);
+      if (version === 0) this.db.exec(base); else this.validateSchema(version as 1 | 2, base);
+      if (version < 2) {
+        const columns = new Set((this.db.prepare('PRAGMA table_info(thread_bindings)').all() as unknown as Array<{ name: string }>).map(column => column.name));
+        for (const column of THREAD_DELETION_COLUMNS) if (!columns.has(column.split(' ')[0])) this.db.exec(`ALTER TABLE thread_bindings ADD COLUMN ${column}`);
+        this.db.exec(WORKSPACE_AUTHORIZATION_SQL);
+        this.db.exec(`ALTER TABLE thread_bindings ADD COLUMN ${APPROVAL_COUNT_COLUMN}`);
+        this.db.exec(APPROVAL_INDEX_SQL);
+      }
+      this.db.exec(PRESENTATION_RESERVATION_INDEX_SQL);
+      this.db.exec('PRAGMA user_version=3');
+      this.validateSchema(3, base);
     });
   }
 
-  private validateSchema(version: 1 | 2, base: string): void {
+  private validateSchema(version: 1 | 2 | 3, base: string): void {
     const definitions = base.split(';').map(sql => sql.trim()).filter(Boolean);
-    if (version === 2) definitions.push(WORKSPACE_AUTHORIZATION_SQL, APPROVAL_INDEX_SQL);
+    if (version >= 2) definitions.push(WORKSPACE_AUTHORIZATION_SQL, APPROVAL_INDEX_SQL);
     for (let expected of definitions) {
       const match = /^CREATE (?:UNIQUE )?(TABLE|INDEX)(?: IF NOT EXISTS)? ([a-z_]+)/i.exec(expected);
       if (!match) throw new Error('multi_agent_schema_invalid');
       const [, kind, name] = match;
       if (name === 'thread_bindings') {
         const present = new Set((this.db.prepare('PRAGMA table_info(thread_bindings)').all() as unknown as Array<{ name: string }>).map(column => column.name));
-        const extras = [...THREAD_DELETION_COLUMNS.filter(column => version === 2 || present.has(column.split(' ')[0])), ...(version === 2 ? [APPROVAL_COUNT_COLUMN] : [])];
+        const extras = [...THREAD_DELETION_COLUMNS.filter(column => version >= 2 || present.has(column.split(' ')[0])), ...(version >= 2 ? [APPROVAL_COUNT_COLUMN] : [])];
         if (extras.length) expected = expected.replace(/\)$/, `,${extras.join(',')})`);
       }
       const actual = this.db.prepare('SELECT sql FROM sqlite_master WHERE type=? AND name=?').get(kind.toLowerCase(), name) as { sql: string } | undefined;
+      // Old v1/v2 may lack these additive indexes. Existing definitions must
+      // still match exactly; v3 never repairs a missing or damaged index.
+      if (!actual && version < 3 && PRESENTATION_RESERVATION_INDEX_NAMES.has(name)) continue;
       if (!actual || schemaSql(actual.sql) !== schemaSql(expected)) throw new Error(`multi_agent_schema_invalid:${name}`);
     }
   }

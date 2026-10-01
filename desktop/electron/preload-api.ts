@@ -297,7 +297,7 @@ export const PRELOAD_API_KEYS = [
   'onMeetingRecorderCloseRequested',
   'onMeetingRecordingSaved',
   'onMeetingLiveTranscriptionUpdate',
-  ...["listCollaborationRooms", "getCollaborationRoom", "createCollaborationRoom", "archiveCollaborationRoom", "updateCollaborationRoomMembers", "sendCollaborationRoomMessage", "markCollaborationRoomSeen", "cancelRoomDiscussion", "createProjectFromRoom", "createTaskFromRoomMessage", "onCollaborationRoomEvent"]
+  ...["listCollaborationRooms", "getCollaborationRoom", "createCollaborationRoom", "archiveCollaborationRoom", "deleteCollaborationRoom", "updateCollaborationRoomMembers", "sendCollaborationRoomMessage", "markCollaborationRoomSeen", "cancelRoomDiscussion", "createProjectFromRoom", "createTaskFromRoomMessage", "onCollaborationRoomEvent"]
   , 'getCollaborationRoomWorkspace', 'previewCollaborationRoomWorkspace', 'commitCollaborationRoomWorkspace',
   'cancelCollaborationRoomWorkspaceChange', 'listCollaborationRoomWorkspaceFiles', 'previewCollaborationRoomWorkspaceFile',
   'publishCollaborationRoomWorkspaceInstructions', 'confirmCollaborationRoomWorkspaceArtifact',
@@ -632,6 +632,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   getCollaborationRoom: 'desktop:collaborationRoom:getRoom',
   createCollaborationRoom: 'desktop:collaborationRoom:createRoom',
   archiveCollaborationRoom: 'desktop:collaborationRoom:archiveRoom',
+  deleteCollaborationRoom: 'desktop:collaborationRoom:deleteRoom',
   updateCollaborationRoomMembers: 'desktop:collaborationRoom:updateMembers',
   sendCollaborationRoomMessage: 'desktop:collaborationRoom:sendMessage',
   markCollaborationRoomSeen: 'desktop:collaborationRoom:markSeen',
@@ -1504,6 +1505,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getCollaborationRoom(roomId: string): Promise<unknown>;
   createCollaborationRoom(input: unknown): Promise<unknown>;
   archiveCollaborationRoom(input: unknown): Promise<unknown>;
+  deleteCollaborationRoom(input: {roomId: string; expectedRoomRevision: number}): Promise<unknown>;
   updateCollaborationRoomMembers(input: unknown): Promise<unknown>;
   sendCollaborationRoomMessage(input: {
     roomId: string;
@@ -2055,6 +2057,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as Promise<unknown>,
     createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,
     archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,
+    deleteCollaborationRoom: (input: {roomId: string; expectedRoomRevision: number}) => ipcRenderer.invoke('desktop:collaborationRoom:deleteRoom', input) as Promise<unknown>,
     updateCollaborationRoomMembers: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input) as Promise<unknown>,
     sendCollaborationRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as ReturnType<DesktopApi['sendCollaborationRoomMessage']>,
     markCollaborationRoomSeen: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input) as Promise<unknown>,

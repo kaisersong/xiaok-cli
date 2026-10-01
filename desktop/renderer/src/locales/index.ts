@@ -80,6 +80,19 @@ export interface LocaleStrings {
   collaborationRoomsSubtitle: string;
   collaborationRoomsCreate: string;
   collaborationRoomsEmptyTitle: string;
+  collaborationRoomMore: string;
+  collaborationRoomsActive: string;
+  collaborationRoomsArchived: string;
+  collaborationRoomArchiving: string;
+  collaborationRoomLastActive: string;
+  collaborationRoomTimeUnknown: string;
+  collaborationRoomsCategoryEmpty: string;
+  collaborationRoomDelete: string;
+  collaborationRoomDeleteBody: string;
+  collaborationRoomDeleting: string;
+  collaborationRoomDeleteFailed: string;
+  collaborationRoomDeletePending: string;
+  collaborationRoomDeleteConflict: string;
   collaborationRoomsEmptyBody: string;
   collaborationRoomTitleLabel: string;
   collaborationRoomDescriptionLabel: string;
@@ -3034,6 +3047,16 @@ export interface LocaleStrings {
       empty: string;
       tooltip: string;
       activeBadge: string;
+      effortLabel: string;
+      effortDefault: string;
+      effortHint: string;
+      effortNone: string;
+      effortMinimal: string;
+      effortLow: string;
+      effortMedium: string;
+      effortHigh: string;
+      effortXhigh: string;
+      effortMax: string;
     };
   };
 

@@ -21,6 +21,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -848,6 +849,11 @@ def assert_activity_above_prompt_with_gap(content: str) -> None:
     assert_true(
         not is_live_activity_line(lines[prompt_index]),
         f"activity leaked into the input prompt row:\n{content}",
+    )
+    activity_index = next((i for i in range(prompt_index - 1, -1, -1) if is_live_activity_line(lines[i])), -1)
+    assert_true(
+        activity_index > 0 and not lines[activity_index - 1].strip(),
+        f"activity must have a blank row above it without moving transcript content:\n{content}",
     )
     for status_fragment in ("gpt-terminal-e2e", "auto", "project"):
         assert_true(
@@ -3151,6 +3157,44 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         image_final = tmux.wait_for(has_ready_input_prompt, timeout=30)
         assert_footer_chrome_is_singular(image_final, allow_completed_summary=True)
         print("PASS: inline image submission degrades to fallback text under tmux")
+
+        print("--- E2E 30: streamed Chinese tables align without hiding a busy draft ---")
+        table_body = "\n".join([
+            "| 指标 | 现在 | 启动时 | 旧配置 |",
+            "| :--- | ---: | ---: | ---: |",
+            "| 代码单流 | **57.5 tok/s** | 55.9 | 56.5 |",
+            "| 散文单流 | 35.9 tok/s | 34.3 | 35.3 |",
+            "", "TABLE_DONE",
+        ])
+        tmux.tmux("resize-window", "-t", session, "-x", "120", "-y", "30")
+        server.responses.append(delayed_text_response_events(table_body, 2.0))
+        tmux.send_text("render table fixture")
+        tmux.send_key("Enter")
+        tmux.wait_for(lambda text: "Finishing response..." in text, timeout=10)
+        tmux.send_text("TABLE_DRAFT")
+        table_pane = tmux.wait_for(lambda text: "TABLE_DONE" in text and "TABLE_DRAFT" in text, timeout=15)
+        table_rows = [line for line in visible_lines(table_pane) if "│" in line and any(token in line for token in ("指标", "57.5", "35.9"))]
+        assert_true(len(table_rows) == 3, f"missing table rows:\n{table_pane}")
+        def cell_positions(line: str) -> list[int]:
+            return [sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in line[:i])
+                    for i, char in enumerate(line) if char == "│"]
+        assert_true(all(cell_positions(row) == cell_positions(table_rows[0]) for row in table_rows), f"table columns are not aligned:\n{table_pane}")
+        assert_true(any(is_input_prompt_line(line) and "TABLE_DRAFT" in line for line in visible_lines(table_pane)), f"draft hidden by table:\n{table_pane}")
+        tmux.send_key("C-u")
+        tmux.wait_for(footer_has_empty_prompt, timeout=10)
+        print("PASS: Chinese table columns align and the busy draft remains visible")
+
+        print("--- E2E 31: narrow tables fall back to labeled records and accept the next input ---")
+        tmux.tmux("resize-window", "-t", session, "-x", "28", "-y", "40")
+        server.responses.append(text_response_events(table_body.replace("TABLE_DONE", "NARROW_DONE")))
+        tmux.send_text("narrow table")
+        tmux.send_key("Enter")
+        narrow_table = tmux.wait_for(lambda text: "NARROW_DONE" in text and has_ready_input_prompt(text), timeout=15)
+        for value in ("指标:", "现在:", "57.5 tok/s", "35.9 tok/s"):
+            assert_contains(narrow_table, value, f"narrow table lost {value}")
+        tmux.send_text("AFTER_TABLE")
+        tmux.wait_for(lambda text: any(is_input_prompt_line(line) and "AFTER_TABLE" in line for line in visible_lines(text)), timeout=10)
+        print("PASS: narrow tables preserve values and the next prompt accepts input")
 
         print("--- E2E Summary ---")
         print(f"Requests observed by fake OpenAI server: {len(server.requests)}")

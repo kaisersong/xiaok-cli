@@ -67,3 +67,10 @@ describe('collaboration room broker client — listRoomMessagesPage', () => {
     expect(capture.url).not.toContain('super-secret-claim-token');
   });
 });
+
+it('deletes through the authenticated semantic endpoint with an encoded room ID', async () => {
+  const fetchImpl = vi.fn(async () => ({json: async () => ({ok: true})}) as Response);
+  const client = createCollaborationRoomBrokerClient({token: 'test-token', fetchImpl: fetchImpl as never});
+  await client.deleteRoom({roomId: 'room/id', expectedRoomRevision: 3});
+  expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:4318/rooms/room%2Fid/delete', expect.objectContaining({method: 'POST', body: JSON.stringify({roomId: 'room/id', expectedRoomRevision: 3})}));
+});

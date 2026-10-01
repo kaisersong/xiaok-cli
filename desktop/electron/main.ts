@@ -1241,9 +1241,17 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     }),
     wakeDispatcher: collaborationRoomWakeDispatcher,
     emitRoomEvent: emitCollaborationRoomEvent,
+    stopRoomExecution: roomId => roomWorkspaceRuntime.cancelRoom(roomId),
   });
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
+    authorizeRoomDeletion: event => {
+      const source = event as Electron.IpcMainInvokeEvent;
+      return Boolean(mainWindow && !mainWindow.isDestroyed()
+        && source.sender === mainWindow.webContents
+        && source.senderFrame === mainWindow.webContents.mainFrame
+        && isTrustedDesktopRendererUrl(mainWindow.webContents.mainFrame.url, {rendererFile, devServer}));
+    },
     kswarm: kswarmSemanticService,
     collaborationRooms: {
       ...collaborationRoomService,

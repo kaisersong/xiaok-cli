@@ -14,6 +14,8 @@ import { highlightLine } from "./highlight.js";
 import { getDisplayWidth, isFullWidthCodePoint, stripAnsi } from "./text-metrics.js";
 import { renderMermaidASCII } from "beautiful-mermaid";
 
+import { renderMarkdownTable, splitTableRow, tableAlignment, tableDisplayWidth, type MarkdownTable } from './markdown-table.js';
+
 const BODY_GUTTER = "";
 const LEAD_BULLET = '●';
 const LEAD_PREFIX_TEXT = `${LEAD_BULLET} `;
@@ -26,6 +28,8 @@ const LEAD_CONTINUATION_PREFIX = '  ';
  */
 export class MarkdownRenderer {
   private buffer = "";
+  private tableCandidate: { line: string; complete: boolean } | null = null;
+  private table: (MarkdownTable & { bytes: number; records: boolean; complete: boolean }) | null = null;
   private inCodeBlock = false;
   private codeLang = "";
   private mermaidBuffer: string[] = [];
@@ -75,14 +79,14 @@ export class MarkdownRenderer {
    * newline callback so the caller's row bookkeeping sees soft-wrapped rows.
    * Byte output is identical to a single write of `rendered`.
    */
-  private emitRendered(rendered: string): void {
+  private emitRendered(rendered: string, measureWidth = getDisplayWidth): void {
     const rows = rendered.split("\n");
     rows.forEach((row, index) => {
       if (row) process.stdout.write(row);
       if (index < rows.length - 1) {
         this.emitNewline();
       } else if (row) {
-        this.columnAdvanceFn?.(getDisplayWidth(stripAnsi(row)));
+        this.columnAdvanceFn?.(measureWidth(stripAnsi(row)));
       }
     });
   }
@@ -96,43 +100,109 @@ export class MarkdownRenderer {
       const line = this.buffer.slice(0, nlIdx);
       this.buffer = this.buffer.slice(nlIdx + 1);
 
-      const rendered = this.renderLine(line);
-      this.lineCount += this.countRenderedRows(rendered);
-
-      const isBlank = line.trim() === "";
-      if (isBlank && !this.inCodeBlock) {
-        this.consecutiveBlankLines++;
-        if (this.consecutiveBlankLines > 1) {
-          continue;
-        }
-        this.emitNewline();
-        continue;
-      }
-      this.consecutiveBlankLines = 0;
-
-      this.emitNewline();
+      this.processLine(line, true);
     }
   }
 
-  /** Flush remaining buffer and return the finalized row count plus rendered tail text. */
-  flush(): { rows: number; renderedLine: string } {
-    let flushedRows = 0;
-    let renderedLine = '';
-
-    if (this.buffer) {
-      const flushed = this.buffer;
-      this.buffer = "";
-      renderedLine = this.formatLine(flushed);
-      this.emitRendered(renderedLine);
-      flushedRows = this.countRenderedRows(renderedLine);
-      this.lineCount += flushedRows;
+  private writeRegularLine(line: string, complete: boolean): string {
+    const rendered = this.formatLine(line);
+    this.lineCount += this.countRenderedRows(rendered);
+    const isBlank = line.trim() === '';
+    if (isBlank && !this.inCodeBlock && complete) {
+      this.consecutiveBlankLines++;
+      if (this.consecutiveBlankLines > 1) return '';
+      this.emitRendered(rendered);
+      this.emitNewline();
+      return rendered + '\n';
     }
-    return { rows: flushedRows, renderedLine };
+    this.consecutiveBlankLines = 0;
+    this.emitRendered(rendered);
+    if (complete) this.emitNewline();
+    return rendered + (complete ? '\n' : '');
+  }
+
+  private emitTable(complete: boolean): string {
+    if (!this.table) return '';
+    const table = this.table;
+    if (table.records && !table.rows.length) return '';
+    const lines = renderMarkdownTable(table, this.termWidth || process.stdout.columns || 80,
+      text => this.inlineFormat(text), table.records);
+    const rendered = lines.join('\n');
+    this.hasRenderedLeadParagraph = true;
+    this.consecutiveBlankLines = 0;
+    this.emitRendered(rendered, tableDisplayWidth);
+    this.lineCount += lines.length;
+    if (complete) this.emitNewline();
+    return rendered + (complete ? '\n' : '');
+  }
+
+  private finishTable(complete: boolean): string {
+    const rendered = this.emitTable(complete);
+    this.table = null;
+    return rendered;
+  }
+
+  private processLine(line: string, complete: boolean): string {
+    let emitted = '';
+    if (this.table) {
+      const cells = splitTableRow(line);
+      if (cells && cells.length === this.table.header.length && !line.trimStart().startsWith('```')) {
+        this.table.rows.push(cells);
+        this.table.bytes += line.length;
+        this.table.complete = complete;
+        if (this.table.records || this.table.rows.length >= 128 || this.table.bytes >= 65536) {
+          this.table.records = true;
+          emitted += this.emitTable(true);
+          this.table.rows = [];
+          this.table.bytes = 0;
+        }
+        return emitted;
+      }
+      emitted += this.finishTable(true);
+      // Malformed rows remain visible rather than silently dropping extra cells.
+      if (cells) return emitted + this.writeRegularLine(line, complete);
+    }
+    if (this.tableCandidate) {
+      const candidate = this.tableCandidate;
+      this.tableCandidate = null;
+      const header = splitTableRow(candidate.line)!;
+      const alignment = tableAlignment(line, header.length);
+      if (alignment) {
+        this.table = { header, alignment, rows: [], bytes: candidate.line.length + line.length, records: false, complete };
+        return emitted;
+      }
+      emitted += this.writeRegularLine(candidate.line, candidate.complete);
+    }
+    if (!this.inCodeBlock && !line.trimStart().startsWith('```') && splitTableRow(line)) {
+      this.tableCandidate = { line, complete };
+      return emitted;
+    }
+    return emitted + this.writeRegularLine(line, complete);
+  }
+
+  /** Commit pending prose or a complete/partial table at a stream boundary. */
+  flush(): { rows: number; renderedLine: string } {
+    const before = this.lineCount;
+    let renderedLine = '';
+    if (this.buffer) {
+      const tail = this.buffer;
+      this.buffer = '';
+      renderedLine += this.processLine(tail, false);
+    }
+    if (this.table) renderedLine += this.finishTable(this.table.complete);
+    if (this.tableCandidate) {
+      const candidate = this.tableCandidate;
+      this.tableCandidate = null;
+      renderedLine += this.writeRegularLine(candidate.line, candidate.complete);
+    }
+    return { rows: this.lineCount - before, renderedLine };
   }
 
   /** Reset state between messages. */
   reset(): void {
     this.buffer = "";
+    this.tableCandidate = null;
+    this.table = null;
     this.inCodeBlock = false;
     this.codeLang = "";
     this.mermaidBuffer = [];
@@ -149,14 +219,9 @@ export class MarkdownRenderer {
    * next natural-language continuation gets a new lead bullet + hanging indent.
    */
   beginNewSegment(): void {
+    this.flush();
     this.hasRenderedLeadParagraph = false;
     this.consecutiveBlankLines = 0;
-  }
-
-  private renderLine(line: string): string {
-    const rendered = this.formatLine(line);
-    this.emitRendered(rendered);
-    return rendered;
   }
 
   private formatLine(line: string): string {
@@ -393,36 +458,19 @@ export class MarkdownRenderer {
    * Does not write to stdout — returns lines for embedding in other UI.
    */
   static renderToLines(text: string): string[] {
-    // Process line-by-line directly, bypassing the streaming pending-line logic
-    const r = new MarkdownRenderer();
-    const inputLines = text.split('\n');
-    const result: string[] = [];
-
-    const orig = process.stdout.write.bind(process.stdout);
-    for (const line of inputLines) {
-      let captured = '';
-      (process.stdout.write as unknown) = (chunk: string | Uint8Array) => {
-        const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-        captured += s;
+    const renderer = new MarkdownRenderer();
+    const originalWrite = process.stdout.write;
+    let captured = '';
+    try {
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        captured += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
         return true;
-      };
-      // Feed line + newline so renderLine fires immediately
-      r.write(line + '\n');
-      process.stdout.write = orig;
-      // captured ends with \n from renderLine; strip it
-      result.push(captured.replace(/\n$/, ''));
+      }) as typeof process.stdout.write;
+      renderer.write(text);
+      renderer.flush();
+    } finally {
+      process.stdout.write = originalWrite;
     }
-    // Flush any remaining buffer
-    let tail = '';
-    (process.stdout.write as unknown) = (chunk: string | Uint8Array) => {
-      const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-      tail += s;
-      return true;
-    };
-    r.flush();
-    process.stdout.write = orig;
-    if (tail) result.push(tail.replace(/\n$/, ''));
-
-    return result;
+    return captured.replace(/\n$/, '').split('\n');
   }
 }

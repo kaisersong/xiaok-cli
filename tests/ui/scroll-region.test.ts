@@ -36,6 +36,76 @@ function createMockScrollRegion() {
 }
 
 describe('ScrollRegionManager activity rendering', () => {
+  it('separates live activity from a full transcript using existing footer space without scrolling', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.renderInput('KEEP_DRAFT', 4);
+      const bottom = manager.maxContentRows;
+      manager.setContentCursor(bottom);
+      manager.writeAtContentCursor('TAIL');
+      const cursor = manager.getContentCursor();
+      const offset = harness.output.raw.length;
+      for (let i = 0; i < 20; i++) manager.renderActivity('Running verification');
+      const lines = harness.screen.lines();
+      const tail = lines.findIndex(line => line.includes('TAIL'));
+      const activity = lines.findIndex(line => line.includes('Running verification'));
+      expect(tail).toBe(bottom - 1);
+      expect(activity).toBe(tail + 2);
+      expect(lines[activity - 1].trim()).toBe('');
+      expect(lines[activity + 1].trim()).toBe('');
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      expect(manager.maxContentRows).toBe(bottom);
+      expect(manager.getContentCursor()).toBe(cursor);
+      expect(harness.output.raw.slice(offset)).not.toContain('\n');
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('keeps live activity visible when the footer status refreshes', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.renderActivity('Running verification');
+      manager.updateStatusLine('updated status');
+      expect(harness.screen.text()).toContain('Running verification');
+      expect(harness.screen.text()).toContain('updated status');
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('preserves a multiline draft and cursor when streaming ends', () => {
+    const { manager } = createMockScrollRegion();
+    manager.begin();
+    manager.beginContentStreaming();
+    manager.renderInput('first\n继续输入', 8);
+    manager.endContentStreaming({ inputPrompt: 'Finishing response...' });
+    expect(manager.getPromptFrameState()).toMatchObject({ inputValue: 'first\n继续输入', cursor: 8 });
+    manager.clearLastInput();
+    expect(manager.getPromptFrameState().inputValue).toBe('');
+  });
+
+  it.each(['darwin', 'win32'])('refreshes activity and status without erasing input on %s', (platform) => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    vi.stubEnv('TMUX', 'input-flicker-test');
+    try {
+      const { manager, getOutput, getChunks, resetOutput } = createMockScrollRegion();
+      manager.begin();
+      manager.renderInput('KEEP_DRAFT', 4);
+      resetOutput();
+      manager.renderActivity('Working');
+      manager.updateStatusLine('new status');
+      expect(getOutput()).not.toContain('\x1b[22;1H\x1b[2K');
+      for (const chunk of getChunks().filter(chunk => chunk.includes('KEEP_DRAFT'))) {
+        expect(chunk.endsWith('\x1b[22;7H')).toBe(true);
+      }
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor);
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('resets terminal style and shows cursor before clearing the footer on exit', () => {
     const {manager,resetOutput,getOutput}=createMockScrollRegion();
     manager.begin();resetOutput();manager.end();
@@ -1391,7 +1461,7 @@ describe('ANSI compatibility', () => {
     const output = getOutput();
     // Footer uses absolute cursor positioning (\x1b[row;colH) to ensure
     // it renders at exact terminal bottom rows regardless of cursor state.
-    expect(output).toMatch(/\x1b\[21;1H\x1b\[2K\x1b\[48;5;238m\x1b\[K\x1b\[0m/);  // padded background row above the prompt
+    expect(output).toMatch(/\x1b\[21;1H\x1b\[48;5;238m\x1b\[K\x1b\[0m/);  // padded background row above the prompt
     expect(output).toMatch(/\x1b\[22;1H/);  // input bar at row 22
     expect(output).toMatch(/\x1b\[24;1H/);  // status bar at row 24
     expect(output).toContain('Type...');
@@ -1556,9 +1626,8 @@ describe('ANSI compatibility', () => {
         manager.renderActivity('⠋ Thinking');
 
         const lines = harness.screen.lines();
-      expect(lines[16]).toContain('Thinking');
       expect(lines[17]).toBe('');
-      expect(lines[18]).toBe('');
+      expect(lines[18]).toContain('Thinking');
       expect(lines[19]).toBe('');
       expect(lines[20]).toBe('');
       expect(lines[21]).not.toContain('Thinking');

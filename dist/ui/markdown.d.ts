@@ -5,6 +5,8 @@
  */
 export declare class MarkdownRenderer {
     private buffer;
+    private tableCandidate;
+    private table;
     private inCodeBlock;
     private codeLang;
     private mermaidBuffer;
@@ -39,7 +41,11 @@ export declare class MarkdownRenderer {
     private emitRendered;
     /** Feed a text chunk (may be partial line). */
     write(text: string): void;
-    /** Flush remaining buffer and return the finalized row count plus rendered tail text. */
+    private writeRegularLine;
+    private emitTable;
+    private finishTable;
+    private processLine;
+    /** Commit pending prose or a complete/partial table at a stream boundary. */
     flush(): {
         rows: number;
         renderedLine: string;
@@ -52,7 +58,6 @@ export declare class MarkdownRenderer {
      * next natural-language continuation gets a new lead bullet + hanging indent.
      */
     beginNewSegment(): void;
-    private renderLine;
     private formatLine;
     private countRows;
     private countRenderedRows;

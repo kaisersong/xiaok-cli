@@ -30,6 +30,7 @@ const ROOM_ROUTES = [
   '/rooms/room-1/messages',
   '/rooms/room-1/members',
   '/rooms/room-1/archive',
+  '/rooms/room-1/delete',
   '/rooms/room-1/seen',
   '/rooms/room-1/discussion',
   '/room-links',
@@ -65,6 +66,7 @@ describe('semantic room preload API surface', () => {
       'getCollaborationRoom',
       'createCollaborationRoom',
       'archiveCollaborationRoom',
+      'deleteCollaborationRoom',
       'updateCollaborationRoomMembers',
       'sendCollaborationRoomMessage',
       'markCollaborationRoomSeen',
@@ -92,8 +94,9 @@ describe('semantic room preload API surface', () => {
 
   it('preload api object wires the room keys to semantic channels', async () => {
     const invoke = async (channel: string) => ({ channel });
-    const preload = createPreloadApi(invoke as never, {} as never, {} as never, {} as never, {} as never);
+    const preload = createPreloadApi({invoke, on: () => undefined, removeListener: () => undefined} as never);
 
+    expect(await preload.deleteCollaborationRoom({roomId: 'room-1', expectedRoomRevision: 1})).toEqual({channel: 'desktop:collaborationRoom:deleteRoom'});
     expect(typeof preload.sendCollaborationRoomMessage).toBe('function');
     expect(typeof preload.onCollaborationRoomEvent).toBe('function');
     // requestSource / actor are not part of any renderer-callable input type;
