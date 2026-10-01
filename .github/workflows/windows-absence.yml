@@ -61,7 +61,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-absence-x64
-          path: data/verification/windows/win32-x64/windows-installation-absence.*
+          # Only the payload the reader consumes travels; the compilation also
+          # leaves an intermediate object file next to it.
+          path: |
+            data/verification/windows/win32-x64/windows-installation-absence.exe
+            data/verification/windows/win32-x64/windows-installation-absence.json
   native-arm64:
     runs-on: windows-2022
     steps:
@@ -93,7 +97,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-absence-arm64
-          path: data/verification/windows/win32-arm64/windows-installation-absence.*
+          path: |
+            data/verification/windows/win32-arm64/windows-installation-absence.exe
+            data/verification/windows/win32-arm64/windows-installation-absence.json
   packaging-gate:
     # The prepack hook in package.json refuses to package a reader without a
     # native payload for every architecture it ships, and the design doc requires
@@ -126,7 +132,9 @@ jobs:
             $from = Join-Path "${{ runner.temp }}/absence-payloads" "windows-absence-$arch"
             $to = Join-Path $PWD "data/verification/windows/win32-$arch"
             New-Item -ItemType Directory -Force -Path $to | Out-Null
-            Copy-Item (Join-Path $from 'windows-installation-absence.*') $to -Force
+            foreach ($name in 'windows-installation-absence.exe','windows-installation-absence.json') {
+              Copy-Item (Join-Path $from $name) $to -Force
+            }
           }
       - name: Run the packaging hook exactly as npm run prepack does
         shell: cmd
