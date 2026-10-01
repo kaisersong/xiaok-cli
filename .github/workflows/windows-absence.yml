@@ -18,6 +18,19 @@ on:
       - tests/scripts/windows-absence*.test.mjs
       - .github/workflows/windows-absence.yml
 jobs:
+  script-tests:
+    # These tests sit in the trigger paths below but nothing used to execute them,
+    # so the guard could quietly lose the PE-machine assertion that catches an ARM64
+    # cross-compile producing x64 code. They only read bytes and hashes, so they need
+    # no Windows machine; the C core test compiles with clang from the Linux image.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run the Windows absence verification tests
+        run: node --test tests/scripts/windows-absence.test.mjs
   native-x64:
     runs-on: windows-2022
     steps:

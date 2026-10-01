@@ -50,3 +50,22 @@ test('packaging verifies PE machine, payload SHA and source freshness', async ()
     pe[250]=1;writeFileSync(exe,pe);assert.throws(()=>verifyArtifact(root,'x64'),/SHA/);
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+test('packaging refuses a payload whose PE machine contradicts the target it claims', async () => {
+  // An ARM64 cross-compile that silently produced x64 code is internally consistent
+  // everywhere else: the manifest declares the arch the build asked for and hashes
+  // the bytes it produced. The PE machine field is the only independent witness, and
+  // the checks above reach it only incidentally, so pin it on its own.
+  const {verifyArtifact} = await import(pathToFileURL(copyScript));
+  const root = mkdtempSync(join(tmpdir(), 'xiaok-absence-mistag-'));
+  try {
+    const pe = Buffer.alloc(256);pe.write('MZ');pe.writeUInt32LE(128,60);pe.write('PE\0\0',128);pe.writeUInt16LE(0x8664,132);
+    const exe=join(root,'windows-installation-absence.exe'),json=join(root,'windows-installation-absence.json');
+    const manifest={version:1,target:'win32-arm64',sha256:hash(pe),sourceSha256:hash(readFileSync(resolve('src/runtime/verification/native/windows-installation-absence.c'))),coreSha256:hash(readFileSync(core))};
+    writeFileSync(exe,pe);writeFileSync(json,JSON.stringify(manifest));
+    assert.throws(()=>verifyArtifact(root,'arm64'),/PE target mismatch/);
+    pe.writeUInt16LE(0xaa64,132);manifest.sha256=hash(pe);
+    writeFileSync(exe,pe);writeFileSync(json,JSON.stringify(manifest));
+    assert.doesNotThrow(()=>verifyArtifact(root,'arm64'));
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
