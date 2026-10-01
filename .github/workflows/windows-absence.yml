@@ -108,6 +108,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # This job commits back, so it needs the full history to be able to
+          # rebase onto a master that moved while the build jobs were running.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -159,7 +163,20 @@ jobs:
             exit 0
           fi
           git commit -m 'chore(verification): refresh the Windows absence payloads [skip ci]'
-          git push
+          # A push that lands while the build jobs run leaves this checkout behind
+          # master, so rebase onto the current tip instead of losing the refresh.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:master; then
+              echo "pushed the refreshed payloads on attempt $attempt"
+              exit 0
+            fi
+            git fetch origin master
+            # FETCH_HEAD, not origin/master: checkout does not guarantee the
+            # remote-tracking ref is refreshed by this fetch.
+            git rebase FETCH_HEAD
+          done
+          echo 'the refreshed payloads could not be pushed'
+          exit 1
       - name: Report which architecture payloads are tracked
         # Surfaces the gap on runs that cannot commit (pull requests) and confirms
         # it is closed on master runs that just committed.
