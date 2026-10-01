@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createPackageWithOptions } from '@electron/asar';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron') as string;
@@ -80,6 +80,35 @@ describe('actual packaged runtime imports', () => {
     write('dist/main/nested/chunk.mjs', "export * from 'ajv';");
     const options = await fixture('export const ready = true;');
     expect(() => verify(options)).toThrow(/ajv.*production dependency/);
+  });
+
+  it('reads actual ASAR chunks with Windows archive path semantics', async () => {
+    write('dist/main/nested/chunk.js', "import 'node:fs';");
+    const options = await fixture("import 'node:path';");
+    if (process.platform === 'win32') {
+      expect(verify(options).specifiers).toEqual([]);
+      return;
+    }
+    const paths = require('node:path');
+    const separator = Object.getOwnPropertyDescriptor(paths, 'sep')!;
+    const mocks = ['join', 'dirname', 'basename', 'normalize'].map(name => vi.spyOn(paths, name).mockImplementation(paths.win32[name]));
+    Object.defineProperty(paths, 'sep', { ...separator, value: paths.win32.sep });
+    try {
+      expect(verify(options).specifiers).toEqual([]);
+    } finally {
+      for (const mock of mocks) mock.mockRestore();
+      Object.defineProperty(paths, 'sep', separator);
+    }
+  });
+
+  it.each(['node:sqlite', 'node:test', 'node:test/reporters', 'node:sea'])('recognizes prefix-only builtin %s on the CI Node version', async specifier => {
+    const options = await fixture(`import '${specifier}';`);
+    expect(verify(options).specifiers).toEqual([]);
+  });
+
+  it.each(['sqlite', 'node:xiaok-not-a-builtin'])('does not exempt non-builtin %s', async specifier => {
+    const options = await fixture(`import '${specifier}';`);
+    expect(() => verify(options)).toThrow(/production dependency/);
   });
 
   it('excludes Node/Electron builtins, relative imports, comments, strings and optional dynamic imports', async () => {

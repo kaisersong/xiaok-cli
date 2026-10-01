@@ -3,12 +3,11 @@
 // Development node_modules must never satisfy a packaged dependency probe.
 const { spawnSync } = require('node:child_process');
 const { realpathSync } = require('node:fs');
-const { builtinModules } = require('node:module');
+const { isBuiltin } = require('node:module');
 const path = require('node:path');
 const { extractFile, listPackage } = require('@electron/asar');
 const ts = require('typescript');
 
-const builtins = new Set([...builtinModules, ...builtinModules.map(name => `node:${name}`), 'electron']);
 const probe = `
   import path from 'node:path';
   import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -37,11 +36,11 @@ function verifyPackagedRuntimeDependencies({ asarPath, electronPath, platform = 
   for (const entry of listPackage(asarPath)) {
     const file = entry.replaceAll('\\', '/').replace(/^\//, '');
     if (!file.startsWith('dist/main/') || !/\.(?:js|mjs|cjs)$/.test(file)) continue;
-    const source = ts.createSourceFile(file, extractFile(asarPath, file).toString('utf8'), ts.ScriptTarget.Latest, true);
+    const source = ts.createSourceFile(file, extractFile(asarPath, path.normalize(file)).toString('utf8'), ts.ScriptTarget.Latest, true);
     for (const node of source.statements) {
       if (!(ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) || !node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) continue;
       const specifier = node.moduleSpecifier.text;
-      if (specifier.startsWith('.') || builtins.has(specifier)) continue;
+      if (specifier.startsWith('.') || specifier === 'electron' || isBuiltin(specifier)) continue;
       const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
       if (!pkg.dependencies?.[name]) throw new Error(`${name} is not a production dependency (${file}: ${specifier})`);
       specifiers.add(specifier);
