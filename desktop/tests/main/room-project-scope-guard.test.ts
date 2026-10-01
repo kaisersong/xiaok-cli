@@ -4,7 +4,8 @@ import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRoomProjectScopeGuard } from '../../electron/room-project-scope-guard.js';
 async function fixture() {
-  const nativeImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+  // Native dynamic import: `new Function(...)` has no import callback under the vitest VM.
+  const nativeImport = ((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier: string) => Promise<any>;
   const { createHub } = await nativeImport(pathToFileURL(join(resolve(process.cwd(), '../..'), 'kswarm/src/core/hub.js')).href);
   const hub = createHub({ silent: true }); const project = hub.createProject({ id: 'p', name: 'p', goal: 'g', poAgent: 'po', members: ['a'] }); project.primaryRoomId = 'r';
   const room = { ok: true, room: { roomId: 'r' }, messages: [{ roomId: 'r', messageId: 'm', contextScope: { kind: 'project', projectId: 'p' } }] };

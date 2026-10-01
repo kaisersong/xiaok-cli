@@ -249,6 +249,47 @@ describe('crash reporter', () => {
     expect(report.context).toEqual({ command: 'diagnose' });
   }, 10_000);
 
+  it('keeps safe Windows startup diagnostics without storing messages or absolute paths', async () => {
+    const configDir=mkdtempSync(join(tmpdir(),'xiaok-startup-diagnostics-'));
+    tempDirs.push(configDir);
+    const previous=process.env.XIAOK_CONFIG_DIR;
+    process.env.XIAOK_CONFIG_DIR=configDir;
+    try {
+      setCrashContext({command:'chat',startupPhase:'transcript'} as Parameters<typeof setCrashContext>[0] & {startupPhase:string});
+      const error=new Error('PRIVATE_KEY_AND_REASONING', {cause:Object.assign(new Error('PRIVATE_CAUSE'),{code:'EPERM'})});
+      error.stack='Error: PRIVATE_KEY_AND_REASONING\n    at secretFunction (C:\\Users\\private-name\\node_modules\\xiaokcode\\dist\\ui\\transcript-storage.js:67:15)\n    at secretFunction (C:\\private-project\\custom.js:2:1)';
+      const raw=readFileSync(await reportCrash(error),'utf8');
+      const report=JSON.parse(raw);
+      expect(report.context).toMatchObject({command:'chat',startupPhase:'transcript'});
+      expect(report.error.frames).toEqual([{module:'ui/transcript-storage.js',line:67,column:15}]);
+      expect(report.error.causeCodes).toEqual(['EPERM']);
+      expect(report.version).not.toBe('unknown');
+      for(const secret of ['PRIVATE','private-name','private-project','secretFunction','custom.js'])expect(raw).not.toContain(secret);
+    } finally {
+      if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;
+      setCrashContext({command:'unknown'});
+    }
+  });
+
+  it('identifies the literal ordinary save guard without recording arbitrary messages', async () => {
+    const configDir=mkdtempSync(join(tmpdir(),'xiaok-save-diagnostics-'));
+    tempDirs.push(configDir);
+    const previous=process.env.XIAOK_CONFIG_DIR;
+    process.env.XIAOK_CONFIG_DIR=configDir;
+    try {
+      const error=new Error('ordinary_source_route');
+      error.stack='Error: ordinary_source_route\n at privateName (C:\\Users\\private\\dist\\ai\\runtime\\session-store\\file-store.js:864:9)\n at privateName (C:\\Users\\private\\dist\\runtime\\verification\\windows-installation-absence.js:10:1)';
+      const raw=readFileSync(await reportCrash(error),'utf8');
+      expect(JSON.parse(raw).error).toEqual({type:'Error',code:'ordinary_source_route',frames:[{module:'ai/runtime/session-store/file-store.js',line:864,column:9},{module:'runtime/verification/windows-installation-absence.js',line:10,column:1}]});
+      expect(raw).not.toContain('private');
+      const spoofed=readFileSync(await reportCrash(new Error('ordinary_source_route PRIVATE_KEY')),'utf8');
+      expect(JSON.parse(spoofed).error.code).toBe('UNCLASSIFIED_ERROR');
+      expect(spoofed).not.toContain('PRIVATE_KEY');
+    } finally {
+      if(previous===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previous;
+    }
+  });
+
   it('removes only expired crash report files before writing a new report', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'xiaok-crash-reporter-retention-'));
     tempDirs.push(configDir);

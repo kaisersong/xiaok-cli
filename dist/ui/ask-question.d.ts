@@ -31,6 +31,8 @@ export interface AskQuestionParams {
     multiSelect?: boolean;
     renderFrame?: (lines: string[]) => boolean | void;
     clearFrame?: () => void;
+    readText?: (question: string, signal?: AbortSignal) => Promise<string | null>;
+    signal?: AbortSignal;
 }
 export interface AskQuestionResult {
     selected: number[];

@@ -1,3 +1,4 @@
+import { isAbortError } from '../runtime/abort-utils.js';
 export function createAskUserTool(options) {
     return {
         permission: 'safe',
@@ -28,7 +29,7 @@ export function createAskUserTool(options) {
             },
         },
         executionPolicy: { waitsForUser: true },
-        async execute(input) {
+        async execute(input, context) {
             const question = typeof input.question === 'string' ? input.question.trim() : '';
             const placeholder = typeof input.placeholder === 'string' ? input.placeholder : undefined;
             const choices = Array.isArray(input.options)
@@ -52,9 +53,12 @@ export function createAskUserTool(options) {
             try {
                 return await options.ask(question, placeholder, choices.length > 0
                     ? { options: choices, multiSelect: input.multiSelect === true }
-                    : undefined);
+                    : undefined, context?.signal);
             }
             catch (error) {
+                context?.signal?.throwIfAborted();
+                if (isAbortError(error))
+                    throw error;
                 return `Error: ${String(error)}`;
             }
         },

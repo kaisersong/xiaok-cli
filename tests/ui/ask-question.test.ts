@@ -24,6 +24,50 @@ describe('ask-question', () => {
   });
 
   describe('key handling', () => {
+    it('aborts a pending menu and releases its input listener', async () => {
+      const harness = createTtyHarness(80, 24);
+      const controller = new AbortController();
+      try {
+        const pending = askQuestion({ question: 'Proceed?', options: [{label:'Yes'}, {label:'No'}], signal: controller.signal });
+        const rejection = expect(pending).rejects.toMatchObject({name:'AbortError'});
+        controller.abort();
+        await rejection;
+        expect(harness.emitter.listenerCount('data')).toBe(0);
+      } finally { harness.restore(); }
+    });
+
+    it('uses the host reader once for Other and propagates its cancellation', async () => {
+      const harness = createTtyHarness(80, 24);
+      const controller = new AbortController();
+      let reads = 0;
+      const readText = async () => {
+        reads++;
+        expect(harness.emitter.listenerCount('data')).toBe(0);
+        throw new DOMException('Aborted', 'AbortError');
+      };
+      try {
+        const pending = askQuestion({question:'Proceed?', options:[{label:'Yes'}, {label:'No'}], readText, signal:controller.signal});
+        const rejection = expect(pending).rejects.toMatchObject({name:'AbortError'});
+        harness.emitter.emit('data', '\x1b[B');
+        harness.emitter.emit('data', '\x1b[B');
+        harness.emitter.emit('data', '\r');
+        harness.emitter.emit('data', '\r');
+        await rejection;
+        expect(reads).toBe(1);
+        expect(harness.emitter.listenerCount('data')).toBe(0);
+      } finally { harness.restore(); }
+    });
+
+    it('settles on EOF without inventing a user answer', async () => {
+      const harness = createTtyHarness(80, 24);
+      try {
+        const pending = askQuestion({question:'Proceed?', options:[{label:'Yes'}, {label:'No'}]});
+        harness.emitter.emit('end');
+        await expect(pending).resolves.toEqual({selected:[],labels:[]});
+        expect(harness.emitter.listenerCount('data')).toBe(0);
+      } finally { harness.restore(); }
+    });
+
     it('ESC should cancel and return empty result', async () => {
       // This test verifies the ESC constant is correctly defined
       const ESC = '\x1b';

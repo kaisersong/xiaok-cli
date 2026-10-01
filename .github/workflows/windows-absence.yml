@@ -1,0 +1,46 @@
+name: Windows ordinary-session native helper
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - src/runtime/verification/native/windows-installation-absence*
+      - scripts/verification/*windows-absence.mjs
+      - .github/workflows/windows-absence.yml
+  pull_request:
+    paths:
+      - src/runtime/verification/native/windows-installation-absence*
+      - scripts/verification/*windows-absence.mjs
+      - .github/workflows/windows-absence.yml
+jobs:
+  native-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Compile with the actual Windows SDK
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'Windows C compiler missing' }
+          $vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvarsall.bat'
+          & cmd.exe /d /s /c "`"`"$vcvars`" x64 >nul && node scripts/verification/build-windows-absence.mjs --target x64`""
+          if ($LASTEXITCODE -ne 0) { throw 'Native compilation failed' }
+      - name: Run fixed machine absence checks
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'data/verification/windows/win32-x64/windows-installation-absence.exe'
+          $answer = (& $exe | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0 -or $answer.kind -ne 'ordinary') { throw 'Clean runner absence check failed' }
+          $env:ProgramData = Join-Path $env:RUNNER_TEMP 'spoofed-programdata'
+          $answer = (& $exe | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0 -or $answer.kind -ne 'ordinary') { throw 'Environment affected the fixed lookup' }
+          $answer = (& $exe ignored | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 2 -or $answer.kind -ne 'unavailable') { throw 'Argument override accepted' }
+          $global:LASTEXITCODE = 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-absence-x64
+          path: data/verification/windows/win32-x64/windows-installation-absence.*

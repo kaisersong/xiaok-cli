@@ -189,6 +189,7 @@ async function runChat(initialInput, opts) {
     log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
     let config = await loadConfig();
     let adapter;
+    setCrashContext({ startupPhase: 'adapter' });
     try {
         const bootstrap = await createChatAdapterWithLoginBootstrap(config, {
             interactive: isTTY(),
@@ -203,14 +204,17 @@ async function runChat(initialInput, opts) {
     }
     // print/json 无头模式（一次性子任务）不初始化分层记忆与向量检索：
     // 跳过 sqlite/ONNX/embedding 启动开销，避免无谓的 embedding 请求
+    setCrashContext({ startupPhase: 'memory' });
     const memoryStore = await createMemoryStoreAsync(opts.print || opts.json
         ? { ...(config.memory ?? {}), type: 'file' }
         : config.memory);
     memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
+    setCrashContext({ startupPhase: 'credentials' });
     const creds = await loadCredentials();
     const devApp = await getDevAppIdentity();
     const cwd = process.cwd();
     const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
+    setCrashContext({ startupPhase: 'platform' });
     const platform = await createPlatformRuntimeContext({ cwd, builtinCommands });
     const pluginRuntime = platform.pluginRuntime;
     let skillDebugEnabled = opts.skillDebug ?? false;
@@ -262,6 +266,7 @@ async function runChat(initialInput, opts) {
     const ownershipMode = opts.forkSession
         ? 'fork'
         : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
+    setCrashContext({ startupPhase: 'transcript' });
     const transcriptLogger = await FileTranscriptLogger.open(sessionId);
     const multiAgentProgress = new MultiAgentProgressView();
     const subAgentNotices = new SubAgentNoticeQueue();
@@ -634,9 +639,14 @@ async function runChat(initialInput, opts) {
     let askUserOnExit = null;
     let askUserRenderFrame = null;
     let askUserClearFrame = null;
+    async function readQuestionText(_question, signal) {
+        const answer = await inputReader.read('Enter your answer: ', { signal });
+        signal?.throwIfAborted();
+        return answer;
+    }
     const workflowTools = [
         createAskUserTool({
-            ask: async (question, placeholder, interaction) => {
+            ask: async (question, placeholder, interaction, signal) => {
                 if (!isTTY()) {
                     throw new Error('当前运行模式不支持 ask_user 交互');
                 }
@@ -649,6 +659,8 @@ async function runChat(initialInput, opts) {
                             multiSelect: interaction.multiSelect ?? false,
                             renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
                             clearFrame: () => askUserClearFrame?.(),
+                            readText: readQuestionText,
+                            signal,
                         });
                         return [...result.labels, result.otherText]
                             .filter((value) => Boolean(value))
@@ -661,7 +673,8 @@ async function runChat(initialInput, opts) {
                     else {
                         process.stdout.write(promptText);
                     }
-                    const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ');
+                    const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ', { signal });
+                    signal?.throwIfAborted();
                     if (answer === null) {
                         throw new Error('用户取消了问题输入');
                     }
@@ -704,6 +717,7 @@ async function runChat(initialInput, opts) {
             onExitInteractive: () => askUserOnExit?.(),
             renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
             clearFrame: () => askUserClearFrame?.(),
+            readText: readQuestionText,
         }),
         createInstallSkillTool({
             cwd,
@@ -960,11 +974,13 @@ async function runChat(initialInput, opts) {
         });
     }
     log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
+    setCrashContext({ startupPhase: 'agent' });
     agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, {
         hooks: runtimeHooks,
         memoryStore,
         maxIterations: resolveAgentMaxIterations(),
     });
+    setCrashContext({ startupPhase: 'ready' });
     agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
     agent.setPromptSnapshot(initialPromptSnapshot);
     runtimeFacade = new RuntimeFacade({
@@ -2696,7 +2712,6 @@ async function runChat(initialInput, opts) {
             flushSubAgentNotices();
             if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
                 turnHadAskUserQuestion = true;
-                enterAskUserQuestionPrompt();
                 maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
                 return;
             }

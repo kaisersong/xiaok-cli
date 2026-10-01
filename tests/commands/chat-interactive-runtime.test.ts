@@ -128,6 +128,19 @@ function createFakeAdapter(
     ): AsyncIterable<StreamChunk> {
       const lastUserText = extractLastUserText(messages);
       const lastToolResult = extractLastToolResult(messages);
+      if (lastUserText.startsWith('问题输入恢复回归')) {
+        if (lastToolResult === '自定义决定' || lastToolResult.includes('"otherText"') || lastToolResult.includes('自定义决定')) {
+          yield {type:'text',delta:'收到自定义决定，继续开发。'};
+        } else if (!lastToolResult && lastUserText.includes('非法参数')) {
+          yield {type:'tool_use',id:'invalid_question',name:'ask_user',input:{_raw:'{"question":"first"}, {"question":"second"}'}};
+        } else if (lastUserText.includes('AskUserQuestion')) {
+          yield {type:'tool_use',id:'valid_question',name:'AskUserQuestion',input:{questions:[{question:'决定如何继续？',options:[{label:'方案一'},{label:'方案二'}]}]}};
+        } else {
+          yield {type:'tool_use',id:'valid_question',name:'ask_user',input:{question:'决定如何继续？',options:[{label:'方案一'},{label:'方案二'}]}};
+        }
+        yield {type:'done'};
+        return;
+      }
       const isReportSlideIntent = (
         lastUserText.includes('生成 md')
         && lastUserText.includes('生成报告')
@@ -1187,6 +1200,163 @@ describe('chat interactive runtime', () => {
     vi.clearAllMocks();
     resetAdapterState();
   });
+
+  it.each(['kimi','glm','minimax'])('continues first-run auto chat after selecting %s Coding Plan', async provider => {
+    const rootDir=join(tmpdir(),`xiaok-first-login-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir=join(rootDir,'config'), projectDir=join(rootDir,'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir,{recursive:true}); mkdirSync(projectDir,{recursive:true});
+    process.env.XIAOK_CONFIG_DIR=configDir;
+    cwdSpy=vi.spyOn(process,'cwd').mockReturnValue(projectDir);
+    const models=await import('../../src/ai/models.js');
+    const {MissingProviderApiKeyError}=await import('../../src/ai/providers/control-plane.js');
+    vi.mocked(models.createAdapter).mockImplementationOnce(()=>{throw new MissingProviderApiKeyError('anthropic','ANTHROPIC');});
+    const fetchSpy=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}',{status:200}));
+    const {registerChatCommands}=await import('../../src/commands/chat.js');
+    const crashReporter=await import('../../src/utils/crash-reporter.js');
+    const crashSpy=vi.spyOn(crashReporter,'reportCrash').mockImplementation(async error=>{throw error;});
+    const harness=createTtyHarness(100,24);
+    const sigint=process.listeners('SIGINT'), resize=process.stdout.listeners('resize');
+    try {
+      const program=new Command();registerChatCommands(program);
+      const pending=program.parseAsync(['node','xiaok','chat','--auto']);
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或 provider id'));
+      harness.send(provider+'\r');
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或服务 id'));
+      harness.send('coding\r');
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入时不可见'));
+      harness.send('test-bootstrap-hidden-key\r');
+      await waitForInputTurnReady(harness);
+      expect(harness.output.normalized).not.toContain('test-bootstrap-hidden-key');
+      const saved=JSON.parse(readFileSync(join(configDir,'config.json'),'utf8'));
+      expect(saved.defaultProvider).toBe(provider);
+      expect(saved.providers[provider].apiKey).toBe('test-bootstrap-hidden-key');
+      harness.send('初始化后继续开发\r');
+      await waitFor(()=>expect(adapterCalls.some(call=>call.lastUserText==='初始化后继续开发')).toBe(true));
+      await waitForInputTurnReady(harness);
+      harness.send('/exit\r'); await pending;
+      expect(crashSpy).not.toHaveBeenCalled();
+    } finally {
+      for(const listener of process.listeners('SIGINT'))if(!sigint.includes(listener))process.removeListener('SIGINT',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener);
+      harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
+    }
+  },15000);
+
+  it.each(['ask_user 非法参数', 'AskUserQuestion', 'ask_user Other abort', 'AskUserQuestion Other abort', 'ask_user menu abort', 'AskUserQuestion menu abort'])('keeps question input and the next turn usable for %s', async (scenario) => {
+    const rootDir = join(tmpdir(), `xiaok-question-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir,'config');
+    const projectDir = join(rootDir,'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir,{recursive:true});
+    mkdirSync(projectDir,{recursive:true});
+    writeFileSync(join(configDir,'config.json'),JSON.stringify({schemaVersion:1,defaultModel:'claude',models:{claude:{model:'claude-test'}},defaultMode:'auto',contextBudget:4000,channels:{}}));
+    process.env.XIAOK_CONFIG_DIR=configDir;
+    cwdSpy=vi.spyOn(process,'cwd').mockReturnValue(projectDir);
+    const {registerChatCommands}=await import('../../src/commands/chat.js');
+    const crashReporter=await import('../../src/utils/crash-reporter.js');
+    const crashSpy=vi.spyOn(crashReporter,'reportCrash').mockImplementation(async error=>{throw error;});
+    const harness=createTtyHarness(90,24);
+    const sigintListeners=process.listeners('SIGINT');
+    const resizeListeners=process.stdout.listeners('resize');
+    try {
+      const program=new Command(); registerChatCommands(program);
+      const pending=program.parseAsync(['node','xiaok','chat','--auto']);
+      await waitForInputTurnReady(harness);
+      harness.send(`问题输入恢复回归 ${scenario}`); harness.send('\r');
+      await waitFor(()=>expect(harness.screen.text()).toContain('方案二'));
+      if (scenario.includes('menu abort')) {
+        process.emit('SIGINT');
+      } else {
+        harness.emitter.emit('data','\x1b[B'); harness.emitter.emit('data','\x1b[B'); harness.emitter.emit('data','\r');
+        await waitFor(()=>expect(harness.output.normalized).toContain('Enter your answer:'));
+        expect(harness.screen.text()).toContain('test-model · auto');
+        expect(harness.output.normalized).not.toContain('[xiaok] UI 已降级');
+        harness.send('自定义决定');
+        expect(harness.screen.text()).toContain('自定义决定');
+        if (scenario.includes('abort')) process.emit('SIGINT');
+        else {
+          harness.send('\r');
+          await waitFor(()=>expect(harness.output.normalized).toContain('收到自定义决定，继续开发。'));
+        }
+      }
+      await waitForInputTurnReady(harness);
+      // A brief cleanup_pending notice is allowed; the actual tool must settle
+      // and return stdin to exactly one reader before the next turn.
+      expect(harness.emitter.listenerCount('data')).toBe(1);
+      harness.send('下一轮'); harness.send('\r');
+      await waitFor(()=>expect(adapterCalls.some(c=>c.lastUserText==='下一轮')).toBe(true));
+      await waitForInputTurnReady(harness);
+      harness.send('/exit');harness.send('\r'); await pending;
+    } finally {
+      for(const listener of process.listeners('SIGINT')) if(!sigintListeners.includes(listener))process.removeListener('SIGINT',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener);
+      harness.restore();
+      crashSpy.mockRestore();
+    }
+  },10000);
+
+  it.each(['slash exit', 'EOF'])('preserves history across repeated exit and resume with %s', async (exitMode) => {
+    const rootDir = join(tmpdir(), `xiaok-exit-resume-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir, {recursive:true});
+    mkdirSync(projectDir, {recursive:true});
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({schemaVersion:1,defaultModel:'claude',models:{claude:{model:'claude-test'}},defaultMode:'auto',contextBudget:4000,channels:{}}));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const {registerChatCommands} = await import('../../src/commands/chat.js');
+    const crashReporter = await import('../../src/utils/crash-reporter.js');
+    const crashSpy = vi.spyOn(crashReporter, 'reportCrash').mockImplementation(async error => {throw error;});
+    let sessionId: string | undefined;
+    let priorOwner: string | undefined;
+    try {
+      for (let cycle = 0; cycle < 3; cycle++) {
+        const harness = createTtyHarness(100, 24);
+        const sigintListeners = process.listeners('SIGINT');
+        const resizeListeners = process.stdout.listeners('resize');
+        try {
+          const program = new Command();
+          registerChatCommands(program);
+          const args = ['node','xiaok','chat','--auto', ...(sessionId ? ['--resume',sessionId] : [])];
+          const pending = program.parseAsync(args);
+          // Surface startup failures immediately instead of hanging on a missing prompt.
+          let startupError: unknown;
+          void pending.catch(error => {startupError = error;});
+          await waitFor(() => {
+            if (startupError) throw startupError;
+            expect(harness.emitter.listenerCount('data')).toBeGreaterThan(0);
+          });
+          await waitForInputTurnReady(harness);
+          harness.send(`session release regression ${cycle}`);
+          harness.send('\r');
+          await waitFor(() => expect(adapterCalls.some(call => call.lastUserText === `session release regression ${cycle}`)).toBe(true));
+          await waitForInputTurnReady(harness);
+          if (exitMode === 'EOF') harness.send('\u0004');
+          else {harness.send('/exit'); harness.send('\r');}
+          await pending;
+          const sessionsDir = join(configDir, 'sessions');
+          const [sessionFile] = readdirSync(sessionsDir).filter(entry => entry.endsWith('.json'));
+          const saved = JSON.parse(readFileSync(join(sessionsDir, sessionFile), 'utf8'));
+          sessionId = saved.sessionId;
+          expect(saved.intentDelegation.ownership.state).toBe('released');
+          expect(saved.intentDelegation.ownership.ownerInstanceId).toBeUndefined();
+          expect(saved.intentDelegation.ownership.previousOwnerInstanceId).toMatch(/^inst_/);
+          expect(saved.intentDelegation.ownership.previousOwnerInstanceId).not.toBe(priorOwner);
+          priorOwner = saved.intentDelegation.ownership.previousOwnerInstanceId;
+          for (let index = 0; index <= cycle; index++) {
+            expect(JSON.stringify(saved.messages)).toContain(`session release regression ${index}`);
+          }
+          expect(readdirSync(sessionsDir).filter(entry => entry.endsWith('.json'))).toHaveLength(1);
+        } finally {
+          for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
+          for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener);
+          harness.restore();
+        }
+      }
+    } finally {crashSpy.mockRestore();}
+  }, 20000);
 
   it('releases session ownership when exiting with slash exit', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-exit-${Date.now()}-${Math.random().toString(36).slice(2)}`);

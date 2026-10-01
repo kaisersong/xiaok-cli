@@ -20,11 +20,12 @@
  *   });
  */
 
-import { createInterface } from 'node:readline';
 import { boldCyan, dim, bold, cyan } from './render.js';
 import { getDisplayWidth } from './display-width.js';
 import { MarkdownRenderer } from './markdown.js';
 import { sliceByDisplayColumns, stripAnsi } from './text-metrics.js';
+import { InputReader } from './input.js';
+import { pauseInputForHandoff } from './input-mode.js';
 
 export interface AskOption {
   label: string;
@@ -39,6 +40,8 @@ export interface AskQuestionParams {
   multiSelect?: boolean;
   renderFrame?: (lines: string[]) => boolean | void;
   clearFrame?: () => void;
+  readText?: (question: string, signal?: AbortSignal) => Promise<string | null>;
+  signal?: AbortSignal;
 }
 
 export interface AskQuestionResult {
@@ -191,21 +194,17 @@ function countRenderedTerminalRows(lines: string[], cols: number): number {
 // ─── Main function ────────────────────────────────────────────────────────────
 
 export async function askQuestion(params: AskQuestionParams): Promise<AskQuestionResult> {
+  params.signal?.throwIfAborted();
   const { allOptions, otherIdx } = withFallbackOther(params.options);
 
-  return new Promise((resolve) => {
+  const selection = await new Promise<{selected: number[]; wantsOther: boolean} | null>((resolve, reject) => {
     const stdout = process.stdout;
     const cols = stdout.columns ?? 80;
     let selectedIdx = 0;
     const checked = new Set<number>();
     let renderedRowCount = 0;
     let externallyRendered = false;
-
-    // Switch to raw mode
-    const rl = createInterface({ input: process.stdin });
-    process.stdin.setRawMode?.(true);
-    process.stdin.resume();
-    process.stdin.setEncoding('utf8');
+    let settled = false;
 
     function clearFrame() {
       if (externallyRendered) {
@@ -249,50 +248,35 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
       stdout.write(frameLines.join('\n'));
     }
 
-    async function confirmSelection() {
-      // Clean up
-      process.stdin.setRawMode?.(false);
-      process.stdin.pause();
+    function cleanup() {
       process.stdin.removeListener('data', onKey);
-      rl.close();
+      process.stdin.removeListener('end', onEnd);
+      params.signal?.removeEventListener('abort', onAbort);
+      pauseInputForHandoff();
       clearFrame();
+    }
 
-      const wantsOther = selectedIdx === otherIdx || (params.multiSelect === true && checked.has(otherIdx));
-      const finalSelected = params.multiSelect
-        ? [...checked].filter((i) => i !== otherIdx)
-        : [];
-      const labels = finalSelected.map((i) => allOptions[i]!.label);
-
-      if (wantsOther) {
-        // "Other" — prompt for free text
-        stdout.write(`${boldCyan('❯')} ${bold(params.question)}\n`);
-        stdout.write(`${dim('Enter your answer:')} `);
-
-        // Use a fresh readline with resumed stdin
-        process.stdin.resume();
-        const text = await new Promise<string>((res) => {
-          const rl2 = createInterface({ input: process.stdin, output: stdout });
-          rl2.question('', (ans) => {
-            rl2.close();
-            res(ans);
-          });
-        });
-        stdout.write('\n');
-        resolve({ selected: finalSelected, labels, otherText: text });
-      } else {
-        const selected = params.multiSelect ? finalSelected : [selectedIdx];
-        const selectedLabels = selected.map((i) => allOptions[i]!.label);
-        // Print confirmation
-        stdout.write(`${boldCyan('❯')} ${bold(params.question)}\n`);
-        for (const label of selectedLabels) {
-          stdout.write(`  ${dim('·')} ${cyan(label)}\n`);
-        }
-        stdout.write('\n');
-        resolve({ selected, labels: selectedLabels });
+    function finish(result: {selected: number[]; wantsOther: boolean} | null, error?: unknown) {
+      if (settled) return;
+      settled = true;
+      try {
+        cleanup();
+        if (error !== undefined) reject(error);
+        else resolve(result);
+      } catch (cleanupError) {
+        reject(error ?? cleanupError);
       }
     }
 
-    function onKey(key: string) {
+    function onAbort() {
+      finish(null, params.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+    }
+
+    function onEnd() { finish(null); }
+
+    function onKey(data: string | Buffer) {
+      if (settled) return;
+      const key = typeof data === 'string' ? data : data.toString('utf8');
       const UP    = '\x1b[A';
       const DOWN  = '\x1b[B';
       const ENTER = '\r';
@@ -301,35 +285,59 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
       const ESC   = '\x1b';
 
       if (key === CTRL_C || key === ESC) {
-        process.stdin.setRawMode?.(false);
-        process.stdin.removeListener('data', onKey);
-        rl.close();
-        clearFrame();
-        // Return empty result (cancelled)
-        resolve({ selected: [], labels: [] });
+        finish(null);
         return;
       }
 
-      if (key === UP) {
-        selectedIdx = (selectedIdx - 1 + allOptions.length) % allOptions.length;
-        draw();
-      } else if (key === DOWN) {
-        selectedIdx = (selectedIdx + 1) % allOptions.length;
-        draw();
-      } else if (key === SPACE && params.multiSelect) {
-        if (checked.has(selectedIdx)) checked.delete(selectedIdx);
-        else checked.add(selectedIdx);
-        draw();
-      } else if (key === ENTER) {
-        if (params.multiSelect && checked.size === 0) {
-          // Nothing checked — treat current selection as the answer
-          checked.add(selectedIdx);
+      try {
+        if (key === UP) {
+          selectedIdx = (selectedIdx - 1 + allOptions.length) % allOptions.length;
+          draw();
+        } else if (key === DOWN) {
+          selectedIdx = (selectedIdx + 1) % allOptions.length;
+          draw();
+        } else if (key === SPACE && params.multiSelect) {
+          if (checked.has(selectedIdx)) checked.delete(selectedIdx);
+          else checked.add(selectedIdx);
+          draw();
+        } else if (key === ENTER || key === '\n') {
+          if (params.multiSelect && checked.size === 0) {
+            // Nothing checked — treat current selection as the answer
+            checked.add(selectedIdx);
+          }
+          const wantsOther = selectedIdx === otherIdx || (params.multiSelect === true && checked.has(otherIdx));
+          const selected = params.multiSelect ? [...checked].filter(i => i !== otherIdx) : (wantsOther ? [] : [selectedIdx]);
+          finish({selected, wantsOther});
         }
-        void confirmSelection();
-      }
+      } catch (error) { finish(null, error); }
     }
 
     process.stdin.on('data', onKey);
-    draw();
+    process.stdin.on('end', onEnd);
+    params.signal?.addEventListener('abort', onAbort, {once:true});
+    try {
+      process.stdin.setRawMode?.(true);
+      process.stdin.resume();
+      if (!settled) draw();
+    } catch (error) { finish(null, error); }
   });
+  params.signal?.throwIfAborted();
+  if (!selection) return {selected:[],labels:[]};
+
+  const {selected, wantsOther} = selection;
+  const labels = selected.map(i => allOptions[i]!.label);
+  const stdout = process.stdout;
+  stdout.write(`${boldCyan('❯')} ${bold(params.question)}\n`);
+  if (wantsOther) {
+    const text = await (params.readText
+      ? params.readText(params.question, params.signal)
+      : new InputReader().read('Enter your answer: ', {signal:params.signal}));
+    params.signal?.throwIfAborted();
+    if (text === null) return {selected:[],labels:[]};
+    stdout.write('\n');
+    return {selected,labels,otherText:text};
+  }
+  for (const label of labels) stdout.write(`  ${dim('·')} ${cyan(label)}\n`);
+  stdout.write('\n');
+  return {selected,labels};
 }

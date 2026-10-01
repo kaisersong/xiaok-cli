@@ -1,0 +1,26 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {verifyArtifact} from './copy-windows-absence.mjs';
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const args=process.argv.slice(2), get=name=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
+const arch=get('--target')??process.arch;
+if(!['x64','arm64'].includes(arch))throw Error('Unsupported Windows target');
+const source=path.join(root,'src/runtime/verification/native/windows-installation-absence.c');
+const core=path.join(root,'src/runtime/verification/native/windows-installation-absence-core.h');
+const out=path.join(root,'data/verification/windows',`win32-${arch}`);
+fs.mkdirSync(out,{recursive:true});
+const temporary=path.join(out,'windows-installation-absence.build.exe'), executable=path.join(out,'windows-installation-absence.exe');
+const compiler=get('--compiler')??(process.platform==='win32'?'cl.exe':arch==='x64'?'x86_64-w64-mingw32-gcc':'aarch64-w64-mingw32-gcc');
+const msvc=/^cl(?:\.exe)?$/i.test(path.basename(compiler));
+const flags=msvc?['/nologo','/std:c11','/W4','/WX','/O2','/MT',source,`/Fe:${temporary}`,`/Fo:${path.join(out,'windows-installation-absence.obj')}`,'/link','shell32.lib','ole32.lib','advapi32.lib']:['-std=c11','-Wall','-Wextra','-Werror','-O2','-static','-s',source,'-o',temporary,'-lshell32','-lole32','-ladvapi32'];
+const result=spawnSync(compiler,flags,{encoding:'utf8',shell:false});
+if(result.error||result.status!==0)throw Error('Windows helper compilation failed: '+(result.error?.message??(result.stderr||result.stdout)));
+fs.renameSync(temporary,executable);
+const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+fs.writeFileSync(path.join(out,'windows-installation-absence.json'),JSON.stringify({version:1,target:`win32-${arch}`,sha256:sha(executable),sourceSha256:sha(source),coreSha256:sha(core)},null,2)+'\n');
+verifyArtifact(out,arch);
+console.log(JSON.stringify({target:`win32-${arch}`,directory:out,executedOnWindows:false}));

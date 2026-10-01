@@ -9,6 +9,13 @@ vi.mock('../../../src/ui/ask-question.js', () => ({
 }));
 
 describe('AskUserQuestion tool', () => {
+  it('passes the abort signal and host text reader to the question UI', async () => {
+    const controller = new AbortController();
+    const readText = vi.fn(async () => 'custom answer');
+    const tool = createAskUserQuestionTool({readText});
+    await tool.execute({questions:[{question:'Proceed?',options:[{label:'Yes'},{label:'No'}]}]}, {signal:controller.signal} as never);
+    expect(askQuestion).toHaveBeenCalledWith(expect.objectContaining({signal:controller.signal,readText}));
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it('allows meaningful pre-execution choices without asking for every ordinary delegation', () => {

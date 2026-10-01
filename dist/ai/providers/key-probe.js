@@ -1,3 +1,4 @@
+import { SYSTEM_ONE_DEFAULT_MODEL, systemOneEndpointUrl } from './system-one-config.js';
 const PROBE_TIMEOUT_MS = 8_000;
 const ANTHROPIC_VERSION = '2023-06-01';
 function buildProbeRequest(protocol, baseUrl, apiKey) {
@@ -9,6 +10,26 @@ function buildProbeRequest(protocol, baseUrl, apiKey) {
                 'x-api-key': apiKey,
                 'anthropic-version': ANTHROPIC_VERSION,
             },
+        };
+    }
+    // System One 端点没有 GET /models，只能用最小白名单问题体做一次 POST 探活。
+    if (protocol === 'system_one') {
+        return {
+            url: systemOneEndpointUrl(baseUrl),
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: SYSTEM_ONE_DEFAULT_MODEL,
+                state: 'probe',
+                questions: {
+                    probe: {
+                        type: 'noul',
+                        instructions: 'Is this a probe request?',
+                    },
+                },
+            }),
         };
     }
     if (protocol === 'openai_legacy' || protocol === 'openai_responses') {
@@ -38,8 +59,9 @@ export async function probeApiKey(protocol, baseUrl, apiKey) {
     const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
     try {
         const resp = await fetch(request.url, {
-            method: 'GET',
+            method: request.body ? 'POST' : 'GET',
             headers: request.headers,
+            ...(request.body ? { body: request.body } : {}),
             signal: controller.signal,
         });
         if (resp.ok) {

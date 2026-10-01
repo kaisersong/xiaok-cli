@@ -1,4 +1,5 @@
 import type { Tool } from '../../types.js';
+import { isAbortError } from '../runtime/abort-utils.js';
 
 export interface AskUserChoice {
   label: string;
@@ -12,7 +13,7 @@ export interface AskUserInteraction {
 }
 
 export interface AskUserOptions {
-  ask(question: string, placeholder?: string, interaction?: AskUserInteraction): Promise<string>;
+  ask(question: string, placeholder?: string, interaction?: AskUserInteraction, signal?: AbortSignal): Promise<string>;
 }
 
 export function createAskUserTool(options: AskUserOptions): Tool {
@@ -45,7 +46,7 @@ export function createAskUserTool(options: AskUserOptions): Tool {
       },
     },
     executionPolicy: { waitsForUser: true },
-    async execute(input) {
+    async execute(input, context) {
       const question = typeof input.question === 'string' ? input.question.trim() : '';
       const placeholder = typeof input.placeholder === 'string' ? input.placeholder : undefined;
       const choices = Array.isArray(input.options)
@@ -72,8 +73,11 @@ export function createAskUserTool(options: AskUserOptions): Tool {
           choices.length > 0
             ? { options: choices, multiSelect: input.multiSelect === true }
             : undefined,
+          context?.signal,
         );
       } catch (error) {
+        context?.signal?.throwIfAborted();
+        if (isAbortError(error)) throw error;
         return `Error: ${String(error)}`;
       }
     },

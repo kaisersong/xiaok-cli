@@ -4,11 +4,13 @@
  * and get back their selection.
  */
 import type { Tool } from '../../types.js';
+import { type AskQuestionParams } from '../../ui/ask-question.js';
 export interface AskUserQuestionToolOptions {
     interactive?: boolean;
     onEnterInteractive?: () => void;
     onExitInteractive?: () => void;
     renderFrame?: (lines: string[]) => boolean | void;
     clearFrame?: () => void;
+    readText?: AskQuestionParams['readText'];
 }
 export declare function createAskUserQuestionTool(options?: AskUserQuestionToolOptions): Tool;

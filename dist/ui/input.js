@@ -564,12 +564,18 @@ export class InputReader {
         capture.pause();
     }
     async read(prompt, options) {
+        if (options?.signal?.aborted)
+            return null;
         if (!stdin.isTTY) {
             const rl = readline.createInterface({ input: stdin, output: stdout });
             return new Promise((resolve) => {
+                const abort = () => { rl.close(); resolve(null); };
+                options?.signal?.addEventListener('abort', abort, { once: true });
+                rl.once('close', () => { options?.signal?.removeEventListener('abort', abort); resolve(null); });
                 rl.question(prompt, (answer) => {
-                    rl.close();
+                    options?.signal?.removeEventListener('abort', abort);
                     resolve(answer);
+                    rl.close();
                 });
             });
         }
@@ -926,6 +932,8 @@ export class InputReader {
                 closeMenu();
                 resolved = true;
                 stdin.removeListener('data', onData);
+                stdin.removeListener('end', onEnd);
+                options?.signal?.removeEventListener('abort', onAbort);
                 pauseInputForHandoff();
                 this.readActive = false;
                 this.suspendHooks = null;
@@ -1324,7 +1332,11 @@ export class InputReader {
                 }
             };
             const onData = (data) => this.dispatchInput(data, consumeData);
+            const onAbort = () => done(null, 'cancel');
+            const onEnd = () => done(null, 'eof');
             stdin.on('data', onData);
+            stdin.on('end', onEnd);
+            options?.signal?.addEventListener('abort', onAbort, { once: true });
             this.suspendHooks = {
                 detach: () => {
                     stdin.removeListener('data', onData);

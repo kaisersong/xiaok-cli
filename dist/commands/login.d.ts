@@ -26,6 +26,8 @@ export interface LoginOptions {
     apiKey?: string;
     setDefault?: boolean;
     skipVerify?: boolean;
+    plan?: string;
+    baseUrl?: string;
 }
 export type LoginCommandResult = {
     status: 'saved';

@@ -33,7 +33,8 @@ describe('project selected model through real Desktop runtime and HTTP provider'
  it('preserves references and explicit follow-current through real KSwarm store reopen',async()=>{
   const root=mkdtempSync(join(tmpdir(),'project-model-store-'));
   try {
-    const nativeImport=new Function('specifier','return import(specifier)') as (specifier:string)=>Promise<any>;
+    // Native import: new Function('...import(specifier)') has no dynamic import callback inside the vitest VM.
+    const nativeImport=((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier:string)=>Promise<any>;
     const {createAgentStore}=await nativeImport(pathToFileURL(resolve(process.cwd(),'../../kswarm/src/core/agent-store.js')).href);
     const filePath=join(root,'agents.json');const first=createAgentStore({filePath});
     const created=first.create({name:'Vision worker',runtimeType:'xiaok',runtimeSource:'desktop-agent-runtime',desktopModelId:'vision'});

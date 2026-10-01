@@ -13,7 +13,8 @@ import { createRoomWorkspaceRecovery } from '../../electron/room-workspace-recov
 import { createRoomWorkspaceRuntime } from '../../electron/room-workspace-runtime.js';
 
 async function fixture() {
-  const nativeImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+  // Native import: new Function('...import(specifier)') has no dynamic import callback inside the vitest VM.
+  const nativeImport = ((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier: string) => Promise<any>;
   const sibling = resolve(process.cwd(), '..', '..', 'intent-broker');
   const { createBrokerService } = await nativeImport(pathToFileURL(join(sibling, 'src/broker/service.js')).href);
   const { createServer } = await nativeImport(pathToFileURL(join(sibling, 'src/http/server.js')).href);

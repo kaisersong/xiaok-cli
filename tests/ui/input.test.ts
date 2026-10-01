@@ -24,6 +24,24 @@ import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 import { clearPastedImagePaths, parseInputBlocks } from '../../src/ui/image-input.js';
 import { waitFor } from '../support/wait-for.js';
 
+describe('InputReader cancellation', () => {
+  it('releases the reader on abort and accepts input for the next read', async () => {
+    const harness = createTtyHarness(80, 24);
+    const reader = new InputReader(new ReplRenderer(process.stdout));
+    const controller = new AbortController();
+    try {
+      const pending = reader.read('Answer: ', {signal:controller.signal});
+      controller.abort();
+      await expect(pending).resolves.toBeNull();
+      expect(harness.emitter.listenerCount('data')).toBe(0);
+      const next = reader.read('Next: ');
+      harness.send('继续开发');
+      harness.send('\r');
+      await expect(next).resolves.toBe('继续开发');
+    } finally { harness.restore(); }
+  });
+});
+
 describe('getSlashCommands', () => {
   it('should return base commands when no skills provided', () => {
     const commands = getSlashCommands([]);

@@ -55,7 +55,7 @@ IMPORTANT: Ask before execution when a material scope or cost tradeoff needs the
                 required: ['questions'],
             },
         },
-        async execute(input) {
+        async execute(input, context) {
             if (options.interactive === false) {
                 return 'Error: AskUserQuestion requires an interactive terminal; no answer was provided. Continue without optional delegation, or report the missing user decision.';
             }
@@ -77,6 +77,8 @@ IMPORTANT: Ask before execution when a material scope or cost tradeoff needs the
                         multiSelect: q.multiSelect ?? false,
                         renderFrame: options.renderFrame,
                         clearFrame: options.clearFrame,
+                        readText: options.readText,
+                        signal: context?.signal,
                     });
                 }
                 finally {

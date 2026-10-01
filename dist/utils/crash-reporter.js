@@ -1,5 +1,6 @@
 import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { getConfigDir } from './config.js';
 let crashContext = {};
 let handlersInstalled = false;
@@ -31,7 +32,30 @@ const SAFE_ERROR_CODES = new Set([
     'EPERM',
     'EPIPE',
     'ETIMEDOUT',
+    'transcript_lock_identity_unreadable',
+    'transcript_busy',
+    'ordinary_source_route',
 ]);
+const SAFE_STARTUP_PHASES = new Set(['adapter', 'memory', 'credentials', 'platform', 'transcript', 'agent', 'ready']);
+const SAFE_STACK_MODULES = new Set([
+    'commands/chat.js', 'commands/chat-login-bootstrap.js', 'commands/login.js',
+    'ui/transcript-storage.js', 'ui/transcript.js', 'ui/input.js', 'ui/input-mode.js',
+    'platform/runtime/context.js', 'platform/provider-store/process-identity.js',
+    'platform/provider-store/plugin-claim-lock.js', 'ai/memory/store.js',
+    'ai/models.js', 'ai/providers/control-plane.js', 'ai/providers/model-harness-profile.js',
+    'ai/runtime/session-store/file-store.js', 'ai/runtime/session-store/store.js',
+    'ai/runtime/session-store/mutation-lock.js', 'ai/runtime/session-store/execution-authority.js',
+    'runtime/verification/ordinary-source-writer-observation.js',
+    'runtime/verification/windows-installation-absence.js', 'runtime/verification/migration-markers.js',
+]);
+const packageVersion = (() => {
+    try {
+        return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+    }
+    catch {
+        return 'unknown';
+    }
+})();
 /**
  * Provider-private task-local reasoning must never be copied into a Node
  * diagnostic report. Xiaok's structured crash report below is the only
@@ -46,6 +70,8 @@ export function configureSafeCrashCapture() {
     process.report.reportOnUncaughtException = false;
 }
 export function setCrashContext(ctx) {
+    if (ctx.command !== undefined)
+        crashContext = {};
     crashContext = { ...crashContext, ...ctx };
 }
 export function setStreamErrorHandler(handler) {
@@ -60,7 +86,7 @@ export async function reportCrash(error) {
     const filePath = join(crashDir, fileName);
     const report = {
         time: new Date().toISOString(),
-        version: process.env.npm_package_version ?? 'unknown',
+        version: packageVersion,
         node: process.version,
         platform: process.platform,
         arch: process.arch,
@@ -104,24 +130,50 @@ function serializeError(error) {
                     ? 'RangeError'
                     : 'Error')
         : 'NonError';
-    const rawCode = typeof error === 'object'
+    let rawCode = typeof error === 'object'
         && error !== null
         && 'code' in error
         && typeof error.code === 'string'
         ? error.code
         : undefined;
+    // One fixed internal sentinel only; never serialize arbitrary error messages.
+    if (rawCode === undefined && error instanceof Error && error.message === 'ordinary_source_route')
+        rawCode = 'ordinary_source_route';
+    const frames = [];
+    if (error instanceof Error) {
+        for (const line of (error.stack ?? '').split('\n').slice(1, 30)) {
+            const match = line.replace(/\\/g, '/').match(/(?:\/dist\/|\/src\/)([a-zA-Z0-9_./-]+\.js):(\d+):(\d+)\)?$/);
+            if (match && SAFE_STACK_MODULES.has(match[1])) {
+                frames.push({ module: match[1], line: Number(match[2]), column: Number(match[3]) });
+                if (frames.length >= 8)
+                    break;
+            }
+        }
+    }
+    const causeCodes = [];
+    const seen = new Set();
+    let cause = error instanceof Error ? error.cause : undefined;
+    while (cause && typeof cause === 'object' && !seen.has(cause) && seen.size < 8) {
+        seen.add(cause);
+        const record = cause;
+        if (typeof record.code === 'string' && SAFE_ERROR_CODES.has(record.code))
+            causeCodes.push(record.code);
+        cause = record.cause;
+    }
     return {
         type,
         code: rawCode && SAFE_ERROR_CODES.has(rawCode)
             ? rawCode
             : 'UNCLASSIFIED_ERROR',
+        ...(frames.length ? { frames } : {}),
+        ...(causeCodes.length ? { causeCodes } : {}),
     };
 }
 function serializeCrashContext(context) {
     const command = context.command && SAFE_COMMANDS.has(context.command)
         ? context.command
         : 'unknown';
-    return { command };
+    return { command, ...(context.startupPhase && SAFE_STARTUP_PHASES.has(context.startupPhase) ? { startupPhase: context.startupPhase } : {}) };
 }
 function isBrokenPipeError(error) {
     return typeof error === 'object'

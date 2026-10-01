@@ -47,12 +47,12 @@ export const bashTool = {
     permission: 'bash',
     definition: {
         name: 'bash',
-        get description() {
+        description: (() => {
             const shell = process.platform === 'win32'
                 ? '当前执行环境是 Windows cmd /c，命令须使用 cmd 语法。POSIX 单引号、heredoc 和 PowerShell cmdlet 不能直接使用；需要其他解释器时须显式调用并确认已安装。'
                 : '当前执行环境是 sh -c，命令须使用 POSIX sh 语法。';
             return `执行 shell 命令，返回 stdout + stderr。${shell}文件内容搜索优先使用 grep 工具，定位文件使用 glob，读取文件使用 read。慎用：所有 shell 命令均视为潜在危险操作。sudo 在主 CLI 的本地交互终端执行；密码只能由用户在终端输入，严禁通过聊天或工具参数索取、传递密码。`;
-        },
+        })(),
         inputSchema: {
             type: 'object',
             properties: {

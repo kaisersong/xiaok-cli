@@ -3,6 +3,7 @@ export interface CrashContext {
     args?: string[];
     sessionId?: string;
     cwd?: string;
+    startupPhase?: string;
 }
 export type StreamErrorHandler = (error: unknown, stream: NodeJS.WriteStream) => boolean;
 /**

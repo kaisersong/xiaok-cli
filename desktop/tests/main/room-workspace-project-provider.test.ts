@@ -46,7 +46,8 @@ it('existing dispatch button reaches real KSwarm HTTP, broker handoff, scoped SS
  });
  await new Promise<void>(done=>model.listen(0,'127.0.0.1',done));
  writeFileSync(join(process.env.XIAOK_CONFIG_DIR,'config.json'),JSON.stringify({schemaVersion:2,defaultProvider:'openai',defaultModelId:'fixture',providers:{openai:{type:'first_party',protocol:'openai_legacy',apiKey:'fixture',baseUrl:`http://127.0.0.1:${(model.address() as any).port}/v1`}},models:{fixture:{provider:'openai',model:'gpt-project-fixture',label:'fixture',runtimeOptions:{contextLimit:100000}}},defaultMode:'interactive',contextBudget:100000,channels:{}}));
- const nodeImport=new Function('specifier','return import(specifier)') as (specifier:string)=>Promise<any>;
+ // Native import: new Function('...import(specifier)') has no dynamic import callback inside the vitest VM.
+ const nodeImport=((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier:string)=>Promise<any>;
  const siblings=resolve(process.cwd(),'..','..');
  const {createBrokerService}=await nodeImport(pathToFileURL(join(siblings,'intent-broker/src/broker/service.js')).href);
  const {createServer:createBrokerServer}=await nodeImport(pathToFileURL(join(siblings,'intent-broker/src/http/server.js')).href);

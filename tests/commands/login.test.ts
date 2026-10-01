@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import {createTtyHarness} from '../support/tty.js';
+import {waitFor} from '../support/wait-for.js';
 
 const probeMock = vi.fn();
 
@@ -64,11 +66,99 @@ describe('xiaok login command', () => {
     return JSON.parse(readFileSync(join(configDir, 'config.json'), 'utf8'));
   }
 
+  it.each(['kimi','glm','minimax'])('selects a Coding Plan interactively without echoing %s secret', async provider => {
+    const harness=createTtyHarness(100,24);
+    const key='test-hidden-plan-secret';
+    try {
+      const pending=runLoginCommand({provider,setDefault:true});
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或服务 id'));
+      harness.send('1\r');
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入时不可见'));
+      harness.send(key+'\r');
+      expect((await pending).status).toBe('saved');
+      expect(harness.output.normalized).not.toContain(key);
+      expect(readSavedConfig().providers[provider].apiKey).toBe(key);
+      expect(process.stdin.isRaw).not.toBe(true);
+    } finally {harness.restore();}
+  });
+
+  it('keeps Windows raw input owned until the login-to-chat handoff finishes', async () => {
+    const descriptor=Object.getOwnPropertyDescriptor(process,'platform')!;
+    const originalRaw=process.stdin.isRaw;
+    const harness=createTtyHarness(100,24);
+    Object.defineProperty(process,'platform',{...descriptor,value:'win32'});
+    const setRaw=vi.mocked(process.stdin.setRawMode).mockImplementation(raw=>{process.stdin.isRaw=raw;return process.stdin;});
+    try {
+      process.stdin.isRaw=false;
+      const pending=runLoginCommand({provider:'kimi',setDefault:true});
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入编号或服务 id'));
+      harness.send('coding\r');
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入时不可见'));
+      expect(setRaw.mock.calls.some(([raw])=>raw===false)).toBe(false);
+      harness.send('test-windows-hidden-key\r');
+      expect((await pending).status).toBe('saved');
+      expect(process.stdin.isRaw).toBe(false);
+      expect(setRaw.mock.calls.at(-1)).toEqual([false]);
+      expect(harness.output.normalized).not.toContain('test-windows-hidden-key');
+    } finally {Object.defineProperty(process,'platform',descriptor);harness.restore();process.stdin.isRaw=originalRaw;}
+  });
+
+  it.each(['\u0003','EOF'])('cleans up hidden input on %s without saving credentials', async action => {
+    const harness=createTtyHarness(100,24);
+    try {
+      const pending=runLoginCommand({provider:'kimi',plan:'coding',setDefault:true} as Parameters<typeof runLoginCommand>[0] & {plan:string});
+      await waitFor(()=>expect(harness.output.normalized).toContain('输入时不可见'));
+      if(action==='EOF') harness.emitter.emit('end'); else harness.send(action);
+      expect(await pending).toEqual({status:'cancelled'});
+      expect(existsSync(join(configDir,'config.json'))).toBe(false);
+      expect(process.stdin.isRaw).not.toBe(true);
+    } finally {harness.restore();}
+  });
+
   it('submits a pasted secret when the key and carriage return share one input chunk', () => {
     expect(consumeSecretInputChunk('', Buffer.from('sk-pasted-key\r'))).toEqual({
       action: 'submit',
       value: 'sk-pasted-key',
     });
+  });
+
+  it.each([
+    ['kimi','coding','https://api.kimi.com/coding/v1','k3'],
+    ['kimi','api','https://api.moonshot.cn/v1','kimi-k2.6'],
+    ['glm','coding','https://open.bigmodel.cn/api/coding/paas/v4','GLM-5.3'],
+    ['glm','api','https://open.bigmodel.cn/api/paas/v4','GLM-5.2'],
+    ['minimax','coding','https://api.minimax.io/v1','MiniMax-M3'],
+  ])('selects matching endpoint and model for %s %s', async (provider,plan,baseUrl,model) => {
+    const result = await runLoginCommand({provider,plan,apiKey:'test-plan-key',setDefault:true} as Parameters<typeof runLoginCommand>[0] & {plan:string});
+    expect(result.status).toBe('saved');
+    const saved = readSavedConfig();
+    expect(saved.providers[provider].baseUrl).toBe(baseUrl);
+    expect(saved.models[saved.defaultModelId].model).toBe(model);
+    expect(probeMock.mock.calls[0].slice(0,3)).toEqual(['openai_legacy',baseUrl,'test-plan-key']);
+  });
+
+  it('explicit plan switches away from an existing incompatible endpoint', async () => {
+    await runLoginCommand({provider:'kimi',apiKey:'old',setDefault:true,skipVerify:true});
+    await runLoginCommand({provider:'kimi',plan:'api',apiKey:'new',setDefault:true} as Parameters<typeof runLoginCommand>[0] & {plan:string});
+    const saved=readSavedConfig();
+    expect(saved.providers.kimi.baseUrl).toBe('https://api.moonshot.cn/v1');
+    expect(saved.models[saved.defaultModelId].model).toBe('kimi-k2.6');
+  });
+
+  it('probes the preserved custom endpoint rather than the catalog endpoint', async () => {
+    const initial=await loadConfig();
+    initial.providers.deepseek={type:'first_party',protocol:'openai_legacy',baseUrl:'https://proxy.example.com/v1'};
+    const {saveConfig}=await import('../../src/utils/config.js');
+    await saveConfig(initial);
+    await runLoginCommand({provider:'deepseek',apiKey:'test-proxy'});
+    expect(probeMock.mock.calls[0][1]).toBe('https://proxy.example.com/v1');
+  });
+
+  it.each([['glm','invalid'],['deepseek','coding']])('rejects unsupported %s plan %s without saving a key', async (provider,plan) => {
+    const result=await runLoginCommand({provider,plan,apiKey:'test-bad-plan',skipVerify:true} as Parameters<typeof runLoginCommand>[0] & {plan:string});
+    expect(result.status).toBe('cancelled');
+    expect(existsSync(join(configDir,'config.json'))).toBe(false);
+    expect(probeMock).not.toHaveBeenCalled();
   });
 
   it('persists the api key and switches the default model when requested', async () => {

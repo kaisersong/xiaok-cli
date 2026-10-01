@@ -12,7 +12,8 @@ import { createCollaborationRoomBrokerClient } from '../../electron/collaboratio
 import { createRoomWorkspaceBrokerClient } from '../../electron/room-workspace-broker-client.js';
 
 it('real Broker HTTP + real KSwarm process enforce project discussion scope and disconnect refusal', async () => {
-  const nativeImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+  // Native import: new Function('...import(specifier)') has no dynamic import callback inside the vitest VM.
+  const nativeImport = ((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier: string) => Promise<any>;
   const siblings = resolve(process.cwd(), '../..');
   const { createBrokerService } = await nativeImport(pathToFileURL(join(siblings, 'intent-broker/src/broker/service.js')).href);
   const { createServer: createBrokerServer } = await nativeImport(pathToFileURL(join(siblings, 'intent-broker/src/http/server.js')).href);

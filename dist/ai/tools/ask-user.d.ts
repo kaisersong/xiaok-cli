@@ -9,6 +9,6 @@ export interface AskUserInteraction {
     multiSelect?: boolean;
 }
 export interface AskUserOptions {
-    ask(question: string, placeholder?: string, interaction?: AskUserInteraction): Promise<string>;
+    ask(question: string, placeholder?: string, interaction?: AskUserInteraction, signal?: AbortSignal): Promise<string>;
 }
 export declare function createAskUserTool(options: AskUserOptions): Tool;

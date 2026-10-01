@@ -12,7 +12,8 @@ describe('R3 actual broker HTTP + Desktop SQLite + user filesystem', () => {
   it('binds arbitrary root, publishes rules, lists, registers, confirms and recovers exactly once', async () => {
     const sibling = resolve(process.cwd(), '..', '..', 'intent-broker');
     // Load sibling Node service natively, outside Vite's renderer import graph.
-    const nodeImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+    // Native import: new Function('...import(specifier)') has no dynamic import callback inside the vitest VM.
+    const nodeImport = ((specifier: string) => import(/* @vite-ignore */ specifier)) as (specifier: string) => Promise<any>;
     const { createBrokerService } = await nodeImport(pathToFileURL(join(sibling, 'src', 'broker', 'service.js')).href);
     const { createServer } = await nodeImport(pathToFileURL(join(sibling, 'src', 'http', 'server.js')).href);
     const root = mkdtempSync(join(tmpdir(), 'room-workspace-http-')); const selected = join(root, '大家 工作'); mkdirSync(selected);

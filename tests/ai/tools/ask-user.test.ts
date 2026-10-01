@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAskUserTool } from '../../../src/ai/tools/ask-user.js';
 
 describe('ask_user tool', () => {
+  it('forwards cancellation and preserves AbortError', async () => {
+    const controller = new AbortController();
+    const ask = vi.fn(async () => {throw new DOMException('Aborted', 'AbortError');});
+    const tool = createAskUserTool({ask});
+    await expect(tool.execute({question:'Proceed?'}, {signal:controller.signal} as never)).rejects.toMatchObject({name:'AbortError'});
+    expect(ask).toHaveBeenCalledWith('Proceed?',undefined,undefined,controller.signal);
+  });
   it('delegates the question to the host and returns the answer', async () => {
     const ask = vi.fn(async (question: string) => `answer:${question}`);
     const tool = createAskUserTool({ ask });
@@ -9,7 +16,7 @@ describe('ask_user tool', () => {
     await expect(tool.execute({ question: 'Should I continue?' })).resolves.toBe(
       'answer:Should I continue?',
     );
-    expect(ask).toHaveBeenCalledWith('Should I continue?', undefined, undefined);
+    expect(ask).toHaveBeenCalledWith('Should I continue?', undefined, undefined, undefined);
   });
 
   it('declares and forwards structured options and multi-select without dropping them', async () => {
@@ -32,7 +39,7 @@ describe('ask_user tool', () => {
     expect(ask).toHaveBeenCalledWith('请选择复现场景', '选择一项', {
       options,
       multiSelect: true,
-    });
+    }, undefined);
   });
 
   it('rejects empty questions', async () => {
