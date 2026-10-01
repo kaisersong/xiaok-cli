@@ -40,7 +40,8 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // artifact operations; it does not expose generic filesystem access.
     // SystemOne adds exactly two auxiliary-decision-model keys
     // (getSystemOneConfig / saveSystemOneConfig); they never touch providers.
-    expect(keys.length).toMatchInlineSnapshot(`294`);
+    // 1.5.6 adds deleteCollaborationRoom to the collaboration room lifecycle.
+    expect(keys.length).toMatchInlineSnapshot(`295`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

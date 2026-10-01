@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ArrowRight, Clock3, MoreHorizontal, Trash2, MessageSquare, Plus, Users, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -98,7 +98,7 @@ export function CollaborationRoomsPage() {
   const activeRooms = sortedRooms.filter(room => room.status === 'active');
   const archivedRooms = sortedRooms.filter(room => room.status === 'archived' || room.status === 'archiving');
   const visibleRooms = category === 'active' ? activeRooms : archivedRooms;
-  const formatTime = new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false});
+  const formatTime = useMemo(() => new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}), [locale]);
 
   const createRoom = async () => {
     if (!title.trim()) return;
@@ -179,7 +179,9 @@ export function CollaborationRoomsPage() {
                     {timestamp ? <time dateTime={timestamp} title={new Date(timestamp).toLocaleString(locale)}>{formatTime.format(new Date(timestamp))}</time> : t.collaborationRoomTimeUnknown}
                   </span>
                   {room.status === 'archiving' && <span className="text-xs text-[var(--c-text-secondary)]">{t.collaborationRoomArchiving}</span>}
-                  <div className="relative" ref={menuRoomId === room.roomId ? menuRef : undefined} onKeyDown={event => {
+                  <div className="relative" ref={menuRoomId === room.roomId ? menuRef : undefined}>
+                    <button type="button" aria-label={t.collaborationRoomMore} title={t.collaborationRoomMore} aria-haspopup="menu" aria-expanded={menuRoomId === room.roomId} disabled={Boolean(archivingRoomId)} onClick={event => {deleteTrigger.current = event.currentTarget; setMenuRoomId(current => current === room.roomId ? null : room.roomId);}} className="rounded-lg p-1.5 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] disabled:opacity-40"><MoreHorizontal size={17} /></button>
+                    {menuRoomId === room.roomId && <div role="menu" aria-label={t.collaborationRoomMore} className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-1 shadow-lg" onKeyDown={event => {
                     if (event.key === 'Escape') {setMenuRoomId(null); deleteTrigger.current?.focus();}
                     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                       event.preventDefault();
@@ -188,8 +190,6 @@ export function CollaborationRoomsPage() {
                       items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1) + items.length) % items.length]?.focus();
                     }
                   }}>
-                    <button type="button" aria-label={t.collaborationRoomMore} title={t.collaborationRoomMore} aria-haspopup="menu" aria-expanded={menuRoomId === room.roomId} disabled={Boolean(archivingRoomId)} onClick={event => {deleteTrigger.current = event.currentTarget; setMenuRoomId(current => current === room.roomId ? null : room.roomId);}} className="rounded-lg p-1.5 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] hover:text-[var(--c-text-primary)] disabled:opacity-40"><MoreHorizontal size={17} /></button>
-                    {menuRoomId === room.roomId && <div role="menu" aria-label={t.collaborationRoomMore} className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-1 shadow-lg">
                       <button autoFocus type="button" role="menuitem" disabled={room.status !== 'active' || !Number.isSafeInteger(room.revision)} onClick={() => void archiveRoom(room)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--c-text-primary)] hover:bg-[var(--c-bg-deep)] disabled:opacity-40"><Archive size={14} />{t.collaborationRoomArchive}</button>
                       <button type="button" role="menuitem" disabled={!Number.isSafeInteger(room.revision)} onClick={() => {setMenuRoomId(null); setDeleteTarget(room); setDeleteError(null); setDeleteConflict(false);}} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive-text hover:bg-[var(--c-bg-deep)] disabled:opacity-40"><Trash2 size={14} />{t.collaborationRoomDelete}</button>
                     </div>}

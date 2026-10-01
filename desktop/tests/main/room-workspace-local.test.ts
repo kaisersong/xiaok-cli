@@ -124,15 +124,19 @@ describe('workspace root identity across macOS device-id drift', () => {
   it('heals stored dev drift with an audit journal and refuses any other identity change', async () => {
     const root = fixture(); const dbPath = join(root, 'internal.db'); const selected = join(root, 'user'); mkdirSync(selected);
     const physical = await prepareWorkspaceRoot(selected);
-    const staleInput = { ...physical, identity: { ...physical.identity, dev: '16777232' }, roomId: 'r1', workspaceId: 'w1', hostId: 'h1', generation: 1, bindingId: 'b1', requestId: 'req1', createdBy: 'u1', payloadDigest: workspaceDigest('binding', physical) };
+    // The stale dev must differ from this host's real root dev: a hardcoded
+    // literal silently degenerates into "no drift to heal" on hosts whose
+    // filesystem dev id happens to equal it (e.g. 16777232 on macOS APFS).
+    const staleDev = String(BigInt(physical.identity.dev) + 1n);
+    const staleInput = { ...physical, identity: { ...physical.identity, dev: staleDev }, roomId: 'r1', workspaceId: 'w1', hostId: 'h1', generation: 1, bindingId: 'b1', requestId: 'req1', createdBy: 'u1', payloadDigest: workspaceDigest('binding', physical) };
     const store = new RoomWorkspaceLocalStore(dbPath);
     try {
       store.prepareBinding(staleInput);
       store.activateBinding('b1', { workspaceId: 'w1', activeBindingId: 'b1', generation: 1 });
-      expect(await store.healBindingRoots()).toEqual([{ bindingId: 'b1', roomId: 'r1', from: '16777232', to: physical.identity.dev }]);
+      expect(await store.healBindingRoots()).toEqual([{ bindingId: 'b1', roomId: 'r1', from: staleDev, to: physical.identity.dev }]);
       expect(store.getBinding('b1')?.identity.dev).toBe(physical.identity.dev);
       expect(store.getBinding('b1')?.state).toBe('active');
-      expect(store.getRecord<{ from: string; to: string }>('identity-heal', 'b1')).toMatchObject({ from: '16777232', to: physical.identity.dev });
+      expect(store.getRecord<{ from: string; to: string }>('identity-heal', 'b1')).toMatchObject({ from: staleDev, to: physical.identity.dev });
       expect(await store.healBindingRoots()).toEqual([]);
       expect(store.healBindingIdentity('b1', { ...physical.identity, ino: '999' })).toBe(false);
       expect(store.healBindingIdentity('b1', { ...physical.identity, birthtimeNs: '1' })).toBe(false);
