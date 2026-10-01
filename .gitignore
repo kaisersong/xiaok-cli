@@ -94,3 +94,6 @@ docs/skill-observability-design.md
 # CodeGraph index cache (107MB local artifact)
 .codegraph/
 .artifacts/
+
+# MSVC leaves this intermediate object next to the payload it produces
+/data/verification/windows/**/*.obj
