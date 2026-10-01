@@ -1,5 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0600
+/* wcscpy/wcscat below write into a buffer already sized wcslen(parent)+32; MSVC
+   reports them as C4996 at /W4 and this build compiles with /WX. Keep the portable
+   names instead of the Microsoft-only _s variants. */
+#define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
 #include <shlobj.h>
 #include <stdio.h>
