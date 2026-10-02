@@ -1,0 +1,796 @@
+[
+  {
+    "name": "list_apps",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_windows",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "on_screen_only": {
+          "type": "boolean"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "session": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "get_window_state",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "pid",
+        "window_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capture_mode": {
+          "enum": [
+            "ax",
+            "vision"
+          ],
+          "type": "string"
+        },
+        "include_accessibility_tree": {
+          "type": "boolean"
+        },
+        "include_screenshot": {
+          "type": "boolean"
+        },
+        "max_depth": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_dimension": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_elements": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_image_dimension": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "query": {
+          "type": "string"
+        },
+        "screenshot_out_file": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 1000,
+          "maximum": 120000,
+          "minimum": 100,
+          "type": "integer"
+        },
+        "window_id": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  {
+    "name": "click",
+    "inputSchema": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "button": {
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "type": "string"
+        },
+        "capture_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "count": {
+          "maximum": 3,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "from_zoom": {
+          "type": "boolean"
+        },
+        "modifier": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "scope": {
+          "default": "window",
+          "enum": [
+            "window",
+            "desktop"
+          ],
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "additionalProperties": true,
+              "properties": {
+                "kind": {
+                  "const": "window",
+                  "type": "string"
+                },
+                "pid": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "window_id": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "pid",
+                "window_id"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": true,
+              "properties": {
+                "display_id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "desktop",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "display_id"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "double_click",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "pid"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "from_zoom": {
+          "type": "boolean"
+        },
+        "modifier": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "session": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "right_click",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "pid"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "from_zoom": {
+          "type": "boolean"
+        },
+        "modifier": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "session": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "drag",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "from_x",
+        "from_y",
+        "to_x",
+        "to_y"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "button": {
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "type": "string"
+        },
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "duration_ms": {
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "from_x": {
+          "type": "number"
+        },
+        "from_y": {
+          "type": "number"
+        },
+        "from_zoom": {
+          "type": "boolean"
+        },
+        "modifier": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "scope": {
+          "enum": [
+            "window",
+            "desktop"
+          ],
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "steps": {
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "description": "Exact capture/input target selected independently for each action.\n\n`display_id=\"primary\"` is the portable desktop target in this release.\nPlatforms that cannot address another display reject it explicitly rather\nthan silently changing coordinate spaces.",
+              "oneOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "kind": {
+                      "const": "window",
+                      "type": "string"
+                    },
+                    "pid": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "window_id": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "pid",
+                    "window_id"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "display_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "desktop",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "display_id"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to_x": {
+          "type": "number"
+        },
+        "to_y": {
+          "type": "number"
+        },
+        "window_id": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  {
+    "name": "type_text",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "maximum": 200,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "scope": {
+          "enum": [
+            "window",
+            "desktop"
+          ],
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "description": "Exact capture/input target selected independently for each action.\n\n`display_id=\"primary\"` is the portable desktop target in this release.\nPlatforms that cannot address another display reject it explicitly rather\nthan silently changing coordinate spaces.",
+              "oneOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "kind": {
+                      "const": "window",
+                      "type": "string"
+                    },
+                    "pid": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "window_id": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "pid",
+                    "window_id"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "display_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "desktop",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "display_id"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "press_key",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "modifiers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "scope": {
+          "enum": [
+            "window",
+            "desktop"
+          ],
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "description": "Exact capture/input target selected independently for each action.\n\n`display_id=\"primary\"` is the portable desktop target in this release.\nPlatforms that cannot address another display reject it explicitly rather\nthan silently changing coordinate spaces.",
+              "oneOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "kind": {
+                      "const": "window",
+                      "type": "string"
+                    },
+                    "pid": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "window_id": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "pid",
+                    "window_id"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "display_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "desktop",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "display_id"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    }
+  },
+  {
+    "name": "set_value",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "pid",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "session": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  {
+    "name": "scroll",
+    "inputSchema": {
+      "type": "object",
+      "required": [
+        "direction"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "by": {
+          "enum": [
+            "line",
+            "page"
+          ],
+          "type": "string"
+        },
+        "delivery_mode": {
+          "enum": [
+            "background",
+            "foreground"
+          ],
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "integer"
+        },
+        "scope": {
+          "default": "window",
+          "enum": [
+            "window",
+            "desktop"
+          ],
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "description": "Exact capture/input target selected independently for each action.\n\n`display_id=\"primary\"` is the portable desktop target in this release.\nPlatforms that cannot address another display reject it explicitly rather\nthan silently changing coordinate spaces.",
+              "oneOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "kind": {
+                      "const": "window",
+                      "type": "string"
+                    },
+                    "pid": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "window_id": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "pid",
+                    "window_id"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "display_id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "desktop",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "display_id"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    }
+  }
+]

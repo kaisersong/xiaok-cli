@@ -1,13 +1,18 @@
 import type { Tool } from '../../types.js';
 import type { McpInvocationOptions, McpRuntimeToolResult } from '../mcp/runtime/client.js';
 import {
-  CUA_ACTION_CONTRACTS,
+  MACOS_CUA_ABI_PROFILE,
+  type CuaAbiProfile,
   InvalidComputerUseInputError,
   translateCuaAction,
 } from '../../platform/computer-use/cua-action-contract.js';
 import { classifyCuaRuntimeFailure } from '../../platform/mcp/cua-runtime-failure.js';
 
 export interface ComputerUseBackend {
+  abiProfile?: CuaAbiProfile;
+  requiresImageInput?: boolean;
+  prepareActionInput?(action: string, input: Record<string, unknown>): Record<string, unknown>;
+  acquireInvocation?(): { generation: number; backend: ComputerUseBackend; isCurrent(): boolean } | null;
   getUnavailableError?(): ComputerUseUnavailableError | null;
   onRecoverableError?(error: ComputerUseUnavailableError): void;
   callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult>;
@@ -31,8 +36,6 @@ export interface ComputerUseUnavailableError {
  * in cua-driver 0.19.3 (its legacy catalog has 54 tools and neither of those), so
  * a "ready" provider failed at call time with Unknown tool.
  */
-const PUBLIC_CUA_ACTIONS: readonly string[] = CUA_ACTION_CONTRACTS.map((c) => c.action);
-
 const DANGEROUS_KEY_PATTERNS = [
   /^cmd\+shift\+q$/i,
   /^cmd\+option\+shift\+q$/i,
@@ -48,13 +51,15 @@ const DANGEROUS_TEXT_PATTERNS = [
   /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/,
 ];
 
-export function createComputerUseTool(backend: ComputerUseBackend): Tool {
+export function createComputerUseTool(backend: ComputerUseBackend, abiProfile: CuaAbiProfile = MACOS_CUA_ABI_PROFILE): Tool {
+  const PUBLIC_CUA_ACTIONS: readonly string[] = abiProfile.contracts.map(c => c.action);
   const repeatedRecoverableErrors = new Set<string>();
+  let lastErrorGeneration: number | undefined;
   return {
     permission: 'write',
     definition: {
       name: 'xiaok_computer_use',
-      description: 'Observe and operate local macOS apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED has waitForUserAction=false, first observe the current UI again, then decide whether the interrupted mutation still needs to be retried. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.',
+      description: `Observe and operate local ${abiProfile.platform === 'win32' ? 'Windows' : 'macOS'} apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If a reobserve-required error has waitForUserAction=false, first capture the current target UI again, then decide whether the interrupted mutation still needs to be retried. Windows mutations default to background. An explicit foreground retry requires a native background_unavailable response for that exact target/operation and another fresh capture; never switch focus preemptively. Windows mutations require a fresh capture, explicit pid + window_id, and tokens/indices from that exact host snapshot. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -64,9 +69,9 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
             description: 'Computer-use action to run.',
           },
           app: { type: 'string' },
-          pid: { type: 'number' },
-          window_id: { type: 'string' },
-          element_index: { type: 'string' },
+          pid: { type: abiProfile.platform === 'win32' ? 'integer' : 'number' },
+          window_id: { type: abiProfile.platform === 'win32' ? 'integer' : 'string' },
+          element_index: { type: abiProfile.platform === 'win32' ? 'integer' : 'string' },
           x: { type: 'number' },
           y: { type: 'number' },
           to_x: { type: 'number' },
@@ -78,17 +83,32 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
           value: { type: 'string' },
           on_screen_only: { type: 'boolean' },
           query: { type: 'string' },
-          javascript: { type: 'string' },
-          screenshot_out_file: { type: 'string' },
+          ...(abiProfile.platform === 'win32' ? {
+            snapshot_id: { type: 'string', description: 'Host snapshot identity returned by this generation of capture. Required with element_index.' },
+            element_token: { type: 'string', description: 'Host element token from the latest capture of this pid and window_id.' },
+            capture_id: { type: 'string', description: 'Host capture identity from the latest capture of this target.' },
+            delivery_mode: { type: 'string', enum: ['background', 'foreground'] },
+            button: { type: 'string', enum: ['left', 'right', 'middle'] }, count: { type: 'integer', minimum: 1, maximum: 3 },
+            by: { type: 'string', enum: ['line', 'page'] },
+            duration_ms: { type: 'integer', minimum: 0 }, steps: { type: 'integer', minimum: 1 }, delay_ms: { type: 'integer', minimum: 0 },
+            include_accessibility_tree: { type: 'boolean' }, max_depth: { type: 'integer', minimum: 1 },
+            max_elements: { type: 'integer', minimum: 1 }, max_dimension: { type: 'integer', minimum: 1 },
+            max_image_dimension: { type: 'integer', minimum: 0 }, timeout_ms: { type: 'integer', minimum: 100, maximum: 120000 },
+            modifier: { type: 'array', items: { type: 'string' } }, modifiers: { type: 'array', items: { type: 'string' } },
+          } : { javascript: { type: 'string' }, screenshot_out_file: { type: 'string' } }),
           capture_after: { type: 'boolean' },
         },
         required: ['action'],
-        additionalProperties: true,
+        additionalProperties: abiProfile.platform !== 'win32',
       },
     },
     async execute(input, context) {
       const options = context?.signal ? { signal: context.signal } : undefined;
       options?.signal?.throwIfAborted();
+      const lease = backend.acquireInvocation?.();
+      if (lease?.generation !== lastErrorGeneration) {
+        repeatedRecoverableErrors.clear(); lastErrorGeneration = lease?.generation;
+      }
       const returnRecoverableError = (error: ComputerUseUnavailableError, notifyBackend = false): string => {
         if (notifyBackend && error.notifyBackend !== false) {
           try {
@@ -123,13 +143,43 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       if (!PUBLIC_CUA_ACTIONS.includes(action)) {
         return `Error: unsupported computer-use action: ${String(input.action)}`;
       }
+      const targetBackend = lease?.backend ?? backend;
+      const invocationProfile = targetBackend.abiProfile ?? abiProfile;
+      if (invocationProfile.id !== abiProfile.id) return returnRecoverableError({ code: 'COMPUTER_USE_WRAPPER_NOT_READY', message: 'Computer Use 接口版本已变化，请重新启用。', retryable: false });
+      const assertGeneration = () => {
+        if (lease && !lease.isCurrent()) {
+          throw Object.assign(new Error('Computer Use connection changed; observe again.'), { code: 'COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED' });
+        }
+      };
+      const invocationBackend: ComputerUseBackend = {
+        ...targetBackend,
+        async callToolResult(name, args, callOptions) {
+          assertGeneration();
+          const result = await targetBackend.callToolResult(name, args, callOptions);
+          assertGeneration();
+          if (targetBackend.requiresImageInput && name === 'get_window_state' && !result.isError) {
+            const observation = result.structuredContent as Record<string, unknown> | undefined;
+            for (const field of ['pid', 'window_id']) {
+              const requested = args[field];
+              if (typeof requested !== 'number' || !Number.isSafeInteger(requested) || requested <= 0
+                || !observation || observation[field] !== requested) throw new Error('COMPUTER_USE_OBSERVATION_TARGET_MISMATCH');
+            }
+          }
+          return result;
+        },
+      };
+      if (targetBackend.requiresImageInput && !['list_apps', 'list_windows'].includes(action)
+        && (context?.modelSupportsImageInput !== true || !context.emitToolImage)) {
+        return returnRecoverableError({ code: 'COMPUTER_USE_MODEL_IMAGE_DISABLED', message: '当前会话模型没有经过确认的图片输入能力，请切换到支持图片的模型。', retryable: false, waitForUserAction: true, remember: false });
+      }
+      const images: McpRuntimeToolResult['images'] = [];
 
       const blocked = checkBlockedInput(action, input);
       if (blocked) return blocked;
 
       let prepared: Record<string, unknown> | string;
       try {
-        prepared = await buildActionInput(backend, action, input, options);
+        prepared = await buildActionInput(invocationBackend, action, input, options);
         options?.signal?.throwIfAborted();
       } catch (error) {
         options?.signal?.throwIfAborted();
@@ -147,15 +197,17 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
       // renames and forced constants; nothing is passed through implicitly.
       let translated: { operation: string; input: Record<string, unknown> };
       try {
-        translated = translateCuaAction(action, prepared);
+        translated = translateCuaAction(action, targetBackend.prepareActionInput?.(action, prepared) ?? prepared, invocationProfile);
       } catch (error) {
         if (error instanceof InvalidComputerUseInputError) return `Error: ${error.message}`;
+        const recoverable = classifyRecoverableComputerUseError(error);
+        if (recoverable) return returnRecoverableError(recoverable);
         throw error;
       }
 
       let result: McpRuntimeToolResult;
       try {
-        result = await callComputerUseBackend(backend, translated.operation, translated.input, options);
+        result = await callComputerUseBackend(invocationBackend, translated.operation, translated.input, options);
         options?.signal?.throwIfAborted();
       } catch (error) {
         options?.signal?.throwIfAborted();
@@ -174,9 +226,10 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         action,
         result: sanitizeToolResult(result),
       };
+      if (targetBackend.requiresImageInput && ['capture', 'screenshot'].includes(action)) images.push(...result.images);
 
-      if (input.capture_after === true && action !== 'capture' && action !== 'list_apps' && action !== 'list_windows') {
-        const captureInput = await buildCaptureInput(backend, input, options);
+      if (input.capture_after === true && action !== 'capture' && action !== 'screenshot' && action !== 'list_apps' && action !== 'list_windows') {
+        const captureInput = await buildCaptureInput(invocationBackend, input, options);
         options?.signal?.throwIfAborted();
         if (typeof captureInput === 'string') {
           const recoverable = classifyRecoverableComputerUseError(captureInput);
@@ -187,11 +240,11 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
         // The follow-up observation goes through the same frozen translator as the
         // public `capture` action, so both paths force include_screenshot and share
         // one allowed-field set (design §6.1).
-        const captureTranslated = translateCuaAction('capture', captureInput);
+        const captureTranslated = translateCuaAction('capture', captureInput, invocationProfile);
         let capture: McpRuntimeToolResult;
         try {
           capture = await callComputerUseBackend(
-            backend,
+            invocationBackend,
             captureTranslated.operation,
             captureTranslated.input,
             options,
@@ -207,10 +260,16 @@ export function createComputerUseTool(backend: ComputerUseBackend): Tool {
           const recoverable = classifyRecoverableComputerUseError(capture);
           if (recoverable) return returnRecoverableError(recoverable, true);
         }
+        if (targetBackend.requiresImageInput && !capture.isError) images.push(...capture.images);
         response.captureAfter = sanitizeToolResult(capture);
       }
 
       options?.signal?.throwIfAborted();
+      assertGeneration();
+      for (const image of images) {
+        if (!image.data || image.mimeType !== 'image/png') throw new Error('COMPUTER_USE_IMAGE_INVALID');
+        context!.emitToolImage!({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.data } });
+      }
       return JSON.stringify(response);
     },
   };
@@ -237,6 +296,19 @@ async function callComputerUseBackend(
 
 function classifyRecoverableComputerUseError(value: unknown): ComputerUseUnavailableError | null {
   const code = readErrorCode(value);
+  if (code === 'background_unavailable' || code === 'background_occluded') {
+    return { code: 'COMPUTER_USE_BACKGROUND_UNAVAILABLE', message: '当前目标的后台操作不可用，请重新观察后再决定是否显式选择 foreground。', waitForUserAction: false, retryable: true, notifyBackend: false, remember: false, nextAction: 'capture' };
+  }
+  const nativeMessage = value && typeof value === 'object' ? (value as Partial<McpRuntimeToolResult>).summary ?? (value as Partial<McpRuntimeToolResult>).text : undefined;
+  if (code === 'foreground_unavailable' || (code === 'tool_invocation_failed' && typeof nativeMessage === 'string' && nativeMessage.startsWith('foreground_unavailable:'))) return { code: 'COMPUTER_USE_FOREGROUND_UNAVAILABLE', message: 'Windows 未确认目标窗口或控件获得焦点。请检查目标状态后重新观察，避免重复发送操作。', waitForUserAction: true, retryable: false, notifyBackend: false, remember: false };
+  if (code === 'background_uipi_blocked') return { code: 'COMPUTER_USE_WINDOWS_TARGET_PERMISSION_DENIED', message: 'Windows 阻止了向此目标发送输入，请将目标与小K运行在相同权限级别后重新观察。', waitForUserAction: true, retryable: false, notifyBackend: false, remember: false };
+  if (code === 'COMPUTER_USE_WINDOW_AMBIGUOUS') {
+    return { code, message: value instanceof Error ? value.message : '多个窗口匹配，请明确 pid + window_id。', waitForUserAction: false, retryable: true, notifyBackend: false, remember: false, nextAction: 'list_windows' };
+  }
+  if (code === 'COMPUTER_USE_REOBSERVE_REQUIRED' || code === 'COMPUTER_USE_OBSERVATION_TARGET_MISMATCH' || code === 'COMPUTER_USE_OBSERVATION_INVALID') {
+    return { code, message: '目标尚未观察、快照已过期或观察结果无效，请重新 capture 同一 pid 与 window_id 后再操作。',
+      waitForUserAction: false, retryable: true, notifyBackend: false, remember: false, nextAction: 'capture' };
+  }
   if (code === 'COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED') {
     return {
       code,
@@ -263,7 +335,8 @@ function classifyRecoverableComputerUseError(value: unknown): ComputerUseUnavail
 
 function readErrorCode(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null;
-  const code = (value as { code?: unknown }).code;
+  const record = value as { code?: unknown; structuredContent?: { code?: unknown; error?: { code?: unknown } } };
+  const code = record.code ?? record.structuredContent?.code ?? record.structuredContent?.error?.code;
   return typeof code === 'string' ? code : null;
 }
 
@@ -343,7 +416,7 @@ async function buildCaptureInput(
     return `Error: ${windows.summary || windows.text || 'list_windows failed before capture'}`;
   }
 
-  const candidate = selectWindowForApp(windows.structuredContent, app);
+  const candidate = selectWindowForApp(windows.structuredContent, app, backend.abiProfile?.platform === 'win32');
   if (!candidate) {
     return `Error: no visible CUA window found for app: ${app}`;
   }
@@ -373,7 +446,7 @@ async function buildScreenshotInput(
     return `Error: ${windows.summary || windows.text || 'list_windows failed before screenshot'}`;
   }
 
-  const candidate = selectWindowForApp(windows.structuredContent, app);
+  const candidate = selectWindowForApp(windows.structuredContent, app, backend.abiProfile?.platform === 'win32');
   if (!candidate) {
     return `Error: no visible CUA window found for app: ${app}`;
   }
@@ -410,12 +483,16 @@ function pickWindowStateOptions(input: Record<string, unknown>): Record<string, 
       output[key] = input[key];
     }
   }
+  for (const key of ['include_accessibility_tree', 'max_depth', 'max_elements', 'max_dimension', 'max_image_dimension', 'timeout_ms']) {
+    if (input[key] !== undefined) output[key] = input[key];
+  }
   return output;
 }
 
 function selectWindowForApp(
   structuredContent: unknown,
   app: string,
+  rejectAmbiguous = false,
 ): { pid: number; windowId: number } | null {
   const windows = extractWindows(structuredContent);
   const normalizedApp = normalizeName(app);
@@ -424,8 +501,12 @@ function selectWindowForApp(
     .filter((window): window is NormalizedWindowRecord => window !== null)
     .filter((window) => {
       const appName = normalizeName(window.appName);
-      return appName === normalizedApp || appName.includes(normalizedApp) || normalizedApp.includes(appName);
+      return Boolean(appName) && (appName === normalizedApp || appName.includes(normalizedApp) || normalizedApp.includes(appName));
     });
+
+  if (rejectAmbiguous && candidates.length > 1) {
+    throw Object.assign(new Error(`多个窗口匹配 ${app}，请明确 pid + window_id：${JSON.stringify(candidates.slice(0, 8).map(window => ({ pid: window.pid, window_id: window.windowId, title: window.title })))}`), { code: 'COMPUTER_USE_WINDOW_AMBIGUOUS' });
+  }
 
   const selected = candidates.find((window) => window.isOnScreen !== false) ?? candidates[0];
   if (!selected) return null;
@@ -434,6 +515,7 @@ function selectWindowForApp(
 
 interface NormalizedWindowRecord {
   appName: string;
+  title: string;
   pid: number;
   windowId: number;
   isOnScreen?: boolean;
@@ -454,6 +536,7 @@ function normalizeWindowRecord(record: unknown): NormalizedWindowRecord | null {
   if (pid === null || windowId === null || !appName) return null;
   return {
     appName,
+    title: readFirstString(value, ['title', 'window_title']).slice(0, 200),
     pid,
     windowId,
     ...(typeof value.is_on_screen === 'boolean' ? { isOnScreen: value.is_on_screen } : {}),
@@ -469,10 +552,10 @@ function readFirstString(record: Record<string, unknown>, keys: string[]): strin
 }
 
 function normalizeInteger(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) return value;
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value);
-    if (Number.isInteger(parsed)) return parsed;
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
   }
   return null;
 }

@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { posix as posixPath, win32 as win32Path, type PlatformPath } from 'node:path';
 import { homedir, platform as osPlatform } from 'node:os';
-import { spawn } from 'node:child_process';
+import { runDependencyProcess } from './dependency-task.js';
 
 /**
  * Selects POSIX vs Windows path semantics for dependency resolution. When a
@@ -14,7 +14,7 @@ function pathModuleFor(platform?: NodeJS.Platform | string): PlatformPath {
   return target === 'win32' ? win32Path : posixPath;
 }
 
-export type PluginDependencyKind = 'macos_app_cli';
+export type PluginDependencyKind = 'macos_app_cli' | 'native_cli';
 export type PluginDependencyState = 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
 export type PluginDependencyCode =
   | 'ready'
@@ -30,6 +30,8 @@ export type PluginDependencyCode =
 export interface ExternalPluginDependency {
   id: string;
   kind: PluginDependencyKind;
+  supportedPlatforms?: readonly string[];
+  exactVersion?: string;
   displayName: string;
   envOverride?: string;
   binaryCandidates: string[];
@@ -39,7 +41,7 @@ export interface ExternalPluginDependency {
     sourceUrl: string;
     sourceAllowlist?: string[];
     requiresUserConfirmation: boolean;
-  };
+  } | { kind: 'official_release_archive'; requiresUserConfirmation: boolean };
   update?:
     | {
         kind: 'command';
@@ -52,7 +54,8 @@ export interface ExternalPluginDependency {
         sourceUrl: string;
         sourceAllowlist?: string[];
         requiresUserConfirmation: boolean;
-      };
+      }
+    | { kind: 'official_release_archive'; requiresUserConfirmation: boolean };
   health?: {
     version?: string[];
     status?: string[];
@@ -91,6 +94,9 @@ export interface PluginDependencyStatusOptions {
   homeDir?: string;
   pathEnv?: string;
   exists?: (path: string) => boolean;
+  isFile?: (path: string) => boolean;
+  appArch?: string;
+  nativeOsArch?: string;
   runCommand?: (command: string, args: string[]) => Promise<CommandResult>;
 }
 
@@ -107,9 +113,9 @@ export function expandHomePath(path: string, homeDir = homedir(), pathModule: Pl
 
 export function resolveDependencyBinary(
   candidates: string[],
-  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists' | 'platform'> = {},
+  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists' | 'isFile' | 'platform'> = {},
 ): string | null {
-  const exists = options.exists ?? existsSync;
+  const exists = filePredicate(options);
   const homeDir = options.homeDir ?? homedir();
   const pathMod = pathModuleFor(options.platform);
   const pathDirs = (options.pathEnv ?? process.env.PATH ?? '')
@@ -134,22 +140,25 @@ export function resolveDependencyBinary(
 
 function resolveEnvOverrideBinary(
   envName: string | undefined,
-  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists' | 'platform'> = {},
+  options: Pick<PluginDependencyStatusOptions, 'homeDir' | 'pathEnv' | 'exists' | 'isFile' | 'platform'> = {},
 ): { binary: string | null; error?: string } {
   if (!envName) return { binary: null };
   const raw = process.env[envName]?.trim();
   if (!raw) return { binary: null };
-  if (/[\s;&|`$<>]/.test(raw)) {
+  const pathMod = pathModuleFor(options.platform);
+  const expanded = expandHomePath(raw, options.homeDir ?? homedir(), pathMod);
+  const absolute = pathMod.isAbsolute(expanded);
+  const isWindows = (options.platform ?? process.platform) === 'win32';
+  const extension = pathMod.extname(expanded).toLowerCase();
+  if (/[;&|`$<>\r\n\0"]/.test(raw) || (!absolute && /\s/.test(raw))
+    || (isWindows && ((absolute && extension !== '.exe') || (extension !== '' && extension !== '.exe')))) {
     return {
       binary: null,
       error: `${envName} must contain a single binary path or command name without shell syntax`,
     };
   }
 
-  const exists = options.exists ?? existsSync;
-  const homeDir = options.homeDir ?? homedir();
-  const pathMod = pathModuleFor(options.platform);
-  const expanded = expandHomePath(raw, homeDir, pathMod);
+  const exists = filePredicate(options);
   if (/[\\/]/.test(expanded) || pathMod.isAbsolute(expanded)) {
     if (exists(expanded)) return { binary: expanded };
     return { binary: null, error: `${envName} points to a binary that does not exist: ${expanded}` };
@@ -159,7 +168,7 @@ function resolveEnvOverrideBinary(
     .split(pathMod.delimiter)
     .filter(Boolean);
   for (const dir of pathDirs) {
-    const resolved = pathMod.join(dir, expanded);
+    const resolved = pathMod.join(dir, isWindows && !extension ? `${expanded}.exe` : expanded);
     if (exists(resolved)) return { binary: resolved };
   }
   return { binary: null, error: `${envName} command was not found on PATH: ${expanded}` };
@@ -178,9 +187,12 @@ export async function getPluginDependencyStatus(
     canDiagnose: Boolean(dependency.health?.doctor),
   };
 
-  if (currentPlatform !== 'darwin') {
+  if (!isDependencyPlatformSupported(dependency, options)) {
     return {
       ...baseStatus,
+      canInstall: false,
+      canUpdate: false,
+      canDiagnose: false,
       state: 'unsupported',
       code: 'unsupported_platform',
       detail: 'This dependency is only supported on macOS.',
@@ -209,7 +221,7 @@ export async function getPluginDependencyStatus(
 
   const runCommand = options.runCommand ?? runLocalCommand;
   let version: string | undefined;
-  if (dependency.minVersion) {
+  if (dependency.minVersion || dependency.exactVersion) {
     let versionResult: CommandResult;
     try {
       versionResult = await runHealthCommand(runCommand, resolvedBinary, dependency.health?.version ?? [resolvedBinary, '--version']);
@@ -232,14 +244,15 @@ export async function getPluginDependencyStatus(
         detail: 'Could not determine dependency version.',
       };
     }
-    if (compareVersions(version, dependency.minVersion) < 0) {
+    if ((dependency.exactVersion && version !== dependency.exactVersion)
+      || (dependency.minVersion && compareVersions(version, dependency.minVersion) < 0)) {
       return {
         ...baseStatus,
         state: 'degraded',
         code: 'version_too_old',
         resolvedBinary,
         version,
-        detail: `${dependency.displayName} ${version} is older than ${dependency.minVersion}.`,
+        detail: `${dependency.displayName} ${version} does not meet the required version ${dependency.exactVersion ?? dependency.minVersion}.`,
       };
     }
   }
@@ -319,7 +332,7 @@ function parseVersion(output: string): string | undefined {
 }
 
 function compareVersions(actual: string, minimum: string): number {
-  const toParts = (value: string) => value.split(/[.+-]/)[0].split('.').map((part) => Number(part));
+  const toParts = (value: string) => value.split(/[-+]/)[0].split('.').map((part) => Number(part));
   const a = toParts(actual);
   const b = toParts(minimum);
   for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
@@ -341,18 +354,20 @@ function classifyPermissionOutput(output: string): Extract<PluginDependencyCode,
   return null;
 }
 
-function runLocalCommand(command: string, args: string[]): Promise<CommandResult> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    child.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
-    child.stderr.on('data', (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on('error', (error) => resolve({ exitCode: 1, stdout: '', stderr: error.message }));
-    child.on('close', (code) => resolve({
-      exitCode: code ?? 1,
-      stdout: Buffer.concat(stdout).toString('utf8'),
-      stderr: Buffer.concat(stderr).toString('utf8'),
-    }));
-  });
+async function runLocalCommand(command: string, args: string[]): Promise<CommandResult> {
+  const result = await runDependencyProcess(command, args, { timeoutMs: 30_000 });
+  return { exitCode: result.success ? 0 : 1, stdout: result.output ?? '', stderr: result.error ?? '' };
+}
+
+function filePredicate(options: Pick<PluginDependencyStatusOptions, 'exists' | 'isFile'>): (path: string) => boolean {
+  if (options.isFile) return path => (options.exists ?? existsSync)(path) && options.isFile!(path);
+  if (options.exists) return options.exists;
+  return path => { try { return statSync(path).isFile(); } catch { return false; } };
+}
+
+export function isDependencyPlatformSupported(dependency: ExternalPluginDependency, options: PluginDependencyStatusOptions = {}): boolean {
+  const target = options.platform ?? process.platform;
+  if (dependency.kind === 'macos_app_cli') return target === 'darwin';
+  if (!dependency.supportedPlatforms?.includes(target)) return false;
+  return target !== 'win32' || ((options.appArch ?? process.arch) === 'x64' && options.nativeOsArch === 'x64');
 }

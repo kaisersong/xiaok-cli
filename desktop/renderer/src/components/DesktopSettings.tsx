@@ -2282,6 +2282,7 @@ interface PluginDependencyStatus {
   canInstall: boolean;
   canUpdate: boolean;
   canDiagnose: boolean;
+  task?: { taskId: string; dependencyId: string; state: 'running' | 'cancelling' };
 }
 
 function McpPane() {
@@ -2521,6 +2522,13 @@ function McpPane() {
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                      {dependency.task && (
+                        <button type="button" disabled={dependency.task.state === 'cancelling'}
+                          onClick={() => void api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId }).then(load).catch(error => alert(error instanceof Error ? error.message : String(error)))}
+                          className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs disabled:opacity-50">
+                          {dependency.task.state === 'cancelling' ? ts.mcpCancellingTask : ts.mcpCancelTask}
+                        </button>
+                      )}
                       {dependency.code === 'permission_accessibility_missing' && (
                         <button
                           type="button"

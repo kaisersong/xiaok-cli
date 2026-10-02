@@ -1,12 +1,38 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import {
   buildComputerUseDisabledError,
   isComputerUseAutoConnectEligibleApp,
   normalizeComputerUsePreference,
+  saveComputerUsePreference,
 } from '../../electron/computer-use-capability-service.js';
 
 describe('computer-use capability service', () => {
+  it('retains v2 Windows identity and compares paths with Windows semantics', () => {
+    const preference = normalizeComputerUsePreference({ schemaVersion: 2, platform: 'win32', enabledByUser: true,
+      autoConnectAfterSuccessfulEnablement: true, lastSuccessfulAt: 123,
+      lastSuccessfulAppPath: 'C:\\Program Files\\Xiaok', lastSuccessfulAppAsarSha256: 'hash' });
+    expect(preference).toMatchObject({ schemaVersion: 2, platform: 'win32' });
+    expect(isComputerUseAutoConnectEligibleApp(preference, { platform: 'win32', appPath: 'c:/program files/xiaok',
+      isPackaged: true, appAsarSha256: 'hash', installationSource: 'nsis' })).toEqual({ eligible: true });
+    expect(isComputerUseAutoConnectEligibleApp(preference, { platform: 'win32', appPath: 'c:/program files/xiaok',
+      isPackaged: true, appAsarSha256: 'hash' })).toEqual({ eligible: false, reason: 'installation_source_unverified' });
+  });
+  it.each([99, '3', null])('cannot overwrite an unknown or invalid preference schema %s', schemaVersion => {
+    const root = mkdtempSync(join(tmpdir(), 'cua-future-'));
+    try {
+      const file = join(root, 'state.json');
+      const original = JSON.stringify({ schemaVersion, enabledByUser: true, futureField: 'preserve' });
+      writeFileSync(file, original);
+      const decoded = normalizeComputerUsePreference(JSON.parse(original));
+      expect(decoded.enabledByUser).toBe(false);
+      saveComputerUsePreference(file, decoded);
+      expect(readFileSync(file, 'utf8')).toBe(original);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   it('allows auto-connect only for a previously enabled packaged Applications app with matching TeamIdentifier', () => {
     const preference = normalizeComputerUsePreference({
       schemaVersion: 1,

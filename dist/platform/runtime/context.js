@@ -267,6 +267,10 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             break;
         }
         const policy = classifyMcpServer(server, classificationRegistry);
+        if (policy.activation.mode === 'blocked') {
+            capabilityHealth.push({ kind: 'mcp', name: server.name, status: 'degraded', detail: policy.reason });
+            continue;
+        }
         if (policy.activation.mode === 'lazy' && policy.activation.adapter === 'cua-computer-use-wrapper') {
             if (platform !== 'darwin') {
                 capabilityHealth.push({

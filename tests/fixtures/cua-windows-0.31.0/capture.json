@@ -1,0 +1,258 @@
+{
+  "content": [
+    {
+      "text": "window_id=309463084 pid=25220 elements=9\n\n- Window \"Xiaok CUA Verification 1790879251299\"\n  - [0] TitleBar [value=\"Xiaok CUA Verification 1790879251299\" actions=[set_value]]\n    - MenuBar \"系统\"\n      - [1] MenuItem \"系统\" [actions=[expand]]\n    - [2] Button \"最小化\" [actions=[invoke]]\n    - [3] Button \"最大化\" [actions=[invoke]]\n    - [4] Button \"关闭\" [actions=[invoke]]\n  - Text \"Xiaok disposable CUA test window\"\n  - [5] Edit [id=VerificationInput actions=[set_value,text,scroll]]\n  - [6] Button \"Verification Click\" [actions=[invoke]]\n    - Text \"Verification Click\"\n  - [7] Pane \"Verification row 1\r\nVerification row 2\r\nVerification row 3\r\nVerification row 4\r\nVerification row 5\r\nVerification row 6\r\nVerification row 7\r\nVerification row 8\r\nVerification row 9\r\nVerification row 10\r\nVerification row 11\r\nVerification row 12\r\nVerification row 13\r\nVerification row 14\r\nVerification row 15\r\nVerification row 16\r\nVerification row 17\r\nVerification row 18\r\nVerification row 19\r\nVerification row 20\r\nVerification row 21\r\nVerification row 22\r\nVerification row 23\r\nVerification row 24\r\nVerification row 25\r\nVerification row 26\r\nVerification row 27\r\nVerification row 28\r\nVerification row 29\r\nVerification row 30\r\nVerification row 31\r\nVerification row 32\r\nVerification row 33\r\nVerification row 34\r\nVerification row 35\r\nVerification row 36\r\nVerification row 37\r\nVerification row 38\r\nVerification row 39\r\nVerification row 40\r\nVerification row 41\r\nVerification row 42\r\nVerification row 43\r\nVerification row 44\r\nVerification row 45\r\nVerification row 46\r\nVerification row 47\r\nVerification row 48\r\nVerification row 49\r\nVerification row 50\r\nVerification row 51\r\nVerification row 52\r\nVerification row 53\r\nVerification row 54\r\nVerification row 55\r\nVerification row 56\r\nVerification row 57\r\nVerification row 58\r\nVerification row 59\r\nVerification row 60\r\nVerification row 61\r\nVerification row 62\r\nVerification row 63\r\nVerification row 64\r\nVerification row 65\r\nVerification row 66\r\nVerification row 67\r\nVerification row 68\r\nVerification row 69\r\nVerification row 70\r\nVerification row 71\r\nVerification row 72\r\nVerification row 73\r\nVerification row 74\r\nVerification row 75\r\nVerification row 76\r\nVerification row 77\r\nVerification row 78\r\nVerification row 79\r\nVerification row 80\r\nVerification row 81\r\nVerification row 82\r\nVerification row 83\r\nVerification row 84\r\nVerification row 85\r\nVerification row 86\r\nVerification row 87\r\nVerification row 88\r\nVerification row 89\r\nVerification row 90\r\nVerification row 91\r\nVerification row 92\r\nVerification row 93\r\nVerification row 94\r\nVerification row 95\r\nVerification row 96\r\nVerification row 97\r\nVerification row 98\r\nVerification row 99\r\nVerification row 100\" [actions=[scroll]]\n    - Text \"Verification row 1\r\nVerification row 2\r\nVerification row 3\r\nVerification row 4\r\nVerification row 5\r\nVerification row 6\r\nVerification row 7\r\nVerification row 8\r\nVerification row 9\r\nVerification row 10\r\nVerification row 11\r\nVerification row 12\r\nVerification row 13\r\nVerification row 14\r\nVerification row 15\r\nVerification row 16\r\nVerification row 17\r\nVerification row 18\r\nVerification row 19\r\nVerification row 20\r\nVerification row 21\r\nVerification row 22\r\nVerification row 23\r\nVerification row 24\r\nVerification row 25\r\nVerification row 26\r\nVerification row 27\r\nVerification row 28\r\nVerification row 29\r\nVerification row 30\r\nVerification row 31\r\nVerification row 32\r\nVerification row 33\r\nVerification row 34\r\nVerification row 35\r\nVerification row 36\r\nVerification row 37\r\nVerification row 38\r\nVerification row 39\r\nVerification row 40\r\nVerification row 41\r\nVerification row 42\r\nVerification row 43\r\nVerification row 44\r\nVerification row 45\r\nVerification row 46\r\nVerification row 47\r\nVerification row 48\r\nVerification row 49\r\nVerification row 50\r\nVerification row 51\r\nVerification row 52\r\nVerification row 53\r\nVerification row 54\r\nVerification row 55\r\nVerification row 56\r\nVerification row 57\r\nVerification row 58\r\nVerification row 59\r\nVerification row 60\r\nVerification row 61\r\nVerification row 62\r\nVerification row 63\r\nVerification row 64\r\nVerification row 65\r\nVerification row 66\r\nVerification row 67\r\nVerification row 68\r\nVerification row 69\r\nVerification row 70\r\nVerification row 71\r\nVerification row 72\r\nVerification row 73\r\nVerification row 74\r\nVerification row 75\r\nVerification row 76\r\nVerification row 77\r\nVerification row 78\r\nVerification row 79\r\nVerification row 80\r\nVerification row 81\r\nVerification row 82\r\nVerification row 83\r\nVerification row 84\r\nVerification row 85\r\nVerification row 86\r\nVerification row 87\r\nVerification row 88\r\nVerification row 89\r\nVerification row 90\r\nVerification row 91\r\nVerification row 92\r\nVerification row 93\r\nVerification row 94\r\nVerification row 95\r\nVerification row 96\r\nVerification row 97\r\nVerification row 98\r\nVerification row 99\r\nVerification row 100\"\n    - [8] ScrollBar [id=VerticalScrollBar actions=[set_value]]\n",
+      "type": "text"
+    },
+    {
+      "data": "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ICdPnuTP/uzPeIVXeAWe27Fjx1itVjzQ3XffzcbGBgBPeMITODo64pd+6Zd4oKc85Slcf/31PLdHP/rR/PVf/zV33303q9WK66+/nvu9yZu8Cddffz0P9IQnPIH/KH/2Z3/GnXfeyfu+7/sC8NM//dP8W21sbPAf6fz587zSK70SD/ToRz+aRz/60QA84QlPYLlcAjCfz7njjju4/vrrAbhw4QInT57kCU94AidPnuT6668H4NGPfjR//dd/zd133831118PwMWLF3mjN3ojHugVXuEVeIVXeAUA/uzP/oz7PeEJT+Cv//qved/3fV/+I/zwD/8wL/3SL82jH/1ontv7vu/7cr/v/M7v5NGPfjQAr/Ear8FrvMZrAPB7v/d7bGxscNVVV131/93d99zD7/z2b/Nar/3aXH/ddQC81mu/Nr/z27/Na732a3P9ddfxH4TgX/D4O8E58ZYvP+OVHznj+3/xr/mQL/1tduMxvOKLP4j3eL0zvOfrX8t7vsH1vNcb3sgjrz2iWxzn0dc3/iV//dd/zUu/9EsD8Eqv9Er83d/9Hc/PYrEA4O677+bChQsAPPrRj+bChQs84QlP4H5PfepTOXPmDPd7rdd6LRaLBb/yK7/C8/PoRz+av/u7v+MJT3gC9/uzP/sznvCEJ3D99dcD8Gd/9mfc72//9m+58cYbAXjGM57BIx7xCN73fd+X933f9+V93/d9edVXfVXuvPNOXpATJ07wO7/zO9x4443c78SJE/zt3/4t/1FOnDjB3/7t3/LcFosFAHfffTcXLlzgfhsbG6xWK57box/9aC5cuMATnvAE7vfUpz6VM2fO8B/l7rvvZrVacf311/OC/PVf/zWPfvSjAbjxxhu58847ud+dd97JK7zCK3Ds2DEuXLjA3XffDcATnvAEjo6OuP766wF4whOewHw+54X5u7/7O17yJV8SgCc84Qm81mu9Fv+Sv/7rv+bGG2/khfmzP/szbrzxRh796EfzwvzKr/wKj3jEI3hud999N09+8pN5jdd4Da666qqr/iNIYr1e84IcHR0hif9p7r7nHn7nt3+b13rt1+b6667jftdfdx2v9dqvze/89m9z9z338B+Eyr/gGedM6Sd+7a/3+YXf+ANuPR9snnxJnBPf+2t38Ud/9QTatAKbvcMVT71rySu+0iPY6M0L89M//dOcOHGCRz/60QBcf/313Hjjjfz0T/80b/3Wb839XuEVXoHv/M7v5Du/8zvZ2Njg5MmT3O9N3uRN+KVf+iX+8A//EICXeImX4NGPfjQP9EZv9Eb89E//NN/5nd/J+77v+/JAj370ozl27Bi/9Eu/xB/+4R8CcOONN/IKr/AKALzzO78z3/md38nf/d3fAXDy5Ene6I3eCIA777yTN3mTN+GBHv3oR/PXf/3XPOEJT+DRj340z+1BD3oQd955Jw9/+MO53xu90Rvxwz/8w3znd34n93vf931f/q3e6I3eiJ/+6Z/mO7/zOwG48cYbeaM3eiO+8zu/k+/8zu9kY2ODkydPcr8zZ87wh3/4hzz5yU/mfd/3fXmgN3mTN+GXfumX+MM//EMAXuIlXoJHP/rR/Ee5dOkS8/mc5/bDP/zDHB0dAfASL/ESPPrRjwbgFV7hFbhw4QLf+Z3fCcCrvuqrAnD99dfzEi/xEvzSL/0S93uTN3kT7re/v89iseC5fed3fif3e9VXfVWuv/56AFarFb/0S7/EA73ES7wEr/AKr8B3fud3cr9HPOIRvMIrvAIvzGq14slPfjJPfvKTud/Jkyd567d+a37lV36FO++8E4Abb7yR13iN1wDg7rvv5pd+6Ze435u8yZtw1VVXXfUf5dGPfjQ/8RM/gW2eH0k8+tGP5n+aP/j93+e1Xvu1uf6663hu1193Ha/12q/NH/z+7/P2b//2/AdA+/v75oX40p+8wNEYSAICBCBEgAAJKXig13nJLV794SNXXXXVVVddddVV/wuh/f19c9VVV1111VVXXXXV/Qiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiBk21x11VVXXXXVVVdddT+Cq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IIKrrrrqqquuuuqqqx6I4KqrrrrqqquuuuqqByK46qqrrrrqqquuuuqBCK666qqrrrrqqquueiCCq6666qqrrrrqqqseiOCqq6666qqrrrrqqgciuOqqq6666qqrrrrqgQiuuuqqq6666qqrrnoggquuuuqqq6666qqrHojgqquuuuqqq6666qoHIrjqqquuuuqqq6666oEIrrrqqquuuuqqq656IP4Rz6MwozEsg7UAAAAASUVORK5CYII=",
+      "mimeType": "image/png",
+      "type": "image"
+    }
+  ],
+  "structuredContent": {
+    "_note": "Prefer `elements` — `tree_markdown` will continue to work but new fields will only be added to the structured side. Issue #22865: use `max_elements` / `max_depth` to bound the UIA walk on apps with very large trees.",
+    "app_name": "powershell.exe",
+    "capture_id": "capture_ef648a4d17f04792ab10df192093d68d_0000000000000000",
+    "element_count": 9,
+    "elements": [
+      {
+        "actions": [
+          "set_value"
+        ],
+        "depth": 1,
+        "element_index": 0,
+        "element_token": "s00000001:0",
+        "enabled": true,
+        "frame": {
+          "h": 28,
+          "w": 568,
+          "x": 76,
+          "y": 55
+        },
+        "label": "Xiaok CUA Verification 1790879251299",
+        "role": "TitleBar",
+        "screenshot_frame": {
+          "h": 28,
+          "w": 568,
+          "x": 16,
+          "y": 2
+        },
+        "value": "Xiaok CUA Verification 1790879251299"
+      },
+      {
+        "actions": [
+          "expand"
+        ],
+        "depth": 3,
+        "element_index": 1,
+        "element_token": "s00000001:1",
+        "enabled": true,
+        "frame": {
+          "h": 22,
+          "w": 22,
+          "x": 60,
+          "y": 60
+        },
+        "label": "系统",
+        "parent_index": 0,
+        "role": "MenuItem",
+        "screenshot_frame": {
+          "h": 22,
+          "w": 22,
+          "x": 0,
+          "y": 7
+        }
+      },
+      {
+        "actions": [
+          "invoke"
+        ],
+        "depth": 2,
+        "element_index": 2,
+        "element_token": "s00000001:2",
+        "enabled": true,
+        "frame": {
+          "h": 30,
+          "w": 47,
+          "x": 505,
+          "y": 53
+        },
+        "label": "最小化",
+        "parent_index": 0,
+        "role": "Button",
+        "screenshot_frame": {
+          "h": 30,
+          "w": 47,
+          "x": 445,
+          "y": 0
+        }
+      },
+      {
+        "actions": [
+          "invoke"
+        ],
+        "depth": 2,
+        "element_index": 3,
+        "element_token": "s00000001:3",
+        "enabled": true,
+        "frame": {
+          "h": 30,
+          "w": 46,
+          "x": 552,
+          "y": 53
+        },
+        "label": "最大化",
+        "parent_index": 0,
+        "role": "Button",
+        "screenshot_frame": {
+          "h": 30,
+          "w": 46,
+          "x": 492,
+          "y": 0
+        }
+      },
+      {
+        "actions": [
+          "invoke"
+        ],
+        "depth": 2,
+        "element_index": 4,
+        "element_token": "s00000001:4",
+        "enabled": true,
+        "frame": {
+          "h": 30,
+          "w": 47,
+          "x": 598,
+          "y": 53
+        },
+        "label": "关闭",
+        "parent_index": 0,
+        "role": "Button",
+        "screenshot_frame": {
+          "h": 30,
+          "w": 47,
+          "x": 538,
+          "y": 0
+        }
+      },
+      {
+        "actions": [
+          "set_value",
+          "text",
+          "scroll"
+        ],
+        "depth": 1,
+        "element_index": 5,
+        "element_token": "s00000001:5",
+        "enabled": true,
+        "frame": {
+          "h": 40,
+          "w": 584,
+          "x": 60,
+          "y": 98
+        },
+        "label": "VerificationInput",
+        "role": "Edit",
+        "screenshot_frame": {
+          "h": 40,
+          "w": 584,
+          "x": 0,
+          "y": 45
+        }
+      },
+      {
+        "actions": [
+          "invoke"
+        ],
+        "depth": 1,
+        "element_index": 6,
+        "element_token": "s00000001:6",
+        "enabled": true,
+        "frame": {
+          "h": 40,
+          "w": 584,
+          "x": 60,
+          "y": 138
+        },
+        "label": "Verification Click",
+        "role": "Button",
+        "screenshot_frame": {
+          "h": 40,
+          "w": 584,
+          "x": 0,
+          "y": 85
+        }
+      },
+      {
+        "actions": [
+          "scroll"
+        ],
+        "depth": 1,
+        "element_index": 7,
+        "element_token": "s00000001:7",
+        "enabled": true,
+        "frame": {
+          "h": 250,
+          "w": 584,
+          "x": 60,
+          "y": 178
+        },
+        "label": "Verification row 1\r\nVerification row 2\r\nVerification row 3\r\nVerification row 4\r\nVerification row 5\r\nVerification row 6\r\nVerification row 7\r\nVerification row 8\r\nVerification row 9\r\nVerification row 10\r\nVerification row 11\r\nVerification row 12\r\nVerification row 13\r\nVerification row 14\r\nVerification row 15\r\nVerification row 16\r\nVerification row 17\r\nVerification row 18\r\nVerification row 19\r\nVerification row 20\r\nVerification row 21\r\nVerification row 22\r\nVerification row 23\r\nVerification row 24\r\nVerification row 25\r\nVerification row 26\r\nVerification row 27\r\nVerification row 28\r\nVerification row 29\r\nVerification row 30\r\nVerification row 31\r\nVerification row 32\r\nVerification row 33\r\nVerification row 34\r\nVerification row 35\r\nVerification row 36\r\nVerification row 37\r\nVerification row 38\r\nVerification row 39\r\nVerification row 40\r\nVerification row 41\r\nVerification row 42\r\nVerification row 43\r\nVerification row 44\r\nVerification row 45\r\nVerification row 46\r\nVerification row 47\r\nVerification row 48\r\nVerification row 49\r\nVerification row 50\r\nVerification row 51\r\nVerification row 52\r\nVerification row 53\r\nVerification row 54\r\nVerification row 55\r\nVerification row 56\r\nVerification row 57\r\nVerification row 58\r\nVerification row 59\r\nVerification row 60\r\nVerification row 61\r\nVerification row 62\r\nVerification row 63\r\nVerification row 64\r\nVerification row 65\r\nVerification row 66\r\nVerification row 67\r\nVerification row 68\r\nVerification row 69\r\nVerification row 70\r\nVerification row 71\r\nVerification row 72\r\nVerification row 73\r\nVerification row 74\r\nVerification row 75\r\nVerification row 76\r\nVerification row 77\r\nVerification row 78\r\nVerification row 79\r\nVerification row 80\r\nVerification row 81\r\nVerification row 82\r\nVerification row 83\r\nVerification row 84\r\nVerification row 85\r\nVerification row 86\r\nVerification row 87\r\nVerification row 88\r\nVerification row 89\r\nVerification row 90\r\nVerification row 91\r\nVerification row 92\r\nVerification row 93\r\nVerification row 94\r\nVerification row 95\r\nVerification row 96\r\nVerification row 97\r\nVerification row 98\r\nVerification row 99\r\nVerification row 100",
+        "role": "Pane",
+        "screenshot_frame": {
+          "h": 250,
+          "w": 584,
+          "x": 0,
+          "y": 125
+        }
+      },
+      {
+        "actions": [
+          "set_value"
+        ],
+        "depth": 2,
+        "element_index": 8,
+        "element_token": "s00000001:8",
+        "enabled": true,
+        "frame": {
+          "h": 250,
+          "w": 17,
+          "x": 627,
+          "y": 178
+        },
+        "label": "VerticalScrollBar",
+        "parent_index": 7,
+        "role": "ScrollBar",
+        "screenshot_frame": {
+          "h": 250,
+          "w": 17,
+          "x": 567,
+          "y": 125
+        }
+      }
+    ],
+    "elements_complete": false,
+    "nodes_pending": 0,
+    "nodes_visited": 22,
+    "pid": 25220,
+    "returned_element_count": 9,
+    "screenshot_height": 471,
+    "screenshot_mime_type": "image/png",
+    "screenshot_width": 584,
+    "snapshot_id": "s00000001",
+    "timeout_ms": 1000,
+    "total_element_count": 9,
+    "tree_markdown": "- Window \"Xiaok CUA Verification 1790879251299\"\n  - [0] TitleBar [value=\"Xiaok CUA Verification 1790879251299\" actions=[set_value]]\n    - MenuBar \"系统\"\n      - [1] MenuItem \"系统\" [actions=[expand]]\n    - [2] Button \"最小化\" [actions=[invoke]]\n    - [3] Button \"最大化\" [actions=[invoke]]\n    - [4] Button \"关闭\" [actions=[invoke]]\n  - Text \"Xiaok disposable CUA test window\"\n  - [5] Edit [id=VerificationInput actions=[set_value,text,scroll]]\n  - [6] Button \"Verification Click\" [actions=[invoke]]\n    - Text \"Verification Click\"\n  - [7] Pane \"Verification row 1\r\nVerification row 2\r\nVerification row 3\r\nVerification row 4\r\nVerification row 5\r\nVerification row 6\r\nVerification row 7\r\nVerification row 8\r\nVerification row 9\r\nVerification row 10\r\nVerification row 11\r\nVerification row 12\r\nVerification row 13\r\nVerification row 14\r\nVerification row 15\r\nVerification row 16\r\nVerification row 17\r\nVerification row 18\r\nVerification row 19\r\nVerification row 20\r\nVerification row 21\r\nVerification row 22\r\nVerification row 23\r\nVerification row 24\r\nVerification row 25\r\nVerification row 26\r\nVerification row 27\r\nVerification row 28\r\nVerification row 29\r\nVerification row 30\r\nVerification row 31\r\nVerification row 32\r\nVerification row 33\r\nVerification row 34\r\nVerification row 35\r\nVerification row 36\r\nVerification row 37\r\nVerification row 38\r\nVerification row 39\r\nVerification row 40\r\nVerification row 41\r\nVerification row 42\r\nVerification row 43\r\nVerification row 44\r\nVerification row 45\r\nVerification row 46\r\nVerification row 47\r\nVerification row 48\r\nVerification row 49\r\nVerification row 50\r\nVerification row 51\r\nVerification row 52\r\nVerification row 53\r\nVerification row 54\r\nVerification row 55\r\nVerification row 56\r\nVerification row 57\r\nVerification row 58\r\nVerification row 59\r\nVerification row 60\r\nVerification row 61\r\nVerification row 62\r\nVerification row 63\r\nVerification row 64\r\nVerification row 65\r\nVerification row 66\r\nVerification row 67\r\nVerification row 68\r\nVerification row 69\r\nVerification row 70\r\nVerification row 71\r\nVerification row 72\r\nVerification row 73\r\nVerification row 74\r\nVerification row 75\r\nVerification row 76\r\nVerification row 77\r\nVerification row 78\r\nVerification row 79\r\nVerification row 80\r\nVerification row 81\r\nVerification row 82\r\nVerification row 83\r\nVerification row 84\r\nVerification row 85\r\nVerification row 86\r\nVerification row 87\r\nVerification row 88\r\nVerification row 89\r\nVerification row 90\r\nVerification row 91\r\nVerification row 92\r\nVerification row 93\r\nVerification row 94\r\nVerification row 95\r\nVerification row 96\r\nVerification row 97\r\nVerification row 98\r\nVerification row 99\r\nVerification row 100\" [actions=[scroll]]\n    - Text \"Verification row 1\r\nVerification row 2\r\nVerification row 3\r\nVerification row 4\r\nVerification row 5\r\nVerification row 6\r\nVerification row 7\r\nVerification row 8\r\nVerification row 9\r\nVerification row 10\r\nVerification row 11\r\nVerification row 12\r\nVerification row 13\r\nVerification row 14\r\nVerification row 15\r\nVerification row 16\r\nVerification row 17\r\nVerification row 18\r\nVerification row 19\r\nVerification row 20\r\nVerification row 21\r\nVerification row 22\r\nVerification row 23\r\nVerification row 24\r\nVerification row 25\r\nVerification row 26\r\nVerification row 27\r\nVerification row 28\r\nVerification row 29\r\nVerification row 30\r\nVerification row 31\r\nVerification row 32\r\nVerification row 33\r\nVerification row 34\r\nVerification row 35\r\nVerification row 36\r\nVerification row 37\r\nVerification row 38\r\nVerification row 39\r\nVerification row 40\r\nVerification row 41\r\nVerification row 42\r\nVerification row 43\r\nVerification row 44\r\nVerification row 45\r\nVerification row 46\r\nVerification row 47\r\nVerification row 48\r\nVerification row 49\r\nVerification row 50\r\nVerification row 51\r\nVerification row 52\r\nVerification row 53\r\nVerification row 54\r\nVerification row 55\r\nVerification row 56\r\nVerification row 57\r\nVerification row 58\r\nVerification row 59\r\nVerification row 60\r\nVerification row 61\r\nVerification row 62\r\nVerification row 63\r\nVerification row 64\r\nVerification row 65\r\nVerification row 66\r\nVerification row 67\r\nVerification row 68\r\nVerification row 69\r\nVerification row 70\r\nVerification row 71\r\nVerification row 72\r\nVerification row 73\r\nVerification row 74\r\nVerification row 75\r\nVerification row 76\r\nVerification row 77\r\nVerification row 78\r\nVerification row 79\r\nVerification row 80\r\nVerification row 81\r\nVerification row 82\r\nVerification row 83\r\nVerification row 84\r\nVerification row 85\r\nVerification row 86\r\nVerification row 87\r\nVerification row 88\r\nVerification row 89\r\nVerification row 90\r\nVerification row 91\r\nVerification row 92\r\nVerification row 93\r\nVerification row 94\r\nVerification row 95\r\nVerification row 96\r\nVerification row 97\r\nVerification row 98\r\nVerification row 99\r\nVerification row 100\"\n    - [8] ScrollBar [id=VerticalScrollBar actions=[set_value]]\n",
+    "truncated": false,
+    "walk_elapsed_ms": 0,
+    "window_bounds": {
+      "height": 473,
+      "width": 586,
+      "x": 59,
+      "y": 52
+    },
+    "window_id": 309463084,
+    "window_title": "Xiaok CUA Verification 1790879251299"
+  }
+}

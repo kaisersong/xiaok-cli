@@ -1837,6 +1837,8 @@ export interface LocaleStrings {
     mcpConnected: string;
     mcpDisconnected: string;
     mcpInstallFailed: string;
+    mcpCancelTask: string;
+    mcpCancellingTask: string;
     mcpPluginInstallFailed: string;
     mcpUpdateFailed: string;
     mcpDiagnoseFailed: string;
@@ -3094,6 +3096,8 @@ export interface LocaleStrings {
     cuProcessing: string;
     cuSettingsOpened: string;
     cuReady: string;
+    cuActionUnsupported: string;
+    cuConnectedNoTarget: string;
     cuConnectFailed: string;
     cuDismissed: string;
   };

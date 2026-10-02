@@ -35,6 +35,58 @@ const cuaDependency: ExternalPluginDependency = {
 };
 
 describe('plugin dependency service', () => {
+  it.each(['arm64', undefined])('rejects Windows native architecture %s before running a version command', async nativeOsArch => {
+    const dependency: ExternalPluginDependency = { ...cuaDependency, kind: 'native_cli', supportedPlatforms: ['win32'] };
+    let calls = 0;
+    const status = await getPluginDependencyStatus(dependency, { platform: 'win32', appArch: 'x64', nativeOsArch,
+      runCommand: async () => { calls++; throw new Error('must not spawn'); } });
+    expect(status).toMatchObject({ state: 'unsupported', canInstall: false, canUpdate: false, canDiagnose: false });
+    expect(calls).toBe(0);
+  });
+  it('compares the minor and patch version rather than only the major', async () => {
+    const status = await getPluginDependencyStatus({ ...cuaDependency, minVersion: '0.19.3' }, {
+      platform: 'darwin', exists: () => true,
+      runCommand: async () => ({ exitCode: 0, stdout: '0.19.2', stderr: '' }),
+    });
+    expect(status.code).toBe('version_too_old');
+  });
+  it('rejects a Windows cmd override even when the shim is present on PATH', async () => {
+    const previous = process.env.XIAOK_CUA_DRIVER_CMD;
+    process.env.XIAOK_CUA_DRIVER_CMD = 'cua-driver.cmd';
+    try {
+      const status = await getPluginDependencyStatus({ ...cuaDependency, kind: 'native_cli', supportedPlatforms: ['win32'], envOverride: 'XIAOK_CUA_DRIVER_CMD' }, {
+        platform: 'win32', appArch: 'x64', nativeOsArch: 'x64', pathEnv: 'C:\\bin', exists: () => true,
+        runCommand: async () => ({ exitCode: 0, stdout: '0.31.0', stderr: '' }),
+      });
+      expect(status.code).toBe('invalid_binary_override');
+    } finally { if (previous === undefined) delete process.env.XIAOK_CUA_DRIVER_CMD; else process.env.XIAOK_CUA_DRIVER_CMD = previous; }
+  });
+  it('disables every dependency action before probing an unsupported platform', async () => {
+    let probed = false;
+    const status = await getPluginDependencyStatus(cuaDependency, {
+      platform: 'win32',
+      runCommand: async () => { probed = true; throw new Error('must not spawn'); },
+    });
+    expect(status).toMatchObject({ state: 'unsupported', canInstall: false, canUpdate: false, canDiagnose: false });
+    expect(probed).toBe(false);
+  });
+
+  it('accepts a file path with spaces without interpreting it as shell arguments', async () => {
+    const previous = process.env.XIAOK_CUA_DRIVER_CMD;
+    process.env.XIAOK_CUA_DRIVER_CMD = '/opt/Cua Driver/cua-driver';
+    try {
+      const status = await getPluginDependencyStatus({ ...cuaDependency, envOverride: 'XIAOK_CUA_DRIVER_CMD' }, {
+        platform: 'darwin', exists: path => path === '/opt/Cua Driver/cua-driver',
+        isFile: () => true,
+        runCommand: async () => ({ exitCode: 0, stdout: '0.2.0', stderr: '' }),
+      });
+      expect(status.resolvedBinary).toBe('/opt/Cua Driver/cua-driver');
+    } finally {
+      if (previous === undefined) delete process.env.XIAOK_CUA_DRIVER_CMD;
+      else process.env.XIAOK_CUA_DRIVER_CMD = previous;
+    }
+  });
+
   it('resolves the first installed binary candidate with home expansion before running health checks', async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const status = await getPluginDependencyStatus(cuaDependency, {

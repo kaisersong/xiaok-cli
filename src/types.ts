@@ -75,6 +75,9 @@ export interface ToolExecutionContext {
   onToolInvocationStarted?: () => void;
   /** Host-only correlation fields. They are never part of tool input/model payloads. */
   toolInvocationId?: string;
+  /** Host-only media port and actual adapter capability, attached after provider projection. */
+  emitToolImage?: (image: Extract<MessageBlock, { type: 'image' }>) => void;
+  modelSupportsImageInput?: boolean;
   runtimeFactSink?: {
     emit(fact: ToolExecutionFact): void;
   };

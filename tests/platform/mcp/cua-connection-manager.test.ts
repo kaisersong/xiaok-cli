@@ -1,3 +1,4 @@
+import { normalizeMcpRuntimeToolResult } from '../../../src/ai/mcp/runtime/client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,6 +37,17 @@ function failed(message: string) {
 }
 
 describe('recovery and per-call cancellation integration', () => {
+  it('awaits an owned asynchronous close on disposal', async () => {
+    let release!: () => void;
+    const closed = new Promise<void>(resolve => { release = resolve; });
+    const connection: CuaConnection = { callToolResult: async () => ok(), dispose: () => closed };
+    const manager = new CuaConnectionManager(async () => connection, { initialConnection: connection });
+    let disposed = false;
+    const pending = manager.dispose().then(() => { disposed = true; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(disposed).toBe(false);
+    release(); await pending; expect(disposed).toBe(true);
+  });
   it('does not cancel a sibling revive or replay the cancelled caller', async () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
@@ -265,14 +277,41 @@ describe('CuaConnectionManager', () => {
     expect(classifyCuaRuntimeFailure(ok(failureFixtures.sessionEndedResult))).toBeNull();
   });
 
+  it('classifies the real Windows unnamed-session refusal and preserves authorization priority', () => {
+    const raw = JSON.parse(readFileSync(join(process.cwd(), 'tests/fixtures/cua-windows-0.31.0/session-ended.json'), 'utf8'));
+    const result = normalizeMcpRuntimeToolResult(raw);
+    expect(classifyCuaRuntimeFailure(result)?.kind).toBe('session_ended');
+    expect(classifyCuaRuntimeFailure({ ...result, text: 'authorization denied', summary: 'authorization denied' })?.kind).toBe('authorization_denied');
+    expect(classifyCuaRuntimeFailure({ ...result, isError: false })).toBeNull();
+  });
+
   it('treats only side-effect-free observation calls as replay safe', () => {
     expect(isReplaySafeCuaCall('list_apps', {})).toBe(true);
     expect(isReplaySafeCuaCall('list_windows', { on_screen_only: true })).toBe(true);
     expect(isReplaySafeCuaCall('get_window_state', { pid: 1, window_id: 2, include_screenshot: true })).toBe(true);
     expect(isReplaySafeCuaCall('get_window_state', { pid: 1, window_id: 2, screenshot_out_file: '/tmp/capture.png' })).toBe(false);
     expect(isReplaySafeCuaCall('get_window_state', { pid: 1, window_id: 2, javascript: 'mutate()' })).toBe(false);
+    expect(isReplaySafeCuaCall('get_window_state', { javascript: '' })).toBe(false);
+    expect(isReplaySafeCuaCall('get_window_state', { future_option: true })).toBe(false);
+    expect(isReplaySafeCuaCall('list_windows', { future_option: true })).toBe(false);
+    expect(isReplaySafeCuaCall('list_apps', { javascript: 'mutate()' })).toBe(false);
     expect(isReplaySafeCuaCall('click', { x: 10, y: 20 })).toBe(false);
     expect(isReplaySafeCuaCall('future_readish_name', {})).toBe(false);
+  });
+
+  it('changes observation generation when the same transport revives an ended session', async () => {
+    let ended = true;
+    const connection: CuaConnection = {
+      callToolResult: vi.fn(async name => {
+        if (name === 'start_session') { ended = false; return ok('revived'); }
+        return ended ? failed("Session 'verification' has ended. Call start_session to revive.") : ok('observed');
+      }), dispose: vi.fn(),
+    };
+    const manager = new CuaConnectionManager(async () => connection, { initialConnection: connection });
+    const before = manager.generation;
+    await manager.callToolResult('list_windows', {});
+    expect(manager.generation).toBeGreaterThan(before);
+    await manager.dispose();
   });
 
   it('revives one ended implicit session and retries one observation on the same connection', async () => {

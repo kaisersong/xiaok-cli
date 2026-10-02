@@ -164,6 +164,7 @@ export const PRELOAD_API_KEYS = [
   'installPluginDependency',
   'updatePluginDependency',
   'diagnosePluginDependency',
+  'cancelPluginDependencyTask',
   'getUpdateStatus',
   'checkForUpdates',
   'quitAndInstall',
@@ -501,6 +502,7 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   installPluginDependency: 'desktop:installPluginDependency',
   updatePluginDependency: 'desktop:updatePluginDependency',
   diagnosePluginDependency: 'desktop:diagnosePluginDependency',
+  cancelPluginDependencyTask: 'desktop:cancelPluginDependencyTask',
   getUpdateStatus: 'desktop:getUpdateStatus',
   checkForUpdates: 'desktop:checkForUpdates',
   quitAndInstall: 'desktop:quitAndInstall',
@@ -925,6 +927,7 @@ export interface PluginDependencyStatusView {
   canInstall: boolean;
   canUpdate: boolean;
   canDiagnose: boolean;
+  task?: { taskId: string; dependencyId: string; state: 'running' | 'cancelling' };
 }
 
 export interface PluginDependencyActionInput {
@@ -1392,6 +1395,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   listPluginDependencyStatuses(): Promise<PluginDependencyStatusView[]>;
   installPluginDependency(input: PluginDependencyActionInput): Promise<PluginDependencyActionResult>;
   updatePluginDependency(input: PluginDependencyActionInput): Promise<PluginDependencyActionResult>;
+  cancelPluginDependencyTask(input: Omit<PluginDependencyActionInput, 'confirmed'>): Promise<{ cancelling: boolean }>;
   diagnosePluginDependency(input: Omit<PluginDependencyActionInput, 'confirmed'>): Promise<PluginDependencyActionResult>;
   getUpdateStatus(): Promise<UpdateStatus>;
   checkForUpdates(): Promise<void>;
@@ -1861,6 +1865,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     listPluginDependencyStatuses: () => ipcRenderer.invoke('desktop:listPluginDependencyStatuses') as Promise<PluginDependencyStatusView[]>,
     installPluginDependency: (input) => ipcRenderer.invoke('desktop:installPluginDependency', input) as Promise<PluginDependencyActionResult>,
     updatePluginDependency: (input) => ipcRenderer.invoke('desktop:updatePluginDependency', input) as Promise<PluginDependencyActionResult>,
+    cancelPluginDependencyTask: (input) => ipcRenderer.invoke('desktop:cancelPluginDependencyTask', input) as Promise<{ cancelling: boolean }>,
     diagnosePluginDependency: (input) => ipcRenderer.invoke('desktop:diagnosePluginDependency', input) as Promise<PluginDependencyActionResult>,
     getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus') as Promise<UpdateStatus>,
     checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates') as Promise<void>,

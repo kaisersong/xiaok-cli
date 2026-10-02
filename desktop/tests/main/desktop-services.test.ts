@@ -2,7 +2,7 @@ import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-co
 import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -31,6 +31,53 @@ function mockKSwarmService(): KSwarmService {
     request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
   };
 }
+
+describe('CUA mutation sources and reconnect intent', () => {
+  it('does not treat a third-party same-named server as official CUA or disable it', async () => {
+    const root = join(tmpdir(), `cua-third-party-${Date.now()}`);
+    try {
+      const { services } = createCuaFixtureServices(root);
+      const plugins = join(root, '.xiaok', 'plugins');
+      renameSync(join(plugins, 'cua-computer-use'), join(plugins, 'third-party'));
+      const manifest = join(plugins, 'third-party', 'plugin.json');
+      const data = JSON.parse(readFileSync(manifest, 'utf8')); data.name = 'third-party';
+      writeFileSync(manifest, JSON.stringify(data));
+      const lifecycle = await services.registerMcpTools();
+      try {
+        expect(services.listPluginMcpServers()).toEqual([expect.objectContaining({ pluginName: 'third-party', connected: true, toolCount: expect.any(Number) })]);
+        expect(services.getComputerUseCapabilityStatus().mcpConnected).toBe(false);
+        await services.disableComputerUse({ requestSource: 'user' });
+        expect(services.listPluginMcpServers()).toEqual([expect.objectContaining({ pluginName: 'third-party', connected: true })]);
+      } finally { lifecycle.dispose(); }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('blocks an invalid official CUA server identity before launching raw MCP', async () => {
+    const root = join(tmpdir(), `cua-identity-${Date.now()}`);
+    const marker = join(root, 'raw-mcp-launched');
+    try {
+      const { services } = createCuaFixtureServices(root, { CUA_MCP_CALL_LOG_PATH: marker });
+      const manifest = join(root, '.xiaok', 'plugins', 'cua-computer-use', 'plugin.json');
+      const data = JSON.parse(readFileSync(manifest, 'utf8')); data.mcpServers[0].name = 'renamed-cua';
+      writeFileSync(manifest, JSON.stringify(data));
+      const lifecycle = await services.registerMcpTools();
+      expect(existsSync(marker)).toBe(false);
+      expect(services.listPluginMcpServers()).toEqual([expect.objectContaining({ connected: false, enabled: false })]);
+      lifecycle.dispose();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('does not let reconnect grant a disabled capability or agent install a dependency', async () => {
+    const root = join(tmpdir(), `cua-user-intent-${Date.now()}`);
+    try {
+      const { services } = createCuaFixtureServices(root);
+      await expect(services.enableComputerUse({ requestSource: 'agent' })).rejects.toThrow('request_source_user_required');
+      await expect(services.installPluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true, requestSource: 'agent' })).resolves.toMatchObject({ success: false, error: 'request_source_user_required' });
+      await services.disableComputerUse({ requestSource: 'user' });
+      const state = await services.reconnectComputerUse({ requestSource: 'user' });
+      expect(state.state).toBe('disabled_by_user');
+      expect(services.getComputerUseCapabilityStatus().mcpConnected).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
 
 function readJsonLineLog(path: string): Array<Record<string, unknown>> {
   if (!existsSync(path)) return [];
@@ -963,6 +1010,7 @@ describe('desktop services', () => {
     ]);
 
     await expect(services.installPluginDependency({
+      requestSource: 'user',
       pluginName: 'cua-computer-use',
       dependencyId: 'cua-driver',
       confirmed: false,
@@ -1020,6 +1068,7 @@ describe('desktop services', () => {
     expect(statuses[0].canUpdate).toBe(true);
 
     await expect(services.updatePluginDependency({
+      requestSource: 'user',
       pluginName: 'cua-computer-use',
       dependencyId: 'cua-driver',
       confirmed: false,
@@ -1219,7 +1268,7 @@ describe('desktop services', () => {
         exists: (path) => path === '/Users/alice/.local/bin/cua-driver',
         runCommand: async (command, args) => {
           calls.push({ command, args });
-          if (args[0] === '--version') return { exitCode: 0, stdout: 'cua-driver 0.2.0\n', stderr: '' };
+          if (args[0] === '--version') return { exitCode: 0, stdout: 'cua-driver 0.19.3\n', stderr: '' };
           return { exitCode: 99, stdout: '', stderr: `unexpected health command: ${args.join(' ')}` };
         },
       },
@@ -1384,7 +1433,7 @@ describe('desktop services', () => {
     ]);
 
     // The explicit, user-sourced enable path is what brings it up.
-    await services.enableComputerUse();
+    await services.enableComputerUse({ requestSource: 'user' });
 
     expect(services.getToolDefinitions().map(tool => tool.name)).toContain('xiaok_computer_use');
     expect(services.listPluginMcpServers()).toEqual([
@@ -1525,7 +1574,7 @@ describe('desktop services', () => {
       enabled: true,
     });
 
-    await services.enableComputerUse();
+    await services.enableComputerUse({ requestSource: 'user' });
 
     expect(services.listPluginMcpServers().find(server => server.name === 'cua-driver')).toMatchObject({
       connected: true,
@@ -1758,7 +1807,7 @@ describe('desktop services', () => {
       CUA_MCP_CALL_LOG_PATH: callLogPath,
     });
 
-    await services.enableComputerUse();
+    await services.enableComputerUse({ requestSource: 'user' });
     const result = await services.executeTool('xiaok_computer_use', {
       action: 'list_windows',
       on_screen_only: true,
@@ -1779,7 +1828,7 @@ describe('desktop services', () => {
         'list_windows',
       ]);
     expect(JSON.parse(readFileSync(join(dataRoot, 'computer-use-state.json'), 'utf8'))).not.toHaveProperty('lastFailureCode');
-    await services.disableComputerUse();
+    await services.disableComputerUse({ requestSource: 'user' });
   });
 
   it('replaces an exited CUA proxy once and safely replays an observation', async () => {
@@ -1790,7 +1839,7 @@ describe('desktop services', () => {
       CUA_MCP_CALL_LOG_PATH: callLogPath,
     });
 
-    await services.enableComputerUse();
+    await services.enableComputerUse({ requestSource: 'user' });
     const result = await services.executeTool('xiaok_computer_use', {
       action: 'list_windows',
       on_screen_only: true,
@@ -1806,7 +1855,7 @@ describe('desktop services', () => {
       'list_windows',
       'list_windows',
     ]);
-    await services.disableComputerUse();
+    await services.disableComputerUse({ requestSource: 'user' });
   }, 15_000);
 
   it('does not let a late CUA readiness commit resurrect Computer Use after disable', async () => {
@@ -1816,11 +1865,11 @@ describe('desktop services', () => {
       CUA_MCP_DELAY_TOOL_CALL_MS: '150',
     });
 
-    const enabling = services.enableComputerUse();
+    const enabling = services.enableComputerUse({ requestSource: 'user' });
     await vi.waitFor(() => {
       expect(readJsonLineLog(callLogPath).some((event) => event.event === 'tool_call')).toBe(true);
     }, { timeout: 5_000 });
-    const disabled = await services.disableComputerUse();
+    const disabled = await services.disableComputerUse({ requestSource: 'user' });
     const lateEnableResult = await enabling;
 
     expect(disabled).toMatchObject({ state: 'disabled_by_user', mcpConnected: false });
@@ -1841,15 +1890,15 @@ describe('desktop services', () => {
     });
 
     const [first, second] = await Promise.all([
-      services.enableComputerUse(),
-      services.enableComputerUse(),
+      services.enableComputerUse({ requestSource: 'user' }),
+      services.enableComputerUse({ requestSource: 'user' }),
     ]);
 
     expect(first).toMatchObject({ state: 'ready', mcpConnected: true });
     expect(second).toMatchObject({ state: 'ready', mcpConnected: true });
     expect(readJsonLineLog(callLogPath).filter((event) => event.event === 'initialize')).toHaveLength(1);
     expect(services.listPluginMcpServers().filter((server) => server.name === 'cua-driver')).toHaveLength(1);
-    await services.disableComputerUse();
+    await services.disableComputerUse({ requestSource: 'user' });
   });
 
   it('does not auto-recover Computer Use in development even when a prior success exists', async () => {

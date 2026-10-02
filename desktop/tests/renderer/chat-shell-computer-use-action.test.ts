@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { parseComputerUseRecoverableAction } from '../../renderer/src/lib/computer-use-recoverable-action';
+import { parseComputerUseRecoverableAction, resolveComputerUseUserAction } from '../../renderer/src/lib/computer-use-recoverable-action';
 
 describe('parseComputerUseRecoverableAction', () => {
+  it('dispatches enable, reconnect and permission actions explicitly', () => {
+    expect(resolveComputerUseUserAction('reconnect_computer_use', 'COMPUTER_USE_MCP_CONNECT_TIMEOUT')).toEqual({ type: 'reconnect' });
+    expect(resolveComputerUseUserAction('enable_computer_use', 'COMPUTER_USE_NEEDS_ENABLEMENT')).toEqual({ type: 'enable' });
+    expect(resolveComputerUseUserAction('open_system_settings', 'COMPUTER_USE_NEEDS_SCREEN_RECORDING')).toEqual({ type: 'settings', permission: 'screen' });
+    expect(resolveComputerUseUserAction('open_system_settings', 'COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE')).toBeNull();
+    expect(resolveComputerUseUserAction('invented_action', 'COMPUTER_USE_NEEDS_ENABLEMENT')).toBeNull();
+  });
   it('does not render an enablement card for internal reobserve recovery', () => {
     expect(parseComputerUseRecoverableAction(JSON.stringify({
       ok: false,

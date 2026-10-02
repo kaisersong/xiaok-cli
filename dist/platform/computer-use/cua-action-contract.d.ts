@@ -24,6 +24,7 @@ export interface CuaActionContract {
     /** Backend-only fields that must never be forwarded from public input. */
     readonly backendOnlyExcluded: readonly string[];
     /** Injected constants, e.g. include_screenshot / button:middle. */
+    readonly defaults?: Readonly<Record<string, unknown>>;
     readonly forced?: Readonly<Record<string, unknown>>;
     /** Public → backend renames, e.g. x→from_x, pages→amount. */
     readonly renames?: Readonly<Record<string, string>>;
@@ -31,19 +32,31 @@ export interface CuaActionContract {
     readonly pixelPairs?: readonly (readonly [string, string])[];
     readonly acceptsSnapshotTargeting: boolean;
 }
+export interface CuaAbiProfile {
+    readonly id: string;
+    readonly platform: 'darwin' | 'win32';
+    readonly contracts: readonly CuaActionContract[];
+    readonly absentOperations: readonly string[];
+    readonly snapshotIdPattern: RegExp;
+    readonly expectedProperties?: Readonly<Record<string, Readonly<Record<string, {
+        type: string;
+        enum?: readonly unknown[];
+    }>>>>;
+}
 export declare const CUA_ACTION_CONTRACTS: readonly CuaActionContract[];
+export declare const MACOS_CUA_ABI_PROFILE: CuaAbiProfile;
 /** Wrapper-only or compatibility fields that never reach the backend. */
 export declare const WRAPPER_ONLY_FIELDS: readonly string[];
 export declare class InvalidComputerUseInputError extends Error {
     readonly code = "invalid_computer_use_input";
     constructor(detail: string);
 }
-export declare function contractFor(action: string): CuaActionContract;
+export declare function contractFor(action: string, profile?: CuaAbiProfile): CuaActionContract;
 /**
  * Builds the backend payload from public input. It constructs a fresh object from
  * the allowed set — never "delete two keys and forward the rest".
  */
-export declare function translateCuaAction(action: string, publicInput: Readonly<Record<string, unknown>>): {
+export declare function translateCuaAction(action: string, publicInput: Readonly<Record<string, unknown>>, profile?: CuaAbiProfile): {
     operation: string;
     input: Record<string, unknown>;
 };
@@ -63,4 +76,4 @@ export type AbiVerification = {
     code: 'activation_failed';
     problems: readonly string[];
 };
-export declare function verifyBackendAbi(catalog: readonly BackendOperationSchema[]): AbiVerification;
+export declare function verifyBackendAbi(catalog: readonly BackendOperationSchema[], profile?: CuaAbiProfile): AbiVerification;

@@ -1,0 +1,12 @@
+{
+  "content": [
+    {
+      "text": "foreground_unavailable: exact target HWND 0x870856 or a verified same-process post-action window was not foreground after the click (actual foreground HWND 0x0)",
+      "type": "text"
+    }
+  ],
+  "isError": true,
+  "structuredContent": {
+    "code": "tool_invocation_failed"
+  }
+}

@@ -48,7 +48,7 @@ function detectPython(): string | null {
   return null;
 }
 
-function resolveBundledPluginsDir(): string | null {
+export function resolveBundledPluginsDir(): string | null {
   const candidates = app.isPackaged
     ? [join(process.resourcesPath, 'bundled-plugins')]
     : [

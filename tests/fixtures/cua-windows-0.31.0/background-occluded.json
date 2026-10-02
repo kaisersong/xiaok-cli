@@ -1,0 +1,20 @@
+{
+  "content": [
+    {
+      "text": "Background delivery is not available for target window class 'HwndWrapper[DefaultDomain;Pipeline Execution Thread;fa2eed35-0233-439b-8161-f9695ba6b824]' on this event kind (mouse_click): background coordinate injection cannot reach this target at (482,248) \u2014 it is occluded by another window (raising it would break the no-foreground contract). Escalate to delivery_mode:\"foreground\".. Retry this action with delivery_mode:\"foreground\"; Cua Driver will activate the target for the action and restore the previous foreground afterward.",
+      "type": "text"
+    }
+  ],
+  "isError": true,
+  "structuredContent": {
+    "cause": "background coordinate injection cannot reach this target at (482,248) \u2014 it is occluded by another window (raising it would break the no-foreground contract). Escalate to delivery_mode:\"foreground\".",
+    "code": "background_occluded",
+    "escalation": {
+      "reason": "background input could not be delivered by the coordinate actuator; retry this action with delivery_mode:\"foreground\".",
+      "recommended": "foreground"
+    },
+    "event_kind": "mouse_click",
+    "suggestion": "Retry this action with delivery_mode:\"foreground\".",
+    "target_class": "HwndWrapper[DefaultDomain;Pipeline Execution Thread;fa2eed35-0233-439b-8161-f9695ba6b824]"
+  }
+}

@@ -1,5 +1,8 @@
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 
+const windowsFixture = process.env.CUA_MCP_WINDOWS_FIXTURE;
+const windowsCatalog = windowsFixture ? JSON.parse(readFileSync(process.env.CUA_MCP_WINDOWS_CATALOG, 'utf8')) : null;
+const windowsCapture = windowsFixture ? JSON.parse(readFileSync(process.env.CUA_MCP_WINDOWS_CAPTURE, 'utf8')) : null;
 let buffer = '';
 let transport = null;
 let toolCallCount = 0;
@@ -79,7 +82,7 @@ async function respond(message) {
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'fixture-cua-driver', version: '1.0.0' },
+        serverInfo: windowsFixture ? { name: 'cua-driver', version: process.env.CUA_MCP_WINDOWS_VERSION || '0.31.0' } : { name: 'fixture-cua-driver', version: '1.0.0' },
       },
     }));
     return;
@@ -91,7 +94,7 @@ async function respond(message) {
       jsonrpc: '2.0',
       id: message.id,
       result: {
-        tools: [
+        tools: windowsCatalog || [
           { name: 'list_apps', description: 'list apps', inputSchema: { type: 'object', properties: {} } },
           { name: 'list_windows', description: 'list windows', inputSchema: { type: 'object', properties: { on_screen_only: { type: 'boolean' } } } },
           { name: 'get_window_state', description: 'get window state', inputSchema: { type: 'object', properties: { pid: { type: 'integer' }, window_id: { type: 'integer' } } } },
@@ -145,6 +148,10 @@ async function respond(message) {
       }));
       return;
     }
+    if (windowsFixture) {
+      const result = name === 'get_window_state' ? windowsCapture : { content: [], structuredContent: { windows: windowsFixture === 'empty' ? [] : [{ pid: windowsCapture.structuredContent.pid, window_id: windowsCapture.structuredContent.window_id }] } };
+      process.stdout.write(encode({ jsonrpc: '2.0', id: message.id, result })); return;
+    }
     process.stdout.write(encode({
       jsonrpc: '2.0',
       id: message.id,
@@ -182,3 +189,5 @@ process.stdin.on('data', (chunk) => {
     parsed.messages.forEach((message) => { void respond(message); });
   }
 });
+
+process.stdin.on('end', () => process.exit(0));

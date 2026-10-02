@@ -4,10 +4,10 @@
 
 ## CUA / Computer Use 平台边界
 
-- CUA / Computer Use 当前是 macOS-only 能力。
-- Windows CLI / desktop startup 不能顶层 import、启动期解析或暴露 CUA / CuaDriver / `cua-driver mcp` 依赖；平台 gate 必须发生在动态 import `platform/mcp/cua-connection-manager` 和注册 `xiaok_computer_use` wrapper 之前。
-- Windows 上发现 `cua-driver` / `cua-computer-use` plugin 时，应标记为 macOS-only degraded capability 并跳过 wrapper 注册，不能让 `xiaok --auto` 因 CUA 模块缺失或 CuaDriver 不存在而启动失败。
-- 改 CUA lazy activation 或 CLI runtime startup 时，必须跑 package-boundary 测试，证明缺失 compiled CUA manager 时 Windows runtime context 仍可导入并跳过 CUA。
+- CUA 支持 macOS 与 Windows desktop 原生 x64；Windows CLI、ARM64 和 Linux 不开放。
+- Windows desktop 同时检查应用架构和 `GetNativeSystemInfo` 原生架构，资格 gate 必须早于动态 import CUA manager 和注册 wrapper。缺驱动、缺交互桌面、ABI 不匹配时降级，不能影响普通启动。
+- Windows desktop 使用固定私有 release `0.31.0` 与 `mcp --direct`；初始化及每次 replacement 都验证运行身份和 Windows ABI profile。禁止全局安装脚本、共享 daemon 接管、按进程名杀共享进程和无校验 raw MCP fallback。
+- CLI 仍须在动态导入 manager 之前跳过所有官方 canonical/renamed CUA server。改启动边界时跑 package-boundary 测试，证明缺失 compiled manager 时 Windows runtime context 可导入并跳过 CUA。
 
 
 ## 跨平台兼容
@@ -30,7 +30,7 @@
 - 拉起后台 node sidecar 用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`（已是标准做法），不要 spawn 裸 `node` 或 `.cmd`。
 
 ### 平台守卫
-- macOS 专有能力（CUA driver、`open`、`.app` bundle 路径、`launchctl`、`defaults`）必须有 `process.platform` 守卫；Windows / Linux 下不能调用，也不能因缺失而启动崩溃。macOS 专有的固定路径（如 `/Applications/...`）用 `path.posix` 构造，避免在 Windows 上被转成反斜杠。
+- macOS 专有能力（CuaDriver.app、`open`、`.app` bundle 路径、`launchctl`、`defaults`）必须有 `process.platform` 守卫；Windows / Linux 下不能调用，也不能因缺失而启动崩溃。macOS 专有的固定路径（如 `/Applications/...`）用 `path.posix` 构造，避免在 Windows 上被转成反斜杠。
 - Windows 专有能力（`reg`、`cmd /c`、`explorer.exe`）同样需要平台守卫。
 - 可选原生模块（`better-sqlite3`、`nodejieba` 等）在 Windows 上可能未构建：生产代码必须优雅降级，测试在模块不可用时用运行时探测 + skip，不要假设一定存在。
 
@@ -45,7 +45,7 @@
 - `.github/workflows/desktop-cross-platform.yml` 在 windows-latest + macos-14 上跑跨平台路径测试 + renderer 构建，把 Windows-only 回归挡在 PR 阶段。
 
 ### 已知历史教训
-- CUA 是 macOS 专有，曾因无条件启动导致 Windows CLI 无法启动。
+- CUA 原为 macOS 专有，曾因无条件启动导致 Windows CLI 无法启动；Windows desktop 接入不能放开 CLI 边界。
 - 路径硬编码 `/Users/...` 导致 Windows 解析失败（产品代码与测试都出现过）。
 - 无 shell spawn `.cmd` shim（dev-runner 的 tsc/electron/npm、evidence-gate 的 npm、react-doctor bin）在 Windows 抛 `EINVAL`/`ENOENT`，曾让 `npm run dev:all` 和多个测试在 Windows 失败。
 - 路径包含判断硬编码 `/`（kswarm-runtime-bridge `isAllowedPath`）在 Windows 误拒合法 handoff，连带导致取消/超时测试失败。

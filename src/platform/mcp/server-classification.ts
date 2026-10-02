@@ -15,6 +15,7 @@ import type { NamedMcpServerConfig } from './types.js';
 
 export type McpActivation =
   | { mode: 'eager' }
+  | { mode: 'blocked' }
   | { mode: 'lazy'; adapter: 'cua-computer-use-wrapper' };
 
 export type McpDisposeOwnership =
@@ -151,6 +152,10 @@ export function classifyMcpServer(
   registry: readonly McpClassificationEntry[] = BUILT_IN_MCP_CLASSIFICATIONS,
 ): McpServerPolicy {
   validateRegistry(registry);
+  if (server.source?.origin === 'plugin' && server.source.pluginName === OFFICIAL_CUA.pluginName && server.name !== OFFICIAL_CUA.name) {
+    return { activation: { mode: 'blocked' }, disposeOwnership: 'owned-child', diagnostics: [],
+      reason: 'COMPUTER_USE_PLUGIN_IDENTITY_MISMATCH', source: 'registry' };
+  }
   const matches = registry.filter((e) => entryMatches(e, server));
   if (matches.length > 1) {
     throw new Error(

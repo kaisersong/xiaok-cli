@@ -143,6 +143,7 @@ describe('preload API contract', () => {
       'installPluginDependency',
       'updatePluginDependency',
       'diagnosePluginDependency',
+      'cancelPluginDependencyTask',
       'getUpdateStatus',
       'checkForUpdates',
       'quitAndInstall',
@@ -532,6 +533,7 @@ describe('preload API contract', () => {
     await api.installPluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
     await api.updatePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver', confirmed: true });
     await api.diagnosePluginDependency({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver' });
+    await api.cancelPluginDependencyTask({ pluginName: 'cua-computer-use', dependencyId: 'cua-driver' });
     await api.retryPluginComponent({ componentId: 'cua-driver' });
     await api.getComputerUseCapabilityStatus();
     await api.enableComputerUse();
@@ -553,6 +555,9 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:diagnosePluginDependency', {
       pluginName: 'cua-computer-use',
       dependencyId: 'cua-driver',
+    });
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:cancelPluginDependencyTask', {
+      pluginName: 'cua-computer-use', dependencyId: 'cua-driver',
     });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:retryPluginComponent', { componentId: 'cua-driver' });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:getComputerUseCapabilityStatus');

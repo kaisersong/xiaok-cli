@@ -227,6 +227,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   listPluginDependencyStatuses: () => ipcRenderer.invoke('desktop:listPluginDependencyStatuses'),
   installPluginDependency: (input) => ipcRenderer.invoke('desktop:installPluginDependency', input),
   updatePluginDependency: (input) => ipcRenderer.invoke('desktop:updatePluginDependency', input),
+  cancelPluginDependencyTask: (input) => ipcRenderer.invoke('desktop:cancelPluginDependencyTask', input),
   diagnosePluginDependency: (input) => ipcRenderer.invoke('desktop:diagnosePluginDependency', input),
   getUpdateStatus: () => ipcRenderer.invoke('desktop:getUpdateStatus'),
   checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates'),

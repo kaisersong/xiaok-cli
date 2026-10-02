@@ -5,7 +5,30 @@ import {
   translateCuaAction,
   verifyBackendAbi,
   type BackendOperationSchema,
+  MACOS_CUA_ABI_PROFILE,
 } from '../../../src/platform/computer-use/cua-action-contract.js';
+
+describe('explicit immutable ABI profile', () => {
+  it('freezes the production profile recursively so one caller cannot change later calls', () => {
+    expect(Object.isFrozen(MACOS_CUA_ABI_PROFILE)).toBe(true);
+    for (const contract of MACOS_CUA_ABI_PROFILE.contracts) {
+      expect(Object.isFrozen(contract)).toBe(true);
+      expect(Object.isFrozen(contract.backendRequired)).toBe(true);
+      expect(Object.isFrozen(contract.translatorAllowed)).toBe(true);
+      if (contract.forced) expect(Object.isFrozen(contract.forced)).toBe(true);
+      for (const pair of contract.pixelPairs ?? []) expect(Object.isFrozen(pair)).toBe(true);
+    }
+  });
+  it('binds translation and ABI checks to one profile without changing the macOS default', () => {
+    const profile = Object.freeze({ id: 'fixture-profile', platform: 'win32' as const, snapshotIdPattern: /^w[0-9]+$/,
+      absentOperations: [], contracts: [Object.freeze({ action: 'capture' as const, backendOperation: 'observe_window',
+        backendRequired: ['pid', 'window_id'], translatorAllowed: ['pid', 'window_id'], backendOnlyExcluded: [], acceptsSnapshotTargeting: false })] });
+    expect(translateCuaAction('capture', { pid: 123, window_id: 456 }, profile)).toEqual({ operation: 'observe_window', input: { pid: 123, window_id: 456 } });
+    expect(verifyBackendAbi([{ name: 'observe_window', required: ['pid', 'window_id'], properties: { pid: { type: 'integer' }, window_id: { type: 'integer' } } }], profile)).toEqual({ ok: true });
+    expect(translateCuaAction('capture', { pid: 123, window_id: 456 }).operation).toBe('get_window_state');
+    expect(MACOS_CUA_ABI_PROFILE.id).toBe('macos-0.19.3');
+  });
+});
 
 /**
  * Design v58 §6.1. Real `cua-driver 0.19.3` has no standalone `screenshot` or

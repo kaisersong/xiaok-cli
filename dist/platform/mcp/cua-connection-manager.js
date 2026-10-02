@@ -5,20 +5,26 @@ export class CuaConnectionManager {
     _connection = null;
     _connectPromise = null;
     _epoch = 0;
+    _generation = 0;
+    _isReplaySafeCall;
+    _pendingCloses = new Set();
     _revivePromises = new Map();
     _factory;
     _connectTimeoutMs;
     constructor(factory, options = {}) {
         this._factory = factory;
         this._connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+        this._isReplaySafeCall = options.isReplaySafeCall ?? isReplaySafeCuaCall;
         if (options.initialConnection) {
             this._connection = options.initialConnection;
             this._state = 'connected';
+            this._generation += 1;
         }
     }
     get state() {
         return this._state;
     }
+    get generation() { return this._generation; }
     async callToolResult(name, input, options) {
         options?.signal?.throwIfAborted();
         try {
@@ -52,14 +58,14 @@ export class CuaConnectionManager {
             }
             options?.signal?.throwIfAborted();
             this._assertEpoch(epoch);
-            if (!isReplaySafeCuaCall(name, input)) {
+            if (!this._isReplaySafeCall(name, input)) {
                 throw new CuaConnectionReobserveRequiredError();
             }
             const retry = await invoke(recoveredConnection, name, input, options);
             options?.signal?.throwIfAborted();
             const retryFailure = classifyCuaRuntimeFailure(retry.ok ? retry.result : retry.error);
             if (retryFailure && retryFailure.kind !== 'authorization_denied') {
-                this._invalidateConnection(recoveredConnection);
+                await this._invalidateConnection(recoveredConnection);
             }
             return unwrap(retry);
         }
@@ -70,8 +76,11 @@ export class CuaConnectionManager {
     }
     async dispose() {
         this._epoch += 1;
-        if (this._state === 'idle')
+        this._generation += 1;
+        if (this._state === 'idle') {
+            await Promise.all(this._pendingCloses);
             return;
+        }
         if (this._state === 'connecting') {
             this._state = 'closing';
             try {
@@ -81,20 +90,31 @@ export class CuaConnectionManager {
                 // Expected — cancelled or failed
             }
             this._cleanup();
+            await Promise.all(this._pendingCloses);
             return;
         }
         if (this._state === 'connected' || this._state === 'failed') {
             this._cleanup();
+            await Promise.all(this._pendingCloses);
             return;
         }
         if (this._state === 'closing') {
+            await Promise.all(this._pendingCloses);
             return;
         }
+    }
+    _closeConnection(connection) {
+        try {
+            const pending = Promise.resolve(connection.dispose()).catch(() => undefined);
+            this._pendingCloses.add(pending);
+            void pending.finally(() => this._pendingCloses.delete(pending));
+        }
+        catch { /* A failed close does not retain the dead connection. */ }
     }
     _cleanup() {
         if (this._connection) {
             try {
-                this._connection.dispose();
+                this._closeConnection(this._connection);
             }
             catch {
                 // Best-effort cleanup
@@ -118,10 +138,11 @@ export class CuaConnectionManager {
         try {
             const connection = await this._connectPromise;
             if (epoch !== this._epoch) {
-                connection.dispose();
+                this._closeConnection(connection);
                 throw new Error('CUA connection cancelled during dispose');
             }
             this._connection = connection;
+            this._generation += 1;
             this._state = 'connected';
             return connection;
         }
@@ -146,7 +167,7 @@ export class CuaConnectionManager {
             this._factory()
                 .then((connection) => {
                 if (settled) {
-                    connection.dispose();
+                    this._closeConnection(connection);
                     return;
                 }
                 settled = true;
@@ -169,6 +190,7 @@ export class CuaConnectionManager {
         const existing = this._revivePromises.get(key);
         if (existing)
             return existing;
+        this._generation += 1;
         const promise = invoke(connection, 'start_session', session ? { session } : {});
         this._revivePromises.set(key, promise);
         try {
@@ -181,7 +203,7 @@ export class CuaConnectionManager {
     }
     async _replaceConnection(connection, epoch) {
         this._assertEpoch(epoch);
-        this._invalidateConnection(connection);
+        await this._invalidateConnection(connection);
         try {
             return await this._ensureConnected(epoch);
         }
@@ -191,11 +213,12 @@ export class CuaConnectionManager {
             throw new CuaConnectionRecoveryFailedError(error);
         }
     }
-    _invalidateConnection(connection) {
+    async _invalidateConnection(connection) {
         if (this._connection !== connection)
             return false;
+        this._generation += 1;
         try {
-            connection.dispose();
+            this._closeConnection(connection);
         }
         catch {
             // Best effort; the replacement must not retain the dead generation.
@@ -204,6 +227,7 @@ export class CuaConnectionManager {
         this._connectPromise = null;
         this._revivePromises.clear();
         this._state = 'idle';
+        await Promise.all(this._pendingCloses);
         return true;
     }
     _assertEpoch(epoch) {

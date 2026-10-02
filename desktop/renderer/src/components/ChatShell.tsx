@@ -22,7 +22,7 @@ import { parseScheduledTaskPromptDisplay } from '../lib/scheduled-task-prompt-di
 import { fileBasename, isAbsoluteFilePath, toFileUrl } from '../lib/file-path';
 import { getDesktopApi } from '../shared/desktop';
 import { getStreamingRenderDelay } from '../lib/streaming-render-policy';
-import { parseComputerUseRecoverableAction } from '../lib/computer-use-recoverable-action';
+import { parseComputerUseRecoverableAction, resolveComputerUseUserAction } from '../lib/computer-use-recoverable-action';
 import {
   buildProjectCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
@@ -224,10 +224,6 @@ function buildResultCardMessage(input: {
     result: input.result,
     generatedFiles: input.generatedFiles,
   };
-}
-
-function isComputerUseSettingsAction(actionType: string | undefined): boolean {
-  return actionType === 'open_system_settings';
 }
 
 async function createGoalAwareTaskWithRetry<T>(action: () => Promise<T>): Promise<T> {
@@ -1448,15 +1444,21 @@ export function ChatShell() {
   const handleComputerUseAction = async (messageId: string, action: ComputerUseActionData) => {
     updateComputerUseActionMessage(messageId, { status: 'working', detail: t.chatShell.cuProcessing });
     try {
-      if (isComputerUseSettingsAction(action.actionType)) {
-        const permission = action.code === 'COMPUTER_USE_NEEDS_SCREEN_RECORDING' ? 'screen' : 'accessibility';
-        await api.openPluginDependencyPermissionSettings({ permission });
+      const dispatch = resolveComputerUseUserAction(action.actionType, action.code);
+      if (!dispatch) {
+        updateComputerUseActionMessage(messageId, { status: 'failed', detail: t.chatShell.cuActionUnsupported });
+        return;
+      }
+      if (dispatch.type === 'settings') {
+        await api.openPluginDependencyPermissionSettings({ permission: dispatch.permission });
         updateComputerUseActionMessage(messageId, { status: 'idle', detail: t.chatShell.cuSettingsOpened });
         return;
       }
-      const next = await api.enableComputerUse();
+      const next = dispatch.type === 'enable' ? await api.enableComputerUse() : await api.reconnectComputerUse();
       if (next.state === 'ready') {
         updateComputerUseActionMessage(messageId, { status: 'ready', detail: t.chatShell.cuReady });
+      } else if (next.state === 'connected_no_target') {
+        updateComputerUseActionMessage(messageId, { status: 'idle', detail: t.chatShell.cuConnectedNoTarget });
       } else {
         updateComputerUseActionMessage(messageId, { status: 'failed', detail: next.lastError || t.chatShell.cuConnectFailed });
       }

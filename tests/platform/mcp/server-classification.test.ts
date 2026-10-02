@@ -38,6 +38,9 @@ function settingsServer(name: string): NamedMcpServerConfig {
 }
 
 describe('classifyMcpServer (BUILT_IN registry)', () => {
+  it('blocks a renamed server in the official CUA plugin instead of falling through to eager', () => {
+    expect(classifyMcpServer(pluginCua({ name: 'renamed-cua', requiresUserActivation: false })).activation).toEqual({ mode: 'blocked' });
+  });
   it('matches official cua-driver by pluginName + name → lazy + shared-singleton-never-stop + diagnostics', () => {
     const policy = classifyMcpServer(pluginCua());
     expect(policy.activation).toEqual({ mode: 'lazy', adapter: 'cua-computer-use-wrapper' });

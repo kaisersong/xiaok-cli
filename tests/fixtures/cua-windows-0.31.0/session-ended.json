@@ -1,0 +1,16 @@
+{
+  "content": [
+    {
+      "text": "this transport's unnamed session has ended; call start_session without a session label to start a new one",
+      "type": "text"
+    }
+  ],
+  "isError": true,
+  "structuredContent": {
+    "refusal": {
+      "code": "session_ended",
+      "message": "this transport's unnamed session has ended; call start_session without a session label to start a new one"
+    },
+    "status": "refused"
+  }
+}

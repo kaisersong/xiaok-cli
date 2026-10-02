@@ -6,7 +6,7 @@ import {
 
 export interface CuaConnection {
   callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult>;
-  dispose(): void;
+  dispose(): void | Promise<void>;
 }
 
 export type CuaConnectionFactory = () => Promise<CuaConnection>;
@@ -16,6 +16,7 @@ export type CuaConnectionState = 'idle' | 'connecting' | 'connected' | 'closing'
 export interface CuaConnectionManagerOptions {
   connectTimeoutMs?: number;
   initialConnection?: CuaConnection;
+  isReplaySafeCall?: (operation: string, input: Readonly<Record<string, unknown>>) => boolean;
 }
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
@@ -25,6 +26,9 @@ export class CuaConnectionManager {
   private _connection: CuaConnection | null = null;
   private _connectPromise: Promise<CuaConnection> | null = null;
   private _epoch = 0;
+  private _generation = 0;
+  private readonly _isReplaySafeCall: NonNullable<CuaConnectionManagerOptions['isReplaySafeCall']>;
+  private readonly _pendingCloses = new Set<Promise<void>>();
   private readonly _revivePromises = new Map<string, Promise<CallOutcome>>();
   private readonly _factory: CuaConnectionFactory;
   private readonly _connectTimeoutMs: number;
@@ -32,15 +36,18 @@ export class CuaConnectionManager {
   constructor(factory: CuaConnectionFactory, options: CuaConnectionManagerOptions = {}) {
     this._factory = factory;
     this._connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+    this._isReplaySafeCall = options.isReplaySafeCall ?? isReplaySafeCuaCall;
     if (options.initialConnection) {
       this._connection = options.initialConnection;
       this._state = 'connected';
+      this._generation += 1;
     }
   }
 
   get state(): CuaConnectionState {
     return this._state;
   }
+  get generation(): number { return this._generation; }
 
   async callToolResult(name: string, input: Record<string, unknown>, options?: McpInvocationOptions): Promise<McpRuntimeToolResult> {
     options?.signal?.throwIfAborted();
@@ -75,7 +82,7 @@ export class CuaConnectionManager {
 
     options?.signal?.throwIfAborted();
     this._assertEpoch(epoch);
-    if (!isReplaySafeCuaCall(name, input)) {
+    if (!this._isReplaySafeCall(name, input)) {
       throw new CuaConnectionReobserveRequiredError();
     }
 
@@ -83,7 +90,7 @@ export class CuaConnectionManager {
     options?.signal?.throwIfAborted();
     const retryFailure = classifyCuaRuntimeFailure(retry.ok ? retry.result : retry.error);
     if (retryFailure && retryFailure.kind !== 'authorization_denied') {
-      this._invalidateConnection(recoveredConnection);
+      await this._invalidateConnection(recoveredConnection);
     }
     return unwrap(retry);
     } catch (error) {
@@ -94,7 +101,8 @@ export class CuaConnectionManager {
 
   async dispose(): Promise<void> {
     this._epoch += 1;
-    if (this._state === 'idle') return;
+    this._generation += 1;
+    if (this._state === 'idle') { await Promise.all(this._pendingCloses); return; }
 
     if (this._state === 'connecting') {
       this._state = 'closing';
@@ -104,23 +112,34 @@ export class CuaConnectionManager {
         // Expected — cancelled or failed
       }
       this._cleanup();
+      await Promise.all(this._pendingCloses);
       return;
     }
 
     if (this._state === 'connected' || this._state === 'failed') {
       this._cleanup();
+      await Promise.all(this._pendingCloses);
       return;
     }
 
     if (this._state === 'closing') {
+      await Promise.all(this._pendingCloses);
       return;
     }
+  }
+
+  private _closeConnection(connection: CuaConnection): void {
+    try {
+      const pending = Promise.resolve(connection.dispose()).catch(() => undefined);
+      this._pendingCloses.add(pending);
+      void pending.finally(() => this._pendingCloses.delete(pending));
+    } catch { /* A failed close does not retain the dead connection. */ }
   }
 
   private _cleanup(): void {
     if (this._connection) {
       try {
-        this._connection.dispose();
+        this._closeConnection(this._connection);
       } catch {
         // Best-effort cleanup
       }
@@ -148,10 +167,11 @@ export class CuaConnectionManager {
     try {
       const connection = await this._connectPromise;
       if (epoch !== this._epoch) {
-        connection.dispose();
+        this._closeConnection(connection);
         throw new Error('CUA connection cancelled during dispose');
       }
       this._connection = connection;
+      this._generation += 1;
       this._state = 'connected';
       return connection;
     } catch (error) {
@@ -176,7 +196,7 @@ export class CuaConnectionManager {
       this._factory()
         .then((connection) => {
           if (settled) {
-            connection.dispose();
+            this._closeConnection(connection);
             return;
           }
           settled = true;
@@ -203,6 +223,7 @@ export class CuaConnectionManager {
     const existing = this._revivePromises.get(key);
     if (existing) return existing;
 
+    this._generation += 1;
     const promise = invoke(connection, 'start_session', session ? { session } : {});
     this._revivePromises.set(key, promise);
     try {
@@ -214,7 +235,7 @@ export class CuaConnectionManager {
 
   private async _replaceConnection(connection: CuaConnection, epoch: number): Promise<CuaConnection> {
     this._assertEpoch(epoch);
-    this._invalidateConnection(connection);
+    await this._invalidateConnection(connection);
     try {
       return await this._ensureConnected(epoch);
     } catch (error) {
@@ -223,10 +244,11 @@ export class CuaConnectionManager {
     }
   }
 
-  private _invalidateConnection(connection: CuaConnection): boolean {
+  private async _invalidateConnection(connection: CuaConnection): Promise<boolean> {
     if (this._connection !== connection) return false;
+    this._generation += 1;
     try {
-      connection.dispose();
+      this._closeConnection(connection);
     } catch {
       // Best effort; the replacement must not retain the dead generation.
     }
@@ -234,6 +256,7 @@ export class CuaConnectionManager {
     this._connectPromise = null;
     this._revivePromises.clear();
     this._state = 'idle';
+    await Promise.all(this._pendingCloses);
     return true;
   }
 

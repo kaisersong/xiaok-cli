@@ -14,7 +14,7 @@
 - reminder 是到点通知，scheduled task 是自动执行。变更 IPC 时同步 main handler、preload API/实现、renderer types 和 contract tests。
 - agent mutation service 必须显式接收 `requestSource: 'user' | 'agent' | 'scheduler'`，在 service 内按来源与所有权 default deny、allowlist 放行，并有越权拒绝测试。工具描述写“只能/严禁”的边界，避免引导自动取消或删除。安全修复同时审查同权限兄弟入口，不能只堵可零成本绕过的一路就宣称修复。
 - 路径用 `path.join` / `path.resolve`；renderer 文件 URL/文件名用 `lib/file-path.ts`。不硬编码本机路径；兼容 Windows 盘符、UNC、大小写和分隔符。Windows 不直接无 shell spawn `.cmd` shim；后台 Node sidecar 用 `process.execPath` 与 `ELECTRON_RUN_AS_NODE=1`。
-- CUA 当前仅 macOS：平台 gate 必须早于动态导入 CUA manager 和注册 wrapper；Windows 缺失 CUA 时仍应能启动。改启动/子进程/原生模块/路径相关逻辑时验证 Windows 分支。
+- CUA 支持 macOS 与 Windows desktop 原生 x64；Windows CLI、ARM64 和其它平台保持关闭。资格 gate 必须早于动态导入 CUA manager 和注册 wrapper；Windows 缺失 CUA 时仍应能启动。改启动/子进程/原生模块/路径相关逻辑时验证 Windows 分支。
 - renderer 用户可见字符串全部用 `t.*`，同步 `locales/index.ts`、`zh.ts`、`en.ts`；纯函数接收 labels，带变量用函数 key。AI prompt、技术标识符和注释除外。
 - 发布涉及真实 sibling repo 内容：有未提交、未 push、过期 bundle 或缺平台 wheels 时不能称 release ready。本地验证打包禁止签名；只有正式发布才允许签名。
 

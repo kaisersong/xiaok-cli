@@ -1,0 +1,42 @@
+{
+  "content": [
+    {
+      "text": "✅ Found 1 window(s) across 1 app(s); 1 on-screen. (SkyLight Space SPIs unavailable — on_current_space / space_ids omitted.)\n- powershell.exe (pid 25220) \"Xiaok CUA Verification 1790879251299\" [window_id: 309463084]",
+      "type": "text"
+    }
+  ],
+  "structuredContent": {
+    "_legacy_windows": [
+      {
+        "height": 473,
+        "is_on_screen": true,
+        "minimized": false,
+        "pid": 25220,
+        "title": "Xiaok CUA Verification 1790879251299",
+        "width": 586,
+        "window_id": 309463084,
+        "x": 59,
+        "y": 52
+      }
+    ],
+    "current_space_id": null,
+    "windows": [
+      {
+        "app_name": "powershell.exe",
+        "bounds": {
+          "height": 473,
+          "width": 586,
+          "x": 59,
+          "y": 52
+        },
+        "is_on_screen": true,
+        "layer": 0,
+        "minimized": false,
+        "pid": 25220,
+        "title": "Xiaok CUA Verification 1790879251299",
+        "window_id": 309463084,
+        "z_index": 0
+      }
+    ]
+  }
+}

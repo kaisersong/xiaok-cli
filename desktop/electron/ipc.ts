@@ -1240,11 +1240,13 @@ export async function registerDesktopIpc(
     requestSource: 'user',
   }));
   ipcMain.handle('desktop:getComputerUseCapabilityStatus', () => services.getComputerUseCapabilityStatus());
-  ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse());
-  ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse());
-  ipcMain.handle('desktop:disableComputerUse', () => services.disableComputerUse());
+  ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse({ requestSource: 'user' }));
+  ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse({ requestSource: 'user' }));
+  ipcMain.handle('desktop:disableComputerUse', () => services.disableComputerUse({ requestSource: 'user' }));
   ipcMain.handle('desktop:openPluginDependencyPermissionSettings', async (_event, input) => {
+    if (process.platform !== 'darwin') throw new Error('unsupported_action');
     const permission = String(input?.permission ?? '');
+    if (permission !== 'screen' && permission !== 'accessibility') throw new Error('invalid_permission');
     const pane = permission === 'screen'
       ? 'Privacy_ScreenCapture'
       : 'Privacy_Accessibility';
@@ -1253,8 +1255,9 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:installPlugin', (_event, name) => services.installPlugin(name));
   ipcMain.handle('desktop:listAvailablePlugins', () => services.listAvailablePlugins());
   ipcMain.handle('desktop:listPluginDependencyStatuses', () => services.listPluginDependencyStatuses());
-  ipcMain.handle('desktop:installPluginDependency', (_event, input) => services.installPluginDependency(input));
-  ipcMain.handle('desktop:updatePluginDependency', (_event, input) => services.updatePluginDependency(input));
+  ipcMain.handle('desktop:installPluginDependency', (_event, input) => services.installPluginDependency({ ...input, requestSource: 'user' }));
+  ipcMain.handle('desktop:updatePluginDependency', (_event, input) => services.updatePluginDependency({ ...input, requestSource: 'user' }));
+  ipcMain.handle('desktop:cancelPluginDependencyTask', (_event, input) => services.cancelPluginDependencyTask({ ...input, requestSource: 'user' }));
   ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });

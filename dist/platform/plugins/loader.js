@@ -35,7 +35,29 @@ export async function loadPlugins(dirs, options = {}) {
                 if (!existsSync(manifestPath))
                     continue;
                 const raw = JSON.parse(readFileSync(manifestPath, 'utf8'));
-                const manifest = parsePluginManifest(raw, candidate.pluginDir);
+                let manifest = parsePluginManifest(raw, candidate.pluginDir);
+                // The official CUA identity includes its deployment name (also for
+                // managed pointers). A renamed manifest must not fall through to eager
+                // activation as a different plugin, or impersonate CUA from another dir.
+                if ((candidate.name === 'cua-computer-use' || manifest.name === 'cua-computer-use')
+                    && candidate.name !== manifest.name)
+                    continue;
+                let effectiveDir = candidate.pluginDir;
+                if (platform === 'win32' && candidate.name === 'cua-computer-use'
+                    && managed.entries.some(entry => entry.name === candidate.name)
+                    && manifest.platforms?.length && !manifest.platforms.includes(platform)
+                    && options.desktopCuaBundleDir) {
+                    const bundled = parsePluginManifest(JSON.parse(readFileSync(join(options.desktopCuaBundleDir, 'plugin.json'), 'utf8')), options.desktopCuaBundleDir);
+                    const version = (value) => /^\d+\.\d+\.\d+$/.test(value) ? value.split('.').map(Number) : null;
+                    const current = version(manifest.version);
+                    const next = version(bundled.version);
+                    const newer = current && next && next.some((part, index) => part > current[index] && next.slice(0, index).every((prior, i) => prior === current[i]));
+                    if (newer && bundled.name === 'cua-computer-use' && bundled.platforms?.includes('win32')
+                        && bundled.mcpServers?.length === 1 && bundled.mcpServers[0].name === 'cua-driver' && bundled.mcpServers[0].type === 'stdio') {
+                        manifest = bundled;
+                        effectiveDir = options.desktopCuaBundleDir;
+                    }
+                }
                 if (manifest.platforms?.length && !manifest.platforms.includes(platform)) {
                     continue;
                 }
@@ -50,7 +72,7 @@ export async function loadPlugins(dirs, options = {}) {
                     .map((command) => `command:${command}`);
                 loaded.push({
                     ...manifest,
-                    rootDir: candidate.pluginDir,
+                    rootDir: effectiveDir,
                     collisions,
                 });
             }

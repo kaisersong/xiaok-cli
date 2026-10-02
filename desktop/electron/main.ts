@@ -37,6 +37,7 @@ import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdate
 import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
+  resolveBundledPluginsDir,
   prepareBundledPluginPythonRuntime,
 } from './deploy-bundled-plugins.js';
 import { DesktopShutdownGate, ShutdownAwareIpcMain } from './shutdown-aware-ipc-main.js';
@@ -661,9 +662,22 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   const dataRoot = getConfigDir('desktop');
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
   let managedPythonCommand: string | undefined;
+  const computerUseAppIdentity = process.platform === 'win32'
+    ? await (await import('./windows-computer-use-identity.js')).resolveWindowsComputerUseIdentity({
+      platform: process.platform, executablePath: process.execPath, resourcesPath: process.resourcesPath,
+      isPackaged: app.isPackaged, devServerUrl: process.env.XIAOK_DESKTOP_DEV_SERVER, nodeEnv: process.env.NODE_ENV,
+    }) : undefined;
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
+    computerUseAppIdentity,
+    computerUseBundledPluginDir: process.platform === 'win32' ? (() => { const root = resolveBundledPluginsDir(); return root ? join(root, 'cua-computer-use') : undefined; })() : undefined,
+    getComputerUseReadinessTarget: () => {
+      if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return null;
+      const handle = mainWindow.getNativeWindowHandle();
+      const hwnd = handle.length >= 8 ? Number(handle.readBigUInt64LE()) : handle.readUInt32LE();
+      return Number.isSafeInteger(hwnd) && hwnd > 0 ? { pid: process.pid, window_id: hwnd } : null;
+    },
     // Design v58 §4/§9.3: the facade exists before services, so every static
     // gateway captures one stable identity instead of a temporary runtime.
     pluginProviderRuntime,
@@ -1301,7 +1315,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   });
 
   // Register MCP plugin tools (connects to MCP servers declared in the plugins dir)
-  let mcpDispose: (() => void) | undefined;
+  let mcpDispose: (() => Promise<void>) | undefined;
   const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
   let runtimeBridgeStarted = false;
   let runtimeBridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1633,7 +1647,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       debugMain('mobileGateway.stop failed', err instanceof Error ? err.message : String(err));
     });
     mobileRelayBridge?.stop();
-    mcpDispose?.();
+    await mcpDispose?.();
   });
 
   // Reminder IPC handlers

@@ -8,7 +8,7 @@ import { CodexTaskBridge, LOCAL_CODEX_MODEL } from './codex-task-bridge.js';
 import type { NativeActor } from './codex-native-service.js';
 import { accessSync, constants as fsConstants, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync, statSync, realpathSync } from 'node:fs';
 import { join, extname, basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
-import { writeFile as writeFileAsync, readFile as readFileAsync } from 'node:fs/promises';
+import { writeFile as writeFileAsync, readFile as readFileAsync, mkdir as mkdirAsync, mkdtemp, rm as rmAsync } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { buildDesktopSystemPrompt, VISUAL_PDF_EXPORT_GUIDANCE } from './desktop-system-prompt.js';
 import { spawnSync, execFile } from 'node:child_process';
@@ -110,9 +110,16 @@ import { loadPlugins } from '../../src/platform/plugins/loader.js';
 import {
   buildOfficialInstallerExecution,
   getPluginDependencyStatus,
+  isDependencyPlatformSupported,
   type ExternalPluginDependency,
   type PluginDependencyStatusOptions,
 } from './plugin-dependency-service.js';
+import { DependencyTaskOwner, runDependencyProcess } from './dependency-task.js';
+import { downloadDependencyAsset, installPrivateCuaRelease, resolveActivePrivateCuaRelease } from './cua-release-install.js';
+import { detectNativeWindowsArchitecture, detectWindowsInteractiveDesktop } from './windows-cua-host.js';
+import { createWindowsCuaDependency, verifyWindowsCuaReadiness } from './windows-cua-runtime.js';
+import { WINDOWS_CUA_ABI_PROFILE } from '../../src/platform/computer-use/windows-cua-profile.js';
+import { InvocationToolImages } from './tool-image-channel.js';
 import { runCuaMcpReadinessSmoke } from './cua-driver-manager.js';
 import { UserMemoryStore } from './user-memory.js';
 import { createComputerUseTool, type ComputerUseBackend, type ComputerUseUnavailableError } from '../../src/ai/tools/computer-use.js';
@@ -455,10 +462,13 @@ export interface DesktopServicesOptions {
   runner?: TaskRunner;
   kswarmService: KSwarmService;
   pluginRootDir?: string;
+  /** Main-owned bundled resource; only used to upgrade incompatible managed Windows CUA. */
+  computerUseBundledPluginDir?: string;
   pluginDependencies?: Array<{ pluginName: string; dependency: ExternalPluginDependency }>;
   pluginDependencyStatusOptions?: PluginDependencyStatusOptions;
   computerUseAppIdentity?: ComputerUseAppIdentity;
   computerUsePreferencePath?: string;
+  getComputerUseReadinessTarget?: () => { pid: number; window_id: number } | null;
   artifactWorkspaceFeatureFlags?: Partial<ArtifactWorkspaceFeatureFlags>;
   /**
    * Design v58 §4: the stable provider-runtime identity, created before services
@@ -989,7 +999,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     lastErrorDetail?: McpErrorDetail;
   }
   const pluginMcpServers: PluginMcpServerState[] = [];
-  const pluginMcpDisposers: Array<{ name: string; pluginName: string; dispose: () => void }> = [];
+  const pluginMcpDisposers: Array<{ name: string; pluginName: string; dispose: () => void | Promise<void> }> = [];
   const deferredPythonServerNames = new Set<string>();
   /**
    * Live handles for the reserved renderers, so the provider runtime's
@@ -1001,10 +1011,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     call: (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => Promise<string>;
     close: () => Promise<void>;
   }>();
+  const servicesOptions = options;
   const pluginDependencies = options.pluginDependencies ?? [
-    { pluginName: 'cua-computer-use', dependency: CUA_DRIVER_DEPENDENCY },
+    { pluginName: 'cua-computer-use', dependency: process.platform === 'win32' ? createWindowsCuaDependency(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local')) : CUA_DRIVER_DEPENDENCY },
   ];
   const pluginRootDir = options.pluginRootDir ?? getConfigDir('plugins');
+  const computerUseBundledPluginDir = options.computerUseBundledPluginDir;
+  const dependencyTasks = new DependencyTaskOwner();
   const computerUsePreferencePath = options.computerUsePreferencePath ?? join(options.dataRoot, 'computer-use-state.json');
   let computerUsePreference = loadComputerUsePreference(computerUsePreferencePath);
   const computerUseAppIdentity = options.computerUseAppIdentity ?? resolveComputerUseAppIdentity();
@@ -1013,18 +1026,37 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let computerUseActivation: {
     key: string;
     promise: Promise<PluginMcpServerState[]>;
+    controller: AbortController;
   } | null = null;
-  let computerUseUnavailableError: ComputerUseUnavailableError = process.platform !== 'darwin'
+  let computerUseWrapperRegistered = false;
+  let windowsNativeArchitecture: Promise<string> | undefined;
+  let computerUseObserved = false;
+  let shimGeneration = 0;
+  let shimGenerationKey = '';
+  let computerUseUnavailableError: ComputerUseUnavailableError = !['darwin', 'win32'].includes(process.platform)
     ? {
         code: 'COMPUTER_USE_WRAPPER_NOT_READY',
-        message: 'Computer Use / CUA 仅支持 macOS。',
+        message: '当前平台或原生架构尚未支持 Computer Use。',
       }
     : computerUsePreference.lastFailureCode === 'COMPUTER_USE_DISABLED_BY_USER'
       ? buildComputerUseDisabledUnavailableError()
       : buildComputerUseNeedsEnablementError();
 
-  if (process.platform === 'darwin') {
+  function registerComputerUseWrapper(): void {
+    if (computerUseWrapperRegistered) return;
+    computerUseWrapperRegistered = true;
+    const profile = process.platform === 'win32' ? WINDOWS_CUA_ABI_PROFILE : undefined;
     registry.registerTool(createComputerUseTool({
+      abiProfile: profile,
+      acquireInvocation: () => {
+        const backend = computerUseBackend;
+        if (!backend) return null;
+        const epoch = computerUseLifecycleEpoch;
+        const inner = backend.acquireInvocation?.();
+        const key = `${epoch}:${inner?.generation ?? 0}`;
+        if (shimGenerationKey !== key) { shimGenerationKey = key; shimGeneration += 1; }
+        return { backend: inner?.backend ?? backend, generation: shimGeneration, isCurrent: () => backend === computerUseBackend && epoch === computerUseLifecycleEpoch && (!inner || inner.isCurrent()) };
+      },
       getUnavailableError: () => computerUseBackend ? null : computerUseUnavailableError,
       onRecoverableError: (error) => {
         markComputerUseRecoverableFailure(error);
@@ -1041,7 +1073,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         }
         return computerUseBackend.callToolResult(name, input, options);
       },
-    }));
+    }, profile));
+  }
+  if (process.platform === 'darwin') registerComputerUseWrapper();
+
+  async function dependencyStatusOptions(): Promise<PluginDependencyStatusOptions> {
+    if (process.platform !== 'win32') return options.pluginDependencyStatusOptions ?? {};
+    windowsNativeArchitecture ??= options.pluginDependencyStatusOptions?.nativeOsArch
+      ? Promise.resolve(options.pluginDependencyStatusOptions.nativeOsArch) : detectNativeWindowsArchitecture();
+    return { ...options.pluginDependencyStatusOptions, nativeOsArch: await windowsNativeArchitecture };
+  }
+  async function qualifyComputerUse(): Promise<boolean> {
+    const supported = process.platform === 'darwin' || (process.platform === 'win32'
+      && process.arch === 'x64' && (await dependencyStatusOptions()).nativeOsArch === 'x64');
+    if (supported) registerComputerUseWrapper();
+    return supported;
   }
 
   const findPluginDependency = (pluginName: string, dependencyId: string) =>
@@ -1053,11 +1099,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const isPluginInstalled = (pluginName: string) =>
     existsSync(join(pluginRootDir, pluginName, 'plugin.json'));
 
-  const getDependencyStatusView = async (entry: { pluginName: string; dependency: ExternalPluginDependency }) => ({
-    pluginName: entry.pluginName,
-    pluginInstalled: isPluginInstalled(entry.pluginName),
-    ...(await getPluginDependencyStatus(entry.dependency, options.pluginDependencyStatusOptions)),
-  });
+  const getDependencyStatusView = async (entry: { pluginName: string; dependency: ExternalPluginDependency }) => {
+    const facts = await dependencyStatusOptions();
+    let dependency = entry.dependency;
+    if (!options.pluginDependencies && process.platform === 'win32' && entry.pluginName === 'cua-computer-use'
+      && entry.dependency.id === 'cua-driver' && facts.nativeOsArch === 'x64') {
+      dependency = createWindowsCuaDependency(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), await resolveActivePrivateCuaRelease(options.dataRoot));
+    }
+    return { pluginName: entry.pluginName, pluginInstalled: isPluginInstalled(entry.pluginName),
+      ...(await getPluginDependencyStatus(dependency, facts)), task: dependencyTasks.get(`${entry.pluginName}:${entry.dependency.id}`) };
+  };
 
   const resolvePluginMcpLaunch = async (
     pluginName: string,
@@ -1082,12 +1133,50 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     args: string[],
     timeout = 300_000,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
-    const result = spawnSync(command, args, { encoding: 'utf8', timeout });
-    if (result.error) return { success: false, error: result.error.message };
-    if (result.status !== 0) {
-      return { success: false, error: result.stderr?.trim() || result.stdout?.trim() || `exit ${result.status}` };
-    }
-    return { success: true, output: [result.stdout, result.stderr].filter(Boolean).join('\n').trim() };
+    return runDependencyProcess(command, args, { timeoutMs: timeout });
+  }
+
+  async function mutatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean; requestSource: 'user' | 'agent' | 'scheduler' }, action: 'install' | 'update') {
+    if (input.requestSource !== 'user') return { success: false, error: 'request_source_user_required' };
+    const entry = findPluginDependency(input.pluginName, input.dependencyId);
+    if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
+    if (!isDependencyPlatformSupported(entry.dependency, await dependencyStatusOptions())) return { success: false, error: 'unsupported_platform' };
+    const config = action === 'install' ? entry.dependency.install : entry.dependency.update;
+    if (!config) return { success: false, error: `plugin_dependency_${action}_not_available` };
+    if (config.requiresUserConfirmation && !input.confirmed) return { success: false, error: 'confirmation_required' };
+    try {
+      return await dependencyTasks.run(`${entry.pluginName}:${entry.dependency.id}`, async signal => {
+        let result: { success: boolean; output?: string; error?: string };
+        if (config.kind === 'official_release_archive') {
+          if (entry.dependency.id !== 'cua-driver' || entry.pluginName !== 'cua-computer-use') throw new Error('release_not_allowed');
+          if (action === 'update' && process.env.XIAOK_CUA_DRIVER_CMD?.trim()) throw new Error('external_driver_update_not_allowed');
+          await installPrivateCuaRelease(options.dataRoot, signal);
+          result = { success: true };
+        } else if (config.kind === 'official_installer') {
+          if (process.platform !== 'darwin') throw new Error('unsupported_platform');
+          if (!config.sourceAllowlist?.includes(config.sourceUrl)) throw new Error('installer_source_not_allowed');
+          const installerRoot = join(options.dataRoot, 'runtime', 'plugin-installers');
+          await mkdirAsync(installerRoot, { recursive: true });
+          const staging = await mkdtemp(join(installerRoot, 'task-'));
+          try {
+            const bytes = await downloadDependencyAsset(config.sourceUrl, 2 * 1024 * 1024, signal);
+            const script = join(staging, 'install.sh');
+            await writeFileAsync(script, bytes, { flag: 'wx' });
+            signal.throwIfAborted();
+            const execution = buildOfficialInstallerExecution({ ...entry.dependency, install: config }, script, { confirmed: Boolean(input.confirmed) });
+            result = await runDependencyProcess(execution.command, execution.args, { signal, timeoutMs: 300_000 });
+          } finally { await rmAsync(staging, { recursive: true, force: true, maxRetries: 3 }).catch(() => {}); }
+        } else {
+          const status = await getDependencyStatusView(entry);
+          signal.throwIfAborted();
+          if (!status.resolvedBinary) throw new Error('plugin_dependency_binary_missing');
+          result = await runDependencyProcess(status.resolvedBinary, config.args ?? [], { signal, timeoutMs: 300_000 });
+        }
+        signal.throwIfAborted();
+        if (!result.success) return { success: false, error: result.error };
+        return { success: true, status: await getDependencyStatusView(entry) };
+      });
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
   }
 
   const persistComputerUsePreference = (): void => {
@@ -1106,7 +1195,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     } = computerUsePreference;
     computerUsePreference = {
       ...preferenceWithoutFailure,
-      schemaVersion: 1,
+      schemaVersion: process.platform === 'win32' ? 2 : (computerUsePreference.schemaVersion ?? 1),
+      ...(process.platform === 'win32' ? { platform: 'win32' as const } : {}),
       enabledByUser: source === 'user_enable' ? true : computerUsePreference.enabledByUser,
       autoConnectAfterSuccessfulEnablement: true,
       lastSuccessfulAt: options.now?.() ?? Date.now(),
@@ -1127,22 +1217,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       || code === 'COMPUTER_USE_PLUGIN_MISSING';
     computerUsePreference = {
       ...computerUsePreference,
-      schemaVersion: 1,
+      schemaVersion: process.platform === 'win32' ? 2 : (computerUsePreference.schemaVersion ?? 1),
+      ...(process.platform === 'win32' ? { platform: 'win32' as const } : {}),
       lastFailureCode: code,
       ...(suspendsAutoConnect ? { autoConnectSuspendedReason: code } : {}),
     };
     persistComputerUsePreference();
   };
 
-  const disposePluginMcpServers = (predicate: (server: { name: string; pluginName: string }) => boolean = () => true): void => {
+  const pendingMcpCloses = new Set<Promise<void>>();
+  const disposePluginMcpServers = (predicate: (server: { name: string; pluginName: string }) => boolean = () => true): Promise<void> => {
     for (let index = pluginMcpDisposers.length - 1; index >= 0; index -= 1) {
       const entry = pluginMcpDisposers[index];
       if (!predicate(entry)) continue;
       try {
-        entry.dispose();
+        const pending = Promise.resolve(entry.dispose()).catch(() => undefined);
+        pendingMcpCloses.add(pending);
+        void pending.finally(() => pendingMcpCloses.delete(pending));
       } catch {}
       pluginMcpDisposers.splice(index, 1);
     }
+    return Promise.all(pendingMcpCloses).then(() => undefined);
   };
 
   function markComputerUseRecoverableFailure(error: ComputerUseUnavailableError): void {
@@ -1172,18 +1267,24 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   }
 
   const performReconnectPluginMcpServers = async (
-    options: { userInitiated?: boolean; targetServerName?: string; autoConnectComputerUse?: boolean } = {},
+    options: { userInitiated?: boolean; targetServerName?: string; targetPluginName?: string; autoConnectComputerUse?: boolean } = {},
     computerUseActivationEpoch?: number,
+    computerUseActivationSignal?: AbortSignal,
   ): Promise<PluginMcpServerState[]> => {
+    const computerUseQualified = await qualifyComputerUse();
+    if (computerUseActivationEpoch !== undefined && computerUseActivationEpoch !== computerUseLifecycleEpoch) return pluginMcpServers;
     const matchesTarget = (server: { name: string; pluginName: string }) =>
-      !options.targetServerName || server.name === options.targetServerName;
-    disposePluginMcpServers(matchesTarget);
+      (!options.targetPluginName || server.pluginName === options.targetPluginName)
+      && (!options.targetServerName || server.name === options.targetServerName
+        || (options.targetServerName === 'cua-driver' && server.pluginName === 'cua-computer-use'));
+    await disposePluginMcpServers(matchesTarget);
     for (let index = pluginMcpServers.length - 1; index >= 0; index -= 1) {
       if (matchesTarget(pluginMcpServers[index])) {
         pluginMcpServers.splice(index, 1);
       }
     }
-    if (!options.targetServerName || options.targetServerName === 'cua-driver') {
+    if ((!options.targetPluginName || options.targetPluginName === 'cua-computer-use')
+      && (!options.targetServerName || options.targetServerName === 'cua-driver')) {
       computerUseBackend = null;
       computerUseUnavailableError = options.userInitiated
         ? { code: 'COMPUTER_USE_MCP_CONNECT_TIMEOUT', message: 'Computer Use 正在连接或连接失败。', userAction: { type: 'reconnect_computer_use', label: '重新连接' } }
@@ -1201,17 +1302,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }));
     }
     try {
-      const plugins = await loadPlugins([pluginRootDir]);
+      const plugins = await loadPlugins([pluginRootDir], { desktopCuaBundleDir: process.platform === 'win32' ? computerUseBundledPluginDir : undefined });
       for (const plugin of plugins) {
         if (!plugin.mcpServers?.length) continue;
         for (const server of plugin.mcpServers) {
           if (server.type !== 'stdio') continue;
           if (!matchesTarget({ name: server.name, pluginName: plugin.name })) continue;
+          if (plugin.name === 'cua-computer-use' && server.name !== 'cua-driver') {
+            computerUseUnavailableError = { code: 'COMPUTER_USE_PLUGIN_INCOMPATIBLE', message: 'CUA 插件身份不匹配，请更新插件后重新启用。' };
+            pluginMcpServers.push({ name: server.name, pluginName: plugin.name, toolCount: 0, connected: false, enabled: false, lastError: computerUseUnavailableError.message });
+            continue;
+          }
+          const isCuaServer = plugin.name === 'cua-computer-use' && server.name === 'cua-driver';
           const dependency = findPluginDependencyForMcpServer(plugin.name, server.name);
           const mayConnectUserActivatedServer = options.userInitiated
-            || (server.name === 'cua-driver' && options.autoConnectComputerUse === true);
+            || (isCuaServer && options.autoConnectComputerUse === true);
           if (dependency?.dependency.mcp?.requiresUserActivation && !mayConnectUserActivatedServer) {
-            if (server.name === 'cua-driver') {
+            if (isCuaServer) {
               computerUseUnavailableError = buildComputerUseNeedsEnablementError();
             }
             pluginMcpServers.push({
@@ -1220,14 +1327,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               toolCount: 0,
               connected: false,
               enabled: false,
-              lastError: '等待用户点击连接，避免自动触发 macOS 权限弹窗',
+              lastError: '等待用户点击连接以启用 Computer Use',
             });
             continue;
           }
-          if (server.name === 'cua-driver' && process.platform !== 'darwin') {
+          if (isCuaServer && !computerUseQualified) {
             computerUseUnavailableError = {
               code: 'COMPUTER_USE_WRAPPER_NOT_READY',
-              message: 'Computer Use / CUA 仅支持 macOS。',
+              message: '当前平台或原生架构尚未支持 Computer Use。',
             };
             pluginMcpServers.push({
               name: server.name,
@@ -1242,6 +1349,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           let connectionRef: McpClientConnection | null = null;
           let resolvedCommand: string | undefined;
           try {
+            if (isCuaServer) computerUseActivationSignal?.throwIfAborted();
+            if (isCuaServer && process.platform === 'win32' && !(await detectWindowsInteractiveDesktop(computerUseActivationSignal))) throw new Error('COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE');
             const launch = await resolvePluginMcpLaunch(plugin.name, server.name, server.command, server.args ?? []);
             // Use managed venv python if available for Python MCP servers
             const isPythonServer = launch.command === 'python3' || launch.command === 'python';
@@ -1273,7 +1382,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               ? buildPythonServerEnv(baseEnv)
               : isNodeServer && !process.env.XIAOK_NODE_CMD && process.versions.electron
                 ? { ...(baseEnv ?? {}), ELECTRON_RUN_AS_NODE: '1' }
-                : baseEnv;
+                : isCuaServer && process.platform === 'win32'
+                  ? { ...(baseEnv ?? {}), CUA_DRIVER_RS_TELEMETRY_ENABLED: 'false', CUA_DRIVER_RS_UPDATE_CHECK: 'false', CUA_DRIVER_TELEMETRY_HOME: join(servicesOptions.dataRoot, 'runtime', 'cua-telemetry') } : baseEnv;
+            if (isCuaServer) computerUseActivationSignal?.throwIfAborted();
             const connection = await createMcpClientConnection(server.name, {
               type: 'stdio',
               command,
@@ -1284,13 +1395,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             }, {
               cwd: plugin.rootDir,
               clientName: 'xiaok-desktop',
+              ...(isCuaServer ? { startupSignal: computerUseActivationSignal } : {}),
             });
             connectionRef = connection;
             const catalogTimeout = server.timeout?.catalog ?? resolveMcpCatalogTimeoutMs();
             const callTimeout = server.timeout?.call ?? resolveMcpCallToolTimeoutMs();
             const schemas = (await connection.client.listTools(
               undefined,
-              { timeout: catalogTimeout },
+              { timeout: catalogTimeout, ...(isCuaServer ? { signal: computerUseActivationSignal } : {}) },
             )).tools as McpToolSchema[];
             const callToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => {
               const result = await callMcpToolWithSignal(connection.client,
@@ -1305,7 +1417,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               options?.signal?.throwIfAborted();
               return result.text;
             };
-            let disposeConnectedServer = () => connection.dispose();
+            let disposeConnectedServer: () => void | Promise<void> = () => connection.dispose();
             if (server.name === 'slide-renderer' || server.name === 'report-renderer') {
               reservedServerHandles.set(server.name, {
                 listOperations: async () => schemas.map((schema) => schema.name),
@@ -1315,22 +1427,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             }
             let mcpTools: Tool[];
             let toolCount = 0;
-            if (server.name === 'cua-driver') {
-              const readiness = await runCuaMcpReadinessSmoke({
-                schemas,
-                callToolResult,
-              });
-              if (!readiness.ready) {
-                connection.dispose();
-                throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
+            if (isCuaServer) {
+              let windowsObserved = false;
+              if (process.platform === 'win32') {
+                windowsObserved = (await verifyWindowsCuaReadiness({ identity: connection.client.getServerVersion(), schemas, callToolResult, target: servicesOptions.getComputerUseReadinessTarget?.() })).observed;
+              } else {
+                const readiness = await runCuaMcpReadinessSmoke({ schemas, callToolResult });
+                if (!readiness.ready) throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
               }
               if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
-                connection.dispose();
+                if (process.platform === 'win32') await connection.close(); else connection.dispose();
                 connectionRef = null;
                 continue;
               }
 
               const createReplacementConnection = async () => {
+                if (process.platform === 'win32' && !(await detectWindowsInteractiveDesktop())) throw new Error('COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE');
+                if (isCuaServer) computerUseActivationSignal?.throwIfAborted();
                 const replacement = await createMcpClientConnection(server.name, {
                   type: 'stdio',
                   command,
@@ -1341,39 +1454,42 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                 }, {
                   cwd: plugin.rootDir,
                   clientName: 'xiaok-desktop',
+                  startupSignal: computerUseActivationSignal,
                 });
                 try {
                   const replacementSchemas = (await replacement.client.listTools(
                     undefined,
-                    { timeout: catalogTimeout },
+                    { timeout: catalogTimeout, ...(isCuaServer ? { signal: computerUseActivationSignal } : {}) },
                   )).tools as McpToolSchema[];
                   const replacementCallToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) =>
                     normalizeMcpRuntimeToolResult(await callMcpToolWithSignal(replacement.client,
                       { name, arguments: input },
                       { timeout: callTimeout, signal: options?.signal },
                     ));
-                  const replacementReadiness = await runCuaMcpReadinessSmoke({
-                    schemas: replacementSchemas,
-                    callToolResult: replacementCallToolResult,
-                  });
-                  if (!replacementReadiness.ready) {
-                    throw new Error(`CUA MCP readiness failed: ${replacementReadiness.code}`);
+                  if (process.platform === 'win32') {
+                    if (!(await detectWindowsInteractiveDesktop())) throw new Error('COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE');
+                    await verifyWindowsCuaReadiness({ identity: replacement.client.getServerVersion(), schemas: replacementSchemas, callToolResult: replacementCallToolResult, target: servicesOptions.getComputerUseReadinessTarget?.() });
+                  } else {
+                    const replacementReadiness = await runCuaMcpReadinessSmoke({ schemas: replacementSchemas, callToolResult: replacementCallToolResult });
+                    if (!replacementReadiness.ready) throw new Error(`CUA MCP readiness failed: ${replacementReadiness.code}`);
                   }
                   return {
                     callToolResult: replacementCallToolResult,
-                    dispose: () => replacement.dispose(),
+                    dispose: () => process.platform === 'win32' ? replacement.close() : replacement.dispose(),
                   };
                 } catch (error) {
-                  replacement.dispose();
+                  if (process.platform === 'win32') await replacement.close(); else replacement.dispose();
                   throw error;
                 }
               };
 
               const { CuaConnectionManager } = await import('../../src/platform/mcp/cua-connection-manager.js');
+              const windowsBackendModule = process.platform === 'win32' ? await import('../../src/platform/computer-use/windows-cua-backend.js') : null;
               const manager = new CuaConnectionManager(createReplacementConnection, {
+                ...(windowsBackendModule ? { isReplaySafeCall: windowsBackendModule.isWindowsCuaReplaySafeCall } : {}),
                 initialConnection: {
                   callToolResult,
-                  dispose: () => connection.dispose(),
+                  dispose: () => process.platform === 'win32' ? connection.close() : connection.dispose(),
                 },
               });
               if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
@@ -1382,12 +1498,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                 continue;
               }
 
-              computerUseBackend = {
-                callToolResult: (name, input, options) => manager.callToolResult(name, input, options),
-              };
-              disposeConnectedServer = () => { void manager.dispose(); };
+              computerUseObserved = process.platform !== 'win32' || windowsObserved;
+              computerUseBackend = windowsBackendModule ? windowsBackendModule.createWindowsCuaBackend(manager, {
+                onObserved: () => {
+                  if (computerUseActivationEpoch !== computerUseLifecycleEpoch) return;
+                  computerUseObserved = true;
+                  recordComputerUseReady(options.userInitiated ? 'user_enable' : 'auto_recovery');
+                },
+              }) : { callToolResult: (name, input, options) => manager.callToolResult(name, input, options) };
+              disposeConnectedServer = () => manager.dispose();
               connectionRef = null;
-              if (options.userInitiated || options.autoConnectComputerUse) {
+              if (computerUseObserved && (options.userInitiated || options.autoConnectComputerUse)) {
                 recordComputerUseReady(options.userInitiated ? 'user_enable' : 'auto_recovery');
               }
               mcpTools = [];
@@ -1405,7 +1526,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               toolCount = mcpTools.length;
             }
             let catalogRegistration: DesktopMcpCatalogRegistration<McpToolSchema> | undefined;
-            if (server.name !== 'cua-driver') {
+            if (!isCuaServer) {
               catalogRegistration = new DesktopMcpCatalogRegistration({ registry, connection, ownerId: `mcp:${plugin.name}:${server.name}`,
                 listSchemas: async () => (await connection.client.listTools(undefined, { timeout: catalogTimeout })).tools as McpToolSchema[],
                 buildTools: next => buildMcpRuntimeTools({ name: server.name, command: server.command }, { listTools: async () => next, callTool, dispose: connection.dispose }, next)
@@ -1437,11 +1558,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               pluginName: plugin.name,
               dispose: () => {
                 catalogRegistration?.dispose();
-                if (server.name === 'cua-driver') {
+                if (isCuaServer) {
                   computerUseBackend = null;
                   computerUseUnavailableError = buildComputerUseNeedsEnablementError();
                 }
-                disposeConnectedServer();
+                return disposeConnectedServer();
               },
             });
             pluginMcpServers.push({
@@ -1454,10 +1575,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           } catch (e) {
             const baseMessage = e instanceof Error ? e.message : String(e);
             const stderrTail = connectionRef?.getStderrTail() || getMcpConnectionStderrTail(e);
-            connectionRef?.dispose();
+            if (isCuaServer && process.platform === 'win32') await connectionRef?.close(); else connectionRef?.dispose();
             const combinedDetail = stderrTail ? `${baseMessage}\n${stderrTail}` : baseMessage;
             const errorDetail = classifyMcpStartupError(combinedDetail, resolvedCommand);
-            if (server.name === 'cua-driver') {
+            if (isCuaServer) {
               if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
                 continue;
               }
@@ -1487,21 +1608,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   const reconnectPluginMcpServers = (
-    options: { userInitiated?: boolean; targetServerName?: string; autoConnectComputerUse?: boolean } = {},
+    options: { userInitiated?: boolean; targetServerName?: string; targetPluginName?: string; autoConnectComputerUse?: boolean } = {},
   ): Promise<PluginMcpServerState[]> => {
-    const includesComputerUse = !options.targetServerName || options.targetServerName === 'cua-driver';
+    const includesComputerUse = (!options.targetPluginName || options.targetPluginName === 'cua-computer-use')
+      && (!options.targetServerName || options.targetServerName === 'cua-driver');
     if (!includesComputerUse) return performReconnectPluginMcpServers(options);
 
     const key = JSON.stringify({
       targetServerName: options.targetServerName ?? '*',
+      targetPluginName: options.targetPluginName ?? '*',
       userInitiated: options.userInitiated === true,
       autoConnectComputerUse: options.autoConnectComputerUse === true,
     });
     if (computerUseActivation?.key === key) return computerUseActivation.promise;
 
+    computerUseActivation?.controller.abort();
+    const controller = new AbortController();
     const epoch = ++computerUseLifecycleEpoch;
-    const promise = performReconnectPluginMcpServers(options, epoch);
-    computerUseActivation = { key, promise };
+    const promise = performReconnectPluginMcpServers(options, epoch, controller.signal);
+    computerUseActivation = { key, promise, controller };
     void promise.finally(() => {
       if (computerUseActivation?.promise === promise) computerUseActivation = null;
     }).catch(() => {});
@@ -1514,26 +1639,26 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return {
         state: 'disabled_by_user',
         mcpConnected: false,
-        wrapperReady: true,
+        wrapperReady: computerUseWrapperRegistered,
         lastError: computerUseUnavailableError.message,
       };
     }
     if (computerUseBackend && server?.connected) {
-      return { state: 'ready', mcpConnected: true, wrapperReady: true };
+      return { state: computerUseObserved ? 'ready' : 'connected_no_target', mcpConnected: true, wrapperReady: true };
     }
     if (server?.enabled === false || computerUseUnavailableError.code === 'COMPUTER_USE_NEEDS_ENABLEMENT') {
       return {
         state: 'not_enabled',
         mcpConnected: false,
-        wrapperReady: true,
+        wrapperReady: computerUseWrapperRegistered,
         lastError: computerUseUnavailableError.message,
       };
     }
     return {
       state: 'failed',
       mcpConnected: false,
-      wrapperReady: true,
-      lastError: server?.lastError ?? computerUseUnavailableError.message,
+      wrapperReady: computerUseWrapperRegistered,
+      lastError: computerUseUnavailableError.message || server?.lastError,
     };
   };
 
@@ -2531,7 +2656,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }));
       return { started: true };
     },
-    async registerMcpTools(): Promise<{ dispose: () => void }> {
+    async registerMcpTools(): Promise<{ dispose: () => Promise<void> }> {
       const autoConnectDecision = isComputerUseAutoConnectEligibleApp(computerUsePreference, computerUseAppIdentity);
       await reconnectPluginMcpServers({
         userInitiated: false,
@@ -2540,7 +2665,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return {
         dispose: () => {
           computerUseLifecycleEpoch += 1;
-          disposePluginMcpServers();
+          computerUseActivation?.controller.abort();
+          dependencyTasks.cancelAll();
+          return disposePluginMcpServers();
         },
       };
     },
@@ -2582,36 +2709,49 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const target = pluginMcpServers.find((server) => server.name === input.componentId);
       if (!target) return pluginMcpServers;
       // A disabled CUA component must not be activated by a retry.
-      if (target.name === 'cua-driver' && !computerUsePreference.enabledByUser) {
+      if (target.pluginName === 'cua-computer-use' && !computerUsePreference.enabledByUser) {
         return pluginMcpServers;
       }
-      return reconnectPluginMcpServers({ userInitiated: true, targetServerName: input.componentId });
+      return reconnectPluginMcpServers({ userInitiated: true, targetServerName: input.componentId, targetPluginName: target.pluginName });
     },
-    async enableComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
-      await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver' });
+    async enableComputerUse(input: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      if (input?.requestSource !== 'user') throw new Error('request_source_user_required');
+      if (computerUsePreference.readOnlyUnknownSchema) throw new Error('computer_use_preference_schema_unsupported');
+      if (process.platform === 'win32') {
+        computerUsePreference = { ...computerUsePreference, schemaVersion: 2, platform: 'win32', enabledByUser: true, autoConnectAfterSuccessfulEnablement: true };
+        persistComputerUsePreference();
+      }
+      await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver', targetPluginName: 'cua-computer-use' });
       return getComputerUseCapabilityStatus();
     },
-    async reconnectComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
-      await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver' });
+    async reconnectComputerUse(input: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      if (input?.requestSource !== 'user') throw new Error('request_source_user_required');
+      if (!computerUsePreference.enabledByUser || computerUsePreference.readOnlyUnknownSchema) return getComputerUseCapabilityStatus();
+      await reconnectPluginMcpServers({ userInitiated: true, targetServerName: 'cua-driver', targetPluginName: 'cua-computer-use' });
       return getComputerUseCapabilityStatus();
     },
-    async disableComputerUse(): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+    async disableComputerUse(input: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<{ state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string }> {
+      if (input?.requestSource !== 'user') throw new Error('request_source_user_required');
       computerUseLifecycleEpoch += 1;
-      disposePluginMcpServers((server) => server.name === 'cua-driver');
+      computerUseActivation?.controller.abort();
+      dependencyTasks.cancel('cua-computer-use:cua-driver');
+      const closed = disposePluginMcpServers((server) => server.pluginName === 'cua-computer-use');
       for (let index = pluginMcpServers.length - 1; index >= 0; index -= 1) {
-        if (pluginMcpServers[index].name === 'cua-driver') pluginMcpServers.splice(index, 1);
+        if (pluginMcpServers[index].pluginName === 'cua-computer-use') pluginMcpServers.splice(index, 1);
       }
       computerUseBackend = null;
       computerUseUnavailableError = buildComputerUseDisabledUnavailableError();
       computerUsePreference = {
         ...computerUsePreference,
-        schemaVersion: 1,
+        schemaVersion: process.platform === 'win32' ? 2 : (computerUsePreference.schemaVersion ?? 1),
+      ...(process.platform === 'win32' ? { platform: 'win32' as const } : {}),
         enabledByUser: false,
         autoConnectAfterSuccessfulEnablement: false,
         lastFailureCode: 'COMPUTER_USE_DISABLED_BY_USER',
         autoConnectSuspendedReason: 'COMPUTER_USE_DISABLED_BY_USER',
       };
       persistComputerUsePreference();
+      await closed;
       return getComputerUseCapabilityStatus();
     },
     getComputerUseCapabilityStatus(): { state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string } {
@@ -2648,70 +2788,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async listPluginDependencyStatuses() {
       return Promise.all(pluginDependencies.map(getDependencyStatusView));
     },
-    async installPluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }): Promise<{ success: boolean; status?: unknown; error?: string }> {
-      const entry = findPluginDependency(input.pluginName, input.dependencyId);
-      if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
-      try {
-        const dependency = entry.dependency;
-        if (dependency.install?.kind !== 'official_installer') {
-          return { success: false, error: 'plugin_dependency_installer_not_available' };
-        }
-        if (dependency.install.requiresUserConfirmation && !input.confirmed) {
-          return { success: false, error: 'confirmation_required' };
-        }
-        if (dependency.install.sourceAllowlist && !dependency.install.sourceAllowlist.includes(dependency.install.sourceUrl)) {
-          return { success: false, error: 'installer_source_not_allowed' };
-        }
-        const installerDir = join(options.dataRoot, 'runtime', 'plugin-installers');
-        mkdirSync(installerDir, { recursive: true });
-        const res = await fetch(dependency.install.sourceUrl);
-        if (!res.ok) return { success: false, error: `installer_download_failed_${res.status}` };
-        const installerPath = join(installerDir, `${dependency.id}-${Date.now()}.sh`);
-        await writeFileAsync(installerPath, Buffer.from(await res.arrayBuffer()));
-        const execution = buildOfficialInstallerExecution(dependency, installerPath, { confirmed: Boolean(input.confirmed) });
-        const result = await runDependencyCommand(execution.command, execution.args);
-        if (!result.success) return { success: false, error: result.error };
-        return { success: true, status: await getDependencyStatusView(entry) };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) };
-      }
+    async installPluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean; requestSource: 'user' | 'agent' | 'scheduler' }) {
+      return mutatePluginDependency(input, 'install');
     },
-    async updatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }): Promise<{ success: boolean; status?: unknown; error?: string }> {
-      const entry = findPluginDependency(input.pluginName, input.dependencyId);
-      if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
-      const dependency = entry.dependency;
-      if (!dependency.update) return { success: false, error: 'plugin_dependency_update_not_available' };
-      if (dependency.update.requiresUserConfirmation && !input.confirmed) {
-        return { success: false, error: 'confirmation_required' };
-      }
-      if (dependency.update.kind === 'official_installer') {
-        const updateConfig = dependency.update;
-        if (updateConfig.sourceAllowlist && !updateConfig.sourceAllowlist.includes(updateConfig.sourceUrl)) {
-          return { success: false, error: 'installer_source_not_allowed' };
-        }
-        try {
-          const installerDir = join(options.dataRoot, 'runtime', 'plugin-installers');
-          mkdirSync(installerDir, { recursive: true });
-          const res = await fetch(updateConfig.sourceUrl);
-          if (!res.ok) return { success: false, error: `installer_download_failed_${res.status}` };
-          const installerPath = join(installerDir, `${dependency.id}-update-${Date.now()}.sh`);
-          await writeFileAsync(installerPath, Buffer.from(await res.arrayBuffer()));
-          const result = await runDependencyCommand('/bin/bash', [installerPath]);
-          if (!result.success) return { success: false, error: result.error };
-          return { success: true, status: await getDependencyStatusView(entry) };
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) };
-        }
-      }
-      const status = await getDependencyStatusView(entry);
-      if (!status.resolvedBinary) return { success: false, error: 'plugin_dependency_binary_missing' };
-      const result = await runDependencyCommand(status.resolvedBinary, dependency.update.args ?? []);
-      if (!result.success) return { success: false, error: result.error };
-      return { success: true, status: await getDependencyStatusView(entry) };
+    async updatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean; requestSource: 'user' | 'agent' | 'scheduler' }) {
+      return mutatePluginDependency(input, 'update');
+    },
+    async cancelPluginDependencyTask(input: { pluginName: string; dependencyId: string; requestSource: 'user' | 'agent' | 'scheduler' }) {
+      if (input?.requestSource !== 'user') throw new Error('request_source_user_required');
+      return { cancelling: dependencyTasks.cancel(`${input.pluginName}:${input.dependencyId}`) };
     },
     async diagnosePluginDependency(input: { pluginName: string; dependencyId: string }): Promise<{ success: boolean; output?: string; status?: unknown; error?: string }> {
       const entry = findPluginDependency(input.pluginName, input.dependencyId);
       if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
+      if (!isDependencyPlatformSupported(entry.dependency, await dependencyStatusOptions())) return { success: false, error: 'unsupported_platform' };
       const status = await getDependencyStatusView(entry);
       if (!status.resolvedBinary) return { success: false, error: 'plugin_dependency_binary_missing' };
       const doctor = entry.dependency.health?.doctor;
@@ -3441,6 +3531,15 @@ function buildComputerUseDisabledUnavailableError(): ComputerUseUnavailableError
 
 function mapComputerUseStartupError(error: unknown): ComputerUseUnavailableError {
   const message = error instanceof Error ? error.message : String(error);
+  if (process.platform === 'win32') {
+    const code = message.includes('SESSION_UNAVAILABLE') ? 'COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE'
+      : /IDENTITY_MISMATCH|ABI_MISMATCH|OBSERVATION_INVALID|TARGET_MISMATCH/.test(message) ? 'COMPUTER_USE_WINDOWS_ABI_MISMATCH'
+      : /binary_missing|dependency.*not.ready/.test(message) ? 'COMPUTER_USE_DRIVER_MISSING' : 'COMPUTER_USE_MCP_CONNECT_TIMEOUT';
+    return { code, message: code === 'COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE'
+      ? '当前 Windows 会话没有可操作桌面，请登录并解锁桌面后重新连接。'
+      : code === 'COMPUTER_USE_WINDOWS_ABI_MISMATCH' ? 'CUA Driver 版本或接口不匹配，请安装兼容版本后重新连接。' : message,
+      userAction: { type: 'reconnect_computer_use', label: '重新连接' } };
+  }
   if (message.includes('permission_accessibility_missing')) {
     return {
       code: 'COMPUTER_USE_NEEDS_ACCESSIBILITY',
@@ -5331,7 +5430,7 @@ async function streamDesktopToolLoopFinalization(input: {
   projectModel?: ProjectAgentModel;
   beforeRequest?: () => Promise<void>;
   deadline?: number;
-  adapter: Pick<ModelAdapter, 'stream'>;
+  adapter: Pick<ModelAdapter, 'stream'> & { getCapabilities?(): Partial<import('../../src/ai/runtime/model-capabilities.js').ModelCapabilities> };
   apiMessages: Message[];
   systemPrompt: string;
   streamOptions: StreamOptions;
@@ -5413,7 +5512,7 @@ interface ToolLoopStrategies {
 interface ToolLoopContext {
   projectModel?: ProjectAgentModel;
   canResumeSummary?: () => boolean;
-  adapter: Pick<ModelAdapter, 'stream'>;
+  adapter: Pick<ModelAdapter, 'stream'> & { getCapabilities?(): Partial<import('../../src/ai/runtime/model-capabilities.js').ModelCapabilities> };
   systemPrompt: string;
   messages: Message[];
   allToolDefs: ToolDefinition[];
@@ -6014,6 +6113,8 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       const projectedToolContext = isStrictKimiK3Adapter(ctx.adapter)
         ? projectStrictToolExecutionContext(rawToolContext)
         : rawToolContext;
+      const modelSupportsImageInput = ctx.adapter.getCapabilities?.().supportsImageInput === true;
+      const toolImages = new InvocationToolImages(ctx.signal, modelSupportsImageInput);
       let invoked = false;
       // Internal observer is deliberately added after the strict provider
       // projection, whose allowlist must never accept executable callbacks.
@@ -6021,11 +6122,14 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         ? { ...projectedToolContext, onToolInvocationStarted: () => { invoked = true; } }
         : projectedToolContext;
       const monitoredToolContext:ToolExecutionContext={...toolContext,
+        modelSupportsImageInput,
+        emitToolImage: toolImages.emit,
         onExecutionHealth: state => {void ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,invocationId:toolCall.id,state}).catch(error=>console.warn('[execution-health] status delivery failed',error));},
         executionProgress: {progress:()=>{void ctx.emitRuntimeEvent({type:'execution_progress',sessionId:ctx.sessionId,turnId:ctx.turnId}).catch(error=>console.warn('[execution-health] progress delivery failed',error));},wait:()=>{},resume:()=>{}},
       };
       if(Object.isFrozen(projectedToolContext))Object.freeze(monitoredToolContext);
-      let { ok, result } = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
+      let execution: Awaited<ReturnType<typeof executeDesktopTaskTool>>;
+      try { execution = await executeDesktopTaskTool({ ...toolCall, input: runtimeToolInput }, {
         registry: ctx.registry,
         taskId: ctx.taskId,
         materials: ctx.materials,
@@ -6033,7 +6137,9 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         context:monitoredToolContext,
         officeToMarkdown: ctx.officeToMarkdown,
         scoped: Boolean(ctx.mailbox),
-      });
+      }); } catch (error) { toolImages.finish(false); throw error; }
+      let { ok, result } = execution;
+      const invocationImages = toolImages.finish(ok);
       ctx.signal.throwIfAborted();
       if (ok) {
         await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
@@ -6179,7 +6285,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       const resultContent = ctx.strategies.processToolResult(result, toolCall.name, toolCall.id);
       toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: resultContent, is_error: !ok });
       const materialImages=ctx.roomExecution?.takePendingImages?.()??[];
-      if(ok)toolResults.push(...materialImages);
+      if(ok)toolResults.push(...invocationImages, ...materialImages);
     }
     ctx.messages.push({ role: 'user', content: toolResults });
     toolResultsAwaitingFinalResponse = true;

@@ -14,6 +14,8 @@ import type { NamedMcpServerConfig } from './types.js';
 export type McpActivation = {
     mode: 'eager';
 } | {
+    mode: 'blocked';
+} | {
     mode: 'lazy';
     adapter: 'cua-computer-use-wrapper';
 };

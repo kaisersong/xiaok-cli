@@ -170,7 +170,26 @@ const CUA_ACTION_CONTRACT_LIST = [
         acceptsSnapshotTargeting: true,
     },
 ];
+for (const contract of CUA_ACTION_CONTRACT_LIST) {
+    Object.freeze(contract.backendRequired);
+    Object.freeze(contract.translatorAllowed);
+    Object.freeze(contract.backendOnlyExcluded);
+    if (contract.forced)
+        Object.freeze(contract.forced);
+    if (contract.renames)
+        Object.freeze(contract.renames);
+    if (contract.pixelPairs) {
+        for (const pair of contract.pixelPairs)
+            Object.freeze(pair);
+        Object.freeze(contract.pixelPairs);
+    }
+    Object.freeze(contract);
+}
 export const CUA_ACTION_CONTRACTS = Object.freeze(CUA_ACTION_CONTRACT_LIST);
+export const MACOS_CUA_ABI_PROFILE = Object.freeze({
+    id: 'macos-0.19.3', platform: 'darwin', contracts: CUA_ACTION_CONTRACTS,
+    absentOperations: Object.freeze(['screenshot', 'middle_click']), snapshotIdPattern: Object.freeze(SNAPSHOT_ID_PATTERN),
+});
 /** Wrapper-only or compatibility fields that never reach the backend. */
 export const WRAPPER_ONLY_FIELDS = Object.freeze([
     'action', 'app', 'capture_after', 'pages', 'javascript',
@@ -182,8 +201,8 @@ export class InvalidComputerUseInputError extends Error {
         this.name = 'InvalidComputerUseInputError';
     }
 }
-export function contractFor(action) {
-    const found = CUA_ACTION_CONTRACTS.find((c) => c.action === action);
+export function contractFor(action, profile = MACOS_CUA_ABI_PROFILE) {
+    const found = profile.contracts.find((c) => c.action === action);
     if (!found)
         throw new InvalidComputerUseInputError(`unsupported action "${action}"`);
     return found;
@@ -213,8 +232,8 @@ function normalizeIdentifier(field, value) {
  * Builds the backend payload from public input. It constructs a fresh object from
  * the allowed set — never "delete two keys and forward the rest".
  */
-export function translateCuaAction(action, publicInput) {
-    const contract = contractFor(action);
+export function translateCuaAction(action, publicInput, profile = MACOS_CUA_ABI_PROFILE) {
+    const contract = contractFor(action, profile);
     if ('javascript' in publicInput) {
         throw new InvalidComputerUseInputError('javascript is not supported by cua-driver 0.19.3');
     }
@@ -232,13 +251,26 @@ export function translateCuaAction(action, publicInput) {
         if (!(field in renamed))
             continue;
         const value = renamed[field];
+        const expectedProperty = profile.expectedProperties?.[contract.backendOperation]?.[field];
+        if (expectedProperty && !IDENTIFIER_FIELDS.includes(field)) {
+            const validType = expectedProperty.type === 'integer' ? typeof value === 'number' && Number.isSafeInteger(value)
+                : expectedProperty.type === 'number' ? typeof value === 'number' && Number.isFinite(value)
+                    : expectedProperty.type === 'array' ? Array.isArray(value) && value.every(item => typeof item === 'string')
+                        : typeof value === expectedProperty.type;
+            if (!validType || (expectedProperty.enum && !expectedProperty.enum.includes(value))) {
+                throw new InvalidComputerUseInputError(`${field} does not match the frozen ${profile.id} contract`);
+            }
+        }
         if (IDENTIFIER_FIELDS.includes(field)) {
             output[field] = normalizeIdentifier(field, value);
+            if (profile.platform === 'win32' && field !== 'element_index' && output[field] <= 0) {
+                throw new InvalidComputerUseInputError(`${field} must be positive`);
+            }
             continue;
         }
         if (field === 'snapshot_id') {
-            if (typeof value !== 'string' || !SNAPSHOT_ID_PATTERN.test(value)) {
-                throw new InvalidComputerUseInputError('snapshot_id must match ^s[0-9a-f]{8}$');
+            if (typeof value !== 'string' || !profile.snapshotIdPattern.test(value)) {
+                throw new InvalidComputerUseInputError(`snapshot_id must match ${profile.snapshotIdPattern.source}`);
             }
             output[field] = value;
             continue;
@@ -250,6 +282,10 @@ export function translateCuaAction(action, publicInput) {
     }
     for (const excluded of contract.backendOnlyExcluded) {
         delete output[excluded];
+    }
+    for (const [field, value] of Object.entries(contract.defaults ?? {})) {
+        if (!(field in output))
+            output[field] = value;
     }
     Object.assign(output, contract.forced ?? {});
     for (const [a, b] of contract.pixelPairs ?? []) {
@@ -283,10 +319,10 @@ export function translateCuaAction(action, publicInput) {
     }
     return { operation: contract.backendOperation, input: output };
 }
-export function verifyBackendAbi(catalog) {
+export function verifyBackendAbi(catalog, profile = MACOS_CUA_ABI_PROFILE) {
     const problems = [];
     const byName = new Map(catalog.map((op) => [op.name, op]));
-    for (const contract of CUA_ACTION_CONTRACTS) {
+    for (const contract of profile.contracts) {
         const op = byName.get(contract.backendOperation);
         if (!op) {
             problems.push(`missing backend operation ${contract.backendOperation} for action ${contract.action}`);
@@ -300,6 +336,12 @@ export function verifyBackendAbi(catalog) {
         for (const field of contract.translatorAllowed) {
             if (!(field in op.properties)) {
                 problems.push(`${contract.backendOperation} has no property ${field}`);
+                continue;
+            }
+            const expectedProperty = profile.expectedProperties?.[contract.backendOperation]?.[field];
+            if (expectedProperty && (op.properties[field].type !== expectedProperty.type
+                || JSON.stringify(op.properties[field].enum) !== JSON.stringify(expectedProperty.enum))) {
+                problems.push(`${contract.backendOperation}.${field} type/enum drifted from ${profile.id}`);
             }
         }
         for (const excluded of contract.backendOnlyExcluded) {
@@ -314,7 +356,7 @@ export function verifyBackendAbi(catalog) {
         }
     }
     // Operations the wrapper must never call because 0.19.3 does not have them.
-    for (const absent of ['screenshot', 'middle_click']) {
+    for (const absent of profile.absentOperations) {
         if (byName.has(absent)) {
             problems.push(`catalog unexpectedly exposes ${absent}; revisit the alias contract`);
         }

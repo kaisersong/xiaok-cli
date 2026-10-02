@@ -29,6 +29,7 @@ export interface CuaActionContract {
   /** Backend-only fields that must never be forwarded from public input. */
   readonly backendOnlyExcluded: readonly string[];
   /** Injected constants, e.g. include_screenshot / button:middle. */
+  readonly defaults?: Readonly<Record<string, unknown>>;
   readonly forced?: Readonly<Record<string, unknown>>;
   /** Public → backend renames, e.g. x→from_x, pages→amount. */
   readonly renames?: Readonly<Record<string, string>>;
@@ -38,6 +39,14 @@ export interface CuaActionContract {
 }
 
 const IDENTIFIER_FIELDS = Object.freeze(['pid', 'window_id', 'element_index']);
+export interface CuaAbiProfile {
+  readonly id: string;
+  readonly platform: 'darwin' | 'win32';
+  readonly contracts: readonly CuaActionContract[];
+  readonly absentOperations: readonly string[];
+  readonly snapshotIdPattern: RegExp;
+  readonly expectedProperties?: Readonly<Record<string, Readonly<Record<string, { type: string; enum?: readonly unknown[] }>>>>;
+}
 const SNAPSHOT_ID_PATTERN = /^s[0-9a-f]{8}$/;
 
 const GET_WINDOW_STATE_ALLOWED = Object.freeze([
@@ -197,7 +206,23 @@ const CUA_ACTION_CONTRACT_LIST: CuaActionContract[] = [
   },
 ];
 
+for (const contract of CUA_ACTION_CONTRACT_LIST) {
+  Object.freeze(contract.backendRequired);
+  Object.freeze(contract.translatorAllowed);
+  Object.freeze(contract.backendOnlyExcluded);
+  if (contract.forced) Object.freeze(contract.forced);
+  if (contract.renames) Object.freeze(contract.renames);
+  if (contract.pixelPairs) {
+    for (const pair of contract.pixelPairs) Object.freeze(pair);
+    Object.freeze(contract.pixelPairs);
+  }
+  Object.freeze(contract);
+}
 export const CUA_ACTION_CONTRACTS: readonly CuaActionContract[] = Object.freeze(CUA_ACTION_CONTRACT_LIST);
+export const MACOS_CUA_ABI_PROFILE: CuaAbiProfile = Object.freeze({
+  id: 'macos-0.19.3', platform: 'darwin', contracts: CUA_ACTION_CONTRACTS,
+  absentOperations: Object.freeze(['screenshot', 'middle_click']), snapshotIdPattern: Object.freeze(SNAPSHOT_ID_PATTERN),
+});
 
 /** Wrapper-only or compatibility fields that never reach the backend. */
 export const WRAPPER_ONLY_FIELDS: readonly string[] = Object.freeze([
@@ -213,8 +238,8 @@ export class InvalidComputerUseInputError extends Error {
   }
 }
 
-export function contractFor(action: string): CuaActionContract {
-  const found = CUA_ACTION_CONTRACTS.find((c) => c.action === action);
+export function contractFor(action: string, profile: CuaAbiProfile = MACOS_CUA_ABI_PROFILE): CuaActionContract {
+  const found = profile.contracts.find((c) => c.action === action);
   if (!found) throw new InvalidComputerUseInputError(`unsupported action "${action}"`);
   return found;
 }
@@ -248,8 +273,9 @@ function normalizeIdentifier(field: string, value: unknown): number {
 export function translateCuaAction(
   action: string,
   publicInput: Readonly<Record<string, unknown>>,
+  profile: CuaAbiProfile = MACOS_CUA_ABI_PROFILE,
 ): { operation: string; input: Record<string, unknown> } {
-  const contract = contractFor(action);
+  const contract = contractFor(action, profile);
 
   if ('javascript' in publicInput) {
     throw new InvalidComputerUseInputError('javascript is not supported by cua-driver 0.19.3');
@@ -267,13 +293,26 @@ export function translateCuaAction(
   for (const field of contract.translatorAllowed) {
     if (!(field in renamed)) continue;
     const value = renamed[field];
+    const expectedProperty = profile.expectedProperties?.[contract.backendOperation]?.[field];
+    if (expectedProperty && !IDENTIFIER_FIELDS.includes(field)) {
+      const validType = expectedProperty.type === 'integer' ? typeof value === 'number' && Number.isSafeInteger(value)
+        : expectedProperty.type === 'number' ? typeof value === 'number' && Number.isFinite(value)
+        : expectedProperty.type === 'array' ? Array.isArray(value) && value.every(item => typeof item === 'string')
+        : typeof value === expectedProperty.type;
+      if (!validType || (expectedProperty.enum && !expectedProperty.enum.includes(value))) {
+        throw new InvalidComputerUseInputError(`${field} does not match the frozen ${profile.id} contract`);
+      }
+    }
     if (IDENTIFIER_FIELDS.includes(field)) {
       output[field] = normalizeIdentifier(field, value);
+      if (profile.platform === 'win32' && field !== 'element_index' && (output[field] as number) <= 0) {
+        throw new InvalidComputerUseInputError(`${field} must be positive`);
+      }
       continue;
     }
     if (field === 'snapshot_id') {
-      if (typeof value !== 'string' || !SNAPSHOT_ID_PATTERN.test(value)) {
-        throw new InvalidComputerUseInputError('snapshot_id must match ^s[0-9a-f]{8}$');
+      if (typeof value !== 'string' || !profile.snapshotIdPattern.test(value)) {
+        throw new InvalidComputerUseInputError(`snapshot_id must match ${profile.snapshotIdPattern.source}`);
       }
       output[field] = value;
       continue;
@@ -287,6 +326,7 @@ export function translateCuaAction(
   for (const excluded of contract.backendOnlyExcluded) {
     delete output[excluded];
   }
+  for (const [field, value] of Object.entries(contract.defaults ?? {})) { if (!(field in output)) output[field] = value; }
   Object.assign(output, contract.forced ?? {});
 
   for (const [a, b] of contract.pixelPairs ?? []) {
@@ -333,11 +373,11 @@ export type AbiVerification =
   | { ok: true }
   | { ok: false; code: 'activation_failed'; problems: readonly string[] };
 
-export function verifyBackendAbi(catalog: readonly BackendOperationSchema[]): AbiVerification {
+export function verifyBackendAbi(catalog: readonly BackendOperationSchema[], profile: CuaAbiProfile = MACOS_CUA_ABI_PROFILE): AbiVerification {
   const problems: string[] = [];
   const byName = new Map(catalog.map((op) => [op.name, op]));
 
-  for (const contract of CUA_ACTION_CONTRACTS) {
+  for (const contract of profile.contracts) {
     const op = byName.get(contract.backendOperation);
     if (!op) {
       problems.push(`missing backend operation ${contract.backendOperation} for action ${contract.action}`);
@@ -353,6 +393,12 @@ export function verifyBackendAbi(catalog: readonly BackendOperationSchema[]): Ab
     for (const field of contract.translatorAllowed) {
       if (!(field in op.properties)) {
         problems.push(`${contract.backendOperation} has no property ${field}`);
+        continue;
+      }
+      const expectedProperty = profile.expectedProperties?.[contract.backendOperation]?.[field];
+      if (expectedProperty && (op.properties[field].type !== expectedProperty.type
+        || JSON.stringify(op.properties[field].enum) !== JSON.stringify(expectedProperty.enum))) {
+        problems.push(`${contract.backendOperation}.${field} type/enum drifted from ${profile.id}`);
       }
     }
     for (const excluded of contract.backendOnlyExcluded) {
@@ -368,7 +414,7 @@ export function verifyBackendAbi(catalog: readonly BackendOperationSchema[]): Ab
   }
 
   // Operations the wrapper must never call because 0.19.3 does not have them.
-  for (const absent of ['screenshot', 'middle_click']) {
+  for (const absent of profile.absentOperations) {
     if (byName.has(absent)) {
       problems.push(`catalog unexpectedly exposes ${absent}; revisit the alias contract`);
     }

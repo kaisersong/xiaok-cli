@@ -10,6 +10,28 @@ const cuaFailureFixtures = JSON.parse(readFileSync(
 )) as { sessionEndedResult: string };
 
 describe('createComputerUseTool', () => {
+  it('rejects a mismatched observation target before emitting image bytes', async () => {
+    const emitToolImage = vi.fn();
+    const tool = createComputerUseTool({ requiresImageInput: true, callToolResult: async () => ({
+      text: 'wrong window', images: [{ mimeType: 'image/png', data: 'bytes' }], isError: false,
+      structuredContent: { pid: 999, window_id: 456 }, summary: 'wrong window',
+    }) });
+    await expect(tool.execute({ action: 'capture', pid: 123, window_id: '456' }, { modelSupportsImageInput: true, emitToolImage } as never)).rejects.toThrow('COMPUTER_USE_OBSERVATION_TARGET_MISMATCH');
+    expect(emitToolImage).not.toHaveBeenCalled();
+  });
+
+  it('does not publish a capture from a retired generation', async () => {
+    let current = true;
+    const emitToolImage = vi.fn();
+    const bound = { requiresImageInput: true, callToolResult: async () => {
+      current = false;
+      return { text: 'stale', images: [{ mimeType: 'image/png', data: 'bytes' }], isError: false, structuredContent: { pid: 123, window_id: 456 }, summary: 'stale' };
+    } };
+    const tool = createComputerUseTool({ ...bound, acquireInvocation: () => ({ generation: 1, backend: bound, isCurrent: () => current }) });
+    const response = JSON.parse(await tool.execute({ action: 'capture', pid: 123, window_id: '456' }, { modelSupportsImageInput: true, emitToolImage } as never));
+    expect(response).toMatchObject({ ok: false, code: 'COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED' });
+    expect(emitToolImage).not.toHaveBeenCalled();
+  });
   it('returns a recoverable enablement error instead of disappearing when backend is not ready', async () => {
     const tool = createComputerUseTool({
       getUnavailableError: () => ({

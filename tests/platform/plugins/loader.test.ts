@@ -87,6 +87,45 @@ describe('plugin loader', () => {
     return pluginDir;
   }
 
+  it.each([
+    ['cua-computer-use', 'renamed-plugin', false],
+    ['renamed-folder', 'cua-computer-use', false],
+    ['cua-computer-use', 'renamed-plugin', true],
+    ['renamed-folder', 'cua-computer-use', true],
+  ] as const)('rejects mismatched CUA deployment %s / manifest %s (managed=%s)', async (deployment, name, managed) => {
+    const pluginsDir = join(root, 'plugins');
+    const pluginDir = managed ? await seedManagedPlugin(pluginsDir, deployment, '1.0.0') : join(pluginsDir, deployment);
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ name, version: '1.0.0',
+      mcpServers: [{ name: 'renamed-cua', type: 'stdio', command: 'should-never-start' }] }));
+    if (managed) {
+      // A mismatched active version must not fall back to the legacy copy.
+      const legacy = join(pluginsDir, deployment);
+      mkdirSync(legacy, { recursive: true });
+      writeFileSync(join(legacy, 'plugin.json'), JSON.stringify({ name: deployment, version: '0.0.1' }));
+    }
+    expect(await loadPlugins([pluginsDir])).toEqual([]);
+  });
+
+  it('uses the Desktop Windows bundle for a valid incompatible older managed CUA without changing its pointer', async () => {
+    const pluginsDir = join(root, 'plugins'); mkdirSync(pluginsDir, { recursive: true });
+    const old = await seedManagedPlugin(pluginsDir, 'cua-computer-use', '0.2.1');
+    writeFileSync(join(old, 'plugin.json'), JSON.stringify({ name: 'cua-computer-use', version: '0.2.1', platforms: ['darwin'] }));
+    const bundle = join(root, 'resources', 'cua-computer-use'); mkdirSync(bundle, { recursive: true });
+    const manifest = { name: 'cua-computer-use', version: '0.3.0', platforms: ['darwin', 'win32'], skills: ['skills'], mcpServers: [{ name: 'cua-driver', type: 'stdio', command: 'verified-by-host' }] };
+    writeFileSync(join(bundle, 'plugin.json'), JSON.stringify(manifest));
+    const opts = { platform: 'win32' as const, desktopCuaBundleDir: bundle };
+    expect(await loadPlugins([pluginsDir], opts)).toMatchObject([{ version: '0.3.0', rootDir: bundle, skills: [join(bundle, 'skills')] }]);
+    expect(await loadPlugins([pluginsDir], { platform: 'win32' })).toEqual([]);
+    expect(await loadPlugins([pluginsDir], { ...opts, platform: 'darwin' })).toMatchObject([{ rootDir: old }]);
+    writeFileSync(join(old, 'plugin.json'), JSON.stringify({ ...manifest, version: '0.4.0' }));
+    expect(await loadPlugins([pluginsDir], opts)).toMatchObject([{ version: '0.4.0', rootDir: old }]);
+    writeFileSync(join(old, 'plugin.json'), JSON.stringify({ ...manifest, name: 'renamed', platforms: ['darwin'] }));
+    expect(await loadPlugins([pluginsDir], opts)).toEqual([]);
+    writeFileSync(join(pluginsDir, '.active', 'cua-computer-use.json'), '{}');
+    expect(await loadPlugins([pluginsDir], opts)).toEqual([]);
+  });
+
   it('loads managed plugins through their active pointer', async () => {
     const pluginsDir = join(root, 'plugins');
     mkdirSync(pluginsDir, { recursive: true });

@@ -46,7 +46,7 @@ describe('Windows CUA startup boundary', () => {
     }
   });
 
-  it('imports the compiled runtime without the CUA manager and skips CUA on Windows', async () => {
+  it.each(['cua-driver', 'renamed-cua'])('imports the compiled runtime without the CUA manager and skips %s on Windows', async serverName => {
     const builtContextPath = join(process.cwd(), '.test-dist', 'src', 'platform', 'runtime', 'context.js');
     const builtCuaManagerPath = join(process.cwd(), '.test-dist', 'src', 'platform', 'mcp', 'cua-connection-manager.js');
 
@@ -73,7 +73,7 @@ describe('Windows CUA startup boundary', () => {
         commands: [],
         mcpServers: [
           {
-            name: 'cua-driver',
+            name: serverName,
             type: 'stdio',
             command: 'cua-driver',
             args: ['mcp'],
@@ -91,8 +91,8 @@ describe('Windows CUA startup boundary', () => {
       await context.mcpReady;
 
       expect(context.mcpTools.map((tool) => tool.definition.name)).not.toContain('xiaok_computer_use');
-      expect(context.health.summary()).toContain('mcp:cua-driver degraded');
-      expect(context.health.summary()).toContain('macOS-only');
+      expect(context.health.summary()).toContain(`mcp:${serverName} degraded`);
+      expect(context.health.summary()).toContain(serverName === 'cua-driver' ? 'macOS-only' : 'COMPUTER_USE_PLUGIN_IDENTITY_MISMATCH');
 
       await context.dispose();
     } finally {

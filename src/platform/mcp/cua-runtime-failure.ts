@@ -65,6 +65,9 @@ export function classifyCuaRuntimeFailure(value: unknown): CuaRuntimeFailure | n
   if (AUTHORIZATION_PATTERNS.some((pattern) => pattern.test(message))) {
     return { kind: 'authorization_denied', message };
   }
+  const structured = value && typeof value === 'object' ? (value as Partial<McpRuntimeToolResult>).structuredContent : undefined;
+  const refusal = structured && typeof structured === 'object' ? (structured as { refusal?: { code?: unknown } }).refusal : undefined;
+  if (refusal?.code === 'session_ended') return { kind: 'session_ended', message };
   if (SESSION_ENDED_PATTERNS.some((pattern) => pattern.test(message))) {
     return { kind: 'session_ended', message };
   }
@@ -82,17 +85,21 @@ export function classifyCuaRuntimeFailure(value: unknown): CuaRuntimeFailure | n
 }
 
 /** Default-deny replay guard for calls whose first execution result is unknown. */
+const OBSERVATION_FIELDS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  list_apps: Object.freeze(['session']),
+  list_windows: Object.freeze(['pid', 'on_screen_only', 'session']),
+  get_window_state: Object.freeze([
+    'pid', 'window_id', 'capture_mode', 'include_screenshot', 'max_depth',
+    'max_elements', 'query', 'session',
+  ]),
+});
+
 export function isReplaySafeCuaCall(
   operation: string,
   input: Readonly<Record<string, unknown>>,
 ): boolean {
-  if (operation === 'list_apps' || operation === 'list_windows') return true;
-  if (operation !== 'get_window_state') return false;
-
-  // get_window_state is normally observational, but these compatibility fields
-  // can write a file or execute code. Future side-effectful fields stay denied
-  // until this production guard is deliberately extended.
-  if (typeof input.screenshot_out_file === 'string' && input.screenshot_out_file.trim()) return false;
-  if (typeof input.javascript === 'string' && input.javascript.trim()) return false;
-  return true;
+  const allowed = Object.hasOwn(OBSERVATION_FIELDS, operation) ? OBSERVATION_FIELDS[operation] : undefined;
+  // Check field presence, including empty values. Unknown future fields may
+  // mutate state, so they require a deliberate contract update before replay.
+  return Boolean(allowed && Object.keys(input).every(field => allowed.includes(field)));
 }

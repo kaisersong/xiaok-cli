@@ -869,6 +869,9 @@ export const api = {
   async updatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean }) {
     return window.xiaokDesktop.updatePluginDependency(input);
   },
+  async cancelPluginDependencyTask(input: { pluginName: string; dependencyId: string }) {
+    return window.xiaokDesktop.cancelPluginDependencyTask(input);
+  },
   async diagnosePluginDependency(input: { pluginName: string; dependencyId: string }) {
     return window.xiaokDesktop.diagnosePluginDependency(input);
   },

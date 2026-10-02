@@ -1,5 +1,17 @@
 import type { ComputerUseActionData } from '../components/ChatView';
 
+export function resolveComputerUseUserAction(actionType: string | undefined, code: string):
+  | { type: 'enable' | 'reconnect' }
+  | { type: 'settings'; permission: 'accessibility' | 'screen' }
+  | null {
+  if (actionType === 'enable_computer_use') return { type: 'enable' };
+  if (actionType === 'reconnect_computer_use') return { type: 'reconnect' };
+  if (actionType !== 'open_system_settings') return null;
+  if (['COMPUTER_USE_NEEDS_SCREEN_RECORDING', 'COMPUTER_USE_SCREEN_PERMISSION_REQUIRED'].includes(code)) return { type: 'settings', permission: 'screen' };
+  if (['COMPUTER_USE_NEEDS_ACCESSIBILITY', 'COMPUTER_USE_ACCESSIBILITY_PERMISSION_REQUIRED'].includes(code)) return { type: 'settings', permission: 'accessibility' };
+  return null;
+}
+
 export function parseComputerUseRecoverableAction(
   response: string,
   fallbackMessage: string,

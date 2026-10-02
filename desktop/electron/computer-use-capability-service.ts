@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, win32 } from 'node:path';
 
 export type ComputerUseFailureCode =
   | 'COMPUTER_USE_NEEDS_ENABLEMENT'
   | 'COMPUTER_USE_PLUGIN_MISSING'
+  | 'COMPUTER_USE_PLUGIN_INCOMPATIBLE'
   | 'COMPUTER_USE_DRIVER_MISSING'
   | 'COMPUTER_USE_NEEDS_ACCESSIBILITY'
   | 'COMPUTER_USE_NEEDS_SCREEN_RECORDING'
@@ -11,11 +12,16 @@ export type ComputerUseFailureCode =
   | 'COMPUTER_USE_PERMISSION_INVALID'
   | 'COMPUTER_USE_MCP_CONNECT_TIMEOUT'
   | 'COMPUTER_USE_WRAPPER_NOT_READY'
+  | 'COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE'
+  | 'COMPUTER_USE_WINDOWS_ABI_MISMATCH'
   | 'COMPUTER_USE_MODEL_IMAGE_DISABLED'
   | 'COMPUTER_USE_DISABLED_BY_USER';
 
 export interface ComputerUsePreference {
-  schemaVersion?: 1;
+  schemaVersion?: number;
+  platform?: 'darwin' | 'win32';
+  /** Unknown future schema is read-only, even after an explicit action. */
+  readOnlyUnknownSchema?: boolean;
   enabledByUser: boolean;
   autoConnectAfterSuccessfulEnablement: boolean;
   lastSuccessfulAt?: number;
@@ -38,6 +44,8 @@ export interface ComputerUsePreference {
 }
 
 export interface ComputerUseAppIdentity {
+  platform?: 'darwin' | 'win32';
+  installationSource?: 'nsis';
   appPath?: string;
   bundleId?: string;
   teamId?: string;
@@ -67,14 +75,20 @@ export function loadComputerUsePreference(filePath: string): ComputerUsePreferen
 }
 
 export function saveComputerUsePreference(filePath: string, preference: ComputerUsePreference): void {
+  if (preference.readOnlyUnknownSchema || (preference.schemaVersion !== undefined && ![1, 2].includes(preference.schemaVersion))) return;
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(normalizeComputerUsePreference(preference), null, 2), 'utf-8');
 }
 
 export function normalizeComputerUsePreference(raw: unknown): ComputerUsePreference {
   const value = raw && typeof raw === 'object' ? raw as Partial<ComputerUsePreference> : {};
+  if (value.readOnlyUnknownSchema || (value.schemaVersion !== undefined && value.schemaVersion !== 1 && value.schemaVersion !== 2)) {
+    return { ...(typeof value.schemaVersion === 'number' ? { schemaVersion: value.schemaVersion } : {}),
+      readOnlyUnknownSchema: true, enabledByUser: false, autoConnectAfterSuccessfulEnablement: false };
+  }
   return {
-    ...(value.schemaVersion === 1 ? { schemaVersion: 1 as const } : {}),
+    ...([1, 2].includes(value.schemaVersion ?? 0) ? { schemaVersion: value.schemaVersion } : {}),
+    ...(value.platform === 'darwin' || value.platform === 'win32' ? { platform: value.platform } : {}),
     enabledByUser: value.enabledByUser === true,
     autoConnectAfterSuccessfulEnablement: value.autoConnectAfterSuccessfulEnablement !== false,
     ...(typeof value.lastSuccessfulAt === 'number' ? { lastSuccessfulAt: value.lastSuccessfulAt } : {}),
@@ -95,7 +109,7 @@ export function isComputerUseAutoConnectEligibleApp(
   preference: ComputerUsePreference,
   identity: ComputerUseAppIdentity,
 ): ComputerUseAutoConnectDecision {
-  if (preference.schemaVersion !== 1) return { eligible: false, reason: 'preference_migration_required' };
+  if (preference.readOnlyUnknownSchema || ![1, 2].includes(preference.schemaVersion ?? 0)) return { eligible: false, reason: 'preference_migration_required' };
   if (!preference.enabledByUser) return { eligible: false, reason: 'not_enabled_by_user' };
   if (!preference.autoConnectAfterSuccessfulEnablement) return { eligible: false, reason: 'auto_connect_disabled' };
   if (!preference.lastSuccessfulAt) {
@@ -108,6 +122,19 @@ export function isComputerUseAutoConnectEligibleApp(
     return { eligible: false, reason: 'development_build' };
   }
   if (!identity.isPackaged) return { eligible: false, reason: 'not_packaged' };
+  if (identity.platform === 'win32') {
+    if (preference.schemaVersion !== 2 || preference.platform !== 'win32') return { eligible: false, reason: 'preference_migration_required' };
+    if (identity.installationSource !== 'nsis') return { eligible: false, reason: 'installation_source_unverified' };
+    if (!identity.appPath || !preference.lastSuccessfulAppPath || !win32.isAbsolute(identity.appPath)
+      || !win32.isAbsolute(preference.lastSuccessfulAppPath)
+      || win32.normalize(identity.appPath).toLowerCase() !== win32.normalize(preference.lastSuccessfulAppPath).toLowerCase()) {
+      return { eligible: false, reason: 'app_path_mismatch' };
+    }
+    if (!identity.appAsarSha256 || !preference.lastSuccessfulAppAsarSha256) return { eligible: false, reason: 'installation_fingerprint_missing' };
+    return identity.appAsarSha256 === preference.lastSuccessfulAppAsarSha256
+      ? { eligible: true } : { eligible: false, reason: 'installation_fingerprint_mismatch' };
+  }
+  if (preference.platform === 'win32') return { eligible: false, reason: 'platform_mismatch' };
   if (!identity.appPath?.startsWith('/Applications/')) {
     return { eligible: false, reason: 'not_applications_install' };
   }
@@ -152,6 +179,7 @@ function isComputerUseFailureCode(value: unknown): value is ComputerUseFailureCo
   return typeof value === 'string' && (
     value === 'COMPUTER_USE_NEEDS_ENABLEMENT' ||
     value === 'COMPUTER_USE_PLUGIN_MISSING' ||
+    value === 'COMPUTER_USE_PLUGIN_INCOMPATIBLE' ||
     value === 'COMPUTER_USE_DRIVER_MISSING' ||
     value === 'COMPUTER_USE_NEEDS_ACCESSIBILITY' ||
     value === 'COMPUTER_USE_NEEDS_SCREEN_RECORDING' ||
@@ -159,6 +187,8 @@ function isComputerUseFailureCode(value: unknown): value is ComputerUseFailureCo
     value === 'COMPUTER_USE_PERMISSION_INVALID' ||
     value === 'COMPUTER_USE_MCP_CONNECT_TIMEOUT' ||
     value === 'COMPUTER_USE_WRAPPER_NOT_READY' ||
+    value === 'COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE' ||
+    value === 'COMPUTER_USE_WINDOWS_ABI_MISMATCH' ||
     value === 'COMPUTER_USE_MODEL_IMAGE_DISABLED' ||
     value === 'COMPUTER_USE_DISABLED_BY_USER'
   );
