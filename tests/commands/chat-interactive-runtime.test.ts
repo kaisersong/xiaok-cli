@@ -3810,12 +3810,11 @@ describe('chat interactive runtime', () => {
         expect(screen).toContain('请选择复现场景');
         expect(screen).toContain('X 桌面客户端/网页');
         expect(screen).toContain('手机端 X');
+        expect(screen).toContain('3. 手机端 X');
         expect(screen).not.toContain('Other');
       }, { timeoutMs: 3_000 });
 
-      harness.emitter.emit('data', '\x1b[B');
-      harness.emitter.emit('data', '\x1b[B');
-      harness.emitter.emit('data', '\r');
+      harness.emitter.emit('data', '3');
       await waitFor(() => {
         expect(harness.output.normalized).toContain('收到选项: 手机端 X');
       }, { timeoutMs: 3_000 });
@@ -3988,7 +3987,7 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const screen = harness.screen.text();
         expect(screen).toContain('想吃什么类型的？');
-        expect(countOccurrences(screen, '↑↓ navigate   Enter select')).toBe(1);
+        expect(countOccurrences(screen, '1-6 select')).toBe(1);
       }, { timeoutMs: 3_000 });
 
       const realDateNow = Date.now.bind(Date);
@@ -4012,7 +4011,7 @@ describe('chat interactive runtime', () => {
       await waitFor(() => {
         const screen = harness.screen.text();
         expect(countOccurrences(screen, '想吃什么类型的？')).toBe(1);
-        expect(countOccurrences(screen, '↑↓ navigate   Enter select')).toBe(1);
+        expect(countOccurrences(screen, '1-6 select')).toBe(1);
       }, { timeoutMs: 3_000 });
 
       sendAskUserKey('\r');
@@ -4023,7 +4022,7 @@ describe('chat interactive runtime', () => {
 
       await waitFor(() => {
         const screen = harness.screen.text();
-        expect(screen).not.toContain('↑↓ navigate   Enter select');
+        expect(screen).not.toContain('1-6 select');
         expect(screen).not.toContain('1. 中餐炒菜（如宫保鸡丁、番茄炒蛋）');
       }, { timeoutMs: 3_000 });
 

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { askQuestion } from '../../src/ui/ask-question.js';
-import { createTtyHarness } from '../support/tty.js';
+import { askQuestion, type AskQuestionParams, type AskQuestionResult } from '../../src/ui/ask-question.js';
+import { createTtyHarness, type TtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
+
+async function withMenu(params: AskQuestionParams, check: (harness: TtyHarness, pending: Promise<AskQuestionResult>) => Promise<void>): Promise<void> {
+  const harness = createTtyHarness(100, 24);
+  const pending = askQuestion(params);
+  try { await check(harness, pending); }
+  finally { harness.emitter.emit('data', '\x1b'); await pending.catch(() => undefined); harness.restore(); }
+}
 
 // We test renderFrame logic and key handling separately from the interactive loop
 describe('ask-question', () => {
@@ -24,6 +31,90 @@ describe('ask-question', () => {
   });
 
   describe('key handling', () => {
+
+    it('shows option numbers and submits the corresponding single choice without Enter', async () => {
+      await withMenu({question:'选择环境',options:[{label:'桌面'},{label:'手机'}]}, async (h,pending) => {
+        expect(h.screen.text()).toContain('1. 桌面');
+        expect(h.screen.text()).toContain('2. 手机');
+        expect(h.screen.text()).toContain('3. Other');
+        expect(h.screen.text()).toContain('1-3 select');
+        h.send('2');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        await expect(pending).resolves.toEqual({selected:[1],labels:['手机']});
+        expect(h.screen.text()).not.toContain('1-3 select');
+      });
+    });
+    it('ignores zero and out-of-range digits while retaining arrow and Enter selection', async () => {
+      await withMenu({question:'选择环境',options:[{label:'桌面'},{label:'手机'}]}, async (h,pending) => {
+        h.send('0'); h.send('9'); h.send('a');
+        expect(h.emitter.listenerCount('data')).toBe(1);
+        h.send('\x1b[B'); h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[1],labels:['手机']});
+      });
+    });
+    it.each([false,true])('uses number 3 for Other and preserves numeric free text (explicit=%s)', async explicit => {
+      let reads=0;
+      await withMenu({question:'补充',options:[{label:'桌面'},{label:'手机'},...(explicit?[{label:'其它'}]:[])],readText:async()=>{reads++;return '123 个节点';}}, async (h,pending) => {
+        h.send('3');
+        expect(h.emitter.listenerCount('data')).toBe(0);
+        h.send('3');
+        await expect(pending).resolves.toEqual({selected:[],labels:[],otherText:'123 个节点'});
+        expect(reads).toBe(1);
+      });
+    });
+    it('toggles multi-select with digits and waits for Enter to confirm', async () => {
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true}, async (h,pending) => {
+        h.send('2');h.send('1');h.send('2');
+        expect(h.screen.text()).toContain('✓ 桌面');
+        expect(h.screen.text()).not.toContain('✓ 手机');
+        expect(h.emitter.listenerCount('data')).toBe(1);
+        h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[0],labels:['桌面']});
+      });
+    });
+    it('handles rapidly typed digits delivered together in one stdin chunk', async () => {
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true}, async (h,pending) => {
+        h.send('12');
+        expect(h.screen.text()).toContain('✓ 桌面');
+        expect(h.screen.text()).toContain('✓ 手机');
+        h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[0,1],labels:['桌面','手机']});
+      });
+    });
+    it('does not request free text when Other was toggled off in a multi-select', async () => {
+      let reads=0;
+      await withMenu({question:'多选',options:[{label:'桌面'},{label:'手机'}],multiSelect:true,readText:async()=>{reads++;return 'unexpected';}}, async (h,pending) => {
+        h.send('1');h.send('3');h.send('3');h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[0],labels:['桌面']});
+        expect(reads).toBe(0);
+      });
+    });
+    it('waits for the complete multi-digit number instead of submitting its first digit', async () => {
+      await withMenu({question:'选择编号',options:Array.from({length:10},(_,i)=>({label:`方案${i+1}`}))}, async (h,pending) => {
+        h.send('1');h.send('0');
+        expect(h.emitter.listenerCount('data')).toBe(1);
+        h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[9],labels:['方案10']});
+      });
+    });
+    it('does not submit an invalid buffered number and allows backspace and navigation', async () => {
+      await withMenu({question:'选择编号',options:Array.from({length:10},(_,i)=>({label:`方案${i+1}`}))}, async (h,pending) => {
+        h.send('9');h.send('9');h.send('\r');
+        expect(h.emitter.listenerCount('data')).toBe(1);
+        h.send('\x7f');h.send('\x08');h.send('1');h.send('\x1b[B');h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[1],labels:['方案2']});
+      });
+    });
+    it('toggles multi-digit choices before a separate Enter confirms all selections', async () => {
+      await withMenu({question:'多选编号',options:Array.from({length:10},(_,i)=>({label:`方案${i+1}`})),multiSelect:true}, async (h,pending) => {
+        h.send('1');h.send('0');h.send('\r');h.send('1');h.send('\r');
+        expect(h.screen.text()).toContain('✓ 方案10');
+        expect(h.screen.text()).toContain('✓ 方案1');
+        h.send('\r');
+        await expect(pending).resolves.toEqual({selected:[9,0],labels:['方案10','方案1']});
+      });
+    });
+
     it('aborts a pending menu and releases its input listener', async () => {
       const harness = createTtyHarness(80, 24);
       const controller = new AbortController();
@@ -112,7 +203,7 @@ describe('ask-question', () => {
       await waitFor(() => {
         const screen = harness.screen.text();
         expect(screen).toContain('想吃什么类型的？');
-        expect((screen.match(/↑↓ navigate   Enter select/g) ?? []).length).toBe(1);
+        expect((screen.match(/1-6 select/g) ?? []).length).toBe(1);
       });
 
       for (let i = 0; i < 9; i += 1) {
@@ -122,7 +213,7 @@ describe('ask-question', () => {
       await waitFor(() => {
         const screen = harness.screen.text();
         expect((screen.match(/想吃什么类型的？/g) ?? []).length).toBe(1);
-        expect((screen.match(/↑↓ navigate   Enter select/g) ?? []).length).toBe(1);
+        expect((screen.match(/1-6 select/g) ?? []).length).toBe(1);
       });
 
       sendKey('\r');
@@ -136,7 +227,7 @@ describe('ask-question', () => {
         const screen = harness.screen.text();
         expect(screen).toContain('❯ 想吃什么类型的？');
         expect(screen).toContain('快餐/便当（如汉堡、便当）');
-        expect(screen).not.toContain('↑↓ navigate   Enter select');
+        expect(screen).not.toContain('1-6 select');
         expect(screen).not.toContain('1. 中餐炒菜（如宫保鸡丁、番茄炒蛋）');
       });
 
@@ -176,7 +267,7 @@ describe('ask-question', () => {
         ],
       });
 
-      await waitFor(() => expect(harness.screen.text()).toContain('Space select'));
+      await waitFor(() => expect(harness.screen.text()).toContain('Enter confirm'));
       harness.emitter.emit('data', ' ');
       harness.emitter.emit('data', '\x1b[B');
       harness.emitter.emit('data', '\x1b[B');

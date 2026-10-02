@@ -54,7 +54,7 @@ function withFallbackOther(options) {
     };
 }
 // ─── Renderer ────────────────────────────────────────────────────────────────
-function renderFrame(params, selectedIdx, checked, cols) {
+function renderFrame(params, selectedIdx, checked, cols, numberInput = '') {
     const { allOptions } = withFallbackOther(params.options);
     const hasPreview = allOptions.some((o) => o.preview);
     const leftWidth = hasPreview ? Math.floor(cols * 0.45) : cols - 2;
@@ -130,11 +130,14 @@ function renderFrame(params, selectedIdx, checked, cols) {
         lines.push(' '.repeat(leftWidth + 3) + dim(boxBottom));
     }
     // Footer hint
+    const numberHint = allOptions.length <= 9
+        ? `1-${allOptions.length} ${params.multiSelect ? 'toggle' : 'select'}`
+        : `Number + Enter ${params.multiSelect ? 'toggle' : 'select'}${numberInput ? ` (${numberInput})` : ''}`;
     if (params.multiSelect) {
-        lines.push(dim('  ↑↓ navigate   Space select   Enter confirm'));
+        lines.push(dim(`  ${numberHint}   ↑↓   Space   Enter confirm`));
     }
     else {
-        lines.push(dim('  ↑↓ navigate   Enter select'));
+        lines.push(dim(`  ${numberHint}   ↑↓   Enter`));
     }
     return lines;
 }
@@ -150,6 +153,7 @@ export async function askQuestion(params) {
         const stdout = process.stdout;
         const cols = stdout.columns ?? 80;
         let selectedIdx = 0;
+        let numberInput = '';
         const checked = new Set();
         let renderedRowCount = 0;
         let externallyRendered = false;
@@ -181,7 +185,7 @@ export async function askQuestion(params) {
         function draw() {
             clearFrame();
             const terminalCols = stdout.columns ?? cols;
-            const frameLines = renderFrame(params, selectedIdx, checked, terminalCols);
+            const frameLines = renderFrame(params, selectedIdx, checked, terminalCols, numberInput);
             renderedRowCount = countRenderedTerminalRows(frameLines, terminalCols);
             if (params.renderFrame) {
                 const handled = params.renderFrame(frameLines);
@@ -220,6 +224,26 @@ export async function askQuestion(params) {
             finish(null, params.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
         }
         function onEnd() { finish(null); }
+        function confirmSelection() {
+            if (params.multiSelect && checked.size === 0)
+                checked.add(selectedIdx);
+            const wantsOther = params.multiSelect ? checked.has(otherIdx) : selectedIdx === otherIdx;
+            const selected = params.multiSelect ? [...checked].filter(i => i !== otherIdx) : (wantsOther ? [] : [selectedIdx]);
+            finish({ selected, wantsOther });
+        }
+        function chooseIndex(index) {
+            selectedIdx = index;
+            numberInput = '';
+            if (params.multiSelect) {
+                if (checked.has(index))
+                    checked.delete(index);
+                else
+                    checked.add(index);
+                draw();
+            }
+            else
+                confirmSelection();
+        }
         function onKey(data) {
             if (settled)
                 return;
@@ -236,28 +260,49 @@ export async function askQuestion(params) {
             }
             try {
                 if (key === UP) {
+                    numberInput = '';
                     selectedIdx = (selectedIdx - 1 + allOptions.length) % allOptions.length;
                     draw();
                 }
                 else if (key === DOWN) {
+                    numberInput = '';
                     selectedIdx = (selectedIdx + 1) % allOptions.length;
                     draw();
                 }
                 else if (key === SPACE && params.multiSelect) {
-                    if (checked.has(selectedIdx))
-                        checked.delete(selectedIdx);
-                    else
-                        checked.add(selectedIdx);
+                    chooseIndex(selectedIdx);
+                }
+                else if (allOptions.length > 9 && (key === '\x7f' || key === '\x08')) {
+                    numberInput = numberInput.slice(0, -1);
                     draw();
                 }
-                else if (key === ENTER || key === '\n') {
-                    if (params.multiSelect && checked.size === 0) {
-                        // Nothing checked — treat current selection as the answer
-                        checked.add(selectedIdx);
+                else if (/^\d+$/.test(key)) {
+                    if (allOptions.length <= 9) {
+                        for (const digit of key) {
+                            const number = Number(digit);
+                            if (number > 0 && number <= allOptions.length)
+                                chooseIndex(number - 1);
+                            if (settled)
+                                break;
+                        }
                     }
-                    const wantsOther = selectedIdx === otherIdx || (params.multiSelect === true && checked.has(otherIdx));
-                    const selected = params.multiSelect ? [...checked].filter(i => i !== otherIdx) : (wantsOther ? [] : [selectedIdx]);
-                    finish({ selected, wantsOther });
+                    else {
+                        const candidate = numberInput + key;
+                        if (!candidate.startsWith('0') && candidate.length <= String(allOptions.length).length) {
+                            numberInput = candidate;
+                            draw();
+                        }
+                    }
+                }
+                else if (key === ENTER || key === '\n') {
+                    if (numberInput) {
+                        const index = Number(numberInput) - 1;
+                        if (index >= 0 && index < allOptions.length)
+                            chooseIndex(index);
+                    }
+                    else {
+                        confirmSelection();
+                    }
                 }
             }
             catch (error) {
