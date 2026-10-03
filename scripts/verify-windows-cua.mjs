@@ -4,19 +4,21 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { homedir, release } from 'node:os';
 import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
+import { createServer } from 'node:http';
 
 if (process.platform !== 'win32' || process.arch !== 'x64') {
   console.error('此脚本需要 Windows x64 的交互桌面与 Node.js 24。'); process.exit(1);
 }
 const here = dirname(fileURLToPath(import.meta.url));
-const runtime = existsSync(join(here, 'runtime', 'verification-runtime.js'))
+const runtimeIndex = process.argv.indexOf('--runtime-entry');
+const runtime = runtimeIndex >= 0 ? pathToFileURL(process.argv[runtimeIndex + 1]) : existsSync(join(here, 'runtime', 'verification-runtime.js'))
   ? new URL('./runtime/verification-runtime.js', import.meta.url)
   : new URL('../artifacts/cua-verification-runtime.js', import.meta.url);
-const { installPrivateCuaRelease, WINDOWS_CUA_RELEASE, InvocationToolImages, runDependencyProcess,
+const { verificationRuntimeProvenance, installPrivateCuaRelease, WINDOWS_CUA_RELEASE, InvocationToolImages, runDependencyProcess,
   createComputerUseTool, normalizeMcpRuntimeToolResult, CuaConnectionManager, createWindowsCuaBackend,
   isWindowsCuaReplaySafeCall, WINDOWS_CUA_ABI_PROFILE, verifyBackendAbi, detectNativeWindowsArchitecture, detectWindowsInteractiveDesktop, verifyWindowsCuaReadiness } = await import(runtime.href);
 const root = join(homedir(), 'Downloads', `xiaok-cua-baseline-${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -24,10 +26,11 @@ await mkdir(root, { recursive: true });
 const controller = new AbortController();
 process.once('SIGINT', () => controller.abort());
 const report = { schemaVersion: 1, platform: process.platform, appArch: process.arch, osRelease: release(), node: process.version,
-  release: WINDOWS_CUA_RELEASE, collectedAt: new Date().toISOString(), verified: false };
+  runtimeSource: runtimeIndex >= 0 ? 'packaged-asar' : 'production-source-bundle', runtimeModuleHashes: verificationRuntimeProvenance, release: WINDOWS_CUA_RELEASE, collectedAt: new Date().toISOString(), verified: false };
 let gui;
 let driver;
 let desktopTrace;
+let browserServer;
 const ownedDrivers = [];
 const stopOwnedChildren = () => {
   for (const child of [...ownedDrivers, gui, desktopTrace]) {
@@ -78,9 +81,10 @@ $w.Content=$panel; $w.ShowDialog()|Out-Null
     const executable = process.argv[electronIndex + 1]; if (!executable || !existsSync(executable)) throw new Error('electron_fixture_executable_missing');
     const mainPath = join(root, 'electron-fixture.cjs'); const preloadPath = join(root, 'electron-preload.cjs'); const htmlPath = join(root, 'electron-fixture.html');
     await writeFile(preloadPath, "const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('verification',{save:state=>ipcRenderer.send('verification:state',state)});");
-    const html = `<!doctype html><html><head><meta charset="UTF-8"><title>${title}</title></head><body style="font:16px sans-serif"><h3>Xiaok disposable CUA test window</h3><input aria-label="VerificationInput" style="width:95%;height:40px"/><button style="width:95%;height:40px">Verification Click</button><textarea aria-label="VerificationScroll" style="width:95%;height:230px">${Array.from({length:100},(_,i)=>'Verification row '+(i+1)).join('\n')}</textarea><script>
-      const input=document.querySelector('input'),button=document.querySelector('button'),scroll=document.querySelector('textarea');let clicks=0,doubleClicks=0,rightClicks=0,middleClicks=0;
-      function save(){window.verification.save({text:input.value,selectionStart:input.selectionStart,selectionLength:input.selectionEnd-input.selectionStart,scrollOffset:scroll.scrollTop,clicks,doubleClicks,rightClicks,middleClicks})}
+    const html = `<!doctype html><html><head><meta charset="UTF-8"><title>${title}</title></head><body style="font:16px sans-serif"><h3>Xiaok disposable CUA test window</h3><input aria-label="VerificationInput" style="width:95%;height:40px"/><input type="range" aria-label="VerificationDrag" min="0" max="100" value="0" style="width:95%;height:28px"/><button style="width:95%;height:40px">Verification Click</button><textarea aria-label="VerificationScroll" style="width:95%;height:185px">${Array.from({length:100},(_,i)=>'Verification row '+(i+1)).join('\n')}</textarea><script>
+      const input=document.querySelector('input'),button=document.querySelector('button'),scroll=document.querySelector('textarea'),slider=document.querySelector('input[type=range]');const sliderValues=[],pointerEvents=[];let clicks=0,doubleClicks=0,rightClicks=0,middleClicks=0;
+      function save(){window.verification.save({text:input.value,selectionStart:input.selectionStart,selectionLength:input.selectionEnd-input.selectionStart,scrollOffset:scroll.scrollTop,clicks,doubleClicks,rightClicks,middleClicks,sliderValue:Number(slider.value),sliderValues:[...sliderValues],pointerEvents:[...pointerEvents]})}
+      slider.addEventListener('input',()=>{sliderValues.push(Number(slider.value));save()});for(const control of [input,slider])for(const type of ['pointerdown','pointermove','pointerup'])control.addEventListener(type,e=>{if(pointerEvents.length<80){pointerEvents.push({type,pointerType:e.pointerType,buttons:e.buttons,isTrusted:e.isTrusted,label:e.target.getAttribute('aria-label'),clientX:e.clientX,clientY:e.clientY});save()}});
       input.addEventListener('input',save);input.addEventListener('select',save);input.addEventListener('keyup',save);input.addEventListener('dblclick',()=>{doubleClicks++;save()});button.addEventListener('click',()=>{clicks++;save()});button.addEventListener('mousedown',e=>{if(e.button===2)rightClicks++;if(e.button===1)middleClicks++;save()});button.addEventListener('auxclick',e=>e.preventDefault());document.addEventListener('contextmenu',e=>e.preventDefault());scroll.addEventListener('scroll',save);document.addEventListener('selectionchange',save);save();
       </script></body></html>`;
     await writeFile(htmlPath, html);
@@ -285,7 +289,48 @@ $w.Content=$panel; $w.ShowDialog()|Out-Null
       const frame = current.elements.find(e => e.label === 'VerificationInput').screenshot_frame;
       return { action: 'drag', ...target, x: frame.x + 5, y: frame.y + frame.h / 2, to_x: frame.x + 180, to_y: frame.y + frame.h / 2, duration_ms: 300, steps: 12, capture_after: true };
     }, observed => observed.selectionLength > 0);
+    if (report.fixture === 'electron') {
+      const view = await capture(); const frame = view.elements.find(e => e.label === 'VerificationDrag').screenshot_frame;
+      const attempt = await run({ action: 'drag', ...target, x: frame.x + 8, y: frame.y + frame.h / 2, to_x: frame.x + frame.w * 0.65, to_y: frame.y + frame.h / 2, duration_ms: 500, steps: 20, capture_after: true }, true);
+      report.sliderDragDiagnostic = { result: attempt.result, state: await state(), countsAsOriginalTextSelectionAcceptance: false };
+    }
+    // Diagnostic raw calls are restricted to this disposable window and never count as wrapper acceptance.
+    if (report.gestures.drag?.ok === false) {
+      const diagnosticView = await capture();
+      const frame = diagnosticView.elements.find(e => e.label === 'VerificationInput').screenshot_frame;
+      const result = await request('tools/call', { name: 'drag', arguments: { ...target, from_x: frame.x + 5, from_y: frame.y + frame.h / 2, to_x: frame.x + 180, to_y: frame.y + frame.h / 2, duration_ms: 500, steps: 20, delivery_mode: 'foreground' } });
+      report.nativeForegroundDragDiagnostic = { result, state: await state(), countsAsWrapperAcceptance: false };
+    }
     report.actionsPassed = Object.values(report.gestures).every(result => result.ok);
+    if (process.argv.includes('--open-url-check')) {
+      const marker = `Xiaok URL Launch Verification ${Date.now()}`; const route = `/xiaok-owned-verification-${Date.now()}`;
+      let requests = 0;
+      browserServer = createServer((request, response) => {
+        if (request.url === route) requests++;
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(`<!doctype html><html><head><title>${marker}</title></head><body><h1>${marker}</h1><p>Owned local browser launch test.</p></body></html>`);
+      });
+      await new Promise((resolve, reject) => { browserServer.once('error', reject); browserServer.listen(0, '127.0.0.1', resolve); });
+      const address = browserServer.address(); const url = `http://127.0.0.1:${address.port}${route}`;
+      const started = Date.now(); const launched = await run({ action: 'open_url', url });
+      if (!launched.result.ok) throw new Error('open_url_launch_failed:'+JSON.stringify(launched.result));
+      let browserWindow;
+      const deadline = Date.now() + 20000;
+      while (Date.now() < deadline) {
+        const listed = await run({ action: 'list_windows', on_screen_only: true });
+        browserWindow = listed.result.result.structuredContent.windows.find(window => window.title?.includes(marker));
+        if (browserWindow && requests > 0) break;
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      if (!browserWindow || requests < 1) throw new Error('open_url_page_not_observed');
+      const observed = await run({ action: 'capture', pid: browserWindow.pid, window_id: browserWindow.window_id });
+      const browserView = observed.result.result.structuredContent;
+      if (observed.imageCount !== 1 || !JSON.stringify(browserView).includes(marker)) throw new Error('open_url_capture_failed');
+      report.openUrlCheck = { ok: true, launchElapsedMs: Date.now() - started, nativeResult: launched.result,
+        ownedPageRequests: requests, browserWindow, screenshotWidth: browserView.screenshot_width,
+        screenshotHeight: browserView.screenshot_height, imageCount: observed.imageCount,
+        cleanup: 'Only the owned local server is closed; the test tab is retained to avoid closing a user browser tab.' };
+    }
     await manager.dispose();
   }
   if (driver.exitCode !== null || driver.signalCode !== null) report.stdinEofExit = { code: driver.exitCode, signal: driver.signalCode };
@@ -306,6 +351,7 @@ $w.Content=$panel; $w.ShowDialog()|Out-Null
   const closed = [...ownedDrivers, gui, desktopTrace].filter(child => child && child.exitCode === null && child.signalCode === null)
     .map(child => new Promise(resolve => child.once('close', resolve)));
   controller.abort();
+  if (browserServer) { browserServer.closeAllConnections(); await new Promise(resolve => browserServer.close(resolve)); }
   await Promise.all(closed);
   controller.signal.removeEventListener('abort', stopOwnedChildren);
   await writeFile(join(root, 'report.json'), JSON.stringify(report, null, 2));

@@ -1,3 +1,4 @@
+import type {OpenFileResult, ReadFileResult, SaveFileInput, SaveFileResult} from '../shared/file-ipc-contract.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -1348,8 +1349,8 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getActiveTask(): Promise<{ taskId: string } | null>;
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
   openArtifact(artifactId: string): Promise<void>;
-  openFileInSystemApp(filePath: string): Promise<void>;
-  readFileContent(filePath: string): Promise<{ content: string; error?: string }>;
+  openFileInSystemApp(filePath: string): Promise<OpenFileResult>;
+  readFileContent(filePath: string): Promise<ReadFileResult>;
   getArtifactWorkspaceSnapshot(input: GetArtifactWorkspaceSnapshotInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
   closeArtifactWorkspace(input: ArtifactWorkspaceIdentityInput): Promise<ArtifactWorkspaceIpcResult<{ closed: boolean }>>;
   onArtifactWorkspaceChanged(handler: (change: { conversationId: string; workspaceId: string }) => void): () => void;
@@ -1678,7 +1679,7 @@ export interface KSwarmProxyApi {
  */
 export type FullDesktopApi = DesktopApi & KSwarmProxyApi & {
   showSaveDialog(input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }): Promise<{ filePath: string; canceled: boolean }>;
-  saveFile(input: { filePath: string; content: string; purpose?: 'html-edit' | 'text-edit' }): Promise<{ ok?: boolean; success?: boolean; error?: string }>;
+  saveFile(input: SaveFileInput): Promise<SaveFileResult>;
   listPrinciples(): Promise<unknown[]>;
   savePrinciple(principle: unknown): Promise<unknown>;
   deletePrinciple(id: string): Promise<void>;
@@ -1758,8 +1759,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask') as ReturnType<DesktopApi['getActiveTask']>,
     recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }) as ReturnType<DesktopApi['recoverTask']>,
     openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }) as Promise<void>,
-    openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<void>,
-    readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<{ content: string; error?: string }>,
+    openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }) as Promise<OpenFileResult>,
+    readFileContent: (filePath) => ipcRenderer.invoke('desktop:readFileContent', { filePath }) as Promise<ReadFileResult>,
     getArtifactWorkspaceSnapshot: (input) => ipcRenderer.invoke(
       'desktop:artifactWorkspace:getArtifactWorkspaceSnapshot',
       sanitizeArtifactWorkspaceInput(input),
@@ -2144,7 +2145,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     setAppFlag: (key, value) => ipcRenderer.invoke('desktop:setAppFlag', key, value) as Promise<ThreadMetaWriteResult>,
     migrateLegacyThreadMeta: (data) => ipcRenderer.invoke('desktop:migrateLegacyThreadMeta', data) as Promise<{ migrated: boolean; reason?: string }>,
     showSaveDialog: (input) => ipcRenderer.invoke('desktop:showSaveDialog', input) as Promise<{ filePath: string; canceled: boolean }>,
-    saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input) as Promise<{ ok?: boolean; success?: boolean; error?: string }>,
+    saveFile: (input) => ipcRenderer.invoke('desktop:saveFile', input) as Promise<SaveFileResult>,
     listPrinciples: () => ipcRenderer.invoke('desktop:listPrinciples') as Promise<unknown[]>,
     savePrinciple: (principle) => ipcRenderer.invoke('desktop:savePrinciple', principle) as Promise<unknown>,
     deletePrinciple: (id) => ipcRenderer.invoke('desktop:deletePrinciple', id) as Promise<void>,

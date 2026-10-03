@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { drainExitedWindowsShell, INHERITED_SHELL_OUTPUT_NOTICE } from '../utils/shell-output-drain.js';
 
 export type ShellEscapeParseResult =
   | { kind: 'command'; command: string }
@@ -70,6 +71,7 @@ export function runInteractiveShellCommand(
     const maxCapturedOutputBytes = 200_000;
     let capturedOutput = '';
     let settled = false;
+    let stopOutputDrain = () => {};
     const appendOutput = (chunk: Buffer | string, stream: NodeJS.WriteStream): void => {
       const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
       capturedOutput += text;
@@ -83,6 +85,7 @@ export function runInteractiveShellCommand(
     const finish = (result: ShellCommandResult): void => {
       if (settled) return;
       settled = true;
+      stopOutputDrain();
       resolve({ ...result, output: capturedOutput });
     };
 
@@ -106,6 +109,13 @@ export function runInteractiveShellCommand(
 
     child.on('close', (exitCode, signal) => {
       finish({ exitCode, signal });
+    });
+    stopOutputDrain = drainExitedWindowsShell(child, {
+      platform: options.platform,
+      onDrained: (exitCode, signal) => {
+        capturedOutput += `\n${INHERITED_SHELL_OUTPUT_NOTICE}`;
+        finish({ exitCode, signal });
+      },
     });
   });
 }

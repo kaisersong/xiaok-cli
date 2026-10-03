@@ -792,5 +792,65 @@
         }
       }
     }
+  },
+  {
+    "name": "launch_app",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "additional_arguments": {
+          "description": "Extra command-line arguments passed to the launched process (or activation arguments for packaged apps).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "aumid": {
+          "description": "Explicit AUMID for a packaged app. Cleaner alternative to overloading `bundle_id`. Takes precedence over `bundle_id` / `name` when present.",
+          "type": "string"
+        },
+        "bundle_id": {
+          "description": "App User Model ID (AUMID) for a packaged app — pattern `{PackageFamilyName}!{ApplicationId}`, e.g. `Microsoft.WindowsNotepad_8wekyb3d8bbwe!App`. Falls back to a `name` alias if no `!` is present. Either bundle_id, name, aumid, path, or launch_path must be provided.",
+          "type": "string"
+        },
+        "creates_new_application_instance": {
+          "description": "Accepted for parity; no-op on Windows (ShellExecuteEx always creates a new process).",
+          "type": "boolean"
+        },
+        "launch_path": {
+          "description": "Round-trip the `launch_path` returned by `list_apps`. Highest precedence — when set, this exact string is handed to ShellExecuteEx unchanged. For Windows desktop apps it's the full `.exe` commandline (path + arguments preserved from the source shortcut); for UWP apps it's `shell:appsFolder\\{PackageFamilyName}!{AppId}`. For precise UWP pid capture, prefer `aumid` over `launch_path`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "App display name. Tried against the `shell:AppsFolder` index first for packaged-app lookup; on a miss, passed to ShellExecuteEx's PATH search.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Full path to executable. Windows-only; takes precedence over name/bundle_id/aumid (but not over `launch_path`).",
+          "type": "string"
+        },
+        "session": {
+          "description": "For multi-call work, prefer a short public session label and repeat it on every call that accepts it. Omit it to use the authenticated transport's implicit lifecycle session.",
+          "type": "string"
+        },
+        "start_minimized": {
+          "description": "When true, launch the app's window minimized to the taskbar instead of restored-but-not-activated. Use this when the agent wants to drive the app entirely in the background — the user's previously-frontmost window (e.g. terminal) stays visually on top. Desktop launches hold the foreground lock through startup and use SW_SHOWMINNOACTIVE; packaged-app activation remains broker-controlled and receives a best-effort SW_SHOWMINNOACTIVE post-pass. UIA / background dispatch still work on a minimized window; only `screenshot` and `delivery_mode:\"foreground\"` need it restored.",
+          "type": "boolean"
+        },
+        "urls": {
+          "description": "URLs to open in the default browser via ShellExecuteEx (no activation).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "webkit_inspector_port": {
+          "description": "Accepted for cross-platform parity; no-op on Windows.",
+          "type": "integer"
+        }
+      },
+      "type": "object",
+      "required": []
+    }
   }
 ]

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { drainExitedWindowsShell, INHERITED_SHELL_OUTPUT_NOTICE } from '../utils/shell-output-drain.js';
 export function parseShellEscapeInput(input) {
     const trimmed = input.trim();
     if (!trimmed.startsWith('!')) {
@@ -33,6 +34,7 @@ export function runInteractiveShellCommand(command, options = {}) {
         const maxCapturedOutputBytes = 200_000;
         let capturedOutput = '';
         let settled = false;
+        let stopOutputDrain = () => { };
         const appendOutput = (chunk, stream) => {
             const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
             capturedOutput += text;
@@ -47,6 +49,7 @@ export function runInteractiveShellCommand(command, options = {}) {
             if (settled)
                 return;
             settled = true;
+            stopOutputDrain();
             resolve({ ...result, output: capturedOutput });
         };
         const child = spawn(invocation.shell, invocation.args, {
@@ -66,6 +69,13 @@ export function runInteractiveShellCommand(command, options = {}) {
         });
         child.on('close', (exitCode, signal) => {
             finish({ exitCode, signal });
+        });
+        stopOutputDrain = drainExitedWindowsShell(child, {
+            platform: options.platform,
+            onDrained: (exitCode, signal) => {
+                capturedOutput += `\n${INHERITED_SHELL_OUTPUT_NOTICE}`;
+                finish({ exitCode, signal });
+            },
         });
     });
 }

@@ -77,7 +77,13 @@
     "eval:quick": "node benchmark/run.mjs --runs 1 --tasks aut-rename,eff-simple-qa,eff-math",
     "quality:check-artifacts": "node --import tsx scripts/check-artifacts.ts",
     "quality:capture-regression": "node --import tsx scripts/capture-regression.ts",
-    "worktree:new": "node scripts/new-worktree.mjs"
+    "worktree:new": "node scripts/new-worktree.mjs",
+    "lint": "node scripts/governance/check.mjs lint",
+    "lint:baseline": "node scripts/governance/check.mjs lint --update-baseline",
+    "architecture:check": "node scripts/governance/check.mjs architecture",
+    "architecture:baseline": "node scripts/governance/check.mjs architecture --update-baseline",
+    "governance:check": "npm run lint && npm run architecture:check",
+    "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
@@ -106,6 +112,7 @@
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
+    "oxlint": "1.86.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"

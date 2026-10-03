@@ -880,7 +880,7 @@ function createComputerUseTool(backend, abiProfile = MACOS_CUA_ABI_PROFILE) {
     permission: "write",
     definition: {
       name: "xiaok_computer_use",
-      description: `Observe and operate local ${abiProfile.platform === "win32" ? "Windows" : "macOS"} apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If a reobserve-required error has waitForUserAction=false, first capture the current target UI again, then decide whether the interrupted mutation still needs to be retried. Windows mutations default to background. An explicit foreground retry requires a native background_unavailable response for that exact target/operation and another fresh capture; never switch focus preemptively. Windows mutations require a fresh capture, explicit pid + window_id, and tokens/indices from that exact host snapshot. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.`,
+      description: `Observe and operate local ${abiProfile.platform === "win32" ? "Windows" : "macOS"} apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If a reobserve-required error has waitForUserAction=false, first capture the current target UI again, then decide whether the interrupted mutation still needs to be retried. On Windows, open a user-authorized HTTP/HTTPS webpage with open_url, then list_windows and capture the browser to verify it. Never use shell start to open a browser, and never blindly repeat a launch after timeout or interruption. Windows mutations default to background. An explicit foreground retry requires COMPUTER_USE_BACKGROUND_UNAVAILABLE for that exact target/operation (and button/count for clicks) and another fresh capture; never switch focus preemptively. Windows double/right clicks without observed web content refuse background pen input before dispatch; capture again before explicitly requesting foreground mouse input. Windows middle clicks refuse the background route before input because the pinned driver may invoke the primary action instead. An observed Windows text editor may refuse background pen drag before sending input so that text selection uses an explicitly authorized foreground mouse drag. Windows mutations require a fresh capture, explicit pid + window_id, and tokens/indices from that exact host snapshot. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -905,6 +905,7 @@ function createComputerUseTool(backend, abiProfile = MACOS_CUA_ABI_PROFILE) {
           on_screen_only: { type: "boolean" },
           query: { type: "string" },
           ...abiProfile.platform === "win32" ? {
+            url: { type: "string", description: "One user-authorized HTTP/HTTPS URL to open in the default browser. Then list_windows and capture; never use shell start." },
             snapshot_id: { type: "string", description: "Host snapshot identity returned by this generation of capture. Required with element_index." },
             element_token: { type: "string", description: "Host element token from the latest capture of this pid and window_id." },
             capture_id: { type: "string", description: "Host capture identity from the latest capture of this target." },
@@ -1147,6 +1148,9 @@ function readErrorCode(value) {
   return typeof code === "string" ? code : null;
 }
 function checkBlockedInput(action, input) {
+  if (action === "open_url" && (input.capture_after === true || Object.keys(input).some((field) => !["action", "url", "capture_after"].includes(field)))) {
+    return "Error: open_url accepts only url; use list_windows and capture after opening, not capture_after or executable arguments";
+  }
   if (action === "type") {
     const text = typeof input.text === "string" ? input.text : "";
     if (DANGEROUS_TEXT_PATTERNS.some((pattern) => pattern.test(text))) {
@@ -1643,6 +1647,7 @@ var types = Object.freeze({
   to_y: "number",
   modifier: "array",
   modifiers: "array",
+  urls: "array",
   session: "string",
   query: "string",
   element_token: "string",
@@ -1685,6 +1690,7 @@ var contracts = Object.freeze([
   contract("screenshot", "get_window_state", ["pid", "window_id"], [...observation], { forced: Object.freeze({ include_screenshot: true }) }),
   contract("list_apps", "list_apps", [], ["session"]),
   contract("list_windows", "list_windows", [], ["pid", "on_screen_only", "session"]),
+  contract("open_url", "launch_app", [], ["urls"]),
   contract("click", "click", [], [...click], { defaults: background, forced: windowScope, pixelPairs: pair }),
   contract("middle_click", "click", [], [...click], { defaults: background, forced: Object.freeze({ ...windowScope, button: "middle" }), pixelPairs: pair }),
   contract("double_click", "double_click", ["pid"], [...windowFields, "x", "y", "modifier"], { defaults: background, pixelPairs: pair }),
@@ -1716,6 +1722,29 @@ var WINDOWS_CUA_ABI_PROFILE = Object.freeze({
   expectedProperties: Object.freeze(expectedProperties)
 });
 
+// src/platform/computer-use/windows-cua-url.ts
+function validatedBrowserUrl(value) {
+  if (typeof value !== "string" || !value || value.length > 8192 || /[\s\x00-\x1f\x7f]/.test(value)) {
+    throw new InvalidComputerUseInputError("open_url requires one HTTP/HTTPS URL without whitespace or control characters");
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new InvalidComputerUseInputError("open_url requires a valid URL");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+    throw new InvalidComputerUseInputError("open_url allows only HTTP/HTTPS without embedded credentials");
+  }
+  return url.href;
+}
+function validateNativeBrowserLaunch(input) {
+  if (Object.keys(input).length !== 1 || !Array.isArray(input.urls) || input.urls.length !== 1) {
+    throw new InvalidComputerUseInputError("launch_app permits only one browser URL");
+  }
+  return { urls: [validatedBrowserUrl(input.urls[0])] };
+}
+
 // src/platform/computer-use/windows-cua-observation.ts
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -1732,6 +1761,11 @@ function address(value) {
 function error(code) {
   return Object.assign(new Error(code), { code });
 }
+function foregroundKey(operation, input) {
+  const a = address(input);
+  const button = operation === "click" ? `:${input.button ?? "left"}:${input.count ?? 1}` : "";
+  return `${a.pid}:${a.window_id}:${operation}${button}`;
+}
 var WindowsCuaObservationStore = class {
   nonce = randomBytes(16).toString("hex");
   foregroundGrants = /* @__PURE__ */ new Set();
@@ -1742,8 +1776,7 @@ var WindowsCuaObservationStore = class {
     this.foregroundGrants.clear();
   }
   recordOutcome(operation, input, result) {
-    const a = address(input);
-    const key = `${a.pid}:${a.window_id}:${operation}`;
+    const key = foregroundKey(operation, input);
     this.foregroundGrants.delete(key);
     const structured = object(result.structuredContent);
     const escalation = object(structured?.escalation);
@@ -1755,6 +1788,29 @@ var WindowsCuaObservationStore = class {
   identity(input) {
     const a = address(input);
     return this.observations.get(`${a.pid}:${a.window_id}`);
+  }
+  backgroundDragRequiresMouse(input) {
+    if (input.delivery_mode !== "background") return false;
+    const a = address(input);
+    const observation2 = this.observations.get(`${a.pid}:${a.window_id}`);
+    const x = input.from_x;
+    const y = input.from_y;
+    return typeof x === "number" && typeof y === "number" && Boolean(observation2?.edits.some(
+      (rect) => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
+    ));
+  }
+  backgroundGestureRequiresMouse(operation, input) {
+    if (input.delivery_mode !== "background") return false;
+    const complex = ["double_click", "right_click"].includes(operation) || operation === "click" && (input.button === "right" || Number(input.count ?? 1) > 1);
+    if (!complex) return false;
+    const a = address(input);
+    const observation2 = this.observations.get(`${a.pid}:${a.window_id}`);
+    if (typeof input.element_token === "string") return !observation2?.webTokens.has(input.element_token);
+    const x = input.x;
+    const y = input.y;
+    return !(typeof x === "number" && typeof y === "number" && observation2?.webRegions.some(
+      (rect) => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
+    ));
   }
   consume(input) {
     const a = address(input);
@@ -1773,6 +1829,9 @@ var WindowsCuaObservationStore = class {
     const capture = `w${this.nonce}:${raw.capture_id}`;
     const indices = /* @__PURE__ */ new Map();
     const tokens = /* @__PURE__ */ new Map();
+    const edits = [];
+    const webTokens = /* @__PURE__ */ new Set();
+    const webRegions = [];
     const elements = raw.elements.map((value) => {
       const element = object(value);
       const index = element?.element_index;
@@ -1781,22 +1840,33 @@ var WindowsCuaObservationStore = class {
       const publicToken = `w${this.nonce}:${token}`;
       indices.set(index, token);
       tokens.set(publicToken, token);
+      if (element.in_web_content === true) webTokens.add(token);
+      const frame = object(element.screenshot_frame);
+      if (frame && ["x", "y", "w", "h"].every((k) => typeof frame[k] === "number" && Number.isFinite(frame[k])) && frame.w > 0 && frame.h > 0) {
+        const rect = { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+        if (element.role === "Edit") edits.push(rect);
+        if (element.in_web_content === true) webRegions.push(rect);
+      }
       return { ...element, element_token: publicToken };
     });
     if (this.observations.size >= 16) this.observations.delete(this.observations.keys().next().value);
-    this.observations.set(key, { snapshot, capture, width: png.width, height: png.height, indices, tokens });
+    this.observations.set(key, { snapshot, capture, width: png.width, height: png.height, indices, tokens, edits, webTokens, webRegions });
     return { ...result, structuredContent: { ...raw, snapshot_id: snapshot, capture_id: capture, elements } };
   }
   prepare(action, input) {
+    if (action === "open_url") {
+      if (Object.keys(input).some((field) => field !== "url")) throw new InvalidComputerUseInputError("open_url accepts only url");
+      return { urls: [validatedBrowserUrl(input.url)] };
+    }
     if (["capture", "screenshot", "list_apps", "list_windows"].includes(action)) return { ...input };
     const a = address(input);
     const observation2 = this.observations.get(`${a.pid}:${a.window_id}`);
     if (!observation2) throw error("COMPUTER_USE_REOBSERVE_REQUIRED");
     const mode = input.delivery_mode ?? "background";
     if (mode !== "background" && mode !== "foreground") throw new InvalidComputerUseInputError("invalid delivery_mode");
-    const operation = WINDOWS_CUA_ABI_PROFILE.contracts.find((contract2) => contract2.action === action)?.backendOperation;
-    const grant = `${a.pid}:${a.window_id}:${operation}`;
-    if (mode === "foreground" && !this.foregroundGrants.has(grant)) throw new InvalidComputerUseInputError("foreground requires a native background_unavailable response for this target and operation");
+    const contract2 = WINDOWS_CUA_ABI_PROFILE.contracts.find((contract3) => contract3.action === action);
+    const grant = foregroundKey(contract2?.backendOperation, { ...input, ...contract2?.forced });
+    if (mode === "foreground" && !this.foregroundGrants.has(grant)) throw new InvalidComputerUseInputError("foreground requires a background_unavailable response for this target and operation");
     const output = { ...input, ...a, delivery_mode: mode };
     if ((input.element_index !== void 0 || input.element_token !== void 0) && ["x", "y", "to_x", "to_y"].some((field) => input[field] !== void 0)) {
       throw new InvalidComputerUseInputError("Use either element or pixel targeting for one action");
@@ -1848,19 +1918,21 @@ function createWindowsCuaBackend(manager, options = {}) {
   };
   const reobserve = () => Object.assign(new Error("COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED"), { code: "COMPUTER_USE_RECONNECTED_REOBSERVE_REQUIRED" });
   const queues = /* @__PURE__ */ new Map();
+  let launchBarrier = Promise.resolve();
   const enqueue = async (name, input, callOptions, expected) => {
     const key = input.pid && input.window_id ? `${input.pid}:${input.window_id}` : "<catalog>";
     const previous = queues.get(key) ?? Promise.resolve();
-    const next = previous.catch(() => {
-    }).then(async () => {
+    const predecessors = name === "launch_app" ? [...queues.values(), launchBarrier] : [previous, launchBarrier];
+    const next = Promise.allSettled(predecessors).then(async () => {
       callOptions?.signal?.throwIfAborted();
       synchronize();
-      if (!["get_window_state", "list_apps", "list_windows"].includes(name) && (!expected || store.identity(input) !== expected)) {
+      if (!["get_window_state", "list_apps", "list_windows", "launch_app"].includes(name) && (!expected || store.identity(input) !== expected)) {
         throw Object.assign(new Error("COMPUTER_USE_REOBSERVE_REQUIRED"), { code: "COMPUTER_USE_REOBSERVE_REQUIRED" });
       }
       return perform(name, input, callOptions);
     });
     queues.set(key, next);
+    if (name === "launch_app") launchBarrier = next;
     try {
       return await next;
     } finally {
@@ -1871,8 +1943,33 @@ function createWindowsCuaBackend(manager, options = {}) {
     synchronize();
     const current = manager.generation;
     const observation2 = ["get_window_state", "list_apps", "list_windows"].includes(name);
+    if (name === "launch_app") {
+      const launchInput = validateNativeBrowserLaunch(input);
+      store.reset();
+      try {
+        const result = await manager.callToolResult(name, launchInput, callOptions);
+        callOptions?.signal?.throwIfAborted();
+        if (current !== manager.generation) {
+          synchronize();
+          throw reobserve();
+        }
+        return result;
+      } finally {
+        store.reset();
+      }
+    }
     try {
-      const result = await manager.callToolResult(name, input, callOptions);
+      const middle = name === "click" && input.button === "middle" && input.delivery_mode === "background";
+      const textDrag = name === "drag" && store.backgroundDragRequiresMouse(input);
+      const nonWebGesture = store.backgroundGestureRequiresMouse(name, input);
+      const text = middle ? "Background middle click may invoke the primary action instead of the middle mouse button. No input was sent; capture again before explicitly choosing foreground middle click." : nonWebGesture ? "Background pen injection cannot reliably deliver this mouse gesture to a target without observed web content. No input was sent; capture again before explicitly choosing foreground mouse input." : "Background pen drag cannot reliably select text in this observed Edit. No input was sent; capture again before explicitly choosing foreground mouse drag.";
+      const result = middle || textDrag || nonWebGesture ? { isError: true, text, summary: text, images: [], structuredContent: {
+        code: "background_unavailable",
+        source: "xiaok_host",
+        inputSent: false,
+        reason: middle ? "middle_click_requires_mouse_input" : nonWebGesture ? "non_web_gesture_requires_mouse_input" : "text_selection_requires_mouse_input",
+        escalation: { recommended: "foreground" }
+      } } : await manager.callToolResult(name, input, callOptions);
       callOptions?.signal?.throwIfAborted();
       if (current !== manager.generation) {
         synchronize();
@@ -1913,7 +2010,7 @@ function createWindowsCuaBackend(manager, options = {}) {
         prepareActionInput(action, input) {
           synchronize();
           const result = store.prepare(action, input);
-          if (!["capture", "screenshot", "list_apps", "list_windows"].includes(action)) expected = store.identity(input);
+          if (!["capture", "screenshot", "list_apps", "list_windows", "open_url"].includes(action)) expected = store.identity(input);
           return result;
         },
         callToolResult: (name, input, options2) => enqueue(name, input, options2, expected)

@@ -41,7 +41,7 @@ describe('preload API surface snapshot (Stage 5.5)', () => {
     // SystemOne adds exactly two auxiliary-decision-model keys
     // (getSystemOneConfig / saveSystemOneConfig); they never touch providers.
     // 1.5.6 adds deleteCollaborationRoom to the collaboration room lifecycle.
-    expect(keys.length).toMatchInlineSnapshot(`295`);
+    expect(keys.length).toMatchInlineSnapshot(`296`);
   });
 
   it('showSaveDialog currently passes input directly (pre-capabilityToken)', () => {

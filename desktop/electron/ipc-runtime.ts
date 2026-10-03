@@ -30,6 +30,8 @@ export interface IpcSchemaEntry {
 
 export const IPC_SCHEMA_REGISTRY = new Map<string, IpcSchemaEntry>();
 
+let registrations = new WeakMap<IpcHandleRegistrar, Map<string, IpcSchemaEntry>>();
+
 let ipcMainImpl: IpcHandleRegistrar | null = null;
 
 export function setIpcMainImpl(impl: IpcHandleRegistrar): void {
@@ -42,9 +44,11 @@ export function setIpcMainForTests(fake: IpcHandleRegistrar): void {
 
 export function resetIpcSchemaRegistryForTests(): void {
   IPC_SCHEMA_REGISTRY.clear();
+  registrations = new WeakMap();
 }
 
 export function registerIpcHandler<I, O>(opts: {
+  registrar?: IpcHandleRegistrar;
   channel: string;
   input: ZodSchema<I>;
   output: ZodSchema<O>;
@@ -53,12 +57,14 @@ export function registerIpcHandler<I, O>(opts: {
   riskTags?: RiskTag[];
   handler: (input: I, event: IpcMainInvokeEvent) => Promise<O>;
 }): void {
-  if (!ipcMainImpl) {
+  const registrar = opts.registrar ?? ipcMainImpl;
+  if (!registrar) {
     throw new Error('ipcMainImpl not set. Call setIpcMainImpl(ipcMain) before registering handlers.');
   }
-  if (IPC_SCHEMA_REGISTRY.has(opts.channel)) {
+  const owned = registrations.get(registrar) ?? new Map<string, IpcSchemaEntry>();
+  if (owned.has(opts.channel)) {
     throw new Error(
-      `IPC channel "${opts.channel}" registered twice (existing: ${IPC_SCHEMA_REGISTRY.get(opts.channel)!.sourceFile})`,
+      `IPC channel "${opts.channel}" registered twice (existing: ${owned.get(opts.channel)!.sourceFile})`,
     );
   }
   const entry: IpcSchemaEntry = {
@@ -69,9 +75,7 @@ export function registerIpcHandler<I, O>(opts: {
     rolloutRound: opts.rolloutRound,
     riskTags: opts.riskTags ?? [],
   };
-  IPC_SCHEMA_REGISTRY.set(opts.channel, entry);
-
-  ipcMainImpl.handle(opts.channel, async (event: IpcMainInvokeEvent, raw: unknown) => {
+  registrar.handle(opts.channel, async (event: IpcMainInvokeEvent, raw: unknown) => {
     const parsed = opts.input.parse(raw);
     const result = await opts.handler(parsed, event);
     if (process.env.NODE_ENV !== 'production') {
@@ -82,4 +86,7 @@ export function registerIpcHandler<I, O>(opts: {
     }
     return result;
   });
+  owned.set(opts.channel, entry);
+  registrations.set(registrar, owned);
+  IPC_SCHEMA_REGISTRY.set(opts.channel, entry);
 }

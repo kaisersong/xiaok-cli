@@ -13,7 +13,7 @@
  * One table drives both activation (exact-set ABI verification) and execution
  * (translation), so they can never drift.
  */
-export type PublicCuaAction = 'capture' | 'screenshot' | 'list_apps' | 'list_windows' | 'click' | 'double_click' | 'right_click' | 'middle_click' | 'drag' | 'scroll' | 'type' | 'key' | 'set_value';
+export type PublicCuaAction = 'capture' | 'screenshot' | 'list_apps' | 'list_windows' | 'open_url' | 'click' | 'double_click' | 'right_click' | 'middle_click' | 'drag' | 'scroll' | 'type' | 'key' | 'set_value';
 export interface CuaActionContract {
     readonly action: PublicCuaAction;
     readonly backendOperation: string;

@@ -59,7 +59,7 @@ export function createComputerUseTool(backend: ComputerUseBackend, abiProfile: C
     permission: 'write',
     definition: {
       name: 'xiaok_computer_use',
-      description: `Observe and operate local ${abiProfile.platform === 'win32' ? 'Windows' : 'macOS'} apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If a reobserve-required error has waitForUserAction=false, first capture the current target UI again, then decide whether the interrupted mutation still needs to be retried. Windows mutations default to background. An explicit foreground retry requires a native background_unavailable response for that exact target/operation and another fresh capture; never switch focus preemptively. Windows mutations require a fresh capture, explicit pid + window_id, and tokens/indices from that exact host snapshot. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.`,
+      description: `Observe and operate local ${abiProfile.platform === 'win32' ? 'Windows' : 'macOS'} apps through CUA Driver with Xiaok safety checks. Session revival and transport reconnection are owned internally by Xiaok; never search for or call start_session or raw cua-driver commands. If an error has waitForUserAction=true, stop and wait for that user action. If a reobserve-required error has waitForUserAction=false, first capture the current target UI again, then decide whether the interrupted mutation still needs to be retried. On Windows, open a user-authorized HTTP/HTTPS webpage with open_url, then list_windows and capture the browser to verify it. Never use shell start to open a browser, and never blindly repeat a launch after timeout or interruption. Windows mutations default to background. An explicit foreground retry requires COMPUTER_USE_BACKGROUND_UNAVAILABLE for that exact target/operation (and button/count for clicks) and another fresh capture; never switch focus preemptively. Windows double/right clicks without observed web content refuse background pen input before dispatch; capture again before explicitly requesting foreground mouse input. Windows middle clicks refuse the background route before input because the pinned driver may invoke the primary action instead. An observed Windows text editor may refuse background pen drag before sending input so that text selection uses an explicitly authorized foreground mouse drag. Windows mutations require a fresh capture, explicit pid + window_id, and tokens/indices from that exact host snapshot. Never fall back to shell screenshot, osascript, cliclick, open, or cua-driver commands.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -84,6 +84,7 @@ export function createComputerUseTool(backend: ComputerUseBackend, abiProfile: C
           on_screen_only: { type: 'boolean' },
           query: { type: 'string' },
           ...(abiProfile.platform === 'win32' ? {
+            url: { type: 'string', description: 'One user-authorized HTTP/HTTPS URL to open in the default browser. Then list_windows and capture; never use shell start.' },
             snapshot_id: { type: 'string', description: 'Host snapshot identity returned by this generation of capture. Required with element_index.' },
             element_token: { type: 'string', description: 'Host element token from the latest capture of this pid and window_id.' },
             capture_id: { type: 'string', description: 'Host capture identity from the latest capture of this target.' },
@@ -341,6 +342,9 @@ function readErrorCode(value: unknown): string | null {
 }
 
 function checkBlockedInput(action: string, input: Record<string, unknown>): string | null {
+  if (action === 'open_url' && (input.capture_after === true || Object.keys(input).some(field => !['action', 'url', 'capture_after'].includes(field)))) {
+    return 'Error: open_url accepts only url; use list_windows and capture after opening, not capture_after or executable arguments';
+  }
   if (action === 'type') {
     const text = typeof input.text === 'string' ? input.text : '';
     if (DANGEROUS_TEXT_PATTERNS.some((pattern) => pattern.test(text))) {

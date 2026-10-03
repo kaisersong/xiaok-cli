@@ -9,7 +9,7 @@ import {pathToFileURL} from 'node:url';
 
 // Test the exact npm runtime. Only its OS helper process is injected on macOS.
 const packageRoot=process.env.XIAOK_TEST_RELEASE_ROOT;
-if(!packageRoot)throw Error('Set XIAOK_TEST_RELEASE_ROOT to the extracted 1.5.6 release');
+if(!packageRoot)throw Error('Set XIAOK_TEST_RELEASE_ROOT to the extracted 1.5.7 release');
 const originalPlatform=process.platform, originalArch=process.arch, originalSpawn=cp.spawnSync;
 let response={version:1,kind:'ordinary'}, invocations=[];
 Object.defineProperty(process,'platform',{value:'win32',configurable:true});
@@ -76,7 +76,7 @@ test('missing manifest reproduces the original save failure and never starts a p
       setCrashContext({command:'chat',startupPhase:'agent'});
       try{await new FileSessionStore(root).save(snapshot());}catch(error){
         const report=JSON.parse(fs.readFileSync(await reportCrash(error),'utf8'));
-        assert.equal(report.version,'1.5.6');assert.equal(report.error.code,'ordinary_source_route');
+        assert.equal(report.version,'1.5.7');assert.equal(report.error.code,'ordinary_source_route');
         assert.ok(report.error.frames.some(frame=>frame.module==='ai/runtime/session-store/file-store.js'));
       }
     }finally{if(previousConfig===undefined)delete process.env.XIAOK_CONFIG_DIR;else process.env.XIAOK_CONFIG_DIR=previousConfig;}

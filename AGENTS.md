@@ -10,6 +10,8 @@
 
 ## 架构与不可省略的边界
 
+- 术语定义与 Avoid 反例统一见 [CONTEXT.md](CONTEXT.md)。开工运行 `npm run hygiene:check`；修改代码后运行 `npm run governance:check`，架构增量查看用 `npm run architecture:check -- --changed`。正常检查不更新存量 baseline。
+
 - Electron main 是 filesystem、SQLite、后台执行、调度、通知、子进程、服务和窗口生命周期的本地事实来源；preload 只提供白名单语义 API；renderer 管展示和局部 UI 状态，不持有 durable state 或后台事实。一个业务轮询只能有一个 owner。
 - reminder 是到点通知，scheduled task 是自动执行。变更 IPC 时同步 main handler、preload API/实现、renderer types 和 contract tests。
 - agent mutation service 必须显式接收 `requestSource: 'user' | 'agent' | 'scheduler'`，在 service 内按来源与所有权 default deny、allowlist 放行，并有越权拒绝测试。工具描述写“只能/严禁”的边界，避免引导自动取消或删除。安全修复同时审查同权限兄弟入口，不能只堵可零成本绕过的一路就宣称修复。

@@ -1,0 +1,22 @@
+name: Incremental governance
+on:
+  push:
+    branches: [master]
+  pull_request: {}
+  workflow_dispatch: {}
+jobs:
+  governance:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:governance
+      - run: npm run governance:check

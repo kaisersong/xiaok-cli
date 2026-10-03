@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { validateComputerUsePng } from './cua-png.js';
 import { WINDOWS_CUA_ABI_PROFILE } from './windows-cua-profile.js';
 import { InvalidComputerUseInputError } from './cua-action-contract.js';
+import { validatedBrowserUrl } from './windows-cua-url.js';
 function object(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
@@ -16,6 +17,13 @@ function address(value) {
     return { pid: read('pid'), window_id: read('window_id') };
 }
 function error(code) { return Object.assign(new Error(code), { code }); }
+function foregroundKey(operation, input) {
+    const a = address(input);
+    // click and middle_click share a native operation. A refusal for one button
+    // must not authorize a different button's foreground action.
+    const button = operation === 'click' ? `:${input.button ?? 'left'}:${input.count ?? 1}` : '';
+    return `${a.pid}:${a.window_id}:${operation}${button}`;
+}
 /** Never reuses driver tokens across a host generation, even if raw IDs repeat. */
 export class WindowsCuaObservationStore {
     nonce = randomBytes(16).toString('hex');
@@ -23,8 +31,7 @@ export class WindowsCuaObservationStore {
     observations = new Map();
     reset() { this.nonce = randomBytes(16).toString('hex'); this.observations.clear(); this.foregroundGrants.clear(); }
     recordOutcome(operation, input, result) {
-        const a = address(input);
-        const key = `${a.pid}:${a.window_id}:${operation}`;
+        const key = foregroundKey(operation, input);
         this.foregroundGrants.delete(key);
         const structured = object(result.structuredContent);
         const escalation = object(structured?.escalation);
@@ -38,6 +45,30 @@ export class WindowsCuaObservationStore {
     identity(input) {
         const a = address(input);
         return this.observations.get(`${a.pid}:${a.window_id}`);
+    }
+    backgroundDragRequiresMouse(input) {
+        if (input.delivery_mode !== 'background')
+            return false;
+        const a = address(input);
+        const observation = this.observations.get(`${a.pid}:${a.window_id}`);
+        const x = input.from_x;
+        const y = input.from_y;
+        return typeof x === 'number' && typeof y === 'number' && Boolean(observation?.edits.some(rect => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h));
+    }
+    backgroundGestureRequiresMouse(operation, input) {
+        if (input.delivery_mode !== 'background')
+            return false;
+        const complex = ['double_click', 'right_click'].includes(operation)
+            || (operation === 'click' && (input.button === 'right' || Number(input.count ?? 1) > 1));
+        if (!complex)
+            return false;
+        const a = address(input);
+        const observation = this.observations.get(`${a.pid}:${a.window_id}`);
+        if (typeof input.element_token === 'string')
+            return !observation?.webTokens.has(input.element_token);
+        const x = input.x;
+        const y = input.y;
+        return !(typeof x === 'number' && typeof y === 'number' && observation?.webRegions.some(rect => x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h));
     }
     consume(input) {
         const a = address(input);
@@ -62,6 +93,9 @@ export class WindowsCuaObservationStore {
         const capture = `w${this.nonce}:${raw.capture_id}`;
         const indices = new Map();
         const tokens = new Map();
+        const edits = [];
+        const webTokens = new Set();
+        const webRegions = [];
         const elements = raw.elements.map(value => {
             const element = object(value);
             const index = element?.element_index;
@@ -72,14 +106,30 @@ export class WindowsCuaObservationStore {
             const publicToken = `w${this.nonce}:${token}`;
             indices.set(index, token);
             tokens.set(publicToken, token);
+            if (element.in_web_content === true)
+                webTokens.add(token);
+            const frame = object(element.screenshot_frame);
+            if (frame && ['x', 'y', 'w', 'h'].every(k => typeof frame[k] === 'number' && Number.isFinite(frame[k]))
+                && frame.w > 0 && frame.h > 0) {
+                const rect = { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+                if (element.role === 'Edit')
+                    edits.push(rect);
+                if (element.in_web_content === true)
+                    webRegions.push(rect);
+            }
             return { ...element, element_token: publicToken };
         });
         if (this.observations.size >= 16)
             this.observations.delete(this.observations.keys().next().value);
-        this.observations.set(key, { snapshot, capture, width: png.width, height: png.height, indices, tokens });
+        this.observations.set(key, { snapshot, capture, width: png.width, height: png.height, indices, tokens, edits, webTokens, webRegions });
         return { ...result, structuredContent: { ...raw, snapshot_id: snapshot, capture_id: capture, elements } };
     }
     prepare(action, input) {
+        if (action === 'open_url') {
+            if (Object.keys(input).some(field => field !== 'url'))
+                throw new InvalidComputerUseInputError('open_url accepts only url');
+            return { urls: [validatedBrowserUrl(input.url)] };
+        }
         if (['capture', 'screenshot', 'list_apps', 'list_windows'].includes(action))
             return { ...input };
         const a = address(input);
@@ -89,10 +139,10 @@ export class WindowsCuaObservationStore {
         const mode = input.delivery_mode ?? 'background';
         if (mode !== 'background' && mode !== 'foreground')
             throw new InvalidComputerUseInputError('invalid delivery_mode');
-        const operation = WINDOWS_CUA_ABI_PROFILE.contracts.find(contract => contract.action === action)?.backendOperation;
-        const grant = `${a.pid}:${a.window_id}:${operation}`;
+        const contract = WINDOWS_CUA_ABI_PROFILE.contracts.find(contract => contract.action === action);
+        const grant = foregroundKey(contract?.backendOperation, { ...input, ...contract?.forced });
         if (mode === 'foreground' && !this.foregroundGrants.has(grant))
-            throw new InvalidComputerUseInputError('foreground requires a native background_unavailable response for this target and operation');
+            throw new InvalidComputerUseInputError('foreground requires a background_unavailable response for this target and operation');
         const output = { ...input, ...a, delivery_mode: mode };
         if ((input.element_index !== undefined || input.element_token !== undefined) && ['x', 'y', 'to_x', 'to_y'].some(field => input[field] !== undefined)) {
             throw new InvalidComputerUseInputError('Use either element or pixel targeting for one action');

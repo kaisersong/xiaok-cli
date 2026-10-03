@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "roots": ["desktop/electron", "desktop/renderer/src", "desktop/shared", "src"],
+  "preload": ["desktop/electron/preload.cjs", "desktop/electron/preload-api.ts", "desktop/electron/desktop-multi-agent-preload.ts"],
+  "publicTypeContracts": ["desktop/electron/preload-api.ts", "desktop/shared/room-workspace-contract.ts", "desktop/shared/file-ipc-contract.ts"],
+  "aliases": {
+    "@/*": ["desktop/renderer/src/*"],
+    "@xiaok/shared": ["desktop/renderer/src/shared/index.ts"],
+    "@xiaok/shared/*": ["desktop/renderer/src/shared/*"]
+  }
+}

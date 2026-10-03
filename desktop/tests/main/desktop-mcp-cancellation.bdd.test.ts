@@ -64,8 +64,10 @@ describe('R1 actual Desktop factory MCP sibling cancellation', () => {
       },
     } as unknown as transport.McpClientConnection));
     for (const server of ['generic', 'report-renderer', 'slide-renderer', ...(includeCua ? ['cua-driver'] : [])]) {
-      const plugin = join(root, 'plugins', `fixture-${server}`); mkdirSync(plugin, { recursive: true });
-      writeFileSync(join(plugin, 'plugin.json'), JSON.stringify({ name: `fixture-${server}`, version: '1', mcpServers: [{ name: server, type: 'stdio', command: process.execPath, args: [], protocol: { mode: 'modern', version: '2026-07-28' } }] }));
+      // The official CUA identity needs plugin name === dir name === 'cua-computer-use'.
+      const pluginName = server === 'cua-driver' ? 'cua-computer-use' : `fixture-${server}`;
+      const plugin = join(root, 'plugins', pluginName); mkdirSync(plugin, { recursive: true });
+      writeFileSync(join(plugin, 'plugin.json'), JSON.stringify({ name: pluginName, version: '1', mcpServers: [{ name: server, type: 'stdio', command: process.execPath, args: [], protocol: { mode: 'modern', version: '2026-07-28' } }] }));
     }
     let mainRegistry!: DesktopOwnedToolRegistry;
     const originalRegister = DesktopOwnedToolRegistry.prototype.registerOwnedTool;

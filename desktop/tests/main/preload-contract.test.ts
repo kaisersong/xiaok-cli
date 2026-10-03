@@ -979,7 +979,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
-    const re = /(?:ipcMain|shutdownAwareIpc)\.handle\(\s*'([^']+)'/g;
+    const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(source)) !== null) {
       channels.add(match[1]!);

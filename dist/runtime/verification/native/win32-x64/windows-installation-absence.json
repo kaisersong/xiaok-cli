@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "target": "win32-x64",
+  "sha256": "14aa2276f62e4269af78ab607f1655cb920e4382c62c219876073d81a8cd9910",
+  "sourceSha256": "41f96c450f30568ee5dfeb502032fcff61d673e1c8b209adef1ea4e5c42e95c4",
+  "coreSha256": "e3b77ae7eb3f2b8b1a01dc9fd44f685b8e308883a1ef44a500b5695c907205a9"
+}

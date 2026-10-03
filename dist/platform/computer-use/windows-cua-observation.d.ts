@@ -7,6 +7,8 @@ export declare class WindowsCuaObservationStore {
     reset(): void;
     recordOutcome(operation: string, input: Readonly<Record<string, unknown>>, result: McpRuntimeToolResult): void;
     identity(input: Readonly<Record<string, unknown>>): object | undefined;
+    backgroundDragRequiresMouse(input: Readonly<Record<string, unknown>>): boolean;
+    backgroundGestureRequiresMouse(operation: string, input: Readonly<Record<string, unknown>>): boolean;
     consume(input: Readonly<Record<string, unknown>>): void;
     record(input: Readonly<Record<string, unknown>>, result: McpRuntimeToolResult): McpRuntimeToolResult;
     prepare(action: string, input: Readonly<Record<string, unknown>>): Record<string, unknown>;

@@ -62,6 +62,6 @@ describe('Desktop bundled MCP v2 contract', () => {
     // version at least as new as the last one Desktop pinned.
     expect(readPluginManifest('kai-report-creator').version).toBe('2.3.0');
     expect(readPluginManifest('kai-slide-creator').version).toBe('3.3.0');
-    expect(readPluginManifest('cua-computer-use').version).toBe('0.2.1');
+    expect(readPluginManifest('cua-computer-use').version).toBe('0.3.1');
   });
 });

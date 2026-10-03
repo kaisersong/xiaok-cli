@@ -1,3 +1,6 @@
+import {z, type ZodSchema} from 'zod';
+import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
+import {absoluteFilePath, filePathInput, saveFileInput, openFileResult, readFileResult, saveFileResult} from './file-ipc-schemas.js';
 import { readClipboardPathCandidates } from './clipboard-file-paths.js';
 import { app, BrowserWindow, clipboard, dialog, shell, systemPreferences, type IpcMain, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -752,6 +755,9 @@ export async function registerDesktopIpc(
   services: DesktopServices,
   options: RegisterDesktopIpcOptions = {}
 ): Promise<void> {
+  const fileHandler = <I, O>(channel: string, input: ZodSchema<I>, output: ZodSchema<O>, riskTags: RiskTag[], handler: (input: I, event: IpcMainInvokeEvent) => Promise<O>) => registerIpcHandler({
+    registrar: ipcMain, channel, input, output, riskTags, sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 1, handler,
+  });
   const primaryWindow = () => options.getMainWindow?.() ?? window;
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
@@ -1097,13 +1103,13 @@ export async function registerDesktopIpc(
     log('info', 'openArtifact', { artifactId: input?.artifactId });
     return services.openArtifact(input.artifactId);
   });
-  ipcMain.handle('desktop:openFileInSystemApp', async (_event, input) => {
+  fileHandler('desktop:openFileInSystemApp', filePathInput, openFileResult, ['shell-open'], async (input) => {
     const filePath = input?.filePath as string;
-    if (!filePath || !isAbsolute(filePath)) return { ok: false, error: 'invalid_path' };
+    if (!filePath || !isAbsolute(filePath)) return { ok: false as const, error: 'invalid_path' };
     const error = await shell.openPath(filePath);
-    return error ? { ok: false, error } : { ok: true };
+    return error ? { ok: false as const, error } : { ok: true as const };
   });
-  ipcMain.handle('desktop:readFileContent', async (_event, input) => {
+  fileHandler('desktop:readFileContent', filePathInput, readFileResult, ['fs-read'], async (input) => {
     const filePath = input?.filePath as string;
     log('info', 'readFileContent', { filePath });
     try {
@@ -1553,30 +1559,30 @@ export async function registerDesktopIpc(
   // ---- Artifact Editing ----
   const { sessionHash, backupArtifact, revertArtifact, cleanupBackups, watchArtifactFile, unwatchArtifactFile } = await import('./artifact-editing.js');
 
-  ipcMain.handle('desktop:artifactBackup', async (_event, filePath: string) => {
+  fileHandler('desktop:artifactBackup', absoluteFilePath, z.string().nullable(), ['fs-read', 'fs-write'], async (filePath) => {
     const sid = sessionHash(filePath);
     return backupArtifact(filePath, sid);
   });
 
-  ipcMain.handle('desktop:artifactRevert', async (_event, filePath: string) => {
+  fileHandler('desktop:artifactRevert', absoluteFilePath, z.boolean(), ['fs-write'], async (filePath) => {
     const sid = sessionHash(filePath);
     const ok = revertArtifact(filePath, sid);
     if (ok && !primaryWindow().isDestroyed()) primaryWindow().webContents.send('desktop:artifactFileChanged', filePath);
     return ok;
   });
 
-  ipcMain.handle('desktop:artifactCleanup', async (_event, filePath: string) => {
+  fileHandler('desktop:artifactCleanup', absoluteFilePath, z.void(), ['fs-delete'], async (filePath) => {
     const sid = sessionHash(filePath);
     cleanupBackups(sid);
   });
 
-  ipcMain.handle('desktop:artifactWatch', async (_event, filePath: string) => {
+  fileHandler('desktop:artifactWatch', absoluteFilePath, z.void(), ['fs-watch'], async (filePath) => {
     watchArtifactFile(filePath, () => {
       if (!primaryWindow().isDestroyed()) primaryWindow().webContents.send('desktop:artifactFileChanged', filePath);
     });
   });
 
-  ipcMain.handle('desktop:artifactUnwatch', async (_event, filePath: string) => {
+  fileHandler('desktop:artifactUnwatch', absoluteFilePath, z.void(), ['fs-watch'], async (filePath) => {
     unwatchArtifactFile(filePath);
   });
 
@@ -1595,7 +1601,7 @@ export async function registerDesktopIpc(
     return { canceled: false, filePath: result.filePath };
   });
 
-  ipcMain.handle('desktop:saveFile', async (_event, input: { filePath: string; content: string; purpose?: string }) => {
+  fileHandler('desktop:saveFile', saveFileInput, saveFileResult, ['fs-write'], async (input) => {
     log('info', 'saveFile', { filePath: input?.filePath });
     try {
       if (input?.purpose === 'html-edit' || input?.purpose === 'text-edit') {

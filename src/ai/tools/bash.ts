@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import type { Tool } from '../../types.js';
 import { truncateText } from './truncation.js';
 import { classifyBashCommand } from './bash-safety.js';
+import { drainExitedWindowsShell, INHERITED_SHELL_OUTPUT_NOTICE } from '../../utils/shell-output-drain.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const WINDOWS_ELEVATION_OUTPUT_PATTERNS = [
@@ -95,9 +96,15 @@ export const bashTool: Tool = {
       let settled = false;
       let aborted = false;
       let terminationResult: string | undefined;
+      let normalExitObserved = false;
+      let stopOutputDrain = () => {};
       const onAbort = () => {
         if (settled || aborted) return;
         aborted = true;
+        if (normalExitObserved) {
+          child.stdout?.destroy(); child.stderr?.destroy();
+          finish('', null); return;
+        }
         terminateChildProcessTree(child);
       };
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -106,6 +113,7 @@ export const bashTool: Tool = {
           return;
         }
         settled = true;
+        stopOutputDrain();
         context?.signal?.removeEventListener('abort', onAbort);
         if (timer) {
           clearTimeout(timer);
@@ -143,7 +151,7 @@ export const bashTool: Tool = {
             `Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`,
             max_chars,
           ).text;
-          terminateChildProcessTree(child);
+          if (!normalExitObserved) terminateChildProcessTree(child);
         }
       };
 
@@ -156,18 +164,27 @@ export const bashTool: Tool = {
         terminateChildProcessTree(child);
       }, timeout_ms);
 
-      child.on('close', code => {
+      const complete = (code: number | null, inheritedOutput = false) => {
         if (terminationResult) { finish(terminationResult, null); return; }
         if (settled) {
           return;
         }
-        const output = [stdout, stderr].filter(Boolean).join('\n').trim();
+        const output = [stdout, stderr, inheritedOutput ? INHERITED_SHELL_OUTPUT_NOTICE : ''].filter(Boolean).join('\n').trim();
         if (code !== 0) {
           finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text, code);
         } else {
           finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text, 0);
         }
+      };
+      stopOutputDrain = drainExitedWindowsShell(child, {
+        onExit: () => {
+          normalExitObserved = !aborted && !terminationResult;
+          if (normalExitObserved && timer) clearTimeout(timer);
+        },
+        canDrain: () => normalExitObserved && !aborted,
+        onDrained: code => complete(code, true),
       });
+      child.on('close', code => complete(code));
 
       child.on('error', (error) => {
         if (aborted || terminationResult) {

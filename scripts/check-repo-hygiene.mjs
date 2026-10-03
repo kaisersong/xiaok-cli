@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-export { evaluateRepoHealth, parseStatusPorcelain } from './check-repo-hygiene.js';
+export { evaluateRepoHealth, parseStatusPorcelain, collectWorkspaceHealth } from './check-repo-hygiene.js';
+import { pathToFileURL } from 'node:url';
 import { main } from './check-repo-hygiene.js';
 
-if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     main();
   } catch (error) {

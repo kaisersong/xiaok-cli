@@ -1,0 +1,58 @@
+{
+  "version": "1.5.7",
+  "date": "2026-10-03",
+  "cliSandbox": {
+    "filesPassed": 457,
+    "filesSkipped": 2,
+    "filesFailed": 0,
+    "passed": 4086,
+    "skipped": 18,
+    "failed": 0
+  },
+  "cliEvals": {
+    "intentDelegation": "26/26",
+    "skillQuality": "3/3",
+    "skillAdherence": "3/3"
+  },
+  "desktop": {
+    "filesPassed": 472,
+    "filesSkipped": 1,
+    "filesFailed": 0
+  },
+  "desktopTypecheck": {
+    "electron": "clean",
+    "rendererCurrent": 0,
+    "rendererNewSinceBaseline": 0
+  },
+  "governance": {
+    "lintScanned": 1108,
+    "lintCurrent": 4,
+    "lintNew": 0,
+    "architectureScanned": 991,
+    "architectureCurrent": 161,
+    "architectureNew": 0
+  },
+  "governanceTests": {
+    "passed": 15,
+    "failed": 0
+  },
+  "windowsAbsenceScriptTests": {
+    "passed": 4,
+    "failed": 0
+  },
+  "windowsAbsenceReleaseTests": {
+    "passed": 3,
+    "failed": 4,
+    "reason": "Four cases assert the store-side win32 absence gate that the current FileSessionStore no longer declares; this file is not wired into any CI job."
+  },
+  "cliVersionCheck": "1.5.7",
+  "externalDocsCheck": {
+    "exit": 0,
+    "symlinkMode": "120000",
+    "repositories": ["Ampliky", "intent-broker", "kai-business-blueprint", "kswarm", "xiaok-cli"]
+  },
+  "limitations": [
+    "Scoped local checks on Node 24.16.0 macOS arm64; not Windows hardware or live provider acceptance.",
+    "Signed installers and npm publication come from CI, not from these local numbers."
+  ]
+}

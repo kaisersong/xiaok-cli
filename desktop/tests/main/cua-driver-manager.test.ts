@@ -19,15 +19,16 @@ describe('CUA driver manager', () => {
     const platformGate = source.lastIndexOf("process.platform !== 'darwin'", dynamicImport);
     const connectionSetup = source.lastIndexOf('let connectionRef: McpClientConnection | null = null', dynamicImport);
     const wrapperRegistration = source.indexOf('registry.registerTool(createComputerUseTool');
-    const wrapperPlatformGate = source.lastIndexOf("if (process.platform === 'darwin')", wrapperRegistration);
+    // The wrapper builder is declared first and only invoked under the macOS gate.
+    const wrapperCall = source.indexOf("if (process.platform === 'darwin') registerComputerUseWrapper();");
     expect(dynamicImport).toBeGreaterThan(-1);
     expect(platformGate).toBeGreaterThan(-1);
     expect(platformGate).toBeLessThan(dynamicImport);
     expect(connectionSetup).toBeGreaterThan(-1);
     expect(platformGate).toBeLessThan(connectionSetup);
     expect(wrapperRegistration).toBeGreaterThan(-1);
-    expect(wrapperPlatformGate).toBeGreaterThan(-1);
-    expect(wrapperPlatformGate).toBeLessThan(wrapperRegistration);
+    expect(wrapperCall).toBeGreaterThan(wrapperRegistration);
+    expect(wrapperRegistration).toBeLessThan(dynamicImport);
   });
 
   it('launches the daemon through the exact CuaDriver.app path instead of app-name resolution', () => {

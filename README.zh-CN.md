@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**发布目标：1.5.6（2026-10-01）。** CLI 与 Desktop 版本统一为 **1.5.6**。本次增加协作空间活跃／归档分类、最后活跃时间和管理菜单，优化终端阅读与模型思考强度选择，并在打包时验证运行依赖。当前可用安装包见[最新正式发布版](https://github.com/kaisersong/xiaok-cli/releases/latest)；1.5.6 在[发布构建](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml)与产物验收完成后开放下载。详见[版本日志](#版本日志)。
+**发布目标：1.5.7（2026-10-03）。** CLI 与 Desktop 版本统一为 **1.5.7**。本次增加 `ask_user` 数字快捷键选择、Windows Computer Use 的 host／backend 与私有 release 安装、Windows 普通会话 shell 输出排空、Desktop 文件类 IPC 具名契约，以及仓库治理门禁。当前可用安装包见[最新正式发布版](https://github.com/kaisersong/xiaok-cli/releases/latest)；1.5.7 在[发布构建](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml)与产物验收完成后开放下载。详见[版本日志](#版本日志)。
 
 ---
 
@@ -249,11 +249,11 @@ Desktop 是基于 Electron 与 React 的主要图形工作台。主进程 servic
 
 ### 下载
 
-可下载的安装包以 [GitHub Releases 当前正式版](https://github.com/kaisersong/xiaok-cli/releases/latest) 为准。`desktop-v1.5.6` 在发布 CI 完成后提供：
+可下载的安装包以 [GitHub Releases 当前正式版](https://github.com/kaisersong/xiaok-cli/releases/latest) 为准。`desktop-v1.5.7` 在发布 CI 完成后提供：
 
-- `xiaok-1.5.6-arm64.dmg` — macOS Apple Silicon 安装包。
-- `xiaok-1.5.6-arm64-mac.zip` — macOS Apple Silicon 压缩包。
-- `xiaok-setup-1.5.6.exe` — Windows x64 安装程序。
+- `xiaok-1.5.7-arm64.dmg` — macOS Apple Silicon 安装包。
+- `xiaok-1.5.7-arm64-mac.zip` — macOS Apple Silicon 压缩包。
+- `xiaok-setup-1.5.7.exe` — Windows x64 安装程序。
 
 自动更新使用 `latest-mac.yml` 与 `latest.yml`。本文标记为近期源码的改动，需要源码构建或后续正式发布后使用。
 
@@ -467,7 +467,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 将三个关联仓库固定到 `desktop-v1.5.6`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
+在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 将三个关联仓库固定到 `desktop-v1.5.7`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
 
 ---
 
@@ -558,6 +558,16 @@ npm run test --prefix desktop -- --run \
 ---
 
 ## 版本日志
+
+### v1.5.7 — 发布准备，2026-10-03
+
+- **`ask_user` 数字快捷键**：直接输入序号即可选中对应选项，原有文本匹配继续可用。
+- **Windows Computer Use**：CUA host、win32 backend 与私有 release 安装共用同一 ABI profile；新增 `windows-cua-url` 归一化 URL，window observation 与 action contract 同步扩展。
+- **Windows shell 输出**：普通会话 bash 工具先排空已退出子进程的输出流再读取，继承的 shell 输出显式标记。
+- **Desktop 文件类 IPC 具名契约**：`openFileInSystemApp`、`readFileContent`、`saveFile` 使用 main 进程校验的共享契约类型，preload 与 renderer 同源。
+- **治理门禁**：oxlint 与架构基线由 `scripts/governance/check.mjs` 统计当前／新增违规（当前 4 项与 161 项，新增 0 项）。
+- **文档集中**：五个仓库的 `docs` 改为指向共享 `mydocs` 的软链接（模式 `120000`），由 `scripts/check-external-docs.mjs` 校验。
+- CLI／Desktop 均为 `1.5.7`，内置关联仓库固定到 `desktop-v1.5.7`。本地验证覆盖 sandbox 套件（4086 通过／18 跳过）、Desktop 套件（472 个文件）、行为评测与治理门禁；不等于 Windows 实机或真实厂商 API 验收。验证范围见[发布说明](release-notes/1.5.7.md)；更新元数据不等于发布 npm。
 
 ### v1.5.6 — 发布准备，2026-10-01
 

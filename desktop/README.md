@@ -120,3 +120,15 @@ On Windows, run the root install command to build and install the current-user d
 ```bash
 npm run desktop:install
 ```
+
+## 开发治理检查
+
+在仓库根运行 `npm run hygiene:check`：默认 fetch 并聚合 xiaok-cli、kswarm、intent-broker、kai-xiaok-plugins。`-- --json` 输出结构化报告，`-- --no-fetch` 明确不验证远端新鲜度。报告不会自动 merge/reset 工作区。
+
+修改源码后运行 `npm run governance:check`（Oxlint + main/preload/renderer 架构边界）。开发工具需要 Node 22.12+；工具仅为 root devDependency，不进入 Desktop runtime。术语见根 `CONTEXT.md`。
+
+`npm run architecture:check -- --changed` 检查工作区变更及所有反向 importer；CI 使用全量检查。跨提交检查可加 `--base=<git-ref>`。新增违规返回 exit code 1。存量由 `.lint-baseline.json` / `.architecture-baseline.json` 按路径、规则、源码和消息 fingerprint 逐条抵扣，同一旧违规多一个也算新增。policy/config/tool version 与 baseline 绑定。
+
+只有明确审查存量变化后才运行 `npm run lint:baseline` / `npm run architecture:baseline`，并审查 diff；CI 不执行这些更新命令。不得用更新 baseline、删扫描路径、减少另一条问题来掩盖新增问题。最小 policy 管三层 import 边界、shared 转发和动态加载，未承诺全面模块拆分或任意第三方依赖的安全审计。
+
+回归运行 `npm run test:governance`；IPC 相关变更还需 Desktop 的 file-ipc-schema、ipc-handler、preload、shutdown 及对应业务 suites。

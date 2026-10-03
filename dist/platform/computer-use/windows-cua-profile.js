@@ -9,7 +9,7 @@ const types = Object.freeze({
     count: 'integer', duration_ms: 'integer', steps: 'integer', delay_ms: 'integer', amount: 'integer',
     include_screenshot: 'boolean', include_accessibility_tree: 'boolean', on_screen_only: 'boolean',
     x: 'number', y: 'number', from_x: 'number', from_y: 'number', to_x: 'number', to_y: 'number',
-    modifier: 'array', modifiers: 'array', session: 'string', query: 'string',
+    modifier: 'array', modifiers: 'array', urls: 'array', session: 'string', query: 'string',
     element_token: 'string', capture_id: 'string', button: 'string', delivery_mode: 'string',
     scope: 'string', direction: 'string', by: 'string', text: 'string', key: 'string', value: 'string',
 });
@@ -33,6 +33,7 @@ const contracts = Object.freeze([
     contract('screenshot', 'get_window_state', ['pid', 'window_id'], [...observation], { forced: Object.freeze({ include_screenshot: true }) }),
     contract('list_apps', 'list_apps', [], ['session']),
     contract('list_windows', 'list_windows', [], ['pid', 'on_screen_only', 'session']),
+    contract('open_url', 'launch_app', [], ['urls']),
     contract('click', 'click', [], [...click], { defaults: background, forced: windowScope, pixelPairs: pair }),
     contract('middle_click', 'click', [], [...click], { defaults: background, forced: Object.freeze({ ...windowScope, button: 'middle' }), pixelPairs: pair }),
     contract('double_click', 'double_click', ['pid'], [...windowFields, 'x', 'y', 'modifier'], { defaults: background, pixelPairs: pair }),

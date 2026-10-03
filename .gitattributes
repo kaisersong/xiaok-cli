@@ -7,3 +7,5 @@
 # everywhere.
 src/runtime/verification/native/windows-installation-absence.c text eol=lf
 src/runtime/verification/native/windows-installation-absence-core.h text eol=lf
+# Governance binds the lint configuration bytes into its baseline metadata.
+.oxlintrc.json text eol=lf

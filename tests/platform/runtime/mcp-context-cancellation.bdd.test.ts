@@ -17,8 +17,10 @@ describe('M8/M10 actual CLI context MCP cancellation and emitted Windows boundar
     return root;
   }
   function plugin(root: string, server: string) {
-    const dir = join(root, '.xiaok', 'plugins', server); mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ name: server === 'cua-driver' ? 'cua-computer-use' : 'fixture', version: '1', commands: [],
+    // The loader binds the official CUA identity to dir name === manifest name.
+    const pluginName = server === 'cua-driver' ? 'cua-computer-use' : 'fixture';
+    const dir = join(root, '.xiaok', 'plugins', pluginName); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ name: pluginName, version: '1', commands: [],
       mcpServers: [{ name: server, type: 'stdio', command: server === 'cua-driver' ? 'cua-driver' : process.execPath, args: server === 'cua-driver' ? ['mcp'] : [], ...(server === 'cua-driver' ? { requiresUserActivation: true } : {}) }],
     }));
   }

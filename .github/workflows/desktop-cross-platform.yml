@@ -55,6 +55,9 @@ jobs:
           tests/main/cross-platform-path-guard.test.ts
           tests/renderer/project-artifact-actions.test.tsx
           tests/main/read-file-content-binary.test.ts
+          tests/main/file-ipc-schema.test.ts
+          tests/main/ipc-handler-test-injection.test.ts
+          tests/main/shutdown-aware-ipc-main.test.ts
 
       - name: Build renderer
         run: cd desktop && npm run build:renderer

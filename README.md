@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.6 (October 1, 2026).** CLI and Desktop metadata are aligned at **1.5.6**. This update adds active/archived collaboration room lists, last-active timestamps and room management, improves terminal readability and model reasoning controls, and checks runtime dependencies in packaged apps. Get currently available installers from the [latest published release](https://github.com/kaisersong/xiaok-cli/releases/latest); 1.5.6 becomes downloadable after the [release build](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) and publication checks complete. See [Version History](#version-history).
+**Release target: 1.5.7 (October 3, 2026).** CLI and Desktop metadata are aligned at **1.5.7**. This update adds numbered `ask_user` option shortcuts, the Windows Computer Use host and backend, drained Windows shell output, typed Desktop file IPC contracts, and repository governance gates. Get currently available installers from the [latest published release](https://github.com/kaisersong/xiaok-cli/releases/latest); 1.5.7 becomes downloadable after the [release build](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) and publication checks complete. See [Version History](#version-history).
 
 ---
 
@@ -249,11 +249,11 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). Version `desktop-v1.5.6` provides these assets once release CI completes:
+Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). Version `desktop-v1.5.7` provides these assets once release CI completes:
 
-- `xiaok-1.5.6-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.6-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.6.exe` — Windows x64 installer.
+- `xiaok-1.5.7-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.7-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.7.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
@@ -467,7 +467,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins all three siblings to `desktop-v1.5.6`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
+Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins all three siblings to `desktop-v1.5.7`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
 
 ---
 
@@ -558,6 +558,16 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.7 — Release preparation, October 3, 2026
+
+- **Numbered `ask_user` options:** a numeric answer selects the matching option directly, while the existing text matching still works.
+- **Windows Computer Use:** the CUA host, win32 backend and private release install share one ABI profile; `windows-cua-url` normalizes URLs, and window observation plus the action contract grow together.
+- **Windows shell output:** the ordinary-session bash tool drains an already-exited child's streams before reading, and inherited shell output is marked explicitly.
+- **Typed Desktop file IPC:** `openFileInSystemApp`, `readFileContent` and `saveFile` use a named contract validated in main, shared by preload and renderer.
+- **Governance gates:** oxlint and the architecture baseline are reported as current/new violations by `scripts/governance/check.mjs` (4 and 161 current, 0 new).
+- **Centralized docs:** `docs` in the five repositories is now a `120000` symlink into the shared `mydocs` repository, validated by `scripts/check-external-docs.mjs`.
+- CLI and Desktop are `1.5.7`; bundled sibling repositories are pinned to `desktop-v1.5.7`. Local runs cover the sandbox suite (4086 passed / 18 skipped), the Desktop suite (472 files), the behavioral evals and the governance gates; they are not Windows hardware or live provider acceptance. See [release notes](release-notes/1.5.7.md) for validation and boundaries; metadata changes do not publish the npm package.
 
 ### v1.5.6 — Release preparation, October 1, 2026
 

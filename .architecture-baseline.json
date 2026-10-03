@@ -1,0 +1,1298 @@
+{
+  "version": 1,
+  "metadata": {
+    "tool": "typescript-architecture",
+    "version": "5.9.3",
+    "policyHash": "8e0842cda447b93b5ff1fa849871c80fce4ae37e5aafc594bde5ae90a14f4a84"
+  },
+  "entries": {
+    "00b0da35458030185388ad134f384afc014e9012bb95fe554463178bc1c8b612": {
+      "path": "desktop/renderer/src/components/skills/SkillList.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "03583546a2533a1536b1d10ccd02bcd7f356817d3dfd058182c29aebd18970ee": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import type { RequestedSchema } from '../userInputTypes'",
+      "message": "unresolved-import: ../userInputTypes",
+      "line": 53,
+      "count": 1
+    },
+    "045fdc767bce4f0eeec74334de14badb3c62ac7a899151ac6523b4825361ac94": {
+      "path": "desktop/renderer/src/components/skills/BuiltinSkillsView.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 2,
+      "count": 1
+    },
+    "0a5e5daa405ea9731398df07017c94d67e4fc1fe9d580e52f8cac02713ae0a80": {
+      "path": "desktop/renderer/src/contexts/stream.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  createEmptyAssistantTurnFoldState,\n  foldAssistantTurnEvent as foldEvent,\n  requestAssistantTurnThinkingBreak as requestThinkingBreak,\n  snapshotAssistantTurn,\n} from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 19,
+      "count": 1
+    },
+    "0e649251c66e9db0c6b99837b927e41440e72a2c9684ce5d0f48d19072a42648": {
+      "path": "desktop/renderer/src/components/settings/MemoryConfigModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { Modal } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 3,
+      "count": 1
+    },
+    "0f6b5e3af71d268bd71b68ab304a6c16e99eb56a0dd73572c256232e180a05ac": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import { setThreadTodos } from '../todoDb'",
+      "message": "unresolved-import: ../todoDb",
+      "line": 3,
+      "count": 1
+    },
+    "154a5815d558b67714f22b0e524448c553138be9ec3ec7ddb6b79b0fe49a1b44": {
+      "path": "desktop/renderer/src/components/settings/ModulesSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  bridgeClient,\n  checkBridgeAvailable,\n  type ModuleInfo,\n  type ModuleAction,\n  type ModuleStatus,\n} from \"../../api-bridge\";",
+      "message": "unresolved-import: ../../api-bridge",
+      "line": 14,
+      "count": 1
+    },
+    "15c23a5439dc31891757a85487190a30b792e3d3a8c40e9242e36105688892ef": {
+      "path": "desktop/renderer/src/lib/chat-helpers.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  buildAssistantTurnFromRunEvents,\n  assistantTurnPlainText,\n  copSegmentCalls,\n  type AssistantTurnSegment,\n  type AssistantTurnUi,\n} from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 4,
+      "count": 1
+    },
+    "15ea4ed37b5a9bd62d65de59ac6aee9370b71298f9fea56556ae1d6cd5cdd920": {
+      "path": "desktop/renderer/src/components/settings/TimeZoneSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  detectDeviceTimeZone,\n  formatTimeZoneOffset,\n  listSupportedTimeZones,\n  normalizeTimeZone,\n} from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 15,
+      "count": 1
+    },
+    "1609c5a89cbe3bdb71ac2e8f6fa1357ed40e0e917b6d9e9bd430589273822766": {
+      "path": "desktop/renderer/src/components/settings/NotebookSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { ConfirmDialog, Modal, formatDateTime } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 5,
+      "count": 1
+    },
+    "168713eef999f655050704c0081ef7e7658ad809c76bc81ccbddb93dc56e03ff": {
+      "path": "desktop/renderer/src/components/settings/CreditsSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { formatDateTime, getActiveTimeZone } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 8,
+      "count": 1
+    },
+    "1693730841291f9e86bc57b712c5c06e4507eaa56eeef289275c8baefdc4d308": {
+      "path": "desktop/renderer/src/components/settings/DesignTokensSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { TabBar } from '../shared/components/prompt-injection'",
+      "message": "unresolved-import: ../shared/components/prompt-injection",
+      "line": 8,
+      "count": 1
+    },
+    "16a5b37af8f54a678c75b8ecaea789a11560f712eb4cd9c3a52d630e371e325a": {
+      "path": "desktop/renderer/src/components/SourcesPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { handleExternalAnchorClick } from '../openExternal'",
+      "message": "unresolved-import: ../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "176c6b1960752ee80dcd711afee213147bfc58d895d36b42836e5da5bdfdbbb0": {
+      "path": "desktop/renderer/src/components/settings/DesktopPromptInjectionSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  listPlatformSettings,\n  updatePlatformSetting,\n  deletePlatformSetting,\n  listAuditLogs,\n} from '../../api-admin'",
+      "message": "unresolved-import: ../../api-admin",
+      "line": 5,
+      "count": 1
+    },
+    "185f2a8e23bf2f18ab608d90b24e1f54c7a96c9927e4b417d12948a631bf1699": {
+      "path": "desktop/renderer/src/components/settings/RoutingSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { isLocalMode } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 10,
+      "count": 1
+    },
+    "18edd87343211e05a5210a8b6f60f2162c5552b4620d81acea125dc9de309243": {
+      "path": "desktop/renderer/src/components/cop-timeline/CopTimeline.tsx",
+      "rule": "unresolved-import",
+      "source": "import { aggregateMainTitle } from '../../copSubSegment'",
+      "message": "unresolved-import: ../../copSubSegment",
+      "line": 8,
+      "count": 1
+    },
+    "19f0c4ccd84c1926d5c441282d8ddc944a4ad358009db6a10432b55f18642592": {
+      "path": "desktop/renderer/src/components/settings/TimeZoneSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 14,
+      "count": 1
+    },
+    "1ad2f2472447f24dac7883598ecfb598bc1e005afc165b0657f5863eee0dbfee": {
+      "path": "desktop/renderer/src/components/GoalBar.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import type { GoalInput, GoalEvidenceKind } from '../../../../src/runtime/goal/types';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/goal/types",
+      "line": 3,
+      "count": 1
+    },
+    "1b2d3d2dd2f76d8396e1759b895fd2de3076f31d24b290c505384a98addc5b31": {
+      "path": "desktop/renderer/src/components/settings/ChatSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 9,
+      "count": 1
+    },
+    "1b556241a8495fc199ad3761f25246665f38c6294c1a525147afe57b5d5494de": {
+      "path": "desktop/renderer/src/components/settings/UpdateSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi, type UpdaterComponent, type AppUpdaterState } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 6,
+      "count": 1
+    },
+    "1b6304d007e907f1bd4c6d153e9fa0b4e4438020c92740c3ef12c97e4898b81c": {
+      "path": "desktop/renderer/src/components/settings/MemorySettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle, Modal } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 3,
+      "count": 1
+    },
+    "1d68ce31e07295c470333cc4f00cf9e3de4cb3d24ad34124d56893148db402b3": {
+      "path": "desktop/renderer/src/components/settings/DesktopDiscordSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "1da737f0909370fee688d9f11a5d37239bfe86e778c38eab7ee8c108106e88dd": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import { noteShowWidgetDelta } from '../streamDebug'",
+      "message": "unresolved-import: ../streamDebug",
+      "line": 54,
+      "count": 1
+    },
+    "24effd6dfcdd493ae00e01b4b8a052a72844e4b95d010f2a8907f47142351870": {
+      "path": "desktop/renderer/src/components/settings/ConnectionSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { DesktopConfig } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 1,
+      "count": 1
+    },
+    "254c3dd566f91eb2d3dadd0b2187c3738063eff85790a2fc0668167adcfd09eb": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import { SSEApiError } from '../sse'",
+      "message": "unresolved-import: ../sse",
+      "line": 13,
+      "count": 1
+    },
+    "260323eb105ce1bc3ae14e0193efb3c0e04185b0db55dbe044c7ce32311fbe89": {
+      "path": "desktop/renderer/src/components/settings/DesktopQQBotSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "2669aedf1c14006a70aabbbe4deff856dba4e6f0df6ff3c7879c2133dd95cc14": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import { setThreadTodos } from '../todoDb'",
+      "message": "unresolved-import: ../todoDb",
+      "line": 3,
+      "count": 1
+    },
+    "279a81743316182fcd0b1d79bb3ac60d86c0f1213543f7c1c1a17e024cf241b3": {
+      "path": "desktop/renderer/src/components/cop-timeline/types.ts",
+      "rule": "unresolved-import",
+      "source": "import { codeExecutionAccentColor } from '../../codeExecutionStatus'",
+      "message": "unresolved-import: ../../codeExecutionStatus",
+      "line": 5,
+      "count": 1
+    },
+    "29f69124e2e6d1015de0a800a743bdc543460aeb3d61b1821ad7dffb824c2590": {
+      "path": "desktop/renderer/src/components/settings/MemorySettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { checkBridgeAvailable, bridgeClient, type ModuleStatus } from '../../api-bridge'",
+      "message": "unresolved-import: ../../api-bridge",
+      "line": 10,
+      "count": 1
+    },
+    "29f6dd21ca4cb81e6bedf7e4a9ecb7b752e1eed85ce33eaec602e34363e35851": {
+      "path": "desktop/renderer/src/components/settings/DesktopWeixinSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 17,
+      "count": 1
+    },
+    "2aecc6ecc051d5691f023d0af9dcf329e8b72e8ceb1e98c93a84d3b94cbcc851": {
+      "path": "desktop/renderer/src/components/settings/DesktopPromptInjectionSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 22,
+      "count": 1
+    },
+    "2b580f5b82aa0badded932b744bc9ac41c5ab4aa4124ba83cbf71075bd946e99": {
+      "path": "desktop/renderer/src/components/settings/AboutSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { Button, PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 4,
+      "count": 1
+    },
+    "313c0404275573352b9abd63b5e83668e3aaca799a3fd122bdfa9313b8de16e8": {
+      "path": "desktop/renderer/src/contexts/stream.tsx",
+      "rule": "unresolved-import",
+      "source": "import type {\n  AssistantTurnFoldState,\n  AssistantTurnUi,\n} from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 15,
+      "count": 1
+    },
+    "34adeb8aae63586b52ab17ee77ce01f2a1eb913d96c25a1e244740d9d6f1f916": {
+      "path": "desktop/renderer/src/hooks/useRunTransition.ts",
+      "rule": "unresolved-import",
+      "source": "import { createEmptyAssistantTurnFoldState, snapshotAssistantTurn, type AssistantTurnUi } from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 6,
+      "count": 1
+    },
+    "374af867c43a0961ce83f7215cac5f84ff575ab3aa1c67b3e4221392b56d7333": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  createEmptyAssistantTurnFoldState,\n  snapshotAssistantTurn,\n} from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 32,
+      "count": 1
+    },
+    "39a2d115c3ffaf5c0bc6afaa056aba606935ef629534a5b5bc9effdfc9f7ee17": {
+      "path": "desktop/renderer/src/hooks/useSSE.ts",
+      "rule": "unresolved-import",
+      "source": "import { emitStreamDebug } from '../streamDebug'",
+      "message": "unresolved-import: ../streamDebug",
+      "line": 6,
+      "count": 1
+    },
+    "3b855761b12bac016829f0c44f099249d5bdaef100218987516abd3392459ec7": {
+      "path": "desktop/renderer/src/components/a2ui/A2uiSurfaceRenderer.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import type { A2UIComponent, A2UIMessage } from '../../../../../src/a2ui/index.js';",
+      "message": "cross-layer-private-import: ../../../../../src/a2ui/index.js",
+      "line": 2,
+      "count": 1
+    },
+    "3da88a694323417959d3f0f063f0bacf6922c218bb474da1961ed0c286fd748d": {
+      "path": "desktop/renderer/src/components/skills/types.ts",
+      "rule": "unresolved-import",
+      "source": "import { getActiveTimeZone } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 2,
+      "count": 1
+    },
+    "3ef2c94e787fa75b39a054eba07e2e3899e70c55e69d68b4262c0ca748bdcc8a": {
+      "path": "desktop/renderer/src/components/settings/SearchFetchSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopAccessToken, getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 13,
+      "count": 1
+    },
+    "436588f9ea8a46eee8654d9b43dd179e07d33e480aeefce9685ab768469eb63a": {
+      "path": "desktop/renderer/src/hooks/useSubAgentCop.ts",
+      "rule": "unresolved-import",
+      "source": "import type { RunEvent } from '../sse'",
+      "message": "unresolved-import: ../sse",
+      "line": 6,
+      "count": 1
+    },
+    "436c03614b6191a4f6a02548c9ef40771d6a5c1d42e09dda607a30f8c46d84ab": {
+      "path": "desktop/renderer/src/components/settings/VoiceSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 4,
+      "count": 1
+    },
+    "44961da215a77bff913647617ace8787760ddab211550679f8cdbba5891823cb": {
+      "path": "desktop/renderer/src/components/settings/DesignTokensSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 7,
+      "count": 1
+    },
+    "4583027e5d0225ab074d39bcde2ca45d83466d7d85f735d0cc4a3be720eaeafd": {
+      "path": "desktop/renderer/src/locales/index.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/task-host/delivery-types';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/task-host/delivery-types",
+      "line": 5,
+      "count": 1
+    },
+    "465d41b0fa43cb3938750c05cfeeec7972dc4eb27909a9ec6b52ebd51f5044e0": {
+      "path": "desktop/renderer/src/components/cop-timeline/WebFetchItem.tsx",
+      "rule": "unresolved-import",
+      "source": "import { handleExternalAnchorClick } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 4,
+      "count": 1
+    },
+    "47f4702d0e991c9b062072b75cce6f84786cc998f5d60546befcfec23ca60b3c": {
+      "path": "desktop/electron/preload-api.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import type { GoalActivation, GoalInput, GoalState } from '../../src/runtime/goal/types.js';",
+      "message": "cross-layer-private-import: ../../src/runtime/goal/types.js",
+      "line": 18,
+      "count": 1
+    },
+    "4868294f76a1d5ce84e7a49e8a8ead624926cb18f48a0d50df88d8c32f0a5022": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import { SSEApiError } from '../sse'",
+      "message": "unresolved-import: ../sse",
+      "line": 12,
+      "count": 1
+    },
+    "49798939601de23732266c4f790f1f0ab01ba83c12590efc2812a4eee4272711": {
+      "path": "desktop/renderer/src/components/UserInputCard.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  isEnumField,\n  isOneOfField,\n  isArrayEnumField,\n  isArrayAnyOfField,\n  isBooleanField,\n  isTextField,\n  isNumberField,\n} from '../userInputTypes'",
+      "message": "unresolved-import: ../userInputTypes",
+      "line": 10,
+      "count": 1
+    },
+    "4a2b3e0315341cd9520e0a214682cf729d0bacf40da876e02452cbbb124439bd": {
+      "path": "desktop/renderer/src/components/settings/MemoryConfigModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  bridgeClient,\n  checkBridgeAvailable,\n  type ModuleInfo,\n  type ModuleStatus,\n  type ModuleAction,\n} from '../../api-bridge'",
+      "message": "unresolved-import: ../../api-bridge",
+      "line": 8,
+      "count": 1
+    },
+    "4c4bd857fe2493fbdce02988b5294ab0444a2fa592692ebc8f049764b800ccd0": {
+      "path": "desktop/renderer/src/components/settings/AdvancedSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import type {\n  AgentImportDiscovery,\n  DesktopExportSection,\n  DesktopLogEntry,\n  DesktopLogLevel,\n  DesktopLogQuery,\n  ImportItemKey,\n  ImportSourceKind,\n} from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 21,
+      "count": 1
+    },
+    "4cd03ca51d742a500ea6155c3a526494ae4fa6adfc8d08950c478e11a7097e9e": {
+      "path": "desktop/renderer/src/components/ChatView.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';",
+      "message": "cross-layer-private-import: ../../../../src/a2ui/index.js",
+      "line": 20,
+      "count": 1
+    },
+    "4d4aaff281bbaac2f40b8f5d6ee745d27b4f2a4641db4c29d86c54fab140c68c": {
+      "path": "desktop/renderer/src/components/settings/GeneralSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 15,
+      "count": 1
+    },
+    "4f77ebb955f73f66d43d1eff50d337cece89dc0f4d6c6dc782f09f8cb5335c9a": {
+      "path": "desktop/electron/preload-api.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import type {\n  ConnectorsConfig,\n  ProviderRuntime,\n  SearchProviderName,\n  FetchProviderName,\n} from '../../src/ai/tools/connectors/config.js';",
+      "message": "cross-layer-private-import: ../../src/ai/tools/connectors/config.js",
+      "line": 24,
+      "count": 1
+    },
+    "50f1e81ea2432f8263ef27269e2391132f1b0bc0790b875fcb88c078e22449f6": {
+      "path": "desktop/renderer/src/components/shared/Button.tsx",
+      "rule": "unresolved-import",
+      "source": "import { SpinnerIcon } from './auth-ui'",
+      "message": "unresolved-import: ./auth-ui",
+      "line": 2,
+      "count": 1
+    },
+    "5218e6b92bf6e278e4ecb932790f367eb61ef95b1bfd06d9b659947a29d21c45": {
+      "path": "desktop/renderer/src/components/settings/SearchFetchSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { ConnectorsConfig, FetchProvider, SearchProvider } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 14,
+      "count": 1
+    },
+    "5334feed66c161976f47425620d0aa1f57ad1ae2b6041a54319afd0906e92bc3": {
+      "path": "desktop/renderer/src/components/cop-timeline/CopTimelineSegment.tsx",
+      "rule": "unresolved-import",
+      "source": "import { categoryForTool, type CopSubSegment, type ResolvedPool } from '../../copSubSegment'",
+      "message": "unresolved-import: ../../copSubSegment",
+      "line": 4,
+      "count": 1
+    },
+    "5488e7bd56f56d40a07f8c5d218b51355e20402de48b96d6e9d50114e565c407": {
+      "path": "desktop/renderer/src/components/CopSegmentBlocks.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { AssistantTurnSegment } from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 1,
+      "count": 1
+    },
+    "5718278e91a051912a2fb8b9aa1dcb1c1f6bad14b5b16e1983bdd404f115755a": {
+      "path": "desktop/electron/preload-api.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import type {\n  ModelRuntimeConstraints,\n  ModelRuntimeOptions,\n  ProtocolId,\n} from '../../src/ai/providers/types.js';",
+      "message": "cross-layer-private-import: ../../src/ai/providers/types.js",
+      "line": 19,
+      "count": 1
+    },
+    "58e5f98b7fd5193cd063f89a30e2a41acc399b31fa11549a9f637317eada04e9": {
+      "path": "desktop/renderer/src/components/settings/RunsSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { formatDateTime } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 6,
+      "count": 1
+    },
+    "5a87c3f34f55ee3e8fd0fc79659b4be4a04902988d124fddefce056924a921aa": {
+      "path": "desktop/renderer/src/components/settings/VoiceSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { DesktopConfig } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 5,
+      "count": 1
+    },
+    "5c3706e346d37cb29ac3d404bbfc1fa017214a2665d87ed83e90b0f6c58d0885": {
+      "path": "desktop/renderer/src/components/cop-timeline/ToolRows.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { ExploreGroupRef } from '../../toolPresentation'",
+      "message": "unresolved-import: ../../toolPresentation",
+      "line": 8,
+      "count": 1
+    },
+    "5d1789244e9862e16913973af5442caec2059b04c124f439208500f7ad0733cc": {
+      "path": "desktop/renderer/src/components/mcp/MCPInstallList.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 2,
+      "count": 1
+    },
+    "5d94c53de6e9176b37aef3cc1df83cf213b6089ce35e9b02c194224a3c5e0dff": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import { applyRunEventToWebSearchSteps, webSearchSourcesFromResult, isWebSearchToolName } from '../webSearchTimelineFromRunEvent'",
+      "message": "unresolved-import: ../webSearchTimelineFromRunEvent",
+      "line": 36,
+      "count": 1
+    },
+    "5f0ce11634910e0839abd6724670c0bb461d8c833500fefabba298c4d7b1688e": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import { isWebFetchToolName } from '../runEventProcessing'",
+      "message": "unresolved-import: ../runEventProcessing",
+      "line": 46,
+      "count": 1
+    },
+    "5f88fbc68a56fba99b47b673214ac6dc51a06bdd78e3db7f733785bdc797aca9": {
+      "path": "desktop/renderer/src/components/settings/ConnectorsSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  type ToolProviderGroup,\n  type ToolProviderItem,\n  type ToolCatalogGroup,\n  type ToolCatalogItem,\n  listToolProviders,\n  activateToolProvider,\n  deactivateToolProvider,\n  updateToolProviderCredential,\n  clearToolProviderCredential,\n  updateToolProviderConfig,\n  listToolCatalog,\n  updateToolDescription,\n  deleteToolDescription,\n  updateToolDisabled,\n} from '../../api-admin'",
+      "message": "unresolved-import: ../../api-admin",
+      "line": 19,
+      "count": 1
+    },
+    "5ff9facb41a78ab9ad8a48b9aee5b557d1ac38a1b09bc1395e120c43a7ec2946": {
+      "path": "desktop/renderer/src/components/ChatsSearchModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { isPerfDebugEnabled, recordPerfDuration, recordPerfValue } from '../perfDebug'",
+      "message": "unresolved-import: ../perfDebug",
+      "line": 7,
+      "count": 1
+    },
+    "62fe90a60293622feee1c36cdeaff4feed9de72980eb085a8c967fa4f9a3f609": {
+      "path": "desktop/renderer/src/components/mcp/MCPFormModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { AutoResizeTextarea, Modal } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 2,
+      "count": 1
+    },
+    "65dca8ecd37e6e51ba0b867c4bb4abf2c39c77e638ad4ec37bbf7dcf48cb98a9": {
+      "path": "desktop/renderer/src/contexts/run-lifecycle.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { QueuedPrompt } from '../queuedPrompts'",
+      "message": "unresolved-import: ../queuedPrompts",
+      "line": 17,
+      "count": 1
+    },
+    "663b2506fd9073930f02a77936aeb30f42b796c9b451cbbb149ae3c72f6a3b2e": {
+      "path": "desktop/renderer/src/components/cop-timeline/CopTimeline.tsx",
+      "rule": "unresolved-import",
+      "source": "import { recordPerfCount, recordPerfValue } from '../../perfDebug'",
+      "message": "unresolved-import: ../../perfDebug",
+      "line": 9,
+      "count": 1
+    },
+    "67366f3ce39ce6918f5c5e3e21a80a302d927394806dcefa8d389b391cad2d4b": {
+      "path": "desktop/renderer/src/hooks/useChatActions.ts",
+      "rule": "unresolved-import",
+      "source": "import type { UserInputResponse } from '../userInputTypes'",
+      "message": "unresolved-import: ../userInputTypes",
+      "line": 37,
+      "count": 1
+    },
+    "6743e9c9b95d5bebca22b09a57b900673f0737328134b2f7070ba9ff6ecad34f": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import type { UserInputRequest, RequestedSchema } from '../userInputTypes'",
+      "message": "unresolved-import: ../userInputTypes",
+      "line": 47,
+      "count": 1
+    },
+    "6ae47bfd5660c67073c4105c5d4b9fc0d0e94b8631708674b793c737901c5041": {
+      "path": "desktop/renderer/src/components/UserInputCard.tsx",
+      "rule": "unresolved-import",
+      "source": "import type {\n  FieldSchema,\n  FieldValue,\n  UserInputRequest,\n  UserInputResponse,\n} from '../userInputTypes'",
+      "message": "unresolved-import: ../userInputTypes",
+      "line": 4,
+      "count": 1
+    },
+    "6b0b516be907b3491f631169f2c3b535e841c450af7bf6b19743177929badc01": {
+      "path": "desktop/renderer/src/components/settings/SearchFetchSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { listToolProviders } from '../../api-admin'",
+      "message": "unresolved-import: ../../api-admin",
+      "line": 12,
+      "count": 1
+    },
+    "6c1b48c82840ba5d49b9e9eb2862ceac19a50366962a35849c6866cd8471d975": {
+      "path": "desktop/renderer/src/components/cop-timeline/SourceList.tsx",
+      "rule": "unresolved-import",
+      "source": "import { handleExternalAnchorClick } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 5,
+      "count": 1
+    },
+    "6cef3455eb9ecaa410d6a99c6b49b931cc4d4584af9fb2f6adeda2969e961457": {
+      "path": "desktop/renderer/src/components/cop-timeline/types.ts",
+      "rule": "unresolved-import",
+      "source": "import type { ExploreGroupRef } from '../../toolPresentation'",
+      "message": "unresolved-import: ../../toolPresentation",
+      "line": 3,
+      "count": 1
+    },
+    "6d775b05f85df522a705de3f86a5338e8935713284c40604c98e8df95271b6cf": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import { getInjectionBlockMessage, shouldSuppressLiveRunEventAfterInjectionBlock } from '../liveRunSecurity'",
+      "message": "unresolved-import: ../liveRunSecurity",
+      "line": 45,
+      "count": 1
+    },
+    "6da948c9e67978b3e049b4a5e8aca3a9960d4eb2192c5b29628b4d3507a7fafc": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  applyCodeExecutionToolCall,\n  applyCodeExecutionToolResult,\n  applyTerminalDelta,\n  patchCodeExecutionList,\n  findAssistantMessageForRun,\n  selectFreshRunEvents,\n  applyBrowserToolCall,\n  applyBrowserToolResult,\n  applySubAgentToolCall,\n  applySubAgentToolResult,\n  applyFileOpToolCall,\n  applyFileOpToolResult,\n  applyWebFetchToolCall,\n  applyWebFetchToolResult,\n  isWebFetchToolName,\n  extractArtifacts,\n  firstVisibleCodeExecutionToolCallIndex,\n} from '../runEventProcessing'",
+      "message": "unresolved-import: ../runEventProcessing",
+      "line": 14,
+      "count": 1
+    },
+    "6f03085cf85361ba4ca1f92e12ba49454db71bf378ea861676181473292a7f2c": {
+      "path": "desktop/renderer/src/components/settings/ToolsSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { TabBar } from '../shared/components/prompt-injection'",
+      "message": "unresolved-import: ../shared/components/prompt-injection",
+      "line": 3,
+      "count": 1
+    },
+    "724be9f3fd461be835f1cc438a0fd4b83a82c9e737608a4da610fd1ea591268f": {
+      "path": "desktop/renderer/src/components/TodoListCard.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { TodoChangeRef, TodoItemRef, TodoWriteRef } from '../copSegmentTimeline'",
+      "message": "unresolved-import: ../copSegmentTimeline",
+      "line": 3,
+      "count": 1
+    },
+    "73cdf38fa1cdcb4179e4a1ae4efc00ecccbe0218ee0275a3e9001861b07868d7": {
+      "path": "desktop/renderer/src/components/skills/SkillList.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 2,
+      "count": 1
+    },
+    "747357b66521f643ff763a6b6549e11747d0ec70ac6758d382d672b4ba281446": {
+      "path": "desktop/renderer/src/components/skills/SkillDetailModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 2,
+      "count": 1
+    },
+    "7493625e0f9090633d6570924f770442118df0b575c578fb510c654d2d472644": {
+      "path": "desktop/renderer/src/components/settings/AdvancedSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { Modal, PillToggle, TabBar, formatDateTime, useTimeZone, useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 20,
+      "count": 1
+    },
+    "7496e6dd2f964326646cf8fdf4ff197a311d998ea4e337be6511e3c325f0f8b3": {
+      "path": "desktop/renderer/src/components/settings/PersonasSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  type LiteAgent,\n  type ToolCatalogGroup,\n  type ToolCatalogItem,\n  listLiteAgents,\n  createLiteAgent,\n  patchLiteAgent,\n  deleteLiteAgent,\n  listToolCatalog,\n} from '../../api-admin'",
+      "message": "unresolved-import: ../../api-admin",
+      "line": 18,
+      "count": 1
+    },
+    "7557f1433d68a6e0b830da002e78f56448c4cef329dd5b4e01829d56c686b8fb": {
+      "path": "desktop/renderer/src/components/settings/MemorySettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { MemoryConfig, SnapshotHit } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 9,
+      "count": 1
+    },
+    "7833174e6aab3d33eb5d030ce856541732934ae9f978903b9ab1848aa61f7b9f": {
+      "path": "desktop/renderer/src/components/settings/ChatSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  listPlatformSettings,\n  updatePlatformSetting,\n} from '../../api-admin'",
+      "message": "unresolved-import: ../../api-admin",
+      "line": 4,
+      "count": 1
+    },
+    "792c95be1e0bb8773bf98dfaad328c4625e1631c47e9a471c9e66f8b16f83a5c": {
+      "path": "desktop/renderer/src/components/settings/HelpSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 5,
+      "count": 1
+    },
+    "79e38ec74bd6809aa29e4c0d30fb3d401f66fd315a03dbf2bf65b01f8dd36d09": {
+      "path": "desktop/renderer/src/components/settings/MemoryConfigModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { MemoryConfig, NowledgeDesktopConfig, OpenVikingDesktopConfig } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 7,
+      "count": 1
+    },
+    "7a042adc0c2618475005af9776c7fc7a0e0b256cf348cacac4b37118adff5f8a": {
+      "path": "desktop/renderer/src/hooks/useSseDispatch.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  applyBrowserToolCall,\n  applyBrowserToolResult,\n  applyCodeExecutionToolCall,\n  applyCodeExecutionToolResult,\n  applyFileOpToolCall,\n  applyFileOpToolResult,\n  applySubAgentToolCall,\n  applySubAgentToolResult,\n  applyTerminalDelta,\n  applyWebFetchToolCall,\n  applyWebFetchToolResult,\n  extractArtifacts,\n  findAssistantMessageForRun,\n  firstVisibleCodeExecutionToolCallIndex,\n  patchCodeExecutionList,\n  selectFreshRunEvents,\n} from '../runEventProcessing'",
+      "message": "unresolved-import: ../runEventProcessing",
+      "line": 14,
+      "count": 1
+    },
+    "7b714781af926d0d7a1fef7cd76b93d5284cbbe131194330808f831b14cd7233": {
+      "path": "desktop/renderer/src/components/WidgetBlock.tsx",
+      "rule": "unresolved-import",
+      "source": "import { noteShowWidgetPhase } from '../streamDebug'",
+      "message": "unresolved-import: ../streamDebug",
+      "line": 4,
+      "count": 1
+    },
+    "7d0949107bebbaabc5dd8c14822d733fe9a17f40985ff5c9a78d685c0c389c20": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import { getInjectionBlockMessage, shouldSuppressLiveRunEventAfterInjectionBlock } from '../liveRunSecurity'",
+      "message": "unresolved-import: ../liveRunSecurity",
+      "line": 52,
+      "count": 1
+    },
+    "7db2863f039a1f24ec0cfddb194af7710645ec3d3f311ff159045942d4395ab0": {
+      "path": "desktop/renderer/src/contexts/message-store.tsx",
+      "rule": "unresolved-import",
+      "source": "import { findAssistantMessageForRun } from '../runEventProcessing'",
+      "message": "unresolved-import: ../runEventProcessing",
+      "line": 12,
+      "count": 1
+    },
+    "7fd5cd7da21308bd41d916428ba32b7eb0bd84f0b70fd88c30ea59504d45c485": {
+      "path": "desktop/renderer/src/components/settings/AdvancedSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 19,
+      "count": 1
+    },
+    "804f05e2f55cb14dd81560425142504eb2f8534942b75fb11a5678037fe9f4d4": {
+      "path": "desktop/renderer/src/shared/document-formats.ts",
+      "rule": "cross-layer-private-import",
+      "source": "export type { OfficeFormat } from '../../../../src/runtime/materials/document-formats';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/materials/document-formats",
+      "line": 10,
+      "count": 1
+    },
+    "818dc2cd0e447f4dfd737b377e8191bfb61689f5acd8977130fe43c56a14ae45": {
+      "path": "desktop/renderer/src/components/HostDeliveryStatus.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import type { HostDeliveryRecord } from '../../../../src/runtime/task-host/delivery-types';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/task-host/delivery-types",
+      "line": 3,
+      "count": 1
+    },
+    "83260ca6f611f943cb7962694eff4fb2176fa92da82e5ed6f7ec2f160b83897f": {
+      "path": "desktop/renderer/src/components/settings/MemorySettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 7,
+      "count": 1
+    },
+    "8519b7ed77dcb8931a0e7137dee5cf462330df894c9320e1845c7d44cf350224": {
+      "path": "desktop/renderer/src/components/settings/DesktopQQSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 17,
+      "count": 1
+    },
+    "867a02f1e04e2de22f98587c1b6760d91604f4760654d29bb0869487e52f5a17": {
+      "path": "desktop/renderer/src/components/TopLevelCopToolBlock.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { TodoWriteRef } from '../copSegmentTimeline'",
+      "message": "unresolved-import: ../copSegmentTimeline",
+      "line": 2,
+      "count": 1
+    },
+    "8a9442e5059321442f53b7cc5aae96fc437bd7363374841eef59fa32892451c9": {
+      "path": "desktop/renderer/src/hooks/useScrollPin.ts",
+      "rule": "unresolved-import",
+      "source": "import type { AssistantTurnUi } from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 2,
+      "count": 1
+    },
+    "8f8230dba7b2bd36623e465eae8b236869727a15ee595b5233bda87b6319baed": {
+      "path": "desktop/renderer/src/components/settings/VoiceSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 17,
+      "count": 1
+    },
+    "932dcdedc5cd23bf4a02a81e9c48470243d0aa7c6b7b465aa0e432dd22ae54a2": {
+      "path": "desktop/renderer/src/components/settings/UpdateSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { Button } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 3,
+      "count": 1
+    },
+    "94ba1756036c10eb77778878664aabf817d9fe92a2b58951b521da9b78b503ed": {
+      "path": "desktop/renderer/src/components/settings/DesktopTelegramSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "961692719eca2fd2f7d51e9b6e1e8b290bae68d5333afda9f273662aec0a81fa": {
+      "path": "desktop/renderer/src/hooks/useSSE.ts",
+      "rule": "unresolved-import",
+      "source": "import { createSSEClient, type RunEvent, type SSEClient, type SSEClientState } from '../sse'",
+      "message": "unresolved-import: ../sse",
+      "line": 4,
+      "count": 1
+    },
+    "97b2337747040218458ee94749ee33803a04b8e3e15a4827a71aa36723a414ec": {
+      "path": "desktop/renderer/src/components/CopSegmentBlocks.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  copTimelinePayloadForSegment,\n  deriveTodoChanges,\n  splitCopItemsByTopLevelTools,\n  type TodoWriteRef,\n} from '../copSegmentTimeline'",
+      "message": "unresolved-import: ../copSegmentTimeline",
+      "line": 7,
+      "count": 1
+    },
+    "9ac5db9933cefbc7b495bc85f3b2d2a6f62d7af8b542d21d15b04e998839ce00": {
+      "path": "desktop/renderer/src/components/settings/AccountSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 10,
+      "count": 1
+    },
+    "9dfdb8acc6ae70914c599aae4c296124e1d5960eeae5ab668e385886271ac67c": {
+      "path": "desktop/renderer/src/components/settings/ProvidersSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { ConfirmDialog, PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 30,
+      "count": 1
+    },
+    "9f584069238d28a4258a65896062d953e2a905a6c0900694d47ff0447d15bbdc": {
+      "path": "desktop/renderer/src/components/settings/DesktopFeishuSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 14,
+      "count": 1
+    },
+    "a3d0e56bf28ac07be1ef8b4f9eea2556f5cdbf764994c215db0cb44d96db17a3": {
+      "path": "desktop/renderer/src/hooks/useChatActions.ts",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../openExternal'",
+      "message": "unresolved-import: ../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "a60eb4f5ba6fac5a484994b962bd4aefda1aed7cfc840d0c35377b9f3a9c8470": {
+      "path": "desktop/renderer/src/hooks/useMessageMetaCompat.ts",
+      "rule": "unresolved-import",
+      "source": "import type { AssistantTurnUi } from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 16,
+      "count": 1
+    },
+    "a8fec3031f095f793fbb51b88a33d7a5e4db6054c864f17d484f49d89c0a83bc": {
+      "path": "desktop/renderer/src/components/settings/DesktopPromptInjectionSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  TabBar,\n  AuditTab,\n  SemanticSetupPanel,\n  LayerCard,\n  SETTING_KEYS,\n  LAYERS,\n  TABS,\n  type Tab,\n} from '../shared/components/prompt-injection'",
+      "message": "unresolved-import: ../shared/components/prompt-injection",
+      "line": 12,
+      "count": 1
+    },
+    "a937ec03c3168a03507fbe3ad02427b67e00175f86e7d2aab1e41b2fd8403097": {
+      "path": "desktop/renderer/src/components/settings/MemorySettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { SpinnerIcon } from '../shared/components/auth-ui'",
+      "message": "unresolved-import: ../shared/components/auth-ui",
+      "line": 5,
+      "count": 1
+    },
+    "abae7ebeb35e316298523e58f9ff9c600c9737826b49727819b5380b0da1a1c3": {
+      "path": "desktop/renderer/src/components/settings/DesktopPromptInjectionSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { isApiError } from '../shared/api/client'",
+      "message": "unresolved-import: ../shared/api/client",
+      "line": 3,
+      "count": 1
+    },
+    "ac0e9921a990d7c2d191a7d18dd7de643075a8402635f6822ac6a6c0a93b3512": {
+      "path": "desktop/renderer/src/hooks/useSubAgentCop.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  COMPLETED_SEARCHING_LABEL,\n  DEFAULT_SEARCHING_LABEL,\n  isWebSearchToolName,\n  webSearchQueriesFromArguments,\n} from '../webSearchTimelineFromRunEvent'",
+      "message": "unresolved-import: ../webSearchTimelineFromRunEvent",
+      "line": 7,
+      "count": 1
+    },
+    "ac108eb74dc51929aa5e8ead96f1059609b61139a9bc3533ef5009380c54f1e0": {
+      "path": "desktop/renderer/src/components/OnboardingWizard.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  Reveal,\n  inputCls,\n  inputStyle,\n  labelStyle,\n  SpinnerIcon,\n  normalizeError,\n} from \"../shared/components/auth-ui\";",
+      "message": "unresolved-import: ../shared/components/auth-ui",
+      "line": 13,
+      "count": 1
+    },
+    "ac5dbd7bff7bf33719b9da6ee0907181fe5acd165657b6e81cbb3811921f2c62": {
+      "path": "desktop/renderer/src/components/settings/NotebookSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { SpinnerIcon } from '../shared/components/auth-ui'",
+      "message": "unresolved-import: ../shared/components/auth-ui",
+      "line": 6,
+      "count": 1
+    },
+    "aed1bcee25f786b66d54eb384058291ba2c86d66befa93a4e3a32e0ebcb13575": {
+      "path": "desktop/renderer/src/components/settings/DesktopPromptInjectionSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { bridgeClient, checkBridgeAvailable } from '../../api-bridge'",
+      "message": "unresolved-import: ../../api-bridge",
+      "line": 11,
+      "count": 1
+    },
+    "af02a8ee1327f30a24c754ace0abae35a51f0e7d93e65d5b66635e205c9fc73d": {
+      "path": "desktop/renderer/src/components/ArtifactStreamBlock.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import { isA2UIMimeType } from '../../../../src/a2ui/index.js'",
+      "message": "cross-layer-private-import: ../../../../src/a2ui/index.js",
+      "line": 4,
+      "count": 1
+    },
+    "b2b64ebd55bfc6285635f620033cbcd31cf4cd9719acdf89b37890091def9f32": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  applyRunEventToWebSearchSteps,\n  isWebSearchToolName,\n  webSearchSourcesFromResult,\n} from '../webSearchTimelineFromRunEvent'",
+      "message": "unresolved-import: ../webSearchTimelineFromRunEvent",
+      "line": 38,
+      "count": 1
+    },
+    "b505d0fd8cb61d6124e8ed34baa95d083d510d5b8d810b4e542f78be8979900e": {
+      "path": "desktop/renderer/src/hooks/useChatActions.ts",
+      "rule": "unresolved-import",
+      "source": "import { buildMessageRequest } from '../messageContent'",
+      "message": "unresolved-import: ../messageContent",
+      "line": 24,
+      "count": 1
+    },
+    "b5630df84f907e078abad7d50ffe032ca54d2ee46ccb704940dac78fd64f42b1": {
+      "path": "desktop/renderer/src/hooks/useTypewriter.ts",
+      "rule": "unresolved-import",
+      "source": "import { recordPerfCount, recordPerfValue } from '../perfDebug'",
+      "message": "unresolved-import: ../perfDebug",
+      "line": 2,
+      "count": 1
+    },
+    "b7b97c439b526325a192be2728347d0a21f4c557341f57fc6044f91f20775840": {
+      "path": "desktop/renderer/src/components/settings/PersonasSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { AutoResizeTextarea, Modal, ConfirmDialog } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 12,
+      "count": 1
+    },
+    "b87afcb7c7612d78b12bd75080654b3407934ae7f8a4588b89d229b2c9b70e7a": {
+      "path": "desktop/renderer/src/components/settings/HelpSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { AutoResizeTextarea } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 6,
+      "count": 1
+    },
+    "b8e2e74a557f98d3baabc65ff253e02783af3a0bd013ba5a2dc7260fccec37ae": {
+      "path": "desktop/renderer/src/components/CitationBadge.tsx",
+      "rule": "unresolved-import",
+      "source": "import { handleExternalAnchorClick } from '../openExternal'",
+      "message": "unresolved-import: ../openExternal",
+      "line": 3,
+      "count": 1
+    },
+    "b8ec522f73eb2a530782d358ea12f6adac4e90ded792e1395932f47c2a9b2513": {
+      "path": "desktop/renderer/src/components/settings/ProvidersSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { routeAdvancedJsonFromAvailableCatalog } from '../shared/llm/available-catalog-advanced-json'",
+      "message": "unresolved-import: ../shared/llm/available-catalog-advanced-json",
+      "line": 29,
+      "count": 1
+    },
+    "bc2c131c4a1fa6e1e5d7493545afdc2838040760a8bf44812fc836f05a352177": {
+      "path": "desktop/renderer/src/components/settings/MemoryConfigModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 6,
+      "count": 1
+    },
+    "bd609ff6d96128da9f937cab873b7ef158d7303f188ef89a0e853b4939df2a98": {
+      "path": "desktop/renderer/src/components/skills/SkillDetailModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 5,
+      "count": 1
+    },
+    "be4c63c8a6a08cf897d51f32c79365e04f69f44bdfb08bc80e51c39bda2c9f5b": {
+      "path": "desktop/renderer/src/components/settings/GeneralSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopMode, isDesktop, isLocalMode, getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 14,
+      "count": 1
+    },
+    "c057ae12007c51b24a6745d412b555d1a7b8cca551df4eb4ef3da4baae87427e": {
+      "path": "desktop/renderer/src/components/cop-timeline/CopTimelineSegment.tsx",
+      "rule": "unresolved-import",
+      "source": "import { normalizeToolName } from '../../toolPresentation'",
+      "message": "unresolved-import: ../../toolPresentation",
+      "line": 11,
+      "count": 1
+    },
+    "c9b72887d1718a60606b745c9b2ced6a71c9ef6b0bffd7fb269532ba34fc770a": {
+      "path": "desktop/renderer/src/components/CodeExecutionCard.tsx",
+      "rule": "unresolved-import",
+      "source": "import { codeExecutionAccentColor } from '../codeExecutionStatus'",
+      "message": "unresolved-import: ../codeExecutionStatus",
+      "line": 3,
+      "count": 1
+    },
+    "cac40508d95130d2aee0a53ebcdf8e921d5df20e49f26a0c8cf71444f19a7d83": {
+      "path": "desktop/renderer/src/components/settings/MemoryConfigModal.tsx",
+      "rule": "unresolved-import",
+      "source": "import { SpinnerIcon } from '../shared/components/auth-ui'",
+      "message": "unresolved-import: ../shared/components/auth-ui",
+      "line": 4,
+      "count": 1
+    },
+    "cb897763c9bfee692fe44157139b4ef106137f51e70dacbffaa50b400177f6d6": {
+      "path": "desktop/renderer/src/shared/document-formats.ts",
+      "rule": "cross-layer-private-import",
+      "source": "export {\n  OFFICE_EXTENSIONS,\n  OFFICE_FORMATS,\n  OOXML_FALLBACK_EXTENSIONS,\n  extensionFromPathLike,\n  getDocumentMimeType,\n  isOfficeDocument,\n  officeFormatForPath,\n} from '../../../../src/runtime/materials/document-formats';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/materials/document-formats",
+      "line": 1,
+      "count": 1
+    },
+    "d4fc857a0e1f64bad3c7878e1488338a3494f95e1a8f4accf189b525078163cd": {
+      "path": "desktop/renderer/src/components/settings/MemorySettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { formatDateTime } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 8,
+      "count": 1
+    },
+    "d752c263b10c2e28491ca6fe689052f3fff5a716bac1749ca939c85f2165a199": {
+      "path": "desktop/renderer/src/components/settings/ChatSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 10,
+      "count": 1
+    },
+    "d80d9ad5a81a97a053537d98bef615fa50ddc0ca8405130492a276dad882e954": {
+      "path": "desktop/renderer/src/components/settings/ModulesSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { SpinnerIcon } from \"../shared/components/auth-ui\";",
+      "message": "unresolved-import: ../shared/components/auth-ui",
+      "line": 11,
+      "count": 1
+    },
+    "de1a627a9f280635081b9457c8976aa4b67897cac9caa4e5275a2a03d5298592": {
+      "path": "desktop/renderer/src/contexts/app-ui.tsx",
+      "rule": "unresolved-import",
+      "source": "import {\n  beginPerfTrace,\n  endPerfTrace,\n  isPerfDebugEnabled,\n  recordPerfDuration,\n  type PerfSample,\n} from '../perfDebug'",
+      "message": "unresolved-import: ../perfDebug",
+      "line": 20,
+      "count": 1
+    },
+    "df088f51d3845d753b400340fc58a4d3c63788545019f83ff770187cf965cbbd": {
+      "path": "desktop/renderer/src/components/settings/AboutSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi, type DesktopAdvancedOverview } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 3,
+      "count": 1
+    },
+    "df13cde98706b45778edf0ae6f2c101b93a152e90a33f18261d764092dfafe63": {
+      "path": "desktop/renderer/src/components/CopSegmentBlocks.tsx",
+      "rule": "unresolved-import",
+      "source": "import { buildResolvedPool, buildSubSegments, buildThinkingOnlyFromItems, segmentLiveTitle } from '../copSubSegment'",
+      "message": "unresolved-import: ../copSubSegment",
+      "line": 6,
+      "count": 1
+    },
+    "df65b04449cb7cb1b6c757e293e9090ba6a2e14df3b261d40ecb88bb0465cfe5": {
+      "path": "desktop/renderer/src/components/settings/DesktopDiscordSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 18,
+      "count": 1
+    },
+    "dfad26445d1653431e4153e17e54344f26eb6d038dde2ea9e9b801437de3ed39": {
+      "path": "desktop/renderer/src/lib/multi-agent-projection.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import type { HostDeliveryReport } from '../../../../src/runtime/task-host/delivery-types';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/task-host/delivery-types",
+      "line": 2,
+      "count": 1
+    },
+    "dfd960fa78b9ec298a6099c5af8deb629958a1b50afb81b4151c3184778b8f72": {
+      "path": "desktop/renderer/src/components/settings/GeneralSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { bridgeClient, checkBridgeAvailable } from '../../api-bridge'",
+      "message": "unresolved-import: ../../api-bridge",
+      "line": 17,
+      "count": 1
+    },
+    "e047e15baab28446f53386de19c9a977e97136b4c99bb9a4428eb1451eb82797": {
+      "path": "desktop/renderer/src/components/settings/DesktopTelegramSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 18,
+      "count": 1
+    },
+    "e1deb1efc9ed4746eeb5c29b615ac507a203796195e994aaa446a8c75d7ee41e": {
+      "path": "desktop/renderer/src/hooks/useThreadSseEffect.ts",
+      "rule": "unresolved-import",
+      "source": "import {\n  assistantTurnPlainText,\n  foldAssistantTurnEvent,\n  requestAssistantTurnThinkingBreak,\n} from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 33,
+      "count": 1
+    },
+    "e3161ff9793ee759167e7168097e3388e79b7ce419a65281ac80deb840df69ac": {
+      "path": "desktop/renderer/src/hooks/useChatActions.ts",
+      "rule": "unresolved-import",
+      "source": "import { createQueuedPrompt } from '../queuedPrompts'",
+      "message": "unresolved-import: ../queuedPrompts",
+      "line": 25,
+      "count": 1
+    },
+    "e3c31a3a6c5b0a09d85989a15010fd992f8aef3e46c339614cea24cb663baf98": {
+      "path": "desktop/renderer/src/components/MultiAgentPanel.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import type { HostDeliveryReport } from '../../../../src/runtime/task-host/delivery-types';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/task-host/delivery-types",
+      "line": 14,
+      "count": 1
+    },
+    "e80431b3e404d5ee7e196f80c5d96249d0e17621f484c168c2f5ff86dc79df9b": {
+      "path": "desktop/renderer/src/components/ChannelsSettingsContent.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../openExternal'",
+      "message": "unresolved-import: ../openExternal",
+      "line": 23,
+      "count": 1
+    },
+    "e8972bf23fd1e7a31016011172bb7e577d4b4df165133d62029ba582be201e74": {
+      "path": "desktop/renderer/src/shared/document-formats.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import {\n  extensionFromPathLike,\n  getDocumentMimeType,\n} from '../../../../src/runtime/materials/document-formats';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/materials/document-formats",
+      "line": 12,
+      "count": 1
+    },
+    "ed44ae02b6718439da58dde1bf11db80c0b573bd6ea73522fec985176e37e5fc": {
+      "path": "desktop/renderer/src/components/settings/DesktopQQBotSettingsPanel.tsx",
+      "rule": "unresolved-import",
+      "source": "import { PillToggle } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 17,
+      "count": 1
+    },
+    "f04c7b61ab07bbae3805f6afe73296b0db10a83f7c46b359df2e0d38c51bba62": {
+      "path": "desktop/renderer/src/components/settings/UpdateSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { SpinnerIcon } from '../shared/components/auth-ui'",
+      "message": "unresolved-import: ../shared/components/auth-ui",
+      "line": 4,
+      "count": 1
+    },
+    "f157db757410c77f09b4d90c399084af6d2d9975df8736315df63483d35555db": {
+      "path": "desktop/renderer/src/components/settings/AboutSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { openExternal } from '../../openExternal'",
+      "message": "unresolved-import: ../../openExternal",
+      "line": 6,
+      "count": 1
+    },
+    "f1e149acbb00cba0eed3bb69d33e099d2b8b5259dc8679818412c13727c3fcc1": {
+      "path": "desktop/renderer/src/components/ChatShell.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import type { GoalInput } from '../../../../src/runtime/goal/types';",
+      "message": "cross-layer-private-import: ../../../../src/runtime/goal/types",
+      "line": 8,
+      "count": 1
+    },
+    "f3a78462dd8dad04dcc9b8a24208f7df940607c1f1c1c5e1b7cf25b806a1b486": {
+      "path": "desktop/electron/preload-api.ts",
+      "rule": "cross-layer-private-import",
+      "source": "import type {\n  DesktopTaskEvent,\n  GoalTurnExecutionScope,\n  MaterialView,\n  MaterialRole,\n  TaskCreateContext,\n  TaskSnapshot,\n  TaskUnderstanding,\n  UserAnswer,\n} from '../../src/runtime/task-host/types.js';",
+      "message": "cross-layer-private-import: ../../src/runtime/task-host/types.js",
+      "line": 8,
+      "count": 1
+    },
+    "f41fea0caa036ac2cc90ef687284b83b151993479e106d2e50898483a05e257e": {
+      "path": "desktop/renderer/src/contexts/run-lifecycle.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { UserInputRequest } from '../userInputTypes'",
+      "message": "unresolved-import: ../userInputTypes",
+      "line": 14,
+      "count": 1
+    },
+    "f43da4b019c2fbe243aca6f5c8f2996dd3be52928701ad035e17b3f6ffca3bec": {
+      "path": "desktop/renderer/src/components/cop-timeline/CopTimeline.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { CopSubSegment, ResolvedPool } from '../../copSubSegment'",
+      "message": "unresolved-import: ../../copSubSegment",
+      "line": 7,
+      "count": 1
+    },
+    "f4858fe3048db817697a9955cb3a4c9e2af6e050f39e35a2928e6bf1d85c1a5d": {
+      "path": "desktop/renderer/src/components/settings/NotebookSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { MemoryEntry } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 9,
+      "count": 1
+    },
+    "f6820bd2d1ee2526a5726a539f1e7b9a638fe8e0a065fffc546128cf3c0a42e5": {
+      "path": "desktop/renderer/src/components/settings/RoutingSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getAvailableCatalogFromAdvancedJson } from '../shared/llm/available-catalog-advanced-json'",
+      "message": "unresolved-import: ../shared/llm/available-catalog-advanced-json",
+      "line": 11,
+      "count": 1
+    },
+    "f775cf5e113f8a4ddec89d0e27090456c7cf8187662c76a03734df4e52d9bd71": {
+      "path": "desktop/renderer/src/contexts/message-meta.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { AssistantTurnUi } from '../assistantTurnSegments'",
+      "message": "unresolved-import: ../assistantTurnSegments",
+      "line": 54,
+      "count": 1
+    },
+    "f854f02868cc450c07dc3d9a68ce8f169a286bb43d6dd5b21b63e4bfca2513fe": {
+      "path": "desktop/renderer/src/components/a2ui/A2uiArtifactRenderer.tsx",
+      "rule": "cross-layer-private-import",
+      "source": "import { validateA2uiMessages, type A2UIMessage } from '../../../../../src/a2ui/index.js';",
+      "message": "cross-layer-private-import: ../../../../../src/a2ui/index.js",
+      "line": 3,
+      "count": 1
+    },
+    "f9802ffa42466007a91e221c447c69da615bce3bfc3d62d225de78998bb63a08": {
+      "path": "desktop/renderer/src/components/settings/ConnectorsSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { AutoResizeTextarea, Modal, ConfirmDialog, useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 17,
+      "count": 1
+    },
+    "f9e87b9813dd12c4e9c6fb1b207f55a7562c03b66734f02d4176d77fae65021f": {
+      "path": "desktop/renderer/src/components/settings/ToolsSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { isDesktop } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 2,
+      "count": 1
+    },
+    "fb83e86d0d68200ce5d68d34a62174b4712f8b18dd4e9f2b19a7d6fca85e6b47": {
+      "path": "desktop/renderer/src/components/settings/ChatSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { bridgeClient } from '../../api-bridge'",
+      "message": "unresolved-import: ../../api-bridge",
+      "line": 8,
+      "count": 1
+    },
+    "fcac5c83f14b2aeaf97aa87e7368184a1d512a23d38ba6069c2aa4cd1e7de05a": {
+      "path": "desktop/renderer/src/components/settings/NotebookSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { getDesktopApi } from '../shared/desktop'",
+      "message": "unresolved-import: ../shared/desktop",
+      "line": 8,
+      "count": 1
+    },
+    "fe25953aa9d6e2b0a08366c22c961299e9209a82e77365fb443afb3b81a3c31f": {
+      "path": "desktop/renderer/src/contexts/stream.tsx",
+      "rule": "unresolved-import",
+      "source": "import type { RunEvent } from '../sse'",
+      "message": "unresolved-import: ../sse",
+      "line": 25,
+      "count": 1
+    },
+    "fe3ab7148a35b63b18dcc90da23bde206b4cca0ff2baaf256b8cea43c4acfe91": {
+      "path": "desktop/renderer/src/components/settings/SearchFetchSettings.tsx",
+      "rule": "unresolved-import",
+      "source": "import { useToast } from '../shared'",
+      "message": "unresolved-import: ../shared",
+      "line": 15,
+      "count": 1
+    }
+  }
+}
