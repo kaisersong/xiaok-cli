@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.5.6)'
+        description: 'Tag to release (e.g. desktop-v1.5.7)'
         required: true
-        default: 'desktop-v1.5.6'
+        default: 'desktop-v1.5.7'
 
 permissions:
   contents: write
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create Draft GitHub Release
-        run: gh release create "${{ env.RELEASE_TAG }}" --title "Desktop ${{ env.RELEASE_TAG }}" --generate-notes --draft || true
+        run: gh release create "${{ env.RELEASE_TAG }}" --title "Xiaok CLI & Desktop ${RELEASE_TAG#desktop-v}" --generate-notes --draft || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
