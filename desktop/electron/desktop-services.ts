@@ -50,7 +50,7 @@ import { DesktopMultiAgentService, type DesktopAgentExecutionContext, type Deskt
 import { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approval-transport.js';
 import { DesktopMultiAgentRuntime } from './desktop-multi-agent-runtime.js';
 import { getDesktopDelegationPolicy } from './desktop-delegation-policy.js';
-import { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
+import { streamDesktopTaskRecovery, type DesktopTaskRequestPreparer } from './desktop-task-stream.js';
 import { DesktopMultiAgentWorktrees } from './desktop-multi-agent-worktrees.js';
 import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from './desktop-multi-agent-catalog-bridge.js';
 import { DesktopMcpCatalogRegistration } from './desktop-mcp-catalog-registration.js';
@@ -5431,6 +5431,7 @@ const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
 ].join('\n');
 
 async function streamDesktopToolLoopFinalization(input: {
+  prepareRequest?: DesktopTaskRequestPreparer;
   projectModel?: ProjectAgentModel;
   beforeRequest?: () => Promise<void>;
   deadline?: number;
@@ -5444,26 +5445,41 @@ async function streamDesktopToolLoopFinalization(input: {
   intentId: string;
   stepId: string;
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
-  onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>) => void | Promise<void>;
+  onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
-  for await (const chunk of (input.projectModel ? input.projectModel.stream : streamDesktopTaskProviderConversation)({
+  let providerInvocationId = `inv_${randomUUID()}`;
+  let connectionRecovering = false;
+  const request = {
+    prepareRequest: input.prepareRequest,
     deadline: input.deadline ?? Infinity,
+    onRecovery: async () => {
+      assistantBlocks.length = 0;
+      connectionRecovering = true;
+      await input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:input.turnId,state:'recovering'});
+    },
+    onInvocation: (id: string) => { providerInvocationId = id; },
     beforeRequest: input.beforeRequest,
     adapter: input.adapter,
     messages: input.apiMessages,
     tools: [],
     systemPrompt: input.systemPrompt,
     options: input.streamOptions,
-    invocationId: `inv_${randomUUID()}`,
-  })) {
+    invocationId: providerInvocationId,
+  };
+  const prepared = input.projectModel && input.prepareRequest ? await input.prepareRequest(request) : request;
+  for await (const chunk of (input.projectModel ? input.projectModel.stream : streamDesktopTaskRecovery)({ ...request, ...prepared })) {
     if (chunk.type === 'usage') {
-      const captured = input.onUsage?.(chunk);
+      const captured = input.onUsage?.(chunk, providerInvocationId);
       if (captured) await captured;
       continue;
     }
     throwIfAborted(input.signal);
+    if (connectionRecovering) {
+      connectionRecovering = false;
+      await input.emitRuntimeEvent({type:'execution_health',sessionId:input.sessionId,turnId:input.turnId,state:'running'});
+    }
     if (chunk.type === 'text') {
       const lastBlock = assistantBlocks[assistantBlocks.length - 1];
       if (lastBlock?.type === 'text') {
@@ -5952,7 +5968,8 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
     const apiMessages = await prepareDesktopLoopRequest(ctx, streamOptions, iteration > 1, lastRequestInputTokens);
     lastRequestInputTokens = 0;
     let providerInvocationId = `inv_${randomUUID()}`;
-    for await (const chunk of (ctx.projectModel ? ctx.projectModel.stream : streamDesktopSummaryRecovery)({
+    let connectionRecovering = false;
+    for await (const chunk of (ctx.projectModel ? ctx.projectModel.stream : streamDesktopTaskRecovery)({
       adapter: ctx.adapter,
       beforeRequest: ctx.roomExecution?.authorize,
       messages: apiMessages,
@@ -5963,7 +5980,12 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       deadline: ctx.taskDeadline,
       summaryOnly: summaryRecoveryMode,
       canRecover: ctx.canResumeSummary,
-      onRecovery: () => { summaryRecoveryMode = true; void ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'}).catch(error=>console.warn('[execution-health] recovery delivery failed',error)); },
+      onRecovery: async (notice?: { summaryOnly: boolean }) => {
+        summaryRecoveryMode = notice?.summaryOnly ?? true;
+        connectionRecovering = true;
+        assistantBlocks.length = 0;
+        await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'});
+      },
       onInvocation: id => { providerInvocationId = id; },
     })) {
       if (chunk.type === 'usage') {
@@ -5978,6 +6000,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         continue;
       }
       throwIfAborted(ctx.signal);
+      if (connectionRecovering) {
+        connectionRecovering = false;
+        await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'running'});
+      }
       await ctx.emitRuntimeEvent({type:'execution_progress',sessionId:ctx.sessionId,turnId:ctx.turnId});
       ctx.onActivity?.({ phase: chunk.type === 'thinking' ? 'thinking' : chunk.type === 'tool_use' ? 'tool' : 'model',
         ...(chunk.type === 'tool_use' ? { toolName: chunk.name } : {}) });
@@ -6321,13 +6347,13 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       intentId: ctx.intentId,
       stepId: ctx.stepId,
       emitRuntimeEvent: ctx.emitRuntimeEvent,
-      onUsage: async (chunk) => {
+      onUsage: async (chunk, invocationId) => {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
           lastRequestInputTokens = inputTkns;
           totalInputTokens += inputTkns;
           totalOutputTokens += chunk.usage?.outputTokens ?? 0;
-          await ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, `${ctx.turnId}:tail`);
+          await ctx.onUsage?.(inputTkns, chunk.usage?.outputTokens ?? 0, invocationId);
         } catch (e) { if (ctx.mailbox) throw e; console.warn('[usage] token capture failed:', (e as Error).message) }
       },
     });

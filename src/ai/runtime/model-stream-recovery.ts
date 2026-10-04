@@ -44,7 +44,9 @@ function wait<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs: number, on
 /** Retries only model reads. Callers never execute tools until a complete stream commits. */
 export async function* recoverModelStream(input: {
   open(signal: AbortSignal): AsyncIterable<StreamChunk>; signal: AbortSignal;
-  policy?: ModelRecoveryPolicy; onRetry?(notice: ModelRecoveryNotice): void;
+  policy?: ModelRecoveryPolicy; onRetry?(notice: ModelRecoveryNotice): void | Promise<void>;
+  /** Additional owner gate; it cannot make permanent errors recoverable. */
+  shouldRetry?(error: unknown): boolean;
 }): AsyncIterable<StreamChunk> {
   const policy = input.policy ?? resolveModelRecoveryPolicy();
   let recoveryStarted: number | undefined, attempt = 0;
@@ -72,13 +74,13 @@ export async function* recoverModelStream(input: {
       }
     } catch (error) {
       input.signal.throwIfAborted();
-      if (!recoverable(error) || policy.windowMs === 0) throw error;
+      if (!recoverable(error) || policy.windowMs === 0 || input.shouldRetry?.(error) === false) throw error;
       recoveryStarted ??= Date.now();
       const remainingMs = policy.windowMs - (Date.now() - recoveryStarted);
       if (remainingMs <= 0) throw exhausted();
       const delayMs = Math.min(policy.initialDelayMs * 2 ** Math.min(attempt++, 10), policy.maxDelayMs, remainingMs);
       owned.abort();
-      input.onRetry?.({ attempt, delayMs, remainingMs });
+      await input.onRetry?.({ attempt, delayMs, remainingMs });
       let timer: ReturnType<typeof setTimeout> | undefined;
       try { await wait(new Promise<void>(resolve => { timer = setTimeout(resolve, delayMs); }), input.signal, Infinity, () => {}); }
       finally { clearTimeout(timer); }

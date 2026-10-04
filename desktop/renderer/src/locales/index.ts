@@ -3092,6 +3092,7 @@ export interface LocaleStrings {
     taskExecutionFailed: (reason: string) => string;
     modelAuthFailed: string;
     modelServiceFailed: string;
+    modelConnectionFailed: string;
     modelUsageLimitReached: (resetAt?: string) => string;
     cuProcessing: string;
     cuSettingsOpened: string;

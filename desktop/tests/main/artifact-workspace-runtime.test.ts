@@ -228,7 +228,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
     };
   }
 
-  it('reuses one current-signal StreamOptions object for compact, main, and finalization', async () => {
+  it('preserves invocation options and binds main and finalization requests to current cancellation', async () => {
     const currentController = new AbortController();
     const staleController = new AbortController();
     const cacheKey = `pc1_${'a'.repeat(64)}`;
@@ -278,14 +278,14 @@ describe('desktop tool loop invocation and consumer ordering', () => {
 
     await expect(execution).rejects.toMatchObject({ code: 'tool_loop_iteration_limit', partialReply: 'final', limit: 2, used: 2, source: 'task' });
     expect(streamOptions).toHaveLength(3);
-    expect(streamOptions[0]).toBe(streamOptions[1]);
-    expect(streamOptions[1]).toBe(streamOptions[2]);
-    expect(compactOptions).toEqual([streamOptions[0]]);
-    expect(streamOptions[0]).toEqual({
-      cacheKey,
-      signal: currentController.signal,
-    });
-    expect(streamOptions[0]?.signal).not.toBe(staleController.signal);
+    expect(compactOptions).toEqual([{ cacheKey, signal: currentController.signal }]);
+    for (const options of streamOptions) {
+      expect(options?.cacheKey).toBe(cacheKey);
+      expect(options?.signal?.aborted).toBe(false);
+      expect(options?.signal).not.toBe(staleController.signal);
+    }
+    currentController.abort();
+    expect(streamOptions.every(options => options?.signal?.aborted)).toBe(true);
     const expectedMainTools = context.allToolDefs.map(tool => tool.name);
     expect(streamTools).toEqual([expectedMainTools, expectedMainTools, []]);
   });
@@ -382,7 +382,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
 
     await expect(execution).rejects.toBe(sentinel);
     expect(usage).toHaveBeenCalledTimes(1);
-    expect(usage).toHaveBeenCalledWith(21, 5, 'turn-1:tail');
+    expect(usage).toHaveBeenCalledWith(21, 5, expect.stringMatching(/^inv_/));
     expect(context.emitRuntimeEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'assistant_delta' }),
     );

@@ -129,3 +129,12 @@ describe('chat error display sanitization', () => {
     expect(message).toBe('Localized provider service failure.')
   })
 })
+
+describe('connection failures have an actionable localized explanation', () => {
+  it.each(['terminated', 'Error: socket hang up', 'UND_ERR_SOCKET', '模型连接持续不可用，自动恢复窗口已耗尽；已完成的工作保留，可稍后继续。'])('maps %s without blaming credentials', raw => {
+    expect(sanitizeUserFacingErrorMessage(raw, 'fallback', { modelConnectionFailed: 'Connection interrupted; completed work was saved. Continue or switch model.' })).toBe('Connection interrupted; completed work was saved. Continue or switch model.');
+  });
+  it('keeps authentication failures distinct from network wording', () => {
+    expect(sanitizeUserFacingErrorMessage('401 authentication_error: terminated', 'fallback', { providerAuth: 'Fix API key', modelConnectionFailed: 'Retry network' })).toBe('Fix API key');
+  });
+});

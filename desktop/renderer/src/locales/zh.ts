@@ -3100,7 +3100,7 @@ export const zh: LocaleStrings = {
     cuEnabled: "已启用",
     enableComputerUse: "启用 Computer Use",
     cuDismiss: "暂不启用",
-    taskFailed: "任务未完成，请检查模型配置或稍后重试。",
+    taskFailed: "任务已停止，执行记录已保留。可在下方回复继续；若再次失败，请根据上方原因处理或切换模型。",
     scrollToBottom: "跳到最新",
     conversationIndexLabel: "提示词索引",
     conversationIndexItem: (index, preview) => `跳到提示词 ${index}：${preview}`,
@@ -3187,6 +3187,7 @@ export const zh: LocaleStrings = {
     taskExecutionFailed: (reason) => `任务执行失败：${reason}`,
     modelAuthFailed: "模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。",
     modelServiceFailed: "模型服务请求失败，请检查模型配置或稍后重试。",
+    modelConnectionFailed: "模型连接中断，未能完成自动恢复。已保留对话与完成的执行记录；请在下方回复继续，或切换模型后重试。",
     modelUsageLimitReached: (resetAt) => resetAt
       ? `当前模型使用额度已达上限，将于 ${resetAt} 重置。请在额度恢复后重试，或切换其他可用模型。`
       : "当前模型使用额度已达上限。请稍后重试，或切换其他可用模型。",

@@ -3120,7 +3120,7 @@ export const en: LocaleStrings = {
     cuEnabled: "Enabled",
     enableComputerUse: "Enable Computer Use",
     cuDismiss: "Not now",
-    taskFailed: "Task incomplete. Please check model configuration or try again later.",
+    taskFailed: "Task stopped. Execution history was saved. Reply below to continue; if it fails again, follow the reason above or switch models.",
     scrollToBottom: "Jump to latest",
     conversationIndexLabel: "Prompt index",
     conversationIndexItem: (index, preview) => `Jump to prompt ${index}: ${preview}`,
@@ -3207,6 +3207,7 @@ export const en: LocaleStrings = {
     taskExecutionFailed: (reason) => `Task failed: ${reason}`,
     modelAuthFailed: "Model authentication failed. The API key is invalid or expired. Reconfigure the provider in Settings.",
     modelServiceFailed: "The model service request failed. Check the model configuration or try again later.",
+    modelConnectionFailed: "The model connection was interrupted and could not recover. Conversation and completed actions were saved. Reply below to continue, or switch models and try again.",
     modelUsageLimitReached: (resetAt) => resetAt
       ? `The current model usage limit has been reached. It resets at ${resetAt}. Try again after the reset or switch to another available model.`
       : "The current model usage limit has been reached. Try again later or switch to another available model.",

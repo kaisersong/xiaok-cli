@@ -652,6 +652,7 @@ export function ChatShell() {
         const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
           providerAuth: t.chatShell.modelAuthFailed,
           providerService: t.chatShell.modelServiceFailed,
+              modelConnectionFailed: t.chatShell.modelConnectionFailed,
           modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
         });
         streamRef.current = '';
@@ -1019,6 +1020,7 @@ export function ChatShell() {
             const reason = sanitizeUserFacingErrorMessage(rawMessage, t.chatShell.taskCreateFailed, {
               providerAuth: t.chatShell.modelAuthFailed,
               providerService: t.chatShell.modelServiceFailed,
+              modelConnectionFailed: t.chatShell.modelConnectionFailed,
               modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
             });
             msgs.push({
