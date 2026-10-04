@@ -29,6 +29,8 @@ describe('Windows shell with inherited GUI output handles', () => {
     const pending = entry === 'tool' ? bashTool.execute({ command: 'start "" chrome.exe', timeout_ms: 50 })
       : runInteractiveShellCommand('start "" chrome.exe', { platform: 'win32' });
     void pending.then(value => { result = value; });
+    // Production startup may await permission/observation setup before spawn.
+    await vi.advanceTimersByTimeAsync(0);
     child.stdout.write('before exit'); child.exitCode = 0; child.emit('exit', 0, null);
     child.stdout.write('buffered tail');
     await vi.advanceTimersByTimeAsync(250);
@@ -43,6 +45,7 @@ describe('Windows shell with inherited GUI output handles', () => {
   it('keeps the observed nonzero shell exit code after output drain', async () => {
     const child = childFixture(); children.push(child); spawnMock.mockReturnValue(child);
     let result: unknown; void bashTool.execute({ command: 'echo error' }).then(value => { result = value; });
+    await vi.advanceTimersByTimeAsync(0);
     child.stderr.write('failure'); child.exitCode = 7; child.emit('exit', 7, null);
     await vi.advanceTimersByTimeAsync(250);
     expect(result).toContain('exit 7'); expect(result).toContain('failure');
@@ -52,12 +55,14 @@ describe('Windows shell with inherited GUI output handles', () => {
     const controller = new AbortController();
     const pending = bashTool.execute({ command: 'start "" chrome.exe' }, { signal: controller.signal } as never);
     const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(0);
     child.exitCode = 0; child.emit('exit', 0, null); controller.abort();
     await rejected; expect(spawnMock).toHaveBeenCalledTimes(1); expect(child.kill).not.toHaveBeenCalled();
   });
   it('retains normal close output and does not add the inherited-pipe notice', async () => {
     const child = childFixture(); children.push(child); spawnMock.mockReturnValue(child);
     const pending = bashTool.execute({ command: 'echo normal' });
+    await vi.advanceTimersByTimeAsync(0);
     child.stdout.write('normal'); child.exitCode = 0; child.emit('exit', 0, null); child.emit('close', 0, null);
     expect(await pending).toBe('normal'); await vi.advanceTimersByTimeAsync(250);
     expect(child.stdout.destroyed).toBe(false);
