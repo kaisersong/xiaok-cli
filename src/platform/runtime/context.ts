@@ -34,6 +34,7 @@ import {
   tryConnect,
 } from '../mcp/transport.js';
 import { resolveBuiltinSlideRendererConfig } from '../mcp/python-server.js';
+import { startMcpToolSubscription } from '../mcp/tool-events.js';
 import type { NamedMcpServerConfig } from '../mcp/types.js';
 import {
   BUILT_IN_MCP_CLASSIFICATIONS,
@@ -407,7 +408,7 @@ async function connectWorkspaceMcpServers(
             callToolResult: async (name, input, options) => {
               const result = await callMcpToolWithSignal(conn.client,
                 { name, arguments: input },
-                { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal },
+                { timeout: callToolTimeoutMs, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
               );
               options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result);
@@ -460,6 +461,7 @@ async function connectWorkspaceMcpServers(
         onToolsChanged?.([...tools]);
       };
       const refreshTools = async (): Promise<number> => {
+        if (!connected || shouldStop()) return 0;
         const revision = ++catalogRevision;
         let toolsResult: Awaited<ReturnType<typeof activeConnection.client.listTools>>;
         try {
@@ -480,7 +482,7 @@ async function connectWorkspaceMcpServers(
               if (!connected) throw new Error(`MCP server is disconnected: ${server.name}`);
               const result = await callMcpToolWithSignal(activeConnection.client,
                 { name, arguments: input },
-                { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal },
+                { timeout: callToolTimeoutMs, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
               );
               options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result).text;
@@ -506,6 +508,21 @@ async function connectWorkspaceMcpServers(
           // refreshTools revokes only the failed current revision.
         }
       });
+      let eventsClosed = false;
+      const subscription = await startMcpToolSubscription(activeConnection, {
+        timeout: catalogTimeoutMs,
+        onClosed: () => {
+          eventsClosed = true;
+          connected = false;
+          catalogRevision++;
+          replaceServerTools([]);
+          const health = capabilityHealth.find(entry => entry.kind === 'mcp' && entry.name === server.name);
+          if (health) {
+            health.status = 'degraded';
+            health.detail = 'MCP tool subscription ended; reconnect required';
+          }
+        },
+      });
       const schemaCount = await refreshTools();
 
       if (!registerDisposable(activeConnection)) {
@@ -516,6 +533,7 @@ async function connectWorkspaceMcpServers(
       const detailParts: string[] = [
         `${schemaCount} tools`,
         `protocol ${activeConnection.protocolEra}`,
+        ...(subscription ? ['tool events subscribed'] : []),
       ];
       if (policy.source === 'legacy-manifest' && policy.reason) {
         detailParts.push(policy.reason);
@@ -523,8 +541,8 @@ async function connectWorkspaceMcpServers(
       capabilityHealth.push({
         kind: 'mcp',
         name: server.name,
-        status: 'connected',
-        detail: detailParts.join('; '),
+        status: eventsClosed ? 'degraded' : 'connected',
+        detail: eventsClosed ? 'MCP tool subscription ended; reconnect required' : detailParts.join('; '),
       });
     } catch (error) {
       connection?.dispose();

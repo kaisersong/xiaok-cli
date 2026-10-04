@@ -1407,7 +1407,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             const callToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => {
               const result = await callMcpToolWithSignal(connection.client,
                 { name, arguments: input },
-                { timeout: callTimeout, signal: options?.signal },
+                { timeout: callTimeout, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
               );
               options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result);
@@ -1469,7 +1469,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                   const replacementCallToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) =>
                     normalizeMcpRuntimeToolResult(await callMcpToolWithSignal(replacement.client,
                       { name, arguments: input },
-                      { timeout: callTimeout, signal: options?.signal },
+                      { timeout: callTimeout, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
                     ));
                   const checkedReplacement = macosCuaModule
                     ? macosCuaModule.createMacosCuaConnection(macosCuaModule.macosCuaCatalog(replacementSchemas), {
@@ -1538,7 +1538,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                 onChanged: current => { const view = pluginMcpServers.find(item => item.name === server.name && item.pluginName === plugin.name); if (view) view.toolCount = current.length; },
                 onDisconnected: () => { const view = pluginMcpServers.find(item => item.name === server.name && item.pluginName === plugin.name); if (view) { view.connected = false; view.toolCount = 0; } },
               });
-              try { await catalogRegistration.refresh(); } catch (error) { catalogRegistration.dispose(); throw error; }
+              try {
+                if (!await catalogRegistration.initialize(catalogTimeout)) throw new Error('MCP tool subscription ended during discovery');
+              } catch (error) { catalogRegistration.dispose(); throw error; }
             }
             for (const tool of mcpTools) {
               if (

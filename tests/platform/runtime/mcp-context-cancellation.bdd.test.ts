@@ -27,7 +27,7 @@ describe('M8/M10 actual CLI context MCP cancellation and emitted Windows boundar
   it.each(['darwin', 'win32'] as const)('M8 actual %s generic context initial/refresh forwards per-call signals and preabort starts no new SDK request', async platform => {
     const root = directory(); plugin(root, 'generic'); const calls: Array<{ signal?: AbortSignal }> = []; let refresh!: () => void | Promise<void>;
     const connection = { protocolEra: 'modern', getStderrTail: () => '', getChildPid: () => null, close: async () => {}, dispose: vi.fn(),
-      client: { listTools: async () => ({ tools: [schema] }), setNotificationHandler: (_name: string, callback: () => void | Promise<void>) => { refresh = callback; },
+      client: { getServerCapabilities: () => ({ tools: {} }), listTools: async () => ({ tools: [schema] }), setNotificationHandler: (_name: string, callback: () => void | Promise<void>) => { refresh = callback; },
         callTool: async (_params: unknown, options?: { signal?: AbortSignal }) => { calls.push(options ?? {}); return { content: [{ type: 'text', text: 'ok' }] }; } },
     } as unknown as transport.McpClientConnection;
     vi.spyOn(transport, 'tryConnect').mockResolvedValue({ status: 'connected', connection });

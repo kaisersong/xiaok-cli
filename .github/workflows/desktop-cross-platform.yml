@@ -83,7 +83,9 @@ jobs:
 
       - name: Clone desktop sidecar repositories
         run: |
-          git clone --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin 56b9df72dfbc4541cab6032d4039e2e208b8be68
+          git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
           git clone --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
 
@@ -99,6 +101,13 @@ jobs:
           npm run build
           npm run build:bundle
 
+      - name: Build canvas frontend and MCP bundle
+        run: |
+          npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
+          npm run build --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas
+          npm ci --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+          npm run build:bundle --prefix ../kai-xiaok-plugins/plugins/kai-infinity-canvas/mcp-servers/canvas-server
+
       - name: Download Python wheels (Windows)
         shell: pwsh
         run: |
@@ -106,7 +115,7 @@ jobs:
           Remove-Item -LiteralPath $wheelDir -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $wheelDir | Out-Null
           foreach ($py in @('311', '312', '313', '314')) {
-            python -m pip download mcp==1.27.1 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 `
+            python -m pip download mcp==2.3.0 pydantic==2.13.4 jsonschema==4.26.0 beautifulsoup4 `
               -d $wheelDir `
               --only-binary=:all: `
               --platform win_amd64 `

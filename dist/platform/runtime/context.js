@@ -21,6 +21,7 @@ import { FileCapabilityHealthStore } from './health-store.js';
 import { loadSettingsMcpServers, loadPluginMcpServers, mergeMcpServerConfigs, } from '../mcp/config.js';
 import { callMcpToolWithSignal, createMcpClientConnection, resolveMcpCallToolTimeoutMs, resolveMcpCatalogTimeoutMs, resolveStdioCommand, tryConnect, } from '../mcp/transport.js';
 import { resolveBuiltinSlideRendererConfig } from '../mcp/python-server.js';
+import { startMcpToolSubscription } from '../mcp/tool-events.js';
 import { BUILT_IN_MCP_CLASSIFICATIONS, classifyMcpServer, validateRegistry, } from '../mcp/server-classification.js';
 export async function createPlatformRuntimeContext(options) {
     const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
@@ -292,7 +293,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                     const schemas = (await conn.client.listTools(undefined, { timeout: frozenSnapshot.timeout?.catalog ?? globalCatalogTimeoutMs })).tools;
                     return createMacosCuaConnection(macosCuaCatalog(schemas), {
                         callToolResult: async (name, input, options) => {
-                            const result = await callMcpToolWithSignal(conn.client, { name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal });
+                            const result = await callMcpToolWithSignal(conn.client, { name, arguments: input }, { timeout: callToolTimeoutMs, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) });
                             options?.signal?.throwIfAborted();
                             return normalizeMcpRuntimeToolResult(result);
                         },
@@ -344,6 +345,8 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                 onToolsChanged?.([...tools]);
             };
             const refreshTools = async () => {
+                if (!connected || shouldStop())
+                    return 0;
                 const revision = ++catalogRevision;
                 let toolsResult;
                 try {
@@ -364,7 +367,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                         options?.signal?.throwIfAborted();
                         if (!connected)
                             throw new Error(`MCP server is disconnected: ${server.name}`);
-                        const result = await callMcpToolWithSignal(activeConnection.client, { name, arguments: input }, { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal });
+                        const result = await callMcpToolWithSignal(activeConnection.client, { name, arguments: input }, { timeout: callToolTimeoutMs, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) });
                         options?.signal?.throwIfAborted();
                         return normalizeMcpRuntimeToolResult(result).text;
                     },
@@ -391,6 +394,21 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
                     // refreshTools revokes only the failed current revision.
                 }
             });
+            let eventsClosed = false;
+            const subscription = await startMcpToolSubscription(activeConnection, {
+                timeout: catalogTimeoutMs,
+                onClosed: () => {
+                    eventsClosed = true;
+                    connected = false;
+                    catalogRevision++;
+                    replaceServerTools([]);
+                    const health = capabilityHealth.find(entry => entry.kind === 'mcp' && entry.name === server.name);
+                    if (health) {
+                        health.status = 'degraded';
+                        health.detail = 'MCP tool subscription ended; reconnect required';
+                    }
+                },
+            });
             const schemaCount = await refreshTools();
             if (!registerDisposable(activeConnection)) {
                 connection = undefined;
@@ -400,6 +418,7 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             const detailParts = [
                 `${schemaCount} tools`,
                 `protocol ${activeConnection.protocolEra}`,
+                ...(subscription ? ['tool events subscribed'] : []),
             ];
             if (policy.source === 'legacy-manifest' && policy.reason) {
                 detailParts.push(policy.reason);
@@ -407,8 +426,8 @@ async function connectWorkspaceMcpServers(servers, capabilityHealth, registerDis
             capabilityHealth.push({
                 kind: 'mcp',
                 name: server.name,
-                status: 'connected',
-                detail: detailParts.join('; '),
+                status: eventsClosed ? 'degraded' : 'connected',
+                detail: eventsClosed ? 'MCP tool subscription ended; reconnect required' : detailParts.join('; '),
             });
         }
         catch (error) {

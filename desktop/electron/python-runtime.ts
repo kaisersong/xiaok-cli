@@ -3,11 +3,11 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const REQUIRED_MODULES = ['jsonschema', 'pydantic', 'bs4'];
-const REQUIRED_DISTRIBUTIONS = ['mcp==2.0.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4'];
+const REQUIRED_DISTRIBUTIONS = ['mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4'];
 const REQUIRED_NATIVE_WHEEL_PREFIXES = ['pydantic_core-', 'rpds_py-'];
 const WINDOWS_REQUIRED_WHEEL_PREFIXES = ['pywin32-', 'colorama-'];
 const KNOWN_NATIVE_WHEEL_PREFIXES = [...REQUIRED_NATIVE_WHEEL_PREFIXES, 'cffi-', 'cryptography-', 'pywin32-'];
-const IMPORT_CHECK_SNIPPET = `from mcp.server.mcpserver import MCPServer; import ${REQUIRED_MODULES.join(', ')}`;
+const IMPORT_CHECK_SNIPPET = `from importlib.metadata import version; assert version('mcp') == '2.3.0'; from mcp.server.mcpserver import MCPServer; import ${REQUIRED_MODULES.join(', ')}`;
 const PYTHON_COMPATIBILITY_TAG_SNIPPET = 'import sys; print(f"cp{sys.version_info[0]}{sys.version_info[1]}")';
 
 export type PythonExecFile = (

@@ -17,9 +17,14 @@ export function buildMcpRuntimeTools(declaration, client, schemas, options = {})
         async execute(input, context) {
             const signal = context?.signal;
             signal?.throwIfAborted();
+            let active = true;
+            const onProgress = context?.executionProgress ? () => {
+                if (active && !signal?.aborted)
+                    context.executionProgress?.progress();
+            } : undefined;
             try {
-                const result = await (signal
-                    ? client.callTool(schema.name, input, { signal })
+                const result = await (signal || onProgress
+                    ? client.callTool(schema.name, input, { ...(signal ? { signal } : {}), ...(onProgress ? { onProgress } : {}) })
                     : client.callTool(schema.name, input));
                 signal?.throwIfAborted();
                 return result;
@@ -27,6 +32,9 @@ export function buildMcpRuntimeTools(declaration, client, schemas, options = {})
             catch (error) {
                 signal?.throwIfAborted();
                 throw error;
+            }
+            finally {
+                active = false;
             }
         },
     }));

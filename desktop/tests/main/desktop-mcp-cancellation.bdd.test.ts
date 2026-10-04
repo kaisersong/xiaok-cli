@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mcpTestContext } from '../../../tests/support/mcp-cancellation-context.js';
@@ -55,7 +55,9 @@ describe('R1 actual Desktop factory MCP sibling cancellation', () => {
       protocolEra: 'modern', getStderrTail: () => '', getChildPid: () => null,
       close: async () => { closes.push(server); }, dispose: () => { closes.push(server); },
       client: {
-        listTools: async () => ({ tools: server === 'cua-driver' ? ['list_windows', 'get_window_state', 'click'].map(name => ({ name, description: 'CUA controlled fixture', inputSchema: { type: 'object' } })) : server === 'generic' ? [genericSchema]
+        getServerCapabilities: () => ({ tools: {} }),
+        listTools: async () => ({ tools: server === 'cua-driver' ? JSON.parse(readFileSync(join(process.cwd(), '..', 'tests', 'fixtures', 'cua-macos-0.33.1', 'catalog.json'), 'utf8'))
+          .map(({ name, required, properties }: any) => ({ name, inputSchema: { type: 'object', required, properties } })) : server === 'generic' ? [genericSchema]
           : HOST_GATEWAY_CONTRACTS.filter(c => c.capabilityKey === `mcp:${server}`).map(c => ({ name: c.operation, description: c.description, inputSchema: c.inputSchema })) }),
         setNotificationHandler: (_name: string, callback: () => void | Promise<void>) => { notifications.set(server, callback); },
         async callTool(params: { name: string; arguments?: Record<string, unknown> }, options?: { signal?: AbortSignal }) {

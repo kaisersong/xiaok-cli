@@ -1,5 +1,7 @@
 import type { Tool } from '../../src/types.js';
 import type { McpClientConnection } from '../../src/platform/mcp/transport.js';
+import type { McpSubscription } from '@modelcontextprotocol/client';
+import { startMcpToolSubscription } from '../../src/platform/mcp/tool-events.js';
 import { DesktopOwnedToolRegistry } from './desktop-multi-agent-catalog-bridge.js';
 
 /** Owns one live MCP connection's tool identities, not the connection process. */
@@ -7,6 +9,7 @@ export class DesktopMcpCatalogRegistration<TSchema> {
   private revision = 0;
   private active = true;
   private tools: Tool[] = [];
+  private subscription?: McpSubscription;
   private readonly previousOnClose: McpClientConnection['client']['onclose'];
   private readonly onClose: () => void;
   constructor(private readonly options: {
@@ -20,6 +23,20 @@ export class DesktopMcpCatalogRegistration<TSchema> {
     options.connection.client.setNotificationHandler('notifications/tools/list_changed', async () => {
       try { await this.refresh(); } catch { /* Current refresh already revoked its tools. */ }
     });
+  }
+  async initialize(timeout: number): Promise<boolean> {
+    const subscription = await startMcpToolSubscription(this.options.connection, {
+      timeout,
+      onClosed: () => {
+        if (!this.active) return;
+        this.dispose();
+        this.options.onDisconnected?.();
+      },
+    });
+    if (!this.active) { await subscription?.close(); return false; }
+    this.subscription = subscription;
+    await this.refresh();
+    return this.active;
   }
   async refresh(): Promise<void> {
     if (!this.active) return;
@@ -36,6 +53,7 @@ export class DesktopMcpCatalogRegistration<TSchema> {
   dispose(): void {
     if (!this.active) return;
     this.active = false; this.revision++; this.replace([]);
+    void this.subscription?.close().catch(() => undefined);
     if (this.options.connection.client.onclose === this.onClose) this.options.connection.client.onclose = this.previousOnClose;
     this.options.connection.client.setNotificationHandler('notifications/tools/list_changed', () => {});
   }

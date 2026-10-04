@@ -19,15 +19,31 @@ export class InPlaceStdioClientTransport extends StdioClientTransport {
 export async function callMcpToolWithSignal(client, params, options) {
     const signal = options?.signal;
     signal?.throwIfAborted();
+    let active = true;
+    let lastProgress = -Infinity;
+    const onprogress = options?.onprogress;
     try {
         // Keep SDK validation, catalog caching and header-refresh retry intact.
-        const result = await client.callTool(params, options);
+        const result = await client.callTool(params, onprogress ? {
+            ...options,
+            onprogress: (progress) => {
+                if (!active || signal?.aborted || !Number.isFinite(progress.progress)
+                    || progress.progress < 0 || progress.progress <= lastProgress
+                    || (progress.total !== undefined && (!Number.isFinite(progress.total) || progress.total < progress.progress)))
+                    return;
+                lastProgress = progress.progress;
+                onprogress(progress);
+            },
+        } : options);
         signal?.throwIfAborted();
         return result;
     }
     catch (error) {
         signal?.throwIfAborted();
         throw error;
+    }
+    finally {
+        active = false;
     }
 }
 export const DEFAULT_MCP_STARTUP_TIMEOUT_MS = 3_000;

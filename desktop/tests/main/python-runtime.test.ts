@@ -28,6 +28,7 @@ describe('python runtime helper', () => {
       '-c',
       expect.stringContaining('from mcp.server.mcpserver import MCPServer'),
     ], { timeout: 15_000 });
+    expect((exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.[1]).toContain("version('mcp') == '2.3.0'");
   });
 
   it('falls back to online pip install when offline wheel install fails', async () => {
@@ -51,11 +52,11 @@ describe('python runtime helper', () => {
     expect(result).toEqual({ ready: true, mode: 'online' });
     expect(exec).toHaveBeenNthCalledWith(2, 'C:\\runtime\\python.exe', [
       '-m', 'pip', 'install', '--no-index', '--find-links', 'C:\\wheels',
-      'mcp==2.0.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
+      'mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
     ], { timeout: 60_000 });
     expect(exec).toHaveBeenNthCalledWith(4, 'C:\\runtime\\python.exe', [
       '-m', 'pip', 'install',
-      'mcp==2.0.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
+      'mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
     ], { timeout: 120_000 });
     expect(markerWrites).toEqual(['C:\\runtime\\.deps-installed']);
   });
@@ -77,7 +78,7 @@ describe('python runtime helper', () => {
     expect(result).toEqual({ ready: true, mode: 'offline' });
     expect(exec).toHaveBeenNthCalledWith(2, '/runtime/bin/python3', [
       '-m', 'pip', 'install', '--no-index', '--find-links', '/wheels',
-      'mcp==2.0.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
+      'mcp==2.3.0', 'pydantic==2.13.4', 'jsonschema==4.26.0', 'beautifulsoup4',
     ], { timeout: 60_000 });
   });
 
@@ -123,7 +124,7 @@ describe('python runtime helper', () => {
 
   it('rejects macOS native wheels for Windows offline slide-renderer installs', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl',
       'rpds_py-0.30.0-cp311-cp311-macosx_11_0_arm64.whl',
@@ -132,7 +133,7 @@ describe('python runtime helper', () => {
 
   it('accepts Windows native wheels for Windows offline slide-renderer installs', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp311-cp311-win_amd64.whl',
       'rpds_py-0.30.0-cp311-cp311-win_amd64.whl',
@@ -143,7 +144,7 @@ describe('python runtime helper', () => {
 
   it('rejects Windows wheelhouses without mandatory Windows-only dependencies', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp311-cp311-win_amd64.whl',
       'rpds_py-0.30.0-cp311-cp311-win_amd64.whl',
@@ -152,7 +153,7 @@ describe('python runtime helper', () => {
 
   it('rejects same-platform native wheels when the Python ABI tag does not match', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp314-cp314-macosx_11_0_arm64.whl',
       'rpds_py-0.30.0-cp314-cp314-macosx_11_0_arm64.whl',
@@ -161,7 +162,7 @@ describe('python runtime helper', () => {
 
   it('accepts same-platform native wheels when the Python ABI tag matches', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp314-cp314-macosx_11_0_arm64.whl',
       'rpds_py-0.30.0-cp314-cp314-macosx_11_0_arm64.whl',
@@ -170,7 +171,7 @@ describe('python runtime helper', () => {
 
   it('ignores Windows-only native wheels in a mixed macOS wheelhouse', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl',
       'rpds_py-2026.6.3-cp311-cp311-macosx_11_0_arm64.whl',
       'pywin32-312-cp314-cp314-win_amd64.whl',
@@ -180,7 +181,7 @@ describe('python runtime helper', () => {
 
   it('rejects wheelhouses with another native dependency for a different Python ABI', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'pydantic_core-2.46.4-cp311-cp311-macosx_11_0_arm64.whl',
       'rpds_py-0.30.0-cp311-cp311-macosx_11_0_arm64.whl',
@@ -190,7 +191,7 @@ describe('python runtime helper', () => {
 
   it('rejects pure-only wheelhouses because pydantic-core needs a native wheel', () => {
     expect(isCompatibleSlideRendererWheelhouse([
-      'mcp-2.0.0-py3-none-any.whl',
+      'mcp-2.3.0-py3-none-any.whl',
       'pydantic-2.13.4-py3-none-any.whl',
       'jsonschema-4.26.0-py3-none-any.whl',
     ], 'linux', 'x64')).toBe(false);
