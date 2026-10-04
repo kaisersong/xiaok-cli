@@ -261,6 +261,7 @@ export interface ArtifactOpenOptions {
 interface ChatViewProps {
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
+  pendingApprovalCount?: number;
   thread: ThreadRecord;
   messages: ChatMessage[];
   streamingText: string;
@@ -285,7 +286,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent,
+  thread, messages, streamingText, status, currentQuestion, result, approvalContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -406,6 +407,16 @@ export function ChatView({
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
     setShowScrollToBottom(false);
   }, [messages, streamingText, status]);
+
+  // Approvals can arrive after the last text chunk inside the stream throttle.
+  // Follow them only for readers already following the latest output; keep
+  // their draft/focus and a deliberately scrolled-back position unchanged.
+  useEffect(() => {
+    if (!pendingApprovalCount || !isAtBottomRef.current) return;
+    const scroller = scrollRef.current;
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' as ScrollBehavior });
+    setShowScrollToBottom(false);
+  }, [pendingApprovalCount]);
 
   // Keyboard shortcut: Ctrl+Shift+C to toggle canvas
   useEffect(() => {

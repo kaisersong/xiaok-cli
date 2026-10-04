@@ -1784,6 +1784,7 @@ export function ChatShell() {
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ChatView
         executionConnection={multiAgent.connection}
+        pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
         thread={thread}
         messages={messages}
