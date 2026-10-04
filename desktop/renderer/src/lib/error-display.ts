@@ -56,7 +56,7 @@ export function sanitizeUserFacingErrorMessage(
   if (isModelUsageLimitError(text) && options?.modelUsageLimitReached) {
     return options.modelUsageLimitReached(extractResetAt(text))
   }
-  if (options?.modelConnectionFailed && /^(?:Error:\s*)?(?:terminated|socket hang up|fetch failed|Premature close|ECONNRESET|ETIMEDOUT|EPIPE|ERR_STREAM_PREMATURE_CLOSE|UND_ERR_SOCKET)$|model stream idle timeout|模型连接持续不可用/i.test(text)) {
+  if (options?.modelConnectionFailed && /^(?:Error:\s*)?(?:terminated|socket hang up|fetch failed|Premature close|ECONNRESET|ETIMEDOUT|EPIPE|ERR_STREAM_PREMATURE_CLOSE|UND_ERR_SOCKET)$|OpenAI stream ended before finish_reason|model stream idle timeout|模型连接持续不可用/i.test(text)) {
     return options.modelConnectionFailed
   }
   if (isProviderResponseDump(text)) {
