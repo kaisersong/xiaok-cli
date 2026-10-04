@@ -44,7 +44,8 @@ jobs:
       - run: npm run build:release
       - run: npm run test:sandbox:build
       - name: Stage recorded MCP catalogs for compiled tests
-        run: node --input-type=module -e "import { cpSync } from 'node:fs'; import { join } from 'node:path'; cpSync(join('tests', 'fixtures'), join('.test-dist', 'tests', 'fixtures'), { recursive: true });"
+        run: >
+          node --input-type=module -e "import { cpSync } from 'node:fs'; import { join } from 'node:path'; cpSync(join('tests', 'fixtures'), join('.test-dist', 'tests', 'fixtures'), { recursive: true });"
       - name: Test compiled startup and native Windows read-only cache
         run: >
           npm run test:sandbox:run --
