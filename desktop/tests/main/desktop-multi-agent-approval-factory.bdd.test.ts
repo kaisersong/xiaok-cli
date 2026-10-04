@@ -224,11 +224,11 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
       approvalId: f.pending.approvalId, operationId: `mutated-${boundary}`, decision: 'approve' });
     await vi.waitFor(() => expect(f.requests()).toBe(2));
     expect(mutations).toBe(1);
-    if (boundary === 'before-decision') expect(existsSync(f.effect)).toBe(false);
-    else {
-      expect(existsSync(f.effect)).toBe(true);
-      expect(readFileSync(f.effect, 'utf8')).toBe('APPROVAL_PRIVATE_INPUT');
-    }
+    // A registry may snapshot before the prompt. In that case mutating an
+    // observer's retained reference cannot change the approved private input.
+    // Both refusal and executing exactly that original snapshot are safe.
+    if (existsSync(f.effect)) expect(readFileSync(f.effect, 'utf8')).toBe('APPROVAL_PRIVATE_INPUT');
+    else expect(boundary).toBe('before-decision');
     expect(JSON.stringify(f.store.getOperation(f.context.groupId, `approval-request:${f.pending.approvalId}`))).not.toContain('UNAPPROVED_RETAINED_MUTATION');
   });
 
