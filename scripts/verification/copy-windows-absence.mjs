@@ -24,9 +24,12 @@ export function verifyArtifact(directory, arch) {
   return manifest;
 }
 
-export function copyWindowsAbsence(root, {check=false,archs=['x64','arm64']}={}) {
-  const moduleDirectory=path.join(root,'dist/runtime/verification');
-  if(!fs.existsSync(path.join(moduleDirectory,'windows-installation-absence.js'))) return;
+export function copyWindowsAbsence(root, {check=false,archs=['x64','arm64'],desktop=false,requireAll=false}={}) {
+  const moduleDirectory=path.join(root,desktop?'desktop/dist/main/src/runtime/verification':'dist/runtime/verification');
+  if(!fs.existsSync(path.join(moduleDirectory,'windows-installation-absence.js'))){
+    if(requireAll) throw Error('Windows absence reader missing: '+moduleDirectory);
+    return;
+  }
   for(const arch of archs){
     const destination=path.join(moduleDirectory,'native',`win32-${arch}`);
     if(!check){
@@ -40,5 +43,5 @@ export function copyWindowsAbsence(root, {check=false,archs=['x64','arm64']}={})
 if(process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url){
   const args=process.argv.slice(2), get=name=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
   const arch=get('--arch');
-  copyWindowsAbsence(path.resolve(get('--root')??sourceRoot),{check:args.includes('--check'),archs:arch?[arch]:['x64','arm64']});
+  copyWindowsAbsence(path.resolve(get('--root')??sourceRoot),{check:args.includes('--check'),archs:arch?[arch]:['x64','arm64'],desktop:args[0]==='desktop',requireAll:args.includes('--require-all')});
 }

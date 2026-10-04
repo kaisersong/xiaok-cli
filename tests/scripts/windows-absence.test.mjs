@@ -69,3 +69,16 @@ test('packaging refuses a payload whose PE machine contradicts the target it cla
     assert.doesNotThrow(()=>verifyArtifact(root,'arm64'));
   } finally {rmSync(root,{recursive:true,force:true});}
 });
+
+for (const target of ['cli', 'desktop']) test(`legacy ${target} build invocation copies verified payloads to its actual runtime`, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xiaok-absence-mode-'));
+  try {
+    const verifier = join(root, target === 'desktop' ? 'desktop/dist/main/src/runtime/verification' : 'dist/runtime/verification');
+    mkdirSync(verifier, {recursive:true});
+    writeFileSync(join(verifier, 'windows-installation-absence.js'), '// emitted reader fixture');
+    const result = spawnSync(process.execPath, [copyScript, target, '--root', root, '--require-all'], {encoding:'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+    const {verifyArtifact} = await import(pathToFileURL(copyScript));
+    for (const arch of ['x64','arm64']) assert.doesNotThrow(() => verifyArtifact(join(verifier, 'native', `win32-${arch}`), arch));
+  } finally {rmSync(root,{recursive:true,force:true});}
+});
