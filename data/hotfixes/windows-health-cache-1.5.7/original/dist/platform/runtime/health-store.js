@@ -1,11 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { writeFileAtomicallySync } from '../../utils/atomic-file.js';
-// This is a rebuildable diagnostic cache, not session or business data. A
-// read-only workspace or a Windows file lock must not prevent CLI startup.
-const CACHE_IO_ERRORS = new Set([
-    'EPERM', 'EACCES', 'EROFS', 'EBUSY', 'ENOSPC', 'EDQUOT', 'EIO',
-    'ENOENT', 'ENOTDIR', 'EISDIR', 'EEXIST', 'EMFILE', 'ENFILE', 'EFBIG', 'ENAMETOOLONG',
-]);
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 export class FileCapabilityHealthStore {
     filePath;
     entries = new Map();
@@ -16,10 +10,9 @@ export class FileCapabilityHealthStore {
     get(cwd) {
         return this.entries.get(cwd);
     }
-    /** Updates live state even when the optional disk cache cannot be saved. */
     set(cwd, snapshot) {
         this.entries.set(cwd, snapshot);
-        return this.persist();
+        this.persist();
     }
     load() {
         if (!existsSync(this.filePath)) {
@@ -41,19 +34,11 @@ export class FileCapabilityHealthStore {
         }
     }
     persist() {
+        mkdirSync(dirname(this.filePath), { recursive: true });
         const doc = {
             schemaVersion: 1,
             entries: [...this.entries.entries()].map(([cwd, snapshot]) => ({ cwd, snapshot })),
         };
-        const contents = JSON.stringify(doc, null, 2);
-        try {
-            writeFileAtomicallySync(this.filePath, contents);
-            return true;
-        }
-        catch (error) {
-            if (CACHE_IO_ERRORS.has(error?.code ?? ''))
-                return false;
-            throw error;
-        }
+        writeFileSync(this.filePath, JSON.stringify(doc, null, 2), 'utf8');
     }
 }

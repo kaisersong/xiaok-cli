@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { writeFileAtomicallySync } from '../../utils/atomic-file.js';
 import type { PlatformCapabilityHealth } from './context.js';
 
 export interface CapabilityHealthSnapshot {
@@ -16,6 +16,13 @@ interface CapabilityHealthStoreDocument {
   }>;
 }
 
+// This is a rebuildable diagnostic cache, not session or business data. A
+// read-only workspace or a Windows file lock must not prevent CLI startup.
+const CACHE_IO_ERRORS = new Set([
+  'EPERM', 'EACCES', 'EROFS', 'EBUSY', 'ENOSPC', 'EDQUOT', 'EIO',
+  'ENOENT', 'ENOTDIR', 'EISDIR', 'EEXIST', 'EMFILE', 'ENFILE', 'EFBIG', 'ENAMETOOLONG',
+]);
+
 export class FileCapabilityHealthStore {
   private readonly entries = new Map<string, CapabilityHealthSnapshot>();
 
@@ -27,9 +34,10 @@ export class FileCapabilityHealthStore {
     return this.entries.get(cwd);
   }
 
-  set(cwd: string, snapshot: CapabilityHealthSnapshot): void {
+  /** Updates live state even when the optional disk cache cannot be saved. */
+  set(cwd: string, snapshot: CapabilityHealthSnapshot): boolean {
     this.entries.set(cwd, snapshot);
-    this.persist();
+    return this.persist();
   }
 
   private load(): void {
@@ -53,12 +61,18 @@ export class FileCapabilityHealthStore {
     }
   }
 
-  private persist(): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
+  private persist(): boolean {
     const doc: CapabilityHealthStoreDocument = {
       schemaVersion: 1,
       entries: [...this.entries.entries()].map(([cwd, snapshot]) => ({ cwd, snapshot })),
     };
-    writeFileSync(this.filePath, JSON.stringify(doc, null, 2), 'utf8');
+    const contents = JSON.stringify(doc, null, 2);
+    try {
+      writeFileAtomicallySync(this.filePath, contents);
+      return true;
+    } catch (error) {
+      if (CACHE_IO_ERRORS.has((error as NodeJS.ErrnoException)?.code ?? '')) return false;
+      throw error;
+    }
   }
 }

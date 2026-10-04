@@ -9,8 +9,7 @@ export declare class FileCapabilityHealthStore {
     private readonly entries;
     constructor(filePath: string);
     get(cwd: string): CapabilityHealthSnapshot | undefined;
-    /** Updates live state even when the optional disk cache cannot be saved. */
-    set(cwd: string, snapshot: CapabilityHealthSnapshot): boolean;
+    set(cwd: string, snapshot: CapabilityHealthSnapshot): void;
     private load;
     private persist;
 }

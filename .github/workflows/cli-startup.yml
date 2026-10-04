@@ -1,0 +1,63 @@
+name: CLI Startup
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/platform/runtime/**'
+      - 'src/utils/atomic-file.ts'
+      - 'dist/platform/runtime/**'
+      - 'tests/platform/runtime/**'
+      - 'tests/utils/atomic-file.test.ts'
+      - 'scripts/apply-health-cache-hotfix.mjs'
+      - 'tests/scripts/health-cache-hotfix.test.mjs'
+      - 'data/hotfixes/windows-health-cache-1.5.7/**'
+      - '.github/workflows/cli-startup.yml'
+  pull_request:
+    paths:
+      - 'src/platform/runtime/**'
+      - 'src/utils/atomic-file.ts'
+      - 'tests/platform/runtime/**'
+      - 'scripts/apply-health-cache-hotfix.mjs'
+      - 'tests/scripts/health-cache-hotfix.test.mjs'
+      - '.github/workflows/cli-startup.yml'
+  workflow_dispatch: {}
+
+jobs:
+  startup:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, node: '24' }
+          - { os: windows-2022, node: '22' }
+          - { os: macos-14, node: '24' }
+          - { os: ubuntu-latest, node: '24' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:release
+      - run: npm run test:sandbox:build
+      - name: Test compiled startup and native Windows read-only cache
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/platform/runtime/health-store.test.js
+          .test-dist/tests/platform/runtime/health-store-io.test.js
+          .test-dist/tests/utils/atomic-file.test.js
+          .test-dist/tests/platform/runtime/windows-cua-startup-boundary.test.js
+      - name: Test 1.5.7 hotfix installer
+        if: runner.os != 'Windows'
+        run: node --test tests/scripts/health-cache-hotfix.test.mjs
+      - name: Test distributed ZIP installer on native Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $patch = Join-Path $env:RUNNER_TEMP 'xiaok-health-hotfix'
+          Expand-Archive -LiteralPath 'data/hotfixes/windows-health-cache-1.5.7/xiaok-windows-cli-1.5.7-health-hotfix.zip' -DestinationPath $patch
+          $env:XIAOK_HEALTH_HOTFIX_TEST_DIR = $patch
+          node --test tests/scripts/health-cache-hotfix.test.mjs

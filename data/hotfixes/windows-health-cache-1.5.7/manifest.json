@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "version": "1.5.7",
+  "files": [
+    {
+      "file": "dist/platform/runtime/health-store.js",
+      "originalSha256": "20c3b61fb7426cf71f336825216b1619c64edba6c3ba2a31e846d972a0fc89bb",
+      "sha256": "7fc0a40a2b589b5da5ea41524745571ce50e0933409a229963b2af290aa77b56"
+    },
+    {
+      "file": "dist/platform/runtime/health-store.d.ts",
+      "originalSha256": "9d781e05539f0be0328f302a318eeb46d686c8607fec18be95d229f01b60e023",
+      "sha256": "09e3774189226876d7e7320ec84cb0e1c389dbe9ca779bcc3984a75b4aafbfd4"
+    }
+  ]
+}
