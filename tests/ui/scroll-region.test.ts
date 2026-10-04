@@ -12,6 +12,7 @@ import { MarkdownRenderer } from '../../src/ui/markdown.js';
 import { formatProgressNote, formatSubmittedInput, setColorsEnabled } from '../../src/ui/render.js';
 import { formatCurrentTurnIntentSummaryLine, formatIntentStageSummaryTranscriptBlock } from '../../src/ui/orchestration.js';
 import { ScrollRegionManager } from '../../src/ui/scroll-region.js';
+import { renderImageLines } from '../../src/ui/image-renderer.js';
 import { createTtyHarness } from '../support/tty.js';
 
 function createMockScrollRegion() {
@@ -2725,6 +2726,63 @@ describe('ScrollRegionManager external command handoff', () => {
 
 
 describe('ScrollRegionManager.writeRawBlock', () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
+
+  it.each([1, 8, 17])('places stationary images entirely inside the content margin at cursor %s and scrolls them with later text', start => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin();
+      manager.renderInput('KEEP_DRAFT', 4);
+      manager.setContentCursor(Math.min(start, manager.maxContentRows));
+      const bottom = manager.maxContentRows;
+      manager.writeRawBlock('\x1b_Ga=T,f=100,C=1,i=42,c=10,r=4;QQ==\x1b\\', 4, { cursorStationary: true });
+      const placed = harness.screen.images()[0];
+      expect(placed).toBeDefined();
+      expect(placed.row).toBeGreaterThanOrEqual(1);
+      expect(placed.row + placed.rows - 1).toBeLessThan(bottom);
+      const before = manager.getContentCursor();
+      manager.writeAtContentCursor('AFTER_IMAGE\n');
+      expect(manager.getContentCursor()).toBe(before + 1);
+      const distanceToMargin = Math.max(0, bottom - Math.min(start + 4, bottom));
+      manager.writeAtContentCursor('\n'.repeat(distanceToMargin + 1));
+      const moved = harness.screen.images()[0];
+      expect(!moved || moved.row < placed.row || moved.rows < placed.rows).toBe(true);
+      expect(harness.screen.text()).toContain('KEEP_DRAFT');
+      expect(manager.getPromptFrameState()).toMatchObject({ inputValue: 'KEEP_DRAFT', cursor: 4 });
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('retains two consecutive images within the margin instead of anchoring the second over the input', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    try {
+      manager.begin(); manager.setContentCursor(manager.maxContentRows);
+      for (const id of [11, 12]) manager.writeRawBlock(`\x1b_Ga=T,C=1,i=${id},c=10,r=3;QQ==\x1b\\`, 3, { cursorStationary: true });
+      const images = harness.screen.images();
+      expect(images).toHaveLength(2);
+      expect(images[0].row + images[0].rows).toBe(images[1].row);
+      expect(images[1].row + images[1].rows - 1).toBeLessThan(manager.maxContentRows);
+      manager.writeAtContentCursor('TAIL\n');
+      expect(harness.screen.images()[1].row).toBe(images[1].row - 1);
+    } finally { manager.end(); harness.restore(); }
+  });
+
+  it('uses real renderer chunks without counting their payload as terminal rows', () => {
+    const { manager, getOutput } = createMockScrollRegion();
+    manager.begin();
+    const rendered = renderImageLines({ data: png, mediaType: 'image/png', protocol: 'kitty', imageId: 14 });
+    const before = manager.getContentCursor();
+    manager.writeRawBlock(rendered.lines[0], rendered.rows, { cursorStationary: true });
+    expect(manager.getContentCursor()).toBe(before + rendered.rows);
+    expect(getOutput()).toContain(rendered.lines[0]);
+  });
+
+  it('rejects a stationary image taller than the available content region', () => {
+    const { manager } = createMockScrollRegion(); manager.begin();
+    expect(() => manager.writeRawBlock('PAYLOAD', manager.maxContentRows, { cursorStationary: true })).toThrow(/rows/);
+  });
+
   it('advances the content cursor by exactly the declared row count', () => {
     const { manager } = createMockScrollRegion();
     manager.begin();

@@ -1,11 +1,38 @@
-import { readFileSync, existsSync, openSync, readSync, closeSync } from 'fs';
+import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'fs';
 import { extname } from 'path';
 import { assertWorkspacePath } from '../permissions/workspace.js';
 import { truncateText } from './truncation.js';
 import { extractMaterialText } from '../../runtime/materials/text-extractor.js';
+import { detectImageMediaType } from '../../shared/media/image.js';
+import { validateToolImage } from '../runtime/tool-image-channel.js';
 import { MODEL_OUTPUT_CAP, SENSITIVE_FILE_REDACTION, isSensitiveFilePath, redactSecrets, } from '../../shared/stream-safety/redact.js';
 const OOXML_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx']);
 const HEADER_SNIFF_BYTES = 4096;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+function readBoundedImage(path) {
+    const handle = openSync(path, 'r');
+    try {
+        const stat = fstatSync(handle);
+        if (!stat.isFile() || stat.size > MAX_IMAGE_BYTES)
+            throw new Error('图片只能是最多 4MiB 的普通文件');
+        // Use the same fd and a fixed ceiling so concurrent file growth cannot
+        // turn a size check followed by readFile into an unbounded allocation.
+        const buffer = Buffer.alloc(Math.min(stat.size + 1, MAX_IMAGE_BYTES + 1));
+        let size = 0;
+        while (size < buffer.length) {
+            const read = readSync(handle, buffer, size, buffer.length - size, size);
+            if (!read)
+                break;
+            size += read;
+        }
+        if (size > stat.size || size > MAX_IMAGE_BYTES)
+            throw new Error('图片读取期间发生变化或超过 4MiB，请重试');
+        return buffer.subarray(0, size);
+    }
+    finally {
+        closeSync(handle);
+    }
+}
 /**
  * Extraction ceiling for Office documents. Deliberately far above the
  * extractor's own 50K default so that a line `offset` past that default still
@@ -42,7 +69,7 @@ export function createReadTool(options = {}) {
         permission: 'safe',
         definition: {
             name: 'read',
-            description: '读取文件内容，带行号输出。Office 文档（docx/pptx/xlsx）会自动提取文本',
+            description: '读取文件内容，文本带行号，Office 文档（docx/pptx/xlsx）自动提取文本。PNG/JPEG/GIF/WebP 图片作为视觉输入返回（需支持图片的模型，最多 4MiB）；图片不使用 offset/limit/max_chars。只能读取获准路径，严禁根据压缩文件大小推断图片内容。',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -54,7 +81,8 @@ export function createReadTool(options = {}) {
                 required: ['file_path'],
             },
         },
-        async execute(input) {
+        async execute(input, context) {
+            context?.signal?.throwIfAborted();
             const { file_path, offset = 1, limit, max_chars = MODEL_OUTPUT_CAP } = input;
             const resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
             if (!existsSync(resolvedPath))
@@ -63,7 +91,20 @@ export function createReadTool(options = {}) {
                 return SENSITIVE_FILE_REDACTION;
             }
             try {
-                const kind = classifyReadContent(resolvedPath, readHeader(resolvedPath));
+                const header = readHeader(resolvedPath);
+                const kind = classifyReadContent(resolvedPath, header);
+                const mediaType = detectImageMediaType(header);
+                if (mediaType && kind !== 'ooxml' && kind !== 'pdf') {
+                    if (context?.modelSupportsImageInput !== true || !context.emitToolImage) {
+                        return 'Error: 当前调用没有可用的视觉图片输入通道。请切换到支持图片输入的模型；不能根据文件大小推断画面内容。';
+                    }
+                    const data = readBoundedImage(resolvedPath);
+                    const image = { type: 'image', source: { type: 'base64', media_type: mediaType, data: data.toString('base64') } };
+                    const dimensions = validateToolImage(image);
+                    context.signal?.throwIfAborted();
+                    context.emitToolImage(image);
+                    return `图片已作为视觉输入返回（${mediaType}，${dimensions.width}×${dimensions.height}）。请依据图像内容分析，而非文件大小。`;
+                }
                 if (kind === 'pdf') {
                     return 'Error: 无法以文本方式读取 PDF。请把它作为附件交给 Desktop 的 read_material，或先转换为文本。';
                 }
@@ -86,12 +127,14 @@ export function createReadTool(options = {}) {
                     content = readFileSync(resolvedPath, 'utf-8');
                 }
                 const lines = content.split('\n');
+                context?.signal?.throwIfAborted();
                 const start = offset - 1;
                 const slice = limit ? lines.slice(start, start + limit) : lines.slice(start);
                 const numbered = slice.map((line, index) => `${start + index + 1}\t${line}`).join('\n');
                 return truncateText(redactSecrets(numbered).text, max_chars).text;
             }
             catch (e) {
+                context?.signal?.throwIfAborted();
                 return `Error: ${String(e)}`;
             }
         },

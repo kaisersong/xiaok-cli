@@ -6,7 +6,7 @@ type WritableChunk = string | Uint8Array;
 export interface TtyHarness {
   emitter: EventEmitter;
   output: { raw: string; normalized: string };
-  screen: { lines: () => string[]; text: () => string };
+  screen: { lines: () => string[]; text: () => string; images: () => TtyImagePlacement[] };
   send: (text: string) => void;
   failNextStdoutWrite: (error: Error) => void;
   restore: () => void;
@@ -16,8 +16,12 @@ interface TtyHarnessOptions {
   captureStderr?: boolean;
 }
 
-function replayTerminal(raw: string, maxRows?: number): string[] {
+export interface TtyImagePlacement { id: number; row: number; column: number; rows: number; cols: number }
+
+function replayTerminal(raw: string, maxRows?: number): { lines: string[]; images: TtyImagePlacement[] } {
   const lines: string[] = [''];
+  let images: TtyImagePlacement[] = [];
+  let pendingKitty: TtyImagePlacement | undefined;
   let row = 0;
   let col = 0;
   let savedRow = 0;
@@ -70,6 +74,7 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
       col = 0;
       savedRow = 0;
       savedCol = 0;
+      images = [];
       return;
     }
     if (mode === '0' || mode === undefined || mode === '') {
@@ -97,6 +102,15 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
       return;
     }
     ensureRow(scrollBottom);
+    // Kitty margin scrolling moves/clips only placements fully inside the
+    // region. A placement straddling the footer stays anchored (Ghostty
+    // graphics_storage.zig scrollMarginsBegin), which is the reported bug.
+    images = images.flatMap(image => {
+      if (image.row - 1 < scrollTop || image.row + image.rows - 2 > scrollBottom) return [image];
+      const top = image.row - 1;
+      const clipped = Math.max(0, scrollTop + 1 - top);
+      return image.rows > clipped ? [{ ...image, row: Math.max(scrollTop + 1, top), rows: image.rows - clipped }] : [];
+    });
     lines.splice(scrollTop, 1);
     lines.splice(scrollBottom, 0, '');
     if (lines.length > viewportRows) {
@@ -200,6 +214,18 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
         }
         j += 1;
       }
+      if (next === '_' && raw[i + 2] === 'G') {
+        // Parse only the APC header; image data remains opaque and invisible.
+        const header = raw.slice(i + 3, raw.indexOf(';', i + 3));
+        const keys = Object.fromEntries(header.split(',').map(part => part.split('=')));
+        if (keys.a === 'T' && keys.r && keys.c) {
+          pendingKitty = { id: Number(keys.i), row: row + 1, column: col + 1, rows: Number(keys.r), cols: Number(keys.c) };
+        }
+        if (pendingKitty && keys.m !== '1') {
+          images.push(pendingKitty);
+          pendingKitty = undefined;
+        }
+      }
       i = j - 1;
       continue;
     }
@@ -221,7 +247,7 @@ function replayTerminal(raw: string, maxRows?: number): string[] {
     }
   }
 
-  return lines.map((line) => line.replace(/\s+$/g, ''));
+  return { lines: lines.map((line) => line.replace(/\s+$/g, '')), images };
 }
 
 export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarnessOptions): TtyHarness {
@@ -285,11 +311,12 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
     },
     screen: {
       lines() {
-        return replayTerminal(raw, rows);
+        return replayTerminal(raw, rows).lines;
       },
       text() {
-        return replayTerminal(raw, rows).join('\n');
+        return replayTerminal(raw, rows).lines.join('\n');
       },
+      images() { return replayTerminal(raw, rows).images; },
     },
     send(text: string) {
       emitter.emit('data', Buffer.from(text, 'utf8'));

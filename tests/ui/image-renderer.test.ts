@@ -113,6 +113,21 @@ describe('detectImageProtocol', () => {
   });
 });
 
+describe('image content height budget', () => {
+  it('reads lossless VP8L dimensions', () => {
+    const buffer = Buffer.alloc(28);
+    buffer.write('RIFF', 0); buffer.writeUInt32LE(20, 4); buffer.write('WEBPVP8L', 8);
+    buffer.writeUInt32LE(8, 16); buffer[20] = 0x2f;
+    buffer.writeUInt32LE((639 | (479 << 14)) >>> 0, 21);
+    expect(readImageDimensions(buffer)).toEqual({ width: 640, height: 480 });
+  });
+  it.each(['kitty', 'iterm2'] as const)('falls back when no content row is available for %s', protocol => {
+    const rendered = renderImageLines({ data: pngBuffer(600, 600), mediaType: 'image/png', protocol, maxRows: 0 });
+    expect(rendered.protocol).toBeNull();
+    expect(rendered.lines[0]).toContain('[Image 600×600]');
+  });
+});
+
 describe('readImageDimensions', () => {
   it('parses PNG header dimensions', () => {
     expect(readImageDimensions(pngBuffer(1388, 278))).toEqual({ width: 1388, height: 278 });

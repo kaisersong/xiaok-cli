@@ -1590,6 +1590,8 @@ export class ScrollRegionManager {
     rows: number,
     options?: {
       clearPromptChrome?: boolean;
+      /** Kitty C=1 leaves the cursor stationary. Reserve its footprint before placement. */
+      cursorStationary?: boolean;
       logger?: {
         beginSuppress(): void;
         endSuppress(): void;
@@ -1599,8 +1601,14 @@ export class ScrollRegionManager {
     },
   ): void {
     const logger = options?.logger;
+    const stationary = options?.cursorStationary === true;
+    const availableRows = this.active ? this.getScrollBottom() : (this.stream.rows ?? 24);
+    if (stationary && (!Number.isInteger(rows) || rows < 1 || rows >= availableRows)) {
+      throw new Error('image rows must fit inside the content region with a trailing cursor row');
+    }
     if (!this.active) {
-      this.writeRawBytes(text, logger);
+      this.writeRawBytes(stationary ? `${'\n'.repeat(rows)}\x1b[${rows}A\r${text}\x1b[${rows}B\r` : text, logger);
+      if (options?.placeholder) logger?.recordOutput('stdout', `${options.placeholder}\n`);
       return;
     }
 
@@ -1613,10 +1621,20 @@ export class ScrollRegionManager {
     }
     this.stream.write(RESET_ALL);
     const targetRow = this.clampCursorRow(this._cursorRow);
-    this.clearActivityIfContentWillUseRow(targetRow);
+    this.clearActivityIfContentWillUseRow(stationary ? this.clampCursorRow(targetRow + rows) : targetRow);
     this.stream.write(`${MOVE_TO_ROW.replace('%d', String(targetRow))}\r`);
 
-    this.writeRawBytes(text, logger);
+    if (stationary) {
+      // A placement straddling the bottom margin does not scroll with content.
+      // Allocate the complete footprint first, then place entirely inside the
+      // margin. CUP after the opaque payload keeps both physical and tracked
+      // cursors on the following content row, independent of chunk count.
+      const endRow = this.clampCursorRow(targetRow + rows);
+      const imageRow = endRow - rows;
+      this.writeRawBytes(`${'\n'.repeat(rows)}\x1b[${imageRow};1H${text}\x1b[${endRow};1H\r`, logger);
+    } else {
+      this.writeRawBytes(text, logger);
+    }
     if (options?.placeholder) {
       logger?.recordOutput('stdout', `${options.placeholder}\n`);
     }

@@ -2453,6 +2453,7 @@ async function runChat(initialInput, opts) {
                     mediaType: block.source.media_type,
                     protocol,
                     columns: process.stdout.columns ?? 80,
+                    maxRows: Math.min(12, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
                     imageId: nextInlineImageId++,
                 });
                 const placeholder = formatImageFallbackLine(dims);
@@ -2467,7 +2468,9 @@ async function runChat(initialInput, opts) {
                         }
                         continue;
                     }
-                    scrollRegion.writeRawBlock(`${rendered.lines.join('\n')}\n`, rendered.rows, {
+                    const stationary = rendered.protocol === 'kitty';
+                    scrollRegion.writeRawBlock(stationary ? rendered.lines[0] : `${rendered.lines.join('\n')}\n`, rendered.rows, {
+                        cursorStationary: stationary,
                         logger: transcriptLogger,
                         placeholder,
                     });

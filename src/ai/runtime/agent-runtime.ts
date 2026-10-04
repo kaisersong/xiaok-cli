@@ -22,6 +22,7 @@ import {
 } from './model-capabilities.js';
 import { resolveRegisteredStrictKimiK3Profile, requiresKimiK3HistoryMigration } from './model-harness-identity.js';
 import { AgentSessionState } from './session.js';
+import { InvocationToolImages } from './tool-image-channel.js';
 import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
 import { executePortableCompaction } from './portable-compaction-executor.js';
@@ -411,10 +412,24 @@ export class AgentRuntime {
               }),
             },
           };
-          const result = await this.registry.executeTool(toolCall.name, toolCall.input, {...toolExecutionContext,
-            onExecutionHealth: state => {this.reportActivity({phase:'tool',toolName:toolCall.name,executionHealth:state});onEvent({type:'execution_health',runId:run.runId,invocationId:toolCall.id,state});},
-            executionProgress: {progress: () => {this.reportActivity({phase:'tool',toolName:toolCall.name});onEvent({type:'execution_progress',runId:run.runId});},wait:()=>{},resume:()=>{}},
-          });
+          const supportsImages = resolveModelCapabilities(this.adapter).supportsImageInput;
+          const toolImages = new InvocationToolImages(mergedSignal, supportsImages);
+          let result: string;
+          let invocationImages: MessageBlock[];
+          try {
+            result = await this.registry.executeTool(toolCall.name, toolCall.input, {
+              ...toolExecutionContext,
+              // Install host media callbacks only after strict provider projection.
+              modelSupportsImageInput: supportsImages,
+              emitToolImage: toolImages.emit,
+              onExecutionHealth: state => {this.reportActivity({phase:'tool',toolName:toolCall.name,executionHealth:state});onEvent({type:'execution_health',runId:run.runId,invocationId:toolCall.id,state});},
+              executionProgress: {progress: () => {this.reportActivity({phase:'tool',toolName:toolCall.name});onEvent({type:'execution_progress',runId:run.runId});},wait:()=>{},resume:()=>{}},
+            });
+            mergedSignal.throwIfAborted();
+            invocationImages = toolImages.finish(isSuccessfulModelToolResult(result));
+          } finally {
+            toolImages.finish(false);
+          }
           // Registry guards cannot cover the microtask before this await resumes.
           // Reject cancellation before spilling or retaining a successful result.
           mergedSignal.throwIfAborted();
@@ -426,6 +441,7 @@ export class AgentRuntime {
             spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),
           });
           toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: truncated.content, is_error: !ok });
+          toolResults.push(...invocationImages);
           mergedSignal.throwIfAborted();
           this.reportActivity({ phase: 'model' });
           executedToolIds.add(toolCall.id);

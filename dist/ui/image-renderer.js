@@ -1,4 +1,6 @@
 import { formatRailLine } from './render.js';
+import { readImageDimensions } from '../shared/media/image.js';
+export { readImageDimensions } from '../shared/media/image.js';
 const CELL_PIXEL_WIDTH = 9;
 const CELL_PIXEL_HEIGHT = 18;
 const DEFAULT_MAX_ROWS = 12;
@@ -19,75 +21,6 @@ export function detectImageProtocol(env = process.env, isTty = process.stdout.is
         return 'kitty';
     if (env.ITERM_SESSION_ID || program === 'iterm.app')
         return 'iterm2';
-    return null;
-}
-export function readImageDimensions(data) {
-    return readPngDimensions(data)
-        ?? readJpegDimensions(data)
-        ?? readGifDimensions(data)
-        ?? readWebpDimensions(data);
-}
-function readPngDimensions(data) {
-    if (data.length < 24)
-        return null;
-    if (data.readUInt32BE(0) !== 0x89504e47 || data.readUInt32BE(4) !== 0x0d0a1a0a)
-        return null;
-    if (data.toString('ascii', 12, 16) !== 'IHDR')
-        return null;
-    return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
-}
-function readJpegDimensions(data) {
-    if (data.length < 4 || data[0] !== 0xff || data[1] !== 0xd8)
-        return null;
-    let offset = 2;
-    while (offset + 9 < data.length) {
-        if (data[offset] !== 0xff) {
-            offset += 1;
-            continue;
-        }
-        const marker = data[offset + 1];
-        const isStartOfFrame = (marker >= 0xc0 && marker <= 0xc3)
-            || (marker >= 0xc5 && marker <= 0xc7)
-            || (marker >= 0xc9 && marker <= 0xcb)
-            || (marker >= 0xcd && marker <= 0xcf);
-        if (isStartOfFrame) {
-            return { width: data.readUInt16BE(offset + 7), height: data.readUInt16BE(offset + 5) };
-        }
-        const segmentLength = data.readUInt16BE(offset + 2);
-        if (segmentLength < 2)
-            return null;
-        offset += 2 + segmentLength;
-    }
-    return null;
-}
-function readGifDimensions(data) {
-    if (data.length < 10)
-        return null;
-    const signature = data.toString('ascii', 0, 6);
-    if (signature !== 'GIF87a' && signature !== 'GIF89a')
-        return null;
-    return { width: data.readUInt16LE(6), height: data.readUInt16LE(8) };
-}
-function readWebpDimensions(data) {
-    if (data.length < 30)
-        return null;
-    if (data.toString('ascii', 0, 4) !== 'RIFF' || data.toString('ascii', 8, 12) !== 'WEBP')
-        return null;
-    const chunk = data.toString('ascii', 12, 16);
-    if (chunk === 'VP8X') {
-        return {
-            width: data.readUIntLE(24, 3) + 1,
-            height: data.readUIntLE(27, 3) + 1,
-        };
-    }
-    if (chunk === 'VP8 ') {
-        if (data[23] !== 0x9d || data[24] !== 0x01 || data[25] !== 0x2a)
-            return null;
-        return {
-            width: data.readUInt16LE(26) & 0x3fff,
-            height: data.readUInt16LE(28) & 0x3fff,
-        };
-    }
     return null;
 }
 export function formatImagePlaceholder(dims) {
@@ -143,6 +76,8 @@ export function renderImageLines(opts) {
         return fallback;
     const maxCols = opts.maxCols ?? Math.min((opts.columns ?? 80) - 2, DEFAULT_MAX_COLS);
     const maxRows = opts.maxRows ?? DEFAULT_MAX_ROWS;
+    if (maxRows < 1 || maxCols < 1)
+        return fallback;
     const { cols, rows } = computeCellBox(dims, Math.max(1, maxCols), Math.max(1, maxRows));
     if (protocol === 'kitty') {
         const sequence = buildKittySequence(opts.data, cols, rows, opts.imageId ?? 1);
