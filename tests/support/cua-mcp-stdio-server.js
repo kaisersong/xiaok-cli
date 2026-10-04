@@ -3,6 +3,8 @@ import { appendFileSync, existsSync, writeFileSync, readFileSync } from 'node:fs
 const windowsFixture = process.env.CUA_MCP_WINDOWS_FIXTURE;
 const windowsCatalog = windowsFixture ? JSON.parse(readFileSync(process.env.CUA_MCP_WINDOWS_CATALOG, 'utf8')) : null;
 const windowsCapture = windowsFixture ? JSON.parse(readFileSync(process.env.CUA_MCP_WINDOWS_CAPTURE, 'utf8')) : null;
+const macosCatalog = JSON.parse(readFileSync(process.env.CUA_MCP_MACOS_CATALOG || new URL('../fixtures/cua-macos-0.33.1/catalog.json', import.meta.url), 'utf8'))
+  .map(({ name, required, properties }) => ({ name, inputSchema: { type: 'object', required, properties } }));
 let buffer = '';
 let transport = null;
 let toolCallCount = 0;
@@ -94,12 +96,7 @@ async function respond(message) {
       jsonrpc: '2.0',
       id: message.id,
       result: {
-        tools: windowsCatalog || [
-          { name: 'list_apps', description: 'list apps', inputSchema: { type: 'object', properties: {} } },
-          { name: 'list_windows', description: 'list windows', inputSchema: { type: 'object', properties: { on_screen_only: { type: 'boolean' } } } },
-          { name: 'get_window_state', description: 'get window state', inputSchema: { type: 'object', properties: { pid: { type: 'integer' }, window_id: { type: 'integer' } } } },
-          { name: 'click', description: 'click an element', inputSchema: { type: 'object', properties: { app: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } } } },
-        ],
+        tools: windowsCatalog || macosCatalog,
       },
     }));
     return;

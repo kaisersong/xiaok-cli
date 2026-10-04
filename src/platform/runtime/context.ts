@@ -396,21 +396,28 @@ async function connectWorkspaceMcpServers(
 
       const frozenSnapshot = freezeServerSnapshot(server);
       const { CuaConnectionManager } = await import('../mcp/cua-connection-manager.js');
+      const { createMacosCuaConnection, macosCuaCatalog } = await import('../computer-use/macos-cua-connection.js');
       const cuaManager = new CuaConnectionManager(async () => {
         const conn = await createMcpClientConnection(server.name, frozenSnapshot);
         registerDisposable(conn);
         const callToolTimeoutMs = frozenSnapshot.timeout?.call ?? globalCallToolTimeoutMs;
-        return {
-          callToolResult: async (name, input, options) => {
-            const result = await callMcpToolWithSignal(conn.client,
-              { name, arguments: input },
-              { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal },
-            );
-            options?.signal?.throwIfAborted();
-            return normalizeMcpRuntimeToolResult(result);
-          },
-          dispose: () => conn.dispose(),
-        };
+        try {
+          const schemas = (await conn.client.listTools(undefined, { timeout: frozenSnapshot.timeout?.catalog ?? globalCatalogTimeoutMs })).tools;
+          return createMacosCuaConnection(macosCuaCatalog(schemas), {
+            callToolResult: async (name, input, options) => {
+              const result = await callMcpToolWithSignal(conn.client,
+                { name, arguments: input },
+                { timeout: callToolTimeoutMs, resetTimeoutOnProgress: true, signal: options?.signal },
+              );
+              options?.signal?.throwIfAborted();
+              return normalizeMcpRuntimeToolResult(result);
+            },
+            dispose: () => conn.dispose(),
+          });
+        } catch (error) {
+          await conn.close();
+          throw error;
+        }
       });
       tools.push(createComputerUseTool({
         callToolResult: (name, input, options) => cuaManager.callToolResult(name, input, options),

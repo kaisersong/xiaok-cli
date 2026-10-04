@@ -1428,11 +1428,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             let mcpTools: Tool[];
             let toolCount = 0;
             if (isCuaServer) {
+              const macosCuaModule = process.platform === 'darwin'
+                ? await import('../../src/platform/computer-use/macos-cua-connection.js') : null;
+              const initialCuaConnection = macosCuaModule
+                ? macosCuaModule.createMacosCuaConnection(macosCuaModule.macosCuaCatalog(schemas), { callToolResult, dispose: () => connection.dispose() })
+                : { callToolResult, dispose: () => connection.close() };
               let windowsObserved = false;
               if (process.platform === 'win32') {
                 windowsObserved = (await verifyWindowsCuaReadiness({ identity: connection.client.getServerVersion(), schemas, callToolResult, target: servicesOptions.getComputerUseReadinessTarget?.() })).observed;
               } else {
-                const readiness = await runCuaMcpReadinessSmoke({ schemas, callToolResult });
+                const readiness = await runCuaMcpReadinessSmoke({ schemas, callToolResult: initialCuaConnection.callToolResult });
                 if (!readiness.ready) throw new Error(`CUA MCP readiness failed: ${readiness.code}`);
               }
               if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
@@ -1466,17 +1471,19 @@ export function createDesktopServices(options: DesktopServicesOptions) {
                       { name, arguments: input },
                       { timeout: callTimeout, signal: options?.signal },
                     ));
+                  const checkedReplacement = macosCuaModule
+                    ? macosCuaModule.createMacosCuaConnection(macosCuaModule.macosCuaCatalog(replacementSchemas), {
+                        callToolResult: replacementCallToolResult, dispose: () => replacement.dispose(),
+                      })
+                    : { callToolResult: replacementCallToolResult, dispose: () => replacement.close() };
                   if (process.platform === 'win32') {
                     if (!(await detectWindowsInteractiveDesktop())) throw new Error('COMPUTER_USE_WINDOWS_SESSION_UNAVAILABLE');
                     await verifyWindowsCuaReadiness({ identity: replacement.client.getServerVersion(), schemas: replacementSchemas, callToolResult: replacementCallToolResult, target: servicesOptions.getComputerUseReadinessTarget?.() });
                   } else {
-                    const replacementReadiness = await runCuaMcpReadinessSmoke({ schemas: replacementSchemas, callToolResult: replacementCallToolResult });
+                    const replacementReadiness = await runCuaMcpReadinessSmoke({ schemas: replacementSchemas, callToolResult: checkedReplacement.callToolResult });
                     if (!replacementReadiness.ready) throw new Error(`CUA MCP readiness failed: ${replacementReadiness.code}`);
                   }
-                  return {
-                    callToolResult: replacementCallToolResult,
-                    dispose: () => process.platform === 'win32' ? replacement.close() : replacement.dispose(),
-                  };
+                  return checkedReplacement;
                 } catch (error) {
                   if (process.platform === 'win32') await replacement.close(); else replacement.dispose();
                   throw error;
@@ -1487,10 +1494,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               const windowsBackendModule = process.platform === 'win32' ? await import('../../src/platform/computer-use/windows-cua-backend.js') : null;
               const manager = new CuaConnectionManager(createReplacementConnection, {
                 ...(windowsBackendModule ? { isReplaySafeCall: windowsBackendModule.isWindowsCuaReplaySafeCall } : {}),
-                initialConnection: {
-                  callToolResult,
-                  dispose: () => process.platform === 'win32' ? connection.close() : connection.dispose(),
-                },
+                initialConnection: initialCuaConnection,
               });
               if (computerUseActivationEpoch !== computerUseLifecycleEpoch) {
                 await manager.dispose();

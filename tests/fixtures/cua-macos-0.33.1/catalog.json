@@ -1,0 +1,487 @@
+[
+  {
+    "name": "list_apps",
+    "required": [],
+    "properties": {
+      "session": {
+        "type": "string"
+      }
+    }
+  },
+  {
+    "name": "list_windows",
+    "required": [],
+    "properties": {
+      "on_screen_only": {
+        "type": "boolean"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "session": {
+        "type": "string"
+      }
+    }
+  },
+  {
+    "name": "get_window_state",
+    "required": [
+      "pid",
+      "window_id"
+    ],
+    "properties": {
+      "capture_mode": {
+        "type": "string",
+        "enum": [
+          "ax",
+          "vision"
+        ]
+      },
+      "include_accessibility_tree": {
+        "type": "boolean"
+      },
+      "include_screenshot": {
+        "type": "boolean"
+      },
+      "max_depth": {
+        "type": "integer"
+      },
+      "max_dimension": {
+        "type": "integer"
+      },
+      "max_elements": {
+        "type": "integer"
+      },
+      "max_image_dimension": {
+        "type": "integer"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "query": {
+        "type": "string"
+      },
+      "screenshot_out_file": {
+        "type": "string"
+      },
+      "session": {
+        "type": "string"
+      },
+      "timeout_ms": {
+        "type": "integer"
+      },
+      "window_id": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "click",
+    "required": [],
+    "properties": {
+      "action": {
+        "type": "string"
+      },
+      "button": {
+        "type": "string",
+        "enum": [
+          "left",
+          "right",
+          "middle"
+        ]
+      },
+      "capture_id": {
+        "type": "string"
+      },
+      "count": {
+        "type": "integer"
+      },
+      "debug_image_out": {
+        "type": "string"
+      },
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "from_zoom": {
+        "type": "boolean"
+      },
+      "modifier": {
+        "type": "array"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "window",
+          "desktop"
+        ]
+      },
+      "session": {
+        "type": "string"
+      },
+      "target": {},
+      "window_id": {
+        "type": "integer"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    }
+  },
+  {
+    "name": "double_click",
+    "required": [
+      "pid"
+    ],
+    "properties": {
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "session": {
+        "type": "string"
+      },
+      "window_id": {
+        "type": "integer"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    }
+  },
+  {
+    "name": "right_click",
+    "required": [
+      "pid"
+    ],
+    "properties": {
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "modifier": {
+        "type": "array"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "session": {
+        "type": "string"
+      },
+      "window_id": {
+        "type": "integer"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    }
+  },
+  {
+    "name": "drag",
+    "required": [
+      "from_x",
+      "from_y",
+      "to_x",
+      "to_y"
+    ],
+    "properties": {
+      "button": {
+        "type": "string",
+        "enum": [
+          "left",
+          "right",
+          "middle"
+        ]
+      },
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "duration_ms": {
+        "type": "integer"
+      },
+      "from_x": {
+        "type": "number"
+      },
+      "from_y": {
+        "type": "number"
+      },
+      "from_zoom": {
+        "type": "boolean"
+      },
+      "modifier": {
+        "type": "array"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "window",
+          "desktop"
+        ]
+      },
+      "session": {
+        "type": "string"
+      },
+      "steps": {
+        "type": "integer"
+      },
+      "target": {},
+      "to_x": {
+        "type": "number"
+      },
+      "to_y": {
+        "type": "number"
+      },
+      "window_id": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "type_text",
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "delay_ms": {
+        "type": "integer"
+      },
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "window",
+          "desktop"
+        ]
+      },
+      "session": {
+        "type": "string"
+      },
+      "target": {},
+      "text": {
+        "type": "string"
+      },
+      "window_id": {
+        "type": "integer"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    }
+  },
+  {
+    "name": "press_key",
+    "required": [
+      "key"
+    ],
+    "properties": {
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "key": {
+        "type": "string"
+      },
+      "modifiers": {
+        "type": "array"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "window",
+          "desktop"
+        ]
+      },
+      "session": {
+        "type": "string"
+      },
+      "target": {},
+      "window_id": {
+        "type": "integer"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    }
+  },
+  {
+    "name": "set_value",
+    "required": [
+      "pid",
+      "value"
+    ],
+    "properties": {
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "session": {
+        "type": "string"
+      },
+      "value": {
+        "type": "string"
+      },
+      "window_id": {
+        "type": "integer"
+      }
+    }
+  },
+  {
+    "name": "scroll",
+    "required": [
+      "direction"
+    ],
+    "properties": {
+      "amount": {
+        "type": "integer"
+      },
+      "by": {
+        "type": "string",
+        "enum": [
+          "line",
+          "page"
+        ]
+      },
+      "delivery_mode": {
+        "type": "string",
+        "enum": [
+          "background",
+          "foreground"
+        ]
+      },
+      "direction": {
+        "type": "string",
+        "enum": [
+          "up",
+          "down",
+          "left",
+          "right"
+        ]
+      },
+      "element_token": {
+        "type": "string",
+        "pattern": "^s[0-9a-f]{8}:[0-9]+$"
+      },
+      "pid": {
+        "type": "integer"
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "window",
+          "desktop"
+        ]
+      },
+      "session": {
+        "type": "string"
+      },
+      "target": {},
+      "window_id": {
+        "type": "integer"
+      },
+      "x": {
+        "type": "number"
+      },
+      "y": {
+        "type": "number"
+      }
+    }
+  },
+  {
+    "name": "start_session",
+    "required": [],
+    "properties": {
+      "capture_scope": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "window",
+          "desktop"
+        ]
+      },
+      "cursor_theme": {
+        "type": [
+          "object",
+          "null"
+        ]
+      },
+      "session": {
+        "type": "string"
+      }
+    }
+  }
+]

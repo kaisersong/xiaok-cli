@@ -5,7 +5,7 @@
  * catalog rather than a hand-written fixture.
  */
 import { spawn } from 'node:child_process';
-import { verifyBackendAbi } from '../src/platform/computer-use/cua-action-contract.js';
+import { selectMacosCuaAbiProfile } from '../src/platform/computer-use/macos-cua-connection.js';
 
 const driver = process.argv[2];
 if (!driver) throw new Error('usage: cua-abi-check.ts <path-to-cua-driver>');
@@ -46,16 +46,18 @@ child.stdout.on('data', (d: Buffer) => {
       const names = catalog.map((c) => c.name);
       console.log(`has standalone screenshot: ${names.includes('screenshot')}`);
       console.log(`has standalone middle_click: ${names.includes('middle_click')}`);
-      const verdict = verifyBackendAbi(catalog);
-      if (verdict.ok) {
-        console.log('ABI VERIFY: ok — frozen contract table matches the live 0.19.3 catalog');
-      } else {
+      let ok = false;
+      try {
+        const profile = selectMacosCuaAbiProfile(catalog);
+        ok = true;
+        console.log(`ABI VERIFY: ok — ${profile.id} matches the live catalog`);
+      } catch (error) {
         console.log('ABI VERIFY: failed');
-        for (const problem of verdict.problems) console.log(`  - ${problem}`);
+        console.log(`  - ${error instanceof Error ? error.message : String(error)}`);
       }
       clearTimeout(timer);
       child.kill('SIGTERM');
-      setTimeout(() => process.exit(verdict.ok ? 0 : 2), 300);
+      setTimeout(() => process.exit(ok ? 0 : 2), 300);
     } else if (msg.error) {
       console.log('ERROR:', JSON.stringify(msg.error).slice(0, 300));
     }

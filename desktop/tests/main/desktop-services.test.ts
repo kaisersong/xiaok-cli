@@ -33,6 +33,39 @@ function mockKSwarmService(): KSwarmService {
 }
 
 describe('CUA mutation sources and reconnect intent', () => {
+  it('dispatches macOS legacy indices as native tokens through the actual Desktop service', async () => {
+    const root = join(tmpdir(), `cua-native-token-${Date.now()}`);
+    const log = join(root, 'calls.jsonl');
+    const { services } = createCuaFixtureServices(root, { CUA_MCP_CALL_LOG_PATH: log });
+    try {
+      expect(await services.enableComputerUse({ requestSource: 'user' })).toMatchObject({ state: 'ready' });
+      expect(await services.executeTool('xiaok_computer_use', {
+        action: 'click', pid: 123, window_id: '456', snapshot_id: 's00000001', element_index: '2',
+      })).toContain('"ok":true');
+      const call = readJsonLineLog(log).find(event => event.name === 'click');
+      expect(call?.input).toEqual({ pid: 123, window_id: 456, element_token: 's00000001:2' });
+    } finally {
+      await services.disableComputerUse({ requestSource: 'user' });
+      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  }, 15_000);
+  it('refuses incompatible macOS catalogs before observation or mutation', async () => {
+    const root = join(tmpdir(), `cua-native-drift-${Date.now()}`);
+    mkdirSync(root, { recursive: true });
+    const catalog = JSON.parse(readFileSync(join(process.cwd(), '..', 'tests', 'fixtures', 'cua-macos-0.33.1', 'catalog.json'), 'utf8'));
+    catalog.find((op: { name: string }) => op.name === 'click').properties.element_token.type = 'integer';
+    const catalogPath = join(root, 'catalog.json'); writeFileSync(catalogPath, JSON.stringify(catalog));
+    const log = join(root, 'calls.jsonl');
+    const { services } = createCuaFixtureServices(root, { CUA_MCP_MACOS_CATALOG: catalogPath, CUA_MCP_CALL_LOG_PATH: log });
+    try {
+      expect(await services.enableComputerUse({ requestSource: 'user' })).toMatchObject({ state: 'failed', mcpConnected: false });
+      expect(services.getComputerUseCapabilityStatus().lastError).toContain('ABI mismatch');
+      expect(readJsonLineLog(log).filter(event => event.event === 'tool_call')).toEqual([]);
+    } finally {
+      await services.disableComputerUse({ requestSource: 'user' });
+      rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+    }
+  }, 15_000);
   it('does not treat a third-party same-named server as official CUA or disable it', async () => {
     const root = join(tmpdir(), `cua-third-party-${Date.now()}`);
     try {
