@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -44,7 +44,11 @@ describe('M8/M10 actual CLI context MCP cancellation and emitted Windows boundar
     const root = directory(); plugin(root, 'cua-driver');
     const receiver = vi.fn(async (_params: unknown, _options?: { signal?: AbortSignal }) => ({ content: [{ type: 'text', text: 'ok' }] }));
     const dispose = vi.fn(); const connect = vi.spyOn(transport, 'createMcpClientConnection').mockResolvedValue({
-      client: { callTool: receiver }, dispose, close: async () => {}, protocolEra: 'modern', getStderrTail: () => '', getChildPid: () => null,
+      client: {
+        listTools: async () => ({ tools: JSON.parse(readFileSync(new URL('../../fixtures/cua-macos-0.33.1/catalog.json', import.meta.url), 'utf8'))
+          .map(({ name, required, properties }: { name: string; required: string[]; properties: Record<string, unknown> }) => ({ name, inputSchema: { type: 'object', required, properties } })) }),
+        callTool: receiver,
+      }, dispose, close: async () => {}, protocolEra: 'modern', getStderrTail: () => '', getChildPid: () => null,
     } as unknown as transport.McpClientConnection);
     const context = await createPlatformRuntimeContext({ cwd: root, builtinCommands: [], reminderMode: 'local', platform: 'darwin' }); cleanup.push(() => context.dispose()); await context.mcpReady;
     expect(connect).not.toHaveBeenCalled(); const signal = new AbortController().signal;
