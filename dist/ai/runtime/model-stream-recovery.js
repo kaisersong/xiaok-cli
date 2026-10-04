@@ -83,7 +83,7 @@ export async function* recoverModelStream(input) {
         }
         catch (error) {
             input.signal.throwIfAborted();
-            if (!recoverable(error) || policy.windowMs === 0)
+            if (!recoverable(error) || policy.windowMs === 0 || input.shouldRetry?.(error) === false)
                 throw error;
             recoveryStarted ??= Date.now();
             const remainingMs = policy.windowMs - (Date.now() - recoveryStarted);
@@ -91,7 +91,7 @@ export async function* recoverModelStream(input) {
                 throw exhausted();
             const delayMs = Math.min(policy.initialDelayMs * 2 ** Math.min(attempt++, 10), policy.maxDelayMs, remainingMs);
             owned.abort();
-            input.onRetry?.({ attempt, delayMs, remainingMs });
+            await input.onRetry?.({ attempt, delayMs, remainingMs });
             let timer;
             try {
                 await wait(new Promise(resolve => { timer = setTimeout(resolve, delayMs); }), input.signal, Infinity, () => { });

@@ -16,5 +16,7 @@ export declare function recoverModelStream(input: {
     open(signal: AbortSignal): AsyncIterable<StreamChunk>;
     signal: AbortSignal;
     policy?: ModelRecoveryPolicy;
-    onRetry?(notice: ModelRecoveryNotice): void;
+    onRetry?(notice: ModelRecoveryNotice): void | Promise<void>;
+    /** Additional owner gate; it cannot make permanent errors recoverable. */
+    shouldRetry?(error: unknown): boolean;
 }): AsyncIterable<StreamChunk>;
