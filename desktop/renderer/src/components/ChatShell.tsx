@@ -13,6 +13,8 @@ import { ChatRightSurface } from './ChatRightSurface';
 import { MultiAgentPanel } from './MultiAgentPanel';
 import { useMultiAgentConnection } from '../hooks/useMultiAgentConnection';
 import type { ThreadRecord } from '../api/types';
+import { separateAssistantNarration, projectNarrationSummary } from '../lib/assistant-narration';
+import { ChatTaskApprovals } from './ChatTaskApprovals';
 import type { ArtifactKind, ArtifactSummary, DesktopTaskEvent, NeedsUserQuestion, TaskResult, TaskSnapshot } from '../../../shared/task-types';
 import type { ArtifactWorkspaceSelectedArtifact } from '../../../shared/artifact-workspace-types';
 import { useSidebarCollapse } from '../layouts/AppLayout';
@@ -441,7 +443,7 @@ export function ChatShell() {
       }
       case 'task_cancelled': {
         setMessages(settleChatProgress);
-        const partialText = (event as { type: 'task_cancelled'; partialText?: string }).partialText || streamRef.current;
+        const partialText = streamRef.current || (event as { type: 'task_cancelled'; partialText?: string }).partialText || '';
         streamRef.current = '';
         cancelStreamingFlush();
         setStreamingText('');
@@ -476,7 +478,7 @@ export function ChatShell() {
         const recordedArtifacts = currentTaskEventsRef.current
           .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
           .map((recordedEvent) => artifactSummaryFromEvent(recordedEvent, sourceTaskId));
-        const resultWithArtifacts = mergeTaskResultArtifacts(r, recordedArtifacts);
+        const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, recordedArtifacts), streamRef.current, currentTaskEventsRef.current);
         const hasGeneratedFiles = currentTaskEventsRef.current.some(
           e => (e.type === 'canvas_tool_call' && (e as { toolName: string }).toolName === 'Write'
             && (e as { input: Record<string, unknown> }).input?.file_path)
@@ -572,6 +574,8 @@ export function ChatShell() {
         break;
       }
       case 'canvas_tool_call': {
+        streamRef.current = separateAssistantNarration(streamRef.current);
+        flushStreamingText(source);
         const ev = event as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; displayInputSummary?: string };
         // report_progress is handled by TaskPanel, don't show in ToolStepsMessage
         if (ev.toolName === 'report_progress') break;
@@ -944,6 +948,7 @@ export function ChatShell() {
           continue;
         }
         if (ev.type === 'canvas_tool_call') {
+          accumulated = separateAssistantNarration(accumulated);
           replayEvents.push(ev);
           const evC = ev as { type: 'canvas_tool_call'; toolName: string; input: unknown; toolUseId: string; eventId: string; ts?: number; displayInputSummary?: string };
           // Skip report_progress from ToolSteps display (handled by TaskPanel)
@@ -995,7 +1000,7 @@ export function ChatShell() {
           accumulated += (ev as { delta: string }).delta;
           lastProgress = null;
         } else if (ev.type === 'task_cancelled') {
-          const partialText = (ev as { partialText?: string }).partialText || accumulated;
+          const partialText = accumulated || (ev as { partialText?: string }).partialText || '';
           if (partialText.trim()) {
             msgs.push({
               id: `msg-assistant-cancelled-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1033,7 +1038,7 @@ export function ChatShell() {
         } else if (ev.type === 'result') {
           if (lastProgress?.stage !== 'completed' && lastProgress?.stage !== 'failed') lastProgress = null;
           const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.taskId);
-          const resultWithArtifacts = mergeTaskResultArtifacts(r, replayArtifacts);
+          const resultWithArtifacts = projectNarrationSummary(mergeTaskResultArtifacts(r, replayArtifacts), accumulated, snapshot.events);
           const assistantContent = accumulated || r.summary;
           if (accumulated || r.summary) {
             msgs.push({
@@ -1776,9 +1781,10 @@ export function ChatShell() {
       taskContent={taskContent} canvasContent={canvasContent} canvasOpen={canvasOpen} canvasExpanded={canvasExpanded}
       canvasRequestId={canvasPreviewModeRequest.id} onCanvasVisibilityChange={setCanvasVisible}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
-        onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
+        showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ChatView
         executionConnection={multiAgent.connection}
+        approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
         thread={thread}
         messages={messages}
         streamingText={streamingText}

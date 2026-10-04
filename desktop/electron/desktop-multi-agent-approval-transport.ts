@@ -42,6 +42,7 @@ export class DesktopMultiAgentApprovalTransport {
   private readonly actors = new WeakMap<DesktopAgentActor, LiveApproval>();
   private readonly invocations = new WeakMap<object, Promise<false | ToolPermissionGrant>>();
   private readonly commands = new Set<Promise<unknown>>();
+  private readonly taskPolicies = new WeakMap<DesktopAgentExecutionContext, Set<string>>();
   private disposed = false;
   private disposal?: Promise<void>;
   constructor(private readonly options: { store: DesktopMultiAgentStore; service: DesktopApprovalServicePort }) {
@@ -100,9 +101,22 @@ export class DesktopMultiAgentApprovalTransport {
             try { this.assertCurrent(record); } catch (error) { admissionRejected = !this.failure(context.groupId); throw error; }
             this.options.store.commitApprovalRequest(operation);
             record.phase = 'pending';
+            if (this.taskPolicies.get(context)?.has(this.policyKey(dto))) {
+              // Persist a fresh decision for this invocation, then use the same
+              // one-use grant and input/deadline checks as manual approval.
+              this.assertCurrent(record);
+              const operationId = `task-policy:${approvalId}`;
+              const result = { operationId, state: 'applied' as const, groupId: dto.groupId,
+                targetAgentId: dto.agentId, expectedTurn: dto.turn };
+              const finalized = this.options.store.finalizeApproval({ groupId: dto.groupId, approvalId, bootId: dto.bootId, status: 'approved',
+                decisionOperation: { groupId: dto.groupId, operationId, command: 'approval_decision',
+                  requestHash: digest(encodeMultiAgentRow({ scope: this.policyKey(dto), approvalId })), applyState: 'applied', result } });
+              record.dto = finalized.operation.result.approval; record.phase = 'approved';
+            }
           });
           this.options.service.publishApprovalChange(this.owner, context.groupId);
-          if (Date.now() >= dto.minDeadlineAt) this.expire(record);
+          if (record.dto.status === 'approved') this.finishCommitted(record);
+          else if (Date.now() >= dto.minDeadlineAt) this.expire(record);
         } catch (error) {
           if (admissionRejected) { this.complete(record, false, this.abortReason(record)); }
           else this.failGroup(context.groupId);
@@ -146,10 +160,10 @@ export class DesktopMultiAgentApprovalTransport {
     return { pendingApprovals, pendingApprovalCount: pendingApprovals.filter(item => item.canDecide).length };
   }
 
-  decideApproval(input: UserScope & { operationId: string; decision: 'approve' | 'deny' }): Promise<MultiAgentControlResult> {
+  decideApproval(input: UserScope & { operationId: string; decision: 'approve' | 'approve_for_task' | 'deny' }): Promise<MultiAgentControlResult> {
     try {
       const user = this.options.service.assertApprovalUserAccess(input.access, input.requestSource, input.groupId);
-      if (!input.operationId || input.operationId.length > 128 || !['approve', 'deny'].includes(input.decision)) throw new Error('invalid approval decision');
+      if (!input.operationId || input.operationId.length > 128 || !['approve', 'approve_for_task', 'deny'].includes(input.decision)) throw new Error('invalid approval decision');
       if (this.failure(input.groupId)) throw new Error('approval_persistence_unknown');
       const requestHash = digest(encodeMultiAgentRow({ actorId: user.actorId, approvalId: input.approvalId, decision: input.decision }));
       const record = this.records.get(input.approvalId);
@@ -170,7 +184,7 @@ export class DesktopMultiAgentApprovalTransport {
             // transaction; only actual persistence failures freeze the group.
             let invalid = false;
             try { this.assertCurrent(record); } catch (error) { if (this.failure(input.groupId)) throw error; invalid = true; }
-            const status = invalid ? Date.now() >= record.dto.minDeadlineAt ? 'expired' : 'invalidated' : input.decision === 'approve' ? 'approved' : 'denied';
+            const status = invalid ? Date.now() >= record.dto.minDeadlineAt ? 'expired' : 'invalidated' : input.decision !== 'deny' ? 'approved' : 'denied';
             const reason = invalid ? record.invalidation ?? (status === 'expired' ? 'approval_deadline' : 'actor_aborted') : input.decision === 'deny' ? 'user_denied' : undefined;
             result = { operationId: input.operationId, state: 'applied', groupId: input.groupId,
               targetAgentId: record.dto.agentId, expectedTurn: record.dto.turn, ...(invalid ? { outcome: 'rejected' as const, error: 'approval_invalidated' } : {}) };
@@ -182,6 +196,13 @@ export class DesktopMultiAgentApprovalTransport {
           });
           this.options.service.publishApprovalChange(this.owner, input.groupId);
         } catch { this.failGroup(input.groupId); return { operationId: input.operationId, state: 'unknown', groupId: input.groupId }; }
+        if (input.decision === 'approve_for_task' && record.dto.status === 'approved') {
+          try {
+            this.assertCurrent(record);
+            const policies = this.taskPolicies.get(record.context) ?? new Set<string>();
+            policies.add(this.policyKey(record.dto)); this.taskPolicies.set(record.context, policies);
+          } catch { /* A stale decision must never install future authority. */ }
+        }
         this.finishCommitted(record);
         return result;
       })).finally(() => {
@@ -202,6 +223,11 @@ export class DesktopMultiAgentApprovalTransport {
     })();
   }
 
+  private policyKey(dto: MultiAgentApprovalDurable): string {
+    return encodeMultiAgentRow([dto.bootId, dto.groupId, dto.agentId, dto.turnId,
+      dto.cwd, dto.ownerId, dto.slotId, dto.capabilityId, dto.revision,
+      dto.permissionRevision, dto.toolName, dto.inputSha256]);
+  }
   private operation(dto: MultiAgentApprovalDurable): ApprovalRequestOperation {
     return { groupId: dto.groupId, operationId: `approval-request:${dto.approvalId}`, command: 'approval_request',
       requestHash: digest(encodeMultiAgentRow(dto)), applyState: 'applied', result: { approval: dto } };

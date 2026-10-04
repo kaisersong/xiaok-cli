@@ -26,7 +26,9 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     onToggleCanvas,
     onArtifactClick,
     messages,
+    streamingText,
   }: {
+    streamingText: string;
     canvasOpen: boolean;
     onToggleCanvas: () => void;
     messages: Array<{
@@ -49,6 +51,7 @@ vi.mock('../../renderer/src/components/ChatView', () => ({
     ) => void;
   }) => (
     <div>
+      <div data-testid="narration-output">{streamingText || messages.filter(m => m.role === 'assistant').map(m => m.content).join('')}</div>
       <div data-testid="health-progress">{messages.filter(m=>m.role === 'progress').map(m=>m.content).join(' ' )}</div>
       <div data-testid="canvas-open">{canvasOpen ? 'open' : 'closed'}</div>
       <button type="button" onClick={() => onToggleCanvas()}>toggle-canvas</button>
@@ -392,5 +395,27 @@ describe('ChatShell canvas is scoped per session', () => {
     fireEvent.click(screen.getByRole('button', { name: 'open-artifact-task-B' }));
     await waitFor(() => expect(screen.getByTestId('canvas-panel-artifact')).toHaveTextContent('artifact-task-B'));
     expect(screen.getByTestId('canvas-panel-artifact-task')).toHaveTextContent('task-B');
+  });
+});
+
+describe('ChatShell narration formatting through production handlers', () => {
+  const narration = [
+    { type: 'assistant_delta', eventId: 'n1', delta: '下载（~1GB）' },
+    { type: 'assistant_delta', eventId: 'n2', delta: '完成。' },
+    { type: 'canvas_tool_call', eventId: 'n3', toolName: 'report_progress', toolUseId: 'progress', input: {} },
+    { type: 'canvas_tool_call', eventId: 'n4', toolName: 'bash', toolUseId: 'bash', input: { command: 'true' } },
+    { type: 'assistant_delta', eventId: 'n5', delta: '构建10~20分钟。' },
+  ];
+  it.each(['live', 'replay'])('keeps chunks contiguous and separates tool rounds for %s', async mode => {
+    mockGetThread.mockImplementation(async (id: string) => ({ ...thread(id), currentTaskId: 'narration', taskIds: ['narration'] }));
+    mockRecoverTask.mockResolvedValue({ snapshot: { taskId: 'narration', status: 'running', events: mode === 'replay' ? narration : [], prompt: 'work', materials: [] } });
+    let deliver!: (event: unknown) => void;
+    mockSubscribeTask.mockImplementation((...args: unknown[]) => { deliver = args[1] as typeof deliver; return () => {}; });
+    render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(() => expect(deliver).toBeDefined());
+    if (mode === 'live') await act(async () => narration.forEach(deliver));
+    await waitFor(() => expect(screen.getByTestId('narration-output').textContent).toBe('下载（~1GB）完成。\n\n构建10~20分钟。'));
+    await act(async () => deliver({ type: 'task_cancelled', eventId: 'n6', partialText: '下载（~1GB）完成。构建10~20分钟。' }));
+    expect(screen.getByTestId('narration-output').textContent).toBe('下载（~1GB）完成。\n\n构建10~20分钟。');
   });
 });

@@ -114,7 +114,7 @@ export function registerDesktopMultiAgentIpc(
     ...(input.inputOffset === undefined ? {} : { inputOffset: integer(input.inputOffset) }),
   }));
   handler('decideMultiAgentApproval', [...scope, 'approvalId', 'operationId', 'decision'], (input, access) => {
-    if (input.decision !== 'approve' && input.decision !== 'deny') throw new Error('invalid approval decision');
+    if (input.decision !== 'approve' && input.decision !== 'approve_for_task' && input.decision !== 'deny') throw new Error('invalid approval decision');
     return boundary!.service.decideApproval({ access, requestSource: 'user', groupId: id(input.groupId)!,
       approvalId: id(input.approvalId)!, operationId: id(input.operationId)!, decision: input.decision });
   });

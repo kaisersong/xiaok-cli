@@ -50,7 +50,7 @@ function ApprovalCard({ scope, pending, agent, readonly, now }: { scope: Scope; 
     && Date.now() < pending.minDeadlineAt && value?.status === 'pending' && value.persistenceState === 'confirmed' && value.canDecide;
   const allowed = !readonly && seconds > 0 && !!value && scope.connection.isApprovalCurrent(owner.identity)
     && value.canDecide && value.persistenceState === 'confirmed' && value.status === 'pending';
-  const decide = async (decision: 'approve' | 'deny') => {
+  const decide = async (decision: 'approve' | 'approve_for_task' | 'deny') => {
     if (!canUse() || receipt || decidePending.current) return;
     const operationId = crypto.randomUUID(); decidePending.current = true; setOperation({ owner, operationId, phase: 'busy' });
     scope.connection.rememberApprovalReceipt(owner.identity, { operationId, phase: 'unknown' });
@@ -106,13 +106,18 @@ function ApprovalCard({ scope, pending, agent, readonly, now }: { scope: Scope; 
   const buttons = 'rounded-lg border px-3 py-2 text-sm disabled:opacity-40';
   return <UserDecisionCard label={`${labels.title} ${name}`} prompt={<>{labels.title} · {name}</>} actions={<>
     <button type="button" className={buttons} disabled={!allowed || !!receipt} onClick={() => void decide('approve')}>{labels.approve}</button>
+    <button type="button" className={buttons} disabled={!allowed || !!receipt} onClick={() => void decide('approve_for_task')}>{labels.approveForTask}</button>
     <button type="button" className={buttons} disabled={!allowed || !!receipt} onClick={() => void decide('deny')}>{labels.deny}</button>
     {receipt?.phase === 'unknown' && <button type="button" className={buttons} onClick={() => void query()}>{labels.query}</button>}
   </>}>
+    <p className="text-sm text-[var(--c-text-secondary)]">{labels.taskScope}</p>
     <div className="space-y-1 break-all text-xs">
-      <p><code>{pending.agentId}</code> · {t.multiAgent.turnLabel(pending.turn)}</p><p><code>{pending.turnId}</code></p>
-      {value && <><p>{value.toolName}</p><p>{value.cwd}</p></>}
-      <p><code>{pending.inputSha256}</code></p><p>{labels.deadline(seconds)}</p>
+      {value && <p><code>{value.toolName}</code> · <code>{value.cwd}</code></p>}
+      <p>{t.multiAgent.turnLabel(pending.turn)} · {labels.deadline(seconds)}</p>
+      <details><summary className="cursor-pointer">{labels.details}</summary>
+        <p><code>{pending.agentId}</code></p><p><code>{pending.turnId}</code></p>
+        <p><code>{pending.inputSha256}</code></p>
+      </details>
       <p>{labels.statuses[value?.status ?? pending.status]}</p>
       {metadata?.owner === owner && metadata.error && <><p role="alert">{labels.metadataFailed}</p>
         <button type="button" className={buttons} onClick={() => void retryMetadata()}>{labels.retryMetadata}</button></>}

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
 import { ChatInput } from './ChatInput';
@@ -260,6 +260,7 @@ export interface ArtifactOpenOptions {
 
 interface ChatViewProps {
   executionConnection?: MultiAgentConnection | null;
+  approvalContent?: ReactNode;
   thread: ThreadRecord;
   messages: ChatMessage[];
   streamingText: string;
@@ -284,7 +285,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  thread, messages, streamingText, status, currentQuestion, result,
+  thread, messages, streamingText, status, currentQuestion, result, approvalContent,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -584,6 +585,8 @@ export function ChatView({
                 <ChatExecutionStatus connection={executionConnection} sourceTaskId={thread.currentTaskId} />
               </div>
             )}
+
+            {approvalContent}
 
             {/* Question */}
             {currentQuestion && (

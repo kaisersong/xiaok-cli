@@ -8,7 +8,7 @@ export const en: LocaleStrings = {
   executionHealth: {running:'Running',waiting:'Waiting for confirmation',recovering:'Recovering connection',cleanup_pending:'Stop requested; waiting for execution to exit and resources to be released'},
   localCodex: "Local Codex",
   multiAgent: {
-    approvals: { title: 'Tool approval', pending: count => `${count} pending approvals`, approve: 'Approve this invocation only', deny: 'Deny this invocation', query: 'Query approval operation',
+    approvals: { title: 'Tool approval', pending: count => `${count} pending approvals`, approve: 'Approve this invocation only', approveForTask: 'Auto-approve identical operations in this task', details: 'Approval verification details', taskScope: 'Only this task, this agent, the same tool and working directory, and identical parameters. Changed parameters still require approval. Ends with the task or restart; stop the task to revoke.', deny: 'Deny this invocation', query: 'Query approval operation',
       viewInput: 'View invocation input', nextInput: 'Read next input page', inputLoading: 'Reading input…', inputFailed: 'Input could not be read or verified. Read it again explicitly.',
       metadataFailed: 'Could not verify this invocation. Resynchronize its state.', retryMetadata: 'Read invocation details again', failure: 'The approval record could not be confirmed. This execution group has stopped; pending tools will not run.',
       deadline: seconds => `${seconds} seconds remaining`, unknown: 'Approval receipt unknown. Query the original operation; approval will not be retried automatically.', received: 'Decision receipt received. Tool results are shown in the execution status above.',
@@ -3102,7 +3102,7 @@ export const en: LocaleStrings = {
     executionSyncing: 'Synchronizing execution status…',
     executionDisconnected: 'Execution status disconnected. Please reconnect.',
     executionQueued: 'Queued, waiting for an execution slot…',
-    executionApproval: 'Waiting for tool approval. Check the task panel.',
+    executionApproval: 'Waiting for tool approval. Confirm below.',
     executionRunning: 'Executing…',
     executionFinishing: 'Execution finished. Finalizing results…',
     copyTitle: "Copy",

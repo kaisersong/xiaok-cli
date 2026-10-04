@@ -14,13 +14,13 @@ import { useLocalExecutionAuthorization } from '../hooks/useLocalExecutionAuthor
 import type { HostDeliveryReport } from '../../../../src/runtime/task-host/delivery-types';
 import './multi-agent-panel.css';
 
-interface Props { connection: MultiAgentConnection; api: MultiAgentDesktopAPI; onSelectGroup: (groupId?: string) => void }
+interface Props { showApprovals?: boolean; connection: MultiAgentConnection; api: MultiAgentDesktopAPI; onSelectGroup: (groupId?: string) => void }
 interface ReadIdentity {
   api: MultiAgentDesktopAPI; connection: MultiAgentConnection; threadId: string; groupId: string;
   agentId: string; turn: number; turnId?: string; contentId: string;
 }
 type ReadState = { identity: ReadIdentity; phase: 'loading' | 'error' } | { identity: ReadIdentity; phase: 'complete'; result: MultiAgentReadContent };
-export function MultiAgentPanel({ connection, api, onSelectGroup }: Props) {
+export function MultiAgentPanel({ connection, api, onSelectGroup, showApprovals = true }: Props) {
   const { t } = useLocale(); const labels = t.multiAgent;
   const state = useSyncExternalStore(connection.subscribe, connection.getSnapshot); const view = state.projection;
   const executionAuthorization = useLocalExecutionAuthorization(api);
@@ -203,7 +203,7 @@ export function MultiAgentPanel({ connection, api, onSelectGroup }: Props) {
       <button type="button" onClick={() => window.dispatchEvent(new Event('xiaok:app:open-settings'))}>{labels.authorization.openSettings}</button></div>}
     {view.approvalFailure && <p role="alert">{labels.approvals.failure}</p>}
     {view.snapshot?.group?.historicalOnly && view.pendingApprovalCount > 0 && <p>{labels.approvals.currentPending(view.pendingApprovalCount)} <button type="button" onClick={() => onSelectGroup(undefined)}>{labels.currentGroup}</button></p>}
-    {!deleted && view.snapshot?.group && <MultiAgentApprovals api={api} connection={connection} threadId={connection.threadId} groupId={view.snapshot.group.groupId}
+    {showApprovals && !deleted && view.snapshot?.group && <MultiAgentApprovals api={api} connection={connection} threadId={connection.threadId} groupId={view.snapshot.group.groupId}
       bootId={view.snapshot.group.bootId} pending={view.snapshot.pendingApprovals ?? []} agents={[...(view.root ? [view.root] : []), ...agents]}
       readonly={readonly || executionDenied || view.approvalFailure?.groupId === groupId} now={now} />}
     {deleting ? <p role="status">{t.deleteThreadPending}</p> : null}
