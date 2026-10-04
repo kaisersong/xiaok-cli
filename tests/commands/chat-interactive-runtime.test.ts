@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import type { Message, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
+import type { Message, MessageBlock, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
@@ -1200,6 +1200,59 @@ describe('chat interactive runtime', () => {
     vi.clearAllMocks();
     resetAdapterState();
   });
+
+  it.each([24, 12])('keeps pasted images within the actual chat content margin on a %s-row terminal', async rows => {
+    const root = join(tmpdir(), `xiaok-image-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(root);
+    const configDir = join(root, 'config'); const projectDir = join(root, 'project');
+    mkdirSync(configDir, { recursive: true }); mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ schemaVersion: 1, defaultModel: 'custom', models: { custom: { model: 'gpt-4o', apiKey: 'test', baseUrl: 'http://localhost:1/v1' } }, defaultMode: 'interactive', channels: {} }));
+    const png = readFileSync(join(process.cwd(), 'tests/fixtures/images/read-image.png'));
+    const file = join(projectDir, 'screen.png'); writeFileSync(file, png);
+    process.env.XIAOK_CONFIG_DIR = configDir; cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const originalEnv = { TMUX: process.env.TMUX, TERM: process.env.TERM, TERM_PROGRAM: process.env.TERM_PROGRAM };
+    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = 'ghostty';
+    const { createAdapter } = await import('../../src/ai/models.js');
+    const adapter = createFakeAdapter('gpt-4o');
+    const originalStream = adapter.stream.bind(adapter);
+    let observedImages: MessageBlock[] = [];
+    adapter.stream = async function* (messages, tools, systemPrompt, options) {
+      observedImages = messages.flatMap(m => m.content.filter(b => b.type === 'image'));
+      yield* originalStream(messages, tools, systemPrompt, options);
+    };
+    vi.mocked(createAdapter).mockImplementation(() => adapter);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const { setPastedImagePath } = await import('../../src/ui/image-input.js');
+    const harness = createTtyHarness(80, rows);
+    const stdoutIsTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+    const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
+    try {
+      const program = new Command(); registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      await waitForInputTurnReady(harness);
+      setPastedImagePath(0, file);
+      harness.send('inspect [image 0]'); harness.send('\r');
+      await waitFor(() => expect(observedImages).toHaveLength(1), { timeoutMs: 3000 });
+      await waitForInputTurnReady(harness);
+      expect(observedImages[0]).toMatchObject({ source: { data: png.toString('base64') } });
+      expect(harness.screen.images()).toHaveLength(1);
+      const placed = harness.screen.images()[0];
+      const margin = [...harness.output.raw.matchAll(/\x1b\[1;(\d+)r/g)].at(-1);
+      expect(margin).toBeDefined();
+      expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
+      const promptRow = findReadyPromptIndex(harness.screen.lines());
+      expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      harness.send('/exit'); harness.send('\r'); await pending;
+    } finally {
+      process.stdout.isTTY = stdoutIsTTY;
+      for (const [key, value] of Object.entries(originalEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+      vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
+      for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+      harness.restore();
+    }
+  }, 15000);
 
   it.each(['kimi','glm','minimax'])('continues first-run auto chat after selecting %s Coding Plan', async provider => {
     const rootDir=join(tmpdir(),`xiaok-first-login-${Date.now()}-${Math.random().toString(36).slice(2)}`);

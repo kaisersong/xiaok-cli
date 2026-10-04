@@ -286,6 +286,8 @@ export declare class ScrollRegionManager {
      */
     writeRawBlock(text: string, rows: number, options?: {
         clearPromptChrome?: boolean;
+        /** Kitty C=1 leaves the cursor stationary. Reserve its footprint before placement. */
+        cursorStationary?: boolean;
         logger?: {
             beginSuppress(): void;
             endSuppress(): void;

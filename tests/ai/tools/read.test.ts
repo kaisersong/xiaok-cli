@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, mkdirSync, rmSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { writeFileSync, mkdirSync, rmSync, mkdtempSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { deflateRawSync } from 'node:zlib';
@@ -59,6 +59,90 @@ describe('readTool', () => {
     });
 
     expect(result).toContain('已截断');
+  });
+
+  describe('visual image reads', () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64');
+    function context() {
+      return { signal: new AbortController().signal, modelSupportsImageInput: true, emitToolImage: vi.fn() };
+    }
+
+    it('emits actual PNG bytes with a text acknowledgment, without base64 in the tool response', async () => {
+      const file = join(dir, 'screen.png'); writeFileSync(file, png);
+      const ctx = context();
+      const result = await readTool.execute({ file_path: file }, ctx as never);
+      expect(result).not.toMatch(/^Error:/);
+      expect(ctx.emitToolImage).toHaveBeenCalledWith({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') } });
+      expect(result).not.toContain(png.toString('base64'));
+      expect(result).toMatch(/视觉|图片/);
+    });
+
+    it('identifies GIF bytes even if the extension says .txt', async () => {
+      const data = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+      const file = join(dir, 'screen.txt'); writeFileSync(file, data);
+      const ctx = context();
+      await expect(readTool.execute({ file_path: file }, ctx as never)).resolves.not.toMatch(/^Error:/);
+      expect(ctx.emitToolImage.mock.calls[0][0].source.media_type).toBe('image/gif');
+    });
+
+    it('reads a real JPEG whose EXIF/ICC segments put dimensions beyond the header sniff', async () => {
+      const jpeg = readFileSync(join(process.cwd(), 'tests/fixtures/images/read-image.jpg'));
+      expect(jpeg.length).toBeGreaterThan(4096);
+      const file = join(dir, 'screen.jpg'); writeFileSync(file, jpeg);
+      const ctx = context();
+      expect(await readTool.execute({ file_path: file }, ctx as never)).not.toMatch(/^Error:/);
+      expect(ctx.emitToolImage).toHaveBeenCalledWith({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpeg.toString('base64') } });
+    });
+
+    it.each([false, undefined])('does not pretend to read pixels when vision capability is %s', capability => {
+      const file = join(dir, 'screen.png'); writeFileSync(file, png);
+      const ctx = { ...context(), modelSupportsImageInput: capability };
+      return readTool.execute({ file_path: file }, ctx as never).then(result => {
+        expect(result).toMatch(/^Error:/);
+        expect(result).toMatch(/图片输入|视觉/);
+        expect(ctx.emitToolImage).not.toHaveBeenCalled();
+      });
+    });
+
+    it('does not pretend success without a host media port', async () => {
+      const file = join(dir, 'screen.png'); writeFileSync(file, png);
+      expect(await readTool.execute({ file_path: file }, { modelSupportsImageInput: true } as never)).toMatch(/^Error:/);
+    });
+
+    it('refuses corrupted PNG chunks', async () => {
+      const bad = Buffer.from(png); bad[45] ^= 1;
+      const file = join(dir, 'bad.png'); writeFileSync(file, bad);
+      const ctx = context();
+      expect(await readTool.execute({ file_path: file }, ctx as never)).toMatch(/^Error:/);
+      expect(ctx.emitToolImage).not.toHaveBeenCalled();
+    });
+
+    it('bounds image file size before emitting it', async () => {
+      const file = join(dir, 'huge.png'); writeFileSync(file, Buffer.concat([png, Buffer.alloc(4 * 1024 * 1024)]));
+      const ctx = context();
+      expect(await readTool.execute({ file_path: file }, ctx as never)).toMatch(/^Error:/);
+      expect(ctx.emitToolImage).not.toHaveBeenCalled();
+    });
+
+    it('preserves sensitive-file and workspace checks ahead of image delivery', async () => {
+      const ctx = context();
+      const secret = join(dir, '.env.png'); writeFileSync(secret, png);
+      expect(await readTool.execute({ file_path: secret }, ctx as never)).toBe(SENSITIVE_FILE_REDACTION);
+      const outside = mkdtempSync(join(tmpdir(), 'xiaok-outside-image-'));
+      try {
+        const file = join(outside, 'screen.png'); writeFileSync(file, png);
+        await expect(readTool.execute({ file_path: file }, ctx as never)).rejects.toThrow();
+        expect(ctx.emitToolImage).not.toHaveBeenCalled();
+      } finally { rmSync(outside, { recursive: true, force: true }); }
+    });
+
+    it('propagates cancellation without emitting an image', async () => {
+      const file = join(dir, 'screen.png'); writeFileSync(file, png);
+      const abort = new AbortController(); abort.abort(new DOMException('stop', 'AbortError'));
+      const ctx = { ...context(), signal: abort.signal };
+      await expect(readTool.execute({ file_path: file }, ctx as never)).rejects.toBe(abort.signal.reason);
+      expect(ctx.emitToolImage).not.toHaveBeenCalled();
+    });
   });
 
   // D1：以前对任何 Office / PDF 文件都直接 utf-8 解码，静默返回乱码且不报错。

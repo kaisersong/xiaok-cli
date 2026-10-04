@@ -3464,6 +3464,22 @@ describe('OpenAIAdapter', () => {
     ]);
   });
 
+  it('sends a read image after paired tool results on the GLM chat-completions wire', async () => {
+    const adapter = createTestAdapter({ wireModel: 'glm-5.3-flash', providerId: 'glm', capabilities: ['tools', 'image_in'] });
+    const request = await captureChatCompletionRequest(adapter, [], [
+      { role: 'user', content: [{ type: 'text', text: 'inspect screen' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'read_screen', name: 'read', input: { file_path: 'screen.png' } }] },
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'read_screen', content: '图片已作为视觉输入返回', is_error: false },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'YWJj' } },
+      ] },
+    ]);
+    expect(request.messages.slice(-2)).toEqual([
+      { role: 'tool', tool_call_id: 'read_screen', content: '图片已作为视觉输入返回' },
+      { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,YWJj' } }] },
+    ]);
+  });
+
   it('drops buffered usage from a retryable attempt with no visible output', async () => {
     vi.useFakeTimers();
     try {

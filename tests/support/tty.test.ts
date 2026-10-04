@@ -54,4 +54,22 @@ describe('tty harness replay', () => {
 
     expect(harness.screen.lines()[0]).toBe('stderr');
   });
+
+  it('models margin-contained graphics scrolling and leaves straddling placements stationary', () => {
+    harness = createTtyHarness(40, 8);
+    process.stdout.write('\x1b[1;5r\x1b[3;1H\x1b_Ga=T,C=1,i=1,c=2,r=2;QQ==\x1b\\');
+    process.stdout.write('\x1b[5;1H\x1b_Ga=T,C=1,i=2,c=2,r=3;QQ==\x1b\\\n');
+    expect(harness.screen.images()).toEqual([
+      { id: 1, row: 2, column: 1, rows: 2, cols: 2 },
+      { id: 2, row: 5, column: 1, rows: 3, cols: 2 },
+    ]);
+  });
+
+  it('creates one placement only after the final Kitty chunk', () => {
+    harness = createTtyHarness(40, 8);
+    process.stdout.write('\x1b_Ga=T,C=1,i=3,c=2,r=2,m=1;QQ==\x1b\\');
+    expect(harness.screen.images()).toEqual([]);
+    process.stdout.write('\x1b_Gm=0;Qg==\x1b\\');
+    expect(harness.screen.images()).toHaveLength(1);
+  });
 });
