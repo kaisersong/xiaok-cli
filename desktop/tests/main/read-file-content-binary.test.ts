@@ -45,15 +45,11 @@ describe('desktop file content IPC binary handling', () => {
     // getElectronPath 抛「Electron failed to install correctly」。
   }, 60_000);
 
-  afterEach(() => {
-    // Windows can hold transient locks on just-written files, making recursive
-    // cleanup throw EPERM well after the assertions have already passed. Treat
-    // teardown cleanup as best-effort so it never masks real test results.
-    try {
-      rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    } catch {
-      /* best-effort temp cleanup; OS reclaims tmpdir entries */
-    }
+  afterEach(async () => {
+    const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');
+    const store = getDesktopMemoryStore(join(rootDir, 'data'));
+    if ('close' in store && typeof store.close === 'function') store.close();
+    rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   it('returns PDF files as application/pdf data URLs instead of UTF-8 text', async () => {

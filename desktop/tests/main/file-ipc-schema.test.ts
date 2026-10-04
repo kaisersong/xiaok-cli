@@ -14,7 +14,13 @@ describe('real file IPC schema rollout', () => {
     let handlers: Map<string, Function>;
     let gate: DesktopShutdownGate;
     beforeEach(async () => { root = mkdtempSync(join(tmpdir(), 'xiaok-file-schema-')); handlers = new Map(); gate = new DesktopShutdownGate(); const registrar = new ShutdownAwareIpcMain({ handle: (c, h) => { handlers.set(c, h); } }, gate); await registerDesktopIpc(registrar, { isDestroyed: () => false, webContents: { send: mocks.send } } as never, { getDataRoot: () => join(root, 'data') } as never); mocks.openPath.mockClear(); }, 60000);
-    afterEach(() => rmSync(root, { recursive: true, force: true }));
+    afterEach(async () => {
+        // The IPC registrar opens SQLite; Windows cannot unlink its live handle.
+        const { getDesktopMemoryStore } = await import('../../electron/desktop-services.js');
+        const store = getDesktopMemoryStore(join(root, 'data'));
+        if ('close' in store && typeof store.close === 'function') store.close();
+        rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    });
     it('registers all eight same-domain channels in the existing registry', () => { for (const name of ['openFileInSystemApp', 'readFileContent', 'saveFile', 'artifactBackup', 'artifactRevert', 'artifactCleanup', 'artifactWatch', 'artifactUnwatch'])
         expect(IPC_SCHEMA_REGISTRY.has('desktop:' + name)).toBe(true); });
     it.each([null, { filePath: 1 }, { filePath: 'relative' }, { filePath: '/tmp/a\0b' }, { filePath: '/tmp/a', extra: 'authority' }])('refuses invalid file object before open IO: %j', async (raw) => { await expect(handlers.get('desktop:openFileInSystemApp')!({}, raw)).rejects.toThrow(); expect(mocks.openPath).not.toHaveBeenCalled(); });
