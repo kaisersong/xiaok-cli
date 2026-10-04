@@ -81,6 +81,43 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
     return { ...f, effect, pending, context, visible, snapshot, release, task, references, requests: () => requests };
   }
 
+  it('task-scoped approval allows identical input again and prompts for changed input', async () => {
+    const f = await authorizationFixture(cleanup);
+    const effect = join(f.root, 'task-scoped.txt');
+    const release = deferred(); cleanup.push(() => release.resolve());
+    let requests = 0;
+    vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+      yield { type: 'thinking', delta: '', reasoningProvenance: { captureVersion: 1, source: 'reasoning_content', fieldPresence: 'present' } };
+      const round = ++requests;
+      if (round <= 3 || round === 5) yield { type: 'tool_use', id: `repeat-${round}`, name: 'write', input: { file_path: effect, content: round === 3 ? 'CHANGED' : 'SAME' } };
+      else { await release.promise; yield { type: 'text', delta: 'Done.' }; }
+    });
+    const task = await f.services.createTask({ prompt: 'Repeated test writes.', permissionMode: 'default', materials: [], context: { threadId: 'approval-thread' } });
+    const snapshot = () => f.invoke<MultiAgentGroupSnapshot>('getMultiAgentSnapshot', { threadId: 'approval-thread' });
+    await vi.waitFor(async () => expect((await snapshot()).pendingApprovalCount).toBe(1));
+    const initial = await snapshot(), first = initial.pendingApprovals![0];
+    await f.invoke('decideMultiAgentApproval', { threadId: 'approval-thread', groupId: initial.group!.groupId,
+      approvalId: first.approvalId, operationId: 'approve-task', decision: 'approve_for_task' });
+    await vi.waitFor(() => expect(requests).toBe(3));
+    await vi.waitFor(async () => expect((await snapshot()).pendingApprovalCount).toBe(1));
+    expect(readFileSync(effect, 'utf8')).toBe('SAME');
+    const changed = (await snapshot()).pendingApprovals![0];
+    expect(changed.approvalId).not.toBe(first.approvalId);
+    expect(changed.inputSha256).not.toBe(first.inputSha256);
+    const rows = f.db.prepare("SELECT data_json FROM operations WHERE group_id=? AND json_extract(data_json,'$.command')='approval_request'").all(initial.group!.groupId);
+    expect(rows.map(row => JSON.parse(row.data_json as string).result.approval.status).sort()).toEqual(['approved', 'approved', 'pending']);
+    await f.invoke('decideMultiAgentApproval', { threadId: 'approval-thread', groupId: initial.group!.groupId,
+      approvalId: changed.approvalId, operationId: 'deny-changed', decision: 'deny' });
+    expect(readFileSync(effect, 'utf8')).toBe('SAME');
+    await vi.waitFor(() => expect(requests).toBe(4));
+    await f.services.cancelTask(task.taskId, 'test-cleanup');
+    const next = await f.services.createTask({ prompt: 'New task with the same operation.', permissionMode: 'default', materials: [], context: { threadId: 'approval-thread' } });
+    await vi.waitFor(async () => expect((await snapshot()).pendingApprovalCount).toBe(1));
+    expect(requests).toBe(5);
+    expect((await snapshot()).pendingApprovals![0].inputSha256).toBe(first.inputSha256);
+    await f.services.cancelTask(next.taskId, 'test-cleanup');
+  });
+
   it.each(['approve', 'deny'] as const)('AP1/AP5 Given a real root write prompt, When user chooses %s, Then one durable decision changes the counter once and only approve performs the original effect', async decision => {
     const f = await startPrompt();
     const scope = { threadId: 'approval-thread', groupId: f.visible.group!.groupId, approvalId: f.pending.approvalId };

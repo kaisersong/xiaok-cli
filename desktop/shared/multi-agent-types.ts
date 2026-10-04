@@ -57,7 +57,7 @@ export type MultiAgentPendingApproval = Pick<MultiAgentApprovalView,
 export interface MultiAgentApprovalFailure { groupId: string; bootId: string; code: 'multi_agent_approval_persistence_failed' }
 export interface MultiAgentApprovalInput { threadId: string; groupId: string; approvalId: string; inputOffset?: number }
 export interface MultiAgentApprovalDecisionInput {
-  threadId: string; groupId: string; approvalId: string; operationId: string; decision: 'approve' | 'deny';
+  threadId: string; groupId: string; approvalId: string; operationId: string; decision: 'approve' | 'approve_for_task' | 'deny';
 }
 
 export interface DesktopAgentSnapshot {
