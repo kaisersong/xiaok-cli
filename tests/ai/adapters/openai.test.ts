@@ -1983,7 +1983,7 @@ describe('OpenAIAdapter', () => {
     expect(chunks.at(-1)).toMatchObject({ type: 'done' });
   });
 
-  it('emits done even when no finish_reason chunk arrives', async () => {
+  it('preserves partial text and reports missing finish_reason instead of done', async () => {
     const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
 
     const mockStream = {
@@ -2001,8 +2001,10 @@ describe('OpenAIAdapter', () => {
     (adapter as unknown as { client: typeof instance }).client = instance;
 
     const chunks = [];
-    for await (const chunk of adapter.stream([], [], 'system')) chunks.push(chunk);
-    expect(chunks.at(-1)).toMatchObject({ type: 'done' });
+    await expect((async () => { for await (const chunk of adapter.stream([], [], 'system')) chunks.push(chunk); })())
+      .rejects.toMatchObject({ code: 'ERR_STREAM_PREMATURE_CLOSE' });
+    expect(chunks[0]).toMatchObject({ type: 'text', delta: 'hi' });
+    expect(chunks.at(-1)).toMatchObject({ type: 'usage' });
   });
 
   it('expands multiple tool results into separate OpenAI tool messages', async () => {
@@ -4184,5 +4186,27 @@ describe('OpenAIAdapter', () => {
     };
 
     await expect(consume()).rejects.toThrow('OPENAI_STREAM_TOOL_ARGUMENT_LIMIT_EXCEEDED');
+  });
+});
+
+
+describe('generic OpenAI terminal boundary', () => {
+  it.each(['text', 'tool'])('rejects clean EOF without finish_reason: %s', async kind => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(instance.chat.completions, 'create').mockResolvedValue({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: kind === 'text' ? { content: 'unfinished (' } : {
+        tool_calls: [{ index: 0, id: 'uncommitted', function: { name: 'write', arguments: '{"file_path":"x","content":"y"}' } }],
+      }, finish_reason: null }] };
+      yield { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2 } };
+    } } as never);
+    const adapter = createTestAdapter({ wireModel: 'glm-5.3-flash' });
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    const chunks: StreamChunk[] = [];
+    await expect((async () => { for await (const chunk of adapter.stream([], [], 'sys')) chunks.push(chunk); })())
+      .rejects.toMatchObject({ code: 'ERR_STREAM_PREMATURE_CLOSE' });
+    expect(chunks.some(x => x.type === 'done' || x.type === 'tool_use')).toBe(false);
+    expect(chunks.filter(x => x.type === 'usage')).toHaveLength(1);
+    expect(instance.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 });

@@ -88,3 +88,28 @@ describe('summary-only stream recovery', () => {
     expect(calls).toBe(mode === 'empty' ? 2 : 1);
   });
 });
+
+
+it('continues a clean premature EOF through the real OpenAI adapter without replaying tools', async () => {
+  const { OpenAIAdapter } = await import('../../../src/ai/adapters/openai.js');
+  const { buildOpenAIHarnessContext, resolveKimiHarnessFeatureFlags } = await import('../../../src/ai/providers/model-harness-profile.js');
+  const adapter = new OpenAIAdapter({ apiKey: 'test-key', kimiCodingHeadersApplied: false,
+    harnessContext: buildOpenAIHarnessContext({ identity: { providerId: 'test', providerType: 'custom', protocol: 'openai_legacy',
+      wireModel: 'glm-5.3-flash', capabilities: [] }, flags: resolveKimiHarnessFeatureFlags({}) }) });
+  const requests: any[] = [];
+  (adapter as any).client = { chat: { completions: { async create(input: any) {
+    requests.push(input);
+    return { async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: requests.length === 1 ? 'unfinished (' : 'continued).' }, finish_reason: null }] };
+      if (requests.length === 2) yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+    } };
+  } } } };
+  const chunks = await collect(request(adapter));
+  expect(chunks.filter(x => x.type === 'text').map(x => x.delta).join('')).toBe('unfinished (continued).');
+  expect(requests).toHaveLength(2);
+  expect(requests[0].tools).toHaveLength(1);
+  expect(requests[1].tools).toBeUndefined();
+  expect(requests[1].messages.at(-1).content).toContain('Tools are disabled');
+  expect(chunks.filter(x => x.type === 'done')).toHaveLength(1);
+  expect(chunks.filter(x => x.type === 'usage')).toHaveLength(2);
+});

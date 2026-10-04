@@ -34,6 +34,12 @@ const ARTIFACT_KINDS = new Set<ArtifactKind>(['pptx', 'pdf', 'docx', 'xlsx', 'ht
 const THREAD_DRAFT_STORAGE_PREFIX = 'xiaok.threadDraft.';
 const LEGACY_SWARM_CONTEXT_KEY = 'xiaok.swarmContinueContext';
 
+function settleChatProgress(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .filter(message => message.role !== 'progress' || message.stage === 'completed' || message.stage === 'failed')
+    .map(message => message.role === 'tool_steps' && message.stepsLive ? { ...message, stepsLive: false } : message);
+}
+
 interface StoredThreadDraft {
   threadId?: string;
   projectId?: string;
@@ -377,6 +383,7 @@ export function ChatShell() {
       source.terminalSeen = true;
       source.streamEnded = true;
       setCurrentQuestion(null);
+      setMessages(settleChatProgress);
       setStatus(event.status === 'cancelled' ? 'idle' : event.status);
       source.release?.();
       return;
@@ -433,6 +440,7 @@ export function ChatShell() {
         break;
       }
       case 'task_cancelled': {
+        setMessages(settleChatProgress);
         const partialText = (event as { type: 'task_cancelled'; partialText?: string }).partialText || streamRef.current;
         streamRef.current = '';
         cancelStreamingFlush();
@@ -463,6 +471,7 @@ export function ChatShell() {
         break;
       }
       case 'result': {
+        setMessages(settleChatProgress);
         const r = bindArtifactsToSourceTask((event as { type: 'result'; result: TaskResult }).result, sourceTaskId);
         const recordedArtifacts = currentTaskEventsRef.current
           .filter((e): e is Extract<DesktopTaskEvent, { type: 'artifact_recorded' }> => e.type === 'artifact_recorded')
@@ -910,11 +919,16 @@ export function ChatShell() {
     if (snapshot?.events && snapshot.events.length > 0) {
       let accumulated = '';
       let lastProgress: ChatMessage | null = null;
+      let terminalSeen = snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled';
       let lastErrorMessage: string | null = null;
       // For replay, also collect tool_steps so past tasks show tool execution
       let replayToolSteps: ToolStep[] = [];
       const replayArtifacts: ArtifactSummary[] = [];
       for (const ev of snapshot.events) {
+        if (ev.type === 'task_terminal') {
+          terminalSeen = true;
+          continue;
+        }
         if (ev.type === 'artifact_recorded') {
           replayArtifacts.push(artifactSummaryFromEvent(ev, snapshot.taskId));
           continue;
@@ -1015,6 +1029,7 @@ export function ChatShell() {
             lastErrorMessage = rawMessage;
           }
         } else if (ev.type === 'result') {
+          if (lastProgress?.stage !== 'completed' && lastProgress?.stage !== 'failed') lastProgress = null;
           const r = bindArtifactsToSourceTask((ev as { result: TaskResult }).result, snapshot.taskId);
           const resultWithArtifacts = mergeTaskResultArtifacts(r, replayArtifacts);
           const assistantContent = accumulated || r.summary;
@@ -1038,7 +1053,7 @@ export function ChatShell() {
       if (replayToolSteps.length > 0 && replayToolMsgId) {
         msgs.push({ id: replayToolMsgId, role: 'tool_steps', content: '', steps: replayToolSteps, stepsLive: false });
       }
-      if (lastProgress) {
+      if (lastProgress && (!terminalSeen || lastProgress.stage === 'completed' || lastProgress.stage === 'failed')) {
         msgs.push(lastProgress);
       }
       if (accumulated) {

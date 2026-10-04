@@ -923,12 +923,6 @@ export class OpenAIAdapter {
                 }
                 yield segment;
             }
-            for (const toolCall of drainBufferedToolCalls(toolBuffers, false)) {
-                yield toolCall;
-            }
-            if (attemptState) {
-                return;
-            }
             if (!usageReceived) {
                 yield {
                     type: 'usage',
@@ -936,7 +930,11 @@ export class OpenAIAdapter {
                 };
                 throwIfCallerAborted(options?.signal);
             }
-            yield { type: 'done' };
+            // EOF is not a provider terminal boundary. In particular, never dispatch
+            // buffered tools from a response the provider did not finish committing.
+            throw Object.assign(new Error('OpenAI stream ended before finish_reason'), {
+                code: 'ERR_STREAM_PREMATURE_CLOSE',
+            });
         }
     }
 }

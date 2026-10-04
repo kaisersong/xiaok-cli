@@ -216,7 +216,7 @@ describe('timed action executors', () => {
     expect(created[0].prompt).toContain('本次只生成计划');
   });
 
-  it('uses default permissionMode when userApprovedAuto is true', async () => {
+  it('uses auto permissionMode when userApprovedAuto is true', async () => {
     const created: Array<{ permissionMode?: string; prompt: string }> = [];
     const executor = createAgentTaskExecutor({
       createTask: async ({ prompt, permissionMode }) => {
@@ -226,7 +226,7 @@ describe('timed action executors', () => {
     });
 
     await executor.execute({ ...baseAction, userApprovedAuto: true }, baseContext);
-    expect(created[0].permissionMode).toBe('default');
+    expect(created[0].permissionMode).toBe('auto');
     expect(created[0].prompt).not.toContain('本次只生成计划');
   });
 
@@ -257,4 +257,20 @@ it('room schedules never fall through to ordinary chat execution',async()=>{
   expect(await createAgentTaskExecutor({createTask,executeRoomTask}).execute(action,baseContext)).toEqual({runtimeTaskId:'room-message'});
   expect(executeRoomTask).toHaveBeenCalledWith(action,baseContext);expect(createTask).not.toHaveBeenCalled();
   await expect(createAgentTaskExecutor({createTask}).execute(action,baseContext)).rejects.toThrow('room_schedule_executor_unavailable');
+});
+
+
+it('preserves plan for missing approval and applies the actual auto safety policy for approved tasks', async () => {
+  const { PermissionManager } = await import('../../../src/ai/permissions/manager.js');
+  const check = vi.fn(async (input: { permissionMode?: 'auto' | 'plan' | 'default' }) => {
+    const permissions = new PermissionManager({ mode: input.permissionMode! });
+    return { taskId: String(await permissions.check('bash', { command: "date '+%F'" })) };
+  });
+  const executor = createAgentTaskExecutor({ createTask: check });
+  expect((await executor.execute(baseAction, baseContext)).runtimeTaskId).toBe('deny');
+  expect((await executor.execute({ ...baseAction, userApprovedAuto: true }, baseContext)).runtimeTaskId).toBe('allow');
+  const mode = check.mock.calls[1][0].permissionMode!;
+  const permissions = new PermissionManager({ mode });
+  expect(await permissions.check('bash', { command: 'rm -rf /tmp/scheduled-user-data' })).toBe('prompt');
+  expect(await permissions.check('read', { file_path: '/Users/example/.ssh/id_rsa' })).toBe('deny');
 });

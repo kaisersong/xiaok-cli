@@ -154,6 +154,33 @@ afterEach(() => {
 });
 
 describe('ChatShell canvas is scoped per session', () => {
+  it.each(['completed', 'failed', 'cancelled'])('removes live progress on task_terminal %s', async status => {
+    mockGetThread.mockImplementation(async (id:string)=>({...thread(id),currentTaskId:'health',taskIds:['health']}));
+    mockRecoverTask.mockResolvedValue({snapshot:{taskId:'health',status:'running',events:[],prompt:'work',materials:[]}});
+    let deliver!:(event:unknown)=>void;
+    mockSubscribeTask.mockImplementation((...args:unknown[])=>{deliver=args[1] as typeof deliver;return ()=>{};});
+    render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(()=>expect(deliver).toBeDefined());
+    await act(async()=>deliver({type:'execution_health',state:'cleanup_pending'}));
+    expect(screen.getByTestId('health-progress').textContent).not.toBe('');
+    await act(async()=>deliver({type:'task_terminal',status}));
+    expect(screen.getByTestId('health-progress')).toBeEmptyDOMElement();
+  });
+
+  it('does not replay stale running progress from a completed snapshot', async () => {
+    mockGetThread.mockImplementation(async (id:string)=>({...thread(id),currentTaskId:'done',taskIds:['done']}));
+    mockRecoverTask.mockResolvedValue({snapshot:{taskId:'done',status:'completed',events:[
+      {type:'assistant_delta',delta:'preserved response'},
+      {type:'progress',stage:'running',message:'stale running'},
+      {type:'result',result:{summary:'preserved response',artifacts:[]}},
+      {type:'task_terminal',status:'completed'},
+    ],prompt:'work',materials:[]}});
+    render(<MemoryRouter initialEntries={['/t/thread-A']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(()=>expect(mockRecoverTask).toHaveBeenCalledWith('done'));
+    await act(async()=>{});
+    expect(screen.getByTestId('health-progress')).toBeEmptyDOMElement();
+  });
+
   it('renders main-owned cleanup state through the real task subscription', async () => {
     mockGetThread.mockImplementation(async (id:string)=>({...thread(id),currentTaskId:'health',taskIds:['health']}));
     mockRecoverTask.mockResolvedValue({snapshot:{taskId:'health',status:'running',events:[],prompt:'work',materials:[]}});

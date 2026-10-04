@@ -129,7 +129,7 @@ export function createAgentTaskExecutor(options: AgentTaskExecutorOptions): Time
       const result = await options.createTask({
         prompt,
         materials: [],
-        permissionMode: planMode ? 'plan' : 'default',
+        permissionMode: planMode ? 'plan' : action.userApprovedAuto ? 'auto' : 'default',
       });
       return { runtimeTaskId: result.taskId };
     },
