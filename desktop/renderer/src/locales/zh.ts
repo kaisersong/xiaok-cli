@@ -8,7 +8,7 @@ export const zh: LocaleStrings = {
   executionHealth: {running:'执行中',waiting:'等待确认后继续',recovering:'连接恢复中',cleanup_pending:'已请求停止，等待实际执行退出并清理资源'},
   localCodex: "本地 Codex",
   multiAgent: {
-    approvals: { title: '工具审批', pending: count => `${count} 项待审批`, approve: '仅批准本次', approveForTask: '本任务内自动批准相同操作', taskScope: '仅限本任务、当前智能体、同一工具和工作目录，且参数完全相同；参数变化仍需确认。任务结束或重启后失效，停止任务可撤销。', deny: '拒绝本次', query: '查询审批操作',
+    approvals: { title: '工具审批', pending: count => `${count} 项待审批`, approve: '仅批准本次', approveForTask: '本任务内自动批准相同操作', details: '审批校验详情', taskScope: '仅限本任务、当前智能体、同一工具和工作目录，且参数完全相同；参数变化仍需确认。任务结束或重启后失效，停止任务可撤销。', deny: '拒绝本次', query: '查询审批操作',
       viewInput: '查看本次参数', nextInput: '读取下一页参数', inputLoading: '正在读取参数…', inputFailed: '参数读取或校验失败，请手动重读。',
       metadataFailed: '无法核对本次工具调用，请重新同步状态。', retryMetadata: '重新读取调用信息', failure: '审批记录未能确认，当前执行组已停止；不会继续执行待审批工具。',
       deadline: seconds => `剩余 ${seconds} 秒`, unknown: '审批回执未知，请查询原操作；不会自动再次批准。', received: '已收到审批决定回执；工具结果以上方执行状态为准。',

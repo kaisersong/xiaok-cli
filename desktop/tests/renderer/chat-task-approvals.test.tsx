@@ -19,6 +19,7 @@ describe('chat task approval placement', () => {
     const chat = within(screen.getByRole('main', { name: '聊天' }));
     const once = await chat.findByRole('button', { name: '仅批准本次' });
     expect(once).toBeEnabled();
+    expect(chat.getByText('审批校验详情').parentElement).not.toHaveAttribute('open');
     expect(chat.getByText(/参数完全相同/)).toBeVisible();
     fireEvent.click(chat.getByRole('button', { name: '本任务内自动批准相同操作' }));
     expect(f.api.decideMultiAgentApproval).toHaveBeenCalledWith(expect.objectContaining({ decision: 'approve_for_task' }));

@@ -112,9 +112,12 @@ function ApprovalCard({ scope, pending, agent, readonly, now }: { scope: Scope; 
   </>}>
     <p className="text-sm text-[var(--c-text-secondary)]">{labels.taskScope}</p>
     <div className="space-y-1 break-all text-xs">
-      <p><code>{pending.agentId}</code> · {t.multiAgent.turnLabel(pending.turn)}</p><p><code>{pending.turnId}</code></p>
-      {value && <><p>{value.toolName}</p><p>{value.cwd}</p></>}
-      <p><code>{pending.inputSha256}</code></p><p>{labels.deadline(seconds)}</p>
+      {value && <p><code>{value.toolName}</code> · <code>{value.cwd}</code></p>}
+      <p>{t.multiAgent.turnLabel(pending.turn)} · {labels.deadline(seconds)}</p>
+      <details><summary className="cursor-pointer">{labels.details}</summary>
+        <p><code>{pending.agentId}</code></p><p><code>{pending.turnId}</code></p>
+        <p><code>{pending.inputSha256}</code></p>
+      </details>
       <p>{labels.statuses[value?.status ?? pending.status]}</p>
       {metadata?.owner === owner && metadata.error && <><p role="alert">{labels.metadataFailed}</p>
         <button type="button" className={buttons} onClick={() => void retryMetadata()}>{labels.retryMetadata}</button></>}

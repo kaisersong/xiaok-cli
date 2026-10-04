@@ -12,7 +12,7 @@ export interface LocaleStrings {
   localCodex: string;
   executionHealth: Record<'running' | 'waiting' | 'recovering' | 'cleanup_pending', string>;
   multiAgent: {
-    approvals: { title: string; pending: (count: number) => string; approve: string; approveForTask: string; taskScope: string; deny: string; query: string;
+    approvals: { title: string; pending: (count: number) => string; approve: string; approveForTask: string; taskScope: string; details: string; deny: string; query: string;
       viewInput: string; nextInput: string; inputLoading: string; inputFailed: string; metadataFailed: string; retryMetadata: string;
       failure: string; deadline: (seconds: number) => string; unknown: string; received: string; currentPending: (count: number) => string;
       inputProgress: (start: number, read: number, total: number) => string; statuses: Record<string, string> };
