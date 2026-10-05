@@ -60,12 +60,12 @@ describe('registry lifecycle ownership', () => {
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const execute = tool('write');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
     } as any }, [execute]);
     const result = registry.executeTool('write', {});
     registry.dispose();
     allow();
-    expect(await result).toContain('disposed');
+    expect(await result).toContain('tool authorization changed');
     expect(execute.execute).not.toHaveBeenCalled();
   });
 
@@ -136,12 +136,12 @@ describe('registry lifecycle ownership', () => {
     const waiting = new Promise<void>((resolve) => { allow = resolve; });
     const removed = tool('mcp__one__removed');
     const registry = new ToolRegistry({ permissionManager: {
-      getMode: () => 'auto', check: async () => { await waiting; return 'allow'; },
+      getMode: () => 'auto', getRevision: () => 1, check: async () => { await waiting; return 'allow'; },
     } as any }, [removed]);
     const result = registry.executeTool(removed.definition.name, {});
     registry.unregisterTool(removed.definition.name);
     allow();
-    expect(await result).toContain('no longer registered');
+    expect(await result).toContain('tool authorization changed');
     expect(removed.execute).not.toHaveBeenCalled();
     registry.dispose();
   });

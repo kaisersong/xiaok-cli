@@ -44,11 +44,10 @@ export async function checkForUpdate(currentVersion) {
             hasUpdate: semverGt(cache.latest, currentVersion),
         };
     }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
     try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
         const res = await fetch(REGISTRY_URL, { signal: controller.signal });
-        clearTimeout(timeout);
         if (!res.ok)
             return null;
         const data = await res.json();
@@ -72,5 +71,8 @@ export async function checkForUpdate(currentVersion) {
             };
         }
         return null;
+    }
+    finally {
+        clearTimeout(timeout);
     }
 }

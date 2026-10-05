@@ -35,6 +35,13 @@ export interface LoginOptions {
   skipVerify?: boolean;
 }
 
+/** Optional owning host control, never a CLI credential or authorization. */
+export interface LoginCancellation {
+  signal: AbortSignal;
+  onInterrupt?(): void;
+  trackWrite?(original: Promise<void>): void;
+}
+
 export type LoginCommandResult =
   | { status: 'saved'; providerId: string }
   | { status: 'cancelled' };
@@ -51,9 +58,31 @@ const KEY_PORTAL_HINTS: Record<string, string> = {
   gemini: 'https://aistudio.google.com/app/apikey',
 };
 
-function prompt(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => resolve(answer.trim()));
+function prompt(rl: readline.Interface, question: string, cancellation?: LoginCancellation): Promise<string> {
+  // Keep the standalone readline interrupt behavior unchanged.
+  if (!cancellation) return new Promise(resolve => rl.question(question, answer => resolve(answer.trim())));
+  cancellation.signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (answer: string, aborted = false) => {
+      if (settled) return;
+      settled = true;
+      cancellation.signal.removeEventListener('abort', abort);
+      rl.off('close', close); rl.off('SIGINT', interrupt);
+      if (aborted) { rl.close(); reject(cancellation.signal.reason); }
+      else resolve(answer.trim());
+    };
+    const abort = () => finish('', true);
+    const close = () => finish('');
+    const interrupt = () => {
+      cancellation.onInterrupt?.();
+      if (cancellation.signal.aborted) abort();
+      else { finish(''); rl.close(); }
+    };
+    cancellation.signal.addEventListener('abort', abort, { once: true });
+    rl.once('close', close); rl.on('SIGINT', interrupt);
+    rl.question(question, answer => finish(answer));
+    if (cancellation.signal.aborted) abort();
   });
 }
 
@@ -82,48 +111,81 @@ export function consumeSecretInputChunk(value: string, chunk: Buffer): SecretInp
 }
 
 /** Hidden input: raw-mode char capture so the key is never echoed. */
-function promptSecret(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
+function promptSecret(rl: readline.Interface, question: string, cancellation?: LoginCancellation): Promise<string> {
+  cancellation?.signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
     const stdin = (rl as unknown as { input: NodeJS.ReadStream }).input;
     if (typeof stdin.setRawMode !== 'function') {
       // non-TTY (piped stdin): fall back to a plain line read
-      prompt(rl, question).then(resolve);
+      prompt(rl, question, cancellation).then(resolve, reject);
       return;
     }
+    // Our terminal readline would otherwise echo keypresses while raw input
+    // is collected. Close only this interface; retain the Node decoder.
+    rl.close();
     process.stdout.write(question);
     let value = '';
     const wasRaw = stdin.isRaw;
+    let settled = false;
+    const finish = (aborted = false) => {
+      if (settled) return;
+      settled = true;
+      stdin.removeListener('data', onData); stdin.removeListener('end', onEnd);
+      cancellation?.signal.removeEventListener('abort', onAbort);
+      const answer = value.trim(); value = '';
+      try { stdin.setRawMode(wasRaw ?? false); }
+      catch (error) { reject(error); return; }
+      process.stdout.write('\n');
+      if (aborted) reject(cancellation!.signal.reason); else resolve(answer);
+    };
+    const onAbort = () => finish(true);
+    const onEnd = () => { value = ''; finish(); };
     stdin.setRawMode(true);
     stdin.resume();
     const onData = (ch: Buffer) => {
       const result = consumeSecretInputChunk(value, ch);
       value = result.value;
       if (result.action === 'submit') {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener('data', onData);
-        process.stdout.write('\n');
-        resolve(value.trim());
+        finish();
       } else if (result.action === 'abort') {
-        stdin.setRawMode(wasRaw ?? false);
-        stdin.removeListener('data', onData);
-        process.stdout.write('\n');
-        process.exit(130);
+        value = '';
+        if (cancellation) {
+          cancellation.onInterrupt?.();
+          if (cancellation.signal.aborted) onAbort(); else finish();
+        } else { finish(); process.exit(130); }
       }
     };
     stdin.on('data', onData);
+    stdin.once('end', onEnd);
+    cancellation?.signal.addEventListener('abort', onAbort, { once: true });
+    if (cancellation?.signal.aborted) onAbort(); else if (stdin.readableEnded) onEnd();
   });
 }
 
-export async function runLoginCommand(options: LoginOptions): Promise<LoginCommandResult> {
+export async function runLoginCommand(options: LoginOptions, cancellation?: LoginCancellation): Promise<LoginCommandResult> {
+  const current = () => cancellation?.signal.throwIfAborted();
+  current();
   const config = await loadConfig();
+  current();
   const profiles = listProviderProfiles();
   const interactive = Boolean(process.stdin.isTTY);
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: interactive,
-  });
+  let readlineClosed = false;
+  const createReadline = () => {
+    readlineClosed = false;
+    const next = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: interactive });
+    next.once('close', () => { readlineClosed = true; });
+    return next;
+  };
+  let rl = createReadline();
+  const nextReadline = () => { if (readlineClosed) rl = createReadline(); return rl; };
+  const persist = async () => {
+    current();
+    const original = saveConfig(config);
+    cancellation?.trackWrite?.(original);
+    await original;
+    current();
+  };
 
   try {
     // 1. provider selection
@@ -143,7 +205,8 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       profiles.forEach((item, index) => {
         writeLine(`  ${index + 1}. ${item.label} (${item.id})`);
       });
-      const answer = await prompt(rl, '输入编号或 provider id：');
+      const answer = await prompt(rl, '输入编号或 provider id：', cancellation);
+      current();
       const index = Number(answer) - 1;
       const selected = Number.isInteger(index) && index >= 0 && index < profiles.length
         ? profiles[index]
@@ -180,7 +243,8 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       }
     }
     if (!apiKey) {
-      apiKey = await promptSecret(rl, `输入 ${chosen.label} API key（${envCandidates.length > 0 ? '回车复用环境变量中的 key' : '输入时不可见'}）：`);
+      apiKey = await promptSecret(rl, `输入 ${chosen.label} API key（${envCandidates.length > 0 ? '回车复用环境变量中的 key' : '输入时不可见'}）：`, cancellation);
+      current();
       if (!apiKey && envCandidates.length > 0) {
         apiKey = envCandidates[0].apiKey;
       }
@@ -191,9 +255,11 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
     }
 
     // 4. optional live verification (explicit opt-out only skips network)
+    current();
     if (!options.skipVerify) {
       writeLine('正在验证 key（只读模型列表请求，不消耗生成 token）…');
       const probe = await probeApiKey(chosen.protocol, chosen.baseUrl, apiKey);
+      current();
       if (probe.status === 'valid') {
         writeLine('验证通过。');
       } else if (probe.status === 'network_error') {
@@ -216,15 +282,16 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       ...(existing?.headers ? { headers: existing.headers } : {}),
       apiKey,
     };
-    await saveConfig(config);
+    await persist();
     writeLine(`已保存 ${chosen.label} API key 到 ${chosen.id} provider。`);
 
     // 6. default model switch — non-interactive default is no (safe);
     //    interactive runs ask.
     const setDefault = options.setDefault
       ?? (interactive
-        ? (await prompt(rl, `切换默认模型到 ${chosen.defaultModel.label}？(y/N)：`)).toLowerCase() === 'y'
+        ? (await prompt(nextReadline(), `切换默认模型到 ${chosen.defaultModel.label}？(y/N)：`, cancellation)).toLowerCase() === 'y'
         : false);
+    current();
     if (setDefault) {
       config.models = config.models ?? {};
       const modelId = chosen.defaultModel.modelId;
@@ -241,7 +308,7 @@ export async function runLoginCommand(options: LoginOptions): Promise<LoginComma
       }
       config.defaultProvider = chosen.id;
       config.defaultModelId = modelId;
-      await saveConfig(config);
+      await persist();
       writeLine(`默认模型已切换为 [${chosen.id}] ${chosen.defaultModel.label}。`);
     }
 

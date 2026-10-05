@@ -22,7 +22,8 @@
     "**/node_modules/nodejieba/**",
     "dist/main/desktop/electron/office-parser-worker.mjs",
     "**/node_modules/@firecrawl/anydoc/**",
-    "**/node_modules/@firecrawl/anydoc-*/**"
+    "**/node_modules/@firecrawl/anydoc-*/**",
+    "dist/main/src/runtime/verification/native/**"
   ],
   "extraResources": [
     {

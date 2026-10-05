@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { Message, StreamChunk } from '../../src/types.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
 
+export type DesktopProviderRequest = Parameters<typeof streamDesktopTaskProviderConversation>[0];
+export type DesktopRequestPreparer = (input: DesktopProviderRequest) => Promise<DesktopProviderRequest>;
 type Input = Parameters<typeof streamDesktopTaskProviderConversation>[0] & {
+  prepareRequest?: DesktopRequestPreparer;
   deadline: number;
   canRecover?: () => boolean;
   onRecovery?: () => void;
@@ -27,8 +30,11 @@ export async function* streamDesktopSummaryRecovery(input: Input): AsyncGenerato
     input.options?.signal?.throwIfAborted();
     if (Date.now() >= input.deadline) throw new Error('summary_recovery_deadline');
     input.onInvocation?.(invocationId);
-    const iterator = streamDesktopTaskProviderConversation({ ...input, messages,
-      tools: recovering ? [] : input.tools, invocationId })[Symbol.asyncIterator]();
+    const request = { ...input, messages, tools: recovering ? [] : input.tools, invocationId };
+    const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
+    input.options?.signal?.throwIfAborted();
+    if (Date.now() >= input.deadline) throw new Error('summary_recovery_deadline');
+    const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
     let restart = false;
     let recoveredText = '';
     try {

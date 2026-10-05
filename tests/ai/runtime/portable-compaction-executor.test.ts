@@ -74,6 +74,24 @@ function makePorts(
 const THRESHOLD_TRIGGER = { kind: 'threshold' } as const;
 
 describe('executePortableCompaction', () => {
+  it.each(['throw', 'empty'])('semantic %s preserves history without invoking threshold fallback', async failure => {
+    const ports = makePorts({ summarizePrefix: vi.fn(async () => { if (failure === 'throw') throw Error('provider'); return ' '; }) });
+    const strict = vi.fn(() => compacted());
+    const result = await executePortableCompaction({ plan: makePlan(), signal: new AbortController().signal, trigger: { kind: 'semantic' } }, { ...ports, applySemanticPlan: strict });
+    expect(result.status).toBe('no_gain');
+    expect(ports.applyPlan).not.toHaveBeenCalled(); expect(strict).not.toHaveBeenCalled();
+  });
+  it('semantic requires its strict durable apply port before requesting a summary', async () => {
+    const ports = makePorts();
+    const result = await executePortableCompaction({ plan: makePlan(), signal: new AbortController().signal, trigger: { kind: 'semantic' } }, ports);
+    expect(result.status).toBe('invalid_plan'); expect(ports.summarizePrefix).not.toHaveBeenCalled();
+  });
+  it('semantic awaits durable strict apply and never calls the permissive apply port', async () => {
+    const ports = makePorts();
+    const strict = vi.fn(async () => ({ status: 'stale_plan' as const, record: null }));
+    const result = await executePortableCompaction({ plan: makePlan(), signal: new AbortController().signal, trigger: { kind: 'semantic' } }, { ...ports, applySemanticPlan: strict });
+    expect(result.status).toBe('stale_plan'); expect(strict).toHaveBeenCalledOnce(); expect(ports.applyPlan).not.toHaveBeenCalled();
+  });
   it('keeps the portable executor ownership boundary free of adapter, affinity, globals, and key derivation', () => {
     const source = readFileSync(
       join(process.cwd(), 'src/ai/runtime/portable-compaction-executor.ts'),

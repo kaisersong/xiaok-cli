@@ -1,0 +1,10 @@
+import{it,expect,vi}from'vitest';
+const f=vi.hoisted(()=>({ns:1_000_000_000n,uid:process.getuid!()}));
+vi.mock('node:fs',async(importOriginal)=>({...await importOriginal<typeof import('node:fs')>(),readFileSync:()=>Buffer.from('{}'),lstatSync:()=>({size:2,uid:0,nlink:1,isSocket:()=>true})}));
+vi.mock('../../../src/runtime/verification/installed-identity.js',()=>({assertRootProtectedFile(){f.ns+=200_000_000n;},assertRootProtectedExecutable(){}}));
+vi.mock('../../../src/runtime/verification/deployment-manifest.js',()=>({parseInstalledDeploymentManifest:()=>({serviceUid:f.uid,allowedUserIds:[],packageHash:'a'.repeat(64)})}));
+vi.mock('../../../src/runtime/verification/deployment-package.js',()=>({parseDeploymentPackageInventory:()=>({packageHash:'a'.repeat(64)}),verifyDeploymentPackage(){}}));
+vi.mock('../../../src/runtime/verification/continuous-clock.js',()=>({readKernelContinuousNanoseconds:()=>f.ns}));
+vi.mock('node:child_process',async(importOriginal)=>({...await importOriginal<typeof import('node:child_process')>(),spawnSync(){f.ns+=10_000_000n;return{status:0,signal:null,stdout:Buffer.from(JSON.stringify({domainId:'continuous-12345678-1234-1234-1234-123456789abc',qualificationEpoch:1,evidenceHash:'a'.repeat(64),lowerBound:Number(f.ns/1_000_000n),upperBound:Number(f.ns/1_000_000n)}))};}}));
+import{createInstalledRootBrokerClient}from'../../../src/runtime/verification/root-broker-client.js';
+it('controller clock includes actual final currentness checks before the final kernel measurement',()=>{const broker=createInstalledRootBrokerClient();try{const value=broker.clock();expect(value.upperBound).toBe(Number(f.ns/1_000_000n));}finally{broker.dispose();}});

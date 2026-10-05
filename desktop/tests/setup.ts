@@ -2,6 +2,18 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 
+// Main unit fixtures must not register temporary databases in the real OS
+// account. The real producer-to-registry/capture chain is exercised by
+// tests/runtime/verification/captured-sqlite-codex.test.ts with an isolated
+// userInfo account. Ordinary unit fixtures also isolate the route guard;
+// dedicated tests exercise its actual profile/Windows-helper function chain.
+vi.mock('../../src/runtime/verification/ordinary-source-writer-observation.js', async load => ({
+  ...await load<typeof import('../../src/runtime/verification/ordinary-source-writer-observation.js')>(),
+  assertOrdinarySourceWriterRoute: () => {},
+  observeOrdinarySQLiteWriter: () => {},
+  observeOrdinaryDirectoryWriter: () => {},
+}))
+
 // Windows holds transient locks on just-written files / just-closed SQLite
 // handles, so recursive temp-dir cleanup in test teardown frequently throws
 // EPERM/EBUSY *after* the assertions have already passed. That used to surface

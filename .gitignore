@@ -19,6 +19,7 @@ test-*.py
 test-*.sh
 test-*.js
 test-*.mjs
+!/scripts/verification/test-windows-absence.mjs
 test-*.json
 test-*.log
 BUG-*.md

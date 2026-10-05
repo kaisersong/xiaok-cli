@@ -1,3 +1,4 @@
+import { createLocalSourceWriterLifetime } from '../../src/runtime/verification/local-source-writer-lifetime.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -273,6 +274,14 @@ function mapFileError(error: unknown): never {
   throw error;
 }
 
+type ServiceWriter = { ingress: ReturnType<typeof createLocalSourceWriterLifetime>; recoveryTails: ReturnType<typeof createLocalSourceWriterLifetime>; closing?: Promise<void> };
+const serviceWriters = new WeakMap<object, ServiceWriter>();
+function serviceWriter(instance: object): ServiceWriter {
+  const writer = serviceWriters.get(instance);
+  if (!writer) throw Error('artifact_service_source_owner');
+  return writer;
+}
+
 export class ArtifactWorkspaceService {
   private readonly store: ArtifactWorkspaceStore;
   private readonly snapshotStore: FileTaskSnapshotStore;
@@ -301,6 +310,21 @@ export class ArtifactWorkspaceService {
     };
     this.nowFn = options.now ?? Date.now;
     this.createIdFn = options.createId ?? ((prefix) => `${prefix}-${randomUUID()}`);
+    serviceWriters.set(this, { ingress: createLocalSourceWriterLifetime('artifact_service_source'), recoveryTails: createLocalSourceWriterLifetime('artifact_service_recovery') });
+  }
+
+  /** Local service calls only; TaskHost execution and event queues have their own owners. */
+  sealAndDrainInstanceMutations(): Promise<void> {
+    const writer = serviceWriter(this);
+    if (writer.closing) return writer.closing;
+    const ingress = writer.ingress.close();
+    writer.closing = (async () => {
+      const errors: unknown[] = [];
+      try { await ingress; } catch (error) { errors.push(error); }
+      try { await writer.recoveryTails.close(); } catch (error) { errors.push(error); }
+      if (errors.length) throw new AggregateError(errors, 'artifact_service_close_unconfirmed');
+    })();
+    return writer.closing;
   }
 
   subscribeChanges(listener: (change: ArtifactWorkspaceChange) => void): () => void {
@@ -309,10 +333,18 @@ export class ArtifactWorkspaceService {
   }
 
   notifyIdentityChanged(input: WorkspaceIdentityInput): void {
+    return serviceWriter(this).ingress.runSync(() => this.#notifyIdentityChanged(input));
+  }
+
+  #notifyIdentityChanged(input: WorkspaceIdentityInput): void {
     this.notifyChanged(this.workspace(input));
   }
 
   async getArtifactWorkspaceSnapshot(input: WorkspaceIdentityInput & { viewKey: string }): Promise<ArtifactWorkspaceSnapshot> {
+    return serviceWriter(this).ingress.runAsync(() => this.#getArtifactWorkspaceSnapshot(input));
+  }
+
+  async #getArtifactWorkspaceSnapshot(input: WorkspaceIdentityInput & { viewKey: string }): Promise<ArtifactWorkspaceSnapshot> {
     const workspace = this.workspace(input);
     this.recordWorkspaceOpenMetrics(workspace.id, workspace.conversationId, input.viewKey);
     const lineages = this.store.listLineages(workspace.id);
@@ -338,15 +370,27 @@ export class ArtifactWorkspaceService {
   }
 
   closeArtifactWorkspace(input: WorkspaceIdentityInput & { viewKey: string }): boolean {
+    return serviceWriter(this).ingress.runSync(() => this.#closeArtifactWorkspace(input));
+  }
+
+  #closeArtifactWorkspace(input: WorkspaceIdentityInput & { viewKey: string }): boolean {
     const workspace = this.workspace(input);
     return this.store.closeViewSession({ workspaceId: workspace.id, viewKey: input.viewKey });
   }
 
   closeArtifactWorkspaceViewKey(viewKey: string): number {
+    return serviceWriter(this).ingress.runSync(() => this.#closeArtifactWorkspaceViewKey(viewKey));
+  }
+
+  #closeArtifactWorkspaceViewKey(viewKey: string): number {
     return this.store.closeViewSessionsByKey(viewKey);
   }
 
   async recordEligibleArtifactOpened(input: WorkspaceIdentityInput & { sourceTaskId: string; artifactId: string }): Promise<boolean> {
+    return serviceWriter(this).ingress.runAsync(() => this.#recordEligibleArtifactOpened(input));
+  }
+
+  async #recordEligibleArtifactOpened(input: WorkspaceIdentityInput & { sourceTaskId: string; artifactId: string }): Promise<boolean> {
     if (!this.flags.artifactWorkspaceRevisionUi) return false;
     const workspace = this.workspace(input);
     const snapshot = await this.snapshotStore.recoverTask(input.sourceTaskId);
@@ -371,6 +415,14 @@ export class ArtifactWorkspaceService {
   }
 
   async materializeArtifact(input: UserMutationInput & {
+    sourceTaskId: string;
+    artifactId: string;
+    expectedStructureRevision: number;
+  }): Promise<{ lineage: ArtifactLineage; version: ArtifactWorkspaceVersion; node: ArtifactWorkspaceNode }> {
+    return serviceWriter(this).ingress.runAsync(() => this.#materializeArtifact(input));
+  }
+
+  async #materializeArtifact(input: UserMutationInput & {
     sourceTaskId: string;
     artifactId: string;
     expectedStructureRevision: number;
@@ -523,6 +575,16 @@ export class ArtifactWorkspaceService {
     y?: number;
     expectedStructureRevision: number;
   }): Promise<ArtifactWorkspaceNode> {
+    return serviceWriter(this).ingress.runAsync(() => this.#createArtifactPlaceholder(input));
+  }
+
+  async #createArtifactPlaceholder(input: UserMutationInput & {
+    requestedKind: ArtifactWorkspaceRequestedKind;
+    title?: string;
+    x?: number;
+    y?: number;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceNode> {
     this.assertUser(input);
     this.assertRevisionWrite();
     const workspace = this.workspace(input);
@@ -557,6 +619,15 @@ export class ArtifactWorkspaceService {
     y?: number;
     expectedStructureRevision: number;
   }): Promise<ArtifactWorkspaceNode> {
+    return serviceWriter(this).ingress.runAsync(() => this.#createArtifactWorkspaceCollection(input));
+  }
+
+  async #createArtifactWorkspaceCollection(input: UserMutationInput & {
+    title: string;
+    x?: number;
+    y?: number;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceNode> {
     this.assertUser(input);
     this.assertSpatialWrite();
     const title = input.title.trim();
@@ -577,6 +648,15 @@ export class ArtifactWorkspaceService {
   }
 
   async createArtifactWorkspaceNote(input: UserMutationInput & {
+    noteText: string;
+    x?: number;
+    y?: number;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceNode> {
+    return serviceWriter(this).ingress.runAsync(() => this.#createArtifactWorkspaceNote(input));
+  }
+
+  async #createArtifactWorkspaceNote(input: UserMutationInput & {
     noteText: string;
     x?: number;
     y?: number;
@@ -605,6 +685,14 @@ export class ArtifactWorkspaceService {
     noteText: string;
     expectedStructureRevision: number;
   }): Promise<ArtifactWorkspaceNode> {
+    return serviceWriter(this).ingress.runAsync(() => this.#updateArtifactWorkspaceNote(input));
+  }
+
+  async #updateArtifactWorkspaceNote(input: UserMutationInput & {
+    nodeId: string;
+    noteText: string;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceNode> {
     this.assertUser(input);
     this.assertSpatialWrite();
     this.assertNote(input.noteText);
@@ -622,6 +710,16 @@ export class ArtifactWorkspaceService {
   }
 
   async createArtifactWorkspaceRelation(input: UserMutationInput & {
+    fromNodeId: string;
+    toNodeId: string;
+    kind: ArtifactWorkspaceRelation['kind'];
+    order?: number;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceRelation> {
+    return serviceWriter(this).ingress.runAsync(() => this.#createArtifactWorkspaceRelation(input));
+  }
+
+  async #createArtifactWorkspaceRelation(input: UserMutationInput & {
     fromNodeId: string;
     toNodeId: string;
     kind: ArtifactWorkspaceRelation['kind'];
@@ -648,6 +746,16 @@ export class ArtifactWorkspaceService {
   }
 
   async setArtifactCollectionMembership(input: UserMutationInput & {
+    collectionNodeId: string;
+    memberNodeId: string;
+    included: boolean;
+    order?: number;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceRelation | { removed: true }> {
+    return serviceWriter(this).ingress.runAsync(() => this.#setArtifactCollectionMembership(input));
+  }
+
+  async #setArtifactCollectionMembership(input: UserMutationInput & {
     collectionNodeId: string;
     memberNodeId: string;
     included: boolean;
@@ -702,6 +810,13 @@ export class ArtifactWorkspaceService {
     nodeId: string;
     expectedStructureRevision: number;
   }): Promise<ArtifactWorkspaceNode> {
+    return serviceWriter(this).ingress.runAsync(() => this.#removeArtifactWorkspaceNode(input));
+  }
+
+  async #removeArtifactWorkspaceNode(input: UserMutationInput & {
+    nodeId: string;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactWorkspaceNode> {
     this.assertUser(input);
     const workspace = this.workspace(input);
     const node = this.store.getNode(input.nodeId);
@@ -735,6 +850,10 @@ export class ArtifactWorkspaceService {
   }
 
   async updateArtifactWorkspaceLayout(input: UserMutationInput & { patches: ArtifactWorkspaceLayoutPatch[] }): Promise<ArtifactWorkspaceNode[]> {
+    return serviceWriter(this).ingress.runAsync(() => this.#updateArtifactWorkspaceLayout(input));
+  }
+
+  async #updateArtifactWorkspaceLayout(input: UserMutationInput & { patches: ArtifactWorkspaceLayoutPatch[] }): Promise<ArtifactWorkspaceNode[]> {
     this.assertUser(input);
     this.assertSpatialWrite();
     const workspace = this.workspace(input);
@@ -765,6 +884,14 @@ export class ArtifactWorkspaceService {
     viewport: ArtifactWorkspaceView['viewport'];
     expectedViewRevision?: number;
   }): Promise<ArtifactWorkspaceView> {
+    return serviceWriter(this).ingress.runAsync(() => this.#saveArtifactWorkspaceViewport(input));
+  }
+
+  async #saveArtifactWorkspaceViewport(input: UserMutationInput & {
+    viewKey: string;
+    viewport: ArtifactWorkspaceView['viewport'];
+    expectedViewRevision?: number;
+  }): Promise<ArtifactWorkspaceView> {
     this.assertUser(input);
     this.assertSpatialWrite();
     const workspace = this.workspace(input);
@@ -780,6 +907,14 @@ export class ArtifactWorkspaceService {
   }
 
   async preferArtifactVersion(input: UserMutationInput & {
+    lineageId: string;
+    versionId: string;
+    expectedStructureRevision: number;
+  }): Promise<ArtifactLineage> {
+    return serviceWriter(this).ingress.runAsync(() => this.#preferArtifactVersion(input));
+  }
+
+  async #preferArtifactVersion(input: UserMutationInput & {
     lineageId: string;
     versionId: string;
     expectedStructureRevision: number;
@@ -810,6 +945,19 @@ export class ArtifactWorkspaceService {
     expectedStructureRevision?: number;
     preparedGenerationRequestId?: string;
   }): Promise<WorkspaceGenerationRequest> {
+    return serviceWriter(this).ingress.runAsync(() => this.#submitArtifactGeneration(input));
+  }
+
+  async #submitArtifactGeneration(input: UserMutationInput & {
+    placeholderNodeId?: string;
+    prompt: string;
+    sourceVersionId?: string;
+    supersedesRequestId?: string;
+    selectedArtifact?: { sourceTaskId?: string; artifactId: string; kind?: string; mimeType?: string; title?: string };
+    requestedKind?: ArtifactWorkspaceRequestedKind;
+    expectedStructureRevision?: number;
+    preparedGenerationRequestId?: string;
+  }): Promise<WorkspaceGenerationRequest> {
     this.assertUser(input);
     this.assertRevisionWrite();
     const prompt = input.prompt.trim();
@@ -830,7 +978,7 @@ export class ArtifactWorkspaceService {
         if (!selected?.sourceTaskId || !selected.artifactId) {
           throw new ArtifactWorkspaceError('invalid_target', 'generation needs a placeholder, source version or selected artifact');
         }
-        const base = await this.materializeArtifact({
+        const base = await this.#materializeArtifact({
           conversationId: input.conversationId,
           workspaceRootId: input.workspaceRootId,
           sourceTaskId: selected.sourceTaskId,
@@ -853,7 +1001,7 @@ export class ArtifactWorkspaceService {
       ));
       if (duplicate) throw new ArtifactWorkspaceError('generation_conflict', 'this source already has an active revision request');
       const latestWorkspace = this.store.getWorkspace(workspace.id) ?? workspace;
-      const placeholder = await this.createArtifactPlaceholder({
+      const placeholder = await this.#createArtifactPlaceholder({
         conversationId: input.conversationId,
         workspaceRootId: input.workspaceRootId,
         requestedKind,
@@ -990,6 +1138,15 @@ export class ArtifactWorkspaceService {
     conversationId: string;
     workspaceRootId: string;
   }): Promise<WorkspaceGenerationRequest> {
+    return serviceWriter(this).ingress.runAsync(() => this.#cancelArtifactGeneration(input));
+  }
+
+  async #cancelArtifactGeneration(input: {
+    generationRequestId: string;
+    requestSource: ArtifactWorkspaceRequestSource;
+    conversationId: string;
+    workspaceRootId: string;
+  }): Promise<WorkspaceGenerationRequest> {
     this.assertUser(input);
     const request = this.store.getGenerationRequest(input.generationRequestId);
     const workspace = this.workspace({ conversationId: input.conversationId, workspaceRootId: input.workspaceRootId });
@@ -1012,6 +1169,13 @@ export class ArtifactWorkspaceService {
     generationRequestId: string;
     prompt?: string;
   }): Promise<WorkspaceGenerationRequest> {
+    return serviceWriter(this).ingress.runAsync(() => this.#retryArtifactGeneration(input));
+  }
+
+  async #retryArtifactGeneration(input: UserMutationInput & {
+    generationRequestId: string;
+    prompt?: string;
+  }): Promise<WorkspaceGenerationRequest> {
     this.assertUser(input);
     const old = this.store.getGenerationRequest(input.generationRequestId);
     const workspace = this.workspace(input);
@@ -1019,7 +1183,7 @@ export class ArtifactWorkspaceService {
       throw new ArtifactWorkspaceError('generation_conflict', 'generation cannot be retried');
     }
     const prepared = this.store.beginGenerationRetry({ oldRequestId: old.id, workspaceId: workspace.id });
-    const request = await this.submitArtifactGeneration({
+    const request = await this.#submitArtifactGeneration({
       ...input,
       prompt: input.prompt?.trim() || '请重试上一次产物生成任务，保持原目标不变。',
       placeholderNodeId: old.placeholderNodeId,
@@ -1035,6 +1199,17 @@ export class ArtifactWorkspaceService {
   }
 
   async claimProducedArtifact(input: {
+    leaseId: string;
+    producedArtifactId: string;
+    taskId: string;
+    executionScope?: ArtifactWorkspaceExecutionScope;
+    expectedAction?: 'fulfill_placeholder' | 'append_revision' | 'append_collection_item';
+    projectionKind: 'narrow_tool' | 'task_event' | 'startup_reconcile';
+  }): Promise<ArtifactWorkspaceClaimResult> {
+    return serviceWriter(this).ingress.runAsync(() => this.#claimProducedArtifact(input));
+  }
+
+  async #claimProducedArtifact(input: {
     leaseId: string;
     producedArtifactId: string;
     taskId: string;
@@ -1152,7 +1327,7 @@ export class ArtifactWorkspaceService {
         },
       });
       if (!outcome.created) {
-        rmSync(this.fileManager.resolveManagedRef(staged.stagingRef), { recursive: true, force: true, maxRetries: 3 });
+        this.fileManager.removeManagedRef(staged.stagingRef);
       }
       this.store.recordAudit({
         actorKind: 'agent', requestSource: 'agent', workspaceId: lease.workspaceId,
@@ -1204,7 +1379,7 @@ export class ArtifactWorkspaceService {
         },
       });
       if (committed.version.fileRef !== finalized.fileRef) {
-        rmSync(this.fileManager.resolveManagedRef(finalized.fileRef), { recursive: true, force: true, maxRetries: 3 });
+        this.fileManager.removeManagedRef(finalized.fileRef);
       }
     } catch (error) {
       this.store.updateStagingFile({
@@ -1241,6 +1416,15 @@ export class ArtifactWorkspaceService {
     event: DesktopTaskEvent;
     snapshot: TaskSnapshot;
   }): Promise<void> {
+    return serviceWriter(this).ingress.runAsync(() => this.#handlePersistedTaskEvent(input));
+  }
+
+  async #handlePersistedTaskEvent(input: {
+    taskId: string;
+    eventIndex: number;
+    event: DesktopTaskEvent;
+    snapshot: TaskSnapshot;
+  }): Promise<void> {
     const scope = input.snapshot.executionScope;
     if (!scope || scope.kind !== 'artifact_workspace_generation') return;
     const cursor = this.store.getTaskCursor(input.taskId);
@@ -1263,7 +1447,7 @@ export class ArtifactWorkspaceService {
     for (let eventIndex = firstEventIndex; eventIndex <= input.eventIndex; eventIndex++) {
       const event = input.snapshot.events[eventIndex] ?? input.event;
       if (event.type === 'artifact_recorded') {
-        await this.claimProducedArtifact({
+        await this.#claimProducedArtifact({
           leaseId: scope.leaseId,
           producedArtifactId: event.artifactId,
           taskId: input.taskId,
@@ -1326,6 +1510,10 @@ export class ArtifactWorkspaceService {
   }
 
   async reconcileStartup(): Promise<void> {
+    return serviceWriter(this).ingress.runAsync(() => this.#reconcileStartup());
+  }
+
+  async #reconcileStartup(): Promise<void> {
     try {
       this.reconcileStagingRegistry();
     } catch (error) {
@@ -1376,7 +1564,7 @@ export class ArtifactWorkspaceService {
       this.recordRecoveryFailure(workspace, request, attemptKey, 'runtime_unavailable', 'task_unbound');
       return;
     }
-    const snapshot = await withRecoveryTimeout(this.snapshotStore.recoverTask(request.producingTaskId));
+    const snapshot = await withRecoveryTimeout(serviceWriter(this).recoveryTails.runAsync(() => this.snapshotStore.recoverTask(request.producingTaskId!)));
     if (!snapshot) {
       this.recordRecoveryFailure(workspace, request, attemptKey, 'runtime_unavailable', 'snapshot_missing');
       return;
@@ -1393,7 +1581,7 @@ export class ArtifactWorkspaceService {
     }
     const cursor = this.store.getTaskCursor(request.producingTaskId);
     for (let index = cursor + 1; index < snapshot.events.length; index++) {
-      await this.handlePersistedTaskEvent({ taskId: request.producingTaskId, eventIndex: index, event: snapshot.events[index], snapshot });
+      await this.#handlePersistedTaskEvent({ taskId: request.producingTaskId, eventIndex: index, event: snapshot.events[index], snapshot });
     }
     const current = this.store.getGenerationRequest(request.id);
     if (snapshot.status === 'completed' && current?.state === 'running') {
@@ -1480,6 +1668,10 @@ export class ArtifactWorkspaceService {
   }
 
   async readArtifactWorkspaceVersionPreview(input: WorkspaceIdentityInput & { versionId: string }): Promise<ArtifactWorkspacePreview> {
+    return serviceWriter(this).ingress.runAsync(() => this.#readArtifactWorkspaceVersionPreview(input));
+  }
+
+  async #readArtifactWorkspaceVersionPreview(input: WorkspaceIdentityInput & { versionId: string }): Promise<ArtifactWorkspacePreview> {
     const workspace = this.workspace(input);
     const version = this.requireOwnedVersion(workspace.id, input.versionId);
     if (version.status !== 'ready') throw new ArtifactWorkspaceError('artifact_missing', 'artifact version is missing');
@@ -1511,6 +1703,10 @@ export class ArtifactWorkspaceService {
   }
 
   async exportArtifactWorkspaceVersion(input: WorkspaceIdentityInput & { versionId: string; destinationPath?: string }): Promise<{ fileName: string; sourcePath: string; destinationPath?: string }> {
+    return serviceWriter(this).ingress.runAsync(() => this.#exportArtifactWorkspaceVersion(input));
+  }
+
+  async #exportArtifactWorkspaceVersion(input: WorkspaceIdentityInput & { versionId: string; destinationPath?: string }): Promise<{ fileName: string; sourcePath: string; destinationPath?: string }> {
     const workspace = this.workspace(input);
     const version = this.requireOwnedVersion(workspace.id, input.versionId);
     const sourcePath = this.fileManager.resolveManagedRef(version.fileRef);
@@ -1533,6 +1729,15 @@ export class ArtifactWorkspaceService {
   }
 
   recordArtifactWorkspaceEvent(input: UserMutationInput & {
+    eventName: ArtifactWorkspaceEventName;
+    requestId?: string;
+    dedupeKey?: string;
+    metadata?: Record<string, string | number | boolean | null>;
+  }): boolean {
+    return serviceWriter(this).ingress.runSync(() => this.#recordArtifactWorkspaceEvent(input));
+  }
+
+  #recordArtifactWorkspaceEvent(input: UserMutationInput & {
     eventName: ArtifactWorkspaceEventName;
     requestId?: string;
     dedupeKey?: string;
@@ -1572,6 +1777,10 @@ export class ArtifactWorkspaceService {
   }
 
   cleanup(input: { activeViewKeys?: Set<string> } = {}): { stagingRows: number; secondaryViews: number } {
+    return serviceWriter(this).ingress.runSync(() => this.#cleanup(input));
+  }
+
+  #cleanup(input: { activeViewKeys?: Set<string> } = {}): { stagingRows: number; secondaryViews: number } {
     const cutoff = this.now() - ARTIFACT_WORKSPACE_STAGING_RETENTION_MS;
     let stagingRows = 0;
     for (const entry of this.store.listStagingFiles()) {
@@ -1607,6 +1816,10 @@ export class ArtifactWorkspaceService {
    * entering the durable audit log.
    */
   recordPublicMutationFailure(input: PublicMutationAuditInput, action: string, error: unknown): void {
+    return serviceWriter(this).ingress.runSync(() => this.#recordPublicMutationFailure(input, action, error));
+  }
+
+  #recordPublicMutationFailure(input: PublicMutationAuditInput, action: string, error: unknown): void {
     const conversationId = typeof input.conversationId === 'string' ? input.conversationId : undefined;
     const workspaceRootId = typeof input.workspaceRootId === 'string' ? input.workspaceRootId : undefined;
     const candidateWorkspace = conversationId ? this.store.getWorkspaceByConversation(conversationId) : undefined;

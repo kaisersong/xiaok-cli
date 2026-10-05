@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "metadata": {
+    "tool": "oxlint",
+    "version": "1.86.0",
+    "flags": [
+      "--disable-nested-config",
+      "--no-ignore",
+      "--ignore-pattern",
+      "**/node_modules/**",
+      "--ignore-pattern",
+      "**/dist/**",
+      "--ignore-pattern",
+      "**/.generated/**"
+    ],
+    "configHash": "27f32d1eb8f48fd5e18e55908bf433d82917f08860ac991edb043b04ad6c5fab",
+    "paths": [
+      "src",
+      "desktop/electron",
+      "desktop/shared",
+      "desktop/renderer/src",
+      "scripts"
+    ]
+  },
+  "entries": {
+    "768659bc878aec36db635f5cd6149b9f737da200d6c57f6c130f4ed3b5a0cb09": {
+      "path": "desktop/electron/room-local-command.ts",
+      "rule": "eslint(no-unsafe-finally)",
+      "message": "Unsafe `finally` block.",
+      "source": "        if(alive())throw new Error('room_command_cleanup_pending');",
+      "line": 44,
+      "count": 1
+    },
+    "87cbd3dc6d44dbb2f34dcd3632e9f60583bca51f817e2bf2b0cfba5bd16ef2aa": {
+      "path": "desktop/electron/room-local-command.ts",
+      "rule": "eslint(no-unsafe-finally)",
+      "message": "Unsafe `finally` block.",
+      "source": "      } catch(e) {options.onCleanupPending();throw e;}",
+      "line": 46,
+      "count": 1
+    },
+    "9703c4f8ed76fc4b8edf6aabcfb179d0df562ad9e1d09f7d0e349346b8f53980": {
+      "path": "desktop/electron/room-external-discussion-adapter.ts",
+      "rule": "eslint(no-unsafe-finally)",
+      "message": "Unsafe `finally` block.",
+      "source": "        if(alive())throw new Error('room_discussion_cleanup_pending',{cause:cleanupError});",
+      "line": 114,
+      "count": 1
+    },
+    "e540e2c2ffa562c5bd5d9e98f945fe1eec6233e39df84b34b52546a9496c7ff3": {
+      "path": "desktop/electron/room-workspace-runtime.ts",
+      "rule": "eslint(no-unsafe-finally)",
+      "message": "Unsafe `finally` block.",
+      "source": "        if(cleanup?.ok===false)throw new Error(cleanup.code??'workspace_wake_cleanup_pending');",
+      "line": 264,
+      "count": 1
+    }
+  }
+}

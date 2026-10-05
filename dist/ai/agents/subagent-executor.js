@@ -1,3 +1,5 @@
+import { createTransportAuthorizationError } from '../../runtime/sol-pi/transport-lease.js';
+import { consumeDelegatedObservationExecutionPlan, suspendDelegatedObservationOwner, resumeDelegatedObservationOwner } from '../../runtime/sol-pi/delegated-session-owner.js';
 import { Agent } from '../agent.js';
 import { SubAgentRunReporter } from './subagent-presentation.js';
 import { ManagedAgentSessionCreationError } from './multi-agent-coordinator.js';
@@ -9,10 +11,15 @@ export async function createNamedSubAgentSession(options) {
     let registry;
     let agent;
     let checkpoint;
+    let observationOwner;
+    let observationExecution;
+    let observationRotation;
     const reporter = new SubAgentRunReporter(options.agentDef.name, options.runtimeAgentId, options.onSubAgentEvent);
     let deactivated = false;
     let deactivatePromise;
     let disposePromise;
+    let suspending = false, suspension, runTail;
+    const suspensionFailures = [];
     const deactivate = () => {
         deactivated = true;
         if (!registry)
@@ -23,17 +30,42 @@ export async function createNamedSubAgentSession(options) {
         return deactivatePromise;
     };
     const disposeResources = () => {
-        disposePromise ??= (async () => {
-            try {
-                await deactivate();
-            }
-            finally {
-                if (resolved.allocation && resolved.allocation.cleanup === 'delete') {
+        if (disposePromise)
+            return disposePromise;
+        deactivated = true;
+        const currentAgent = agent;
+        currentAgent?.stopNewRuns();
+        disposePromise = (async () => {
+            const blockers = await Promise.allSettled([deactivate(), currentAgent?.waitForStoppedResources(), runTail, suspension]);
+            const errors = [...suspensionFailures, ...blockers.filter((result) => result.status === 'rejected').map(result => result.reason)];
+            // A run's final delegated publication still owns the execution port.
+            // Only close that port after all admitted producers have ended.
+            const execution = await Promise.allSettled([Promise.resolve().then(() => observationExecution?.dispose())]);
+            for (const result of execution)
+                if (result.status === 'rejected')
+                    errors.push(result.reason);
+            if (!errors.length && resolved.allocation?.cleanup === 'delete') {
+                try {
                     await options.worktreeManager?.release(resolved.allocation.path);
                 }
-                agent = undefined;
-                checkpoint = undefined;
+                catch (error) {
+                    errors.push(error);
+                }
             }
+            // Settled cleanup failures must not leave usable execution authority.
+            // Revocation is a control tombstone, never proof of physical release.
+            try {
+                observationOwner?.dispose();
+            }
+            catch (error) {
+                errors.push(error);
+            }
+            if (errors.length)
+                throw errors.length === 1 ? errors[0] : new AggregateError(errors, 'subagent_physical_cleanup_unconfirmed');
+            currentAgent?.dispose();
+            await currentAgent?.waitForDisposedResources();
+            agent = undefined;
+            checkpoint = undefined;
         })();
         return disposePromise;
     };
@@ -50,11 +82,21 @@ export async function createNamedSubAgentSession(options) {
         const baseAdapter = options.adapter();
         const strictK3Parent = isStrictKimiK3Adapter(baseAdapter);
         const adapter = resolveSubAgentAdapter(baseAdapter, options.agentDef.model, options.agentDef.modelCapability, options.forkContext);
+        const delegated = options.observationExecutionPlan === undefined ? undefined
+            : await consumeDelegatedObservationExecutionPlan(options.observationExecutionPlan, registry);
+        observationOwner = delegated?.owner;
+        observationExecution = delegated?.execution;
+        if (delegated) {
+            options.onObservationOwnerReady?.(delegated.owner);
+        }
+        const sourceSnapshot = delegated?.source ?? options.forkContext?.session;
+        const sourceMessages = delegated?.source.messages ?? options.forkContext?.messages;
         let runContext;
         let running = false;
         const createAgent = () => new Agent(adapter, registry, systemPrompt, {
             maxIterations: options.agentDef.maxIterations,
             providerSurfaceKind: 'cli-subagent',
+            ...(delegated ? { initialSession: delegated.session, observationOwner: delegated.owner } : {}),
             onActivity: (activity) => {
                 reporter.activity(activity);
                 runContext?.onActivity(activity);
@@ -63,8 +105,16 @@ export async function createNamedSubAgentSession(options) {
         });
         agent = createAgent();
         const strictK3 = isStrictKimiK3Adapter(adapter);
-        if (options.forkContext?.session && !strictK3Parent && !strictK3) {
-            agent.restoreSession(completedForkSnapshot(options.forkContext.session));
+        if (delegated && !strictK3Parent && !strictK3) {
+            delegated.session.replaceMessages(completedForkSnapshot(delegated.source).messages);
+        }
+        else if (sourceSnapshot && !strictK3Parent && !strictK3) {
+            agent.restoreSession(completedForkSnapshot(sourceSnapshot));
+        }
+        else if (options.forkContext?.session?.protectedObservationClosure) {
+            // Synthesized strict-provider history is still derived from protected bytes.
+            // Keep its host-only closure so the child cannot send without reauthorization.
+            agent.getSessionState().addProtectedObservationReferences(options.forkContext.session.protectedObservationClosure.observations);
         }
         let firstRun = true;
         return {
@@ -75,70 +125,165 @@ export async function createNamedSubAgentSession(options) {
                     throw new Error(`subagent session is deactivated: ${options.runtimeAgentId ?? options.agentDef.name}`);
                 if (running)
                     throw new Error('subagent session already has an active run');
-                const runPrompt = firstRun && (strictK3Parent || strictK3) && options.forkContext?.messages
-                    ? `${buildSynthesizedProviderContext('subagent', options.forkContext.messages)}\n\n`
+                if (suspending)
+                    throw Error('subagent session is suspending');
+                const runPrompt = firstRun && (strictK3Parent || strictK3) && sourceMessages
+                    ? `${buildSynthesizedProviderContext('subagent', sourceMessages)}\n\n`
                         + `Current child task:\n${prompt}`
                     : prompt;
                 const displayTask = firstRun && options.taskDescription?.trim() ? options.taskDescription : prompt;
                 firstRun = false;
                 running = true;
                 runContext = context;
-                reporter.start(displayTask);
+                let finishRun;
+                runTail = new Promise(resolve => { finishRun = resolve; });
                 const chunks = [];
                 let finalResponse = '';
                 let iterationLimitReached = false;
+                let publicationAttempted = false;
+                let failedBinding;
+                let settledBodyResult;
+                let settledBodyFailure;
                 try {
-                    if (!agent) {
-                        registry = options.createRegistry(cwd, options.agentDef.allowedTools, options.runtimeAgentId ?? options.agentDef.name, { parentDepth: options.parentDepth });
-                        agent = createAgent();
-                        if (checkpoint)
-                            agent.restoreSession(checkpoint);
-                        checkpoint = undefined;
-                    }
-                    await agent.runTurn(runPrompt, (chunk) => {
-                        if (chunk.type === 'text') {
-                            chunks.push(chunk.delta);
-                            finalResponse += chunk.delta;
+                    try {
+                        reporter.start(displayTask);
+                        if (deactivated || disposePromise)
+                            throw Error('subagent session is deactivated');
+                        if (!agent) {
+                            registry = options.createRegistry(cwd, options.agentDef.allowedTools, options.runtimeAgentId ?? options.agentDef.name, { parentDepth: options.parentDepth });
+                            if (delegated) {
+                                if (!observationRotation)
+                                    throw new Error('SOL_PI_DELEGATED_ROTATION_REQUIRED');
+                                registry.registerTool(delegated.recallTool);
+                                try {
+                                    await observationExecution?.bindRegistry(registry);
+                                }
+                                catch (error) {
+                                    deactivated = true;
+                                    failedBinding = { error };
+                                    throw error;
+                                }
+                                if (deactivated || disposePromise)
+                                    throw Error('subagent session is deactivated');
+                                resumeDelegatedObservationOwner(observationRotation, registry);
+                                observationRotation = undefined;
+                            }
+                            if (deactivated || disposePromise)
+                                throw Error('subagent session is deactivated');
+                            agent = createAgent();
+                            if (checkpoint)
+                                agent.restoreSession(checkpoint);
+                            checkpoint = undefined;
                         }
-                    }, signal, undefined, (event) => {
-                        if (event.type === 'max_iterations_reached')
-                            iterationLimitReached = true;
-                        if (event.type === 'tool_started')
-                            finalResponse = '';
-                        if (event.type === 'tool_finished')
-                            reporter.toolFinished(event.toolName, event.ok);
-                    });
-                    if (iterationLimitReached)
-                        throw new Error('SUBAGENT_ITERATION_LIMIT: task did not finish within its iteration budget');
-                    const result = chunks.join('').trim();
-                    reporter.finish(signal?.aborted ? 'interrupted' : 'completed', signal?.aborted ? undefined : finalResponse.trim());
-                    return result;
+                        if (deactivated || disposePromise)
+                            throw Error('subagent session is deactivated');
+                        await agent.runTurn(runPrompt, (chunk) => {
+                            if (chunk.type === 'text') {
+                                chunks.push(chunk.delta);
+                                finalResponse += chunk.delta;
+                            }
+                        }, signal, undefined, (event) => {
+                            if (event.type === 'max_iterations_reached')
+                                iterationLimitReached = true;
+                            if (event.type === 'tool_started')
+                                finalResponse = '';
+                            if (event.type === 'tool_finished')
+                                reporter.toolFinished(event.toolName, event.ok);
+                        });
+                        if (iterationLimitReached)
+                            throw new Error('SUBAGENT_ITERATION_LIMIT: task did not finish within its iteration budget');
+                        let result = chunks.join('').trim();
+                        if (delegated) {
+                            publicationAttempted = true;
+                            result = await delegated.complete(result);
+                        }
+                        if (!signal?.aborted)
+                            options.onCompleted?.();
+                        reporter.finish(signal?.aborted ? 'interrupted' : 'completed', signal?.aborted ? undefined : finalResponse.trim());
+                        {
+                            settledBodyResult = result;
+                        }
+                    }
+                    catch (error) {
+                        if (delegated && !publicationAttempted) {
+                            try {
+                                publicationAttempted = true;
+                                await delegated.complete('');
+                            }
+                            catch {
+                                throw createTransportAuthorizationError();
+                            }
+                        }
+                        reporter.finish(signal?.aborted || (error instanceof Error && error.name === 'AbortError') ? 'interrupted' : 'failed');
+                        throw error;
+                    }
                 }
                 catch (error) {
-                    reporter.finish(signal?.aborted || (error instanceof Error && error.name === 'AbortError') ? 'interrupted' : 'failed');
-                    throw error;
+                    settledBodyFailure = { error };
                 }
-                finally {
+                {
                     runContext = undefined;
                     running = false;
+                    finishRun();
+                    runTail = undefined;
+                    // The cleanup waits the original run admission. Finish it first;
+                    // never await our own physical disposal from inside that admission.
+                    if (failedBinding) {
+                        try {
+                            await disposeResources();
+                        }
+                        catch (cleanupError) {
+                            throw new AggregateError([failedBinding.error, cleanupError], 'subagent_registry_binding_cleanup_unconfirmed');
+                        }
+                    }
                 }
+                if (settledBodyFailure)
+                    throw settledBodyFailure.error;
+                return settledBodyResult;
             },
             async suspend() {
                 if (running)
-                    throw new Error('cannot suspend an active subagent run');
+                    throw Error('cannot suspend an active subagent run');
                 if (deactivated || disposePromise)
                     return;
-                if (agent)
-                    checkpoint = agent.exportSession();
-                if (registry) {
-                    const currentRegistry = registry;
-                    deactivatePromise ??= Promise.resolve().then(() => options.releaseRegistry
-                        ? options.releaseRegistry(currentRegistry) : currentRegistry.dispose());
-                    await deactivatePromise;
+                if (suspension)
+                    return suspension;
+                suspending = true;
+                const work = (async () => {
+                    await agent?.waitForIdleResources();
+                    if (deactivated || disposePromise)
+                        return;
+                    if (observationOwner && registry)
+                        observationRotation = await suspendDelegatedObservationOwner(observationOwner, registry);
+                    else if (agent)
+                        checkpoint = agent.exportSession();
+                    if (deactivated || disposePromise)
+                        return;
+                    if (registry) {
+                        const currentRegistry = registry;
+                        deactivatePromise ??= Promise.resolve().then(() => options.releaseRegistry ? options.releaseRegistry(currentRegistry) : currentRegistry.dispose());
+                        await deactivatePromise;
+                    }
+                    if (deactivated || disposePromise)
+                        return;
+                    agent = undefined;
+                    registry = undefined;
+                    deactivatePromise = undefined;
+                })();
+                suspension = work;
+                try {
+                    await work;
                 }
-                agent = undefined;
-                registry = undefined;
-                deactivatePromise = undefined;
+                catch (error) {
+                    deactivated = true;
+                    suspensionFailures.push(error);
+                    throw error;
+                }
+                finally {
+                    suspending = false;
+                    if (suspension === work)
+                        suspension = undefined;
+                }
             },
             deactivate,
             dispose: disposeResources,

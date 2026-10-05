@@ -1,8 +1,11 @@
+import {loopPublicationEn} from './loop-publication';
 import type { LocaleStrings } from "./index";
 import { roomWorkspaceEn } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const en: LocaleStrings = {
+  loopPublication: loopPublicationEn,
+  observation: {compoundExperiment:'Compound execution experiment enabled; edit and validation results are recorded separately.',compoundStep:{not_started:'Not started',pending:'In progress',denied:'Not approved',succeeded:'Succeeded',failed:'Failed',cancelled:'Cancelled',unknown:'Outcome unknown'},compoundEdit:(status:string)=>`Edit: ${status}`,compoundValidation:(status:string)=>`Validation: ${status}`,compoundUnknown:(count:number)=>`${count} operation(s) have an unknown outcome and require execution confirmation.`,semanticState:{waiting:'Waiting for a confirmed subtask boundary',compacted:'History compacted; original requests and execution facts preserved',skipped:'History compaction skipped',failed:'History compaction did not complete'},semanticReason:{economics:'Expected savings do not cover the additional cost.',changed:'The conversation changed; the previous summary no longer applies.','no-gain':'The new history did not meet the reduction requirement.',budget:'The summary budget is insufficient.',unavailable:'Current conditions are not met. Check the task record.'},semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>`Summary calls ${attempts}/${maximum}; reserved at verified pre-dispatch prices $${reserved} / $${budget} (USD, not an actual invoice)`,semanticExperiment:'Explicit compaction experiment: additional summary calls may increase cost.',enable:'Enable observation memory for this task',ready:'Authorized for this task: native tools only, without prior task materials. Send your task.',cancel:'Cancel activation',stop:'Stop new capture',revoke:'Revoke disclosure and stop task',active:'This task: deepseek-flash, observation memory active',recallOnly:'New capture stopped; existing authorized recall remains available',revokedStopping:'Disclosure authorization revoked; task is stopping',revoked:'Disclosure authorization revoked',unavailable:'Observation memory is not enabled for this task',closed:'Task ended; protected history restoration is unavailable',failed:'Could not complete. Check authorization expiry, model, and local environment.',filesUnsupported:'Use the exact sources in the approved policy without adding attachments.'},
   diffView: { showFull: 'Show full diff' },
   roomWorkspace: roomWorkspaceEn,
   executionHealth: {running:'Running',waiting:'Waiting for confirmation',recovering:'Recovering connection',cleanup_pending:'Stop requested; waiting for execution to exit and resources to be released'},
@@ -43,7 +46,7 @@ export const en: LocaleStrings = {
     savedContentTruncated: byteLength => `Only the first ${byteLength} bytes were retained (2MiB storage limit). The rest of the original result was not saved.`,
     contentSegmented: 'Saved content is shown in segments without changes. Find and selection apply to the current segment.', contentSegment: (current, total) => `Segment ${current} / ${total}`,
     previousContentSegment: 'Previous segment', nextContentSegment: 'Next segment',
-    checkOperation: 'Check operation status', userSender: 'User', moreGroups: 'Earlier groups',
+    checkOperation: 'Check operation status', userSender: 'User', finalContentUnavailable: 'The task ended, but its final content could not be persisted and is unavailable.', moreGroups: 'Earlier groups',
     resources: 'Worktrees and cleanup', resourcesEmpty: 'No registered worktrees', moreResources: 'Next resources page', keepResource: 'Keep worktree and detach', retryCleanup: 'Retry cleanup',
     resourceConfirmation: 'Confirm resource disposition', confirmKeep: 'Confirm keep', keepExplanation: 'Keep this directory and its output, releasing the group cleanup obligation. This does not mean external jobs started by tools have stopped.',
     newGroup: 'New execution group', confirmReset: 'Confirm new group', resetExplanation: 'Stop the old root and its children. A new group is created only after resources are really released or explicitly retained. History is preserved.',
@@ -1463,6 +1466,15 @@ export const en: LocaleStrings = {
     userLoopOutputDirectoryLabel: "Output directory",
     userLoopOutputFileNameLabel: "Output file name",
     userLoopOutputPath: "Output file",
+    userLoopArtifactsOpen: 'View verified artifacts',
+    userLoopArtifactsLoading: 'Verifying artifacts…',
+    userLoopArtifactsUnavailable: 'Artifacts cannot be verified right now. Refresh and try again.',
+    userLoopArtifactsEmpty: 'This publication declares no artifacts.',
+    userLoopArtifactsPrevious: 'Previous',
+    userLoopArtifactsNext: 'Next',
+    userLoopArtifactsPage: (first,last,total)=>`${first}–${last} of ${total} artifacts`,
+    userLoopArtifactBytes: size=>`${size.toLocaleString()} bytes`,
+    userLoopWorkspaceNavigationHint: 'Opens the editable working directory. Use the preview to read verified content.',
     userLoopOpenOutputDirectory: "Open output directory",
     userLoopPreviewOutputFile: "Preview output file",
     userLoopViewTaskResult: "View result",
@@ -1481,6 +1493,9 @@ export const en: LocaleStrings = {
     loopDiagnosticsDesc: "Inspect built-in loop runs, anomalies, and manual trigger state.",
     loopDiagnosticsRefresh: "Refresh",
     loopDiagnosticsRunNow: "Run now",
+    loopDiagnosticsCopyLabels: {"loop": "Loop", "status": "Loop status", "history": "Historical execution", "observation": "Verification observation", "finishedAt": "Historical execution time", "openAnomalies": "Open anomalies", "owner": "Owner", "seen": "Seen", "suggestedAction": "Suggested action", "logs": "Logs", "none": "None"},
+    loopDiagnosticsVerifiedAt: (time: string) => `Verified at ${time}`,
+    loopDiagnosticsPublicationPending: "Awaiting verified publication",
     loopDiagnosticsRunning: "Running",
     loopDiagnosticsAlreadyRunning: "Already running",
     loopDiagnosticsLastRun: "Last run",
@@ -3115,6 +3130,22 @@ export const en: LocaleStrings = {
   },
 
   goalBar: {
+    verificationDefinition: "Original verification definition (JSON)",
+    verificationDefinitionHelp: "Protected Goals require predefined verification criteria. Replacements must retain every original obligation.",
+    verificationDefinitionInvalid: "The verification definition is not valid JSON.",
+    nativePending: "Goal change is not active yet",
+    recoverNative: "Recover approval result",
+    continueNative: "Continue Goal change",
+    cancelNative: "Cancel this change",
+    nativeRetired: "This change has stopped. You can submit a new request.",
+
+    statusVerificationUnavailable: "Current verification unavailable",
+    statusNeedsRevalidation: "Revalidation required",
+    statusPublicationPending: "Waiting for completion publication",
+    statusBindingPending: "Waiting for Goal binding",
+    statusBindingRequired: "Goal authorization required",
+    statusBindingMismatch: "Goal binding changed",
+    statusVerifiedComplete: "Verified complete",
     createGoal: "Create Goal",
     goal: "Goal",
     completionCriterion: "Completion criterion",
@@ -3127,6 +3158,8 @@ export const en: LocaleStrings = {
     confirmCreate: "Create Goal",
     close: "Collapse",
     pause: "Pause",
+    recoverPublication: "Check publication result",
+    continuePublication: "Continue completion review",
     resume: "Resume",
     retry: "Retry",
     cancelGoal: "Cancel Goal",

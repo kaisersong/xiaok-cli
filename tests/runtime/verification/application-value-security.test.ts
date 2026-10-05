@@ -1,0 +1,38 @@
+import {it,expect} from 'vitest';
+import {generateKeyPairSync} from 'node:crypto';
+import {intentApplicationCandidate} from '../../support/intent-application-fixture.js';
+import {createIntentApplicationBinding} from '../../../src/runtime/verification/intent-application-binding.js';
+import {parseGoalApplicationBinding,parseActiveGoalApplicationBinding} from '../../../src/runtime/verification/goal-application-binding.js';
+import {createLoopApplicationBinding,parseLoopApplicationBinding,parseLoopCandidateBody} from '../../../src/runtime/verification/loop-application-binding.js';
+import {parseBusinessApplicationBinding,parseActiveBusinessApplicationBinding,businessApplicationBindingHash,businessApplicationOwner} from '../../../src/runtime/verification/business-application-binding.js';
+import {parseApplicationBindingReview} from '../../../src/runtime/verification/application-binding-review.js';
+import {createAuthenticatedControllerClient} from '../../../src/runtime/verification/controller-client.js';
+import {APPLICATION_METHODS} from '../../../src/runtime/verification/application-transport.js';
+function goal(){return {version:1 as const,kind:'goal' as const,sessionId:'session',goalId:'goal',epoch:1,objective:'original',completionCriterion:null,expectedEvidenceKinds:[]};}
+function loop(){return createLoopApplicationBinding({version:1,kind:'loop',subject:{kind:'loop-run',loopId:'artifact-evidence-regression',runId:'run',stage:null},candidateId:'candidate',candidateRevision:1,originalTriggerJson:'{"kind":"manual"}',logicalRunKey:null,contract:{version:1,kind:'builtin-diagnostic',scanner:'artifact-evidence-regression',objective:'Original',completionCriterion:'Original'},body:{kind:'builtin-diagnostic',scanner:'artifact-evidence-regression',observedAt:1,summary:'Original',nextActionKind:'none',nextActionSummary:null,diagnostic:{kind:'artifact-evidence-regression',scannedOwnerCount:0,openAnomalyCount:0,resolvedAnomalyCount:0,anomalies:[]},artifacts:[]}});}
+function binding(kind:string):any{return kind==='goal'?goal():kind==='loop'?loop():createIntentApplicationBinding(intentApplicationCandidate());}
+function trap(){let calls=0;const value=new Proxy({},{ownKeys(){calls++;throw Error('unexpected nested proxy trap');},getPrototypeOf(){calls++;throw Error('unexpected nested proxy trap');},getOwnPropertyDescriptor(){calls++;throw Error('unexpected nested proxy trap');}});return {value,calls:()=>calls};}
+for(const kind of ['goal','loop','intent']){
+ it.each(['bindingHash','revision','extra'])(`rejects nested Proxy control fields before reflection in ${kind} active wrapper: %s`,field=>{const b=binding(kind),t=trap(),raw:any={binding:b,bindingHash:businessApplicationBindingHash(b),revision:1};raw[field]=t.value;expect(()=>parseActiveBusinessApplicationBinding(raw)).toThrow();expect(t.calls()).toBe(0);});
+ it(`rejects symbol fields at ${kind} active wrapper root`,()=>{const b=binding(kind),raw:any={binding:b,bindingHash:businessApplicationBindingHash(b),revision:1};raw[Symbol('approval')]=true;expect(()=>parseActiveBusinessApplicationBinding(raw)).toThrow();});
+ it(`rejects an object kind before nested reflection in ${kind} direct union`,()=>{const raw=structuredClone(binding(kind)),t=trap();raw.kind=t.value;expect(()=>parseBusinessApplicationBinding(raw)).toThrow();expect(t.calls()).toBe(0);});
+ it(`rejects hidden nested symbols in ${kind} bindings through every direct parser`,()=>{const raw=structuredClone(binding(kind));(kind==='goal'?raw.expectedEvidenceKinds:raw.body)[Symbol('approval')]=true;expect(()=>parseBusinessApplicationBinding(raw)).toThrow();if(kind==='goal')expect(()=>parseGoalApplicationBinding(raw)).toThrow();else if(kind==='loop')expect(()=>parseLoopApplicationBinding(raw)).toThrow();});
+}
+it('direct active Goal rejects both wrapper symbols and nested control Proxy',()=>{const b=goal(),raw:any={binding:b,bindingHash:businessApplicationBindingHash(b),revision:1};raw[Symbol('approval')]=true;expect(()=>parseActiveGoalApplicationBinding(raw)).toThrow();delete raw[Reflect.ownKeys(raw).find(key=>typeof key==='symbol')!];const t=trap();raw.bindingHash=t.value;expect(()=>parseActiveGoalApplicationBinding(raw)).toThrow();expect(t.calls()).toBe(0);});
+it('direct Goal and all Loop create/parse/body paths reject nested Proxy before reflection',()=>{
+ const t=trap();expect(()=>parseGoalApplicationBinding({...goal(),objective:t.value})).toThrow();expect(t.calls()).toBe(0);
+ const b=structuredClone(loop()),{triggerHash,contractHash,candidatePayloadHash,...candidate}=b;
+ for(const call of [()=>parseLoopApplicationBinding({...b,body:{...b.body,summary:t.value}}),()=>createLoopApplicationBinding({...candidate,body:{...b.body,summary:t.value}}),()=>parseLoopCandidateBody({...b.body,summary:t.value},b.subject,b.contract)]){expect(call).toThrow();expect(t.calls()).toBe(0);}
+});
+function review(){const b=goal();return {version:1,purpose:'completion-application-binding',authorityId:'authority',challengeId:'challenge',principal:{uid:501,auditSessionId:1,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555'},requestSource:'user',owner:{profileId:'profile',...businessApplicationOwner(b)},registrationHash:'a'.repeat(64),previousBindingHash:null,binding:b,bindingHash:businessApplicationBindingHash(b),deadline:{domainId:'clock',qualificationEpoch:1,notBefore:0,validUntil:1000}};}
+it.each(['root-symbol','principal-symbol','principal-proxy','hash-proxy'])('rejects untrusted native review metadata before erasure/reflection: %s',mode=>{const raw:any=review(),t=trap();if(mode==='root-symbol')raw[Symbol('approval')]=true;else if(mode==='principal-symbol')raw.principal[Symbol('approval')]=true;else if(mode==='principal-proxy')raw.principal=t.value;else raw.registrationHash=t.value;expect(()=>parseApplicationBindingReview(raw)).toThrow();expect(t.calls()).toBe(0);});
+it('preserves original review canonical numeric normalization',()=>{const raw=review();raw.deadline.notBefore=-0;expect(Object.is(parseApplicationBindingReview(raw).deadline.notBefore,0)).toBe(true);});
+it.each(APPLICATION_METHODS)('signed client rejects application payload symbols and Proxy before any identity IPC: %s',async method=>{
+ const keys=generateKeyPairSync('ed25519');let calls=0;const client=createAuthenticatedControllerClient({authorityId:'authority',publicKey:keys.publicKey,async roundTrip(){calls++;throw Error('unexpected identity IPC');},roundTripSync(){calls++;throw Error('unexpected sync IPC');}});
+ try{for(const mode of ['binding-symbol','root-symbol','nested-proxy']){const raw:any={requestSource:'user',requestId:'request',binding:goal()},t=trap();if(mode==='binding-symbol')raw.binding[Symbol('approval')]=true;else if(mode==='root-symbol')raw[Symbol('approval')]=true;else raw.extra=t.value;await expect(client.applicationTransport.call(method,raw)).rejects.toThrow();expect(t.calls()).toBe(0);expect(calls).toBe(0);}}finally{client.dispose();}
+});
+it.each(APPLICATION_METHODS)('retains original pre-aborted reason before application payload processing: %s',async method=>{
+ const keys=generateKeyPairSync('ed25519'),reason=Error('original abort reason'),signal=new AbortController();signal.abort(reason);let calls=0;
+ const client=createAuthenticatedControllerClient({authorityId:'authority',publicKey:keys.publicKey,async roundTrip(){calls++;throw Error('unexpected identity IPC');},roundTripSync(){throw Error('unused');}}),t=trap();
+ try{expect(await client.applicationTransport.call(method,{binding:t.value},signal.signal).catch(error=>error)).toBe(reason);expect(t.calls()).toBe(0);expect(calls).toBe(0);}finally{client.dispose();}
+});

@@ -922,7 +922,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     await service.start();
 
     expect(findPortOwner).toHaveBeenCalledWith(4400);
-    expect(killStalePortOwner).toHaveBeenCalledWith(4400);
+    expect(killStalePortOwner).toHaveBeenCalledWith(4400, expect.objectContaining({ expectedPid: 43_210, signal: expect.any(AbortSignal) }));
     expect(spawnMock).toHaveBeenCalledTimes(1);
     await service.stop();
     rmSync(serviceRoot, { recursive: true, force: true });

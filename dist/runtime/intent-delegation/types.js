@@ -42,6 +42,7 @@ export function cloneIntentRecord(record) {
     const activeStageId = record.activeStageId ?? stages[0]?.stageId ?? `${record.intentId}:stage:1`;
     return {
         ...record,
+        executionTerminals: record.executionTerminals?.map(terminal => ({ ...terminal })),
         providedSourcePaths: [...(record.providedSourcePaths ?? [])],
         explicitConstraints: [...record.explicitConstraints],
         delegationBoundary: [...record.delegationBoundary],
@@ -58,6 +59,9 @@ export function cloneIntentRecord(record) {
 export function cloneSessionIntentLedger(ledger) {
     return {
         ...ledger,
+        ...(ledger.verificationExecutions === undefined ? {} : { verificationExecutions: structuredClone(ledger.verificationExecutions) }),
+        ...(ledger.publicationCandidates === undefined ? {} : { publicationCandidates: structuredClone(ledger.publicationCandidates) }),
+        ...(ledger.nativeContracts === undefined ? {} : { nativeContracts: structuredClone(ledger.nativeContracts) }),
         latestPlan: ledger.latestPlan ? cloneIntentRecord(ledger.latestPlan) : null,
         intents: ledger.intents.map(cloneIntentRecord),
         breadcrumbs: ledger.breadcrumbs.map((entry) => ({ ...entry })),

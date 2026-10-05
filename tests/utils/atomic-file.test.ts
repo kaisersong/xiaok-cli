@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, openSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   writeFileAtomicallySync,
@@ -88,4 +88,18 @@ describe('writeFileAtomicallySync', () => {
       'close-dir',
     ]);
   });
+  it('strict publication propagates an ancestor flush failure after a newly-created directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-atomic-strict-')); roots.push(root);
+    const target = join(root, 'new', 'nested', 'state.json'); const opens: string[] = [];
+    expect(() => writeFileAtomicallySync(target, '{}', { requireDirectorySync: true, operations: {
+      openSync: ((path, flags, mode) => {
+        opens.push(String(path));
+        if (String(path) === dirname(root)) throw Object.assign(new Error('ancestor directory unsupported'), { code: 'ENOTSUP' });
+        return openSync(path, flags, mode);
+      }) as typeof openSync,
+    } })).toThrow('ancestor directory unsupported');
+    expect(opens).toContain(root); expect(opens).toContain(dirname(root));
+    expect(readFileSync(target, 'utf8')).toBe('{}');
+  });
+
 });

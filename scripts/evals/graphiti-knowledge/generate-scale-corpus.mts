@@ -39,7 +39,7 @@ function createRandom(seed: number): () => number {
 }
 
 const random = createRandom(20260807);
-const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
+const pick = <T,>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
 
 const PRODUCT_STEMS = [
   '青羽', '流岚', '磐石', '云梭', '星轨', '木樨', '澄泓', '瀚沙',

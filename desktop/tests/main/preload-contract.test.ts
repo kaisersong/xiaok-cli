@@ -1,5 +1,8 @@
+import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
+import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
+import { registerLoopPublicationIpc } from '../../electron/loop-publication-ipc.js';
 import { registerRoomWorkspaceIpc } from '../../electron/room-workspace-ipc.js';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -67,6 +70,11 @@ describe('preload API contract', () => {
       'selectDirectory',
       'selectMaterials',
       'importMaterial',
+      'prepareObservationTask',
+      'createObservationTask',
+      'stopObservationTask',
+      'revokeObservationTask',
+      'getObservationTaskStatus',
       'createTask',
       'createTaskWithFiles',
       'subscribeTask',
@@ -96,9 +104,15 @@ describe('preload API contract', () => {
       'subscribeLocalExecutionAuthorization',
       'unsubscribeLocalExecutionAuthorization',
       'getGoal',
+      'getGoalNativeMutation',
+      'recoverGoalNativeMutation',
+      'continueGoalNativeMutation',
+      'cancelGoalNativeMutation',
       'createGoal',
       'pauseGoal',
       'resumeGoal',
+      'recoverGoalPublication',
+      'continueGoalPublication',
       'cancelGoal',
       'replaceGoal',
       'ackGoalTaskAttached',
@@ -200,7 +214,11 @@ describe('preload API contract', () => {
       'openLoopOutputDirectory',
       'readLoopOutputPreview',
       'readLoopTaskResult',
+      'listLoopPublishedArtifacts',
       'getLoopRuns',
+      'getLoopPublicationConfiguration',
+      'getLoopPublicationState',
+      'performLoopPublicationAction',
       'getEvidenceAnomalies',
       'runLoopNow',
       'listLoopConstraints',
@@ -490,6 +508,14 @@ describe('preload API contract', () => {
     await api.getEvidenceAnomalies('artifact-evidence-regression');
     await api.runLoopNow('artifact-evidence-regression');
 
+    await api.getLoopPublicationConfiguration('loop');
+    await api.getLoopPublicationState('run');
+    await api.performLoopPublicationAction({kind:'inspect',runId:'run'});
+    await api.performLoopPublicationAction({kind:'reauthorizeNative',attemptId:'original',expectedRevision:7});
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:performPublicationAction',{kind:'reauthorizeNative',attemptId:'original',expectedRevision:7});
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:getPublicationConfiguration','loop');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:getPublicationState','run');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:performPublicationAction',{kind:'inspect',runId:'run'});
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listDefinitions');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listUserTemplates');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:createUserTemplate', {
@@ -511,6 +537,8 @@ describe('preload API contract', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:automations:getConfig');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:automations:setGlobalBackgroundAutoRun', { enabled: false });
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:openOutputDirectory', 'user-loop-1');
+    await api.listLoopPublishedArtifacts('user-loop-1',{offset:0,identity:null});
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listPublishedArtifacts','user-loop-1',{offset:0,identity:null});
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:readOutputPreview', 'user-loop-1');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listRuns', 'artifact-evidence-regression');
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:loops:listAnomalies', 'artifact-evidence-regression');
@@ -903,6 +931,19 @@ describe('preload API contract', () => {
     expect(Object.keys(api).sort()).toEqual([...FULL_PRELOAD_KEYS].sort());
   });
 
+  it('typed and runtime preload preserve Main-owned Goal completion observations', async () => {
+    const runtime = loadRuntimePreloadApi();
+    const typedIpc = { invoke: vi.fn(), on: vi.fn(), off: vi.fn() };
+    const typed = createPreloadApi(typedIpc, 'test-user');
+    for (const { api, ipcRenderer } of [runtime, { api: typed, ipcRenderer: typedIpc }]) {
+      const projection = { state: { goalId: 'goal', status: 'complete' }, activation: 'disarmed',
+        currentCompletion: { kind: 'protected', state: 'needs_revalidation' } };
+      ipcRenderer.invoke.mockResolvedValue(projection);
+      expect(await (api.getGoal as (id: string) => Promise<unknown>)('thread')).toEqual(projection);
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:goal:get', { threadId: 'thread' });
+    }
+  });
+
   it('runtime preload.cjs forwards K3 runtime policy updates unchanged', async () => {
     const { api, ipcRenderer } = loadRuntimePreloadApi();
     const input = {
@@ -969,6 +1010,9 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerLoopPublicationIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerLoopCurrentViewIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
+registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:ipcMain|shutdownAwareIpc)\.handle\(\s*'([^']+)'/g;

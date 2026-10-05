@@ -100,10 +100,9 @@ describe('desktop read_material tool', () => {
     const stalePath = join(dirname(record.workspacePath), `${record.materialId}.txt`);
     writeFileSync(stalePath, '旧版提取器的碎片结果', 'utf8');
     await registry.updateMaterialExtraction(record.materialId, {
-      extractedTextPath: stalePath,
       parseStatus: 'parsed',
       extractorVersion: MATERIAL_EXTRACTOR_VERSION - 1,
-    });
+    }, '旧版提取器的碎片结果');
 
     const stale = registry.get(record.materialId)!;
     const result = await executeReadMaterialForDesktop(
@@ -159,11 +158,10 @@ describe('desktop read_material tool', () => {
     const currentPath = join(dirname(record.workspacePath), `${record.materialId}.txt`);
     writeFileSync(currentPath, '当前版本缓存内容', 'utf8');
     await registry.updateMaterialExtraction(record.materialId, {
-      extractedTextPath: currentPath,
       parseStatus: 'parsed',
       extractorVersion: MATERIAL_EXTRACTOR_VERSION,
       sourceFingerprint: record.sha256,
-    });
+    }, '当前版本缓存内容');
 
     const fresh = registry.get(record.materialId)!;
     const result = await executeReadMaterialForDesktop(

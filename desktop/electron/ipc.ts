@@ -1,14 +1,17 @@
+import { parseGoalVerificationDefinition } from '../../src/runtime/goal/verification-definition.js';
+import { authorizeDesktopValidationMaterials } from './desktop-validation-materials.js';
+import { createDesktopObservationApprovals } from './desktop-observation-approval.js';
+import { parseObservationPolicyFile, describeProductObservationPolicy } from '../../src/runtime/sol-pi/product-bootstrap.js';
 import { readClipboardPathCandidates } from './clipboard-file-paths.js';
 import { app, BrowserWindow, clipboard, dialog, shell, systemPreferences, type IpcMain, type IpcMainInvokeEvent } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, open as openFile, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { MeetingTranscriber } from './meeting-service.js';
-import type { CreateUserLoopTemplateInput, UserLoopTemplate } from './loop-types.js';
-import { isSafeLoopOutputFileName } from './loop-output-paths.js';
+import type { CreateUserLoopTemplateInput } from './loop-types.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
 import type { ArtifactWorkspaceErrorCode } from '../shared/artifact-workspace-types.js';
 import { OFFICE_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
@@ -51,6 +54,7 @@ function parseGoalThreadId(value: unknown): string {
 }
 
 function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
+  verificationDefinition?: unknown;
   threadId: string;
   requestId?: string;
   objective: string;
@@ -61,7 +65,7 @@ function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('invalid_goal_input');
   const input = raw as Record<string, unknown>;
   const allowed = new Set([
-    'threadId', 'objective', 'completionCriterion', 'expectedEvidenceKinds', 'turnLimit', 'requestId',
+    'threadId', 'objective', 'completionCriterion', 'expectedEvidenceKinds', 'turnLimit', 'requestId', 'verificationDefinition',
   ]);
   const unknown = Object.keys(input).find(key => !allowed.has(key));
   if (unknown) throw new Error(`invalid_goal_field:${unknown}`);
@@ -89,6 +93,7 @@ function parseGoalInput(raw: unknown, operation: 'create' | 'replace'): {
   }
   return {
     threadId: parseGoalThreadId(input.threadId), objective,
+    ...(input.verificationDefinition === undefined ? {} : { verificationDefinition: parseGoalVerificationDefinition(input.verificationDefinition) }),
     ...(requestId === undefined ? {} : { requestId }),
     ...(completionCriterion ? { completionCriterion } : {}),
     expectedEvidenceKinds,
@@ -465,7 +470,6 @@ interface RegisterDesktopIpcOptions {
   registerLifetimeDisposer?: (dispose: () => void) => void;
 }
 
-const LOOP_OUTPUT_PREVIEW_LIMIT_BYTES = 256 * 1024;
 const MEETING_TRANSCRIBER_ALLOWED_MODELS = new Set(['tiny', 'base', 'small', 'medium', 'large', 'turbo']);
 const MEETING_SHERPA_ONNX_ALLOWED_MODELS = new Set(['sherpa-onnx-paraformer-zh-small-2024-03-09']);
 const MEETING_TRANSCRIBER_ALLOWED_ENGINES = new Set(['sherpa-onnx-paraformer', 'whisper', 'volcengine-asr', 'aliyun-asr']);
@@ -1007,6 +1011,69 @@ export async function registerDesktopIpc(
     log('info', 'importMaterial ok');
     return r;
   });
+  const observationSenders = new Map<string, {sender:IpcMainInvokeEvent['sender'];control:object}>();
+  const watchedObservationSenders = new WeakSet<object>();
+  const observationApprovals = createDesktopObservationApprovals({
+    async selectPolicy(sender) {
+      const selected = await dialog.showOpenDialog(BrowserWindow.fromWebContents(sender as IpcMainInvokeEvent['sender'])!, { properties: ['openFile'], filters: [{ name: 'Observation policy', extensions: ['json'] }] });
+      if (selected.canceled || selected.filePaths.length !== 1) return null;
+      const policy = parseObservationPolicyFile(selected.filePaths[0]); return {policy,summary:describeProductObservationPolicy(policy)};
+    },
+    async confirm(sender, summary, kind) {
+      const zh = app.getLocale().startsWith('zh');
+      const result = await dialog.showMessageBox(BrowserWindow.fromWebContents(sender as IpcMainInvokeEvent['sender'])!, {
+        type:'warning',defaultId:0,cancelId:0,buttons:zh?['取消','明确同意']:['Cancel','Explicitly agree'],
+        message:kind==='compound'
+          ? (zh?'允许本次任务试用编辑后验证的融合执行？每一步仍需通过工具权限检查；执行结果不明时将停止后续变更。':'Allow the edit-and-validate execution experiment for this task? Each step still requires tool permission; uncertain execution stops further mutations.')
+          : kind==='semantic'
+          ? (zh?'允许在所列次数和预留预算内，额外调用模型压缩本次任务的上下文？按发送前核验的价格预留，实际账单由服务商计费；实验模式可能增加费用。':'Allow extra model calls to summarize this task within the listed call and reservation budget? Reservations use verified pre-dispatch prices; the provider determines the actual bill. Experiment mode may increase costs.')
+          : kind==='persistence' ? (zh?'允许本次任务本地保存所选来源的未分类全文（包含原本被截断的尾部）？':'Allow this task to store unclassified full text from these exact sources, including truncated tails?') : (zh?'允许向以下精确模型和目的地披露这些内容并召回？':'Allow disclosure and recall of this content to this exact model and destination?'),
+        detail:JSON.stringify(summary,null,2),
+      });return result.response===1;
+    },
+  });
+  const observationSender = (event:IpcMainInvokeEvent) => {
+    if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw new Error('observation_user_sender_required');
+    if(!watchedObservationSenders.has(event.sender)) {
+      watchedObservationSenders.add(event.sender);event.sender.once('destroyed',()=>{
+        observationApprovals.destroySender(event.sender);
+        for(const [taskId,record]of observationSenders)if(record.sender===event.sender){void services.revokeObservationTask(taskId,{requestSource:'user',control:record.control}).catch(()=>{});observationSenders.delete(taskId);}
+      });
+    }return event.sender;
+  };
+  ipcMain.handle('desktop:prepareObservationTask', async(event,input) => {
+    if(input!==undefined)throw new Error('observation_input_invalid');return observationApprovals.prepare(observationSender(event));
+  });
+  ipcMain.handle('desktop:createObservationTask', async(event,raw) => {
+    const sender=observationSender(event);
+    if(!raw||typeof raw!=='object'||Object.keys(raw).some(key=>!['draftId','prompt','threadId'].includes(key))||typeof raw.draftId!=='string'||typeof raw.prompt!=='string'||!raw.prompt.trim()||raw.prompt.length>100000||raw.threadId!==undefined&&(typeof raw.threadId!=='string'||!/^[a-zA-Z0-9_-]{1,256}$/.test(raw.threadId)))throw new Error('observation_input_invalid');
+    const approval=observationApprovals.consume(sender,raw.draftId);
+    const result=await services.createObservationTask({prompt:raw.prompt,materials:[],permissionMode:'default',...(raw.threadId?{threadId:raw.threadId}:{})}, {requestSource:'user',approval,
+      authorizeValidationMaterials:async request=>{
+        if(sender.isDestroyed())throw Error('observation_sender_destroyed');
+        const window=BrowserWindow.fromWebContents(sender);if(!window||window.isDestroyed())throw Error('observation_sender_destroyed');
+        return authorizeDesktopValidationMaterials({...request,requestSource:'user',window,cwd:request.workspaceRoot});
+      },
+      onPrompt:async(tool,input)=>{
+        if(sender.isDestroyed())return false;const detail=JSON.stringify({tool,input},null,2);if(detail.length>65536)return false;
+        const zh=app.getLocale().startsWith('zh');const answer=await dialog.showMessageBox(BrowserWindow.fromWebContents(sender)!, {type:'question',defaultId:0,cancelId:0,buttons:zh?['拒绝','仅本次允许']:['Deny','Allow once'],message:zh?'确认本次工具执行？':'Approve this exact tool execution?',detail});
+        return !sender.isDestroyed()&&answer.response===1;
+      }});
+    if(sender.isDestroyed()){await services.revokeObservationTask(result.taskId,{requestSource:'user',control:result.control}).catch(()=>{});throw new Error('observation_sender_destroyed');}
+    observationSenders.set(result.taskId,{sender,control:result.control});return {taskId:result.taskId};
+  });
+  const observationControl=(action:'stop'|'revoke'|'status')=>async(event:IpcMainInvokeEvent,input:unknown)=>{
+      const value=input as {taskId:string};
+      const sender=observationSender(event);
+      if(!input||typeof input!=='object'||Object.keys(input).length!==1||typeof value.taskId!=='string'||(action!=='status'&&observationSenders.get(value.taskId)?.sender!==sender))throw new Error('observation_task_owner_required');
+      if(action==='stop')services.stopObservationTask(value.taskId,{requestSource:'user',control:observationSenders.get(value.taskId)!.control});
+      if(action==='revoke')await services.revokeObservationTask(value.taskId,{requestSource:'user',control:observationSenders.get(value.taskId)!.control});
+      const diagnostics=services.observationTaskDiagnostics?.(value.taskId),semantic=diagnostics?.semantic,compound=diagnostics?.compound;
+      return {mode:await services.observationTaskStatus(value.taskId),...(semantic?{semantic}:{}),...(compound?{compound}:{})};
+  };
+  ipcMain.handle('desktop:stopObservationTask',observationControl('stop'));
+  ipcMain.handle('desktop:revokeObservationTask',observationControl('revoke'));
+  ipcMain.handle('desktop:getObservationTaskStatus',observationControl('status'));
   ipcMain.handle('desktop:createTask', async (_event, input) => {
     log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
     const r = await services.createTask(sanitizeTaskCreateInput(input), options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
@@ -1037,6 +1104,21 @@ export async function registerDesktopIpc(
       ...(turnLimit === undefined ? {} : { turnLimit }),
     });
   });
+  const parseGoalPublicationInput = (input: unknown) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw Error('invalid_goal_publication_input');
+    if (Object.keys(input).some(key => key !== 'threadId')) throw Error('invalid_goal_publication_field');
+    return { threadId: parseGoalThreadId((input as { threadId?: unknown }).threadId), requestSource: 'user' as const };
+  };
+  ipcMain.handle('desktop:goal:getNativeMutation', async (_event, input) => services.getGoalNativeMutation(parseGoalPublicationInput(input).threadId));
+  ipcMain.handle('desktop:goal:recoverNativeMutation', async (_event, input) => services.recoverGoalNativeMutation(parseGoalPublicationInput(input)));
+  ipcMain.handle('desktop:goal:cancelNativeMutation', async (_event, input) => services.cancelGoalNativeMutation(parseGoalPublicationInput(input)));
+  ipcMain.handle('desktop:goal:continueNativeMutation', async (_event, input) => {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['threadId','requestId'].includes(key))) throw Error('invalid_goal_native_input');
+    const requestId = parseGoalRequestId(input.requestId);
+    return services.continueGoalNativeMutation({ threadId: parseGoalThreadId(input.threadId), requestSource: 'user', ...(requestId === undefined ? {} : { requestId }) });
+  });
+  ipcMain.handle('desktop:goal:recoverPublication', async (_event, input) => services.recoverGoalPublication(parseGoalPublicationInput(input)));
+  ipcMain.handle('desktop:goal:continuePublication', async (_event, input) => services.continueGoalPublication(parseGoalPublicationInput(input)));
   ipcMain.handle('desktop:goal:cancel', async (_event, input) => (
     services.cancelGoal(parseGoalThreadId(input?.threadId))
   ));
@@ -1323,25 +1405,6 @@ export async function registerDesktopIpc(
       throw e;
     }
   });
-  ipcMain.handle('desktop:loops:openOutputDirectory', async (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    const id = readLoopId(loopId);
-    return openLoopOutputDirectory(id, loopRuntime.loopStore.getUserLoopTemplate(id));
-  });
-  ipcMain.handle('desktop:loops:readOutputPreview', async (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    const id = readLoopId(loopId);
-    return readLoopOutputPreview(id, loopRuntime.loopStore.getUserLoopTemplate(id));
-  });
-  ipcMain.handle('desktop:loops:readTaskResult', async (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    const id = readLoopId(loopId);
-    return readLoopTaskResult(id, loopRuntime, services);
-  });
-  ipcMain.handle('desktop:loops:listRuns', (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.listLoopRuns(readLoopId(loopId), 20);
-  });
   ipcMain.handle('desktop:loops:listAnomalies', (_event, loopId) => {
     const loopRuntime = getLoopRuntime(options);
     return loopRuntime.listAnomalies(readLoopId(loopId));
@@ -1350,7 +1413,7 @@ export async function registerDesktopIpc(
     log('info', 'loops:runNow', { loopId });
     try {
       const loopRuntime = getLoopRuntime(options);
-      const result = await loopRuntime.runner.runLoopNow(readLoopId(loopId));
+      const result = await loopRuntime.runner.runLoopNow(readLoopId(loopId),undefined,undefined,{requestSource:'user'});
       log('info', 'loops:runNow result', { loopId, status: result.status });
       return result;
     } catch (e) {
@@ -2167,190 +2230,6 @@ function readLoopId(input: unknown): string {
   return input;
 }
 
-async function openLoopOutputDirectory(loopId: string, template: UserLoopTemplate | undefined): Promise<Record<string, unknown>> {
-  const target = resolveUserLoopOutputTarget(loopId, template);
-  if (!target.ok) return target;
-  try {
-    await mkdir(target.outputDirectory, { recursive: true });
-    const error = await shell.openPath(target.outputDirectory);
-    if (error) {
-      return { ok: false, loopId, error: 'open_output_directory_failed', message: error, pathLabel: target.outputDirectory };
-    }
-    return { ok: true, loopId, pathLabel: target.outputDirectory };
-  } catch (error) {
-    return {
-      ok: false,
-      loopId,
-      error: 'open_output_directory_failed',
-      message: error instanceof Error ? error.message : String(error),
-      pathLabel: target.outputDirectory,
-    };
-  }
-}
-
-async function readLoopOutputPreview(loopId: string, template: UserLoopTemplate | undefined): Promise<Record<string, unknown>> {
-  const target = resolveUserLoopOutputTarget(loopId, template);
-  if (!target.ok) return target;
-  try {
-    const symlinkCheck = await lstat(target.outputPath);
-    if (symlinkCheck.isSymbolicLink()) {
-      return { ok: false, loopId, error: 'output_file_symlink', pathLabel: target.outputPath };
-    }
-    if (!symlinkCheck.isFile()) {
-      return { ok: false, loopId, error: 'output_not_file', pathLabel: target.outputPath };
-    }
-    if (symlinkCheck.size > LOOP_OUTPUT_PREVIEW_LIMIT_BYTES) {
-      return {
-        ok: false,
-        loopId,
-        error: 'output_file_too_large',
-        pathLabel: target.outputPath,
-        sizeBytes: symlinkCheck.size,
-        limitBytes: LOOP_OUTPUT_PREVIEW_LIMIT_BYTES,
-      };
-    }
-
-    const file = await openFile(target.outputPath, 'r');
-    try {
-      const fileStat = await file.stat();
-      if (!fileStat.isFile()) {
-        return { ok: false, loopId, error: 'output_not_file', pathLabel: target.outputPath };
-      }
-      if (fileStat.size > LOOP_OUTPUT_PREVIEW_LIMIT_BYTES) {
-        return {
-          ok: false,
-          loopId,
-          error: 'output_file_too_large',
-          pathLabel: target.outputPath,
-          sizeBytes: fileStat.size,
-          limitBytes: LOOP_OUTPUT_PREVIEW_LIMIT_BYTES,
-        };
-      }
-      const buffer = Buffer.alloc(fileStat.size);
-      if (fileStat.size > 0) {
-        await file.read(buffer, 0, fileStat.size, 0);
-      }
-      if (looksBinary(buffer)) {
-        return { ok: false, loopId, error: 'output_file_binary', pathLabel: target.outputPath, sizeBytes: fileStat.size };
-      }
-      return {
-        ok: true,
-        loopId,
-        pathLabel: target.outputPath,
-        content: buffer.toString('utf8'),
-        sizeBytes: fileStat.size,
-        truncated: false,
-      };
-    } finally {
-      await file.close();
-    }
-  } catch (error) {
-    const code = isRecord(error) && typeof error.code === 'string' ? error.code : '';
-    if (code === 'ENOENT') {
-      return { ok: false, loopId, error: 'missing_output_file', pathLabel: target.outputPath };
-    }
-    return {
-      ok: false,
-      loopId,
-      error: 'read_output_preview_failed',
-      message: error instanceof Error ? error.message : String(error),
-      pathLabel: target.outputPath,
-    };
-  }
-}
-
-async function readLoopTaskResult(
-  loopId: string,
-  loopRuntime: NonNullable<RegisterDesktopIpcOptions['loopRuntime']>,
-  services: DesktopServices,
-): Promise<Record<string, unknown>> {
-  const latestRun = loopRuntime.loopStore.listLoopRuns(loopId, 1)[0];
-  if (!latestRun) return { ok: false, loopId, error: 'missing_loop_run' };
-  const evidence = loopRuntime.evidenceStore
-    .listEvidenceForOwner('loop_run', latestRun.id)
-    .filter(record => latestRun.evidenceIds.includes(record.id));
-  const taskId = evidence.map(record => readTaskIdFromMetadata(record.metadata)).find(Boolean);
-  if (!taskId) {
-    const fallback = evidence.find(record => record.summary.trim().length > 0)?.summary.trim();
-    if (fallback) return { ok: true, loopId, runId: latestRun.id, content: fallback };
-    return { ok: false, loopId, runId: latestRun.id, error: 'missing_task_result_evidence' };
-  }
-
-  try {
-    const snapshot = (await services.recoverTask(taskId)).snapshot;
-    const content = readTaskSnapshotResultSummary(snapshot);
-    if (!content) {
-      const fallback = evidence.find(record => record.summary.trim().length > 0)?.summary.trim();
-      if (fallback) return { ok: true, loopId, runId: latestRun.id, taskId, content: fallback };
-      return { ok: false, loopId, runId: latestRun.id, taskId, error: 'missing_task_result_content' };
-    }
-    return { ok: true, loopId, runId: latestRun.id, taskId, content };
-  } catch (error) {
-    const code = isRecord(error) && typeof error.code === 'string' ? error.code : '';
-    return {
-      ok: false,
-      loopId,
-      runId: latestRun.id,
-      taskId,
-      error: code === 'ENOENT' ? 'missing_task_snapshot' : 'read_task_result_failed',
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-function readTaskIdFromMetadata(metadata: Record<string, unknown>): string | undefined {
-  const raw = typeof metadata.taskId === 'string'
-    ? metadata.taskId
-    : typeof metadata.responseId === 'string'
-      ? metadata.responseId
-      : '';
-  const taskId = raw.trim();
-  return /^[A-Za-z0-9_-]+$/.test(taskId) ? taskId : undefined;
-}
-
-function readTaskSnapshotResultSummary(snapshot: unknown): string | undefined {
-  if (!isRecord(snapshot) || !isRecord(snapshot.result)) return undefined;
-  const summary = snapshot.result.summary;
-  return typeof summary === 'string' && summary.trim().length > 0 ? summary : undefined;
-}
-
-function resolveUserLoopOutputTarget(
-  loopId: string,
-  template: UserLoopTemplate | undefined,
-): { ok: true; outputDirectory: string; outputPath: string } | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string } {
-  if (!template) return { ok: false, loopId, error: 'loop_not_found' };
-  if (!isAbsolute(template.outputDirectory)) {
-    return {
-      ok: false,
-      loopId,
-      error: 'output_directory_relative_legacy',
-      pathLabel: template.outputDirectory,
-    };
-  }
-  if (!isSafeLoopOutputFileName(template.outputFileName)) {
-    return {
-      ok: false,
-      loopId,
-      error: 'output_file_name_invalid',
-      pathLabel: template.outputFileName,
-    };
-  }
-  const outputDirectory = resolve(template.outputDirectory);
-  const outputPath = resolve(outputDirectory, template.outputFileName);
-  if (dirname(outputPath) !== outputDirectory) {
-    return {
-      ok: false,
-      loopId,
-      error: 'output_file_escapes_directory',
-      pathLabel: outputPath,
-    };
-  }
-  return { ok: true, outputDirectory, outputPath };
-}
-
-function looksBinary(buffer: Buffer): boolean {
-  return buffer.includes(0);
-}
 
 function readCreateUserLoopTemplateInput(input: unknown): CreateUserLoopTemplateInput {
   if (!isRecord(input)) {

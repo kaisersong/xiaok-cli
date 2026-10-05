@@ -24,6 +24,8 @@ export interface ActiveIntentContext {
 }
 
 export interface CreateIntentPlanInput {
+  /** Fixed product host identity, allocated before construction; never an approval. */
+  newIntentId?: string;
   instanceId: string;
   sessionId: string;
   input: string;
@@ -97,6 +99,8 @@ const INFORMATIONAL_QUERY_PATTERNS = [
 ];
 
 export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerResult {
+  const identity = Object.getOwnPropertyDescriptor(input, 'newIntentId');
+  if (identity && (!('value' in identity) || typeof identity.value !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(identity.value))) throw Error('intent_planner_identity');
   const rawIntent = input.input.trim();
   if (isControlCommand(rawIntent)) {
     return { kind: 'non_intent', reason: 'control_command' };
@@ -132,7 +136,7 @@ export function createIntentPlan(input: CreateIntentPlanInput): IntentPlannerRes
     return { kind: 'non_intent', reason: 'non_substantial' };
   }
 
-  const intentId = buildStableId('intent', normalizedIntent, input.sessionId);
+  const intentId = continuationMode === 'new_intent' && identity ? identity.value as string : buildStableId('intent', normalizedIntent, input.sessionId);
   const instancePlanId = buildStableId('plan', normalizedIntent, input.instanceId);
   const riskTier = deriveRiskTier(topLevelIntentType, continuationMode, extracted.intentMode);
   const stages = buildStages({

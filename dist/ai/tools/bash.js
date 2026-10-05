@@ -1,6 +1,9 @@
+import { measureCollector, observationMetricsEnabled } from '../../runtime/trace/observation-metrics.js';
 import { spawn } from 'child_process';
 import { truncateText } from './truncation.js';
 import { classifyBashCommand } from './bash-safety.js';
+import { StringDecoder } from 'node:string_decoder';
+import { beginToolObservation } from '../../runtime/sol-pi/collector-port.js';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const WINDOWS_ELEVATION_OUTPUT_PATTERNS = [
     /需要管理员权限/i,
@@ -69,10 +72,21 @@ export const bashTool = {
         const { command, timeout_ms = DEFAULT_TIMEOUT_MS, workdir = process.cwd(), max_chars = 12_000 } = input;
         const risk = classifyBashCommand(command);
         if (risk.level === 'block') {
+            await context?.compoundPhase?.rejected?.({ toolName: 'bash', reason: 'risk_policy' });
             return `Error: 命令被安全策略拦截: ${risk.reason}`;
         }
-        if (/\bsudo\b/.test(command))
+        if (/\bsudo\b/.test(command)) {
+            await context?.compoundPhase?.rejected?.({ toolName: 'bash', reason: 'interactive_sudo' });
             return 'Error: sudo 需要主 CLI 的本地交互终端；请交由主会话执行，或在终端使用 !sudo 命令。';
+        }
+        await context?.compoundPhase?.beforeCommandStart?.({ command, workdir });
+        context?.signal?.throwIfAborted();
+        context?.assertPermissionApproval?.();
+        if (context?.compoundPhase) {
+            if (!context.compoundPhase.executeIsolatedCommand)
+                throw Error('compound_isolated_execution_required');
+            return context.compoundPhase.executeIsolatedCommand(Object.freeze({ command, workdir, timeoutMs: timeout_ms, maxChars: max_chars }), () => { context.signal?.throwIfAborted(); context.assertPermissionApproval?.(); });
+        }
         return new Promise((resolve, reject) => {
             const shell = process.platform === 'win32' ? 'cmd' : 'sh';
             // cmd consumes shell text, not CRT-escaped argv. /s strips only our outer quotes.
@@ -83,9 +97,18 @@ export const bashTool = {
                 // Piped stdio alone still lets PowerShell mutate the parent console.
                 windowsHide: true,
             });
+            const observation = beginToolObservation(context?.observationCollector, {
+                toolName: 'bash', source: { command, workdir },
+            });
+            const decoders = { stdout: new StringDecoder('utf8'), stderr: new StringDecoder('utf8') };
+            const collectMetrics = observationMetricsEnabled();
+            const collectionStarted = collectMetrics ? performance.now() : 0;
+            let collectedBytes = 0;
+            let collectedChunks = 0;
             let settled = false;
             let aborted = false;
             let terminationResult;
+            let terminationKind;
             const onAbort = () => {
                 if (settled || aborted)
                     return;
@@ -93,32 +116,57 @@ export const bashTool = {
                 terminateChildProcessTree(child);
             };
             let timer;
-            const finish = (result, exitCode) => {
+            const finish = (result, exitCode, terminalExited = false) => {
                 if (settled) {
                     return;
                 }
                 settled = true;
+                observation.append(decoders.stdout.end());
+                observation.append(decoders.stderr.end());
+                observation.finalize({ executionState: terminalExited ? 'terminal' : 'termination_pending',
+                    ...(terminalExited ? { outcome: aborted ? 'cancelled' : terminationKind ?? (exitCode === 0 ? 'success' : 'error') } : {}),
+                    ...(aborted ? { incompleteReason: 'cancelled' } : terminationKind ? { incompleteReason: terminationKind === 'timeout' ? 'timeout' : 'terminated_for_elevation' }
+                        : !terminalExited ? { incompleteReason: 'termination_unconfirmed' } : {}),
+                });
+                if (collectMetrics)
+                    measureCollector({ invocationId: context?.toolInvocationId, bytes: collectedBytes, chunks: collectedChunks,
+                        durationMs: performance.now() - collectionStarted, terminalExited, interrupted: aborted || terminationResult !== undefined });
                 context?.signal?.removeEventListener('abort', onAbort);
                 if (timer) {
                     clearTimeout(timer);
                 }
-                if (aborted) {
-                    reject(context?.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
-                    return;
+                const complete = () => {
+                    if (aborted) {
+                        reject(context?.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+                        return;
+                    }
+                    if (context?.toolInvocationId) {
+                        context.runtimeFactSink?.emit({
+                            invocationId: context.toolInvocationId,
+                            toolName: 'bash',
+                            factKind: 'command_result',
+                            exitCode,
+                        });
+                    }
+                    resolve(result);
+                };
+                if (context?.compoundPhase?.commandFinished) {
+                    void Promise.resolve().then(() => context.compoundPhase.commandFinished({ exitCode: exitCode ?? null, terminalExited,
+                        outcome: aborted ? 'cancelled' : terminationKind === 'timeout' ? 'timeout' : exitCode === 0 ? 'success' : 'error', pid: child.pid ?? null,
+                    })).then(complete, reject);
                 }
-                if (context?.toolInvocationId) {
-                    context.runtimeFactSink?.emit({
-                        invocationId: context.toolInvocationId,
-                        toolName: 'bash',
-                        factKind: 'command_result',
-                        exitCode,
-                    });
-                }
-                resolve(result);
+                else
+                    complete();
             };
             let stdout = '';
             let stderr = '';
             const handleOutput = (stream, data) => {
+                if (!settled)
+                    observation.append(decoders[stream].write(data));
+                if (collectMetrics) {
+                    collectedBytes += data.byteLength;
+                    collectedChunks++;
+                }
                 context?.executionProgress?.progress();
                 if (aborted || settled || terminationResult)
                     return;
@@ -131,6 +179,7 @@ export const bashTool = {
                 }
                 const output = `${stdout}\n${stderr}`;
                 if (process.platform === 'win32' && outputRequestsWindowsElevation(output)) {
+                    terminationKind = 'error';
                     terminationResult = truncateText(`Error: 命令需要管理员权限，已停止等待。请在管理员 PowerShell 中手动运行该命令。\n${output}`, max_chars).text;
                     terminateChildProcessTree(child);
                 }
@@ -140,12 +189,13 @@ export const bashTool = {
             timer = setTimeout(() => {
                 if (aborted || terminationResult)
                     return;
+                terminationKind = 'timeout';
                 terminationResult = truncateText(`Error: 命令超时（>${timeout_ms}ms）\n${stdout}${stderr}`, max_chars).text;
                 terminateChildProcessTree(child);
             }, timeout_ms);
             child.on('close', code => {
                 if (terminationResult) {
-                    finish(terminationResult, null);
+                    finish(terminationResult, null, true);
                     return;
                 }
                 if (settled) {
@@ -153,10 +203,10 @@ export const bashTool = {
                 }
                 const output = [stdout, stderr].filter(Boolean).join('\n').trim();
                 if (code !== 0) {
-                    finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text, code);
+                    finish(truncateText(`Error (exit ${code}): ${output || '（无输出）'}`, max_chars).text, code, true);
                 }
                 else {
-                    finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text, 0);
+                    finish(truncateText(output || '（命令执行成功，无输出）', max_chars).text, 0, true);
                 }
             });
             child.on('error', (error) => {

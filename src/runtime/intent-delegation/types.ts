@@ -52,6 +52,9 @@ export interface IntentSalvage {
 }
 
 export interface SessionIntentLedger {
+  verificationExecutions?: import('./verification-execution-journal.js').IntentVerificationExecution[];
+  publicationCandidates?: import('./publication-candidate-journal.js').IntentPublicationCandidate[];
+  nativeContracts?: import('./native-contract-journal.js').IntentNativeContractRecord[];
   instanceId?: string;
   sessionId: string;
   activeIntentId?: string;
@@ -153,6 +156,7 @@ export function cloneIntentRecord(record: IntentLedgerRecord): IntentLedgerRecor
   const activeStageId = record.activeStageId ?? stages[0]?.stageId ?? `${record.intentId}:stage:1`;
   return {
     ...record,
+    executionTerminals: record.executionTerminals?.map(terminal=>({...terminal})),
     providedSourcePaths: [...(record.providedSourcePaths ?? [])],
     explicitConstraints: [...record.explicitConstraints],
     delegationBoundary: [...record.delegationBoundary],
@@ -170,6 +174,9 @@ export function cloneIntentRecord(record: IntentLedgerRecord): IntentLedgerRecor
 export function cloneSessionIntentLedger(ledger: SessionIntentLedger): SessionIntentLedger {
   return {
     ...ledger,
+    ...(ledger.verificationExecutions===undefined?{}:{verificationExecutions:structuredClone(ledger.verificationExecutions)}),
+    ...(ledger.publicationCandidates===undefined?{}:{publicationCandidates:structuredClone(ledger.publicationCandidates)}),
+    ...(ledger.nativeContracts===undefined?{}:{nativeContracts:structuredClone(ledger.nativeContracts)}),
     latestPlan: ledger.latestPlan ? cloneIntentRecord(ledger.latestPlan) : null,
     intents: ledger.intents.map(cloneIntentRecord),
     breadcrumbs: ledger.breadcrumbs.map((entry) => ({ ...entry })),

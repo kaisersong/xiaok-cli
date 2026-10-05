@@ -1,3 +1,6 @@
+import { validateSemanticCompactionLedger, mergeSemanticCompactionLedgers, type SemanticCompactionLedger } from '../../runtime/sol-pi/semantic-compaction-ledger.js';
+import { validateCompoundOperationLedger, mergeCompoundOperationLedgers, type CompoundOperationLedger } from '../../runtime/sol-pi/compound-operation.js';
+import { mergeProtectedObservationClosures, type ProtectedObservationClosure, type ProtectedObservationReference } from './protected-observation-closure.js';
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
 
 export interface CompactionRecord {
@@ -8,6 +11,12 @@ export interface CompactionRecord {
 }
 
 export interface SessionGraphSnapshot {
+  compoundOperations?: CompoundOperationLedger;
+  semanticCompaction?: SemanticCompactionLedger;
+  storeRevision?: number;
+  historyDigest?: string;
+  executionProtected?: true;
+  protectedObservationClosure?: ProtectedObservationClosure;
   sessionId: string;
   cwd: string;
   createdAt: number;
@@ -32,6 +41,9 @@ export class AgentSessionGraph {
   ) {
     this.snapshot = {
       ...snapshot,
+      compoundOperations: snapshot.compoundOperations === undefined ? undefined : validateCompoundOperationLedger(snapshot.compoundOperations),
+      semanticCompaction: snapshot.semanticCompaction === undefined ? undefined : validateSemanticCompactionLedger(snapshot.semanticCompaction),
+      protectedObservationClosure: mergeProtectedObservationClosures(undefined, snapshot.protectedObservationClosure),
       messages: snapshot.messages ?? [],
       usage: snapshot.usage ?? { inputTokens: 0, outputTokens: 0 },
       compactions: snapshot.compactions ?? [],
@@ -39,6 +51,15 @@ export class AgentSessionGraph {
       approvalRefs: snapshot.approvalRefs ?? [],
       backgroundJobRefs: snapshot.backgroundJobRefs ?? [],
     };
+  }
+
+  addProtectedObservationReferences(observations: ProtectedObservationReference[]): void {
+    this.snapshot.protectedObservationClosure = mergeProtectedObservationClosures(this.snapshot.protectedObservationClosure, { version: 1, requiresReauthorization: true, observations });
+    this.touch();
+  }
+
+  getProtectedObservationClosure(): ProtectedObservationClosure | undefined {
+    return mergeProtectedObservationClosures(undefined, this.snapshot.protectedObservationClosure);
   }
 
   getMessages(): Message[] {
@@ -141,9 +162,24 @@ export class AgentSessionGraph {
     return structuredClone(this.snapshot);
   }
 
+  /** Durable writer receipt only; message revision and live queued input remain owned here. */
+  updatePersistenceFacts(snapshot: SessionGraphSnapshot): void {
+    const compoundOperations = mergeCompoundOperationLedgers(this.snapshot.compoundOperations, snapshot.compoundOperations);
+    const semanticCompaction = mergeSemanticCompactionLedgers(this.snapshot.semanticCompaction, snapshot.semanticCompaction);
+    this.snapshot.compoundOperations = compoundOperations;
+    this.snapshot.semanticCompaction = semanticCompaction;
+    this.snapshot.storeRevision = snapshot.storeRevision;
+    this.snapshot.historyDigest = snapshot.historyDigest;
+    if (snapshot.executionProtected) this.snapshot.executionProtected = true;
+  }
+
   restoreSnapshot(snapshot: SessionGraphSnapshot): void {
+    const protectedObservationClosure = mergeProtectedObservationClosures(this.snapshot.protectedObservationClosure, snapshot.protectedObservationClosure);
     this.snapshot = {
       ...structuredClone(snapshot),
+      compoundOperations: mergeCompoundOperationLedgers(this.snapshot.compoundOperations, snapshot.compoundOperations),
+      semanticCompaction: mergeSemanticCompactionLedgers(this.snapshot.semanticCompaction, snapshot.semanticCompaction),
+      protectedObservationClosure,
       memoryRefs: snapshot.memoryRefs ?? [],
       approvalRefs: snapshot.approvalRefs ?? [],
       backgroundJobRefs: snapshot.backgroundJobRefs ?? [],

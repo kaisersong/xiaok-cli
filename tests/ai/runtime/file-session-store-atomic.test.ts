@@ -31,6 +31,19 @@ function snapshot(sessionId: string, updatedAt: number): PersistedSessionSnapsho
 }
 
 describe('FileSessionStore atomic persistence', () => {
+  it.each(['snapshot', 'pointer'])('rejects an asynchronous atomic writer at the %s barrier', async target => {
+    const root = mkdtempSync(join(tmpdir(), 'xiaok-session-async-')); roots.push(root);
+    const { writeFileAtomicallySync } = await import('../../../src/utils/atomic-file.js');
+    const store = new FileSessionStore(root, (path, text, options) => {
+      if ((target === 'pointer') === path.endsWith('last_session')) return Promise.reject(new Error('async write rejected'));
+      writeFileAtomicallySync(path, text, options);
+    });
+    const saved = snapshot('sess_async', 100);
+    saved.protectedObservationClosure = { version: 1, requiresReauthorization: true, observations: [{ authorityId: '00000000-0000-4000-8000-000000000000', profileId: 'p', sourceSessionId: saved.sessionId,
+      ownerAgentId: 'owner', scopeId: 'scope', permissionGeneration: 1, observationId: 'observation', contentHash: 'a'.repeat(64), revision: 1, policyId: 'p', policyRevision: 1 }] };
+    await expect(store.save(saved)).rejects.toThrow('session_atomic_write_must_be_synchronous');
+    await new Promise(resolve => setImmediate(resolve));
+  });
   it('keeps a valid pointer authoritative over a newer unrelated snapshot', async () => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-session-atomic-'));
     roots.push(root);

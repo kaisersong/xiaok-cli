@@ -1,8 +1,11 @@
+import {loopPublicationZh} from './loop-publication';
 import type { LocaleStrings } from "./index";
 import { roomWorkspaceZh } from './room-workspace';
 import { subAgentAlias, SUBAGENT_NAMES } from '../lib/subagent-presentation';
 
 export const zh: LocaleStrings = {
+  loopPublication: loopPublicationZh,
+  observation: {compoundExperiment:'本次已启用融合执行实验；编辑和验证结果分别记录。',compoundStep:{not_started:'未开始',pending:'进行中',denied:'未获批准',succeeded:'已成功',failed:'失败',cancelled:'已取消',unknown:'结果未知'},compoundEdit:(status:string)=>`编辑：${status}`,compoundValidation:(status:string)=>`验证：${status}`,compoundUnknown:(count:number)=>`有 ${count} 项操作结果未知，需要确认执行状态。`,semanticState:{waiting:'等待已确认的子任务边界',compacted:'历史已压缩，原始要求和执行事实已保留',skipped:'本次未执行历史压缩',failed:'历史压缩未完成'},semanticReason:{economics:'本次预计节约不足以覆盖额外成本。',changed:'对话内容已变化，旧摘要不再适用。','no-gain':'新历史没有达到缩减要求。',budget:'摘要预算不足。',unavailable:'当前条件不满足，请检查任务记录。'},semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>`摘要调用 ${attempts}/${maximum}；按发送前核验价格预留 $${reserved} / $${budget}（USD，并非实际账单）`,semanticExperiment:'本次为显式压缩实验，额外摘要调用可能增加费用。',enable:'为本次任务启用观测记忆',ready:'本次任务已授权：仅原生工具，不继承旧任务材料。请发送任务。',cancel:'取消本次启用',stop:'停止新采集',revoke:'撤销披露并停止任务',active:'本次任务：deepseek-flash，观测记忆已启用',recallOnly:'已停止新采集，原有授权仍可召回',revokedStopping:'披露授权已撤销；任务正在停止',revoked:'披露授权已撤销',unavailable:'此任务未启用观测记忆',closed:'任务已结束；保护历史恢复尚不可用',failed:'操作未完成，请检查授权期限、模型与本机环境。',filesUnsupported:'已启用任务请使用授权文件中的精确来源，不另附材料。'},
   diffView: { showFull: '展开完整差异' },
   roomWorkspace: roomWorkspaceZh,
   executionHealth: {running:'执行中',waiting:'等待确认后继续',recovering:'连接恢复中',cleanup_pending:'已请求停止，等待实际执行退出并清理资源'},
@@ -43,7 +46,7 @@ export const zh: LocaleStrings = {
     savedContentTruncated: byteLength => `仅保留前 ${byteLength} 字节（保存上限 2MiB），原结果其余部分未保存。`,
     contentSegmented: '已保存内容分段显示，内容未改动。查找和选择仅限当前段。', contentSegment: (current, total) => `第 ${current} / ${total} 段`,
     previousContentSegment: '上一段', nextContentSegment: '下一段',
-    checkOperation: '查询操作状态', userSender: '用户', moreGroups: '更早的执行组',
+    checkOperation: '查询操作状态', userSender: '用户', finalContentUnavailable: '任务已结束，最终内容未能持久化，暂不可读取。', moreGroups: '更早的执行组',
     resources: '工作树与清理状态', resourcesEmpty: '没有登记的工作树', moreResources: '下一页资源', keepResource: '保留工作树并解除关联', retryCleanup: '重试清理',
     resourceConfirmation: '确认资源处置', confirmKeep: '确认保留', keepExplanation: '保留此目录和成果，并解除执行组的清理责任。这不代表工具启动的外部作业已经停止。',
     newGroup: '新建执行组', confirmReset: '确认新建执行组', resetExplanation: '将终止旧组内的主任务和子任务。只有资源真正释放或确认保留后，才会创建新组。历史记录会保留。',
@@ -1414,6 +1417,15 @@ export const zh: LocaleStrings = {
     userLoopOutputDirectoryLabel: "输出目录",
     userLoopOutputFileNameLabel: "输出文件名",
     userLoopOutputPath: "输出文件",
+    userLoopArtifactsOpen: '查看已验证产物',
+    userLoopArtifactsLoading: '正在核验产物…',
+    userLoopArtifactsUnavailable: '暂时无法核验产物，请刷新后重试。',
+    userLoopArtifactsEmpty: '本次发布没有声明产物。',
+    userLoopArtifactsPrevious: '上一页',
+    userLoopArtifactsNext: '下一页',
+    userLoopArtifactsPage: (first,last,total)=>`第 ${first}–${last} 项，共 ${total} 项`,
+    userLoopArtifactBytes: size=>`${size.toLocaleString()} 字节`,
+    userLoopWorkspaceNavigationHint: '打开的是可修改的工作目录；已验证内容请查看预览。',
     userLoopOpenOutputDirectory: "打开输出目录",
     userLoopPreviewOutputFile: "预览输出文件",
     userLoopViewTaskResult: "查看结果",
@@ -1432,6 +1444,9 @@ export const zh: LocaleStrings = {
     loopDiagnosticsDesc: "查看内置 Loop 的最近运行、异常和手动触发状态。",
     loopDiagnosticsRefresh: "刷新",
     loopDiagnosticsRunNow: "立即运行",
+    loopDiagnosticsCopyLabels: {"loop": "循环", "status": "循环状态", "history": "历史执行状态", "observation": "本次核验观察", "finishedAt": "历史执行时间", "openAnomalies": "未处理异常", "owner": "归属", "seen": "出现次数", "suggestedAction": "建议操作", "logs": "日志", "none": "无"},
+    loopDiagnosticsVerifiedAt: (time: string) => `于 ${time} 核验通过`,
+    loopDiagnosticsPublicationPending: "等待验证发布",
     loopDiagnosticsRunning: "运行中",
     loopDiagnosticsAlreadyRunning: "已有运行中",
     loopDiagnosticsLastRun: "最近运行",
@@ -3095,6 +3110,22 @@ export const zh: LocaleStrings = {
   },
 
   goalBar: {
+    verificationDefinition: "原始验收定义（JSON）",
+    verificationDefinitionHelp: "受保护目标须提供预先确定的验收定义；替换时须保留全部原验收项。",
+    verificationDefinitionInvalid: "验收定义不是有效的 JSON",
+    nativePending: "目标变更尚未生效",
+    recoverNative: "恢复批准结果",
+    continueNative: "继续目标变更",
+    cancelNative: "取消本次变更",
+    nativeRetired: "本次变更已停止，可重新提交。",
+
+    statusVerificationUnavailable: "当前验证不可查询",
+    statusNeedsRevalidation: "需要重新验证",
+    statusPublicationPending: "等待完成结果发布",
+    statusBindingPending: "等待目标绑定完成",
+    statusBindingRequired: "目标尚未授权",
+    statusBindingMismatch: "目标绑定已变化",
+    statusVerifiedComplete: "已验证完成",
     createGoal: "创建目标",
     goal: "目标",
     completionCriterion: "完成条件",
@@ -3107,6 +3138,8 @@ export const zh: LocaleStrings = {
     confirmCreate: "确认创建",
     close: "收起",
     pause: "暂停",
+    recoverPublication: "查询发布结果",
+    continuePublication: "继续完成确认",
     resume: "恢复",
     retry: "重试",
     cancelGoal: "取消目标",

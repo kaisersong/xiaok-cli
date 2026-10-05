@@ -67,6 +67,8 @@ export type HookConfig = CommandHookConfig | HttpHookConfig | PromptHookConfig;
 export type HookConfigOrCommand = HookConfig | string;
 export interface HooksRunnerConfig {
     hooks?: HookConfigOrCommand[];
+    /** Bound by the lifecycle host; checked after original work drains. No tool admission. */
+    finalHookAdmission?: () => Record<string, unknown> | undefined | Promise<Record<string, unknown> | undefined>;
     /** Backward-compat: plain pre-hook commands */
     pre?: Array<{
         command: string;
@@ -101,6 +103,8 @@ export interface HookRunResult {
     async?: boolean;
 }
 export interface HooksRunner {
+    /** Seal admission and drain original transports, preserving unknown failures. */
+    closeAndDrain(): Promise<void>;
     /** Run hooks registered for a specific event. */
     runHooks(eventName: HookEventName, payload: Record<string, unknown>): Promise<HookRunResult>;
     /** Convenience: run PreToolUse hooks */
@@ -108,4 +112,7 @@ export interface HooksRunner {
     /** Convenience: run PostToolUse hooks */
     runPostHooks(toolName: string, input: Record<string, unknown>): Promise<string[]>;
 }
+/** Host factory fact, never a plugin-provided declaration. Callers may omit this
+ * genuinely empty runner entirely; this does not qualify any executable hook. */
+export declare function isEmptyConfiguredHooksRunner(runner: HooksRunner): boolean;
 export declare function createHooksRunner(config?: HooksRunnerConfig): HooksRunner;

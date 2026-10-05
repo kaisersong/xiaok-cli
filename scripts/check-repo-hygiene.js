@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { dirname } from 'node:path';
-import { realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { realpathSync, existsSync } from 'node:fs';
 
 const NOISE_PREFIXES = [
   '.DS_Store',
@@ -44,6 +44,8 @@ export function evaluateRepoHealth({
   behind,
   entries,
   globalXiaokTarget,
+  defaultBranch = 'master',
+  reference = 'origin/master',
 }) {
   const issues = [];
   const warnings = [];
@@ -55,18 +57,18 @@ export function evaluateRepoHealth({
     .filter((entry) => entry.code === '??' && !isNoisePath(entry.path))
     .map((entry) => entry.path);
 
-  if (branch === 'master') {
-    if (behind > 0) issues.push(`master is behind origin/master by ${behind} commit(s)`);
-    if (ahead > 0) issues.push(`master is ahead of origin/master by ${ahead} commit(s)`);
-    if (trackedWorkEntries.length > 0) issues.push('master has tracked working tree changes');
+  if (branch === defaultBranch) {
+    if (behind > 0) issues.push(`${defaultBranch} is behind ${reference} by ${behind} commit(s)`);
+    if (ahead > 0) issues.push(`${defaultBranch} is ahead of ${reference} by ${ahead} commit(s)`);
+    if (trackedWorkEntries.length > 0) issues.push(`${defaultBranch} has tracked working tree changes`);
     if (untrackedWorkEntries.length > 0) {
-      issues.push(`master has untracked work items: ${untrackedWorkEntries.join(', ')}`);
+      issues.push(`${defaultBranch} has untracked work items: ${untrackedWorkEntries.join(', ')}`);
     }
     if (globalXiaokTarget && globalXiaokTarget !== repoRoot) {
       warnings.push(`global xiaok points to ${globalXiaokTarget} instead of ${repoRoot}`);
     }
   } else {
-    if (behind > 0) warnings.push(`${branch} is behind origin/master by ${behind} commit(s)`);
+    if (behind > 0) warnings.push(`${branch} is behind ${reference} by ${behind} commit(s)`);
     if (trackedWorkEntries.length > 0 || untrackedWorkEntries.length > 0) {
       warnings.push(`${branch} has active worktree changes`);
     }
@@ -96,42 +98,57 @@ function getGlobalXiaokTarget() {
   }
 }
 
-export function main() {
-  const repoRoot = runGit(['rev-parse', '--show-toplevel'], process.cwd());
-  const branch = runGit(['branch', '--show-current'], repoRoot);
-  const entries = parseStatusPorcelain(runGit(['status', '--short', '--branch'], repoRoot));
-  const [aheadText, behindText] = runGit(
-    ['rev-list', '--left-right', '--count', 'HEAD...origin/master'],
-    repoRoot,
-  ).split(/\s+/);
-  const report = evaluateRepoHealth({
-    repoRoot,
-    branch,
-    ahead: Number(aheadText || 0),
-    behind: Number(behindText || 0),
-    entries,
-    globalXiaokTarget: getGlobalXiaokTarget(),
+function checkedGit(cwd, args) {
+  const result = execFileSync('git', ['-C', cwd, ...args], {encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:15_000});
+  return result.trimEnd();
+}
+function optionalGit(cwd,args) { try { return checkedGit(cwd,args); } catch { return ''; } }
+export function collectWorkspaceHealth({cwd=process.cwd(),fetch=true,globalXiaokTarget=''}={}) {
+  const root=checkedGit(cwd,['rev-parse','--show-toplevel']);
+  // Linked worktrees still resolve their siblings beside the primary checkout.
+  const common=resolve(root,checkedGit(root,['rev-parse','--git-common-dir']));
+  const primary=common.endsWith('.git') ? dirname(common) : root;
+  const workspace=dirname(primary);
+  const repositories=['xiaok-cli','kswarm','intent-broker','kai-xiaok-plugins'].map((name,index)=>{
+    const repoRoot=index===0?root:join(workspace,name);
+    const base={name,repoRoot,fetchSucceeded:null,freshnessVerified:false,issues:[],warnings:[]};
+    if(!existsSync(repoRoot)){base.issues.push('missing repository');return {...base,ok:false};}
+    try {
+      if(realpathSync(checkedGit(repoRoot,['rev-parse','--show-toplevel']))!==realpathSync(repoRoot))throw new Error('not a repository root');
+      const upstream=optionalGit(repoRoot,['rev-parse','--abbrev-ref','--symbolic-full-name','@{upstream}']);
+      const remote=optionalGit(repoRoot,['config','--get','branch.'+checkedGit(repoRoot,['branch','--show-current'])+'.remote'])||'origin';
+      if(remote==='.' || !optionalGit(repoRoot,['remote']).split(/\r?\n/).includes(remote))throw new Error('missing remote');
+      if(fetch){
+        try { checkedGit(repoRoot,['fetch','--prune',remote]); checkedGit(repoRoot,['remote','set-head',remote,'--auto']);base.fetchSucceeded=true;base.freshnessVerified=true; }
+        catch {base.fetchSucceeded=false;base.issues.push('git fetch/default-head discovery failed; freshness unverified');}
+      } else base.warnings.push('fetch skipped; freshness unverified');
+      const reference=optionalGit(repoRoot,['symbolic-ref','--short','refs/remotes/'+remote+'/HEAD']);
+      if(!reference.startsWith(remote+'/'))throw new Error('default remote branch unavailable');
+      const defaultBranch=reference.slice(remote.length+1);
+      const branch=checkedGit(repoRoot,['branch','--show-current']);
+      if(!branch)base.issues.push('detached HEAD');
+      const counts=checkedGit(repoRoot,['rev-list','--left-right','--count','HEAD...'+reference]).split(/\s+/).map(Number);
+      const [ahead,behind]=counts;
+      let upstreamDivergence;
+      if(upstream){const [upAhead,upBehind]=checkedGit(repoRoot,['rev-list','--left-right','--count','HEAD...'+upstream]).split(/\s+/).map(Number);upstreamDivergence={reference:upstream,ahead:upAhead,behind:upBehind};if(upBehind>0)base.issues.push('branch is behind its upstream by '+upBehind+' commit(s)');}
+      else if(branch!==defaultBranch)base.warnings.push('feature branch has no upstream');
+      const entries=parseStatusPorcelain(checkedGit(repoRoot,['status','--short']));
+      const health=evaluateRepoHealth({repoRoot,branch,defaultBranch,reference,ahead,behind,entries,globalXiaokTarget:index===0?globalXiaokTarget:''});
+      base.issues.push(...health.issues);base.warnings.push(...health.warnings);
+      return {...base,branch,defaultBranch,reference,ahead,behind,upstream:upstreamDivergence,ok:base.issues.length===0};
+    } catch(error) {base.issues.push(error instanceof Error && ['missing remote','default remote branch unavailable','not a repository root'].includes(error.message)?error.message:'repository inspection failed');return {...base,ok:false};}
   });
-
-  const lines = [
-    `[repo-hygiene] repo: ${repoRoot}`,
-    `[repo-hygiene] branch: ${branch}`,
-  ];
-
-  if (report.issues.length === 0) {
-    lines.push('[repo-hygiene] blocking issues: none');
-  } else {
-    lines.push('[repo-hygiene] blocking issues:');
-    for (const issue of report.issues) lines.push(`  - ${issue}`);
+  return {ok:repositories.every(r=>r.ok),freshnessVerified:repositories.every(r=>r.freshnessVerified),repositories};
+}
+export function main(args=process.argv.slice(2)) {
+  if(args.some(a=>!['--no-fetch','--json'].includes(a)))throw new Error('Usage: hygiene:check [--no-fetch] [--json]');
+  const report=collectWorkspaceHealth({fetch:!args.includes('--no-fetch'),globalXiaokTarget:getGlobalXiaokTarget()});
+  if(args.includes('--json'))process.stdout.write(JSON.stringify(report,null,2)+'\n');
+  else for(const repo of report.repositories){
+    process.stdout.write(`[repo-hygiene] ${repo.name}: ${repo.repoRoot} (${repo.branch??'unknown'}) fetch=${repo.fetchSucceeded??'skipped'}\n`);
+    for(const issue of repo.issues)process.stdout.write('  ERROR: '+issue+'\n');
+    for(const warning of repo.warnings)process.stdout.write('  WARN: '+warning+'\n');
   }
-
-  if (report.warnings.length > 0) {
-    lines.push('[repo-hygiene] warnings:');
-    for (const warning of report.warnings) lines.push(`  - ${warning}`);
-  }
-
-  lines.push('[repo-hygiene] cadence: run this at start, midday, and before finishing work.');
-  lines.push('[repo-hygiene] rule: keep master clean; do feature work in .worktrees/<branch>.');
-  process.stdout.write(lines.join('\n') + '\n');
-  process.exit(report.ok ? 0 : 1);
+  process.exitCode=report.ok?0:1;
+  return report;
 }

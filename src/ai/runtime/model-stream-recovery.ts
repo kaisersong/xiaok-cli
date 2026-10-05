@@ -1,3 +1,4 @@
+import type {ModelStreamPhysicalRun} from './model-stream-physical-owner.js';
 import type { StreamChunk } from '../../types.js';
 
 export interface ModelRecoveryPolicy { windowMs: number; idleMs: number; initialDelayMs: number; maxDelayMs: number }
@@ -44,7 +45,7 @@ function wait<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs: number, on
 /** Retries only model reads. Callers never execute tools until a complete stream commits. */
 export async function* recoverModelStream(input: {
   open(signal: AbortSignal): AsyncIterable<StreamChunk>; signal: AbortSignal;
-  policy?: ModelRecoveryPolicy; onRetry?(notice: ModelRecoveryNotice): void;
+  physicalRun?: ModelStreamPhysicalRun; policy?: ModelRecoveryPolicy; onRetry?(notice: ModelRecoveryNotice): void;
 }): AsyncIterable<StreamChunk> {
   const policy = input.policy ?? resolveModelRecoveryPolicy();
   let recoveryStarted: number | undefined, attempt = 0;
@@ -63,7 +64,11 @@ export async function* recoverModelStream(input: {
         input.signal.throwIfAborted();
         const budget = recoveryStarted === undefined ? Infinity : policy.windowMs - (Date.now() - recoveryStarted);
         if (budget <= 0) throw exhausted();
-        const next = await wait(iterator.next(), input.signal, Math.min(policy.idleMs > 0 ? policy.idleMs : Infinity, budget), () => owned.abort());
+        const raw=iterator.next();
+        const receipt=input.physicalRun?.observeRead(raw,()=>[signal.reason,input.signal.reason]);
+        let next:IteratorResult<StreamChunk>;
+        try {next=await wait(raw,input.signal,Math.min(policy.idleMs>0?policy.idleMs:Infinity,budget),()=>owned.abort());receipt?.consume();}
+        catch(error){receipt?.classifyFailure(error);throw error;}
         if (next.done || next.value.type !== 'usage') input.signal.throwIfAborted();
         if (next.done) { completed = true; return; }
         if (next.value.type === 'done') completed = true;
@@ -71,7 +76,7 @@ export async function* recoverModelStream(input: {
         if (next.value.type === 'done') { completed = true; return; }
       }
     } catch (error) {
-      input.signal.throwIfAborted();
+      if (input.signal.aborted) throw error;
       if (!recoverable(error) || policy.windowMs === 0) throw error;
       recoveryStarted ??= Date.now();
       const remainingMs = policy.windowMs - (Date.now() - recoveryStarted);
@@ -85,7 +90,10 @@ export async function* recoverModelStream(input: {
     } finally {
       if (!completed) owned.abort();
       // An uncooperative model reader must not hold the retry owner forever.
-      try { const closing = iterator?.return?.(); if (closing) void Promise.resolve(closing).catch(() => {}); } catch { /* already failed */ }
+      try {
+        const closing=iterator?.return?.();
+        if(closing){if(input.physicalRun)input.physicalRun.observeReturn(closing);else void Promise.resolve(closing).catch(()=>{});}
+      } catch(error) {input.physicalRun?.noteReturnFailure(error);} 
     }
   }
 }

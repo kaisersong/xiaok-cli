@@ -1,4 +1,5 @@
 // @vitest-environment node
+import {declaredMainGroupsRows} from '../fixtures/captured-groups-declarations.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -100,7 +101,10 @@ describe('BDD: real service/core/SQLite/registry/session/root loop integration',
       }),
     });
     await service.initialize(host);
-    const prepared = await service.prepareRoot(host, 'thread', { prompt: 'run', materials: [] });
+    const originalReservation=host.reserveTaskIdentity();
+    const prepared = await service.prepareRoot(host, 'thread', { prompt: 'run', materials: [] },originalReservation);
+    expect(prepared.taskId).toBe(originalReservation.taskId);
+    await expect(service.prepareRoot(host,'thread',{prompt:'forged',materials:[]},{...originalReservation})).rejects.toThrow(/reservation/);
     await host.startTask(prepared.taskId); await host.drain();
     expect(errors).toEqual([]);
     await vi.waitFor(() => expect(coordinator.snapshot().active).toBe(0));
@@ -146,7 +150,18 @@ describe('BDD: real service/core/SQLite/registry/session/root loop integration',
       });
       try { expect(await service.resolveResource(request)).toMatchObject({ state: 'unknown' }); } finally { fault.mockRestore(); }
       expect(await service.resolveResource(request)).toMatchObject({ state: 'unknown' });
-      const resolved = await service.resolveResource({ access, requestSource: 'user', groupId, resourceId: resource.resourceId, action: 'keep', operationId: 'keep-dirty' });
+      let capturedResolution=false;
+      const captureOriginal=store.putOperation.bind(store),captureResolution=vi.spyOn(store,'putOperation').mockImplementation((operation,control)=>{
+        const result=captureOriginal(operation,control);
+        if(operation.operationId==='keep-dirty'&&operation.result.action==='keep'){
+          const rows=declaredMainGroupsRows(store,'operations').filter(row=>row.body.operationId==='keep-dirty');
+          expect(rows).toHaveLength(1);expect(rows[0].unmapped).toEqual([]);capturedResolution=true;
+        }
+        return result;
+      });
+      let resolved;
+      try{resolved=await service.resolveResource({ access, requestSource: 'user', groupId, resourceId: resource.resourceId, action: 'keep', operationId: 'keep-dirty' });}finally{captureResolution.mockRestore();}
+      expect(capturedResolution).toBe(true);
       expect(resolved.state).toBe('completed');
       expect(readFileSync(join(resource.canonicalPath, 'user-result.txt'), 'utf8')).toBe('PRESERVE_USER_BYTES');
       expect(store.getAgent(groupId, childId)).toMatchObject({ resourcesReleased: true, cleanupPending: false, resumable: false });

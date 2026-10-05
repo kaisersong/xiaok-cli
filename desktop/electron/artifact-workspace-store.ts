@@ -18,6 +18,7 @@ import type {
   WorkspaceGenerationRequest,
 } from '../shared/artifact-workspace-types.js';
 import { ArtifactWorkspaceError } from '../shared/artifact-workspace-types.js';
+import {assertOrdinarySourceWriterRoute,observeOrdinarySQLiteWriter} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 
 type Row = Record<string, unknown>;
 
@@ -199,8 +200,11 @@ export class ArtifactWorkspaceStore {
   private readonly createIdFn: (prefix: string) => string;
 
   constructor(options: ArtifactWorkspaceStoreOptions) {
+    assertOrdinarySourceWriterRoute();
     mkdirSync(dirname(options.dbPath), { recursive: true });
     this.db = new DatabaseSync(options.dbPath);
+    try {
+    observeOrdinarySQLiteWriter(options.dbPath,'artifact-workspace-sqlite-v1');
     this.db.exec('pragma journal_mode = WAL');
     this.db.exec('pragma synchronous = NORMAL');
     this.db.exec('pragma foreign_keys = ON');
@@ -208,6 +212,10 @@ export class ArtifactWorkspaceStore {
     this.nowFn = options.now ?? Date.now;
     this.createIdFn = options.createId ?? ((prefix) => `${prefix}_${randomUUID()}`);
     this.applySchema();
+    } catch (error) {
+      try { this.db.close(); } catch { /* Preserve the original construction failure. */ }
+      throw error;
+    }
   }
 
   close(): void {

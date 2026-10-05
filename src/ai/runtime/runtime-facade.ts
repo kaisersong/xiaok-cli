@@ -52,7 +52,7 @@ export class RuntimeFacade {
 
       input = this.buildInput(request.input, newSkillsThisTurn);
     } catch (buildError) {
-      if (isAbortError(buildError)) {
+      if (signal?.aborted || isAbortError(buildError)) {
         this.rollbackSkillNames(newSkillsThisTurn);
         throw buildError;
       }
@@ -91,7 +91,7 @@ export class RuntimeFacade {
         await this.options.agent.runTurn(input, onChunk, signal);
       }
     } catch (runError) {
-      if (isAbortError(runError)) {
+      if (signal?.aborted || isAbortError(runError)) {
         this.rollbackSkillNames(newSkillsThisTurn);
         throw runError;
       }

@@ -168,6 +168,26 @@ describe('platform runtime context', () => {
     await context.dispose();
   });
 
+  it('retains actual physical cleanup through the context dispose wrapper', async () => {
+    const context = await createPlatformRuntimeContext({ cwd: process.cwd(), builtinCommands: ['chat'], reminderMode: 'local' });
+    let rejectExecution!: (error: Error) => void;
+    const execution = new Promise<void>((_resolve, reject) => { rejectExecution = reject; });
+    const failure = new Error('wrapped original execution failed');
+    const runner = context.createBackgroundRunner(async () => { await execution; return 'late'; });
+    try {
+      await runner.start({ sessionId: 'wrapped-physical', source: 'chat', input: { agent: 'probe', prompt: 'run' } });
+      expect((await runner.dispose()).settled).toBe(false);
+      const physical = runner.waitForDisposedResources();
+      let settled = false;
+      void physical.then(() => { settled = true; }, () => { settled = true; });
+      await new Promise(setImmediate);
+      expect(settled).toBe(false);
+      rejectExecution(failure);
+      await expect(physical).rejects.toMatchObject({ errors: expect.arrayContaining([failure]) });
+      expect((await runner.dispose()).pendingJobs).toEqual([]);
+    } finally { rejectExecution(failure); await context.dispose(); }
+  });
+
   const itIfCanSpawn = canSpawnChildProcesses() ? it : it.skip;
 
   it.each(['factory', 'context'] as const)('cancels real background subagent execution when %s is disposed', async (owner) => {
@@ -210,7 +230,7 @@ describe('platform runtime context', () => {
     }] });
     const context = await createPlatformRuntimeContext({ cwd, builtinCommands: ['chat'], reminderMode: 'local' });
     const factory = createPlatformRegistryFactory({ platform: context, source: 'chat', sessionId: 'mutable',
-      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
+      adapter: () => ({ getModelName: () => 'probe', async *stream() {} }), buildSystemPrompt: async () => 'test',
     });
     const registry = factory.createRegistry(cwd);
     try {

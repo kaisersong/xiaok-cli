@@ -1,0 +1,41 @@
+name: Windows verification namespace helper
+on:
+  pull_request:
+    paths:
+      - 'src/runtime/verification/native/windows-*'
+      - 'src/runtime/verification/windows-installation-absence.ts'
+      - 'scripts/verification/*windows-absence.mjs'
+      - '.github/workflows/windows-verification-helper.yml'
+  workflow_dispatch: {}
+jobs:
+  helper:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            vcarch: x64
+          - arch: arm64
+            vcarch: amd64_arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compile fixed helper with MSVC
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvarsall.bat" ${{ matrix.vcarch }}
+          node scripts/verification/build-windows-absence.mjs --target ${{ matrix.arch }}
+      - name: Run actual Windows x64 read-only helper
+        if: matrix.arch == 'x64'
+        run: node scripts/verification/test-windows-absence.mjs
+      - name: Preserve architecture and execution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-verification-helper-${{ matrix.arch }}
+          path: |
+            data/verification/windows/win32-${{ matrix.arch }}/
+            .artifacts/p3r/windows-native/*.json
+          if-no-files-found: error

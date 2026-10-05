@@ -222,6 +222,8 @@ export class InputReader {
     clipboardImageSaver = saveClipboardImageToTemp;
     busyCapture = null;
     readActive = false;
+    cancelRead;
+    readsClosed = false;
     onToggleTranscript;
     suspendHooks = null;
     suspendDepth = 0;
@@ -234,6 +236,10 @@ export class InputReader {
         this.onInterrupt = handler;
         this.onOtherInput = onOtherInput;
     }
+    /** Host shutdown uses the original read's completion and detach path. */
+    cancelActiveRead() { this.cancelRead?.(); }
+    /** Closing the host also fences a late permission/confirmation prompt. */
+    close() { this.readsClosed = true; this.cancelActiveRead(); }
     dispatchInput(data, consume) {
         const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
         if (!this.onInterrupt) {
@@ -564,12 +570,26 @@ export class InputReader {
         capture.pause();
     }
     async read(prompt, options) {
+        if (this.readsClosed)
+            return null;
         if (!stdin.isTTY) {
             const rl = readline.createInterface({ input: stdin, output: stdout });
             return new Promise((resolve) => {
-                rl.question(prompt, (answer) => {
+                let resolved = false;
+                const cancel = () => done(null);
+                const done = (value) => {
+                    if (resolved)
+                        return;
+                    resolved = true;
+                    if (this.cancelRead === cancel)
+                        this.cancelRead = undefined;
                     rl.close();
-                    resolve(answer);
+                    resolve(value);
+                };
+                this.cancelRead = cancel;
+                rl.once('close', () => done(null));
+                rl.question(prompt, (answer) => {
+                    done(answer);
                 });
             });
         }
@@ -925,6 +945,8 @@ export class InputReader {
                 }
                 closeMenu();
                 resolved = true;
+                if (this.cancelRead === cancel)
+                    this.cancelRead = undefined;
                 stdin.removeListener('data', onData);
                 pauseInputForHandoff();
                 this.readActive = false;
@@ -937,6 +959,8 @@ export class InputReader {
                 this.historyIdx = this.history.length;
                 resolve(result);
             };
+            const cancel = () => done(null, 'cancel');
+            this.cancelRead = cancel;
             const inputDecoder = new StringDecoder('utf8');
             const consumeData = (data) => {
                 const key = inputDecoder.write(data);

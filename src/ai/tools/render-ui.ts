@@ -80,6 +80,22 @@ const renderUiSectionSchema = {
   ],
 };
 
+// The compiler has always accepted these aliases. Describe them explicitly so
+// full registry schema validation preserves that compatibility without bypasses.
+const compatibleRenderUiSectionSchema = {
+  oneOf: renderUiSectionSchema.oneOf.map(section => {
+    const properties: Record<string, unknown> = { ...section.properties, type: section.properties.kind };
+    const required = section.required.filter(field => field !== 'kind');
+    const allOf: Array<Record<string, unknown>> = [{ anyOf: [{ required: ['kind'] }, { required: ['type'] }] }];
+    if (section.properties.kind.enum[0] === 'text') {
+      properties.text = { type: 'string' };
+      required.splice(required.indexOf('content'), 1);
+      allOf.push({ anyOf: [{ required: ['content'] }, { required: ['text'] }] });
+    }
+    return { ...section, properties, required, allOf };
+  }),
+};
+
 export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
@@ -103,7 +119,7 @@ export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
           sections: {
             type: 'array',
             description: `只读 section 列表。每项必须使用 kind 字段，支持 ${RENDER_UI_SECTION_KINDS.join('/')}。`,
-            items: renderUiSectionSchema,
+            items: compatibleRenderUiSectionSchema,
           },
         },
         required: ['title', 'sections'],

@@ -108,9 +108,9 @@ describe('artifact workspace runtime contract', () => {
     const created = await host.createTask({ prompt: '生成报告', materials: [] });
     await vi.waitFor(async () => {
       expect((await host.recoverTask(created.taskId)).snapshot.status).toBe('completed');
+      // Publication intentionally dispatches on its own setImmediate chain.
+      expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'completed' });
     });
-
-    expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'completed' });
     const recovered = (await host.recoverTask(created.taskId)).snapshot;
     expect(recovered.events.at(-1)).toEqual({ type: 'task_terminal', status: 'completed' });
   });
@@ -131,9 +131,9 @@ describe('artifact workspace runtime contract', () => {
     const created = await host.createTask({ prompt: '触发失败', materials: [] });
     await vi.waitFor(async () => {
       expect((await host.recoverTask(created.taskId)).snapshot.status).toBe('failed');
+      // Publication intentionally dispatches on its own setImmediate chain.
+      expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'failed' });
     });
-
-    expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'failed' });
     expect((await host.recoverTask(created.taskId)).snapshot.events.at(-1))
       .toEqual({ type: 'task_terminal', status: 'failed' });
   });

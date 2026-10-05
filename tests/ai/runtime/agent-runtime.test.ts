@@ -1517,7 +1517,7 @@ describe('AgentRuntime', () => {
       if (event.type === 'usage_updated') {
         controller.abort(sentinel);
       }
-    }, controller.signal)).rejects.toSatisfy((error: Error) => error.name === 'AbortError' && error.cause === sentinel);
+    }, controller.signal)).rejects.toBe(sentinel);
 
     expect(session.getUsage()).toEqual(usage);
     expect(events.filter((type) => type === 'usage_updated')).toHaveLength(1);

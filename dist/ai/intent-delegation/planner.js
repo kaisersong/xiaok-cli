@@ -41,6 +41,9 @@ const INFORMATIONAL_QUERY_PATTERNS = [
     /\b(what|which|how|when|where|current)\b/iu,
 ];
 export function createIntentPlan(input) {
+    const identity = Object.getOwnPropertyDescriptor(input, 'newIntentId');
+    if (identity && (!('value' in identity) || typeof identity.value !== 'string' || !/^[A-Za-z0-9_-]{1,160}$/.test(identity.value)))
+        throw Error('intent_planner_identity');
     const rawIntent = input.input.trim();
     if (isControlCommand(rawIntent)) {
         return { kind: 'non_intent', reason: 'control_command' };
@@ -69,7 +72,7 @@ export function createIntentPlan(input) {
     if (!topLevelTemplate) {
         return { kind: 'non_intent', reason: 'non_substantial' };
     }
-    const intentId = buildStableId('intent', normalizedIntent, input.sessionId);
+    const intentId = continuationMode === 'new_intent' && identity ? identity.value : buildStableId('intent', normalizedIntent, input.sessionId);
     const instancePlanId = buildStableId('plan', normalizedIntent, input.instanceId);
     const riskTier = deriveRiskTier(topLevelIntentType, continuationMode, extracted.intentMode);
     const stages = buildStages({

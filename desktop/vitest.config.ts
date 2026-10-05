@@ -14,7 +14,9 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    setupFiles: ['./tests/setup.ts'],
+    globalSetup: ['../tests/support/profile-account.global.mjs'],
+    setupFiles: ['./tests/profile-account.setup.mjs', './tests/setup.ts'],
+    sequence: { setupFiles: 'list' },
     server: {
       deps: {
         inline: [/electron/],

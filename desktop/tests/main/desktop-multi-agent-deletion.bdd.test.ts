@@ -56,7 +56,27 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     const deletion = (nonce: string) => { const expectedThreadRevision = store.getThread('thread')!.threadRevision!;
       return { access, requestSource: 'user' as const, operationId: `delete:${expectedThreadRevision}:${nonce}`, expectedThreadRevision, confirmTerminate: true as const }; };
     const start = async (threadId = 'thread') => { const prepared = await service.prepareRoot(host, threadId, { prompt: 'work', materials: [], context: { threadId } }); await host.startTask(prepared.taskId); return prepared.taskId; };
-    return { store, service, host, coordinator, access, start, deletion, beforeDelete, path, goal, goalStore, root };
+    // host.drain does not own service scans or Goal-stop IO. Wait for the
+    // already-admitted producers after bounded ACK, before a new user attempt.
+    const drainAcceptedDeletion = async () => {
+      const owners = service as unknown as {
+        deletionScans: Map<string, { promise: Promise<unknown> }>;
+        deletionStops: Map<string, { goal: Promise<void>; tasks: Map<string, { promise: Promise<void> }> }>;
+      };
+      const scan = owners.deletionScans.get('thread'), stops = owners.deletionStops.get('thread');
+      await Promise.all([...(scan ? [scan.promise] : []), ...(stops ? [stops.goal, ...[...stops.tasks.values()].map(stop => stop.promise)] : [])]);
+      await host.drain();
+    };
+    const deleteAfterAcceptedDrain = async (nonce: string) => {
+      await drainAcceptedDeletion();
+      const result = await service.deleteThread(deletion(nonce));
+      if (result.state !== 'cleanup_pending') return result;
+      // This attempt may have admitted cancellation after the original scan.
+      // Wait for that same producer before one final explicit user attempt.
+      await drainAcceptedDeletion();
+      return service.deleteThread(deletion(nonce + '-after-cancel'));
+    };
+    return { store, service, host, coordinator, access, start, deletion, beforeDelete, path, goal, goalStore, root, deleteAfterAcceptedDrain };
   }
 
   it('A25 Given an unbound legacy thread without live resources, Then main registers it and exposes the actual initial revision for deletion', async () => {
@@ -122,8 +142,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     expect((await f.goal.getGoal('thread'))?.state.status).toBe('active');
     const first = await f.service.deleteThread(f.deletion('goal-delete'));
     if (first.state !== 'completed') {
-      await f.host.drain();
-      expect(await f.service.deleteThread(f.deletion('goal-after-drain'))).toMatchObject({ state: 'completed' });
+      const afterDrain=await f.deleteAfterAcceptedDrain('goal-after-drain');expect(afterDrain,JSON.stringify(afterDrain)).toMatchObject({state:'completed'});
     }
     expect(await f.goal.getGoal('thread')).toMatchObject({ state: { status: 'cancelled' }, activation: 'disarmed' });
     expect(f.goal.getPendingAttachmentForTest('thread')).toBeNull();
@@ -223,7 +242,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     const cancel = vi.spyOn(f.host, 'cancelTask').mockRejectedValueOnce(new Error('cancel_write_failed'));
     expect(await f.service.deleteThread(f.deletion('cancel-fails'))).toMatchObject({ state: 'unknown' });
     expect(f.store.getThread('thread')?.deleteState).toBe('delete_pending'); expect(await f.host.getActiveTasks()).toContainEqual({ taskId: task.taskId });
-    expect(await f.service.deleteThread(f.deletion('cancel-retry'))).toMatchObject({ state: 'completed' });
+    const retried=await f.deleteAfterAcceptedDrain('cancel-retry');expect(retried,JSON.stringify(retried)).toMatchObject({state:'completed'});
     expect(cancel).toHaveBeenCalledTimes(2); expect((await f.host.inspectTask(task.taskId))?.status).toBe('cancelled');
   });
 
@@ -338,7 +357,7 @@ describe('BDD: thread deletion retains ownership until real work is settled', ()
     expect(await f.service.deleteThread(f.deletion('scan-rejected'))).toMatchObject({ state: 'unknown' });
     expect(scan).toHaveBeenCalledTimes(1); expect(cancel).not.toHaveBeenCalled();
     expect(f.store.getThread('thread')?.deleteState).toBe('delete_pending');
-    expect(await f.service.deleteThread(f.deletion('scan-retry'))).toMatchObject({ state: 'completed' });
+    const rescanned=await f.deleteAfterAcceptedDrain('scan-retry');expect(rescanned,JSON.stringify(rescanned)).toMatchObject({state:'completed'});
     expect(active).toHaveBeenCalledTimes(2); expect(cancel).toHaveBeenCalledTimes(2);
   });
 

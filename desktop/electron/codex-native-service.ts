@@ -1,3 +1,4 @@
+import {assertOrdinarySourceWriterRoute,observeOrdinarySQLiteWriter} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { access, realpath, stat } from 'node:fs/promises';
@@ -27,18 +28,26 @@ export class CodexNativeService {
   private db: DatabaseSync;
   private sessions = new Map<string, Session>();
   private disposed = false;
+  private used = false;
   private notices = new Map<string, ReturnType<typeof setTimeout>>();
   constructor(private options: NativeServiceOptions) {
+    assertOrdinarySourceWriterRoute();
     mkdirSync(dirname(options.dbPath), {recursive:true});
-    this.db = new DatabaseSync(options.dbPath); this.db.exec('PRAGMA journal_mode=WAL');
+    this.db = new DatabaseSync(options.dbPath);
+    try {
+    observeOrdinarySQLiteWriter(options.dbPath,'codex-native-sqlite-v1');
+    this.db.exec('PRAGMA journal_mode=WAL');
     this.db.exec('CREATE TABLE IF NOT EXISTS codex_native_sessions (id TEXT PRIMARY KEY, owner TEXT NOT NULL, native_id TEXT, snapshot TEXT NOT NULL)');
     for (const row of this.db.prepare('SELECT id,native_id,snapshot FROM codex_native_sessions WHERE owner=?').all(options.profileId) as any[]) {
       const view = JSON.parse(row.snapshot) as NativeSnapshot; view.status='disconnected'; view.approvals=[]; view.queued=0;
       for (const m of view.messages) if (m.state==='queued') m.state='cancelled';
       this.sessions.set(row.id,{view,nativeId:row.native_id,lock:Promise.resolve(),ready:false,stopping:false,pending:new Map(),items:new Map(),queue:[]});
     }
+    } catch(error) {try{this.db.close();}catch{/* Preserve initialization failure. */}throw error;}
   }
-  private authorize(actor: NativeActor) { if (this.disposed || actor.requestSource !== 'user' || actor.actorId !== this.options.profileId) throw new Error('native_access_denied'); }
+  /** Synchronous construction rollback only; after any admitted use, normal drain is required. */
+  closeBeforeUse(){if(this.used)throw Error('native_already_used');if(this.disposed)return;this.disposed=true;this.db.close();}
+  private authorize(actor: NativeActor) { if (this.disposed || actor.requestSource !== 'user' || actor.actorId !== this.options.profileId) throw new Error('native_access_denied'); this.used=true; }
   private owned(actor: NativeActor, id: string) { this.authorize(actor); const s=this.sessions.get(id); if(!s) throw new Error('native_session_denied'); return s; }
   list(actor: NativeActor): NativeSummary[] { this.authorize(actor); return [...this.sessions.values()].map(({view:{id,title,cwd,status,updatedAt,error}})=>({id,title,cwd,status,updatedAt,error})).sort((a,b)=>b.updatedAt-a.updatedAt); }
   get(actor: NativeActor,id:string):NativeSnapshot { return structuredClone(this.owned(actor,id).view); }

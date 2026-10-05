@@ -1,3 +1,9 @@
+import {createLoopTaskIdentityHost,createLoopTaskTerminalObserver,isLoopTaskCreationPending,type LoopReservedTaskPort} from './loop-task-identity.js';
+import {createLoopTemplateExecutionRecovery} from './loop-template-execution-recovery.js';
+import {captureLoopProducerValue} from './loop-scan-publication-body.js';
+import {resolveUserLoopOutputTarget,verifyMarkdownFile} from './loop-template-files.js';
+import {captureLoopRunContext,assertOrdinaryLoopOwner,type LoopRunContext} from './loop-run-context.js';
+import type {LoopPublicationProducer} from './loop-store.js';
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { accessSync, constants as fsConstants } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
@@ -21,18 +27,20 @@ import type { LearnedConstraint, LoopRun, LoopRunTrigger, UserLoopTemplate } fro
 import { isSafeLoopOutputFileName } from './loop-output-paths.js';
 import type { TaskCreateInput, TaskPermissionMode, TaskSnapshot } from '../../src/runtime/task-host/types.js';
 
-export interface UserLoopTaskPort {
+export interface UserLoopTaskPort extends Partial<LoopReservedTaskPort> {
   createTask(input: TaskCreateInput): Promise<{ taskId: string }>;
   recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }>;
   cancelTask(taskId: string, reason?: string): Promise<void>;
 }
 
 export type UserLoopTemplateRunResult =
+  | { status: 'publication_pending'|'executing'; run: LoopRun }
   | { status: 'success'; run: LoopRun }
   | { status: 'blocked'; run: LoopRun }
   | { status: 'failed'; run: LoopRun };
 
 export interface CreateUserLoopTemplateRunnerOptions {
+  acquireWriter?: (label: string) => { release(): void };
   loopStore: LoopStore;
   evidenceStore: CompletionEvidenceStore;
   taskPort: UserLoopTaskPort;
@@ -51,10 +59,13 @@ export interface RunUserLoopTemplateInput {
   loopId: string;
   runId: string;
   trigger: LoopRunTrigger;
+  requestSource:LoopRunContext['requestSource'];
+  producer?:Readonly<LoopPublicationProducer>;
   signal?: AbortSignal;
 }
 
 export interface UserLoopTemplateRunner {
+  recoverTemplateLoop?(input:{loopId:string;runId:string;requestSource:LoopRunContext['requestSource'];signal?:AbortSignal}):Promise<UserLoopTemplateRunResult>;
   runTemplateLoop(input: RunUserLoopTemplateInput): Promise<UserLoopTemplateRunResult> | UserLoopTemplateRunResult;
 }
 
@@ -98,6 +109,12 @@ export function runPreflight(template: UserLoopTemplate): { ok: true } | { ok: f
 }
 
 export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunnerOptions): UserLoopTemplateRunner {
+  // Preserve the actual Main writer port even if the composition options object changes.
+  options = { ...options, acquireWriter: options.acquireWriter?.bind(options) };
+  const taskPort:UserLoopTaskPort=Object.freeze({createTask:options.taskPort.createTask.bind(options.taskPort),recoverTask:options.taskPort.recoverTask.bind(options.taskPort),cancelTask:options.taskPort.cancelTask.bind(options.taskPort)});
+  const identityHost=options.taskPort.reserveTask&&options.taskPort.createReservedTask&&options.taskPort.discardReservedTask?createLoopTaskIdentityHost(options.loopStore,options.taskPort as LoopReservedTaskPort):undefined;
+  const terminalObserver=createLoopTaskTerminalObserver(options.loopStore,taskPort);
+  const recovery=createLoopTemplateExecutionRecovery({store:options.loopStore,taskPort});
   const now = options.now ?? (() => Date.now());
   const finalizer = options.finalizer ?? createLoopFinalizer(options.loopStore);
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -174,28 +191,34 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     let taskId: string;
     try {
       mkdirSync(template.outputDirectory, { recursive: true });
-      const created = await options.taskPort.createTask({
+      if(!identityHost)throw Error('loop_reserved_task_port_required');
+      const created = await identityHost.create({
         prompt: enhancedPrompt,
         materials: [],
         permissionMode: permissionModeFor(input.trigger, template),
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
         maxToolLoopIterations: 500,
-      });
+      },{runId:input.runId,stageId:executeStage.id,requestSource:input.requestSource,signal:input.signal});
       taskId = created.taskId;
+      
     } catch (error) {
+      if(isLoopTaskCreationPending(error)){if(input.signal?.aborted){const original=options.loopStore.listLoopStages(input.runId).find(stage=>stage.id===executeStage.id)?.metadata.taskId;if(typeof original==='string')try{await taskPort.cancelTask(original,'loop_aborted');}catch{}}return {status:'executing',run:options.loopStore.getLoopRun(input.runId)!};}
       const message = (error as Error).message || 'User loop task creation failed.';
       options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
       return failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
     }
 
-    const snapshot = await waitForTerminalSnapshot({
-      taskPort: options.taskPort,
+    await waitForTerminalSnapshot({
+      taskPort,
       taskId,
       maxRunMs,
       pollIntervalMs,
       sleep,
       signal: input.signal,
-    });
+    }).catch(()=>undefined);
+    let snapshot:TaskSnapshot|undefined;
+    try{snapshot=await terminalObserver.observe({runId:input.runId,stageId:executeStage.id,requestSource:input.requestSource});}catch{return {status:'executing',run:options.loopStore.getLoopRun(input.runId)!};}
+    if(!snapshot)return {status:'executing',run:options.loopStore.getLoopRun(input.runId)!};
     if (snapshot.status !== 'completed') {
       const errorEvent = [...(snapshot.events ?? [])].reverse().find(e => (e as any).type === 'error') as { type: 'error'; message?: string } | undefined;
       const errorReason = errorEvent?.message
@@ -210,12 +233,14 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       return result;
     }
 
-    options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), `Task ${taskId} completed.`, { taskId });
+    if(input.producer){input.producer.recordTemplateExecution({executeStageId:executeStage.id,taskSnapshot:snapshot,summary:`Task ${taskId} completed.`,evidenceIds:[],artifacts:[],now:timestamp()});options.loopStore.captureLoopPublicationCandidate({runId:input.runId,stageId:executeStage.id,expectedResultRevision:1},input.producer);}
+    else options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), `Task ${taskId} completed.`, { taskId });
     const verifyStartedAt = timestamp();
     const verifyStage = options.loopStore.startLoopStage(input.runId, input.loopId, 'verify', verifyStartedAt, {
       taskId,
       outputPath,
       injectedConstraintIds,
+      ...(input.producer?{localEvaluationStarted:true}:{}),
     });
 
     // Fallback: if task completed but file doesn't exist, try extracting from result.summary
@@ -269,6 +294,11 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       },
     });
 
+    if(input.producer&&evaluation.status!=='success'){
+      input.producer.recordTemplateNonSuccess({executeStageId:executeStage.id,verifyStageId:verifyStage.id,evaluation,requestSource:input.requestSource,now:timestamp()});
+      return {status:evaluation.status,run:options.loopStore.getLoopRun(input.runId)!};
+    }
+
     if (evaluation.status === 'blocked') {
       const stageEvidenceIds = recordBlockedEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), evaluation.nextActionSummary, {
         outputPath,
@@ -321,6 +351,7 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
 
     const summary = `Markdown file artifact verified: ${outputPath}`;
     const stageEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_stage', verifyStage.id, timestamp(), summary, outputPath);
+    if(input.producer){input.producer.recordTemplateTerminal({executeStageId:executeStage.id,verifyStageId:verifyStage.id,summary,evidenceIds:stageEvidenceIds,artifacts:[],now:timestamp()});options.loopStore.recoverLoopPublicationCandidates({runId:input.runId,requestSource:input.requestSource});return {status:'publication_pending',run:options.loopStore.getLoopRun(input.runId)!};}
     options.loopStore.finishLoopStageSuccess(verifyStage.id, stageEvidenceIds, timestamp(), summary, { outputPath });
     const runEvidenceIds = recordFileArtifactEvidence(options.evidenceStore, 'loop_run', input.runId, timestamp(), summary, outputPath);
     const success = finalizeEvaluation(finalizer, options.loopStore, {
@@ -382,15 +413,18 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
 
     let taskId: string;
     try {
-      const created = await options.taskPort.createTask({
+      if(!identityHost)throw Error('loop_reserved_task_port_required');
+      const created = await identityHost.create({
         prompt: enhancedPrompt,
         materials: [],
         permissionMode: effectivePermission,
         watchdogMs: DEFAULT_LOOP_TASK_WATCHDOG_MS,
         maxToolLoopIterations: 500,
-      });
+      },{runId:input.runId,stageId:executeStage.id,requestSource:input.requestSource,signal:input.signal});
       taskId = created.taskId;
+      
     } catch (error) {
+      if(isLoopTaskCreationPending(error)){if(input.signal?.aborted){const original=options.loopStore.listLoopStages(input.runId).find(stage=>stage.id===executeStage.id)?.metadata.taskId;if(typeof original==='string')try{await taskPort.cancelTask(original,'loop_aborted');}catch{}}return {status:'executing',run:options.loopStore.getLoopRun(input.runId)!};}
       const message = (error as Error).message || 'Task creation failed.';
       options.loopStore.finishLoopStageFailure(executeStage.id, 'executor_failed', message, [], timestamp());
       const result = failRun(options.loopStore, input.runId, 'executor_failed', message, timestamp());
@@ -398,18 +432,19 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
       return result;
     }
 
-    options.loopStore.updateLoopStageMetadata(executeStage.id, { taskId });
-
-    const snapshot = await waitForTerminalSnapshot({
-      taskPort: options.taskPort,
+    await waitForTerminalSnapshot({
+      taskPort,
       taskId,
       maxRunMs,
       pollIntervalMs,
       sleep,
       onPoll: () => options.loopStore.touchLoopRun(input.runId, timestamp()),
       signal: input.signal,
-    });
+    }).catch(()=>undefined);
 
+    let snapshot:TaskSnapshot|undefined;
+    try{snapshot=await terminalObserver.observe({runId:input.runId,stageId:executeStage.id,requestSource:input.requestSource});}catch{return {status:'executing',run:options.loopStore.getLoopRun(input.runId)!};}
+    if(!snapshot)return {status:'executing',run:options.loopStore.getLoopRun(input.runId)!};
     if (snapshot.status !== 'completed') {
       const message = snapshot.status === 'cancelled'
         ? `Task auto-cancelled after ${Math.round(maxRunMs / 60_000)} minutes timeout.`
@@ -427,6 +462,22 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
     }
 
     const summary = `Task ${taskId} completed. Prompt: ${template.prompt.slice(0, 80)}`;
+    if(input.producer){
+      input.producer.recordTemplateExecution({executeStageId:executeStage.id,taskSnapshot:snapshot,summary,evidenceIds:[],artifacts:[],now:timestamp()});
+      options.loopStore.captureLoopPublicationCandidate({runId:input.runId,stageId:executeStage.id,expectedResultRevision:1},input.producer);
+      const weakOnly=template.contract.successCriteria.length>0&&template.contract.successCriteria.every(c=>c.kind==='task_completed'&&c.strength==='weak');
+      const verifyStage=options.loopStore.startLoopStage(input.runId,input.loopId,'verify',timestamp(),{taskId,...(!weakOnly?{localEvaluationStarted:true}:{})});
+      const evaluation=await evaluateLoopContract({runId:input.runId,contract:template.contract,registry:{...(options.verifierRegistry??{})},evidenceBundle:{taskId,snapshot}});
+      if(evaluation.status!=='success'&&!weakOnly){
+        input.producer.recordTemplateNonSuccess({executeStageId:executeStage.id,verifyStageId:verifyStage.id,evaluation,requestSource:input.requestSource,now:timestamp()});
+        return {status:evaluation.status,run:options.loopStore.getLoopRun(input.runId)!};
+      }
+      if(weakOnly)options.loopStore.updateLoopStageMetadata(verifyStage.id,{taskId,localEvaluation:evaluation});
+      const candidateSummary=evaluation.status==='success'?evaluation.summary:'Task execution ended; awaiting independent verification.';
+      input.producer.recordTemplateTerminal({executeStageId:executeStage.id,verifyStageId:verifyStage.id,summary:candidateSummary,evidenceIds:evaluation.evidenceIds,artifacts:[],now:timestamp()});
+      options.loopStore.recoverLoopPublicationCandidates({runId:input.runId,requestSource:input.requestSource});
+      return {status:'publication_pending',run:options.loopStore.getLoopRun(input.runId)!};
+    }
     options.loopStore.finishLoopStageSuccess(executeStage.id, [], timestamp(), summary, { taskId });
     const runEvidenceIds = recordTaskCompletionEvidence(
       options.evidenceStore, 'loop_run', input.runId, timestamp(), summary,
@@ -469,7 +520,37 @@ export function createUserLoopTemplateRunner(options: CreateUserLoopTemplateRunn
   }
 
   return {
+    async recoverTemplateLoop(raw){
+      const descriptors=Object.getOwnPropertyDescriptors(raw);if(Reflect.ownKeys(raw).some(k=>typeof k!=='string'||!['loopId','runId','requestSource','signal'].includes(k))||Object.values(descriptors).some(d=>!('value' in d)))throw Error('loop_run_source');
+      const input=captureLoopProducerValue({loopId:descriptors.loopId?.value,runId:descriptors.runId?.value,requestSource:descriptors.requestSource?.value});const signal=descriptors.signal?.value as AbortSignal|undefined;if(typeof input.loopId!=='string'||typeof input.runId!=='string'||!input.requestSource)throw Error('loop_run_source');captureLoopRunContext({requestSource:input.requestSource});signal?.throwIfAborted();
+      const run=options.loopStore.getLoopRun(input.runId),template=options.loopStore.getUserLoopTemplate(input.loopId);
+      if(!run||run.loopId!==input.loopId||!template)throw Error('loop_template_recovery_original');
+      if(run.status==='failed'||run.status==='blocked')return {status:run.status,run};
+      if(options.loopStore.listLoopStages(run.id).some(stage=>stage.stageKind==='verify'&&stage.metadata.localEvaluationStarted===true)&&!options.loopStore.getLoopRunLifecycle(run.id)?.terminalResultPresent)return {status:'executing',run};
+      if(options.loopStore.getLoopRunLifecycle(run.id)?.businessState==='publication_pending'){options.loopStore.recoverLoopPublicationCandidates({runId:run.id,requestSource:input.requestSource});return {status:'publication_pending',run};}
+      const execute=options.loopStore.listLoopStages(run.id).find(stage=>stage.stageKind==='execute');
+      if(!execute||typeof execute.metadata.taskId!=='string')return {status:'executing',run};
+      if(!options.loopStore.getLoopRunLifecycle(run.id)?.executionStageIds.includes(execute.id)){
+        let token:object;
+        try{token=await recovery.prepareExecution({runId:run.id,executeStageId:execute.id,requestSource:input.requestSource,now:timestamp()});}
+        catch(error){if(error instanceof Error&&(error.message==='loop_template_recovery_task_pending'||error.message===`task not found: ${execute.metadata.taskId}`))return {status:'executing',run};throw error;}
+        signal?.throwIfAborted();options.loopStore.recoverLoopTemplateExecution(token);
+      }
+      const weakOnly=template.kind==='task_completion'&&template.contract.successCriteria.length>0&&template.contract.successCriteria.every(c=>c.kind==='task_completed'&&c.strength==='weak');
+      if(template.kind!=='markdown_file'&&!weakOnly)return {status:'executing',run};
+      const verify=options.loopStore.listLoopStages(run.id).find(stage=>stage.stageKind==='verify')??options.loopStore.startLoopStage(run.id,run.loopId,'verify',timestamp(),{taskId:execute.metadata.taskId});
+      if(weakOnly){const evaluation=await evaluateLoopContract({runId:run.id,contract:template.contract,registry:{},evidenceBundle:{taskId:execute.metadata.taskId}});options.loopStore.updateLoopStageMetadata(verify.id,{taskId:execute.metadata.taskId,localEvaluation:evaluation});}
+      const token=await (weakOnly?recovery.prepareWeakTerminal:recovery.prepareMarkdownTerminal)({runId:run.id,executeStageId:execute.id,verifyStageId:verify.id,requestSource:input.requestSource,now:timestamp()});signal?.throwIfAborted();options.loopStore.recoverLoopTemplateTerminal(token);
+      options.loopStore.recoverLoopPublicationCandidates({runId:run.id,requestSource:input.requestSource});return {status:'publication_pending',run:options.loopStore.getLoopRun(run.id)!};
+    },
     async runTemplateLoop(input: RunUserLoopTemplateInput): Promise<UserLoopTemplateRunResult> {
+      const descriptors=Object.getOwnPropertyDescriptors(input);if(Reflect.ownKeys(input).some(k=>typeof k!=='string')||Object.values(descriptors).some(d=>!('value' in d)))throw Error('loop_run_source');
+      const captured=captureLoopProducerValue({loopId:descriptors.loopId?.value,runId:descriptors.runId?.value,trigger:descriptors.trigger?.value,requestSource:descriptors.requestSource?.value});
+      if(typeof captured.loopId!=='string'||typeof captured.runId!=='string'||!captured.trigger||!captured.requestSource)throw Error('loop_run_source');
+      input={loopId:captured.loopId,runId:captured.runId,trigger:captured.trigger,requestSource:captured.requestSource,signal:descriptors.signal?.value,producer:descriptors.producer?.value};
+      captureLoopRunContext({requestSource:input.requestSource});
+      if(options.loopStore.getLoopRunPublicationBasis(input.runId)){if(!input.producer)throw Error('loop_publication_producer');}
+      else assertOrdinaryLoopOwner('loop_run',input.runId);
       const template = options.loopStore.getUserLoopTemplate(input.loopId);
       if (!template) {
         return failRun(options.loopStore, input.runId, 'validation_failed', 'User loop template does not exist.', timestamp());
@@ -498,47 +579,6 @@ function permissionModeFor(trigger: LoopRunTrigger, template: UserLoopTemplate):
   return 'default';
 }
 
-function resolveUserLoopOutputTarget(template: UserLoopTemplate):
-  | { ok: true; outputDirectory: string; outputPath: string }
-  | { ok: false; nextActionKind: string; message: string; metadata: Record<string, unknown> } {
-  if (!isAbsolute(template.outputDirectory)) {
-    return {
-      ok: false,
-      nextActionKind: 'repair_output_directory',
-      message: `User loop requires an absolute output directory before it can run: ${template.outputDirectory}`,
-      metadata: {
-        reason: 'relative_output_directory',
-        outputDirectory: template.outputDirectory,
-      },
-    };
-  }
-  if (!isSafeLoopOutputFileName(template.outputFileName)) {
-    return {
-      ok: false,
-      nextActionKind: 'repair_output_file_name',
-      message: `User loop output filename must be a safe file name: ${template.outputFileName}`,
-      metadata: {
-        reason: 'unsafe_output_file_name',
-        outputFileName: template.outputFileName,
-      },
-    };
-  }
-  const outputDirectory = resolve(template.outputDirectory);
-  const outputPath = resolve(outputDirectory, template.outputFileName);
-  if (dirname(outputPath) !== outputDirectory) {
-    return {
-      ok: false,
-      nextActionKind: 'repair_output_file_name',
-      message: `User loop output filename must stay inside the output directory: ${template.outputFileName}`,
-      metadata: {
-        reason: 'output_path_escape',
-        outputDirectory: template.outputDirectory,
-        outputFileName: template.outputFileName,
-      },
-    };
-  }
-  return { ok: true, outputDirectory, outputPath };
-}
 
 async function waitForTerminalSnapshot(input: {
   taskPort: UserLoopTaskPort;
@@ -592,16 +632,6 @@ function isTerminalTaskSnapshot(snapshot: TaskSnapshot): boolean {
   return snapshot.status === 'completed' || snapshot.status === 'failed' || snapshot.status === 'cancelled';
 }
 
-function verifyMarkdownFile(outputPath: string): { ok: true } | { ok: false; reason: string } {
-  try {
-    const stat = statSync(outputPath);
-    if (!stat.isFile()) return { ok: false, reason: 'not_file' };
-    if (stat.size <= 0) return { ok: false, reason: 'empty_file' };
-    return { ok: true };
-  } catch {
-    return { ok: false, reason: 'missing_file' };
-  }
-}
 
 function recordTaskCompletionEvidence(
   evidenceStore: CompletionEvidenceStore,
@@ -776,6 +806,9 @@ function triggerAsyncExtraction(
   failureReason: string,
   snapshot: TaskSnapshot
 ): void {
+  let writer: { release(): void } | undefined;
+  try { writer = options.acquireWriter?.('loop:constraint-extraction:' + input.runId); }
+  catch { return; } // Shutdown denied this new auxiliary writer before scheduling.
   const llmPort = options.llmPort;
 
   const extractionContext = JSON.stringify({
@@ -814,7 +847,7 @@ function triggerAsyncExtraction(
   };
 
   if (!llmPort) {
-    setImmediate(addRuleConstraint);
+    setImmediate(() => { try { addRuleConstraint(); } finally { writer?.release(); } });
     return;
   }
 
@@ -837,6 +870,6 @@ function triggerAsyncExtraction(
     } catch (e) {
       console.warn('[loop-runner] extractViaLLM failed:', (e as Error)?.message);
       addRuleConstraint();
-    }
+    } finally { writer?.release(); }
   });
 }

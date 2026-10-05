@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": { "correctness": "off" },
+  "rules": {
+    "no-debugger": "error",
+    "no-eval": "error",
+    "no-new-func": "error",
+    "no-unreachable": "error",
+    "no-duplicate-case": "error",
+    "no-unsafe-finally": "error",
+    "valid-typeof": "error",
+    "constructor-super": "error"
+  }
+}

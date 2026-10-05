@@ -9,26 +9,34 @@ import type { KSwarmService } from '../../electron/kswarm-service.js';
 import type { Message } from '../../../src/types.js';
 import * as kbStoreModule from '../../electron/kb-store-sqlite.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
 
 // Source-mode tests only: use the real fixed compiled Worker without adding a
 // production TypeScript fallback or replacing native messages/exit semantics.
-const nativeWorker = vi.hoisted(() => ({ output: '', root: '', starts: 0, exits: 0 }));
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
   return { ...actual, Worker: class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
-      if (mapped && !nativeWorker.output) throw new Error('test compiled Worker entry is not ready');
-      super(mapped ? nativeWorker.output : filename, options);
-      if (mapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
+      const protectionMapped = String(filename) === protectionSource;
+      if (mapped && !nativeWorker.output) throw new Error('compiled production Worker is not ready');
+      if (protectionMapped && !nativeWorker.protectionOutput) throw Error('fresh compiled protection Worker is required');
+      super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
+      if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => { nativeWorker.exits++; }); }
     }
   } };
 });
-beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); });
+beforeAll(async () => {
+  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+});
 afterAll(() => {
   try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
-  finally { if (nativeWorker.root) rmSync(nativeWorker.root, { recursive: true, force: true, maxRetries: 3 }); }
+  finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
 });
 
 describe('BDD: actual createDesktopServices local task entrypoint', () => {

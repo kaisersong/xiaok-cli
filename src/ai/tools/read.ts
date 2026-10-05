@@ -4,6 +4,7 @@ import type { Tool } from '../../types.js';
 import { assertWorkspacePath } from '../permissions/workspace.js';
 import { truncateText } from './truncation.js';
 import { extractMaterialText } from '../../runtime/materials/text-extractor.js';
+import { beginToolObservation } from '../../runtime/sol-pi/collector-port.js';
 import {
   MODEL_OUTPUT_CAP,
   SENSITIVE_FILE_REDACTION,
@@ -70,7 +71,7 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         required: ['file_path'],
       },
     },
-    async execute(input) {
+    async execute(input, context) {
       const { file_path, offset = 1, limit, max_chars = MODEL_OUTPUT_CAP } = input as {
         file_path: string;
         offset?: number;
@@ -110,6 +111,12 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         const start = offset - 1;
         const slice = limit ? lines.slice(start, start + limit) : lines.slice(start);
         const numbered = slice.map((line, index) => `${start + index + 1}\t${line}`).join('\n');
+        const observation = beginToolObservation(context?.observationCollector, {
+          toolName: 'read', source: { filePath: resolvedPath, offset, ...(limit === undefined ? {} : { limit }) },
+        });
+        observation.append(numbered);
+        observation.finalize({ executionState: 'terminal', outcome: 'success',
+          ...(kind === 'ooxml' ? { incompleteReason: 'extraction_completeness_unverified' } : {}) });
         return truncateText(redactSecrets(numbered).text, max_chars).text;
       } catch (e) {
         return `Error: ${String(e)}`;

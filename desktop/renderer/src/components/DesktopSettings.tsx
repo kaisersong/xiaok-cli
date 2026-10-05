@@ -1,4 +1,7 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import {LoopArtifactList} from './loops/LoopArtifactList';
+import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../lib/loop-run-observation';
+import {LoopPublicationPanel} from './loops/LoopPublicationPanel';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import * as QRCode from 'qrcode';
 import {
   ChevronLeft,
@@ -2889,7 +2892,15 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [editLoopOutputDir, setEditLoopOutputDir] = useState('');
   const [editLoopOutputFile, setEditLoopOutputFile] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const loopLoadGeneration=useRef(0),previewGeneration=useRef(0),taskResultGeneration=useRef(0);
+  useEffect(()=>()=>{loopLoadGeneration.current++;previewGeneration.current++;taskResultGeneration.current++;},[]);
+  const observationLabel=(run:LoopRunView)=>loopObservationLabel(run,{pending:t.desktopSettings.loopDiagnosticsPublicationPending,verified:at=>t.desktopSettings.loopDiagnosticsVerifiedAt(new Date(at).toLocaleString()),status:getLoopRunStatusLabel});
   const loadLoops = useCallback(async (silent = false) => {
+    const generation=++loopLoadGeneration.current;
+    previewGeneration.current++;taskResultGeneration.current++;setLoopOutputPreviews({});setLoopTaskResults({});setPreviewingLoopId(null);setViewingTaskResultLoopId(null);
+    setLoopRuns(invalidateLoopObservations);
+    setLoopRunResults(previous=>Object.fromEntries(Object.entries(previous).filter(([,result])=>result?.status!=='success'&&result?.status!=='already_completed')));
+
     if (!silent) setLoopDiagnosticsLoading(true);
     setLoopDiagnosticsError('');
     try {
@@ -2905,6 +2916,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         ]);
         return { loop, runs, anomalies };
       }));
+      if(generation!==loopLoadGeneration.current)return;
       setLoopDefinitions(definitions);
       setUserLoopTemplates(templates);
       setLoopScheduleBindings(Object.fromEntries(scheduleBindings.map(binding => [binding.loopId, binding])));
@@ -2920,9 +2932,11 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         return next;
       });
     } catch (error) {
+      if(generation!==loopLoadGeneration.current)return;
+      setLoopRuns(invalidateLoopObservations);
       setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsLoadError);
     } finally {
-      if (!silent) setLoopDiagnosticsLoading(false);
+      if (generation===loopLoadGeneration.current) setLoopDiagnosticsLoading(false);
     }
   }, [t.desktopSettings.loopDiagnosticsLoadError]);
 
@@ -2976,32 +2990,38 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   };
 
   const handlePreviewLoopOutput = async (loopId: string) => {
+    const generation=++previewGeneration.current;setLoopOutputPreviews(previous=>({...previous,[loopId]:undefined}));
     setPreviewingLoopId(loopId);
     try {
       const result = await api.readLoopOutputPreview(loopId);
+      if(generation!==previewGeneration.current)return;
       setLoopOutputPreviews(prev => ({ ...prev, [loopId]: result }));
       if (!result.ok) {
         showToast(result.message || t.desktopSettings.userLoopOutputPreviewUnavailable);
       }
     } catch (error) {
+      if(generation!==previewGeneration.current)return;
       showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopOutputPreviewUnavailable);
     } finally {
-      setPreviewingLoopId(null);
+      if(generation===previewGeneration.current)setPreviewingLoopId(null);
     }
   };
 
   const handleViewLoopTaskResult = async (loopId: string) => {
+    const generation=++taskResultGeneration.current;setLoopTaskResults(previous=>({...previous,[loopId]:undefined}));
     setViewingTaskResultLoopId(loopId);
     try {
       const result = await api.readLoopTaskResult(loopId);
+      if(generation!==taskResultGeneration.current)return;
       setLoopTaskResults(prev => ({ ...prev, [loopId]: result }));
       if (!result.ok) {
         showToast(result.message || t.desktopSettings.userLoopTaskResultUnavailable);
       }
     } catch (error) {
+      if(generation!==taskResultGeneration.current)return;
       showToast(error instanceof Error ? error.message : t.desktopSettings.userLoopTaskResultUnavailable);
     } finally {
-      setViewingTaskResultLoopId(null);
+      if(generation===taskResultGeneration.current)setViewingTaskResultLoopId(null);
     }
   };
 
@@ -3056,7 +3076,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     anomalies: EvidenceAnomalyView[],
   ) => {
     try {
-      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies });
+      const summary = buildLoopDiagnosticsSummary({ loop, runs, anomalies, observationLabel,labels:t.desktopSettings.loopDiagnosticsCopyLabels });
       await navigator.clipboard.writeText(summary);
       showToast(t.desktopSettings.loopDiagnosticsCopied, 'success');
     } catch {
@@ -3310,7 +3330,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                   ? t.desktopSettings.loopDiagnosticsRunning
                   : isAlreadyRunning
                     ? t.desktopSettings.loopDiagnosticsAlreadyRunning
-                    : t.desktopSettings.loopDiagnosticsRunNow;
+                    : (runResult?.status==='publication_pending'||loopNeedsRevalidation(latestRun))?t.desktopSettings.loopDiagnosticsPublicationPending:t.desktopSettings.loopDiagnosticsRunNow;
                 return (
                   <div key={template.loopId} id={`loop-${template.loopId}`} className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-page)] p-3 scroll-mt-4">
                     <div className="flex items-start justify-between gap-3">
@@ -3370,6 +3390,8 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         {loopStatus}
                       </span>
                     </div>
+                    <LoopPublicationPanel loopId={template.loopId} runs={runs} onChanged={() => void loadLoops(true)} />
+                    {latestRun?.status==='success'&&<div className="mt-2 text-xs text-[var(--c-text-secondary)]">{observationLabel(latestRun)}</div>}
                     {latestRunFailed && (
                       <div className="mt-3 rounded-md border border-red-200 bg-red-50/50 px-3 py-2 text-xs">
                         <div className="flex items-center justify-between gap-2">
@@ -3445,10 +3467,12 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                         {t.commonDelete}
                       </button>
                     </div>
+                    {isMarkdownLoop ? <p className="mt-2 text-xs text-[var(--c-text-secondary)]">{t.desktopSettings.userLoopWorkspaceNavigationHint}</p> : null}
+                    <LoopArtifactList loopId={template.loopId} refreshGeneration={loopLoadGeneration.current}/>
                     {outputPreview ? (
                       <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
                         <div className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">
-                          {t.desktopSettings.userLoopOutputPreview}
+                          {t.desktopSettings.userLoopOutputPreview}{outputPreview.ok&&outputPreview.origin==='verified_publication'&&outputPreview.checkedAt ? ` · ${t.desktopSettings.loopDiagnosticsVerifiedAt(new Date(outputPreview.checkedAt).toLocaleString())}` : ''}
                         </div>
                         {outputPreview.ok ? (
                           <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-3 text-xs leading-5 text-[var(--c-text-primary)]">
@@ -3468,7 +3492,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                     {taskResult ? (
                       <div className="mt-3 rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3">
                         <div className="mb-2 text-xs font-medium text-[var(--c-text-secondary)]">
-                          {t.desktopSettings.userLoopTaskResult}
+                          {t.desktopSettings.userLoopTaskResult}{taskResult.ok&&taskResult.origin==='verified_publication'&&taskResult.checkedAt ? ` · ${t.desktopSettings.loopDiagnosticsVerifiedAt(new Date(taskResult.checkedAt).toLocaleString())}` : ''}
                         </div>
                         {taskResult.ok ? (
                           <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--c-bg-deep)] p-3 text-xs leading-5 text-[var(--c-text-primary)]">
@@ -3583,7 +3607,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                   ? t.desktopSettings.loopDiagnosticsRunning
                   : isAlreadyRunning
                     ? t.desktopSettings.loopDiagnosticsAlreadyRunning
-                    : t.desktopSettings.loopDiagnosticsRunNow;
+                    : (runResult?.status==='publication_pending'||loopNeedsRevalidation(latestRun))?t.desktopSettings.loopDiagnosticsPublicationPending:t.desktopSettings.loopDiagnosticsRunNow;
 
                 return (
                   <div
@@ -3604,12 +3628,13 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
                       </span>
                     </div>
 
+                    <LoopPublicationPanel loopId={loop.id} runs={runs} onChanged={() => void loadLoops(true)} />
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded-md bg-[var(--c-bg-card)] p-2">
                         <div className="text-[var(--c-text-tertiary)]">{t.desktopSettings.loopDiagnosticsLastRun}</div>
                         <div className="mt-1 text-[var(--c-text-primary)]">
                           {latestRun
-                            ? `${getLoopRunStatusLabel(latestRun.status)} · ${formatLoopRunTime(latestRun)}`
+                            ? `${observationLabel(latestRun)} · ${formatLoopRunTime(latestRun)}`
                             : t.desktopSettings.loopDiagnosticsNoRuns}
                         </div>
                       </div>

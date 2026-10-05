@@ -1,12 +1,25 @@
+import type {ManagedCompoundFollowupFacts,PreparedManagedCompoundFollowup} from '../../src/runtime/sol-pi/compound-managed-followup.js';
+import {getCompoundFinalPublicationBinding,openCompoundFollowupPublicationWindow,type CompoundFinalPublicationTicket} from '../../src/runtime/sol-pi/compound-publication-producer.js';
+import {computeSessionHistoryDigest} from '../../src/ai/runtime/session-store/store.js';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import {getManagedCompoundAdmissionBinding,type ManagedCompoundAdmission} from '../../src/runtime/sol-pi/compound-managed-admission.js';
+import { agentDisplayNames } from '../shared/subagent-presentation.js';
+import { assertDelegatedObservationOwner } from '../../src/runtime/sol-pi/delegated-session-owner.js';
+import { getObservationMessagePublicationBinding, withPublishedObservationMessages, type ObservationMessagePublication } from '../../src/runtime/sol-pi/observation-message-publication.js';
+import type { ToolRegistry } from '../../src/ai/tools/index.js';
+import { capturePublishedClosureRead,restorePublishedClosureRead,getPublishedClosureReadBinding,type PublishedClosureReadFacts,type PublishedClosureReadAnchor,getObservationSessionOwnerHostBinding, getObservationClosedReadAnchor, type ObservationClosedReadAnchor, type ObservationSessionOwner } from '../../src/runtime/sol-pi/observation-session-owner.js';
+import { desktopObservationSessionId, DesktopTaskObservationStore } from '../../src/runtime/task-host/protected-observation-store.js';
+import { mergeProtectedObservationClosures, type ProtectedObservationClosure } from '../../src/ai/runtime/protected-observation-closure.js';
+import type { GroupObservationReferenceTicket } from '../../src/runtime/task-host/task-runtime-host.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { MultiAgentCoordinator, type AgentExecutionHandle, type AgentIdentity, type ManagedAgentSession, type MultiAgentEvent, type MultiAgentSnapshot, type PreparedAgentHandle } from '../../src/ai/agents/multi-agent-coordinator.js';
-import type { InProcessTaskRuntimeHost, TaskCancellationDecision, TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
-import type { TaskCreateInput, TaskMultiAgentPreparation, TaskSnapshot } from '../../src/runtime/task-host/types.js';
-import type { DesktopAgentSnapshot, DesktopMultiAgentGroup, DesktopMailboxPort, MultiAgentControlResult, MultiAgentRootBinding, MultiAgentPage, MultiAgentGroupSnapshot, MultiAgentEnvelope, MultiAgentThreadDeletionSnapshot } from '../shared/multi-agent-types.js';
+import type { InProcessTaskRuntimeHost, TaskIdentityReservation, TaskCancellationDecision, TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
+import type { GoalTurnExecutionScope, TaskCreateInput, TaskMultiAgentPreparation, TaskSnapshot } from '../../src/runtime/task-host/types.js';
+import type { MultiAgentMessage,DesktopAgentSnapshot, DesktopMultiAgentGroup, DesktopMailboxPort, MultiAgentControlResult, MultiAgentRootBinding, MultiAgentPage, MultiAgentGroupSnapshot, MultiAgentEnvelope, MultiAgentThreadDeletionSnapshot } from '../shared/multi-agent-types.js';
 import { DesktopExecutionCoordinator, currentExecutionLane, type ExecutionLane, type ExecutionLease, type ExecutionLeaseRequest } from './desktop-execution-coordinator.js';
 import { DesktopMultiAgentStore, encodeMultiAgentRow, truncateMultiAgentText, type MultiAgentThreadBinding } from './desktop-multi-agent-store.js';
-import { DesktopMultiAgentTurnMailbox, MultiAgentCommandSequencer } from './desktop-multi-agent-mailbox.js';
+import { DesktopMultiAgentTurnMailbox, MultiAgentCommandSequencer, bindDesktopMailboxSemanticAlias } from './desktop-multi-agent-mailbox.js';
 import type { RuntimeEvent } from '../../src/runtime/events.js';
 import type { RuntimeActivity } from '../../src/ai/runtime/events.js';
 import { DesktopWorktreeJournalError, type DesktopMultiAgentWorktrees } from './desktop-multi-agent-worktrees.js';
@@ -30,6 +43,11 @@ interface PendingAuthorization {
 /** Main factory only. The opaque identity, not this diagnostic id, authorizes reports. */
 export interface DesktopHostDeliveryAuthority { readonly ownerId: string }
 interface HostDeliveryOwner { host: InProcessTaskRuntimeHost; bootId: string; active: boolean }
+interface GoalContinuationDecision {
+  host: InProcessTaskRuntimeHost; binding: MultiAgentRootBinding;
+  originalInput: TaskCreateInput; input: TaskCreateInput; sourceScope: GoalTurnExecutionScope;
+  permissionRevision: number; live: boolean; taskId?: string;
+}
 interface DeliveryRecoveryOwner {
   host: InProcessTaskRuntimeHost; source: HostDeliverySource; phase: 'host' | 'consumers';
   expectedDeliveryRevision: number; delivery?: HostDeliveryRecord; receipt?: Omit<HostDeliveryRecoveryReceipt, 'authority'>;
@@ -45,6 +63,11 @@ export interface DesktopAgentExecutionContext {
   memberTicket: ExecutionLease; mailbox: DesktopMailboxPort;
   sourceTaskId?: string;
 }
+export interface DesktopObservationChildPreparation { readonly opaqueDesktopObservationChildPreparation: never }
+export interface DesktopPreparedObservationSession {
+ session: ManagedAgentSession; owner: ObservationSessionOwner; registry: ToolRegistry; publication: ObservationMessagePublication; observationStore: DesktopTaskObservationStore;
+ releasePreparation?():void;
+}
 export interface DesktopMultiAgentServiceOptions {
   store: DesktopMultiAgentStore;
   coordinator: DesktopExecutionCoordinator;
@@ -59,9 +82,18 @@ export interface DesktopMultiAgentServiceOptions {
     bindWorkingDirectory?(cwd: string): void;
     sessionSeed?: DesktopAgentSessionSeed;
   }): Promise<ManagedAgentSession>;
+  prepareObservationSession?(input: {
+    preparation: DesktopObservationChildPreparation; identity: AgentIdentity; parent: DesktopAgentExecutionContext;
+    context: DesktopAgentExecutionContext; message: string; operationId: string; signal: AbortSignal;
+    sessionSeed?: DesktopAgentSessionSeed;
+  }): Promise<DesktopPreparedObservationSession>;
+  prepareObservationFollowup?(preparation:object):Promise<PreparedManagedCompoundFollowup>;
+  prepareObservationMessage?(input: { context: DesktopAgentExecutionContext; sourceOwner: ObservationSessionOwner; recipientOwner: ObservationSessionOwner; operationId: string; text: string; assertCurrent(): void }): Promise<ObservationMessagePublication>;
   closeGraceMs?: number;
   /** Main Goal owner cancellation. Never an agent tool or renderer callback. */
   beforeThreadDeletion?(threadId: string): Promise<void>;
+  /** Synchronous journal prepared after physical cleanup; returned callback follows durable thread deletion. */
+  beforeThreadDeletionCommit?(threadId:string,operationId:string):()=>void;
   /** Main Goal and host history lookup, including terminal legacy records. */
   hasUnboundHistory?(threadId: string): Promise<boolean>;
   /** Fixed main adapter; rejection keeps startup unavailable, never warn-and-swallow. */
@@ -70,17 +102,31 @@ export interface DesktopMultiAgentServiceOptions {
 type Source = 'user' | 'agent' | 'scheduler';
 export type DesktopGoalChildReadiness = 'ready' | 'waiting_children' | 'children_need_attention';
 interface AgentRequest { actor: DesktopAgentActor; requestSource: Source; operationId: string }
-interface ActorState { context: DesktopAgentExecutionContext; group: LiveGroup; active: boolean; sealed: boolean; outcome?: DesktopAgentSnapshot['status'] }
+interface ActorState { context: DesktopAgentExecutionContext; group: LiveGroup; active: boolean; sealed: boolean; preparing?: boolean; outcome?: DesktopAgentSnapshot['status'] }
 interface LiveChild {
   id: string; parentId: string; context: DesktopAgentExecutionContext; prepared: PreparedAgentHandle;
   execution?: AgentExecutionHandle; sessionResident: boolean; fullResult?: string;
+  semanticBoundaryTurnId?: string;
   stopRequested: boolean; ttl?: ReturnType<typeof setTimeout>;
   controller: AbortController;
   stopTimer?: ReturnType<typeof setTimeout>;
   followups: PendingFollowup[];
   cwd?: string;
 }
+interface ManagedFinalPublication {
+ ticket:CompoundFinalPublicationTicket;facts:ReturnType<typeof getCompoundFinalPublicationBinding>;
+ group:LiveGroup;child:LiveChild;context:DesktopAgentExecutionContext;execution:AgentExecutionHandle;
+ notify(receipt:unknown):Promise<void>;settled:boolean;
+ publication?:{operationId:string;operationDigest:string;snapshotRevision:number;status:string};
+ pending?:Promise<void>;
+}
+interface ManagedFollowupPreparationState {
+  facts:Readonly<ManagedCompoundFollowupFacts>;group:LiveGroup;child:LiveChild;oldContext:DesktopAgentExecutionContext;
+  pending:PendingFollowup;requestHash:string;phase:'prepared'|'applied'|'cancelled';
+  appliedDigest?:string;cancelledDigest?:string;
+}
 interface PendingFollowup {
+  readonly origin?:ManagedCompoundFollowupFacts['origin'];
   lane: ExecutionLane;
   acceptedEpoch?: number;
   operationId: string; callerId: string; message: string; expectedTurn: number;
@@ -131,6 +177,31 @@ const MAX_RESIDENT_CHILDREN = 8;
 
 /** Main owns execution, durable truth and permission checks; renderer owns none. */
 export class DesktopMultiAgentService {
+  private readonly observationPreparationDrains = new Set<Promise<void>>();
+  private readonly groupObservationPreparationDrains = new WeakMap<LiveGroup,Set<Promise<void>>>();
+  private readonly managedFollowupPreparations=new WeakMap<object,ManagedFollowupPreparationState>();
+  private readonly followupInvocationScope=new AsyncLocalStorage<Readonly<{context:DesktopAgentExecutionContext;operationId:string;origin:NonNullable<ManagedCompoundFollowupFacts['origin']>}>>();
+  private readonly managedFollowupReceipts=new WeakMap<object,{preparation:object;kind:'applied'|'cancelled'}>();
+  private readonly managedRuntimeBindings=new WeakMap<object,Readonly<{sessionId:string;nativeInvocationId:string}>>();
+  private readonly managedReleaseReceipts=new WeakMap<object,Readonly<{admission:ManagedCompoundAdmission;closedSnapshotDigest:string}>>();
+  private readonly managedReleaseOwners=new Map<string,{admission:ManagedCompoundAdmission;group:LiveGroup;child:LiveChild;sourceOwner:ObservationSessionOwner;permissionRevision:number;ackBytes:string;requestHash:string;notify:(receipt:object)=>Promise<void>;receipt?:object;pending?:Promise<void>;delivered:boolean}>();
+  private readonly unsubscribeManagedResources:()=>void;
+  private readonly fixedObservationAcks = new WeakMap<object,string>();
+  private readonly observationChildPreparations = new WeakMap<object, { group: LiveGroup; child: LiveChild; parent: DesktopAgentExecutionContext; operationId: string; requestHash: string; message: string; active: boolean; ackBytes?: string }>();
+  private readonly observationChildOwners = new Map<string, ObservationSessionOwner>();
+  private readonly managedFinalPublications=new Map<LiveChild,ManagedFinalPublication>();
+  private readonly managedFinalCommittedFacts=new WeakMap<DesktopAgentExecutionContext,NonNullable<ManagedFinalPublication['publication']>>();
+  private readonly managedFinalReceipts=new WeakMap<object,Readonly<{ticket:CompoundFinalPublicationTicket;sessionId:string;turnId:string;historyDigest:string;snapshotRevision:number}>>();
+  private readonly managedFinalDrains=new Set<Promise<void>>();
+  private readonly observationOwners = new Map<string, { owner: WeakRef<ObservationSessionOwner>; canonicalTaskId: string }>();
+  private readonly observationReferences = new WeakMap<GroupObservationReferenceTicket, { actor: DesktopAgentActor; groupId: string; taskId: string; canonicalTaskId: string; owner: ObservationSessionOwner; closure: ProtectedObservationClosure; operationId: string; consumed: boolean; applied: boolean }>();
+  private readonly observationPublished = new Map<string, string>();
+  private readonly cancellationScope=new AsyncLocalStorage<object>();
+  private readonly cancellationTickets=new WeakMap<object,{context:DesktopAgentExecutionContext;rootEpoch:number;operationId:string;kind:'close'|'interrupt';targetId:string;members:Array<{child:LiveChild;context:DesktopAgentExecutionContext;turnId:string;admission:ManagedCompoundAdmission}>;state:'prepared'|'running'|'consumed'|'spent'}>();
+  private readonly physicalSessionFailures = new Map<LiveGroup,unknown[]>();
+  private readonly physicalSessionClosures = new Map<LiveGroup,Set<Promise<void>>>();
+  private readonly observationResourceClosures = new WeakMap<LiveGroup,Promise<void>>();
+  private readonly observationResources = new Map<string, { token: object; subtaskBoundaryPending?: boolean; close?: () => Promise<void> }>();
   readonly approvalCapacity = MAX_RESIDENT_CHILDREN + 1;
   private approvalOwner?: DesktopApprovalOwner;
   private approvalTransport?: DesktopMultiAgentApprovalTransport;
@@ -148,6 +219,8 @@ export class DesktopMultiAgentService {
   private readonly deletionStops = new Map<string, { goal: Promise<void>; goalConfirmed: boolean; goalFailed: boolean;
     tasks: Map<string, { promise: Promise<void>; executionObserved: boolean; state: 'pending' | 'confirmed' | 'failed' }> }>();
   private readonly goalDecisions = new Set<string>();
+  private readonly goalDecisionContext = new AsyncLocalStorage<object>();
+  private readonly goalContinuationDecisions = new WeakMap<object, GoalContinuationDecision>();
   private readonly userAccess = new WeakMap<DesktopMultiAgentUserAccess, UserAccessState>();
   private readonly workspaceUserAccess = new WeakMap<DesktopWorkspaceUserAccess, WorkspaceUserAccessState>();
   private readonly authorizationCommands = new MultiAgentCommandSequencer();
@@ -176,6 +249,174 @@ export class DesktopMultiAgentService {
     this.grace = options.closeGraceMs ?? 500;
     options.coordinator.setReady(false);
     this.unsubscribeStore = options.store.subscribe(event => this.publish(event));
+    this.unsubscribeManagedResources=options.store.subscribe(event=>{if('groupId' in event)this.publishManagedResources(event.groupId);});
+  }
+
+  assertFreshObservationGroup(context: DesktopAgentExecutionContext): void {
+    const state=this.requireActor(context.actor,'agent',context);
+    if(context.agentId!==`root_${state.group.id}`||context.turn!==1||state.group.children.size||this.observationOwners.has(state.group.id))throw Error('SOL_PI_DESKTOP_FRESH_GROUP_REQUIRED');
+  }
+
+  registerGroupObservationOwner(input: { actor: DesktopAgentActor; requestSource: Source; owner: ObservationSessionOwner; canonicalTaskId: string }): void {
+    const state = this.requireActor(input.actor, input.requestSource);
+    const binding = this.options.store.getRootBinding(input.canonicalTaskId);
+    const owner = getObservationSessionOwnerHostBinding(input.owner);
+    if (!binding || binding.groupId !== state.group.id || state.context.agentId !== `root_${state.group.id}`
+      || state.context.sourceTaskId !== input.canonicalTaskId
+      || owner.session.exportSnapshot().sessionId !== desktopObservationSessionId(input.canonicalTaskId))
+      throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_MISMATCH');
+    const previous = this.observationOwners.get(state.group.id);
+    if (previous && (previous.owner.deref() !== input.owner || previous.canonicalTaskId !== input.canonicalTaskId))
+      throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_REBIND');
+    if (previous) return;
+    // Preserve the incarnation tombstone after dispose/GC: another native session
+    // cannot silently become this existing group's owner. No strong owner leak.
+    this.observationOwners.set(state.group.id, { owner: new WeakRef(input.owner), canonicalTaskId: input.canonicalTaskId });
+    const group = state.group;
+    owner.onDispose(() => queueMicrotask(() => this.maybeDormant(group)));
+  }
+
+  /** Fixed main lifetime for a registered native group owner, independent of any root turn signal. */
+  bindObservationGroupLifetime(actor: DesktopAgentActor, owner: ObservationSessionOwner) {
+    const state = this.requireActor(actor, 'agent'), registered = this.observationOwners.get(state.group.id);
+    if (registered?.owner.deref() !== owner || this.observationResources.has(state.group.id)) throw Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_MISMATCH');
+    const group = state.group, token = Object.freeze({});
+    const resource: { token: object; subtaskBoundaryPending?: boolean; close?: () => Promise<void> } = { token };
+    this.observationResources.set(group.id, resource);
+    const assertIdentity = () => {
+      if (this.observationResources.get(group.id)?.token !== token || this.observationOwners.get(group.id)?.owner.deref() !== owner
+        || this.groups.get(group.id) !== group) throw Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_STALE');
+    };
+    const assertCurrent = () => {
+      assertIdentity();
+      if (group.lifetime.signal.aborted || group.frozen || group.deactivating) throw Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_STALE');
+      this.assertExecutionAuthorization(this.options.store.requireGroup(group.id).permissionRevision ?? 0);
+      getObservationSessionOwnerHostBinding(owner);
+    };
+    assertCurrent();
+    return Object.freeze({ groupId: group.id, signal: group.lifetime.signal, assertCurrent, assertIdentity,
+      requestClose: () => { const existing=this.observationResourceClosures.get(group);if(existing)return existing;assertIdentity();return this.closeObservationResources(group); },
+      onClose: (close: () => Promise<void>) => {
+        assertIdentity(); if (resource.close || typeof close !== 'function') throw Error('SOL_PI_GROUP_RESOURCE_ALREADY_BOUND');
+        resource.close = close;
+      },
+      release: () => {
+        if (this.observationResources.get(group.id)?.token !== token) return;
+        this.observationResources.delete(group.id); this.tryCompleteReset(this.options.store.requireGroup(group.id).threadId);this.maybeDormant(group);
+      },
+    });
+  }
+
+  private closeManagedSession(group:LiveGroup,child:LiveChild,close:()=>Promise<void>):Promise<void>{
+    const entries=this.physicalSessionClosures.get(group)??new Set<Promise<void>>();this.physicalSessionClosures.set(group,entries);
+    const pending=Promise.resolve().then(close).then(()=>{child.sessionResident=false;},error=>{const failures=this.physicalSessionFailures.get(group)??[];failures.push(error);this.physicalSessionFailures.set(group,failures);throw error;});entries.add(pending);
+    void pending.finally(()=>{entries.delete(pending);if(!entries.size)this.physicalSessionClosures.delete(group);}).catch(()=>{});
+    return pending;
+  }
+
+  private closeObservationResources(group:LiveGroup):Promise<void>{
+    const previous=this.observationResourceClosures.get(group);if(previous)return previous;
+    // Publish the single promise before abort callbacks or any asynchronous work.
+    let resolve!:()=>void,reject!:(error:unknown)=>void;
+    const pending=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});this.observationResourceClosures.set(group,pending);
+    void pending.catch(()=>{});
+    this.abortExecutionSignal(group, group.lifetime, new Error('observation_group_closing'));
+    void Promise.resolve().then(async()=>{
+      await Promise.all([...(this.groupObservationPreparationDrains.get(group)??[])]);
+      await group.core.dispose();
+      await group.core.waitForDisposedResources();
+      while(this.physicalSessionClosures.get(group)?.size)await Promise.all([...this.physicalSessionClosures.get(group)!]);
+      if(this.physicalSessionFailures.get(group)?.length)throw new AggregateError(this.physicalSessionFailures.get(group)!,'SOL_PI_GROUP_PHYSICAL_CLOSE_FAILED:'+this.physicalSessionFailures.get(group)!.map(String).join(';'));
+      await group.commands.run(()=>{});
+      const finalPublications=[...this.managedFinalPublications.values()].filter(entry=>entry.group===group);
+      await Promise.all(finalPublications.flatMap(entry=>entry.pending?[entry.pending]:[]));
+      if([...this.managedFinalPublications.values()].some(entry=>entry.group===group))throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_UNCONFIRMED');
+      this.publishManagedResources(group.id);
+      await Promise.all([...this.managedReleaseOwners.values()].filter(owner=>owner.group===group).flatMap(owner=>owner.pending?[owner.pending]:[]));
+      if([...this.managedReleaseOwners.values()].some(owner=>owner.group===group&&!owner.delivered))throw Error('SOL_PI_GROUP_MANAGED_FACTS_UNCONFIRMED');
+      for(const child of group.children.values()){
+        const fact=this.options.store.getAgent(group.id,child.id);
+        if(child.execution||child.sessionResident||!fact||!fact.resourcesReleased||fact.cleanupPending)throw Error('SOL_PI_GROUP_CHILD_RESOURCES_UNCONFIRMED:'+JSON.stringify({execution:!!child.execution,resident:child.sessionResident,status:fact?.status,released:fact?.resourcesReleased,cleanup:fact?.cleanupPending}));
+      }
+      const resource=this.observationResources.get(group.id);if(!resource?.close)throw Error('SOL_PI_GROUP_RESOURCE_CLEANUP_UNBOUND');
+      await resource.close();
+    }).then(resolve,reject);
+    return pending;
+  }
+
+  prepareGroupObservationReference(input: { actor: DesktopAgentActor; requestSource: Source; taskId: string; operationId: string }): GroupObservationReferenceTicket {
+    const state = this.requireActor(input.actor, input.requestSource), registered = this.observationOwners.get(state.group.id);
+    const target = this.options.store.getRootBinding(input.taskId);
+    if (!registered || !target || target.groupId !== state.group.id || target.bootId !== this.options.store.bootId)
+      throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_MISMATCH');
+    const registeredOwner = registered.owner.deref();
+    if (!registeredOwner) throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_EXPIRED');
+    const owner = getObservationSessionOwnerHostBinding(registeredOwner);
+    const closure = mergeProtectedObservationClosures(undefined, owner.session.getProtectedObservationClosure());
+    if (!closure) throw new Error('SOL_PI_GROUP_REFERENCE_EMPTY');
+    this.requestHash(input.operationId, { taskId: input.taskId, closure });
+    if (this.options.store.getOperation(state.group.id, input.operationId)) throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_REPLAY');
+    const ticket = Object.freeze({ id: randomUUID() });
+    this.observationReferences.set(ticket, { actor: input.actor, groupId: state.group.id, taskId: input.taskId,
+      canonicalTaskId: registered.canonicalTaskId, owner: registeredOwner, closure, operationId: input.operationId, consumed: false, applied: false });
+    return ticket;
+  }
+
+  inspectGroupObservationReference(ticket: GroupObservationReferenceTicket) {
+    const facts = this.observationReferences.get(ticket);
+    if (!facts || facts.consumed) throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_UNKNOWN');
+    const state = this.requireActor(facts.actor, 'agent'), registered = this.observationOwners.get(facts.groupId);
+    const target = this.options.store.getRootBinding(facts.taskId);
+    const owner = getObservationSessionOwnerHostBinding(facts.owner);
+    if (state.group.id !== facts.groupId || registered?.owner.deref() !== facts.owner || !target
+      || target.groupId !== facts.groupId || target.bootId !== this.options.store.bootId
+      || !isDeepStrictEqual(owner.session.getProtectedObservationClosure(), facts.closure))
+      throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_STALE');
+    return { taskId: facts.taskId, canonicalTaskId: facts.canonicalTaskId, closure: structuredClone(facts.closure) };
+  }
+
+  /** An applied private ticket establishes identity; the latest durable closure
+   * must still cover today's native history before every provider preparation. */
+  requirePublishedGroupObservationReference(ticket: GroupObservationReferenceTicket) {
+    const facts = this.observationReferences.get(ticket);
+    if (!facts?.applied) throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_NOT_APPLIED');
+    const state = this.requireActor(facts.actor, 'agent');
+    const registered = this.observationOwners.get(facts.groupId), target = this.options.store.getRootBinding(facts.taskId);
+    const owner = getObservationSessionOwnerHostBinding(facts.owner);
+    if (state.group.id !== facts.groupId || registered?.owner.deref() !== facts.owner
+      || !target || target.groupId !== facts.groupId || target.bootId !== this.options.store.bootId)
+      throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_STALE');
+    const closure = mergeProtectedObservationClosures(undefined, owner.session.getProtectedObservationClosure());
+    const digest = createHash('sha256').update(JSON.stringify(closure)).digest('hex');
+    if (this.observationPublished.get(facts.taskId) !== digest) throw new Error('SOL_PI_GROUP_REFERENCE_NOT_PUBLISHED');
+    return { taskId: facts.taskId, canonicalTaskId: facts.canonicalTaskId, owner: facts.owner, session: owner.session, context: state.context };
+  }
+
+  /** Main-only consumption of a real completed child event; never a completion proof. */
+  takeGroupSubtaskBoundary(input:{actor:DesktopAgentActor;requestSource:Source;ticket:GroupObservationReferenceTicket}):boolean {
+    const state=this.requireActor(input.actor,input.requestSource);
+    if(input.requestSource!=='agent'||state.context.agentId!==`root_${state.group.id}`)throw Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_MISMATCH');
+    const facts=this.requirePublishedGroupObservationReference(input.ticket),resource=this.observationResources.get(state.group.id);
+    if(facts.context!==state.context||!resource||this.observationOwners.get(state.group.id)?.owner.deref()!==facts.owner)throw Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_STALE');
+    const pending=resource.subtaskBoundaryPending===true;resource.subtaskBoundaryPending=false;return pending;
+  }
+
+  async commitGroupObservationReference(ticket: GroupObservationReferenceTicket): Promise<void> {
+    this.inspectGroupObservationReference(ticket);
+    const facts = this.observationReferences.get(ticket)!, state = this.requireActor(facts.actor, 'agent');
+    await state.group.commands.run(() => {
+      this.inspectGroupObservationReference(ticket);
+      facts.consumed = true;
+      this.persistenceIO(state.group, () => {
+        if (this.options.store.getOperation(facts.groupId, facts.operationId)) throw new Error('SOL_PI_GROUP_REFERENCE_AUTHORIZATION_REPLAY');
+        this.options.store.putOperation({ groupId: facts.groupId, operationId: facts.operationId, command: 'observation_reference',
+          requestHash: this.requestHash(facts.operationId, { taskId: facts.taskId, closure: facts.closure }), applyState: 'applied',
+          result: { state: 'completed', targetTaskId: facts.taskId, canonicalTaskId: facts.canonicalTaskId,
+            closureDigest: createHash('sha256').update(JSON.stringify(facts.closure)).digest('hex') } });
+        facts.applied = true;
+        this.observationPublished.set(facts.taskId, createHash('sha256').update(JSON.stringify(facts.closure)).digest('hex'));
+      });
+    });
   }
 
   registerThread(binding: MultiAgentThreadBinding): void { this.assertExecutionDomain(binding); this.options.store.registerThread(binding); }
@@ -388,16 +629,16 @@ export class DesktopMultiAgentService {
     // is deliberately no disk lookup before issuing their lifetime fences.
     for (const group of this.groups.values()) {
       group.frozen ??= 'permission_revoked';
-      group.lifetime.abort(reason);
+      this.abortExecutionSignal(group, group.lifetime, reason);
       const root = group.root;
       if (root && !this.actors.get(root.context?.actor as DesktopAgentActor)?.sealed) {
-        root.controller.abort(reason);
+        this.abortExecutionSignal(group, root.controller, reason, root.context);
         if (!root.started) (root.ticket ?? root.request?.ticket)?.release();
         if (root.context) this.markRootStopping(group, root);
         this.trackAuthorizationStop(Promise.resolve().then(() => this.host?.cancelTask(root.binding.sourceTaskId, 'permission_revoked')));
       }
       for (const child of group.children.values()) {
-        child.controller.abort(reason);
+        this.abortExecutionSignal(group, child.controller, reason, child.context);
         for (const pending of child.followups) { pending.controller.abort(reason); (pending.ticket ?? pending.request?.ticket)?.release(); }
         if (child.execution) this.markStopping(group, child, reason);
       }
@@ -536,7 +777,10 @@ export class DesktopMultiAgentService {
   /** Seal a Goal decision in the same sequence as mailbox/status/mutations.
    * The Goal store commit runs outside this queue; the short-lived admission
    * fence prevents a new model mutation from invalidating the sealed decision. */
-  async withGoalDecision<T>(taskId: string, action: (state: DesktopGoalChildReadiness | 'superseded') => Promise<T>): Promise<T> {
+  async withGoalDecision<T>(taskId: string, action: (state: DesktopGoalChildReadiness | 'superseded') => Promise<T>, continuationInput?: TaskCreateInput): Promise<T> {
+    // Only the coordinator's second, concrete continuation action supplies this
+    // request. Settlement listeners never receive a preparation capability.
+    const capturedInput = continuationInput && this.captureGoalDecisionInput(continuationInput);
     const binding = this.options.store.getRootBinding(taskId);
     if (!binding) return action('ready');
     const durable = this.options.store.requireGroup(binding.groupId);
@@ -552,9 +796,39 @@ export class DesktopMultiAgentService {
       if (readiness === 'ready') this.goalDecisions.add(group.id);
       return readiness;
     });
-    try { return await action(state); }
+    let token: object | undefined;
+    try {
+      if (state === 'ready' && continuationInput && capturedInput && this.host) {
+        const snapshot = await this.trackRecovery(this.host.inspectTask(taskId, { trackPending: this.trackRecovery }));
+        if (snapshot?.taskId === taskId && snapshot.executionScope?.kind === 'goal_turn'
+          && snapshot.context?.threadId === binding.threadId
+          && snapshot.executionScope.threadId === binding.threadId && snapshot.multiAgentPreparation
+          && encodeMultiAgentRow(snapshot.multiAgentPreparation) === encodeMultiAgentRow(this.marker(binding))) {
+          const permissionRevision = await group.commands.run(() => {
+            const latest = this.options.store.requireGroup(group.id);
+            if (!this.goalDecisions.has(group.id) || latest.currentRootEpoch !== binding.rootEpoch
+              || !isDeepStrictEqual(this.options.store.getRootBinding(taskId), binding)) throw Error('goal_decision_pending');
+            return this.assertExecutionAuthorization(latest.permissionRevision ?? 0);
+          });
+          token = {};
+          this.goalContinuationDecisions.set(token, { host: this.host, binding: structuredClone(binding),
+            originalInput: continuationInput, input: capturedInput, sourceScope: structuredClone(snapshot.executionScope),
+            permissionRevision, live: true });
+          return await this.goalDecisionContext.run(token, () => action(state));
+        }
+      }
+      return await action(state);
+    }
     catch (error) { this.freezeGroup(group, 'goal_settlement_failed'); throw error; }
-    finally { await group.commands.run(() => { this.goalDecisions.delete(group.id); this.maybeDormant(group); }); }
+    finally {
+      if (token) {
+        const decision = this.goalContinuationDecisions.get(token);
+        if (decision) decision.live = false;
+        this.goalContinuationDecisions.delete(token);
+      }
+      // A waiting action owns no fence and must not clear a later ready action.
+      if (state === 'ready') await group.commands.run(() => { this.goalDecisions.delete(group.id); this.maybeDormant(group); });
+    }
   }
 
   async recordActivity(context: DesktopAgentExecutionContext, activity: RuntimeActivity): Promise<void> {
@@ -668,9 +942,9 @@ export class DesktopMultiAgentService {
     const group = state.group;
     if (group.lease?.deadlineAt !== undefined && Date.now() >= group.lease.deadlineAt) {
       const reason = new Error('multi_agent_lease_expired');
-      group.leaseController?.abort(reason);
+      if(group.leaseController)this.abortExecutionSignal(group, group.leaseController, reason);
       if (group.root?.context && !this.actors.get(group.root.context.actor)?.sealed) {
-        group.root.controller.abort(reason); this.markRootStopping(group, group.root);
+        this.abortExecutionSignal(group, group.root.controller, reason, group.root.context); this.markRootStopping(group, group.root);
       }
       for (const child of group.children.values()) if (child.execution && child.context.memberTicket.epoch === group.lease.epoch) this.markStopping(group, child, reason);
       this.trackAuthorizationStop(this.expireLease({ requestSource: 'scheduler', groupId: group.id, leaseEpoch: group.lease.epoch }));
@@ -686,7 +960,7 @@ export class DesktopMultiAgentService {
         this.wake(group);
       }));
     } else if (group.root?.context === context) {
-      group.root.controller.abort(reason); this.markRootStopping(group, group.root);
+      this.abortExecutionSignal(group, group.root.controller, reason, group.root.context); this.markRootStopping(group, group.root);
       this.trackAuthorizationStop(Promise.resolve(this.host?.cancelTask(group.root.binding.sourceTaskId, reason.message)).then(() => undefined));
     } else throw new Error('invalid_approval_actor_context');
   }
@@ -1013,7 +1287,7 @@ export class DesktopMultiAgentService {
       for (const group of this.groups.values()) {
         if (this.options.store.requireGroup(group.id).threadId !== threadId) continue;
         const reason = new Error('multi_agent_thread_deletion_pending');
-        group.lifetime.abort(reason); group.root?.controller.abort(reason);
+        this.abortExecutionSignal(group, group.lifetime, reason); group.root && this.abortExecutionSignal(group, group.root.controller, reason);
         if (group.root?.context) this.markRootStopping(group, group.root);
         for (const child of group.children.values()) if (child.parentId === `root_${group.id}`) this.beginClose(group, child.id, 'user');
       }
@@ -1081,9 +1355,11 @@ export class DesktopMultiAgentService {
         if (groups.some(group => group.root || group.lease && !group.lease.released || this.goalDecisions.has(group.id)
           || [...group.children.values()].some(child => child.execution || child.followups.length || child.sessionResident))) return;
         if ([...this.resourceCommands].some(([id, owner]) => owner.users > 0 && this.options.store.getGroup(id)?.threadId === threadId)) return;
-        if (this.options.store.threadHasUnreleasedResources(threadId)) return;
+        if (this.options.store.threadHasUnreleasedResources(threadId)||groups.some(group=>this.observationResources.has(group.id))) return;
         const oldGroupId = this.options.store.getThread(threadId)!.activeGroupId ?? null;
+        const commitObservationDeletion=this.options.beforeThreadDeletionCommit?.(threadId,input.operationId);
         this.options.store.deleteThreadHistory(threadId, input.operationId);
+        commitObservationDeletion?.();
         for (const group of groups) {
           group.deactivating = true; clearTimeout(group.deadlineTimer);
           for (const child of group.children.values()) { clearTimeout(child.ttl); clearTimeout(child.stopTimer); }
@@ -1194,11 +1470,11 @@ export class DesktopMultiAgentService {
       });
       this.pendingResets.set(scope.threadId, pending);
       const reason = new Error('group_reset_pending');
-      active.lifetime.abort(reason);
+      this.abortExecutionSignal(active, active.lifetime, reason);
       let failed = false;
       if (active.root) {
         const root = active.root;
-        root.controller.abort(reason);
+        this.abortExecutionSignal(active, root.controller, reason, root.context);
         if (root.context) this.markRootStopping(active, root);
         // Host's real cancellation decision and physical root finally retain
         // their ownership. Never await host disk IO in this command queue.
@@ -1263,7 +1539,7 @@ export class DesktopMultiAgentService {
       this.assertExecutionAuthorization(pending.permissionRevision);
       this.requireUserAccess(pending.access, pending.journalGroupId);
       const store = this.options.store;
-      if (store.threadHasUnreleasedResources(threadId)) return;
+      if (store.threadHasUnreleasedResources(threadId)||group&&this.observationResources.has(group.id)) return;
       let nextId = '';
       store.transaction(() => {
         const operation = store.getOperation(pending.journalGroupId, pending.operationId);
@@ -1357,6 +1633,7 @@ export class DesktopMultiAgentService {
         if (target.turn !== input.expectedTurn) return reject('stale_expected_turn');
         if (command === 'send' && target.status === 'closed') return reject('target_closed');
         if (command === 'followup') {
+          if (this.managedReleaseOwners.has(target.id)&&!this.options.prepareObservationFollowup) return reject('SOL_PI_MANAGED_FOLLOWUP_NOT_READY');
           if (!child || !target.resumable || target.cleanupError || child.stopRequested && child.execution) return reject('agent_not_resumable');
           if (child.followups.length >= 4) return reject('multi_agent_followup_queue_full');
         }
@@ -1639,8 +1916,14 @@ export class DesktopMultiAgentService {
     } finally { this.deliveryRecoveryOwners.delete(authority); }
   }
 
-  async prepareRoot(host: InProcessTaskRuntimeHost, threadId: string, input: TaskCreateInput): Promise<{ taskId: string }> {
+  async prepareRoot(host: InProcessTaskRuntimeHost, threadId: string, input: TaskCreateInput, originalReservation?:TaskIdentityReservation): Promise<{ taskId: string }> {
+    const decisionToken = this.goalDecisionContext.getStore();
+    const decision = decisionToken && this.goalContinuationDecisions.get(decisionToken);
+    if (decisionToken && (!decision?.live || decision.host !== host || decision.originalInput !== input
+      || !isDeepStrictEqual(input, decision.input))) throw Error('goal_decision_pending');
+    if (decision) input = decision.input;
     const lane = currentExecutionLane();
+    if(originalReservation)host.assertTaskIdentityReservation(originalReservation);
     this.assertReady();
     const permissionRevision = this.assertExecutionAuthorization();
     this.assertThreadAdmission(threadId);
@@ -1654,9 +1937,13 @@ export class DesktopMultiAgentService {
     const durable = previousGroup ?? store.createGroup(threadId, permissionRevision);
     if (!previousGroup) this.publishGroupChanged(threadId, null, durable.groupId);
     const group = this.liveGroup(durable.groupId);
-    const reservation = host.reserveTaskIdentity();
+    const reservation = originalReservation ?? host.reserveTaskIdentity();
     const preparation = await group.commands.run(() => {
-      this.assertWritable(group);
+      this.assertWritable(group, 'multi_agent_persistence_failed', decisionToken);
+      if (decision) {
+        if (decision.taskId) throw Error('goal_decision_pending');
+        decision.taskId = reservation.taskId;
+      }
       if (group.root) throw new Error('multi_agent_root_busy');
       const latest = store.requireGroup(group.id);
       const binding: MultiAgentRootBinding = {
@@ -1681,7 +1968,8 @@ export class DesktopMultiAgentService {
     try {
       await host.prepareTask(input, { reservation, marker: this.marker(preparation.binding) });
       await group.commands.run(() => {
-        this.assertWritable(group);
+        this.assertWritable(group, 'multi_agent_persistence_failed', decisionToken);
+        if (decision && decision.taskId !== reservation.taskId) throw Error('goal_decision_pending');
         if (group.root !== preparation || preparation.controller.signal.aborted) throw new Error('multi_agent_preparation_cancelled');
         preparation.binding = { ...preparation.binding, phase: 'queued' };
         store.putRootBinding(preparation.binding);
@@ -1694,7 +1982,7 @@ export class DesktopMultiAgentService {
       });
       return { taskId: reservation.taskId };
     } catch (error) {
-      preparation.controller.abort(error);
+      this.abortExecutionSignal(group, preparation.controller, error, preparation.context);
       preparation.ticket?.release();
       try {
         await group.commands.run(() => {
@@ -1784,8 +2072,12 @@ export class DesktopMultiAgentService {
       // A failed authorized intent write still permits physical abort. Denied or
       // stale decisions never reach this block and never authorize host cancel.
       const reason = new Error(input.reason);
-      root.controller.abort(reason);
-      for (const child of group.children.values()) {
+      this.abortExecutionSignal(group, root.controller, reason, root.context);
+      // The registered observation group owns its independent child lifetime.
+      // Stopping one root turn is not user revocation of that group authority.
+      const retainGroupChildren = this.observationResources.has(group.id) && !failed
+        && !group.lifetime.signal.aborted && !group.deactivating && !group.frozen;
+      for (const child of retainGroupChildren ? [] : group.children.values()) {
         try { this.cancelFollowups(group, child, reason); } catch { failed = true; }
       }
       if (!root.started) {
@@ -1793,8 +2085,8 @@ export class DesktopMultiAgentService {
         if (group.root === root && !root.preparing) group.root = undefined;
       }
       if (root.context) this.markRootStopping(group, root);
-      if (root.context && group.lease?.epoch === root.context.memberTicket.epoch) {
-        group.leaseController?.abort(reason);
+      if (!retainGroupChildren && root.context && group.lease?.epoch === root.context.memberTicket.epoch) {
+        if(group.leaseController)this.abortExecutionSignal(group, group.leaseController, reason);
         for (const child of group.children.values()) {
           if (child.execution && child.context.memberTicket.epoch === group.lease.epoch) this.markStopping(group, child, reason);
         }
@@ -1813,7 +2105,7 @@ export class DesktopMultiAgentService {
     const root = group.root;
     if (!root || root.binding.sourceTaskId !== input.taskId || root.started || !root.request) throw new Error('multi_agent_root_not_admitted');
     root.started = true;
-    const abortQueued = () => root.controller.abort(input.signal.reason);
+    const abortQueued = () => this.abortExecutionSignal(group, root.controller, input.signal.reason, root.context);
     input.signal.addEventListener('abort', abortQueued, { once: true });
     if (input.signal.aborted) abortQueued();
     let context: DesktopAgentExecutionContext | undefined;
@@ -1869,8 +2161,260 @@ export class DesktopMultiAgentService {
     }
   }
 
+  /** Actual Runtime only: binds the immutable seed invocation and child session before installation. */
+  bindObservationChildRuntime(preparation:DesktopObservationChildPreparation,input:{session:import('../../src/ai/runtime/session.js').AgentSessionState;nativeInvocationId:string}):void {
+    const facts=this.assertObservationChildPreparation(preparation),sessionId=input.session.exportSnapshot().sessionId;
+    if(this.managedRuntimeBindings.has(preparation)||sessionId!==desktopObservationSessionId(facts.context.agentId)||!input.nativeInvocationId)throw Error('SOL_PI_DESKTOP_CHILD_RUNTIME_BINDING');
+    this.managedRuntimeBindings.set(preparation,Object.freeze({sessionId,nativeInvocationId:input.nativeInvocationId}));
+  }
+  bindManagedObservationAdmission(preparation:DesktopObservationChildPreparation,input:{admission:ManagedCompoundAdmission;onResourcesReleased:(receipt:object)=>Promise<void>}):Readonly<{assertCurrent():void}> {
+    const {admission,onResourcesReleased}=input,binding=getManagedCompoundAdmissionBinding(admission),facts=this.assertObservationChildPreparation(preparation),runtime=this.managedRuntimeBindings.get(preparation),entry=this.observationChildPreparations.get(preparation)!;
+    if(!runtime||typeof onResourcesReleased!=='function'||binding.groupId!==facts.context.groupId||binding.agentId!==facts.context.agentId||binding.rootEpoch!==facts.context.rootEpoch||binding.operationId!==facts.operationId||binding.parentOperationId!==runtime.nativeInvocationId||binding.childSessionId!==runtime.sessionId||binding.parentSessionId!==getObservationSessionOwnerHostBinding(facts.sourceOwner).session.exportSnapshot().sessionId||this.managedReleaseOwners.has(binding.agentId))throw Error('SOL_PI_DESKTOP_MANAGED_ADMISSION_MISMATCH');
+    const operation=this.options.store.getOperation(binding.groupId,binding.operationId);
+    if(!operation||operation.command!=='spawn'||operation.applyState!=='prepared'||operation.fixedAckBytes!==facts.ackBytes)throw Error('SOL_PI_DESKTOP_MANAGED_ADMISSION_MISMATCH');
+    const owner={admission,group:entry.group,child:entry.child,sourceOwner:facts.sourceOwner,permissionRevision:entry.child.context.permissionRevision,ackBytes:facts.ackBytes,requestHash:operation.requestHash,notify:onResourcesReleased,delivered:false};this.managedReleaseOwners.set(binding.agentId,owner);
+    return Object.freeze({assertCurrent:()=>{
+      if(this.managedReleaseOwners.get(binding.agentId)!==owner||this.groups.get(binding.groupId)!==entry.group||entry.group.children.get(binding.agentId)!==entry.child||entry.child.context.rootEpoch!==binding.rootEpoch||entry.child.context.signal.aborted||entry.group.lifetime.signal.aborted||entry.group.frozen||entry.group.deactivating)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+      this.requireActor(entry.child.context.actor,'agent',entry.child.context);
+      const actor=this.options.store.getAgent(binding.groupId,binding.agentId);
+      if(!actor||actor.status==='closed'||actor.resourcesReleased)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    }});
+  }
+  assertManagedObservationAdmissionCurrent(admission:ManagedCompoundAdmission,actor:DesktopAgentActor):void {
+    const binding=getManagedCompoundAdmissionBinding(admission),owner=this.managedReleaseOwners.get(binding.agentId),caller=this.requireActor(actor,'agent');
+    if(!owner||owner.admission!==admission||caller.group!==owner.group||getObservationSessionOwnerHostBinding(this.getObservationExecutionOwner(actor)).session.exportSnapshot().sessionId!==binding.parentSessionId||this.groups.get(binding.groupId)!==owner.group||owner.group.children.get(binding.agentId)!==owner.child||owner.child.context.rootEpoch!==binding.rootEpoch||owner.child.context.signal.aborted||owner.group.lifetime.signal.aborted||owner.group.frozen||owner.group.deactivating)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    this.requireActor(owner.child.context.actor,'agent',owner.child.context);
+    const operation=this.options.store.getOperation(binding.groupId,binding.operationId);
+    if(!operation||operation.command!=='spawn'||operation.applyState!=='applied'||operation.result.state!=='applied'||operation.result.targetAgentId!==binding.agentId||operation.requestHash!==owner.requestHash||operation.fixedAckBytes!==owner.ackBytes)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    const current=this.options.store.getAgent(binding.groupId,binding.agentId);
+    if(!current||current.status==='closed'||current.resourcesReleased)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+  }
+  /** Long-lived resource supervision, independent of the original root turn actor. */
+  assertManagedResourceCurrent(admission:ManagedCompoundAdmission):void {
+    const binding=getManagedCompoundAdmissionBinding(admission),owner=this.managedReleaseOwners.get(binding.agentId);
+    if(!owner||owner.admission!==admission||this.disposed||this.groups.get(binding.groupId)!==owner.group||owner.group.children.get(binding.agentId)!==owner.child||owner.child.context.rootEpoch!==binding.rootEpoch||owner.group.lifetime.signal.aborted||owner.group.frozen||owner.group.deactivating)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    this.assertExecutionAuthorization(owner.permissionRevision);
+    const source=getObservationSessionOwnerHostBinding(owner.sourceOwner);
+    if(source.session.exportSnapshot().sessionId!==binding.parentSessionId)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    const operation=this.options.store.getOperation(binding.groupId,binding.operationId),current=this.options.store.getAgent(binding.groupId,binding.agentId);
+    if(!operation||operation.command!=='spawn'||operation.applyState!=='applied'||operation.result.state!=='applied'||operation.result.targetAgentId!==binding.agentId||operation.requestHash!==owner.requestHash||operation.fixedAckBytes!==owner.ackBytes||!current||current.status==='closed'||current.resourcesReleased)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+  }
+  inspectManagedFollowupPreparation(preparation:unknown):Readonly<ManagedCompoundFollowupFacts> {
+    const entry=preparation&&typeof preparation==='object'?this.managedFollowupPreparations.get(preparation):undefined;
+    if(!entry||entry.phase==='cancelled')throw Error('SOL_PI_DESKTOP_FOLLOWUP_PREPARATION');
+    this.assertManagedResourceCurrent(entry.facts.admission);
+    const operation=this.options.store.getOperation(entry.group.id,entry.facts.operationId),reservation=operation?.managedTurnReservation;
+    if(!operation||operation.requestHash!==entry.requestHash||operation.followupInput?.targetId!==entry.child.id||operation.followupInput.message.trim()!==entry.facts.message||!reservation||reservation.nextTurnId!==entry.facts.nextTurnId||reservation.previousTurnId!==entry.facts.previousTurnId||reservation.agentId!==entry.child.id||reservation.rootEpoch!==entry.facts.rootEpoch||reservation.messageHash!==createHash('sha256').update(entry.facts.message).digest('hex')||reservation.closureHash!==createHash('sha256').update(JSON.stringify(entry.facts.closure??null)).digest('hex')||entry.phase==='prepared'&&(entry.child.context!==entry.oldContext||entry.child.followups[0]!==entry.pending||entry.pending.controller.signal.aborted))throw Error('SOL_PI_DESKTOP_FOLLOWUP_STALE');
+    if(!isDeepStrictEqual(entry.facts.childSession.getProtectedObservationClosure(),entry.facts.closure))throw Error('SOL_PI_DESKTOP_FOLLOWUP_CLOSURE_CHANGED');
+    return Object.freeze({...entry.facts,closure:structuredClone(entry.facts.closure)});
+  }
+  inspectManagedFollowupApplied(receipt:unknown) {
+    const known=receipt&&typeof receipt==='object'?this.managedFollowupReceipts.get(receipt):undefined;
+    const entry=known&&this.managedFollowupPreparations.get(known.preparation);
+    if(!known||known.kind!=='applied'||!entry||entry.phase!=='applied'||!entry.appliedDigest)throw Error('SOL_PI_DESKTOP_FOLLOWUP_RECEIPT');
+    this.inspectManagedFollowupPreparation(known.preparation);
+    const operation=this.options.store.getOperation(entry.group.id,entry.facts.operationId);
+    if(operation?.result.state!=='applied'||operation.applyState!=='applied'||entry.child.context.turnId!==entry.facts.nextTurnId)throw Error('SOL_PI_DESKTOP_FOLLOWUP_RECEIPT');
+    return Object.freeze({preparation:known.preparation,operationId:entry.facts.operationId,nextTurnId:entry.facts.nextTurnId,appliedDigest:entry.appliedDigest});
+  }
+  inspectManagedFollowupCancelled(receipt:unknown) {
+    const known=receipt&&typeof receipt==='object'?this.managedFollowupReceipts.get(receipt):undefined;
+    const entry=known&&this.managedFollowupPreparations.get(known.preparation);
+    if(!known||known.kind!=='cancelled'||!entry||entry.phase!=='cancelled'||!entry.cancelledDigest)throw Error('SOL_PI_DESKTOP_FOLLOWUP_RECEIPT');
+    const operation=this.options.store.getOperation(entry.group.id,entry.facts.operationId);
+    if(operation?.result.outcome!=='cancelled'||operation.managedTurnReservation?.nextTurnId!==entry.facts.nextTurnId)throw Error('SOL_PI_DESKTOP_FOLLOWUP_RECEIPT');
+    return Object.freeze({preparation:known.preparation,operationId:entry.facts.operationId,nextTurnId:entry.facts.nextTurnId,cancelledDigest:entry.cancelledDigest});
+  }
+  inspectManagedResourcesReleased(receipt:unknown):Readonly<{admission:ManagedCompoundAdmission;closedSnapshotDigest:string}> {
+    const facts=receipt&&typeof receipt==='object'?this.managedReleaseReceipts.get(receipt):undefined;
+    if(!facts)throw Error('SOL_PI_DESKTOP_MANAGED_RESOURCE_RECEIPT_INVALID');return facts;
+  }
+  private publishManagedResources(groupId:string):void {
+    for(const owner of this.managedReleaseOwners.values()){
+      const binding=getManagedCompoundAdmissionBinding(owner.admission);
+      if(binding.groupId!==groupId||owner.delivered||owner.pending)continue;
+      if(!owner.receipt){
+        const actor=this.options.store.getAgent(groupId,binding.agentId);
+        if(this.groups.get(groupId)!==owner.group||owner.group.children.get(binding.agentId)!==owner.child||owner.child.context.rootEpoch!==binding.rootEpoch||!actor||actor.status!=='closed'||actor.executionActive||actor.sessionResident||actor.runtimeResident||!actor.resourcesReleased||actor.cleanupPending)continue;
+        const receipt=Object.freeze({});owner.receipt=receipt;
+        this.managedReleaseReceipts.set(receipt,Object.freeze({admission:owner.admission,closedSnapshotDigest:createHash('sha256').update(JSON.stringify(actor)).digest('hex')}));
+      }
+      const receipt=owner.receipt;
+      owner.pending=Promise.resolve().then(()=>owner.notify(receipt)).then(()=>{owner.delivered=true;this.managedReleaseOwners.delete(binding.agentId);},()=>{/* Durable closed facts and original receipt remain for factual retry/recovery. */}).finally(()=>{owner.pending=undefined;});
+    }
+  }
+
+  getFixedObservationAck(value:unknown):string|undefined {
+    return value&&typeof value==='object'?this.fixedObservationAcks.get(value):undefined;
+  }
+
+  getObservationExecutionOwner(actor: DesktopAgentActor): ObservationSessionOwner {
+    const state = this.requireActor(actor, 'agent');
+    const owner = state.context.agentId === `root_${state.group.id}` ? this.observationOwners.get(state.group.id)?.owner.deref() : this.observationChildOwners.get(state.context.agentId);
+    if (!owner) throw Error('SOL_PI_DESKTOP_OBSERVATION_OWNER_UNKNOWN');
+    getObservationSessionOwnerHostBinding(owner); return owner;
+  }
+
+  /** Persistence of an already authorized message can outlive a recipient turn.
+   * This does not return a live execution context or authorize a new tool. */
+  assertObservationChildPersistence(preparation:DesktopObservationChildPreparation,admission?:ManagedCompoundAdmission):void {
+    const entry=this.observationChildPreparations.get(preparation);
+    if(!entry||this.groups.get(entry.group.id)!==entry.group||entry.group.children.get(entry.child.id)!==entry.child)throw Error('SOL_PI_DESKTOP_CHILD_PREPARATION_STALE');
+    const resource=this.managedReleaseOwners.get(entry.child.id);
+    if(admission&&(!resource||resource.admission!==admission||resource.child!==entry.child))throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    if(entry.active){this.assertObservationChildPreparation(preparation);return;}
+    if(!admission)throw Error('SOL_PI_DESKTOP_MANAGED_SUPERVISION_STALE');
+    this.assertManagedResourceCurrent(admission);
+  }
+
+  getObservationChildContext(preparation: DesktopObservationChildPreparation): DesktopAgentExecutionContext {
+    const entry=this.observationChildPreparations.get(preparation);
+    if(!entry||this.groups.get(entry.group.id)!==entry.group||entry.group.children.get(entry.child.id)!==entry.child)throw Error('SOL_PI_DESKTOP_CHILD_PREPARATION_STALE');
+    if(entry.active)this.assertObservationChildPreparation(preparation);
+    else this.requireActor(entry.child.context.actor,'agent',entry.child.context);
+    return entry.child.context;
+  }
+
+  /** Host-only preparation identity. It never authorizes an agent tool, list or preview. */
+  assertObservationChildPreparation(preparation: DesktopObservationChildPreparation) {
+    const entry = this.observationChildPreparations.get(preparation);
+    if (!entry?.active || this.groups.get(entry.group.id) !== entry.group || entry.group.children.get(entry.child.id) !== entry.child
+      || !this.actors.get(entry.child.context.actor)?.preparing || !this.observationResources.has(entry.group.id))
+      throw Error('SOL_PI_DESKTOP_CHILD_PREPARATION_STALE');
+    entry.child.context.signal.throwIfAborted(); this.assertWritable(entry.group);
+    this.assertExecutionAuthorization(entry.child.context.permissionRevision);
+    const sourceOwner = entry.parent.agentId === `root_${entry.group.id}` ? this.observationOwners.get(entry.group.id)?.owner.deref()
+      : this.observationChildOwners.get(entry.parent.agentId);
+    if (!sourceOwner) throw Error('SOL_PI_DESKTOP_CHILD_SOURCE_UNKNOWN');
+    getObservationSessionOwnerHostBinding(sourceOwner);
+    return Object.freeze({ sourceOwner, context: entry.child.context, parent: entry.parent, operationId: entry.operationId, message: entry.message, ackBytes: entry.ackBytes! });
+  }
+
+  private async spawnObservation(input: AgentRequest & { taskName: string; message: string; sessionSeed?: DesktopAgentSessionSeed }, state: ActorState): Promise<MultiAgentControlResult> {
+    const group = state.group, prepareSession = this.options.prepareObservationSession;
+    if (!prepareSession) throw Error('SOL_PI_DESKTOP_CHILD_FACTORY_NOT_READY');
+    let preparedSession: DesktopPreparedObservationSession | undefined;
+    const staged = await group.commands.run(() => {
+      this.requireActor(input.actor, input.requestSource); this.validateText(input.message);
+      if (!/^[a-z0-9_]{1,64}$/.test(input.taskName)) throw Error('invalid task_name');
+      const requestHash = this.requestHash(input.operationId, { command: 'spawn', actor: input.actor, taskName: input.taskName, message: input.message, seedId: input.sessionSeed?.seedId });
+      const previous = this.persistenceIO(group, () => this.options.store.getOperation(group.id, input.operationId));
+      if (previous) { if (previous.requestHash !== requestHash) throw Error('operation_id_conflict'); const result=previous.result as unknown as MultiAgentControlResult;if(previous.applyState==='applied'&&result.state==='applied'&&previous.fixedAckBytes)this.fixedObservationAcks.set(result,previous.fixedAckBytes);return { previous: result }; }
+      if (this.slots.size >= MAX_RESIDENT_CHILDREN) throw Error('multi_agent_capacity_exceeded');
+      const ticket = state.context.memberTicket.retain(); let prepared: PreparedAgentHandle | undefined; let reservedChild: LiveChild | undefined;
+      try {
+        this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command: 'spawn', requestHash,
+          applyState: 'prepared', result: { operationId: input.operationId, state: 'unknown', preparation: 'observation', bootId: this.options.store.bootId } });
+        prepared = group.core.prepareSpawn({ requestSource: 'agent', callerId: this.coreId(group, state.context.agentId), taskName: input.taskName, message: input.message,
+          createSession: async identity => {
+            if (!preparedSession || identity.id !== prepared!.agentId) throw Error('SOL_PI_DESKTOP_CHILD_NOT_PREPARED');
+            const current = group.children.get(identity.id)!; this.requireActor(current.context.actor, 'agent'); current.sessionResident = true;
+            const session = preparedSession.session;
+            return { run: async (message, signal, activity) => {
+              const context = current.context; await this.recordRunStarted(context, message);
+              const result = await session.run(message, signal, activity); if (current.context === context) current.fullResult = result; return result;
+            }, ...(session.suspend ? { suspend: () => session.suspend!() } : {}), ...(session.deactivate ? { deactivate: () => session.deactivate!() } : {}),
+              dispose: () => this.closeManagedSession(group,current,()=>session.dispose()) };
+          } });
+        const controller = new AbortController(), context = this.createContext(group, prepared.agentId, randomUUID(), prepared.expectedTurn, ticket, controller.signal);
+        this.actors.get(context.actor)!.preparing = true;
+        const child: LiveChild = { id: prepared.agentId, parentId: state.context.agentId, context, prepared, sessionResident: false, stopRequested: false, controller, followups: [] };
+        reservedChild=child;group.children.set(child.id, child); this.slots.add(child.id);
+        const preparation = Object.freeze(Object.create(null)) as DesktopObservationChildPreparation;
+        this.observationChildPreparations.set(preparation, { group, child, parent: state.context, operationId: input.operationId, requestHash, message: input.message, active: true });
+        // Persist only the reserved identity. A restart retains unknown and never recreates a session from text absence.
+        this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command: 'spawn', requestHash, applyState: 'prepared',
+          result: { operationId: input.operationId, state: 'unknown', preparation: 'observation', bootId: this.options.store.bootId, targetAgentId: child.id, expectedTurn: prepared.expectedTurn } });
+        const ordinal=this.options.store.reservePresentationOrdinal({groupId:group.id,operationId:input.operationId,requestHash,agentId:child.id});
+        const ackBytes=JSON.stringify({operationId:input.operationId,state:'applied',targetAgentId:child.id,expectedTurn:prepared.expectedTurn,displayNames:agentDisplayNames(ordinal)});
+        if(Buffer.byteLength(ackBytes)>8192)throw Error('fixed ACK capacity exceeded');
+        this.options.store.putOperation({...this.options.store.getOperation(group.id,input.operationId)!,fixedAckBytes:ackBytes});
+        this.observationChildPreparations.get(preparation)!.ackBytes=ackBytes;
+        const parent = this.requireAgent(group.id, state.context.agentId);
+        const identity: AgentIdentity = { id: child.id, taskName: prepared.snapshot.taskName, canonicalName: prepared.snapshot.canonicalName,
+          parentId: this.coreId(group, state.context.agentId), parentCanonicalName: parent.canonicalName, depth: prepared.snapshot.depth };
+        return { preparation, child, prepared, requestHash, identity, ticket };
+      } catch (error) {
+        // No callback/provider can have run before this short reservation finishes.
+        // Persist failure still freezes the group: the disk may contain either row.
+        try {
+          if(prepared)group.core.rollbackPrepared(prepared);
+          if(reservedChild){this.abortExecutionSignal(group, reservedChild.controller, error, reservedChild.context);const actor=this.actors.get(reservedChild.context.actor);if(actor)actor.active=false;group.children.delete(reservedChild.id);this.slots.delete(reservedChild.id);}
+          ticket.release();
+        } finally { this.freezeGroup(group,'multi_agent_preparation_persistence_unknown'); }
+        throw error;
+      }
+    });
+    if ('previous' in staged) return staged.previous!;
+    const { preparation, child, prepared, requestHash, identity, ticket } = staged;
+    let activationEntered = false, preparationDrained = true;
+    try {
+      // Deliberately outside commands: publication may itself require the same real journal sequencer.
+      preparedSession = await prepareSession({ preparation, identity, parent: state.context, context: child.context,
+        message: input.message, operationId: input.operationId, signal: child.context.signal, sessionSeed: input.sessionSeed });
+      if (!(preparedSession.observationStore instanceof DesktopTaskObservationStore)) throw Error('SOL_PI_DESKTOP_CHILD_STORE_REQUIRED');
+      const durable = await preparedSession.observationStore.loadSessionSnapshot(child.id);
+      const native = getObservationSessionOwnerHostBinding(preparedSession.owner).session.exportSnapshot();
+      if (!durable || durable.sessionId !== native.sessionId || !isDeepStrictEqual(durable.messages, native.messages)
+        || !isDeepStrictEqual(durable.protectedObservationClosure, native.protectedObservationClosure)) throw Error('SOL_PI_DESKTOP_CHILD_DURABILITY_REQUIRED');
+      return await group.commands.run(() => {
+        const facts = this.assertObservationChildPreparation(preparation);
+        this.requireActor(input.actor, input.requestSource);
+        const target = getObservationSessionOwnerHostBinding(preparedSession!.owner);
+        assertDelegatedObservationOwner(preparedSession!.owner, target.session, preparedSession!.registry);
+        if (target.session.exportSnapshot().sessionId !== desktopObservationSessionId(child.id)) throw Error('SOL_PI_DESKTOP_CHILD_SESSION_MISMATCH');
+        const publication = getObservationMessagePublicationBinding(preparedSession!.publication);
+        if (publication.sourceOwner !== facts.sourceOwner || publication.recipientOwner !== preparedSession!.owner
+          || publication.operationId !== input.operationId || publication.text !== input.message) throw Error('SOL_PI_DESKTOP_CHILD_PUBLICATION_MISMATCH');
+        const result: MultiAgentControlResult = { operationId: input.operationId, state: 'applied', targetAgentId: child.id, expectedTurn: prepared.expectedTurn };
+        publication.commit(input.operationId, input.message, () => this.options.store.transaction(() => {
+          this.persistCoreSnapshot(group, prepared.snapshot);
+          this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command: 'spawn', requestHash, applyState: 'applied', result: { ...result } });
+        }));
+        this.observationChildPreparations.get(preparation)!.active = false;
+        this.actors.get(child.context.actor)!.preparing = false;
+        this.observationChildOwners.set(child.id, preparedSession!.owner);
+        activationEntered = true; child.execution = group.core.activatePreparedTurn(prepared, { signal: child.context.signal });
+        this.fixedObservationAcks.set(result,facts.ackBytes);
+        this.observeSettlement(group, child); return result;
+      });
+    } catch (error) {
+      this.abortExecutionSignal(group, child.controller, error, child.context);
+      if (activationEntered) {
+        this.freezeGroup(group, 'multi_agent_activation_unknown');
+        try {
+          await group.core.closeAgent({requestSource:'user',callerId:'main',target:child.id});
+          await preparedSession?.session.dispose();
+        } catch { preparationDrained=false; }
+        throw error;
+      }
+      this.observationChildPreparations.get(preparation)!.active = false;
+      let cleanupFailed = false;
+      try { preparedSession?.publication.dispose(); await preparedSession?.session.dispose(); }
+      catch { cleanupFailed = true; preparationDrained=false; }
+      finally { preparedSession?.owner.dispose(); }
+      await group.commands.run(() => {
+        this.actors.get(child.context.actor)!.active = false;
+        if (cleanupFailed) { this.freezeGroup(group, 'multi_agent_preparation_cleanup_unknown'); return; }
+        group.core.rollbackPrepared(prepared); this.slots.delete(child.id); group.children.delete(child.id); ticket.release();
+        this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command: 'spawn', requestHash, applyState: 'applied',
+          result: { operationId: input.operationId, state: 'completed', outcome: 'rejected', targetAgentId: child.id } }, true);
+      });
+      throw error;
+    } finally { preparedSession?.publication.dispose(); if(preparationDrained)preparedSession?.releasePreparation?.(); }
+  }
+
   async spawn(input: AgentRequest & { taskName: string; message: string; sessionSeed?: DesktopAgentSessionSeed }): Promise<MultiAgentControlResult> {
     const state = this.requireActor(input.actor, input.requestSource);
+    if (this.observationResources.has(state.group.id)) {
+      const pending = this.spawnObservation(input, state);
+      const drain = pending.then(() => {}, () => {});
+      this.observationPreparationDrains.add(drain);
+      const groupDrains=this.groupObservationPreparationDrains.get(state.group)??new Set<Promise<void>>();
+      this.groupObservationPreparationDrains.set(state.group,groupDrains);groupDrains.add(drain);
+      void drain.then(() => {this.observationPreparationDrains.delete(drain);groupDrains.delete(drain);if(!groupDrains.size)this.groupObservationPreparationDrains.delete(state.group);});
+      return pending;
+    }
     return state.group.commands.run(() => {
       this.requireActor(input.actor, input.requestSource);
       this.validateText(input.message);
@@ -1917,7 +2461,7 @@ export class DesktopMultiAgentService {
               },
               ...(session.suspend ? { suspend: () => session.suspend!() } : {}),
               ...(session.deactivate ? { deactivate: () => session.deactivate!() } : {}),
-              dispose: async () => { await session.dispose(); child!.sessionResident = false; },
+              dispose: () => this.closeManagedSession(group,child!,()=>session.dispose()),
             };
           } });
         const controller = new AbortController();
@@ -1949,17 +2493,156 @@ export class DesktopMultiAgentService {
     });
   }
 
+  private observationOwnerFor(group: LiveGroup, agentId: string): ObservationSessionOwner {
+    const owner = agentId === `root_${group.id}` ? this.observationOwners.get(group.id)?.owner.deref() : this.observationChildOwners.get(agentId);
+    if (!owner) throw Error('SOL_PI_DESKTOP_OBSERVATION_OWNER_UNKNOWN');
+    getObservationSessionOwnerHostBinding(owner); return owner;
+  }
+
+  private async prepareProtectedMessage(state: ActorState, sourceId: string, recipientId: string, operationId: string, text: string) {
+    if (!this.observationResources.has(state.group.id) || sourceId === recipientId) return undefined;
+    const prepare = this.options.prepareObservationMessage;
+    if (!prepare) throw Error('SOL_PI_DESKTOP_MESSAGE_FACTORY_REQUIRED');
+    const sourceOwner = this.observationOwnerFor(state.group, sourceId), recipientOwner = this.observationOwnerFor(state.group, recipientId);
+    const assertCurrent = () => {
+      this.requireActor(state.context.actor, 'agent', state.context);
+      if (this.observationOwnerFor(state.group, sourceId) !== sourceOwner || this.observationOwnerFor(state.group, recipientId) !== recipientOwner) throw Error('SOL_PI_DESKTOP_MESSAGE_PARTICIPANT_CHANGED');
+    };
+    assertCurrent();
+    const publication = await prepare({ context: state.context, sourceOwner, recipientOwner, operationId, text, assertCurrent });
+    try {
+    assertCurrent();
+    const facts = getObservationMessagePublicationBinding(publication);
+    if (facts.sourceOwner !== sourceOwner || facts.recipientOwner !== recipientOwner || facts.operationId !== operationId || facts.text !== text) { publication.dispose(); throw Error('SOL_PI_DESKTOP_MESSAGE_PUBLICATION_MISMATCH'); }
+    return facts;
+    } catch(error) { publication.dispose(); throw error; }
+  }
+
+  private publishedMessageDigest(message:MultiAgentMessage):string {
+    const {groupId,messageId,sender,receiverId,kind,preview,contentId,truncated,createdAt,bodyUnavailable}=message;
+    return createHash('sha256').update(encodeMultiAgentRow({groupId,messageId,sender,receiverId,kind,preview,contentId,truncated,createdAt,bodyUnavailable})).digest('hex');
+  }
+  /** Called only in the original message writer transaction after actual source
+   * publication, before the row and its exact closure become visible together. */
+  private recordPublishedMessage(group:LiveGroup,message:MultiAgentMessage,preparedAnchor?:PublishedClosureReadAnchor):void {
+    if(!this.observationResources.has(group.id)||message.sender.kind!=='agent'||message.sender.agentId===message.receiverId)return;
+    const source=this.observationOwnerFor(group,message.sender.agentId),recipient=this.observationOwnerFor(group,message.receiverId);
+    const anchor=preparedAnchor??capturePublishedClosureRead(source,recipient),facts=getPublishedClosureReadBinding(anchor).facts;
+    const operationId=`published_message:${message.messageId}`,digest=this.publishedMessageDigest(message);
+    if(this.options.store.getOperation(group.id,operationId))throw Error('SOL_PI_MESSAGE_ANCHOR_ALREADY_EXISTS');
+    this.options.store.putOperation({groupId:group.id,operationId,command:'published_message',requestHash:digest,applyState:'applied',result:{messageId:message.messageId,messageSeq:this.options.store.getGroup(group.id)!.lastSeq,facts}},true);
+  }
+  private protectPublishedMailbox(state:ActorState,messages:readonly MultiAgentMessage[]):PublishedClosureReadAnchor[]|undefined {
+    if(!this.observationResources.has(state.group.id))return [];
+    const anchors:PublishedClosureReadAnchor[]=[];
+    for(const message of messages){
+      if(message.sender.kind!=='agent'||message.sender.agentId===state.context.agentId)continue;
+      const row=this.options.store.getOperation(state.group.id,`published_message:${message.messageId}`);
+      if(!row)return undefined; // Legacy rows retain their existing complete authorization path.
+      const durable=this.options.store.listMessages(state.group.id,message.receiverId).find(item=>item.messageId===message.messageId);
+      if(!durable||message.receiverId!==state.context.agentId||!['published_message','published_message_unavailable'].includes(row.command)||row.applyState!=='applied'||row.requestHash!==this.publishedMessageDigest(message)||row.requestHash!==this.publishedMessageDigest(durable)||row.result.messageId!==message.messageId||!Number.isSafeInteger(row.result.messageSeq))throw Error('SOL_PI_MESSAGE_ANCHOR_CHANGED');
+      const event=this.options.store.readEvents(state.group.id,Number(row.result.messageSeq)-1,1)[0];
+      if(!event||event.seq!==row.result.messageSeq||event.kind!=='message_sent'||this.publishedMessageDigest(event.payload.message as MultiAgentMessage)!==row.requestHash)throw Error('SOL_PI_MESSAGE_ANCHOR_EVENT_CHANGED');
+      if(row.command==='published_message_unavailable'){if(!message.bodyUnavailable||message.preview!=='FINAL_CONTENT_NOT_PERSISTED'||row.result.bodyUnavailable!==true)throw Error('SOL_PI_MESSAGE_ANCHOR_CHANGED');continue;}
+      const source=message.sender.agentId===`root_${state.group.id}`?this.observationOwners.get(state.group.id)?.owner.deref():this.observationChildOwners.get(message.sender.agentId);
+      if(!source)throw Error('SOL_PI_DESKTOP_OBSERVATION_OWNER_UNKNOWN');
+      anchors.push(restorePublishedClosureRead(source,this.observationOwnerFor(state.group,message.receiverId),row.result.facts as PublishedClosureReadFacts));
+    }
+    return anchors;
+  }
+
+  private async protectObservationRead<T>(state: ActorState, sourceIds: readonly string[], value: T): Promise<T> {
+    if (!this.observationResources.has(state.group.id)) return value;
+    const frozen = structuredClone(value), text = JSON.stringify(frozen);
+    const retained: ObservationMessagePublication[] = [];
+    const closedSources: {anchor:ObservationClosedReadAnchor;recipientOwner:ObservationSessionOwner}[]=[];
+    try {
+      for (const sourceId of new Set(sourceIds)) {
+        if(sourceId!==state.context.agentId){
+          const storedSource=this.requireAgent(state.group.id,sourceId);
+          const sourceOwner=this.observationChildOwners.get(sourceId);
+          if(storedSource.status==='closed' && !storedSource.executionActive && storedSource.resourcesReleased && sourceOwner){
+            closedSources.push({anchor:getObservationClosedReadAnchor(sourceOwner),recipientOwner:this.observationOwnerFor(state.group,state.context.agentId)});
+            continue;
+          }
+        }
+        const operationId = randomUUID();
+        const publication = await this.prepareProtectedMessage(state, sourceId, state.context.agentId, operationId, text);
+        if (publication) { retained.push(publication); publication.commit(operationId, text, () => {}); }
+      }
+      return withPublishedObservationMessages(retained, () => { this.requireActor(state.context.actor, 'agent', state.context); return frozen; }, closedSources);
+    } finally { for (const publication of retained) publication.dispose(); }
+  }
+
+  prepareManagedCancellation(context:DesktopAgentExecutionContext,kind:'close'|'interrupt',input:Readonly<{nativeInvocationId:string;finalInput:Readonly<Record<string,unknown>>}>):object{
+    const state=this.requireActor(context.actor,'agent',context);
+    if(Object.keys(input.finalInput).join(',')!=='target'||typeof input.finalInput.target!=='string'||typeof input.nativeInvocationId!=='string'||!input.nativeInvocationId)throw Error('SOL_PI_DESKTOP_CANCEL_INPUT');
+    const target=this.resolveTarget(state,input.finalInput.target);this.assertDescendant(state,target);
+    const children=[...state.group.children.values()].filter(child=>child.id===target.id||kind==='close'&&this.isDescendant(state.group,child.id,target.id));
+    const members=children.map(child=>{const owner=this.managedReleaseOwners.get(child.id);if(!owner||owner.group!==state.group||owner.child!==child)throw Error('SOL_PI_DESKTOP_CANCEL_ADMISSION');return {child,context:child.context,turnId:child.context.turnId,admission:owner.admission};});
+    if(!members.length)throw Error('SOL_PI_DESKTOP_CANCEL_ADMISSION');
+    const ticket=Object.freeze(Object.create(null)) as object;
+    this.cancellationTickets.set(ticket,{context,rootEpoch:context.rootEpoch,operationId:`${context.turnId}:${input.nativeInvocationId}`,kind,targetId:target.id,members,state:'prepared'});return ticket;
+  }
+  async runManagedCancellation(ticket:unknown,work:()=>Promise<string>):Promise<string>{
+    const known=typeof ticket==='object'&&ticket?this.cancellationTickets.get(ticket):undefined;
+    if(!known||known.state!=='prepared'||typeof work!=='function')throw Error('SOL_PI_DESKTOP_CANCEL_TICKET');
+    known.state='running';
+    try{const result=await this.cancellationScope.run(ticket as object,work);if((known.state as string)!=='consumed')throw Error('SOL_PI_DESKTOP_CANCEL_NOT_APPLIED');return result;}finally{known.state='spent';}
+  }
+  private consumeManagedCancellation(state:ActorState,input:AgentRequest,kind:'close'|'interrupt',targetId:string):void{
+    const ticket=this.cancellationScope.getStore();if(!ticket)return;
+    const known=this.cancellationTickets.get(ticket);
+    if(!known||known.state!=='running'||known.context!==state.context||known.rootEpoch!==state.context.rootEpoch||known.operationId!==input.operationId||known.kind!==kind||known.targetId!==targetId)throw Error('SOL_PI_DESKTOP_CANCEL_STALE');
+    const members=[...state.group.children.values()].filter(child=>child.id===targetId||kind==='close'&&this.isDescendant(state.group,child.id,targetId));
+    if(members.length!==known.members.length||known.members.some(member=>!members.includes(member.child)||member.child.context!==member.context||member.context.turnId!==member.turnId||this.managedReleaseOwners.get(member.child.id)?.admission!==member.admission))throw Error('SOL_PI_DESKTOP_CANCEL_STALE');
+    known.state='consumed';
+  }
+
+  inspectCommittedManagedMessage(context:DesktopAgentExecutionContext,input:Readonly<{nativeInvocationId:string;finalInput:Readonly<Record<string,unknown>>;result:string}>){
+    const state=this.actors.get(context.actor);
+    if(!state||state.context!==context||this.groups.get(context.groupId)!==state.group||typeof input.nativeInvocationId!=='string'||!input.nativeInvocationId)throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_IDENTITY');
+    const operationId=`${context.turnId}:${input.nativeInvocationId}`,operation=this.options.store.getOperation(state.group.id,operationId);
+    if(!operation||operation.command!=='send'||operation.applyState!=='applied'||Object.keys(input.finalInput).sort().join(',')!=='message,target'||typeof input.finalInput.target!=='string'||typeof input.finalInput.message!=='string')throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_UNKNOWN');
+    this.validateText(input.finalInput.message);
+    const target=this.resolveTarget(state,input.finalInput.target),requestHash=this.requestHash(operationId,{command:'send',actor:context.actor,payload:{target:target.id,message:input.finalInput.message}});
+    if(operation.requestHash!==requestHash||operation.result.targetAgentId!==target.id||operation.result.operationId!==operationId||operation.result.state!=='applied')throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_MISMATCH');
+    const displayNames=agentDisplayNames(target.presentationOrdinal),expected={...operation.result,...(displayNames?{displayNames}:{})};
+    if(!isDeepStrictEqual(JSON.parse(input.result),expected))throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_RESULT');
+    return Object.freeze({adapter:'desktop-service-metadata-v1' as const,kind:'send' as const,operationId,requestHash,resultHash:createHash('sha256').update(input.result).digest('hex'),groupId:state.group.id,actorId:context.agentId,epoch:context.rootEpoch});
+  }
+
+  inspectCommittedManagedFollowup(context:DesktopAgentExecutionContext,input:Readonly<{nativeInvocationId:string;finalInput:Readonly<Record<string,unknown>>;result:string}>){
+    const state=this.actors.get(context.actor);
+    if(!state||state.context!==context||this.groups.get(context.groupId)!==state.group||typeof input.nativeInvocationId!=='string'||!input.nativeInvocationId)throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_IDENTITY');
+    const operationId=`${context.turnId}:${input.nativeInvocationId}`,operation=this.options.store.getOperation(state.group.id,operationId);
+    if(!operation||operation.command!=='followup'||!operation.followupAcceptedResult||Object.keys(input.finalInput).sort().join(',')!=='message,target'||typeof input.finalInput.target!=='string'||typeof input.finalInput.message!=='string')throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_UNKNOWN');
+    const target=this.resolveTarget(state,input.finalInput.target),requestHash=this.requestHash(operationId,{command:'followup',actor:context.actor,payload:{target:target.id,message:input.finalInput.message}}),accepted=operation.followupAcceptedResult;
+    if(operation.requestHash!==requestHash||accepted.targetAgentId!==target.id||accepted.operationId!==operationId||accepted.state!=='queued_next_admission')throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_MISMATCH');
+    const displayNames=agentDisplayNames(target.presentationOrdinal),expected={...accepted,...(displayNames?{displayNames}:{})};
+    if(!isDeepStrictEqual(JSON.parse(input.result),expected))throw Error('SOL_PI_DESKTOP_MESSAGE_FACT_RESULT');
+    // Freeze the actual final wrapper bytes before reporting a committed metadata fact.
+    this.options.store.putOperation({...operation,followupAckBytes:input.result});
+    return Object.freeze({adapter:'desktop-service-metadata-v1' as const,kind:'followup' as const,operationId,requestHash,resultHash:createHash('sha256').update(input.result).digest('hex'),groupId:state.group.id,actorId:context.agentId,epoch:context.rootEpoch});
+  }
+
   async send(input: AgentRequest & { target: string; message: string }): Promise<MultiAgentControlResult> {
     const state = this.requireActor(input.actor, input.requestSource);
-    return state.group.commands.run(() => {
+    const targetId = this.resolveTarget(state, input.target).id;
+    const publication = this.observationResources.has(state.group.id) ? await this.prepareProtectedMessage(state, state.context.agentId, targetId, input.operationId, input.message) : undefined;
+    try { return await state.group.commands.run(() => {
+      const commit = <T>(work: () => T): T => publication ? publication.commit(input.operationId, input.message, work) : work();
+      return commit(() => {
       this.requireActor(input.actor, input.requestSource); this.validateText(input.message);
-      const target = this.resolveTarget(state, input.target);
+      const target = this.resolveTarget(state, input.target); if(target.id!==targetId)throw Error('SOL_PI_DESKTOP_MESSAGE_TARGET_CHANGED');
       if (target.status === 'closed') throw new Error('target is closed');
       return this.mutate(state.group, input, 'send', { target: target.id, message: input.message }, () => {
         const message = this.options.store.sendMessage(state.group.id, { sender: { kind: 'agent', agentId: state.context.agentId }, receiverId: target.id, text: input.message });
+        this.recordPublishedMessage(state.group,message);
         return { operationId: input.operationId, state: 'applied', targetAgentId: target.id, messageId: message.messageId };
       });
-    });
+      });
+    }); } finally { publication?.dispose(); }
   }
 
   async interrupt(input: AgentRequest & { target: string }): Promise<MultiAgentControlResult> {
@@ -1967,6 +2650,7 @@ export class DesktopMultiAgentService {
     return state.group.commands.run(() => {
       this.requireActor(input.actor, input.requestSource);
       const target = this.resolveTarget(state, input.target); this.assertDescendant(state, target);
+      this.consumeManagedCancellation(state,input,'interrupt',target.id);
       const existing = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, input.operationId));
       const result = this.mutate(state.group, input, 'interrupt', { target: target.id }, () => {
         return { operationId: input.operationId, state: 'applied', targetAgentId: target.id };
@@ -1983,12 +2667,29 @@ export class DesktopMultiAgentService {
     });
   }
 
+  runManagedFollowupInvocation(context:DesktopAgentExecutionContext,nativeInvocationId:string,work:()=>Promise<string>):Promise<string> {
+    this.assertInvocation(context.actor,context);
+    if(!this.observationResources.has(context.groupId))return work();
+    if(typeof nativeInvocationId!=='string'||!nativeInvocationId||nativeInvocationId.length>256)throw Error('SOL_PI_DESKTOP_FOLLOWUP_INVOCATION');
+    const owner=this.getObservationExecutionOwner(context.actor),session=getObservationSessionOwnerHostBinding(owner).session;
+    return this.followupInvocationScope.run(Object.freeze({context,operationId:`${context.turnId}:${nativeInvocationId}`,origin:Object.freeze({session,nativeInvocationId})}),work);
+  }
+
   async followup(input: AgentRequest & { target: string; message: string }): Promise<MultiAgentControlResult> {
     const state = this.requireActor(input.actor, input.requestSource);
-    return state.group.commands.run(() => {
+    const invocation=this.followupInvocationScope.getStore();
+    if(invocation&&(invocation.context!==state.context||invocation.operationId!==input.operationId))throw Error('SOL_PI_DESKTOP_FOLLOWUP_INVOCATION');
+    const origin=invocation?.origin;
+    const targetId = this.resolveTarget(state, input.target).id;
+    if (this.managedReleaseOwners.has(targetId)&&!this.options.prepareObservationFollowup) throw Error('SOL_PI_MANAGED_FOLLOWUP_NOT_READY');
+    const publication = this.observationResources.has(state.group.id) ? await this.prepareProtectedMessage(state, state.context.agentId, targetId, input.operationId, input.message) : undefined;
+    try { return await state.group.commands.run(() => {
+      const commit = <T>(work: () => T): T => publication ? publication.commit(input.operationId, input.message, work) : work();
+      return commit(() => {
       this.requireActor(input.actor, input.requestSource); this.validateText(input.message);
-      const target = this.resolveTarget(state, input.target); this.assertDescendant(state, target);
+      const target = this.resolveTarget(state, input.target); if(target.id!==targetId)throw Error('SOL_PI_DESKTOP_MESSAGE_TARGET_CHANGED'); this.assertDescendant(state, target);
       const child = state.group.children.get(target.id);
+      if (this.managedReleaseOwners.has(target.id)&&!this.options.prepareObservationFollowup) throw Error('SOL_PI_MANAGED_FOLLOWUP_NOT_READY');
       if (!child || !target.resumable || target.cleanupError || child.stopRequested && child.execution) throw new Error('agent is not resumable');
       const existing = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, input.operationId));
       if (child.followups.length >= 4 && !existing) throw new Error('multi_agent_followup_queue_full');
@@ -1998,14 +2699,15 @@ export class DesktopMultiAgentService {
         : { operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn });
       if (existing || result.outcome === 'rejected') return result;
       clearTimeout(child.ttl);
-      child.followups.push({ operationId: input.operationId, callerId: state.context.agentId, message: input.message, expectedTurn,
+      child.followups.push({ origin, operationId: input.operationId, callerId: state.context.agentId, message: input.message, expectedTurn,
         lane: state.context.memberTicket.lane,
         sourceTaskId: state.context.sourceTaskId,
         acceptedEpoch: state.context.memberTicket.epoch,
         forceNewEpoch: false, controller: new AbortController(), requestSource: 'agent' });
       this.enqueueNextFollowup(state.group, child);
       return result;
-    });
+      });
+    }); } finally { publication?.dispose(); }
   }
 
   async wait(input: { actor: DesktopAgentActor; requestSource: Source; targets: string[]; timeoutMs: number; operationId?: string; expectedTurn?: number }): Promise<DesktopAgentWaitResult> {
@@ -2049,7 +2751,7 @@ export class DesktopMultiAgentService {
     };
     for (;;) {
       const result = await state.group.commands.run(inspect);
-      if (result) return result;
+      if (result) return this.protectObservationRead(state, result.agents.map(agent=>agent.id), result);
       await new Promise<void>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout>;
         const done = () => { clearTimeout(timer); state.group.waiters.delete(done); resolve(); };
@@ -2064,7 +2766,14 @@ export class DesktopMultiAgentService {
 
   list(input: { actor: DesktopAgentActor; requestSource: Source; cursor?: string }): MultiAgentPage<DesktopAgentSnapshot> {
     const state = this.requireActor(input.actor, input.requestSource);
+    if (this.observationResources.has(state.group.id)) throw Error('SOL_PI_DESKTOP_PROTECTED_LIST_REQUIRES_PUBLICATION');
     return this.options.store.listAgents(state.group.id, input.cursor, undefined, undefined, query => this.persistenceIO(state.group, query));
+  }
+
+  async listForModel(input: { actor: DesktopAgentActor; requestSource: Source; cursor?: string }): Promise<MultiAgentPage<DesktopAgentSnapshot>> {
+    const state=this.requireActor(input.actor,input.requestSource);
+    const page=this.options.store.listAgents(state.group.id,input.cursor,undefined,undefined,query=>this.persistenceIO(state.group,query));
+    return this.protectObservationRead(state,page.items.map(agent=>agent.id),page);
   }
 
   async close(input: AgentRequest & { target: string }): Promise<MultiAgentControlResult> {
@@ -2072,6 +2781,7 @@ export class DesktopMultiAgentService {
     return state.group.commands.run(() => {
       this.requireActor(input.actor, input.requestSource);
       const target = this.resolveTarget(state, input.target); this.assertDescendant(state, target);
+      this.consumeManagedCancellation(state,input,'close',target.id);
       const existing = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, input.operationId));
       const result = this.mutate(state.group, input, 'close', { target: target.id }, () => ({
         operationId: input.operationId, state: target.resourcesReleased ? 'completed' : 'cleanup_pending', targetAgentId: target.id,
@@ -2141,9 +2851,18 @@ export class DesktopMultiAgentService {
   private maybeDormant(group: LiveGroup): void {
     if (this.disposed) { this.tryShutdownQuiescence(); return; }
     this.tryCompleteReset(this.options.store.requireGroup(group.id).threadId);
+    // A registered native group session is still a live resource even when no
+    // child exists. Root-turn completion must not discard its incarnation.
+    if (this.observationResources.has(group.id)) return;
+    const observationOwner = this.observationOwners.get(group.id)?.owner.deref();
+    if (observationOwner) {
+      try { getObservationSessionOwnerHostBinding(observationOwner); return; }
+      catch { /* Revoked/closed owner no longer retains this live group. */ }
+    }
     if (this.disposed || group.deactivating || group.frozen || group.root || group.lease && !group.lease.released
       || [...group.children.values()].some(child => child.execution || child.followups.length || !this.requireAgent(group.id, child.id).resourcesReleased)
       || this.options.store.resources(group.id).some(resource => !['released', 'retained_by_policy'].includes(resource.state))) return;
+    if(this.observationResources.has(group.id)){void this.closeObservationResources(group).catch(()=>{this.runtimeBlockedReason='runtime_blocked';this.options.coordinator.block('runtime_blocked');});return;}
     group.deactivating = true;
     clearTimeout(group.deadlineTimer);
     for (const activity of group.activities.values()) { clearTimeout(activity.publishTimer); clearTimeout(activity.checkpointTimer); }
@@ -2202,21 +2921,30 @@ export class DesktopMultiAgentService {
     this.pendingResets.clear();
     this.uncertainOperations.clear();
     for (const group of this.groups.values()) {
-      group.lifetime.abort(new Error('app_shutdown')); group.root?.controller.abort(new Error('app_shutdown'));
+      this.abortExecutionSignal(group, group.lifetime, new Error('app_shutdown')); group.root && this.abortExecutionSignal(group, group.root.controller, new Error('app_shutdown'));
       if (group.root && !group.root.started) (group.root.ticket ?? group.root.request?.ticket)?.release();
       clearTimeout(group.deadlineTimer);
       clearTimeout(group.root?.stopTimer);
       for (const activity of group.activities.values()) { clearTimeout(activity.publishTimer); clearTimeout(activity.checkpointTimer); }
       for (const [agentId, output] of group.outputs) { clearTimeout(output.timer); try { this.flushOutput(group, agentId); } catch { /* Preserve persisted shutdown history. */ } }
-      group.lifetime.abort(new Error('app_shutdown'));
-      group.root?.controller.abort(new Error('app_shutdown'));
+      this.abortExecutionSignal(group, group.lifetime, new Error('app_shutdown'));
+      group.root && this.abortExecutionSignal(group, group.root.controller, new Error('app_shutdown'));
       if (group.root && !group.root.started) group.root.ticket?.release();
       for (const child of group.children.values()) {
-        clearTimeout(child.ttl); clearTimeout(child.stopTimer);
+        clearTimeout(child.ttl); clearTimeout(child.stopTimer); this.abortExecutionSignal(group, child.controller, new Error('app_shutdown'), child.context);
         for (const pending of child.followups) { pending.controller.abort(new Error('app_shutdown')); pending.ticket?.release(); }
       }
     }
+    // A prepared actor is not adopted by core yet. Its real factory and cleanup
+    // must finish before the archive authority or OS resources are closed.
+    await Promise.all([...this.observationPreparationDrains]);
     await Promise.all([...this.groups.values()].map(group => group.core.dispose()));
+    for(const group of this.groups.values())this.publishManagedResources(group.id);
+    await Promise.all([...this.managedReleaseOwners.values()].flatMap(owner=>owner.pending?[owner.pending]:[]));
+    this.unsubscribeManagedResources();
+    await Promise.all([...this.observationResources.keys()].map(id=>{const group=this.groups.get(id);if(!group)throw Error('SOL_PI_GROUP_RESOURCE_IDENTITY_LOST');return this.closeObservationResources(group);}));
+    await Promise.all([...this.managedFinalDrains]);
+    if(this.managedFinalPublications.size)throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_UNCONFIRMED');
     this.shutdownOwnerChecksReady = true;
     for (const group of this.groups.values()) {
       if ([...group.children.values()].some(child => child.execution)) this.options.coordinator.block('runtime_blocked');
@@ -2261,7 +2989,7 @@ export class DesktopMultiAgentService {
   }
 
   private createContext(group: LiveGroup, agentId: string, turnId: string, turn: number, memberTicket: ExecutionLease, signal?: AbortSignal,
-    provenance?: { sourceTaskId: string | undefined }): DesktopAgentExecutionContext {
+    provenance?: { sourceTaskId: string | undefined; resourceRootEpoch?:number }): DesktopAgentExecutionContext {
     const actor = Object.freeze({ groupId: group.id, agentId, turnId });
     const combined = AbortSignal.any([group.lifetime.signal, group.leaseController!.signal, ...(signal ? [signal] : [])]);
     const context: DesktopAgentExecutionContext = { actor, groupId: group.id, agentId, turnId, turn,
@@ -2269,7 +2997,7 @@ export class DesktopMultiAgentService {
       // A queued turn's accepted origin is independent of whichever root is now
       // active or prepared. Explicit unknown provenance must remain unknown.
       sourceTaskId: provenance ? provenance.sourceTaskId : group.root?.binding.sourceTaskId ?? this.options.store.getAgent(group.id, agentId)?.sourceTaskId,
-      rootEpoch: group.root?.binding.rootEpoch ?? this.options.store.requireGroup(group.id).currentRootEpoch,
+      rootEpoch: provenance?.resourceRootEpoch ?? group.root?.binding.rootEpoch ?? this.options.store.requireGroup(group.id).currentRootEpoch,
       memberTicket, signal: combined, effectiveDeadline: memberTicket.deadlineAt ?? Number.POSITIVE_INFINITY,
       cwd: group.children.get(agentId)?.cwd ?? this.options.store.getThread(this.options.store.requireGroup(group.id).threadId)!.cwd,
       mailbox: undefined as unknown as DesktopMailboxPort,
@@ -2277,7 +3005,8 @@ export class DesktopMultiAgentService {
     Object.defineProperty(context, 'permissionRevision', { writable: false, configurable: false });
     const state: ActorState = { context, group, active: true, sealed: false };
     this.actors.set(actor, state);
-    context.mailbox = new DesktopMultiAgentTurnMailbox({ store: this.options.store, groupId: group.id, agentId, turnId, commands: group.commands,
+    const nativeMailbox = new DesktopMultiAgentTurnMailbox({ store: this.options.store, groupId: group.id, agentId, turnId, commands: group.commands,
+      assertSemanticCurrent: () => { context.signal.throwIfAborted(); this.assertInvocation(actor, context); },
       beforeSeal: () => { this.flushOutput(group, agentId); this.finishActivity(group, agentId); },
       assertCurrent: () => {
         const current = agentId === `root_${group.id}` ? group.root?.context : group.children.get(agentId)?.context;
@@ -2301,6 +3030,20 @@ export class DesktopMultiAgentService {
         this.wake(group);
       },
     });
+    context.mailbox = {
+      drainInput: async () => {
+        const batch = await nativeMailbox.drainInput();
+        try {
+          const anchors=this.protectPublishedMailbox(state,batch.messages);
+          if(anchors)return withPublishedObservationMessages([],()=>{this.requireActor(state.context.actor,'agent',state.context);return batch;},[],anchors);
+          return await this.protectObservationRead(state,batch.messages.flatMap(message=>message.sender.kind==='agent'?[message.sender.agentId]:[]),batch);
+        } catch(error) { if(batch.claimId)await nativeMailbox.returnClaim(batch.claimId);throw error; }
+      },
+      confirmApplied: claimId=>nativeMailbox.confirmApplied(claimId),
+      returnClaim: claimId=>nativeMailbox.returnClaim(claimId),
+      trySealTurn: input=>nativeMailbox.trySealTurn(input),
+    };
+    bindDesktopMailboxSemanticAlias(context.mailbox, nativeMailbox);
     return context;
   }
 
@@ -2341,9 +3084,9 @@ export class DesktopMultiAgentService {
             this.options.store.appendEvent(group.id, { kind: 'status', agentId: agent.id, turnId: agent.turnId, payload: { agent } });
           });
         } catch { failed = true; }
-        activeRoot.controller.abort(reason); this.markRootStopping(group, activeRoot);
+        this.abortExecutionSignal(group, activeRoot.controller, reason, activeRoot.context); this.markRootStopping(group, activeRoot);
       }
-      group.leaseController?.abort(reason);
+      if(group.leaseController)this.abortExecutionSignal(group, group.leaseController, reason);
       for (const child of group.children.values()) {
         try { this.cancelFollowups(group, child, reason); } catch { failed = true; }
         if (child.execution && child.context.memberTicket.epoch === lease.epoch) this.markStopping(group, child, reason);
@@ -2357,10 +3100,45 @@ export class DesktopMultiAgentService {
     if (sourceTaskId) await this.host?.cancelTask(sourceTaskId, 'multi_agent_lease_expired');
   }
 
+  async registerManagedFinalPublication(context:DesktopAgentExecutionContext,ticket:CompoundFinalPublicationTicket,notify:(receipt:unknown)=>Promise<void>):Promise<void>{
+    const facts=getCompoundFinalPublicationBinding(ticket),actor=this.actors.get(context.actor);
+    if(!actor||actor.context!==context||this.groups.get(context.groupId)!==actor.group)throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_BINDING');
+    const group=actor.group,child=group.children.get(context.agentId);
+    if(!child||child.context!==context||!child.execution||facts.role!=='child'||facts.turnId!==context.turnId||this.managedFinalPublications.has(child)||typeof notify!=='function')throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_BINDING');
+    const owner=this.observationChildOwners.get(child.id);
+    if(!owner||getObservationSessionOwnerHostBinding(owner).session!==facts.session||facts.sessionId!==facts.session.exportSnapshot().sessionId)throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_BINDING');
+    this.managedFinalPublications.set(child,{ticket,facts,group,child,context,execution:child.execution,notify,settled:false,publication:this.managedFinalCommittedFacts.get(context)});
+  }
+  inspectManagedFinalPublicationReceipt(receipt:unknown){
+    const facts=receipt&&typeof receipt==='object'?this.managedFinalReceipts.get(receipt):undefined;
+    if(!facts)throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_RECEIPT');return facts;
+  }
+  private recordManagedFinalPublication(group:LiveGroup,child:LiveChild):void{
+    const context=child.context,entry=this.managedFinalPublications.get(child);
+    const agent=this.options.store.getAgent(group.id,child.id),operationId=`child_result:${createHash('sha256').update(`${child.id}:${context.turnId}`).digest('hex')}`,operation=this.options.store.getOperation(group.id,operationId);
+    if(!agent||agent.turn!==context.turn||!TERMINAL.has(agent.status)||!operation||operation.command!=='child_result'||operation.applyState!=='applied'||!TERMINAL.has(String(operation.result.status))||operation.requestHash!==this.requestHash(operationId,{agentId:child.id,turnId:context.turnId}))return;
+    const publication={operationId,operationDigest:createHash('sha256').update(JSON.stringify(operation)).digest('hex'),snapshotRevision:this.options.store.requireGroup(group.id).lastSeq,status:agent.status};
+    this.managedFinalCommittedFacts.set(context,publication);
+    if(!entry||entry.group!==group||entry.context!==context)return;
+    entry.publication=publication;
+    this.finishManagedFinalPublication(entry);
+  }
+  private finishManagedFinalPublication(entry:ManagedFinalPublication):void{
+    if(!entry.settled||!entry.publication||entry.pending)return;
+    const {group,child,context,facts,publication}=entry;
+    if(this.managedFinalPublications.get(child)!==entry||child.context!==context||this.groups.get(group.id)!==group)throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_STALE');
+    const operation=this.options.store.getOperation(group.id,publication.operationId),agent=this.options.store.getAgent(group.id,child.id);
+    if(!operation||createHash('sha256').update(JSON.stringify(operation)).digest('hex')!==publication.operationDigest||agent?.turn!==context.turn||agent.status!==publication.status||computeSessionHistoryDigest(facts.session.exportSnapshot())!==facts.historyDigest||facts.session.getPublishedHistoryBasis()!==facts.historyDigest)throw Error('SOL_PI_MANAGED_FINAL_PUBLICATION_STALE');
+    const receipt=Object.freeze({});this.managedFinalReceipts.set(receipt,Object.freeze({ticket:entry.ticket,sessionId:facts.sessionId,turnId:facts.turnId,historyDigest:facts.historyDigest,snapshotRevision:publication.snapshotRevision}));
+    const pending=Promise.resolve().then(()=>entry.notify(receipt));entry.pending=pending;this.managedFinalDrains.add(pending);
+    void pending.then(()=>{this.managedFinalDrains.delete(pending);if(this.managedFinalPublications.get(child)===entry)this.managedFinalPublications.delete(child);},()=>{this.freezeGroup(group,'multi_agent_final_publication_unconfirmed');});
+  }
   private observeSettlement(group: LiveGroup, child: LiveChild): void {
     const execution = child.execution!;
     void execution.settled.then(() => group.commands.run(() => {
       if (child.execution !== execution) return;
+      const finalPublication=this.managedFinalPublications.get(child);
+      if(finalPublication?.execution===execution){finalPublication.settled=true;this.finishManagedFinalPublication(finalPublication);}
       child.execution = undefined;
       clearTimeout(child.stopTimer);
       this.actors.get(child.context.actor)!.active = false;
@@ -2386,6 +3164,82 @@ export class DesktopMultiAgentService {
     }).catch(() => this.freezeGroup(group, 'multi_agent_cleanup_failed'));
   }
 
+  private beginManagedFollowup(group:LiveGroup,child:LiveChild,pending:PendingFollowup,ticket:ExecutionLease):Promise<void> {
+    const work=Promise.resolve().then(()=>this.activateManagedFollowup(group,child,pending,ticket));
+    let owned=this.groupObservationPreparationDrains.get(group);if(!owned){owned=new Set();this.groupObservationPreparationDrains.set(group,owned);}
+    this.observationPreparationDrains.add(work);owned.add(work);
+    const release=()=>{this.observationPreparationDrains.delete(work);owned!.delete(work);};void work.then(release,release);
+    return work;
+  }
+
+  private async activateManagedFollowup(group:LiveGroup,child:LiveChild,pending:PendingFollowup,ticket:ExecutionLease):Promise<void> {
+    let preparation:object|undefined,installed:PreparedManagedCompoundFollowup|undefined,corePrepared:PreparedAgentHandle|undefined,applied=false;
+    let publicationWindow:ReturnType<typeof openCompoundFollowupPublicationWindow>|undefined;
+    try {
+      const publicationOwner=this.observationChildOwners.get(child.id);
+      if(!publicationOwner)throw Error('SOL_PI_DESKTOP_FOLLOWUP_SESSION_REQUIRED');
+      publicationWindow=openCompoundFollowupPublicationWindow(publicationOwner,AbortSignal.any([pending.controller.signal,group.lifetime.signal]),child.context.effectiveDeadline,pending.origin);
+      await publicationWindow.drained;
+      preparation=await group.commands.run(()=>{
+        const resource=this.managedReleaseOwners.get(child.id);
+        if(!resource||resource.group!==group||resource.child!==child||!this.options.prepareObservationFollowup||pending.controller.signal.aborted||child.followups[0]!==pending||child.execution)throw Error('SOL_PI_DESKTOP_FOLLOWUP_STALE');
+        this.assertManagedResourceCurrent(resource.admission);this.assertWritable(group);
+        const owner=this.observationChildOwners.get(child.id);if(!owner)throw Error('SOL_PI_DESKTOP_FOLLOWUP_SESSION_REQUIRED');
+        const session=getObservationSessionOwnerHostBinding(owner).session,closure=structuredClone(session.getProtectedObservationClosure()),message=pending.message.trim();
+        const operation=this.options.store.getOperation(group.id,pending.operationId);if(!operation)throw Error('SOL_PI_DESKTOP_FOLLOWUP_OPERATION');
+        const binding=getManagedCompoundAdmissionBinding(resource.admission);
+        const reservation=this.options.store.reserveManagedFollowupTurn({groupId:group.id,operationId:pending.operationId,requestHash:operation.requestHash,agentId:child.id,previousTurnId:child.context.turnId,expectedTurn:pending.expectedTurn,rootEpoch:binding.rootEpoch,messageHash:createHash('sha256').update(message).digest('hex'),closureHash:createHash('sha256').update(JSON.stringify(closure??null)).digest('hex')});
+        const token=Object.freeze({});
+        this.managedFollowupPreparations.set(token,{facts:Object.freeze({admission:resource.admission,childSession:session,operationId:pending.operationId,previousTurnId:child.context.turnId,nextTurnId:reservation.nextTurnId,rootEpoch:binding.rootEpoch,message,closure,requestSource:pending.requestSource,...(pending.origin?{origin:pending.origin}:{})}),group,child,oldContext:child.context,pending,requestHash:operation.requestHash,phase:'prepared'});
+        return token;
+      });
+      // Old runtime/provider/native drain can publish facts through the command queue.
+      installed=await this.options.prepareObservationFollowup!(preparation);
+      const receipt=await group.commands.run(()=>{
+        const facts=this.inspectManagedFollowupPreparation(preparation),entry=this.managedFollowupPreparations.get(preparation!)!;
+        this.assertWritable(group);if(child.execution||pending.controller.signal.aborted)throw Error('SOL_PI_DESKTOP_FOLLOWUP_STALE');
+        this.installLease(group,ticket);
+        corePrepared=group.core.prepareFollowup({requestSource:pending.requestSource,callerId:this.coreId(group,pending.callerId),target:child.id,message:facts.message});
+        if(corePrepared.expectedTurn!==pending.expectedTurn)throw Error('followup turn mismatch');
+        const controller=new AbortController(),context=this.createContext(group,child.id,facts.nextTurnId,corePrepared.expectedTurn,ticket,controller.signal,{sourceTaskId:pending.sourceTaskId,resourceRootEpoch:facts.rootEpoch});
+        this.options.store.transaction(()=>{
+          this.persistCoreSnapshot(group,corePrepared!.snapshot);
+          const operation=this.options.store.getOperation(group.id,pending.operationId)!;
+          if(operation.requestHash!==entry.requestHash||operation.managedTurnReservation?.nextTurnId!==facts.nextTurnId)throw Error('SOL_PI_DESKTOP_FOLLOWUP_OPERATION');
+          this.options.store.putOperation({...operation,applyState:'applied',result:{...operation.result,state:'applied'}});
+        });
+        const oldActor=this.actors.get(child.context.actor);if(oldActor)oldActor.active=false;
+        child.controller=controller;child.context=context;child.prepared=corePrepared;child.stopRequested=false;child.followups.shift();
+        entry.phase='applied';entry.appliedDigest=createHash('sha256').update(JSON.stringify({operation:this.options.store.getOperation(group.id,pending.operationId),turnId:facts.nextTurnId,message:facts.message,closure:facts.closure})).digest('hex');applied=true;
+        const token=Object.freeze({});this.managedFollowupReceipts.set(token,{preparation:preparation!,kind:'applied'});return token;
+      });
+      await installed.commitApplied(receipt);
+      publicationWindow.prepareTurn(this.inspectManagedFollowupPreparation(preparation).nextTurnId);
+      await group.commands.run(()=>{
+        const facts=this.inspectManagedFollowupApplied(receipt);
+        if(group.frozen||group.deactivating||child.context.turnId!==facts.nextTurnId||child.execution||!corePrepared)throw Error('SOL_PI_DESKTOP_FOLLOWUP_STALE');
+        child.execution=group.core.activatePreparedTurn(corePrepared,{signal:child.context.signal});this.observeSettlement(group,child);
+      });
+    } catch(error) {
+      let cancelledConfirmed=false;
+      if(!applied){
+        if(corePrepared)group.core.rollbackPrepared(corePrepared);
+        if(preparation&&installed){
+          try{const receipt=await group.commands.run(()=>{
+            const entry=this.managedFollowupPreparations.get(preparation!)!,operation=this.options.store.getOperation(group.id,pending.operationId)!;
+            this.options.store.putOperation({...operation,result:{...operation.result,state:'completed',outcome:'cancelled'}});
+            entry.phase='cancelled';entry.cancelledDigest=createHash('sha256').update(JSON.stringify(this.options.store.getOperation(group.id,pending.operationId))).digest('hex');
+            const token=Object.freeze({});this.managedFollowupReceipts.set(token,{preparation:preparation!,kind:'cancelled'});return token;
+          });await installed.cancelBeforeApplied(receipt);cancelledConfirmed=true;}catch{/* Original prepared state remains unavailable for replay. */}
+        }
+        ticket.release();
+        if(cancelledConfirmed&&pending.controller.signal.aborted){publicationWindow?.cancelBeforeActivation(error);return;}
+      }
+      publicationWindow?.fail(error);
+      this.freezeGroup(group,'multi_agent_followup_admission_failed');throw error;
+    }
+  }
+
   private enqueueNextFollowup(group: LiveGroup, child: LiveChild): void {
     const pending = child.followups[0];
     if (!pending || pending.request || child.execution || this.disposed || group.frozen) return;
@@ -2398,6 +3252,7 @@ export class DesktopMultiAgentService {
     pending.ticket = pending.request.ticket;
     void pending.request.then(ticket => {
       pending.ticket = ticket;
+      if(this.managedReleaseOwners.has(child.id))return this.beginManagedFollowup(group,child,pending,ticket);
       return group.commands.run(() => {
         // A grant may be delivered after cancellation already won this queue.
         // Its cancelled receipt is authoritative; this is not a storage failure.
@@ -2406,6 +3261,7 @@ export class DesktopMultiAgentService {
         let activated = false;
         try {
           this.assertWritable(group, 'multi_agent_followup_admission_failed');
+          if (this.managedReleaseOwners.has(child.id)) throw Error('SOL_PI_MANAGED_FOLLOWUP_NOT_READY');
           if (pending.controller.signal.aborted || child.followups[0] !== pending || child.execution) throw new Error('stale followup admission');
           this.installLease(group, ticket);
           prepared = group.core.prepareFollowup({ requestSource: pending.requestSource, callerId: this.coreId(group, pending.callerId), target: child.id, message: pending.message });
@@ -2437,10 +3293,18 @@ export class DesktopMultiAgentService {
   }
 
   private captureCoreEvent(group: LiveGroup, event: MultiAgentEvent): void {
-    if (this.disposed || group.deactivating || event.kind !== 'status' && event.kind !== 'activity') return;
+    if (event.kind !== 'status' && event.kind !== 'activity') return;
     const captured = structuredClone(event);
     void group.commands.run(() => {
-      if (this.disposed || group.deactivating) return;
+      if (this.disposed || group.deactivating) {
+        const child=group.children.get(captured.agent.id);
+        if(captured.kind==='status'&&child&&child.context.turn===captured.agent.turn&&TERMINAL.has(captured.agent.status)){
+          // Factual finalization only: no new message, task, grant, or root status.
+          this.options.store.transaction(()=>{this.persistCoreSnapshot(group,captured.agent);});
+          this.recordManagedFinalPublication(group,child);
+        }
+        return;
+      }
       const activeChild = group.children.get(captured.agent.id);
       if (activeChild && activeChild.context.turn !== captured.agent.turn) return;
       if (captured.kind === 'activity') {
@@ -2451,29 +3315,54 @@ export class DesktopMultiAgentService {
       }
       if (TERMINAL.has(captured.agent.status)) this.finishActivity(group, captured.agent.id);
       this.options.store.transaction(() => {
-        const agent = this.persistCoreSnapshot(group, captured.agent);
-        if (agent.status === 'closed') this.options.store.rerouteClosedHandoffs(group.id, agent.id);
-        const child = group.children.get(agent.id);
+        const child = group.children.get(captured.agent.id);
         const operationId = child ? `child_result:${createHash('sha256').update(`${child.id}:${child.context.turnId}`).digest('hex')}` : '';
-        if (child && agent.turn > 0 && TERMINAL.has(agent.status) && !this.options.store.getOperation(group.id, operationId)) {
-          const full = agent.status === 'completed' ? child.fullResult ?? captured.agent.lastResult ?? '' : captured.agent.error ?? `agent_${agent.status}`;
-          const content = this.options.store.putContent(group.id, child.id, full, true);
-          const preview = truncateMultiAgentText(content.utf8Text, 8 * 1024);
-          this.options.store.putAgent(group.id, { ...agent, resultContentId: content.contentId }, true);
-          this.options.store.appendEvent(group.id, { kind: 'result', agentId: child.id, turnId: child.context.turnId,
-            payload: { contentId: content.contentId, preview: preview.text, truncated: preview.truncated || content.truncated } });
-          let parent = this.requireAgent(group.id, child.parentId);
+        const publishResult = child && captured.agent.turn > 0 && TERMINAL.has(captured.agent.status)
+          && !this.options.store.getOperation(group.id, operationId);
+        let parent:DesktopAgentSnapshot|undefined,resultAnchor:PublishedClosureReadAnchor|undefined,bodyUnavailable=false;
+        if (publishResult) {
+          parent = this.requireAgent(group.id, child.parentId);
           while (parent.status === 'closed' && parent.parentId) parent = this.requireAgent(group.id, parent.parentId);
-          if (parent.status !== 'closed') this.options.store.sendMessage(group.id, {
+          if (this.observationResources.has(group.id)) {
+            try {
+              if (parent.status === 'closed') throw Error('published_result_recipient_closed');
+              resultAnchor = capturePublishedClosureRead(this.observationOwnerFor(group,child.id),this.observationOwnerFor(group,parent.id));
+            } catch { bodyUnavailable = true; }
+          }
+        }
+        // The first appended status event must already have the body decision.
+        // A later putAgent cannot erase bytes in that immutable event.
+        const agent = this.persistCoreSnapshot(group, captured.agent, resultAnchor);
+        if (agent.status === 'closed') this.options.store.rerouteClosedHandoffs(group.id, agent.id);
+        if (publishResult && child && parent) {
+          const full = bodyUnavailable?'FINAL_CONTENT_NOT_PERSISTED':agent.status === 'completed' ? child.fullResult ?? captured.agent.lastResult ?? '' : captured.agent.error ?? `agent_${agent.status}`;
+          const content = this.options.store.putContent(group.id, child.id, full, true,bodyUnavailable?{status:agent.status}:undefined);
+          const preview = truncateMultiAgentText(content.utf8Text, 8 * 1024);
+          this.options.store.putAgent(group.id, { ...agent, resultContentId: content.contentId,...(bodyUnavailable?{bodyUnavailable:true as const,lastResult:undefined,resultSummary:undefined,error:undefined}:{}) }, true);
+          this.options.store.appendEvent(group.id, { kind: 'result', agentId: child.id, turnId: child.context.turnId,
+            payload: { contentId: content.contentId, preview: preview.text, truncated: preview.truncated || content.truncated,...(bodyUnavailable?{bodyUnavailable:true}:{}) } });
+          if (parent.status !== 'closed') {const message=this.options.store.sendMessage(group.id, {
             sender: { kind: 'agent', agentId: child.id }, receiverId: parent.id, kind: agent.status === 'completed' ? 'result' : 'error',
-            text: preview.text || '(empty result)', contentId: content.contentId, truncated: preview.truncated || content.truncated,
-          }, true);
+            text: preview.text || '(empty result)', contentId: content.contentId, truncated: preview.truncated || content.truncated,...(bodyUnavailable?{bodyUnavailable:true as const}:{}),
+          }, true);if(bodyUnavailable)this.options.store.putOperation({groupId:group.id,operationId:`published_message:${message.messageId}`,command:'published_message_unavailable',requestHash:this.publishedMessageDigest(message),applyState:'applied',result:{messageId:message.messageId,messageSeq:this.options.store.getGroup(group.id)!.lastSeq,status:agent.status,bodyUnavailable:true}},true);else this.recordPublishedMessage(group,message,resultAnchor);}
           this.options.store.putOperation({ groupId: group.id, operationId, command: 'child_result',
             requestHash: this.requestHash(operationId, { agentId: child.id, turnId: child.context.turnId }), applyState: 'applied',
-            result: { state: 'completed', status: agent.status, contentId: content.contentId } }, true);
+            result: { state: 'completed', status: agent.status, contentId: content.contentId,...(bodyUnavailable?{bodyUnavailable:true}:{}) } }, true);
         }
       });
       const child = group.children.get(captured.agent.id);
+      if(child)this.recordManagedFinalPublication(group,child);
+      // The result can be persisted while execution is still active. Notify only
+      // after the later real core settlement, outside the successful transaction.
+      const resource=this.observationResources.get(group.id);
+      if(resource&&child&&captured.agent.status==='completed'&&!captured.agent.executionActive
+        &&child.context.turn===captured.agent.turn&&child.semanticBoundaryTurnId!==child.context.turnId){
+        const operationId=`child_result:${createHash('sha256').update(`${child.id}:${child.context.turnId}`).digest('hex')}`;
+        const result=this.options.store.getOperation(group.id,operationId);
+        if(result?.applyState==='applied'&&result.result.status==='completed'){
+          resource.subtaskBoundaryPending=true;child.semanticBoundaryTurnId=child.context.turnId;
+        }
+      }
       if (child && TERMINAL.has(captured.agent.status)) child.fullResult = undefined;
       if (child && child.execution && captured.agent.executionActive && ['failed', 'interrupted', 'closed'].includes(captured.agent.status)) {
         try { this.cancelFollowups(group, child, new Error(captured.agent.error ?? 'multi_agent_stopped')); }
@@ -2484,22 +3373,33 @@ export class DesktopMultiAgentService {
     }).catch(() => this.freezeGroup(group, 'multi_agent_persistence_failed'));
   }
 
-  private persistCoreSnapshot(group: LiveGroup, core: MultiAgentSnapshot): DesktopAgentSnapshot {
+  private persistCoreSnapshot(group: LiveGroup, core: MultiAgentSnapshot, publishedResult?: PublishedClosureReadAnchor): DesktopAgentSnapshot {
     const child = group.children.get(core.id);
     const id = core.id === 'main' ? `root_${group.id}` : core.id;
     const previous = this.options.store.getAgent(group.id, id);
     if (previous && core.turn < previous.turn) return previous;
     const sameTurn = previous?.turn === core.turn;
+    if (publishedResult) getPublishedClosureReadBinding(publishedResult).validate();
+    const protectedTerminal = !!child && core.turn > 0 && TERMINAL.has(core.status) && this.observationResources.has(group.id);
+    // Factual shutdown/cleanup snapshots can repeat an already published body,
+    // but may never introduce later free text without its original publication.
+    const priorBody = sameTurn && previous?.resultContentId && !previous.bodyUnavailable ? previous : undefined;
+    const bodyProjection = protectedTerminal && !publishedResult
+      ? priorBody ? { lastResult: priorBody.lastResult, resultSummary: priorBody.resultSummary, error: priorBody.error }
+        : { bodyUnavailable: true as const, lastResult: undefined, resultSummary: undefined, error: undefined }
+      : publishedResult ? { bodyUnavailable: undefined } : {};
     const diskPending = this.pendingResources(group.id, id);
     const agent = this.options.store.putAgent(group.id, {
       ...previous, ...core, id, parentId: core.parentId === 'main' ? `root_${group.id}` : core.parentId,
       ...(!sameTurn ? { taskSummary: undefined, resultSummary: undefined, toolsCompleted: undefined, toolsFailed: undefined,
-        toolCounts: undefined, otherToolCount: undefined, toolStatisticsComplete: undefined, resultContentId: undefined } : {}),
+        toolCounts: undefined, otherToolCount: undefined, toolStatisticsComplete: undefined, resultContentId: undefined, bodyUnavailable:undefined } : {}),
       turnId: child?.context.turnId ?? group.root?.context?.turnId,
       sourceTaskId: child ? child.context.sourceTaskId : group.root?.binding.sourceTaskId ?? previous?.sourceTaskId,
       lastResult: core.lastResult ? truncateMultiAgentText(core.lastResult, 1024).text : sameTurn ? previous?.lastResult : undefined,
       resultSummary: core.lastResult ? desktopSubAgentSummary(core.lastResult) : sameTurn ? previous?.resultSummary : undefined,
       error: core.error ? truncateMultiAgentText(core.error, 1024).text : undefined,
+      ...(sameTurn&&previous?.bodyUnavailable&&!publishedResult?{lastResult:undefined,resultSummary:undefined,error:undefined}:{}),
+      ...bodyProjection,
       resourcesReleased: core.resourcesReleased && diskPending.length === 0,
       cleanupError: core.cleanupError ? truncateMultiAgentText(core.cleanupError, 512).text : core.resourcesReleased ? diskPending[0]?.lastError : undefined,
       // Initializing turns accept queued followups before session residency;
@@ -2553,7 +3453,7 @@ export class DesktopMultiAgentService {
     try {
       const result = this.options.store.transaction(() => {
         const result = action();
-        this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command, requestHash, applyState: 'applied', result: { ...result } }, command === 'interrupt');
+        this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command, requestHash, applyState: 'applied', result: { ...result },...(command==='followup'&&result.state==='queued_next_admission'?{followupAcceptedResult:{...result},followupInput:{targetId:(payload as {target:string}).target,message:(payload as {message:string}).message}}:{}) }, command === 'interrupt');
         return result;
       });
       this.wake(group); return result;
@@ -2563,7 +3463,7 @@ export class DesktopMultiAgentService {
   private requireActor(actor: DesktopAgentActor, source: Source, context?: DesktopAgentExecutionContext): ActorState {
     if (source !== 'agent') throw new Error('request source is not permitted for agent authority');
     const state = this.actors.get(actor);
-    if (!state || !state.active || state.sealed || state.context.signal.aborted) throw new Error('stale or invalid multi-agent authority');
+    if (!state || !state.active || state.preparing || state.sealed || state.context.signal.aborted) throw new Error('stale or invalid multi-agent authority');
     if (context && context !== state.context) throw new Error('invalid runtime context');
     this.assertExecutionAuthorization(state.context.permissionRevision);
     this.assertWritable(state.group); return state;
@@ -2612,9 +3512,31 @@ export class DesktopMultiAgentService {
     if (!this.initialized || this.disposed) throw new Error('multi_agent_runtime_not_ready');
     if (this.runtimeBlockedReason) throw new Error(this.runtimeBlockedReason);
   }
-  private assertWritable(group: LiveGroup, reason = 'multi_agent_persistence_failed'): void {
+  private captureGoalDecisionInput(input: TaskCreateInput): TaskCreateInput {
+    const captured = structuredClone(input);
+    const freeze = (value: unknown): void => {
+      if (!value || typeof value !== 'object' || Object.isFrozen(value)) return;
+      for (const field of Object.values(value)) freeze(field);
+      Object.freeze(value);
+    };
+    freeze(captured);
+    return captured;
+  }
+  private assertWritable(group: LiveGroup, reason = 'multi_agent_persistence_failed', decisionToken?: object): void {
     this.assertReady();
-    if (this.goalDecisions.has(group.id)) throw new Error('goal_decision_pending');
+    if (decisionToken) {
+      const decision = this.goalContinuationDecisions.get(decisionToken);
+      const scope = decision?.input.executionScope;
+      const current = this.options.store.requireGroup(group.id);
+      if (!decision?.live || !this.goalDecisions.has(group.id) || decision.binding.groupId !== group.id
+        || decision.binding.bootId !== this.options.store.bootId || current.currentRootEpoch !== decision.binding.rootEpoch
+        || !isDeepStrictEqual(this.options.store.getRootBinding(decision.binding.sourceTaskId), decision.binding)
+        || current.permissionRevision !== decision.permissionRevision
+        || decision.input.context?.threadId !== decision.binding.threadId || scope?.kind !== 'goal_turn'
+        || scope.origin !== 'continuation' || scope.threadId !== decision.binding.threadId
+        || scope.goalId !== decision.sourceScope.goalId || scope.epoch !== decision.sourceScope.epoch
+        || !scope.goalTurnId || scope.goalTurnId === decision.sourceScope.goalTurnId) throw Error('goal_decision_pending');
+    } else if (this.goalDecisions.has(group.id)) throw new Error('goal_decision_pending');
     const durable = this.persistenceIO(group, () => this.options.store.requireGroup(group.id), reason);
     const thread = this.persistenceIO(group, () => {
       const binding = this.options.store.getThread(durable.threadId);
@@ -2631,7 +3553,7 @@ export class DesktopMultiAgentService {
     if (group.frozen || this.disposed) return;
     group.frozen = reason;
     try { this.options.store.putGroup({ ...this.options.store.requireGroup(group.id), mutationBlockedReason: reason }, true); } catch { /* No false durable ACK. */ }
-    group.lifetime.abort(new Error(reason)); group.root?.controller.abort(new Error(reason));
+    this.abortExecutionSignal(group, group.lifetime, new Error(reason)); group.root && this.abortExecutionSignal(group, group.root.controller, new Error(reason));
     if (group.root?.context) this.markRootStopping(group, group.root);
     for (const child of group.children.values()) {
       try { this.cancelFollowups(group, child, new Error(reason)); } catch { /* Physical stop still proceeds. */ }
@@ -2640,9 +3562,20 @@ export class DesktopMultiAgentService {
     this.wake(group);
   }
 
+  private abortExecutionSignal(group: LiveGroup, controller: AbortController, reason: unknown,
+    extraContext?: DesktopAgentExecutionContext): void {
+    const signals = new Set([group.root?.context?.signal, extraContext?.signal,
+      ...[...group.children.values()].map(child => child.context.signal)].filter((signal): signal is AbortSignal => !!signal));
+    // Native composite signals can refresh lazily. Observe previous causes before
+    // aborting another source, then freeze this cause before a later grace block.
+    for (const signal of signals) void signal.aborted;
+    try { controller.abort(reason); }
+    finally { for (const signal of signals) void signal.aborted; }
+  }
+
   private markStopping(group: LiveGroup, child: LiveChild, reason: Error): void {
     child.stopRequested = true;
-    child.controller.abort(reason);
+    this.abortExecutionSignal(group, child.controller, reason, child.context);
     const actor = this.actors.get(child.context.actor); if (actor) actor.active = false;
     const execution = child.execution;
     if (!execution || child.stopTimer) return;
@@ -2668,11 +3601,11 @@ export class DesktopMultiAgentService {
   private blockRuntime(group: LiveGroup, agentId: string): void {
     this.runtimeBlockedReason = 'runtime_blocked'; this.options.coordinator.block('runtime_blocked');
     for (const current of this.groups.values()) {
-      current.lifetime.abort(new Error('runtime_blocked'));
+      this.abortExecutionSignal(current, current.lifetime, new Error('runtime_blocked'));
       for (const live of current.children.values()) {
         try { this.cancelFollowups(current, live, new Error('runtime_blocked')); } catch { /* Fail closed even when the audit reserve is full. */ }
         if (!live.execution) continue;
-        live.controller.abort(new Error('runtime_blocked'));
+        this.abortExecutionSignal(current, live.controller, new Error('runtime_blocked'), live.context);
         const state = this.actors.get(live.context.actor); if (state) state.active = false;
       }
       this.wake(current);
@@ -2691,6 +3624,14 @@ export class DesktopMultiAgentService {
   private wake(group: LiveGroup): void {
     for (const wake of [...group.waiters]) wake();
     this.tryCompleteReset(this.options.store.requireGroup(group.id).threadId);
+    // A registered native group session is still a live resource even when no
+    // child exists. Root-turn completion must not discard its incarnation.
+    if (this.observationResources.has(group.id)) return;
+    const observationOwner = this.observationOwners.get(group.id)?.owner.deref();
+    if (observationOwner) {
+      try { getObservationSessionOwnerHostBinding(observationOwner); return; }
+      catch { /* Revoked/closed owner no longer retains this live group. */ }
+    }
   }
   private coreId(group: LiveGroup, id: string): string { return id === `root_${group.id}` ? 'main' : id; }
   private marker(binding: MultiAgentRootBinding): TaskMultiAgentPreparation {

@@ -1,3 +1,5 @@
+import {LoopStore} from '../../electron/loop-store.js';
+import {createLoopTimedCompletionHost,type LoopTimedCompletionHost} from '../../electron/loop-timed-completion.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,15 +12,18 @@ import { createLoopExecutor } from '../../electron/loop-executor.js';
 describe('TimedActionScheduler', () => {
   let rootDir: string;
   let store: TimedActionStore;
+  let loops:LoopStore;let loopCompletion:LoopTimedCompletionHost;
+  function actualLoop(action:any,context:any,runtime:any,status:'success'|'blocked'='success'){const began=loops.beginLoopRun(action.executor.loopId,{kind:'scheduled',timedActionId:action.id,timedActionRunId:runtime.timedActionRunId,scheduledDueAt:context.scheduledDueAt},2000,60000,{requestSource:'scheduler'});if(began.status!=='started')throw Error('begin');if(status==='blocked')loops.finishLoopRunBlocked(began.run.id,[],'ask_user','need credentials',2000);else loops.finishLoopRunSuccess(began.run.id,[],2000,'ok');return loops.getLoopRun(began.run.id)!;}
 
   beforeEach(() => {
     rootDir = join(tmpdir(), `xiaok-timed-action-scheduler-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
     store = new TimedActionStore(join(rootDir, 'timed-actions.sqlite'));
+    loops=new LoopStore(join(rootDir,'loops.sqlite'));loops.ensureBuiltInLoops(0);loopCompletion=createLoopTimedCompletionHost({timedStore:store,loopStore:loops,captureAdmission:()=>()=>{},now:()=>2000});
   });
 
-  afterEach(() => {
-    store.close();
+  afterEach(async () => {
+    await loopCompletion.close();loops.close();store.close();
     rmSync(rootDir, { recursive: true, force: true });
   });
 
@@ -71,7 +76,7 @@ describe('TimedActionScheduler', () => {
       now: 0,
     });
 
-    let resolveAgent: (() => void) | null = null;
+    let resolveAgent: (() => void) = () => {throw Error('agent not started');};
     const agentExecutor: TimedActionExecutorHandler = {
       kind: 'agent_task',
       execute: () => new Promise((resolve) => {
@@ -199,9 +204,9 @@ describe('TimedActionScheduler', () => {
     };
     const loopExecutor: TimedActionExecutorHandler = {
       kind: 'loop',
-      execute: vi.fn(() => {
-        calls.push('loop');
-        return { decision: { loopRunId: 'run_loop_now', loopStatus: 'success' } };
+      execute: vi.fn((action,context,runtime) => {
+        calls.push('loop');const run=actualLoop(action,context,runtime);
+        return { decision: { loopRunId: run.id, loopStatus: 'success' } };
       }),
     };
     const agentExecutor: TimedActionExecutorHandler = {
@@ -213,7 +218,7 @@ describe('TimedActionScheduler', () => {
     };
     const scheduler = new TimedActionScheduler(store, {
       executors: { notify: notifyExecutor, loop: loopExecutor, agent_task: agentExecutor },
-      now: () => 2_000,
+      loopCompletion,now: () => 2_000,
       maxAgentConcurrent: 0,
     });
 
@@ -273,7 +278,7 @@ describe('TimedActionScheduler', () => {
 
     const scheduler = new TimedActionScheduler(store, {
       executors: { notify: notifyExecutor, loop: loopExecutor, agent_task: agentExecutor },
-      now: () => 2_000,
+      loopCompletion,now: () => 2_000,
       isGlobalBackgroundAutoRunEnabled: () => false,
     });
 
@@ -349,21 +354,9 @@ describe('TimedActionScheduler', () => {
       now: 0,
     });
 
-    const runLoop = vi.fn().mockResolvedValue({
-      status: 'success',
-      run: {
-        id: 'loop-run-context',
-        loopId: 'artifact-evidence-regression',
-        status: 'success',
-        trigger: { kind: 'scheduled' },
-        evidenceIds: ['evidence-1'],
-        startedAt: 2_000,
-        finishedAt: 2_000,
-        updatedAt: 2_000,
-        summary: 'ok',
-      },
-    });
+    const runLoop=vi.fn(async(loopId:string,trigger:any)=>({status:'success' as const,run:actualLoop({id:trigger.timedActionId,executor:{loopId}},{scheduledDueAt:trigger.scheduledDueAt},{timedActionRunId:trigger.timedActionRunId})}));
     const scheduler = new TimedActionScheduler(store, {
+      loopCompletion,
       executors: {
         loop: createLoopExecutor({ runLoop }),
       },
@@ -379,9 +372,9 @@ describe('TimedActionScheduler', () => {
     expect(runLoop).toHaveBeenCalledWith('artifact-evidence-regression', expect.objectContaining({
       timedActionId: 'loop_with_run_context',
       timedActionRunId: timedRun.runId,
-    }), expect.any(AbortSignal));
+    }), expect.any(AbortSignal), {requestSource:'scheduler'});
     expect(timedRun.decision).toEqual(expect.objectContaining({
-      loopRunId: 'loop-run-context',
+      loopRunId: loops.findLoopRunByTimedActionRunId(timedRun.runId)!.id,
       loopStatus: 'success',
     }));
   });
@@ -436,17 +429,11 @@ describe('TimedActionScheduler', () => {
 
     const onRunComplete = vi.fn();
     const scheduler = new TimedActionScheduler(store, {
+      loopCompletion,
       executors: {
         loop: {
           kind: 'loop',
-          execute: vi.fn().mockResolvedValue({
-            decision: {
-              loopRunId: 'run_blocked',
-              loopStatus: 'blocked',
-              nextActionKind: 'ask_user',
-              nextActionSummary: 'need credentials',
-            },
-          }),
+          execute:vi.fn(async(action,context,runtime)=>{const run=actualLoop(action,context,runtime,'blocked');return{decision:{loopRunId:run.id,loopStatus:'blocked',nextActionKind:'ask_user',nextActionSummary:'need credentials'}};}),
         },
       },
       now: () => 2_000,
@@ -461,7 +448,7 @@ describe('TimedActionScheduler', () => {
         error: 'blocked_requires_user_action',
         decision: expect.objectContaining({
           recoveryDecision: { action: 'pause', reason: 'blocked_requires_user_action' },
-          loopRunId: 'run_blocked',
+          loopRunId: expect.any(String),
           loopStatus: 'blocked',
           nextActionKind: 'ask_user',
           nextActionSummary: 'need credentials',

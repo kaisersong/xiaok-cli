@@ -11,6 +11,7 @@ const { mockGetThread, mockRecoverTask, mockSubscribeTask, mockReadFileContent }
 
 vi.mock('../../renderer/src/api', () => ({
   api: {
+    getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })),
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
     subscribeTask: mockSubscribeTask,

@@ -1,3 +1,5 @@
+import {getBuiltinToolIdentity} from '../../src/ai/tools/native-tool-identity.js';
+import {bindDesktopNativeReadonlyDescriptor} from './desktop-native-catalog-provenance.js';
 import { resolve } from 'node:path';
 import type { Tool } from '../../src/types.js';
 import { ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
@@ -100,6 +102,7 @@ export class DesktopToolCatalogBridge {
           scope: { workspaceId: this.options.workspaceId, materialIds: [], permissions: [tool.permission] },
           bindInvocation: authority => this.bind(tool, owner, authority),
         } });
+      if(owner.binding==='builtin'&&!owner.bindInvocation&&PURE_READ_BUILTINS.has(tool.definition.name)&&getBuiltinToolIdentity(tool)==='readonly')bindDesktopNativeReadonlyDescriptor(descriptor,tool);
       this.slots.set(key, { descriptor, tool, present: true });
     }
     for (const [key, item] of this.slots) if (!seen.has(key) && item.present) {

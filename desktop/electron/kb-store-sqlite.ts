@@ -26,6 +26,9 @@ import type {
   UpdateSourceParseResultInput,
 } from './kb-types.js';
 import { computeKbSourceContentDigest, type KbStore } from './kb-store.js';
+import {canonicalVerificationJson as canonicalJson} from '../../src/runtime/verification/protocol.js';
+import {captureExecutionValue} from './loop-verification-execution.js';
+import {createChunker} from './kb-chunker.js';
 import {
   computeKnowledgeContentHash,
   reconstructKnowledgeSourceText,
@@ -232,6 +235,63 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return getSource(id)!;
   }
 
+  function ensureAssistantSource(raw: AddSourceInput, requestSource: RequestSource): Source {
+    if (requestSource !== 'user') throw Error('assistant_knowledge_user_only');
+    if (db.isTransaction) throw Error('assistant_knowledge_outer_transaction');
+    const input = captureExecutionValue(raw);
+    const fields = ['sourceId','clientRequestKey','collectionId','kind','title','text','parseStatus','metadata'];
+    const meta = input?.metadata;
+    if (!input || Object.keys(input).sort().join(',') !== fields.sort().join(',')
+      || !meta || Object.keys(meta).sort().join(',') !== 'assistantCandidateId,assistantEvidenceRefs,assistantRunId'
+      || typeof meta.assistantCandidateId !== 'string' || !meta.assistantCandidateId
+      || typeof meta.assistantRunId !== 'string' || !meta.assistantRunId
+      || input.sourceId !== `assistant-source:${meta.assistantCandidateId}`
+      || input.clientRequestKey !== `assistant-candidate:${meta.assistantCandidateId}`
+      || input.kind !== 'paste' || input.parseStatus !== 'pending'
+      || typeof input.collectionId !== 'string' || !input.collectionId
+      || typeof input.title !== 'string' || !input.title.trim()
+      || typeof input.text !== 'string' || !input.text.trim()
+      || !Array.isArray(meta.assistantEvidenceRefs) || !meta.assistantEvidenceRefs.length
+      || meta.assistantEvidenceRefs.some(ref => !ref || typeof ref !== 'object' || Object.keys(ref).sort().join(',') !== 'id,kind'
+        || typeof ref.kind !== 'string' || !ref.kind || typeof ref.id !== 'string' || !ref.id)
+      || Buffer.byteLength(canonicalJson(input)) > 65536) throw Error('assistant_knowledge_input');
+    const content = input.text, digest = computeKbSourceContentDigest(input), hash = computeKnowledgeContentHash(content);
+    let cursor = 0;
+    // Reuse the product chunker; remove only its leading overlap so the existing
+    // KB content reader can concatenate these chunks into the exact original.
+    const chunks = createChunker().chunk({text:content,mimeType:'text/plain'}).flatMap(chunk => {
+      const start = Math.max(cursor,chunk.charStart);cursor = Math.max(cursor,chunk.charEnd);
+      return start < chunk.charEnd ? [{idx:0,text:content.slice(start,chunk.charEnd),charStart:start,charEnd:chunk.charEnd}] : [];
+    }).map((chunk,idx)=>({...chunk,idx}));
+    const layout = (values: Array<{idx:number;text:string;charStart:number;charEnd:number}>) => values.map(({idx,text,charStart,charEnd})=>({idx,text,charStart,charEnd}));
+    const matches = (source:Source) => {
+      assertStableSourceMatches(source,input,digest);
+      if (source.kind !== 'paste' || source.title !== input.title || source.metadata.createdBy !== 'user') throw Error('assistant_knowledge_target_conflict');
+    };
+    const durable = () => {
+      const source = getSource(input.sourceId!);if (!source) throw Error('assistant_knowledge_write_not_durable');matches(source);
+      const actual = listChunks(source.id);
+      if (actual.some(chunk=>chunk.collectionId!==input.collectionId||chunk.sourceId!==source.id)
+        || source.parseStatus !== 'parsed' || source.sha256 !== hash || source.chunkCount !== chunks.length
+        || source.byteSize !== Buffer.byteLength(content)
+        || canonicalJson(layout(actual)) !== canonicalJson(chunks)
+        || actual.map(chunk=>chunk.text).join('') !== content) throw Error('assistant_knowledge_body_conflict');
+      return source;
+    };
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (!getCollection(input.collectionId)) throw Error('assistant_candidate_collection_not_found');
+      const source = addSource(input,'user');matches(source);
+      if (source.parseStatus !== 'parsed') {
+        if (source.parseStatus !== 'pending' || source.chunkCount !== 0 || listChunks(source.id).length !== 0 || source.sha256) throw Error('assistant_knowledge_target_conflict');
+        if (db.prepare('UPDATE sources SET sha256=?,byte_size=? WHERE id=?').run(hash,Buffer.byteLength(content),source.id).changes !== 1) throw Error('assistant_knowledge_write_not_durable');
+        insertChunks(source.id,chunks);
+        updateSourceParseResult(source.id,{parseStatus:'parsed',metadata:{engine:'builtin-text'}},'user');
+      }
+      const result = durable();db.exec('COMMIT');return result;
+    } catch (error) { db.exec('ROLLBACK');throw error; }
+  }
+
   function findSourceByClientRequestKey(clientRequestKey: string): Source | undefined {
     const rows = db.prepare('SELECT * FROM sources').all() as Record<string, unknown>[];
     const row = rows.find(candidate => {
@@ -247,7 +307,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       && metadata.clientRequestKey === input.clientRequestKey
       && metadata.assistantCandidateId === input.metadata?.assistantCandidateId
       && metadata.assistantRunId === input.metadata?.assistantRunId
-      && JSON.stringify(metadata.assistantEvidenceRefs ?? []) === JSON.stringify(input.metadata?.assistantEvidenceRefs ?? [])
+      && canonicalJson(metadata.assistantEvidenceRefs ?? []) === canonicalJson(input.metadata?.assistantEvidenceRefs ?? [])
       && metadata.assistantContentDigest === contentDigest;
     if (!matches) throw new Error('kb_stable_source_conflict');
   }
@@ -555,7 +615,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
   return {
     _db: db,
     createCollection, getCollection, listCollections, renameCollection, deleteCollection,
-    addSource, claimSourceContentHash, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
+    addSource, ensureAssistantSource, claimSourceContentHash, getSource, listSources, deleteSource, retrySource, updateSourceParseResult, getSourceEmbeddingProgress,
     insertChunks, listChunks, markChunkEmbedded, markChunkFailed,
     createMeeting, getMeeting, listMeetings, updateMeeting,
     getCollectionState, getSourceWithContent, close,

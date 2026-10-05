@@ -689,6 +689,8 @@ export function ScheduledPage({ embedded = false }: ScheduledPageProps = {}) {
       if (task.executorKind === 'loop') {
         if (!task.loopId) return;
         const result = await api.runLoopNow(task.loopId);
+        if(result.status==='publication_pending'){showToast(t.desktopSettings.loopDiagnosticsPublicationPending,'info');await loadTasks();return;}
+        if(result.status==='executing'){showToast(t.scheduledLoopAlreadyRunning,'info');return;}
         if (result.status === 'already_running') {
           showToast(t.scheduledLoopAlreadyRunning, 'info');
           return;

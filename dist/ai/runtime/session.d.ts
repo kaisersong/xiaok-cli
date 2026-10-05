@@ -1,3 +1,4 @@
+import type { ProtectedObservationClosure, ProtectedObservationReference } from './protected-observation-closure.js';
 import type { Message, MessageBlock, UsageStats } from '../../types.js';
 import { type CompactionPlan } from './usage.js';
 import { type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
@@ -13,10 +14,21 @@ export type CompactionApplyOutcome = {
     record: null;
 };
 export declare class AgentSessionState {
+    private observationRestoreGeneration;
+    private publishedHistoryBasis;
+    getPublishedHistoryBasis(): string;
+    /** Host complete-history publisher only, after the exact snapshot was committed.
+     * Generic metadata receipts never advance this lineage. */
+    notePublishedHistory(snapshot: AgentSessionSnapshot, expectedBasis: string): void;
+    private readonly observationRestoreListeners;
+    onObservationRestoreGeneration(listener: () => void): () => void;
+    getObservationRestoreGeneration(): number;
     private graph;
     private promptSnapshotId?;
     private promptMemoryRefs?;
     private promptCwd?;
+    addProtectedObservationReferences(refs: ProtectedObservationReference[]): void;
+    getProtectedObservationClosure(): ProtectedObservationClosure | undefined;
     getMessages(): Message[];
     getUsage(): UsageStats;
     getCompactions(): CompactionRecord[];
@@ -42,5 +54,13 @@ export declare class AgentSessionState {
     applyCompaction(plan: CompactionPlan, summaryText?: string): CompactionApplyOutcome;
     forceCompact(summaryText?: string): CompactionRecord | null;
     exportSnapshot(): AgentSessionSnapshot;
+    updatePersistenceFacts(snapshot: AgentSessionSnapshot): void;
+    /** Same-owner installation after a successful durable CAS. This is not a restore
+     * and must not invalidate the live observation provenance generation. */
+    installCommittedSnapshot(input: {
+        snapshot: AgentSessionSnapshot;
+        expectedRevision: number;
+        expectedHistoryDigest: string;
+    }): void;
     restoreSnapshot(snapshot: AgentSessionSnapshot): void;
 }

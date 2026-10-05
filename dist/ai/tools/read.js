@@ -3,6 +3,7 @@ import { extname } from 'path';
 import { assertWorkspacePath } from '../permissions/workspace.js';
 import { truncateText } from './truncation.js';
 import { extractMaterialText } from '../../runtime/materials/text-extractor.js';
+import { beginToolObservation } from '../../runtime/sol-pi/collector-port.js';
 import { MODEL_OUTPUT_CAP, SENSITIVE_FILE_REDACTION, isSensitiveFilePath, redactSecrets, } from '../../shared/stream-safety/redact.js';
 const OOXML_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx']);
 const HEADER_SNIFF_BYTES = 4096;
@@ -54,7 +55,7 @@ export function createReadTool(options = {}) {
                 required: ['file_path'],
             },
         },
-        async execute(input) {
+        async execute(input, context) {
             const { file_path, offset = 1, limit, max_chars = MODEL_OUTPUT_CAP } = input;
             const resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
             if (!existsSync(resolvedPath))
@@ -89,6 +90,12 @@ export function createReadTool(options = {}) {
                 const start = offset - 1;
                 const slice = limit ? lines.slice(start, start + limit) : lines.slice(start);
                 const numbered = slice.map((line, index) => `${start + index + 1}\t${line}`).join('\n');
+                const observation = beginToolObservation(context?.observationCollector, {
+                    toolName: 'read', source: { filePath: resolvedPath, offset, ...(limit === undefined ? {} : { limit }) },
+                });
+                observation.append(numbered);
+                observation.finalize({ executionState: 'terminal', outcome: 'success',
+                    ...(kind === 'ooxml' ? { incompleteReason: 'extraction_completeness_unverified' } : {}) });
                 return truncateText(redactSecrets(numbered).text, max_chars).text;
             }
             catch (e) {

@@ -39,6 +39,8 @@ export interface KbStore {
 
   // Source CRUD
   addSource(input: AddSourceInput, requestSource: RequestSource): Source;
+  /** Atomic stable assistant source plus exact durable body; legacy stores must refuse this flow. */
+  ensureAssistantSource?(input: AddSourceInput, requestSource: RequestSource): Source;
   claimSourceContentHash(
     sourceId: string,
     sha256: string,

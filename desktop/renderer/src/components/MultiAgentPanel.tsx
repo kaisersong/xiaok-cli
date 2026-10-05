@@ -173,13 +173,13 @@ export function MultiAgentPanel({ connection, api, onSelectGroup }: Props) {
       const result = await readMultiAgentContent(identity.api, { threadId: identity.threadId, groupId: identity.groupId, contentId: identity.contentId }, {
         signal: session.controller.signal, assertCurrent: () => { if (!isCurrent()) throw new DOMException('Read no longer selected', 'AbortError'); },
       });
-      if (isCurrent()) setContent({ identity, phase: 'complete', result });
+      if (isCurrent()) setContent({ identity, phase: 'complete', result:result.bodyUnavailable?{...result,text:labels.finalContentUnavailable}:result });
     } catch { if (isCurrent()) setContent({ identity, phase: 'error' }); }
     finally { if (activeRead.current === session) activeRead.current = null; }
   };
   const outputView = useMemo(() => selected ? buildAgentOutputView({ groupId, agent: selected,
-    details: (agentId, beforeSeq) => connection.details(agentId, beforeSeq), userSender: labels.userSender }) : { entries: [], partial: false },
-  [connection, view, selected, groupId, labels.userSender]);
+    details: (agentId, beforeSeq) => connection.details(agentId, beforeSeq), userSender: labels.userSender,bodyUnavailableLabel:labels.finalContentUnavailable }) : { entries: [], partial: false },
+  [connection, view, selected, groupId, labels.userSender,labels.finalContentUnavailable]);
   return <div className="multi-agent-panel">
     <div className="multi-agent-toolbar">
       <button ref={historyButton} type="button" onClick={() => {

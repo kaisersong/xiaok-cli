@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron';
+import { captureExecutionValue } from './loop-verification-execution.js';
 import type { KSwarmSemanticService } from './kswarm-semantic-service.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
 
@@ -34,6 +34,7 @@ export function registerSemanticDesktopIpc(
   ipcMain: IpcHandleRegistrar,
   options: {
     assistant: AssistantSemanticController;
+    authorizeAssistant?: (event: unknown) => boolean;
     authorizeRoomDeletion?: (event: unknown) => boolean;
     kswarm: KSwarmSemanticService;
     collaborationRooms?: CollaborationRoomSemanticController | null;
@@ -44,19 +45,27 @@ export function registerSemanticDesktopIpc(
   const unavailable = () => ({ ok: false, code: 'broker_unavailable' });
   const roomHandler = <T,>(fn: (controller: CollaborationRoomSemanticController, input: T) => unknown | Promise<unknown>) =>
     (input: T) => (rooms ? fn(rooms, input) : unavailable());
-  ipcMain.handle('desktop:assistant:getOverview', () => assistant.getOverview());
-  ipcMain.handle('desktop:assistant:activate', () => assistant.activate({ requestSource: 'user' }));
-  ipcMain.handle('desktop:assistant:pause', () => assistant.pause({ requestSource: 'user' }));
-  ipcMain.handle('desktop:assistant:resume', () => assistant.resume({ requestSource: 'user' }));
-  ipcMain.handle('desktop:assistant:acceptCandidate', (_event, input) => assistant.acceptCandidate({
-    candidateId: readId(input?.candidateId),
-    collectionId: readOptionalId(input?.collectionId),
-    requestSource: 'user',
-  }));
-  ipcMain.handle('desktop:assistant:rejectCandidate', (_event, input) => assistant.rejectCandidate({
-    candidateId: readId(input?.candidateId),
-    requestSource: 'user',
-  }));
+  function assistantInput(event: unknown, args: unknown[], fields?: string[]): Record<string, unknown> {
+    if (options.authorizeAssistant?.(event) !== true) throw Error('assistant_ipc_denied');
+    if (args.length !== (fields ? 1 : 0)) throw Error('assistant_ipc_input');
+    if (!fields) return {};
+    const input = captureExecutionValue(args[0]);
+    if (!input || typeof input !== 'object' || Array.isArray(input)
+      || Object.keys(input).some(key => !fields.includes(key))) throw Error('assistant_ipc_input');
+    return input as Record<string, unknown>;
+  }
+  ipcMain.handle('desktop:assistant:getOverview', (event, ...args) => { assistantInput(event, args); return assistant.getOverview(); });
+  ipcMain.handle('desktop:assistant:activate', (event, ...args) => { assistantInput(event, args); return assistant.activate({ requestSource: 'user' }); });
+  ipcMain.handle('desktop:assistant:pause', (event, ...args) => { assistantInput(event, args); return assistant.pause({ requestSource: 'user' }); });
+  ipcMain.handle('desktop:assistant:resume', (event, ...args) => { assistantInput(event, args); return assistant.resume({ requestSource: 'user' }); });
+  ipcMain.handle('desktop:assistant:acceptCandidate', (event, ...args) => {
+    const input = assistantInput(event, args, ['candidateId', 'collectionId']);
+    return assistant.acceptCandidate({candidateId: readId(input.candidateId), collectionId: readOptionalId(input.collectionId), requestSource: 'user'});
+  });
+  ipcMain.handle('desktop:assistant:rejectCandidate', (event, ...args) => {
+    const input = assistantInput(event, args, ['candidateId']);
+    return assistant.rejectCandidate({candidateId: readId(input.candidateId), requestSource: 'user'});
+  });
 
   ipcMain.handle('desktop:kswarm:team:plan', (_event, input) => kswarm.planProjectTeam({ projectId: readId(input?.projectId) }));
 

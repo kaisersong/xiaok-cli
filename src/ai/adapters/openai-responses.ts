@@ -1,3 +1,5 @@
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
@@ -85,16 +87,24 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     systemPrompt: string,
     options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+    if (disclosure !== undefined) {
+      assertProviderDisclosureActive(disclosure);
+      const disclosureSignal = getProviderDisclosureSignal(disclosure);
+      options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
+    }
+    try {
     let attempt = 0;
     while (true) {
       let emittedAny = false;
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options?.signal)) {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options)) {
           emittedAny = true;
           yield chunk;
         }
         return;
       } catch (error) {
+        if (disclosure !== undefined) assertProviderDisclosureActive(disclosure);
         // 已产出 chunk 后重试会重复输出，必须放弃重试
         if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
         const delayMs = Math.min(2000 * 2 ** attempt, 10000);
@@ -102,14 +112,16 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
         attempt++;
       }
     }
+    } finally { if (disclosure !== undefined) disposeProviderDisclosureContext(disclosure); }
   }
 
   private async *streamOnce(
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    signal?: AbortSignal,
+    options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const signal = options?.signal;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
     const mergedSignal = signal
@@ -118,7 +130,9 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     const endpoint = new URL('responses', ensureTrailingSlash(this.baseUrl)).toString();
     let response: Response;
     try {
-      response = await fetch(endpoint, {
+      const fetchImpl = options?.providerDisclosure
+        ? createProviderDisclosureFetch(options.providerDisclosure, globalThis.fetch.bind(globalThis)) : fetch;
+      response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,

@@ -1,3 +1,4 @@
+import type {LoopPublicationProducer} from './loop-store.js';
 import type { EveningReflectionOutput, MorningBriefingOutput } from './assistant-llm.js';
 
 export interface AssistantLoopProfile {
@@ -54,7 +55,7 @@ export interface AssistantLoopExecutorDependencies {
 }
 
 export type AssistantLoopExecutionResult =
-  | { status: 'success'; summary: string; candidateCount: number }
+  | { status: 'success'|'publication_pending'; summary: string; candidateCount: number }
   | { status: 'skipped'; reason: 'needs_consent' | 'paused' | 'missing_profile' }
   | { status: 'failed'; reason: 'runtime_unavailable' };
 
@@ -65,6 +66,7 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
       runId: string;
       now: number;
       signal?: AbortSignal;
+      publicationProducer?:Readonly<LoopPublicationProducer>;
     }): Promise<AssistantLoopExecutionResult> {
       const profile = await dependencies.getProfile();
       if (!profile) return { status: 'skipped', reason: 'missing_profile' };
@@ -79,13 +81,14 @@ export function createAssistantLoopExecutor(dependencies: AssistantLoopExecutorD
           const evening = output as EveningReflectionOutput;
           summary = evening.summary;
           candidateCount = evening.candidates.length;
-          await dependencies.stageCandidates({ runId: input.runId, candidates: evening.candidates, now: input.now });
+          if(!input.publicationProducer)await dependencies.stageCandidates({ runId: input.runId, candidates: evening.candidates, now: input.now });
         } else {
           const morning = output as MorningBriefingOutput;
           summary = morning.recommendations.length === 0
             ? 'assistant_morning_no_recommendations'
             : morning.recommendations.map(item => item.title).join('\n');
         }
+        if(input.publicationProducer){input.publicationProducer.recordAssistantOutput(output,input.now);return {status:'publication_pending',summary,candidateCount};}
         const evidenceIds = await dependencies.recordEvidence({
           runId: input.runId,
           kind: input.kind,

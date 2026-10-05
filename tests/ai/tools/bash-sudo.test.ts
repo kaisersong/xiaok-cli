@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { bashTool, createInteractiveBashTool } from '../../../src/ai/tools/bash.js';
 import { classifyBashCommand } from '../../../src/ai/tools/bash-safety.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
+import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 
 describe('interactive sudo Bash', () => {
   it('classifies sudo as warn while keeping destructive commands blocked', () => {
@@ -26,7 +27,7 @@ describe('interactive sudo Bash', () => {
     const tool = createInteractiveBashTool(run);
     const signal = AbortSignal.abort();
     await expect(tool.execute({ command: 'sudo id' }, { signal } as any)).rejects.toThrow();
-    const registry = new ToolRegistry({ onPrompt: async () => false, permissionManager: { getMode: () => 'default', check: () => 'deny' } as any }, [tool]);
+    const registry = new ToolRegistry({ onPrompt: async () => false, permissionManager: new PermissionManager({ mode: 'default', denyRules: ['bash(*)'] }) }, [tool]);
     await registry.executeTool('bash', { command: 'sudo id' });
     expect(run).not.toHaveBeenCalled();
   });

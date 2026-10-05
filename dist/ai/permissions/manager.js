@@ -8,25 +8,59 @@ export class PermissionManager {
     mode;
     allowRules;
     denyRules;
+    revision = 0;
+    revisionListeners = new Set();
     constructor(options) {
         this.mode = options.mode;
-        this.allowRules = options.allowRules ?? [];
-        this.denyRules = options.denyRules ?? [];
+        this.allowRules = [...(options.allowRules ?? [])];
+        this.denyRules = [...(options.denyRules ?? [])];
     }
     getMode() {
         return this.mode;
     }
     setMode(mode) {
+        if (this.mode === mode)
+            return;
         this.mode = mode;
+        this.advanceRevision();
+    }
+    getRevision() { return this.revision; }
+    /** Host lifecycle hook: revoke already in-flight disclosures in the same turn. */
+    onRevisionChanged(listener) {
+        if (typeof listener !== 'function')
+            throw new Error('invalid_permission_revision_listener');
+        this.revisionListeners.add(listener);
+        return () => { this.revisionListeners.delete(listener); };
+    }
+    advanceRevision() {
+        this.revision++;
+        const failures = [];
+        for (const listener of [...this.revisionListeners]) {
+            try {
+                const result = listener(this.revision);
+                if (result !== undefined) {
+                    if (result && typeof result.then === 'function')
+                        void Promise.resolve(result).catch(() => { });
+                    throw new Error('permission_revision_listener_must_be_synchronous');
+                }
+            }
+            catch (error) {
+                failures.push(error);
+            }
+        }
+        if (failures.length)
+            throw new AggregateError(failures, 'permission_revision_listener_failed');
     }
     addSessionRule(rule) {
         if (!this.allowRules.includes(rule)) {
             this.allowRules.push(rule);
+            this.advanceRevision();
         }
     }
     addSessionDenyRule(rule) {
         if (!this.denyRules.includes(rule)) {
             this.denyRules.push(rule);
+            this.advanceRevision();
         }
     }
     static nextMode(mode) {

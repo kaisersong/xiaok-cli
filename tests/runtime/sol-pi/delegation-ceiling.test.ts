@@ -1,0 +1,96 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createObservationService } from '../../../src/runtime/sol-pi/observation-service.js';
+const close: (() => void)[] = [];
+afterEach(() => close.splice(0).reverse().forEach(fn => fn()));
+const destination = { provider: 'test', model: 'test', url: 'https://example.test/v1/chat/completions' };
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'delegation-ceiling-')); close.push(() => rmSync(root, { recursive: true, force: true }));
+  const service = createObservationService({ profileRoot: root, profileId: 'test', now: () => 1000, redactor: { version: 'test', redact: value => value } }); close.push(() => service.dispose());
+  const claims = { sessionId: 'root', ownerAgentId: 'root', scopeId: 'root', permissionGeneration: 1, surface: 'ordinary-owner' as const };
+  const user = service.bindCaller({ ...claims, requestSource: 'user' }); const agent = service.bindCaller({ ...claims, requestSource: 'agent' });
+  service.setArchivePolicy({ requestSource: 'user', caller: user, policy: { version: 1, id: 'policy', revision: 1, scopeId: 'root', sourceAdapterId: 'fixture', sourceDescriptors: ['exact'], expiresAt: 10000, localPersistence: true, allowUnclassifiedText: true, allowIncomplete: false, destinations: [destination] } });
+  const recipient = (id: string) => service.bindCaller({ ...claims, sessionId: id, ownerAgentId: id, scopeId: id, requestSource: 'agent' });
+  const capture = (caller: object, text: string) => { const token = service.begin({ requestSource: 'agent', caller, invocationId: text, toolName: 'read', sourceAdapterId: 'fixture', sourceDescriptor: 'exact' }); service.append({ requestSource: 'agent', caller, capture: token, text }); return service.finalize({ requestSource: 'agent', caller, capture: token, executionState: 'terminal', outcome: 'success' }); };
+  const approve = (overrides = {}) => (service as any).approveDelegation({ requestSource: 'user', caller: user, destination, maxDepth: 2, maxChildren: 3, expiresAt: 9000, ...overrides });
+  const issue = (approval: object, caller: object, target: object, ids: string[] = []) => (service as any).issueDelegationWithApproval({ requestSource: 'agent', caller, approval, recipient: target, observationIds: ids, destination, expiresAt: 8000 });
+  return { service, user, agent, claims, recipient, capture, approve, issue };
+}
+it('allows only user-issued opaque ceilings to authorize a bounded fresh child', () => {
+  const f = fixture(), recipient = f.recipient('child');
+  expect(() => f.approve({ requestSource: 'agent', caller: f.agent })).toThrow();
+  expect(() => f.issue({}, f.agent, recipient)).toThrow();
+  const approval = f.approve({ maxDepth: 1, maxChildren: 1 });
+  const grant = f.issue(approval, f.agent, recipient);
+  const child = f.service.bindDelegatedCaller({ capability: grant, recipient });
+  expect(f.service.getDelegatedReferences(child, 'child', destination)).toEqual([]);
+  expect(() => f.issue(approval, child, f.recipient('grandchild'))).toThrow();
+  expect(() => f.issue(approval, f.agent, f.recipient('second'))).toThrow();
+  f.service.revokeCaller({ requestSource: 'user', caller: f.user, target: f.agent });
+  expect(() => f.service.getDelegatedReferences(child, 'child', destination)).toThrow();
+});
+it('keeps own child captures distinct and returns only a host-bound grant to the exact parent', () => {
+  const f = fixture(), rootRef = f.capture(f.agent, 'root body'), target = f.recipient('child'), approval = f.approve();
+  const grant = f.issue(approval, f.agent, target, [rootRef.id]);
+  const child = f.service.bindDelegatedCaller({ capability: grant, recipient: target });
+  (f.service as any).inheritDelegatedArchivePolicies({ requestSource: 'user', caller: f.user, approval, capability: grant, recipient: child });
+  const childRef = f.capture(child, 'child native body'); expect(childRef.contentHash).not.toBe(''); expect(childRef.sessionId).toBe('child');
+  const read = (caller: object, id: string) => f.service.read({ caller, id, destination, offset: 0, maxBytes: 64 });
+  expect(() => read(f.agent, childRef.id)).toThrow();
+  const returned = (f.service as any).issueDelegationReturn({ requestSource: 'agent', caller: child, approval, recipient: f.agent, observationIds: [childRef.id], destination, expiresAt: 7000 });
+  expect(() => (f.service as any).attachDelegationReturn({ capability: returned, recipient: f.recipient('other') })).toThrow();
+  (f.service as any).attachDelegationReturn({ capability: returned, recipient: f.agent });
+  expect(read(f.agent, childRef.id).content).toBe('child native body');
+  expect(read(f.agent, rootRef.id).content).toBe('root body');
+  expect(f.service.getReferenceMetadata(f.agent, childRef.id).sourceSessionId).toBe('child');
+  f.service.revokePolicy({ requestSource: 'user', caller: f.user, policyId: 'policy' });
+  expect(() => read(f.agent, childRef.id)).toThrow(); expect(() => read(child, childRef.id)).toThrow();
+});
+it('does not publish an in-progress child capture after the ancestor policy was revoked', () => {
+  const f = fixture(), approval = f.approve(), recipient = f.recipient('child');
+  const capability = f.issue(approval, f.agent, recipient); const child = f.service.bindDelegatedCaller({ capability, recipient });
+  (f.service as any).inheritDelegatedArchivePolicies({ requestSource: 'user', caller: f.user, approval, capability, recipient: child });
+  const capture = f.service.begin({ requestSource: 'agent', caller: child, invocationId: 'pending', toolName: 'read', sourceAdapterId: 'fixture', sourceDescriptor: 'exact' });
+  f.service.append({ requestSource: 'agent', caller: child, capture, text: 'started before revoke' });
+  f.service.revokePolicy({ requestSource: 'user', caller: f.user, policyId: 'policy' });
+  const final = f.service.finalize({ requestSource: 'agent', caller: child, capture, executionState: 'terminal', outcome: 'success' });
+  expect(final.executionState).toBe('terminal'); expect(final.outcome).toBe('success'); expect(final.contentHash).toBe('');
+  expect(() => f.capture(child, 'after revoke')).toThrow();
+});
+it('lets only the approving user revoke an agent-issued child grant or entire ceiling', () => {
+  const f = fixture(), approval = f.approve(), target = f.recipient('child');
+  const capability = f.issue(approval, f.agent, target);
+  const child = f.service.bindDelegatedCaller({ capability, recipient: target });
+  expect(() => f.service.revokeDelegation({ requestSource: 'agent', caller: f.agent, capability })).toThrow();
+  f.service.revokeDelegation({ requestSource: 'user', caller: f.user, capability });
+  expect(() => f.service.getDelegatedReferences(child, 'child', destination)).toThrow();
+  const next = f.recipient('next'), nextCap = f.issue(approval, f.agent, next);
+  const nextChild = f.service.bindDelegatedCaller({ capability: nextCap, recipient: next });
+  expect(() => (f.service as any).revokeDelegationApproval({ requestSource: 'agent', caller: f.agent, approval })).toThrow();
+  (f.service as any).revokeDelegationApproval({ requestSource: 'user', caller: f.user, approval });
+  expect(() => f.service.getDelegatedReferences(nextChild, 'next', destination)).toThrow();
+  expect(() => f.issue(approval, f.agent, f.recipient('later'))).toThrow();
+});
+it('does not inherit archive source permissions outside the explicit host-selected policy subset', () => {
+  const f = fixture(), approval = f.approve({ sourcePolicyIds: [] }), target = f.recipient('metadata-child');
+  const capability = f.issue(approval, f.agent, target), child = f.service.bindDelegatedCaller({ capability, recipient: target });
+  f.service.inheritDelegatedArchivePolicies({ requestSource: 'user', caller: f.user, approval, capability, recipient: child });
+  expect(f.capture(child, 'must remain metadata').contentHash).toBe('');
+  expect(() => f.approve({ sourcePolicyIds: ['unknown'] })).toThrow();
+  expect(() => f.approve({ sourcePolicyIds: ['policy', 'policy'] })).toThrow();
+});
+it('requires the same user ceiling and exact existing recipient for a sibling message grant', () => {
+  const f = fixture(), approval = f.approve();
+  const make = (id: string, ceiling = approval) => { const target = f.recipient(id), capability = f.issue(ceiling, f.agent, target); const caller = f.service.bindDelegatedCaller({ capability, recipient: target }); f.service.inheritDelegatedArchivePolicies({ requestSource: 'user', caller: f.user, approval: ceiling, capability, recipient: caller }); return caller; };
+  const a = make('a'), b = make('b'), foreign = make('foreign', f.approve());
+  const ref = f.capture(a, 'sibling protected bytes');
+  expect(() => f.service.read({ caller: b, id: ref.id, destination, offset: 0, maxBytes: 64 })).toThrow();
+  expect(() => (f.service as any).issueDelegationMessage({ requestSource: 'agent', caller: a, approval, recipient: foreign, observationIds: [ref.id], destination })).toThrow();
+  const grant = (f.service as any).issueDelegationMessage({ requestSource: 'agent', caller: a, approval, recipient: b, observationIds: [ref.id], destination });
+  f.service.attachDelegationReturn({ capability: grant, recipient: b });
+  expect(f.service.read({ caller: b, id: ref.id, destination, offset: 0, maxBytes: 64 }).content).toBe('sibling protected bytes');
+  f.service.revokeDelegationApproval({ requestSource: 'user', caller: f.user, approval });
+  expect(() => f.service.read({ caller: b, id: ref.id, destination, offset: 0, maxBytes: 64 })).toThrow();
+});

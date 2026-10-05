@@ -49,7 +49,7 @@ describe('FileGoalStore', () => {
 
     // GoalService reads the current revision before every mutation. That read
     // must not bless an out-of-band rewrite as the new trusted digest.
-    await store.load('sess_1');
+    await expect(store.load('sess_1')).rejects.toBeInstanceOf(GoalTamperDetectedError);
 
     await expect(store.commit({
       sessionId: 'sess_1', expectedRevision: state.revision,
@@ -57,4 +57,18 @@ describe('FileGoalStore', () => {
       events: [], turns: [], evidence: [],
     })).rejects.toBeInstanceOf(GoalTamperDetectedError);
   });
+});
+
+it('captures the complete commit before waiting for the store queue', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xiaok-goal-captured-'));
+  roots.push(root);
+  const store = new FileGoalStore(root);
+  const state = createGoalState({ sessionId: 'captured', objective: 'original', expectedEvidenceKinds: ['answer'], now: 1 });
+  const input = { sessionId: 'captured', expectedRevision: null, next: state, events: [], turns: [], evidence: [] };
+  const commit = store.commit(input);
+  input.next.objective = 'changed while awaiting queue';
+  input.next.status = 'complete';
+  await commit;
+  const reopened = new FileGoalStore(root);
+  expect((await reopened.load('captured'))?.state).toMatchObject({ objective: 'original', status: 'active' });
 });

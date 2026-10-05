@@ -72,8 +72,9 @@ describe('BDD AP2/AP3: production approval receipt and final invocation boundari
     });
     const result = await scope.executeTool('write', { content: 'approved-input' }, mcpTestContext(new AbortController().signal));
     expect(execute, 'truthy receipt is not permission to skip its input guard').not.toHaveBeenCalled();
-    expect(prepareInput).toHaveBeenCalledWith({ content: 'changed-after-approval' });
-    expect(result).toContain('approval_input_changed');
+    // Registry now rejects changed approvals before consuming the one-use grant.
+    expect(prepareInput).not.toHaveBeenCalled();
+    expect(result).toMatch(/input changed|fresh approval/);
   });
 
   it('AP2 Given an object without approved:true, Then truthiness cannot authorize an invocation', async () => {
@@ -85,12 +86,13 @@ describe('BDD AP2/AP3: production approval receipt and final invocation boundari
 
   it('AP2 Given a legal receipt through the real Catalog, Then it survives the approval timer wrapper and prepares the actual input', async () => {
     const execute = vi.fn(async (_input: Record<string, unknown>) => 'written');
-    const prepareInput = vi.fn(() => ({ content: 'private-approved-copy' }));
+    const prepareInput = vi.fn(input => structuredClone(input));
     const assertCurrent = vi.fn();
     const handle = scoped(writable(execute), { onPrompt: returning({ approved: true, prepareInput, assertCurrent } satisfies ProposedGrant) });
     await handle.registry.executeTool('write', { content: 'public-reference' }, mcpTestContext(new AbortController().signal));
     expect(prepareInput, 'Catalog must not reduce a grant object to a boolean').toHaveBeenCalledOnce();
-    expect(execute.mock.calls[0]?.[0]).toEqual({ content: 'private-approved-copy' });
+    expect(execute.mock.calls[0]?.[0]).toEqual({ content: 'public-reference' });
+    expect(execute.mock.calls[0]?.[0]).not.toBe(prepareInput.mock.calls[0]?.[0]);
     expect(assertCurrent).toHaveBeenCalled();
   });
 
