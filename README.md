@@ -473,6 +473,18 @@ Run these from the parent of `xiaok-cli`. Update compatible checkouts together. 
 
 ## Development
 
+Build and package the npm CLI through its release entry point:
+
+```bash
+npm run build:release
+npm run pack:cli -- --output artifacts
+npm run verify:cli-install -- artifacts/xiaokcode-<version>.tgz
+npm publish artifacts/xiaokcode-<version>.tgz --access public
+```
+
+The tarball bundles nodejieba source and reviewed installer dependencies, preserving the segmentation implementation and dictionaries. Native bindings are prepared on the installing machine. Direct source `npm pack` / `npm publish` is rejected because development overrides do not control consumer installations.
+
+
 From `xiaok-cli`:
 
 ```bash

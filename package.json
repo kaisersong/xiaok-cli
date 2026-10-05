@@ -29,8 +29,8 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "postinstall": "node scripts/prepare-cli-pty.mjs",
-    "prepack": "node scripts/verification/copy-windows-absence.mjs",
+    "postinstall": "node scripts/prepare-cli-native.mjs",
+    "prepack": "node scripts/pack-cli.mjs --prepack-check",
     "build": "node scripts/set-build-flavor.mjs normal && node -e \"const fs=require('fs');const t=new Date();const s=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');fs.writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = '+JSON.stringify(s)+';\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
     "build:release": "node scripts/set-build-flavor.mjs normal && node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
     "build:rollback": "node scripts/set-build-flavor.mjs rollback && node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\"",
@@ -83,7 +83,10 @@
     "architecture:check": "node scripts/governance/check.mjs architecture",
     "architecture:baseline": "node scripts/governance/check.mjs architecture --update-baseline",
     "governance:check": "npm run lint && npm run architecture:check",
-    "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs"
+    "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs",
+    "pack:cli": "node scripts/pack-cli.mjs",
+    "verify:cli-install": "node scripts/verify-cli-install.mjs",
+    "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
@@ -115,7 +118,8 @@
     "oxlint": "1.86.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "tar": "7.5.22"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,
@@ -131,7 +135,8 @@
   "files": [
     "dist",
     "scripts/prepare-cli-pty.mjs",
-    "data"
+    "data",
+    "scripts/prepare-cli-native.mjs"
   ],
   "overrides": {
     "@mapbox/node-pre-gyp": "^2.0.3"

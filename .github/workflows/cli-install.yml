@@ -1,0 +1,46 @@
+name: CLI Published Install
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [master, fix/cli-deprecated-install]
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/pack-cli.mjs'
+      - 'scripts/prepare-cli-native.mjs'
+      - 'scripts/verify-cli-install.mjs'
+      - 'tests/package/cli-source-bundle.test.mjs'
+      - '.github/workflows/cli-install.yml'
+  pull_request:
+    paths:
+      - 'scripts/pack-cli.mjs'
+      - 'scripts/prepare-cli-native.mjs'
+      - '.github/workflows/cli-install.yml'
+jobs:
+  consumer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022, ubuntu-latest]
+        npm: ['11.21.0', '12.0.2']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm install --global npm@${{ matrix.npm }} --ignore-scripts
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build:release
+      - run: npm run test:cli-source-bundle
+      - run: npm run pack:cli -- --output artifacts
+      - name: Verify fresh consumer install, segmentation and native PTY
+        shell: bash
+        run: npm run verify:cli-install -- "artifacts/xiaokcode-$(node -p 'require("./package.json").version').tgz"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cli-package-${{ matrix.os }}-npm-${{ matrix.npm }}
+          path: artifacts/*.tgz

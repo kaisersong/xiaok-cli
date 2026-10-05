@@ -473,6 +473,18 @@ git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 
 ## 开发
 
+发布 npm CLI 时先构建，再使用统一打包入口：
+
+```bash
+npm run build:release
+npm run pack:cli -- --output artifacts
+npm run verify:cli-install -- artifacts/xiaokcode-<version>.tgz
+npm publish artifacts/xiaokcode-<version>.tgz --access public
+```
+
+发布包包含 nodejieba 的纯源码和经过校验的安装依赖，避免开发目录的 overrides 在用户安装时失效。原生模块在目标机器安装阶段准备；分词库和词典保持不变。直接从源码执行 `npm pack` / `npm publish` 会被拒绝，防止发布未经此入口准备的包。
+
+
 在 `xiaok-cli` 中执行：
 
 ```bash
