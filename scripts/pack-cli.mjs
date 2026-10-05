@@ -57,7 +57,9 @@ export async function bundleNativeSource({ root, stage, npmCli }) {
     await assertSourceOnly(destination);
     const patched = await readJson(join(destination, 'package.json'));
     patched.dependencies['@mapbox/node-pre-gyp'] = installerVersion;
-    patched.scripts.install = 'node-pre-gyp install --fallback-to-build';
+    // Only the CLI's lifecycle owns the source build, including on npm 11.
+    delete patched.scripts.install;
+    patched.gypfile = false;
     patched.scripts.rebuild = 'node-pre-gyp rebuild';
     await writeFile(join(destination, 'package.json'), `${JSON.stringify(patched, null, 2)}\n`);
 
