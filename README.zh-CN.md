@@ -6,7 +6,7 @@ Desktop 面向对话、文档、知识、自动化和多智能体项目；CLI �
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**发布目标：1.5.7（2026-10-03）。** CLI 与 Desktop 版本统一为 **1.5.7**。本次增加 `ask_user` 数字快捷键选择、Windows Computer Use 的 host／backend 与私有 release 安装、Windows 普通会话 shell 输出排空、Desktop 文件类 IPC 具名契约，以及仓库治理门禁。当前可用安装包见[最新正式发布版](https://github.com/kaisersong/xiaok-cli/releases/latest)；1.5.7 在[发布构建](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml)与产物验收完成后开放下载。详见[版本日志](#版本日志)。
+**发布目标：1.5.9（2026-10-05）。** CLI 与 Desktop 版本统一为 **1.5.9**。本次包含 CLI 状态闪烁修复、图片读取与历史显示、Desktop 模型中断恢复、输出分段和聊天内任务授权。npm 与签名安装包的发布状态分别验收；可用产物以 [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) 为准。详见[版本日志](#版本日志)。
 
 ---
 
@@ -249,11 +249,11 @@ Desktop 是基于 Electron 与 React 的主要图形工作台。主进程 servic
 
 ### 下载
 
-可下载的安装包以 [GitHub Releases 当前正式版](https://github.com/kaisersong/xiaok-cli/releases/latest) 为准。`desktop-v1.5.7` 在发布 CI 完成后提供：
+可下载的安装包以 [GitHub Releases 当前正式版](https://github.com/kaisersong/xiaok-cli/releases/latest) 为准。`desktop-v1.5.9` 在签名、公证和发布 CI 验收完成后提供：
 
-- `xiaok-1.5.7-arm64.dmg` — macOS Apple Silicon 安装包。
-- `xiaok-1.5.7-arm64-mac.zip` — macOS Apple Silicon 压缩包。
-- `xiaok-setup-1.5.7.exe` — Windows x64 安装程序。
+- `xiaok-1.5.9-arm64.dmg` — macOS Apple Silicon 安装包。
+- `xiaok-1.5.9-arm64-mac.zip` — macOS Apple Silicon 压缩包。
+- `xiaok-setup-1.5.9.exe` — Windows x64 安装程序。
 
 自动更新使用 `latest-mac.yml` 与 `latest.yml`。本文标记为近期源码的改动，需要源码构建或后续正式发布后使用。
 
@@ -467,7 +467,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 将三个关联仓库固定到 `desktop-v1.5.7`；本地源码更新不会自动更新这些发布标签。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
+在 `xiaok-cli` 的父目录执行以上 clone，联动更新兼容版本。[发布 workflow](.github/workflows/desktop-release.yml) 固定关联仓库提交：KSwarm `d4be312`、Intent Broker `0791810`、插件 `a5b473c`；本地未提交改动不进入发布构建。[electron-builder.json](desktop/electron-builder.json) 定义实际打包的服务与插件资源。
 
 ---
 
@@ -558,6 +558,19 @@ npm run test --prefix desktop -- --run \
 ---
 
 ## 版本日志
+
+### v1.5.9 — 发布准备，2026-10-05
+
+- SubAgent 与 Thinking 更新一次提交完整终端帧，消除多次写入之间的空白，保留草稿、光标和正文。
+- CLI 图片读取向视觉模型提供经过校验的图片；终端内嵌图片保留在对话历史里。
+- Desktop 实时与历史输出按工具边界分段，审批在聊天内显示；用户可明确选择本任务相同操作自动批准，变化参数与新任务仍重新确认。
+- 模型中断恢复保留已执行结果；异常关闭提供说明；MCP tool events 转发调用进度。
+- 版本号同步为 1.5.9，关联仓库提交固定。验证与发布状态见[发布说明](release-notes/1.5.9.md)，不包含其他 agent 未提交代码。
+
+### v1.5.8 — CLI 发布，2026-10-04
+
+- 修复 Windows 健康缓存写入导致的启动失败，更新 CUA ABI 兼容校验。
+- npm CLI 已发布 `xiaokcode@1.5.8`，Desktop 安装包有独立发布生命周期。
 
 ### v1.5.7 — 发布准备，2026-10-03
 
