@@ -11,7 +11,8 @@ const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 // npm treats bundled modules as already installed and skips their lifecycle.
 // The published CLI bundles source, so its install hook owns this optional build.
-if (manifest.bundleDependencies?.includes('nodejieba')) {
+if (manifest.bundleDependencies?.includes('nodejieba')
+    && !process.env.npm_config_omit?.split(/\s+/).includes('optional')) {
   try {
     const moduleDir = dirname(require.resolve('nodejieba'));
     try {

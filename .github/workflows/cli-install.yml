@@ -39,6 +39,9 @@ jobs:
       - name: Verify fresh consumer install, segmentation and native PTY
         shell: bash
         run: npm run verify:cli-install -- "artifacts/xiaokcode-$(node -p 'require("./package.json").version').tgz"
+      - name: Verify omitted optional native modules preserve CLI startup
+        shell: bash
+        run: npm run verify:cli-install -- "artifacts/xiaokcode-$(node -p 'require("./package.json").version').tgz" --omit-optional
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
 const archive = process.argv[2];
+const omitOptional = process.argv.includes('--omit-optional');
 if (!archive || !process.env.npm_execpath) throw new Error('npm run verify:cli-install -- <packed .tgz>');
 const dir = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-cli-consumer-')));
 const tarball = realpathSync(resolve(archive));
@@ -21,7 +22,8 @@ writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'xiaok-cli-insta
     'node-pty@1.1.0': true, 'better-sqlite3@13.0.3': true, 'nodejieba@3.5.8': true, 'onnxruntime-node@1.30.0': true },
 }));
 console.log(`Consumer evidence: ${dir}`);
-const output = npm(['install', tarball, '--no-audit', '--no-fund', '--foreground-scripts']);
+const output = npm(['install', tarball, '--no-audit', '--no-fund', '--foreground-scripts',
+  ...(omitOptional ? ['--omit=optional'] : [])]);
 writeFileSync(join(dir, 'install.log'), output);
 const tree = JSON.parse(npm(['ls', '--all', '--json']));
 const forbidden = new Set(['inflight', 'npmlog', 'rimraf', 'glob', 'are-we-there-yet', 'gauge']);
@@ -38,6 +40,16 @@ const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'
 assert.equal(execFileSync(process.execPath, [join(installed, 'dist', 'index.js'), '--version'], {
   cwd: dir, encoding: 'utf8', timeout: 60_000,
 }).trim(), manifest.version);
+if (omitOptional) {
+  const fallback = `import assert from 'node:assert/strict';
+    import {pathToFileURL} from 'node:url';
+    const segment=await import(pathToFileURL(${JSON.stringify(join(installed, 'dist', 'ai', 'memory', 'segment.js'))}));
+    assert.equal(segment.segmentationAvailable(),false);
+    assert.equal(segment.segmentChinese('南京市长江大桥'),'南京市长江大桥');`;
+  execFileSync(process.execPath, ['--input-type=module', '--eval', fallback], { cwd: dir, timeout: 60_000 });
+  console.log(JSON.stringify({ version: manifest.version, deprecatedDependencies: 0, optionalFallback: true, consumer: dir }));
+  process.exit(0);
+}
 const probe = `
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
