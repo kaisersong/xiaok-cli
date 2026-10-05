@@ -35,6 +35,7 @@ export type RuleBoundaryDecision = {
     plannerHint?: PlannerHint;
 };
 export interface IntentBoundaryInput {
+    newIntentId?: string;
     input: string;
     instanceId: string;
     sessionId: string;

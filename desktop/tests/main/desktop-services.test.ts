@@ -1,7 +1,10 @@
+// @vitest-environment node
+import {createServer} from 'node:http';
+import type {AddressInfo} from 'node:net';
 import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-compatibility.js';
 import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +22,33 @@ import type { ExternalPluginDependency } from '../../electron/plugin-dependency-
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 import { TimedActionService } from '../../electron/timed-action-service.js';
 import { TimedActionStore } from '../../electron/timed-action-store.js';
+
+
+import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
+vi.mock('node:worker_threads', async original => {
+  const actual = await original<typeof import('node:worker_threads')>();
+  const deliverySource = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
+  return { ...actual, Worker: class extends actual.Worker {
+    constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
+      const mapped = String(filename) === deliverySource, protectionMapped = String(filename) === protectionSource;
+      if (mapped && !nativeWorker.output || protectionMapped && !nativeWorker.protectionOutput) throw Error('fresh fixed Worker required');
+      super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
+      if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => nativeWorker.exits++); }
+    }
+  } };
+});
+beforeAll(async () => {
+  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+});
+afterAll(() => {
+  try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
+  finally { for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 }); }
+});
 
 function mockKSwarmService(): KSwarmService {
   return {
@@ -3262,18 +3292,26 @@ describe('desktop services', () => {
       },
     });
 
-    // Configure with API key (but fake, so connection will fail)
-    await services.saveModelConfig({
-      providerId: 'anthropic',
-      apiKey: 'sk-test-key',
+    const requests:Array<{method:string|undefined,path:string|undefined,key:string|string[]|undefined,body:any}>=[];
+    const server=createServer((request,response)=>{
+      let body='';request.setEncoding('utf8');request.on('data',chunk=>{body+=chunk;});
+      request.on('end',()=>{
+        requests.push({method:request.method,path:request.url,key:request.headers['x-api-key'],body:JSON.parse(body)});
+        response.writeHead(401,{'content-type':'application/json'});response.end(JSON.stringify({type:'error',error:{type:'authentication_error',message:'synthetic key rejected'}}));
+      });
     });
-
-    // With a fake API key, the connection will fail, but we can verify it tried
-    const result = await services.testProviderConnection({ providerId: 'anthropic' });
-    // Either succeeds (if adapter returns immediately) or fails with connection error
-    expect(result.success).toBeDefined();
-    if (!result.success) {
-      expect(result.error).toBeDefined();
+    try{
+      for(const key of ['XIAOK_ANTHROPIC_API_KEY','XIAOK_CLAUDE_API_KEY','ANTHROPIC_API_KEY','CLAUDE_API_KEY','ANTHROPIC_BASE_URL'])vi.stubEnv(key,undefined);
+      await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
+      await services.saveModelConfig({providerId:'anthropic',apiKey:'sk-test-key',baseUrl:`http://127.0.0.1:${(server.address() as AddressInfo).port}`});
+      const result=await services.testProviderConnection({providerId:'anthropic'});
+      expect(result.success).toBeDefined();expect(result.success).toBe(false);expect(result.error).toBeDefined();expect(result.error).toContain('synthetic key rejected');
+      expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({method:'POST',path:'/v1/messages',key:'sk-test-key'});
+      expect(requests[0].body.model).toEqual(expect.any(String));expect(JSON.stringify(requests[0].body.messages)).toContain('ping');
+      expect(requests[0].body.system).toBe('Reply with "ok" to verify connection.');
+    }finally{
+      try{if(server.listening)await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+      finally{vi.unstubAllEnvs();}
     }
   });
 

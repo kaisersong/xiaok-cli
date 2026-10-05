@@ -17,6 +17,11 @@ vi.mock('../../../src/ai/agent.js', () => ({
     getSessionState: () => ({ attachPromptSnapshot: vi.fn() }),
     restoreSession: vi.fn(),
     setPromptSnapshot: vi.fn(),
+    dispose: vi.fn(),
+    stopNewRuns: vi.fn(),
+    waitForStoppedResources: vi.fn(async()=>{}),
+    waitForIdleResources: vi.fn(async()=>{}),
+    waitForDisposedResources: vi.fn(async()=>{}),
   })),
 }));
 
@@ -632,5 +637,38 @@ describe('persistent named subagent session', () => {
 
     expect(releaseRegistry).toHaveBeenCalledOnce();
     expect(releaseRegistry).toHaveBeenCalledWith(mockRegistry);
+  });
+});
+
+describe('subagent cleanup in the original turn continuation', () => {
+  it.each(['returned', 'undefined-error', 'ordinary-error'] as const)('allows the sibling suspension reaction after physical run completion without another Promise boundary: %s', async mode => {
+    vi.clearAllMocks();
+    const session = await createNamedSubAgentSession({
+      agentDef: { name: 'cleanup-probe', systemPrompt: '', source: 'builtin' },
+      sessionId: 'cleanup-session', adapter: () => mockAdapter,
+      createRegistry: () => mockRegistry, buildSystemPrompt: async () => 'original prompt',
+    });
+    const agent = vi.mocked(Agent).mock.results.at(-1)!.value;
+    const { AgentSessionState } = await import('../../../src/ai/runtime/session.js');
+    agent.exportSession = vi.fn(() => new AgentSessionState().exportSnapshot());
+    let finish!: () => void, fail!: (reason: unknown) => void;
+    const gate = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
+    vi.spyOn(agent, 'runTurn').mockImplementation((_prompt, onChunk) => {
+      onChunk?.({ type: 'text', delta: 'actual result' });
+      return gate;
+    });
+    const error = mode === 'undefined-error' ? undefined : new Error('original turn failure');
+    const running = session.run('original task');
+    const observed = running.then(value => ({ kind: 'returned' as const, value }), error => ({ kind: 'thrown' as const, error }));
+    const suspension = gate.then(() => session.suspend!(), () => session.suspend!());
+    // Capture rejection immediately so a race cannot become an unhandled error.
+    const suspended = suspension.then(() => ({ ok: true as const }), error => ({ ok: false as const, error }));
+    if (mode === 'returned') finish(); else fail(error);
+    try {
+      const suspendedResult = await suspended;
+      expect(suspendedResult, suspendedResult.ok ? 'original sibling suspension accepted' : String(suspendedResult.error)).toEqual({ ok: true });
+      expect(await observed).toEqual(mode === 'returned' ? { kind: 'returned', value: 'actual result' } : { kind: 'thrown', error });
+      expect(mockRegistry.dispose).toHaveBeenCalledTimes(1);
+    } finally { await running.catch(() => {}); await session.dispose(); }
   });
 });

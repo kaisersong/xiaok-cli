@@ -22,15 +22,16 @@ function prefix(text: string, max: number): string {
 function sameTurn(a: MultiAgentDurableEvent, b: MultiAgentDurableEvent): boolean {
   return Boolean(a.turnId && a.turnId === b.turnId && a.agentId === b.agentId && a.groupId === b.groupId);
 }
-function sourceText(event: MultiAgentDurableEvent, userSender: string): string {
+function sourceText(event: MultiAgentDurableEvent, userSender: string, unavailable?:string): string {
+  if(event.payload.bodyUnavailable===true||(event.payload.message as MultiAgentMessage|undefined)?.bodyUnavailable)return unavailable??'FINAL_CONTENT_NOT_PERSISTED';
   if (event.kind === 'message_sent') {
     const message = event.payload.message as MultiAgentMessage | undefined;
     return message ? `${message.sender.kind === 'user' ? userSender : message.sender.agentId} → ${message.receiverId}\n${message.preview}` : '';
   }
   return typeof event.payload.text === 'string' ? event.payload.text : typeof event.payload.preview === 'string' ? event.payload.preview : '';
 }
-function entry(event: MultiAgentDurableEvent, userSender: string): AgentOutputEntry {
-  const raw = sourceText(event, userSender), text = prefix(raw, MAX_ENTRY_UNITS);
+function entry(event: MultiAgentDurableEvent, userSender: string, unavailable?:string): AgentOutputEntry {
+  const raw = sourceText(event, userSender, unavailable), text = prefix(raw, MAX_ENTRY_UNITS);
   return { key: event.eventId, kind: event.kind as VisibleKind, event, text,
     partial: text.length !== raw.length || event.payload.truncated === true || (event.payload.message as MultiAgentMessage | undefined)?.truncated === true };
 }
@@ -48,7 +49,7 @@ function budget(entries: AgentOutputEntry[]): AgentOutputEntry[] {
 /** A bounded presentation over the connection's existing cache; no I/O or new history owner. */
 export function buildAgentOutputView(input: {
   groupId: string | null; agent: DesktopAgentSnapshot;
-  details: (agentId: string, beforeSeq?: number) => MultiAgentDurableEvent[]; userSender: string;
+  details: (agentId: string, beforeSeq?: number) => MultiAgentDurableEvent[]; userSender: string; bodyUnavailableLabel?:string;
 }): AgentOutputView {
   const events: MultiAgentDurableEvent[] = [];
   let beforeSeq = Infinity, limited = false;
@@ -75,7 +76,7 @@ export function buildAgentOutputView(input: {
       continue;
     }
     if (event.kind === 'output') {
-      const next = entry(event, input.userSender);
+      const next = entry(event, input.userSender,input.bodyUnavailableLabel);
       if (active?.event && sameTurn(active.event, event) && event.payload.truncated !== true) {
         const text = prefix(typeof event.payload.text === 'string' ? event.payload.text : next.text, MAX_ENTRY_UNITS - active.text.length);
         active.text += text;
@@ -90,7 +91,7 @@ export function buildAgentOutputView(input: {
     if (event.kind === 'result' && active?.event && sameTurn(active.event, event) && !active.partial
       && event.payload.truncated === false && event.payload.preview === active.text) visible.pop();
     active = undefined; truncatedTail = undefined;
-    if (event.kind === 'result' || event.kind === 'message_sent' || event.kind === 'artifact' || event.kind === 'delivery') visible.push(entry(event, input.userSender));
+    if (event.kind === 'result' || event.kind === 'message_sent' || event.kind === 'artifact' || event.kind === 'delivery') visible.push(entry(event, input.userSender,input.bodyUnavailableLabel));
   }
   partial ||= visible.length > MAX_ENTRIES;
   const history = visible.slice(-MAX_ENTRIES);

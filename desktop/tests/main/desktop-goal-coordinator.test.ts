@@ -130,7 +130,7 @@ describe('DesktopGoalCoordinator', () => {
   });
 
   it('completes from current-turn answer evidence before the last-turn budget block', async () => {
-    const { coordinator } = setup();
+    const { coordinator, store } = setup();
     const created = await coordinator.createGoal({
       threadId: 'thread_1', objective: '回答问题', expectedEvidenceKinds: ['answer'], turnLimit: 1,
     });
@@ -138,6 +138,7 @@ describe('DesktopGoalCoordinator', () => {
       threadId: 'thread_1', attachmentId: created.preparedTask.attachmentId,
     });
     await coordinator.createGoalToolHost(created.preparedTask.taskId).requestComplete('已完成');
+    expect((await store.load('thread_1'))?.completionIntents?.[0]).toMatchObject({ taskId: created.preparedTask.taskId, turnId: created.preparedTask.executionScope.goalTurnId, summary: '已完成', status: 'claimed' });
     await coordinator.handlePersistedTaskEvent(persistedTerminal(
       created.preparedTask.taskId, created.preparedTask.executionScope, 'completed', undefined, '答案',
     ));

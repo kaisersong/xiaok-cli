@@ -16,6 +16,17 @@ describe('InProcessTaskRuntimeHost', () => {
   let snapshotStore: FileTaskSnapshotStore;
   let material: MaterialRecord;
 
+  it('exposes a Host-bound final publication registration and rejects forged tickets', async () => {
+    let rejected = false;
+    const host = new InProcessTaskRuntimeHost({ materialRegistry, snapshotStore, runner: async input => {
+      expect(typeof input.registerCompoundFinalPublication).toBe('function');
+      await expect(input.registerCompoundFinalPublication!({} as never, async () => {})).rejects.toThrow('compound_final_publication_ticket');
+      rejected = true;
+    }});
+    await host.createTask({prompt:'Short bounded answer',materials:[]});
+    await host.drain();expect(rejected).toBe(true);
+  });
+
   it.each([[0.5,0.25],[1,0.5],[60_000,30_000],[239_999,119_999.5],[240_000,120_000],[240_001,120_001],[600_000,480_000],[undefined,undefined]])('passes explicit watchdog %s through the real host with runner budget %s',async(watchdogMs,expected)=>{
     let captured:number|undefined;let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});
     const host=new InProcessTaskRuntimeHost({materialRegistry,snapshotStore,runner:async input=>{captured=input.deadlineMs;entered();}});
@@ -543,6 +554,8 @@ describe('InProcessTaskRuntimeHost', () => {
     });
     await waitFor(() => Boolean(releaseFirstRunner));
     releaseFirstRunner?.();
+    // Simulate restart only after the old host's physical terminal writes settle.
+    await firstHost.drain();
 
     const restartedRegistry = new MaterialRegistry({
       workspaceRoot: join(rootDir, 'workspace'),
@@ -2188,12 +2201,14 @@ describe('InProcessTaskRuntimeHost', () => {
   it('has no implicit runner deadline and survives the former 30 minute watchdog', async () => {
     let finish!: () => void;
     const pending = new Promise<void>(resolve => { finish = resolve; });
-    const runner = vi.fn<TaskRunner>(async () => pending);
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const runner = vi.fn<TaskRunner>(async () => { enter(); return pending; });
     const host = createHost(runner);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
     try {
       await host.createTask({ prompt: 'Long collaboration', materials: [] });
-      for (let i = 0; i < 100 && !runner.mock.calls.length; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      await entered;
       expect(runner).toHaveBeenCalledOnce();
       const input = runner.mock.calls[0]![0];
       expect.soft(input.deadlineMs).toBeUndefined();
@@ -2211,7 +2226,9 @@ describe('InProcessTaskRuntimeHost', () => {
     let finish!: () => void;
     const pending = new Promise<void>(resolve => { finish = resolve; });
     const reports: Array<{ delivery: { startedAt: number; deadlineAt: number } }> = [];
-    const runner = vi.fn<TaskRunner>(async () => pending);
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const runner = vi.fn<TaskRunner>(async () => { enter(); return pending; });
     const host = new InProcessTaskRuntimeHost({ materialRegistry, snapshotStore, runner,
       getExecutionPolicy: () => ({ deliveryRepair: 'explicit' }), authorizePreparation: () => {},
       onDeliveryReport: async report => { reports.push(report); throw new Error('test stop after checking'); },
@@ -2222,7 +2239,7 @@ describe('InProcessTaskRuntimeHost', () => {
       const task = await host.prepareTask({ prompt: 'Long collaboration', materials: [] }, { reservation,
         marker: { groupId: 'g', rootEpoch: 1, rootTurnId: 'r', preparationId: 'p', bootId: 'b' } });
       await host.startTask(task.taskId);
-      for (let i = 0; i < 100 && !runner.mock.calls.length; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      await entered;
       await vi.advanceTimersByTimeAsync(20 * 60_000);
       const activeInput=runner.mock.calls[0]![0];
       await activeInput.emitRuntimeEvent({type:'execution_progress',sessionId:activeInput.sessionId,turnId:'long'});

@@ -1,3 +1,5 @@
+import type { InstalledCompletionObservation } from '../verification/installed-completion-observation.js';
+import type { ProtectedObservationClosure } from '../../ai/runtime/protected-observation-closure.js';
 import type { HostDeliveryRecord } from './delivery-types.js';
 export type MaterialRole = 'customer_material' | 'product_material' | 'template_material' | 'unknown';
 export type MaterialRoleSource = 'user' | 'auto';
@@ -281,6 +283,13 @@ export interface TaskMultiAgentPreparation {
     bootId: string;
 }
 export interface TaskSnapshot {
+    /** Fresh read observation only; omitted for ordinary tasks, never persisted or used as a write grant. */
+    readonly currentCompletion?: Exclude<InstalledCompletionObservation, {
+        kind: 'ordinary';
+    }>;
+    /** Sticky host CAS marker; recovery requires explicit execution reauthorization even before an archive exists. */
+    executionProtected?: true;
+    protectedObservationClosure?: ProtectedObservationClosure;
     taskId: string;
     sessionId: string;
     status: TaskSnapshotStatus;

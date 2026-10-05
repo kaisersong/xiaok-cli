@@ -133,13 +133,11 @@ describe('MaterialRegistry', () => {
     });
     expect(record.extractedTextPath).toBeUndefined();
 
-    const extractedTextPath = join(workspaceRoot, 'task_docx', 'materials', `${record.materialId}.txt`);
-    writeFileSync(extractedTextPath, '这是一份董事会评审报告。');
+    const extractedTextPath = join(record.workspacePath, '..', `${record.materialId}.extracted.txt`);
     const updated = await registry.updateMaterialExtraction(record.materialId, {
-      extractedTextPath,
       parseStatus: 'parsed',
       parseSummary: '已解析 Word 文档，提取 12 字符',
-    });
+    }, '这是一份董事会评审报告。');
     expect(updated).toMatchObject({
       materialId: record.materialId,
       parseStatus: 'parsed',

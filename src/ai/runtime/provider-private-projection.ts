@@ -1,3 +1,6 @@
+import { validateSemanticCompactionLedger } from '../../runtime/sol-pi/semantic-compaction-ledger.js';
+import { validateCompoundOperationLedger } from '../../runtime/sol-pi/compound-operation.js';
+import { mergeProtectedObservationClosures } from './protected-observation-closure.js';
 import { types as nodeTypes } from 'node:util';
 import type {
   Message,
@@ -189,6 +192,8 @@ export function projectStrictToolExecutionContext(
       memoryRefs: clonePlainData(session.memoryRefs),
       approvalRefs: clonePlainData(session.approvalRefs),
       backgroundJobRefs: clonePlainData(session.backgroundJobRefs),
+      ...(session.protectedObservationClosure !== undefined
+        ? { protectedObservationClosure: clonePlainData(session.protectedObservationClosure) } : {}),
     },
     messages,
     systemPrompt: context.systemPrompt,
@@ -385,7 +390,27 @@ function validateSessionSnapshotSchema(
   ], [
     'forkedFromSessionId',
     'promptSnapshotId',
+    'protectedObservationClosure',
+    'storeRevision', 'historyDigest', 'executionProtected', 'semanticCompaction', 'compoundOperations',
   ]);
+  // These are durable host control facts, accepted only with their real schema.
+  // The projected business view above deliberately does not copy them.
+  const revision = readOptionalOwnDataValue(session, 'storeRevision');
+  if (revision !== undefined && (!Number.isSafeInteger(revision) || (revision as number) < 0)) rejectToolContext();
+  const digest = readOptionalOwnDataValue(session, 'historyDigest');
+  if (digest !== undefined && (typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest))) rejectToolContext();
+  const protectedExecution = readOptionalOwnDataValue(session, 'executionProtected');
+  if (protectedExecution !== undefined && protectedExecution !== true) rejectToolContext();
+  for (const [field, validate] of [['semanticCompaction', validateSemanticCompactionLedger], ['compoundOperations', validateCompoundOperationLedger]] as const) {
+    const value = readOptionalOwnDataValue(session, field);
+    if (value !== undefined) { validatePlainData(value); try { validate(value); } catch { rejectToolContext(); } }
+  }
+  const protectedClosure = readOptionalOwnDataValue(session, 'protectedObservationClosure');
+  if (protectedClosure !== undefined) {
+    validatePlainData(protectedClosure);
+    try { mergeProtectedObservationClosures(undefined, protectedClosure as ToolExecutionContext['session']['protectedObservationClosure']); }
+    catch { rejectToolContext(); }
+  }
   assertStringValue(session.sessionId);
   assertStringValue(session.cwd);
   assertFiniteNumber(session.createdAt);
@@ -771,4 +796,13 @@ function deepFreezePlainData(
 
 function rejectToolContext(): never {
   throw new Error('KIMI_STRICT_TOOL_CONTEXT_REJECTED');
+}
+
+/** Validate stored source data only; no projection, disclosure or authority. */
+export function assertCapturedMessageSchema(messages: readonly Message[]): void {
+  assertDenseArray(messages);
+  for (const message of messages) {
+    validateMessageSchema(message);
+    for (const block of message.content) validateMessageBlockSchema(block);
+  }
 }

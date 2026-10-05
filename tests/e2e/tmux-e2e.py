@@ -110,6 +110,7 @@ def build_cli_launch_command(
     env_overrides: dict[str, str] | None = None,
 ) -> str:
     node_cmd = resolve_command("node.exe" if os.name == "nt" else "node", "node")
+    profile_setup = project_dir / "tests" / "support" / "profile-account-child.setup.mjs"
     auto_flag = " --auto" if auto_mode else ""
     extra_args = extra_args or []
     env_overrides = env_overrides or {}
@@ -119,6 +120,7 @@ def build_cli_launch_command(
         home_value = shell_quote_cmd(str(home_dir))
         node_value = str(node_cmd).replace('"', '""')
         cli_value = str(cli_entry).replace('"', '""')
+        profile_setup_value = str(profile_setup).replace('"', '""')
         extra_args_value = f" {subprocess.list2cmdline(extra_args)}" if extra_args else ""
         extra_env = " ".join(
             f'&& set "{key}={shell_quote_cmd(value)}"'
@@ -130,14 +132,17 @@ def build_cli_launch_command(
             f'cd /d "{project_value}" && '
             f'set "XIAOK_CONFIG_DIR={config_value}" && '
             f'set "HOME={home_value}" && '
-            f'set "USERPROFILE={home_value}" {extra_env} && '
-            f'"{node_value}" "{cli_value}"{auto_flag}{extra_args_value} 2>nul'
+            f'set "USERPROFILE={home_value}" && '
+            f'set "XIAOK_TEST_ACCOUNT_HOME={home_value}" {extra_env} && '
+            f'"{node_value}" --import "{profile_setup_value}" "{cli_value}"{auto_flag}{extra_args_value} 2>nul'
             '"'
         )
 
     env_parts = [
         f"XIAOK_CONFIG_DIR={shell_quote_posix(str(config_dir))}",
         f"HOME={shell_quote_posix(str(home_dir))}",
+        f"USERPROFILE={shell_quote_posix(str(home_dir))}",
+        f"XIAOK_TEST_ACCOUNT_HOME={shell_quote_posix(str(home_dir))}",
         *[
             f"{key}={shell_quote_posix(value)}"
             for key, value in env_overrides.items()
@@ -148,6 +153,8 @@ def build_cli_launch_command(
             f"cd {shell_quote_posix(str(project_dir))} &&",
             *env_parts,
             shell_quote_posix(node_cmd),
+            "--import",
+            shell_quote_posix(str(profile_setup)),
             shell_quote_posix(str(cli_entry)),
             *(["--auto"] if auto_mode else []),
             *[shell_quote_posix(arg) for arg in extra_args],

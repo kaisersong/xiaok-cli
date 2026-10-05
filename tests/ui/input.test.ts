@@ -24,6 +24,13 @@ import { ReplRenderer } from '../../src/ui/repl-renderer.js';
 import { clearPastedImagePaths, parseInputBlocks } from '../../src/ui/image-input.js';
 import { waitFor } from '../support/wait-for.js';
 
+function skillDefaults(): Omit<SkillMeta, 'name' | 'description' | 'content' | 'path'> {
+  return { rootDir: '', source: 'project', tier: 'project', allowedTools: [], executionContext: 'inline',
+    dependsOn: [], userInvocable: true, taskHints: { taskGoals: [], inputKinds: [], outputKinds: [], examples: [] },
+    referencesManifest: [], scriptsManifest: [], assetsManifest: [], requiredReferences: [], requiredScripts: [],
+    requiredSteps: [], successChecks: [], strict: false };
+}
+
 describe('InputReader cancellation', () => {
   it('releases the reader on abort and accepts input for the next read', async () => {
     const harness = createTtyHarness(80, 24);
@@ -74,7 +81,7 @@ describe('getSlashCommands', () => {
 
   it('should include skills in command list', () => {
     const skills: SkillMeta[] = [
-      {
+      { ...skillDefaults(),
         name: 'test-skill',
         description: 'A test skill',
         content: 'Test content',
@@ -90,8 +97,8 @@ describe('getSlashCommands', () => {
 
   it('should sort commands alphabetically', () => {
     const skills: SkillMeta[] = [
-      { name: 'zebra', description: 'Z skill', content: '', path: '' },
-      { name: 'alpha', description: 'A skill', content: '', path: '' },
+      { ...skillDefaults(), name: 'zebra', description: 'Z skill', content: '', path: '' },
+      { ...skillDefaults(), name: 'alpha', description: 'A skill', content: '', path: '' },
     ];
 
     const commands = getSlashCommands(skills);
@@ -104,7 +111,7 @@ describe('getSlashCommands', () => {
 
   it('should not duplicate commands if skill has same name as base command', () => {
     const skills: SkillMeta[] = [
-      { name: 'exit', description: 'Custom exit', content: '', path: '' },
+      { ...skillDefaults(), name: 'exit', description: 'Custom exit', content: '', path: '' },
     ];
 
     const commands = getSlashCommands(skills);
@@ -116,9 +123,9 @@ describe('getSlashCommands', () => {
 
   it('should handle multiple skills', () => {
     const skills: SkillMeta[] = [
-      { name: 'skill1', description: 'First skill', content: '', path: '' },
-      { name: 'skill2', description: 'Second skill', content: '', path: '' },
-      { name: 'skill3', description: 'Third skill', content: '', path: '' },
+      { ...skillDefaults(), name: 'skill1', description: 'First skill', content: '', path: '' },
+      { ...skillDefaults(), name: 'skill2', description: 'Second skill', content: '', path: '' },
+      { ...skillDefaults(), name: 'skill3', description: 'Third skill', content: '', path: '' },
     ];
 
     const commands = getSlashCommands(skills);
@@ -136,14 +143,14 @@ describe('getSlashCommands', () => {
 
 describe('InputReader', () => {
   let reader: InputReader;
-  let originalIsTTY: boolean | undefined;
+  let originalIsTTY: PropertyDescriptor | undefined;
   let originalConfigDir: string | undefined;
   let configDir: string;
   const tempDirs: string[] = [];
 
   beforeEach(() => {
     reader = new InputReader();
-    originalIsTTY = process.stdin.isTTY;
+    originalIsTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
     originalConfigDir = process.env.XIAOK_CONFIG_DIR;
     configDir = join(tmpdir(), `xiaok-input-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(configDir);
@@ -152,7 +159,8 @@ describe('InputReader', () => {
   });
 
   afterEach(() => {
-    process.stdin.isTTY = originalIsTTY;
+    if (originalIsTTY) Object.defineProperty(process.stdin, 'isTTY', originalIsTTY);
+    else Reflect.deleteProperty(process.stdin, 'isTTY');
     if (originalConfigDir === undefined) {
       delete process.env.XIAOK_CONFIG_DIR;
     } else {
@@ -168,7 +176,7 @@ describe('InputReader', () => {
   describe('setSkills', () => {
     it('should store skills for menu generation', () => {
       const skills: SkillMeta[] = [
-        {
+        { ...skillDefaults(),
           name: 'test-skill',
           description: 'A test skill',
           content: 'Test content',
@@ -336,7 +344,7 @@ describe('InputReader', () => {
     it('replays slash-menu interaction without appending each typed character onto a new line', async () => {
       const harness = createTtyHarness();
       reader.setSkills([
-        { name: 'kai-report-creator', description: 'Handles reports', content: '', path: '' },
+        { ...skillDefaults(), name: 'kai-report-creator', description: 'Handles reports', content: '', path: '' },
       ]);
 
       const pending = reader.read('> ');
@@ -360,8 +368,8 @@ describe('InputReader', () => {
       const harness = createTtyHarness();
       reader = new InputReader(new ReplRenderer(process.stdout));
       reader.setSkills([
-        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
-        { name: 'simplify', description: '识别可删减的复杂度，优先做小而稳的重构', content: '', path: '' },
+        { ...skillDefaults(), name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+        { ...skillDefaults(), name: 'simplify', description: '识别可删减的复杂度，优先做小而稳的重构', content: '', path: '' },
       ]);
 
       const pending = reader.read('> ');
@@ -523,7 +531,7 @@ describe('InputReader', () => {
       reader = new InputReader(new ReplRenderer(process.stdout));
       reader.setStatusLineProvider(() => ['  xiaok-cli · claude-sonnet-4 · 1%']);
       reader.setSkills([
-        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+        { ...skillDefaults(), name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
       ]);
 
       const pending = reader.read('> ');
@@ -542,8 +550,8 @@ describe('InputReader', () => {
       const harness = createTtyHarness();
       reader = new InputReader(new ReplRenderer(process.stdout));
       reader.setSkills([
-        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
-        { name: 'simplify', description: '识别可删减的复杂度，优先做小而稳的重构', content: '', path: '' },
+        { ...skillDefaults(), name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+        { ...skillDefaults(), name: 'simplify', description: '识别可删减的复杂度，优先做小而稳的重构', content: '', path: '' },
       ]);
 
       const pending = reader.read('> ');
@@ -595,6 +603,7 @@ describe('InputReader', () => {
         recordOutput() {},
         beginSuppress() {},
         endSuppress() {},
+        close() {},
       };
 
       reader.setTranscriptLogger(logger);
@@ -705,7 +714,7 @@ describe('InputReader', () => {
         prepareBlockOutput,
       } as unknown as ReplRenderer);
       reader.setSkills([
-        { name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
+        { ...skillDefaults(), name: 'debug', description: '先定位根因，再提出修复方案', content: '', path: '' },
       ]);
 
       const pending = reader.read('> ');
@@ -854,7 +863,7 @@ describe('InputReader', () => {
   describe('slash command menu', () => {
     it('should include slash menu candidates for "/" input', () => {
       const skills: SkillMeta[] = [
-        { name: 'browse', aliases: ['browser'], description: 'Browser skill', content: '', path: '' },
+        { ...skillDefaults(), name: 'browse', aliases: ['browser'], description: 'Browser skill', content: '', path: '' },
       ];
 
       const commands = getSlashCommands(skills);
@@ -866,8 +875,8 @@ describe('InputReader', () => {
 
     it('should filter commands based on input', () => {
       const skills: SkillMeta[] = [
-        { name: 'test-skill', description: 'A test skill', content: '', path: '' },
-        { name: 'another-skill', description: 'Another skill', content: '', path: '' },
+        { ...skillDefaults(), name: 'test-skill', description: 'A test skill', content: '', path: '' },
+        { ...skillDefaults(), name: 'another-skill', description: 'Another skill', content: '', path: '' },
       ];
 
       reader.setSkills(skills);
@@ -884,9 +893,9 @@ describe('InputReader', () => {
 
     it('should handle partial command matching', () => {
       const skills: SkillMeta[] = [
-        { name: 'test-one', description: 'Test 1', content: '', path: '' },
-        { name: 'test-two', description: 'Test 2', content: '', path: '' },
-        { name: 'other', description: 'Other', content: '', path: '' },
+        { ...skillDefaults(), name: 'test-one', description: 'Test 1', content: '', path: '' },
+        { ...skillDefaults(), name: 'test-two', description: 'Test 2', content: '', path: '' },
+        { ...skillDefaults(), name: 'other', description: 'Other', content: '', path: '' },
       ];
 
       const commands = getSlashCommands(skills);
@@ -899,7 +908,7 @@ describe('InputReader', () => {
 
     it('should return empty array when no commands match', () => {
       const skills: SkillMeta[] = [
-        { name: 'test-skill', description: 'A test skill', content: '', path: '' },
+        { ...skillDefaults(), name: 'test-skill', description: 'A test skill', content: '', path: '' },
       ];
 
       const commands = getSlashCommands(skills);
@@ -909,7 +918,7 @@ describe('InputReader', () => {
     });
 
     it('should handle menu with many commands', () => {
-      const skills: SkillMeta[] = Array.from({ length: 20 }, (_, i) => ({
+      const skills: SkillMeta[] = Array.from({ length: 20 }, (_, i) => ({ ...skillDefaults(),
         name: `skill-${i}`,
         description: `Skill ${i}`,
         content: '',
@@ -924,7 +933,7 @@ describe('InputReader', () => {
 
     it('should preserve command descriptions', () => {
       const skills: SkillMeta[] = [
-        { name: 'test', description: 'This is a test skill with a long description', content: '', path: '' },
+        { ...skillDefaults(), name: 'test', description: 'This is a test skill with a long description', content: '', path: '' },
       ];
 
       const commands = getSlashCommands(skills);

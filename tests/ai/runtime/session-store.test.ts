@@ -1,3 +1,4 @@
+import { computeSessionHistoryDigest } from '../../../src/ai/runtime/session-store/store.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   existsSync,
@@ -170,6 +171,7 @@ describe('FileSessionStore', () => {
     });
 
     await expect(store.load('sess_alpha')).resolves.toEqual({
+      storeRevision: 1, historyDigest: computeSessionHistoryDigest({messages}),
       sessionId: 'sess_alpha',
       cwd: 'D:/projects/workspace/xiaok-cli',
       model: 'claude-opus-4-6',

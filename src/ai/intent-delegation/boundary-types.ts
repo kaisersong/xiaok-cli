@@ -30,6 +30,7 @@ export type RuleBoundaryDecision =
   | { kind: 'ambiguous'; ambiguityType: AmbiguityType; reason: string; plannerHint?: PlannerHint };
 
 export interface IntentBoundaryInput {
+  newIntentId?: string;
   input: string;
   instanceId: string;
   sessionId: string;

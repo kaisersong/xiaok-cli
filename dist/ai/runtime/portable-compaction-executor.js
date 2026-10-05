@@ -15,7 +15,7 @@ function isClosedAbortError(error) {
 }
 export async function executePortableCompaction(request, ports) {
     throwIfAborted(request.signal);
-    if (request.plan.invalidReason) {
+    if (request.plan.invalidReason || (request.trigger.kind === 'semantic' && !ports.applySemanticPlan)) {
         return {
             status: 'invalid_plan',
             record: null,
@@ -43,11 +43,23 @@ export async function executePortableCompaction(request, ports) {
         if (isClosedAbortError(error))
             throw error;
         return {
-            ...ports.applyPlan(request.plan, undefined),
+            ...(request.trigger.kind === 'semantic'
+                ? { status: 'no_gain', record: null }
+                : ports.applyPlan(request.plan, undefined)),
             trigger: request.trigger,
             summaryAttempted: true,
             summaryModelFailed: true,
             summaryFailureCode: 'portable_summary_failed',
+        };
+    }
+    if (request.trigger.kind === 'semantic') {
+        return {
+            ...(summaryText.trim()
+                ? await ports.applySemanticPlan(request.plan, summaryText)
+                : { status: 'no_gain', record: null }),
+            trigger: request.trigger,
+            summaryAttempted: true,
+            summaryModelFailed: false,
         };
     }
     return {

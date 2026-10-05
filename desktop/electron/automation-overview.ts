@@ -1,3 +1,4 @@
+import type {LoopCompletionObservation} from '../shared/loop-current-view-types.js';
 import type { LoopStore } from './loop-store.js';
 import type { LoopDefinition, LoopRun, LoopRunStatus, UserLoopTemplate } from './loop-types.js';
 import type { TimedActionStore } from './timed-action-store.js';
@@ -38,6 +39,8 @@ export interface AutomationOverviewSnapshot {
 }
 
 export interface AutomationRunHistoryItem {
+  historyStatus?: AutomationRunHistoryItem['status'];
+  completionObservation?: LoopCompletionObservation;
   id: string;
   automationKind: 'loop' | 'notify' | 'agent_task';
   scheduleRunId?: string;
@@ -47,9 +50,9 @@ export interface AutomationRunHistoryItem {
   title: string;
   startedAt: number;
   finishedAt?: number;
-  status: 'success' | 'failed' | 'blocked' | 'skipped' | 'running';
+  status: 'success' | 'failed' | 'blocked' | 'skipped' | 'running' | 'publication_pending';
   schedulerStatus?: string;
-  loopStatus?: LoopRunStatus;
+  loopStatus?: LoopRunStatus|'publication_pending';
   failureKind?: string;
   message?: string;
   outputPreviewAvailable?: boolean;
@@ -64,7 +67,7 @@ export interface BuildAutomationOverviewSnapshotInput {
 }
 
 export interface BuildAutomationRunHistoryInput {
-  loopStore: Pick<LoopStore, 'listLoopDefinitions' | 'listLoopRuns' | 'listUserLoopTemplates'>;
+  loopStore: Pick<LoopStore, 'listLoopDefinitions' | 'listLoopRuns' | 'listUserLoopTemplates' | 'getLoopRunLifecycle'>;
   timedActionStore: Pick<TimedActionStore, 'listActions' | 'listRuns'>;
   limit?: number;
 }
@@ -212,6 +215,7 @@ export function buildAutomationRunHistory(input: BuildAutomationRunHistoryInput)
     rows.push(loopRunHistoryItem(item.run, item.definition, userTemplateByLoopId.get(item.run.loopId)));
   }
 
+  for(const row of rows){row.historyStatus=row.status;if(row.loopRunId&&input.loopStore.getLoopRunLifecycle(row.loopRunId)?.businessState==='publication_pending'){row.status='publication_pending';row.loopStatus='publication_pending';}}
   return rows
     .sort((a, b) => (b.finishedAt ?? b.startedAt) - (a.finishedAt ?? a.startedAt) || a.id.localeCompare(b.id))
     .slice(0, limit);
@@ -306,6 +310,7 @@ function fusedStatus(run: TimedActionRunRecord, linkedLoopRun?: LoopRun): Automa
     if (linkedLoopRun.status === 'success') return 'success';
     return 'running';
   }
+  if (run.status === 'publication_pending') return 'publication_pending';
   if (run.status === 'success') return 'success';
   if (run.status === 'failed' || run.status === 'failed_stale') return 'failed';
   if (run.status === 'pause') return 'blocked';

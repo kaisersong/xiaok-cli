@@ -1,0 +1,22 @@
+import { createHash } from 'node:crypto';
+import { parseArchiveOperationReview, archiveReviewBytes } from './archive-operation-review.js';
+/** Root-broker native boundary. The returned fact never enters a public issuer. */
+export async function authorizeArchiveOperation(raw, options) {
+    const { requestSource, authorityId, signal } = options, allowed = new Set(options.allowedUserIds), clock = options.clock.bind(options), resolveAccount = options.resolveAccount.bind(options), approve = options.approve.bind(options);
+    if (requestSource !== 'user')
+        throw Error('archive_authorization_source');
+    const review = parseArchiveOperationReview(raw);
+    if (review.authorityId !== authorityId || !allowed.has(review.principal.uid))
+        throw Error('archive_authorization_authority');
+    const bytes = archiveReviewBytes(review), reviewHash = createHash('sha256').update(bytes).digest('hex');
+    function deadline() { signal.throwIfAborted(); const c = clock(), d = review.deadline; if (!c || c.domainId !== d.domainId || c.qualificationEpoch !== d.qualificationEpoch || !Number.isSafeInteger(c.lowerBound) || !Number.isSafeInteger(c.upperBound) || c.lowerBound < d.notBefore || c.upperBound < c.lowerBound || c.upperBound >= d.validUntil)
+        throw Error('archive_authorization_deadline'); }
+    async function current() { deadline(); const account = await resolveAccount(review.principal.uid, signal); deadline(); if (account !== review.principal.accountGeneration)
+        throw Error('archive_authorization_account'); }
+    await current();
+    const result = await approve({ uid: review.principal.uid, auditSessionId: review.principal.auditSessionId, reviewBytes: Buffer.from(bytes), continuousDeadlineMs: review.deadline.validUntil }, signal);
+    await current();
+    if (result !== reviewHash)
+        throw Error('archive_authorization_unknown');
+    return Object.freeze({ uid: review.principal.uid, auditSessionId: review.principal.auditSessionId, reviewHash });
+}

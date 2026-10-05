@@ -59,13 +59,10 @@ describe('GoalService', () => {
         tokensUsed: 12,
         activeWallClockMs: 30,
         evidence: [{
-          id: 'ev_1',
           ownerKind: 'goal',
           ownerId: created.goalId,
           kind: 'file_artifact',
-          status: 'validated',
           summary: 'a.txt',
-          recordedAt: 100,
         }],
       },
     )).rejects.toThrow(/injected/);
@@ -146,4 +143,49 @@ describe('GoalService', () => {
       budgetLimits: { turnLimit: 2 },
     });
   });
+});
+
+it('durably captures the original completion claim and rejects changing its identity', async () => {
+  const store = new InMemoryGoalStore();
+  const service = new GoalService({ store, ownership: owner, now: () => 100 });
+  const state = await service.create(userContext(null), { objective: 'original', expectedEvidenceKinds: ['answer'] });
+  const claim = await service.requestCompletion({ ...userContext(state.revision), requestSource: 'runtime' }, { taskId: 'task', turnId: 'turn', summary: 'done' });
+  const document = (await store.load('sess_1'))!;
+  expect(document.completionIntents).toEqual([claim]);
+  expect(document.state.status).toBe('active');
+  expect(await service.requestCompletion({ ...userContext(document.state.revision), requestSource: 'runtime' }, { taskId: 'task', turnId: 'turn', summary: 'done' })).toEqual(claim);
+  await expect(service.requestCompletion({ ...userContext(document.state.revision), requestSource: 'runtime' }, { taskId: 'task', turnId: 'turn', summary: 'changed' })).rejects.toThrow(/claim.*changed/);
+  await expect(service.requestCompletion({ ...userContext(document.state.revision), requestSource: 'agent' }, { taskId: 'task', turnId: 'turn2', summary: 'done' })).rejects.toThrow(/not authorized/);
+});
+
+it('does not count duplicate original terminal usage twice or accept altered duplicate usage', async () => {
+  const store = new InMemoryGoalStore();
+  const service = new GoalService({ store, ownership: owner, now: () => 100 });
+  const state = await service.create(userContext(null), { objective: 'original', expectedEvidenceKinds: ['answer'] });
+  const input = { turnId: 'turn', tokensUsed: 4, activeWallClockMs: 8, terminalDecision: { kind: 'none' as const } };
+  const next = await service.settleTurn({ ...userContext(state.revision), requestSource: 'runtime' }, input);
+  expect(await service.settleTurn({ ...userContext(next.revision), requestSource: 'runtime' }, input)).toEqual(next);
+  expect((await store.load('sess_1'))?.turns).toHaveLength(1);
+  await expect(service.settleTurn({ ...userContext(next.revision), requestSource: 'runtime' }, { ...input, tokensUsed: 99 })).rejects.toThrow(/duplicate.*changed/);
+});
+
+it('settles the original pending claim at the final budget and fences task continuation until publication resolves', async () => {
+  const store = new InMemoryGoalStore();
+  const service = new GoalService({ store, ownership: owner, now: () => 100 });
+  const created = await service.create(userContext(null), { objective: 'original', expectedEvidenceKinds: ['answer'], turnLimit: 1 });
+  const claim = await service.requestCompletion({ ...userContext(created.revision), requestSource: 'runtime' }, { taskId: 'task', turnId: 'turn', summary: 'done' });
+  const revision = (await store.load('sess_1'))!.state.revision;
+  const input = { turnId: 'turn', tokensUsed: 4, activeWallClockMs: 8, terminalDecision: { kind: 'publication_pending' as const, intentId: claim.intentId } };
+  await expect(service.settleTurn({ ...userContext(revision), requestSource: 'runtime' }, { ...input, terminalDecision: { kind: 'publication_pending', intentId: 'unknown' } })).rejects.toThrow(/intent_changed/);
+  await expect(service.settleTurn({ ...userContext(revision), requestSource: 'runtime' }, { ...input, turnId: 'wrong' })).rejects.toThrow(/intent_changed/);
+  const pending = await service.settleTurn({ ...userContext(revision), requestSource: 'runtime' }, input);
+  expect(pending).toMatchObject({ status: 'active', turnsUsed: 1, tokensUsed: 4, pendingCompletionIntentId: claim.intentId });
+  await expect(service.recordTurn({ ...userContext(pending.revision), requestSource: 'runtime' }, { turnId: 'extra', tokensUsed: 1, activeWallClockMs: 1 })).rejects.toThrow(/publication_pending/);
+  await expect(service.requestCompletion({ ...userContext(pending.revision), requestSource: 'runtime' }, { taskId: 'extra', turnId: 'extra', summary: 'extra' })).rejects.toThrow(/publication_pending/);
+  const paused = await service.pause(userContext(pending.revision), 'pause');
+  await expect(service.resume(userContext(paused.revision), { turnLimit: 10 })).rejects.toThrow(/publication_pending/);
+  expect((await store.load('sess_1'))!.state.status).toBe('paused');
+  const replaced = await service.replace(userContext(paused.revision), { objective: 'new', expectedEvidenceKinds: ['answer'] });
+  expect(replaced.pendingCompletionIntentId).toBeUndefined();
+  expect((await store.loadCompletionIntent('sess_1', claim.intentId))!.summary).toBe('done');
 });

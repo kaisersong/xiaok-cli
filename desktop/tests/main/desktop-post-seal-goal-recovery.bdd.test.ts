@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +19,12 @@ import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-s
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
 import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
 import { bounded, deferred } from '../fixtures/desktop-post-seal-harness.js';
+const publicationPorts = vi.hoisted(() => ({ protected: false, publisher: vi.fn(() => { throw Error('recovery must not start publication'); }) }));
+vi.mock('../../../src/runtime/verification/installed-owner-state.js', () => ({ readInstalledCurrentOwner: (owner: unknown) => publicationPorts.protected
+  ? { kind: 'protected-unregistered', authorityId: 'recovery-test', owner: { profileId: 'profile', ...(owner as object) } }
+  : { kind: 'ordinary' } }));
+vi.mock('../../../src/runtime/verification/installed-completion-publication.js', () => ({ createInstalledCompletionPublisher: publicationPorts.publisher }));
+
 
 // Test-only declarations allow old production to load. No fabricated authority
 // or permissive authorization callback stands in for the service WeakMap.
@@ -27,6 +35,10 @@ interface Seed { root: string; taskId: string }
 interface ConsumerFixture { goal: DesktopGoalCoordinator; goalStore: SqliteGoalStore; receipts: RecoveryReceipt[] }
 type Fixture = ReturnType<typeof open>;
 const threadId = 'post-seal-thread';
+let protectionEntry: Awaited<ReturnType<typeof compileProtectionWorkerEntry>>;
+const digestFile = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+beforeAll(async () => { protectionEntry = await compileProtectionWorkerEntry(); });
+afterAll(() => { if (protectionEntry) rmSync(protectionEntry.root, { recursive: true, force: true, maxRetries: 3 }); });
 const seeds = new Map<number, Seed>();
 const fixtures: Array<{ close(): Promise<void> }> = [];
 const roots: string[] = [];
@@ -67,8 +79,8 @@ async function crashSeed(turnLimit: number): Promise<Seed> {
 }
 
 async function failRecoveryInRealOwner(root: string, taskId: string): Promise<unknown> {
-  const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-goal-recovery-owner.ts', import.meta.url)), root, taskId], {
-    cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  const child = spawn(process.execPath, ['--import', 'tsx', '--import', fileURLToPath(new URL('../fixtures/desktop-goal-recovery-native-prelude.mjs', import.meta.url)), fileURLToPath(new URL('../fixtures/desktop-post-seal-goal-recovery-owner.ts', import.meta.url)), root, taskId], {
+    cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', XIAOK_TEST_RECOVERY_PROTECTION_ENTRY: protectionEntry.output, XIAOK_TEST_RECOVERY_PROTECTION_SOURCE_SHA: protectionEntry.sourceSha, XIAOK_TEST_RECOVERY_PROTECTION_ENTRY_SHA: protectionEntry.emittedSha, XIAOK_TEST_RECOVERY_PROTECTION_BUNDLE_SHA: digestFile(join(protectionEntry.output, '..', 'protected-observation-store.js')) },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = ''; let stderr = '';
@@ -78,8 +90,15 @@ async function failRecoveryInRealOwner(root: string, taskId: string): Promise<un
     child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal }));
   });
   try {
-    const actualExit = await bounded(closed);
+    const actualExit = await bounded(closed).catch(error => {
+      if (error instanceof Error) error.message += `\nOriginal recovery child stdout: ${output}\nstderr: ${stderr}`;
+      throw error;
+    });
     expect(actualExit, stderr).toEqual({ code: 0, signal: null });
+    const audits = stderr.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)).filter(item => item.nativeProtectionAudit);
+    expect(audits, stderr).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ sourceSha: protectionEntry.sourceSha, targetSha: protectionEntry.emittedSha });
+    expect(audits[0].starts).toBeGreaterThan(0); expect(audits[0].exits).toBe(audits[0].starts);
     const records = output.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line) as { stage: string });
     expect(records).toHaveLength(1);
     expect(records[0].stage).toBe('goal-commit-rejected');
@@ -150,14 +169,14 @@ async function userContext(f: Fixture) {
   const document = (await f.goalStore.load(threadId))!;
   return { sessionId: threadId, instanceId: 'user-before-recovery', requestSource: 'user' as const, expectedRevision: document.state.revision };
 }
-async function seedCommittedHost(f: Fixture, knownUsage = true) {
+async function seedCommittedHost(f: Fixture, knownUsage = true, withAnswer = false) {
   const before = (await f.snapshots.recoverTask(f.taskId))!;
   const binding = f.store.getRootBinding(f.taskId)!;
   const marker = binding.delivery!;
   const now = Date.now();
   const terminal = { type: 'task_terminal' as const, status: 'completed' as const };
   const saved: TaskSnapshot = { ...before, status: 'completed', updatedAt: now,
-    events: [...before.events, terminal],
+    events: [...before.events, ...(withAnswer ? [{ type: 'assistant_delta' as const, delta: 'Recovered actual answer', eventId: 'recovery-answer' }] : []), terminal],
     usage: knownUsage ? before.usage : undefined,
     hostDelivery: { ...marker, revision: marker.revision + 1, status: 'passed', verification: 'passed',
       stage: 'settle', hostSettlement: 'committed', hostTerminalStatus: 'completed', decisionAt: now, finishedAt: now,
@@ -172,7 +191,7 @@ async function seedCommittedHost(f: Fixture, knownUsage = true) {
 beforeAll(async () => { for (const limit of [1, 3]) seeds.set(limit, await crashSeed(limit)); });
 afterEach(async () => {
   for (const fixture of fixtures.splice(0).reverse()) await fixture.close();
-  vi.restoreAllMocks();
+  vi.restoreAllMocks(); publicationPorts.protected = false; publicationPorts.publisher.mockClear();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
 });
 afterAll(() => { for (const seed of seeds.values()) rmSync(seed.root, { recursive: true, force: true, maxRetries: 3 }); });
@@ -337,5 +356,48 @@ describe('R4 Goal recovery consumes actual service-owned durable terminals while
     await next.ready();
     expect(await next.host.inspectTask(next.taskId)).toEqual(hostCommitted);
     expect((await next.goalStore.load(threadId))?.turns).toHaveLength(1); assertNoReplay(next);
+  });
+});
+
+
+describe('recovered original completion claim', () => {
+  async function claim(f: Fixture) {
+    const binding = f.goalStore.getTaskBinding(f.taskId)!;
+    return f.goalService.requestCompletion({ ...await userContext(f), requestSource: 'runtime' }, {
+      taskId: f.taskId, turnId: binding.goalTurnId, summary: 'Original durable completion claim',
+    });
+  }
+  it.each([true, false])('completed original final-budget claim settles protected=%s without native replay', async protectedOwner => {
+    const f = open(seeds.get(1)!, { onReceipt: async (input, current) => {
+      await Promise.all([consume(current.goal, input), consume(current.goal, copyReceipt(input))]);
+    } });
+    const intent = await claim(f); await seedCommittedHost(f, true, true);
+    publicationPorts.protected = protectedOwner;
+    await f.ready();
+    const document = (await f.goalStore.load(threadId))!;
+    expect(document.state).toMatchObject({ status: protectedOwner ? 'active' : 'complete', turnsUsed: 1, tokensUsed: 18 });
+    if (protectedOwner) expect(document.state.pendingCompletionIntentId).toBe(intent.intentId);
+    expect(document.turns).toHaveLength(1); expect(document.completionAttempts ?? []).toEqual([]);
+    expect(publicationPorts.publisher).not.toHaveBeenCalled(); assertNoReplay(f);
+  });
+  it.each(['paused','cancelled','replaced','different-application','missing-answer','failed'] as const)('recovery preserves %s despite an original protected claim', async scenario => {
+    const f = open(seeds.get(1)!); await claim(f);
+    if (scenario !== 'failed') await seedCommittedHost(f, true, scenario !== 'missing-answer');
+    if (scenario === 'paused') await f.goalService.pause(await userContext(f), 'user_paused');
+    if (scenario === 'cancelled') await f.goalService.cancel(await userContext(f), 'user_cancelled');
+    if (scenario === 'replaced') await f.goalService.replace(await userContext(f), { objective: 'Replacement', expectedEvidenceKinds: ['answer'], turnLimit: 3 });
+    if (scenario === 'different-application') {
+      const original = (await f.goalStore.load(threadId))!;
+      // Actual store CAS changes application content while retaining task/epoch;
+      // matching only those IDs must not recover the old completion claim.
+      await f.goalStore.commit({ sessionId: threadId, expectedRevision: original.state.revision,
+        next: { ...original.state, revision: original.state.revision + 1, objective: 'Different application' }, events: [], turns: [], evidence: [] });
+    }
+    const before = await f.goalStore.load(threadId); publicationPorts.protected = true;
+    await f.ready(); const after = (await f.goalStore.load(threadId))!;
+    expect(after.state.pendingCompletionIntentId).toBeUndefined();
+    if (['paused','cancelled','replaced'].includes(scenario)) expect(after).toEqual(before);
+    else expect(after.state.status).toBe('blocked');
+    expect(publicationPorts.publisher).not.toHaveBeenCalled(); assertNoReplay(f);
   });
 });

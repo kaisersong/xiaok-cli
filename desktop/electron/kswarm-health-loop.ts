@@ -1,6 +1,5 @@
+import {openLoopDatabase,type LoopDatabaseSource,type LoopDatabaseLease} from './loop-database-owner.js';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
 import {
@@ -102,44 +101,46 @@ interface PendingHealthAnomaly {
 }
 
 export class KSwarmServiceHealthScanner {
-  private readonly db: DatabaseSync;
+  private readonly connection:LoopDatabaseLease;
+  private get db():DatabaseSync{return this.connection.database;}
+  private closing=false;
+  private pending=0;
+  stopAccepting():void{this.closing=true;}
+  get pendingScans():number{return this.pending;}
   private readonly probe: () => KSwarmHealthDiagnosticInput | Promise<KSwarmHealthDiagnosticInput>;
   private readonly logPaths: string[];
 
-  constructor(dbPath: string, options: KSwarmServiceHealthScannerOptions) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new DatabaseSync(dbPath);
-    this.db.exec('pragma journal_mode = WAL');
-    this.applySchema();
+  constructor(dbPath: string|LoopDatabaseSource, options: KSwarmServiceHealthScannerOptions) {
+    this.connection=openLoopDatabase(dbPath);
+    try{this.applySchema();
     this.probe = options.probe;
     this.logPaths = options.logPaths ?? [];
+    this.connection.recordComponent('healthScanner');
+    }catch(error){this.connection.close();throw error;}
   }
 
   close(): void {
-    this.db.close();
+    this.stopAccepting();if(this.pending)throw Error('loop_scanner_not_drained');
+    this.connection.close();
   }
 
   scan(input: KSwarmServiceHealthScanInput = {}): KSwarmServiceHealthScanResult | Promise<KSwarmServiceHealthScanResult> {
+    if(this.closing)throw Error('loop_scanner_closed');
     const now = input.now ?? Date.now();
-    let probeResult: KSwarmHealthDiagnosticInput | Promise<KSwarmHealthDiagnosticInput>;
-    try {
-      probeResult = this.probe();
-    } catch (error) {
-      return this.transaction(() => this.recordSourceUnavailable(input.loopRunId, now, error));
-    }
-    if (isPromiseLike(probeResult)) {
-      return probeResult
-        .then(result => this.transaction(() => this.recordFindings(input.loopRunId, now, classifyKSwarmHealth(result))))
-        .catch(error => this.transaction(() => this.recordSourceUnavailable(input.loopRunId, now, error)));
-    }
-    return this.transaction(() => {
-      try {
-        const findings = classifyKSwarmHealth(probeResult);
-        return this.recordFindings(input.loopRunId, now, findings);
-      } catch (error) {
-        return this.recordSourceUnavailable(input.loopRunId, now, error);
+    const unavailable=(error:unknown)=>this.transaction(()=>this.recordSourceUnavailable(input.loopRunId,now,error));
+    const record=(value:KSwarmHealthDiagnosticInput)=>{
+      let findings:KSwarmHealthFinding[];try{findings=classifyKSwarmHealth(value);}catch(error){return unavailable(error);}
+      return this.transaction(()=>this.recordFindings(input.loopRunId,now,findings));
+    };
+    this.pending++;let deferred=false;
+    try{
+      let result:KSwarmHealthDiagnosticInput|Promise<KSwarmHealthDiagnosticInput>;
+      try{result=this.probe();}catch(error){return unavailable(error);}
+      if(isPromiseLike(result)){
+        const settled=Promise.resolve(result).then(record,unavailable).finally(()=>{this.pending--;});deferred=true;return settled;
       }
-    });
+      return record(result);
+    }finally{if(!deferred)this.pending--;}
   }
 
   listAnomalies(filter: KSwarmHealthAnomalyFilter = {}): KSwarmHealthAnomaly[] {
@@ -391,7 +392,7 @@ export class KSwarmServiceHealthScanner {
       return result;
     } catch (error) {
       try {
-        this.db.exec('rollback');
+        if(this.db.isTransaction)this.db.exec('rollback');
       } catch { /* ignore rollback errors */ }
       throw error;
     }

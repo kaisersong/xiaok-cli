@@ -1,3 +1,5 @@
+import type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
+import type {LoopPublicationAction} from '../../../shared/loop-publication-types.js';
 import { createLogger } from '../lib/logger';
 import type {
   AvailableModelView,
@@ -388,6 +390,11 @@ export const api = {
   // ---------------------
   // Run API (IPC via DesktopApi)
   // ---------------------
+  prepareObservationTask: () => window.xiaokDesktop.prepareObservationTask(),
+  createObservationTask: (input:{draftId:string;prompt:string;threadId?:string}) => window.xiaokDesktop.createObservationTask(input),
+  stopObservationTask: (taskId:string) => window.xiaokDesktop.stopObservationTask(taskId),
+  revokeObservationTask: (taskId:string) => window.xiaokDesktop.revokeObservationTask(taskId),
+  getObservationTaskStatus: (taskId:string) => window.xiaokDesktop.getObservationTaskStatus(taskId),
   async createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
@@ -448,6 +455,10 @@ export const api = {
     log.info('recoverTask ok', JSON.stringify({ status: r?.snapshot?.status }));
     return r;
   },
+
+  getLoopPublicationConfiguration: (loopId:string) => window.xiaokDesktop.getLoopPublicationConfiguration(loopId),
+  getLoopPublicationState: (runId:string) => window.xiaokDesktop.getLoopPublicationState(runId),
+  performLoopPublicationAction: (input:LoopPublicationAction) => window.xiaokDesktop.performLoopPublicationAction(input),
 
   async getLoopDefinitions(): Promise<LoopDefinitionView[]> {
     return await window.xiaokDesktop.getLoopDefinitions() as LoopDefinitionView[];
@@ -520,6 +531,8 @@ export const api = {
   async readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView> {
     return await window.xiaokDesktop.readLoopOutputPreview(loopId) as LoopOutputPreviewView;
   },
+
+  async listLoopPublishedArtifacts(loopId:string,page:LoopArtifactPageRequest):Promise<LoopArtifactListView>{return await window.xiaokDesktop.listLoopPublishedArtifacts(loopId,page) as LoopArtifactListView;},
 
   async readLoopTaskResult(loopId: string): Promise<LoopTaskResultView> {
     return await window.xiaokDesktop.readLoopTaskResult(loopId) as LoopTaskResultView;

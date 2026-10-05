@@ -3,6 +3,12 @@ import { recoverModelStream } from '../../../src/ai/runtime/model-stream-recover
 const policy = { windowMs: 100, idleMs: 20, initialDelayMs: 1, maxDelayMs: 2 };
 async function collect(stream: AsyncIterable<unknown>) { const values=[]; for await (const value of stream) values.push(value); return values; }
 describe('model stream recovery', () => {
+  it('preserves the original reader failure B when its signal was cancelled with independent A', async () => {
+    const controller = new AbortController(), cancellation = new DOMException('original cancellation A', 'AbortError'), failure = new Error('independent reader failure B');
+    const open = vi.fn(async function* () { controller.abort(cancellation);throw failure; });
+    await expect(collect(recoverModelStream({ signal: controller.signal, policy, open }))).rejects.toBe(failure);
+    expect(open).toHaveBeenCalledTimes(1);
+  });
   it('recovers a terminated stream', async () => {
     let calls=0;
     const reset=vi.fn();

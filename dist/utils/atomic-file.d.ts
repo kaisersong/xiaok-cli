@@ -12,6 +12,10 @@ export interface AtomicWriteOptions {
     operations?: Partial<AtomicFileOperations>;
     platform?: NodeJS.Platform;
     tempName?: string;
+    /** Protected publication barrier: unsupported directory flush is a hard failure. */
+    requireDirectorySync?: boolean;
 }
 export type AtomicWriteFile = (targetPath: string, contents: string, options?: AtomicWriteOptions) => void;
 export declare const writeFileAtomicallySync: AtomicWriteFile;
+/** A publication barrier, not a best-effort durability hint. Failures must propagate. */
+export declare function syncDirectoryTreeStrict(directoryPath: string, options?: Pick<AtomicWriteOptions, 'operations' | 'platform'>): void;

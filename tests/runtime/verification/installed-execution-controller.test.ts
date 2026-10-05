@@ -1,0 +1,4 @@
+import {it,expect} from 'vitest';import {createInstalledExecutionController} from '../../../src/runtime/verification/installed-execution-controller.js';
+it('rejects a copied engine before touching database, authority, material or a caller-supplied qualification',()=>{
+ let touched=0;expect(()=>createInstalledExecutionController({engine:{observation:{engineId:'fake'}} as any,get database():never{touched++;throw Error('db');},get qualification():never{touched++;throw Error('fake qualification');},get budget():never{touched++;throw Error('budget');},get materials():never{touched++;throw Error('materials');},get resolveOwnerKey():never{touched++;throw Error('owner');},get readApprovedRecipeBinding():never{touched++;throw Error('recipe');},get onActualExecutionResult():never{touched++;throw Error('archive');}})).toThrow('installed_engine_handle');expect(touched).toBe(0);
+});

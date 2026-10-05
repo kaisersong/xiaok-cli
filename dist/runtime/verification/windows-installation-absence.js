@@ -3,12 +3,17 @@ import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { machine } from 'node:os';
 /** Fixed client-bundled read-only helper. This is not a protected Windows
  * controller or a qualification receipt. Missing build artifacts deny fallback. */
 export function readWindowsInstallationAbsence() {
     if (arguments.length || process.platform !== 'win32' || !['x64', 'arm64'].includes(process.arch))
         return 'unavailable';
     try {
+        const system = machine().toLowerCase();
+        const nativeArch = ['amd64', 'x86_64'].includes(system) ? 'x64' : ['arm64', 'aarch64'].includes(system) ? 'arm64' : undefined;
+        if (nativeArch !== process.arch)
+            return 'unavailable';
         const moduleDirectory = dirname(fileURLToPath(import.meta.url));
         // electron-builder explicitly unpacks this fixed native subtree. CLI and
         // Desktop development builds use the same relative tsc output location.

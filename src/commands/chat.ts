@@ -1,6 +1,38 @@
+import {parseIntentReceiverCommand,intentReceiverHelp} from './chat-intent-receiver.js';
+import {createIntentReceiverPublicationHost} from '../runtime/intent-delegation/receiver-publication-host.js';
+import {parseIntentVerificationCommand,readIntentVerificationSelectionFile,intentVerificationHelp} from './chat-intent-verification.js';
+import {createIntentVerificationHost} from '../runtime/intent-delegation/verification-host.js';
+import {parseIntentPublicationCommand,readIntentPublicationSelectionFile} from './chat-intent-publication.js';
+import {createIntentPublicationHost} from '../runtime/intent-delegation/publication-host.js';
+import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { describeChatFinalizationFailures, drainCliRegistryWriters } from './chat-owned-writers.js';
+import {readIntentVerificationFile,parseIntentNativeCommand,prepareIntentNativeContinuation} from './chat-intent-native.js';
+import {createIntentNativeContractHost} from '../runtime/intent-delegation/native-contract-host.js';
+import {intentNativeLedgerHash} from '../runtime/intent-delegation/native-contract-journal.js';
+import {createSessionExecutionAuthority,createSessionExecutionContext,type SessionExecutionAuthority} from '../ai/runtime/session-store/execution-authority.js';
+import { CliGoalNativeHost, readGoalVerificationFile } from './chat-goal-native.js';
+import { FileGoalNativeJournal, goalNativeStateHash } from '../runtime/goal/native-mutation-journal.js';
+import { assertGoalNativeApplicationCurrent } from '../runtime/goal/native-mutation-projection.js';
+import { readInstalledCurrentProfile } from '../runtime/verification/migration-markers.js';
+import { canonicalVerificationJson as goalIdentityJson } from '../runtime/verification/protocol.js';
+import { createGoalPublicationWorkflow } from '../runtime/goal/publication-workflow.js';
+import { goalApplicationFromState } from '../runtime/goal/completion-intent.js';
+import { readInstalledCurrentOwner } from '../runtime/verification/installed-owner-state.js';
+import { observeGoalCompletion, unobservedGoalCompletion } from '../runtime/goal/completion-observation.js';
+import {resolveCompoundHostStorage} from '../runtime/sol-pi/compound-host-storage.js';
+import { createProductValidationBackend } from '../runtime/sol-pi/product-validation-backend.js';
+import { authorizeCliValidationMaterials } from './validation-materials.js';
+import { installProductCompoundCoordinator,assertProductIntentExecutionCurrent,persistCompoundPublicationSnapshot } from '../runtime/sol-pi/product-compound-coordinator.js';
+import type { CompoundExecutionCoordinator } from '../runtime/sol-pi/compound-execution-coordinator.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
+import { homedir } from 'node:os';
+import { AgentSessionState } from '../ai/runtime/session.js';
+import { resolveRuntimeModelBinding } from '../ai/providers/control-plane.js';
+import { parseObservationPolicyFile, prepareObservationConfig, createProductObservationOwner, describeProductObservationPolicy } from '../runtime/sol-pi/product-bootstrap.js';
+import { createProductObservationSubagentTool } from '../runtime/sol-pi/product-subagent-tool.js';
 import type { Command } from 'commander';
 import type { ModelAdapter, MessageBlock, UsageStats } from '../types.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
@@ -14,7 +46,7 @@ import { PermissionManager } from '../ai/permissions/manager.js';
 import { ToolRegistry, type ToolObservation } from '../ai/tools/index.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
-import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
+import { createIntentDelegationTools,isIntentProducerTool } from '../ai/tools/intent-delegation.js';
 import { createGoalTools } from '../ai/tools/goal.js';
 import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput, type DebugEvent, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
@@ -23,7 +55,7 @@ import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
-import { createHooksRunner } from '../runtime/hooks-runner.js';
+import { createHooksRunner, isEmptyConfiguredHooksRunner } from '../runtime/hooks-runner.js';
 import type { RuntimeEvent } from '../runtime/events.js';
 import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
 import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
@@ -88,7 +120,7 @@ import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand, type ShellCommandResult, type ShellEscapeExecutor } from './chat-shell-escape.js';
 import { retainRawInputModeForSession } from '../ui/input-mode.js';
 import { createExitConfirmation } from '../ui/exit-confirmation.js';
-import { createTurnActivityWatchdog, resolveAgentMaxIterations, resolveTurnTimeoutMs, runCleanupWithTimeout } from './chat-runtime-config.js';
+import { createTurnActivityWatchdog, resolveAgentMaxIterations, resolveTurnTimeoutMs } from './chat-runtime-config.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -103,7 +135,6 @@ import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
-import { isAbortError } from '../ai/runtime/abort-utils.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 import { SessionIntentDelegationStore, createEmptySessionIntentLedger } from '../runtime/intent-delegation/store.js';
 import { SessionSkillEvalStore } from '../runtime/intent-delegation/skill-eval-store.js';
@@ -209,6 +240,10 @@ export function __setShellEscapeExecutorForTests(
 }
 
 interface ChatOptions {
+  observationPolicy?: string;
+  validationMaterial?: string[];
+  goalVerification?: string;
+  intentVerification?: string;
   auto: boolean;
   dryRun: boolean;
   print?: boolean;
@@ -282,9 +317,163 @@ async function flushStandardStreams(): Promise<void> {
 }
 
 async function runChat(initialInput: string | undefined, opts: ChatOptions): Promise<void> {
+  if (opts.observationPolicy && (opts.continue || opts.resume || opts.takeover || opts.forkSession || opts.dryRun)) {
+    writeError('SOL_PI_FRESH_SESSION_REQUIRED：观察归档仅支持新建普通会话；恢复和 dry-run 不启用。');
+    process.exitCode = 2;
+    return;
+  }
+  const intentNativeHandled=Symbol('intent-native-handled');
+  const intentVerificationDefinition=opts.intentVerification?readIntentVerificationFile(opts.intentVerification):undefined;
+  const goalVerificationDefinition = opts.goalVerification ? readGoalVerificationFile(opts.goalVerification) : undefined;
+  const validationMaterialPaths=Object.freeze([...(opts.validationMaterial??[])]);
+  if(validationMaterialPaths.length&&!opts.observationPolicy){writeError('SOL_PI_VALIDATION_POLICY_REQUIRED：验证材料必须与显式 compoundExecution 策略一起使用。');process.exitCode=2;return;}
+  const observationPolicy = opts.observationPolicy ? parseObservationPolicyFile(opts.observationPolicy) : undefined;
+  if(validationMaterialPaths.length&&(!observationPolicy||!describeProductObservationPolicy(observationPolicy).compoundExecution)){writeError('SOL_PI_VALIDATION_POLICY_REQUIRED：策略尚未启用 compoundExecution。');process.exitCode=2;return;}
+  let intentNativeHost:ReturnType<typeof createIntentNativeContractHost>|undefined;
+  let intentVerificationHost:ReturnType<typeof createIntentVerificationHost>|undefined;
+  let intentVerificationAbort:AbortController|undefined;
+  let intentReceiverHost:ReturnType<typeof createIntentReceiverPublicationHost>|undefined;
+  let intentReceiverAbort:AbortController|undefined;
+  let intentPublicationHost:ReturnType<typeof createIntentPublicationHost>|undefined;
+  let agent: Agent | undefined;
+  let stopSkillEvalRuntimeSync:()=>Promise<void>=()=>Promise.resolve();
+  let modelIngressClosed=false,abortSkillProducerTurn=()=>{};
+  const actualIntentTurns=new Set<Promise<void>>();
+  let ownIntentAuthority:SessionExecutionAuthority|undefined;
+  let stopIntentRuntimeSync: () => Promise<void> = () => Promise.resolve();
+  const commandContext = new AsyncLocalStorage<object>();
+  const liveCommands = new Set<object>();
+  const commandWork = new Set<Promise<unknown>>();
+  const commandCancellations = new WeakMap<object, Set<unknown>>();
+  const observeCommandCancellation = (signal: AbortSignal): (() => void) => {
+    const token = commandContext.getStore();
+    const record = () => { if (token && liveCommands.has(token)) commandCancellations.get(token)?.add(signal.reason); };
+    signal.addEventListener('abort', record, { once: true });
+    if (signal.aborted) record();
+    return () => signal.removeEventListener('abort', record);
+  };
+  const isCurrentCommandCancellation = (error: unknown): boolean => {
+    if (modelIngressClosed && error === finalizationReason) return true;
+    const token = commandContext.getStore();
+    return !!(token && liveCommands.has(token) && commandCancellations.get(token)?.has(error));
+  };
+  const sessionWriters = new Set<Promise<void>>();
+  const trackOwnedWrite = (work: Promise<void>): Promise<void> => {
+    sessionWriters.add(work);
+    void work.then(() => sessionWriters.delete(work), error => {
+      sessionWriters.delete(work);
+      if (error !== finalizationReason) finalizationErrors.push(error);
+    });
+    return work;
+  };
+  const trackSessionWrite = (body: () => Promise<void>): Promise<void> => trackOwnedWrite(Promise.resolve().then(body));
+
+  let finalizationExitReason: ExitSignal | 'exit' = 'exit';
+  const finalizationErrors: unknown[] = [];
+  const finalizationReason = new DOMException('CLI session is closing', 'AbortError');
+  const bootstrapAbort = new AbortController();
+  let finalization: Promise<void> | undefined;
+  let finishBootstrap!: () => void;
+  const bootstrap = new Promise<void>(resolve => { finishBootstrap = resolve; });
+  let freezeIngress = () => { agent?.stopNewRuns(finalizationReason); abortSkillProducerTurn(); };
+  const bootstrapCleanup: Array<() => void | Promise<unknown>> = [];
+  let releaseAfterBootstrap: () => Promise<void> = async () => {};
+  let finalizeOwners: (errors: unknown[]) => Promise<void> = async errors => {
+    const collect = async (operations: Array<() => void | Promise<unknown>>) => {
+      const results = await Promise.allSettled(operations.map(operation => Promise.resolve().then(operation)));
+      for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+    };
+    agent?.stopNewRuns(finalizationReason);
+    await collect([() => agent?.waitForStoppedResources(), () => stopSkillEvalRuntimeSync(), () => compoundCoordinator?.dispose()]);
+    // No model/runtime producer remains before sealing final trace admission.
+    traceClosed = true;
+    await drainContinuations(traceWork);
+    if (!errors.length) {
+      await collect([async () => { agent?.dispose(); await agent?.waitForDisposedResources(); }]);
+      if (!errors.length) await collect([() => productObservation?.dispose()]);
+      if (!errors.length) { ownIntentAuthority?.dispose(); await collect([releaseAfterBootstrap]); }
+    }
+    // Registered bootstrap resources are closed even when a writer failed;
+    // the durable domain/ownership remains conservative in that case.
+    await collect(bootstrapCleanup);
+    await drainContinuations(traceWork);
+    if (errors.length) { traceClosed = true; throw new AggregateError(errors, 'chat_finalization_unconfirmed'); }
+  };
+  const runCliCommand = <T>(body: () => Promise<T>): Promise<T> => {
+    if (modelIngressClosed) return Promise.reject(finalizationReason);
+    const token = {};
+    liveCommands.add(token); commandCancellations.set(token, new Set());
+    const work = Promise.resolve().then(() => commandContext.run(token, body));
+    commandWork.add(work);
+    void work.then(() => { commandWork.delete(work); liveCommands.delete(token); commandCancellations.delete(token); }, error => {
+      commandWork.delete(work); liveCommands.delete(token); commandCancellations.delete(token);
+      if (error !== finalizationReason) finalizationErrors.push(error);
+    });
+    return work;
+  };
+  const detachedWork = new Set<Promise<unknown>>(), traceWork = new Set<Promise<unknown>>();
+  let detachedClosed = false, traceClosed = false;
+  const trackContinuation = <T>(body: () => Promise<T>, population: Set<Promise<unknown>>, sealed: boolean): Promise<T> => {
+    const work = sealed ? Promise.reject<T>(finalizationReason) : Promise.resolve().then(body);
+    population.add(work);
+    void work.then(() => population.delete(work), error => {
+      population.delete(work); if (error !== finalizationReason) finalizationErrors.push(error);
+    });
+    return work;
+  };
+  const trackDetached = <T>(body: () => Promise<T>): Promise<T> => trackContinuation(body, detachedWork, detachedClosed);
+  const trackTrace = <T>(body: () => Promise<T>): Promise<T> => trackContinuation(body, traceWork, traceClosed);
+  const drainContinuations = async (population: Set<Promise<unknown>>) => {
+    while (population.size) await Promise.allSettled([...population]);
+  };
+  const finalizeChat = (): Promise<void> => {
+    if (finalization) return finalization;
+    modelIngressClosed = true;
+    // Publish before abort callbacks or input settlement can reenter shutdown.
+    finalization = Promise.resolve().then(async () => {
+      await bootstrap;
+      await Promise.allSettled([...commandWork]);
+      await finalizeOwners(finalizationErrors);
+    });
+    try { bootstrapAbort.abort(finalizationReason); freezeIngress(); } catch (error) { finalizationErrors.push(error); }
+    return finalization;
+  };
+  type ExitSignal = 'sigint' | 'sighup' | 'sigterm' | 'stdin_end';
+  let signalExit: Promise<void> | undefined;
+  let finishTerminal = () => {};
+  const exitFromSignal = (reason: ExitSignal): Promise<void> => {
+    if (signalExit) return signalExit;
+    finalizationExitReason = reason;
+    signalExit = finalizeChat().then(() => {
+      finishTerminal();
+      process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
+    }, error => {
+      log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
+      finishTerminal();
+      process.exit(1);
+    });
+    return signalExit;
+  };
+  let interrupt = () => { void exitFromSignal('sigint'); };
+  const dispatchInterrupt = () => interrupt();
+  const dispatchHangup = () => { void exitFromSignal('sighup'); };
+  const dispatchTerminate = () => { void exitFromSignal('sigterm'); };
+  process.on('SIGINT', dispatchInterrupt);
+  process.on('SIGHUP', dispatchHangup);
+  process.on('SIGTERM', dispatchTerminate);
+  const removeSignalHandlers = () => {
+    process.off('SIGINT', dispatchInterrupt);
+    process.off('SIGHUP', dispatchHangup);
+    process.off('SIGTERM', dispatchTerminate);
+  };
+  let verificationClient:ReturnType<typeof import('../runtime/verification/controller-client.js').createInstalledVerificationClient>|undefined;
+  let productObservation: Awaited<ReturnType<typeof createProductObservationOwner>> | undefined;
+  let compoundCoordinator: CompoundExecutionCoordinator | undefined;
+  let lastSemanticOutcome: import('../runtime/sol-pi/semantic-compaction-owner.js').SemanticCompactionOutcome | undefined;
+  try {
   if ((opts.print || opts.json) && !initialInput) {
     writeError('print/json 模式需要提供单次输入');
-    process.exit(1);
+    process.exitCode = 1; return;
   }
   if (initialInput && isUnsupportedSingleShotGoalInput(initialInput)) {
     writeError('Goal Mode 仅支持交互式 chat；print/json/单次输入不能创建或恢复 Goal');
@@ -294,11 +483,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const sessionModeFlags = [opts.continue, opts.resume, opts.takeover, opts.forkSession].filter(Boolean);
   if (sessionModeFlags.length > 1) {
     writeError('--continue / --resume / --takeover / --fork-session 只能同时使用一个');
-    process.exit(1);
+    process.exitCode = 1; return;
   }
   if (opts.confirmHighRiskTakeover && !opts.takeover) {
     writeError('--confirm-high-risk-takeover 只能与 --takeover 一起使用');
-    process.exit(1);
+    process.exitCode = 1; return;
   }
 
   // 检测 CI 环境
@@ -310,19 +499,23 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   // 加载配置和凭据
   log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
   let config = await loadConfig();
+  if (observationPolicy) config = prepareObservationConfig(config, observationPolicy);
   let adapter: ModelAdapter;
   setCrashContext({startupPhase:'adapter'});
   try {
-    const bootstrap = await createChatAdapterWithLoginBootstrap(config, {
+    const bootstrap = observationPolicy ? { config, adapter: createAdapter(config) } : await createChatAdapterWithLoginBootstrap(config, {
       interactive: isTTY(),
       hasInitialInput: initialInput !== undefined,
+      cancellation: { signal: bootstrapAbort.signal, onInterrupt: dispatchInterrupt, trackWrite: work => { trackOwnedWrite(work); } },
     });
     config = bootstrap.config;
     adapter = bootstrap.adapter;
   } catch (e) {
+    if (e !== finalizationReason) finalizationErrors.push(e);
     writeError(String(e));
-    process.exit(1);
+    process.exitCode = 1; return;
   }
+  bootstrapCleanup.push(() => disposeModelAdapter(adapter));
   // print/json 无头模式（一次性子任务）不初始化分层记忆与向量检索：
   // 跳过 sqlite/ONNX/embedding 启动开销，避免无谓的 embedding 请求
   setCrashContext({startupPhase:'memory'});
@@ -331,6 +524,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       ? { ...((config.memory as Record<string, unknown> | undefined) ?? {}), type: 'file' }
       : config.memory as Record<string, unknown> | undefined,
   );
+  bootstrapCleanup.push(() => memoryStore.close?.());
   memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
 
   setCrashContext({startupPhase:'credentials'});
@@ -340,12 +534,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
   setCrashContext({startupPhase:'platform'});
   const platform = await createPlatformRuntimeContext({ cwd, builtinCommands });
+  bootstrapCleanup.push(() => platform.dispose());
   const pluginRuntime = platform.pluginRuntime;
   let skillDebugEnabled = opts.skillDebug ?? false;
   const customAgents = platform.customAgents;
-  const sessionStore = createFileSessionStore();
+  const compoundStorage=observationPolicy&&describeProductObservationPolicy(observationPolicy).compoundExecution
+    ?resolveCompoundHostStorage({configRoot:getConfigDir()}):undefined;
+  const sessionStoreRoot=compoundStorage?.canonicalRoot??getConfigDir('sessions');
+  const sessionStore = createFileSessionStore(sessionStoreRoot);
   const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
-  const skillEvalStore = new SessionSkillEvalStore(sessionStore);
+  const skillEvalStore = new SessionSkillEvalStore(sessionStore,{withMutationLease:async<T>(targetSession:string,work:(lease?:import('../ai/runtime/session-store/execution-authority.js').SessionExecutionLease)=>Promise<T>):Promise<T>=>{
+    if(targetSession!==sessionId)throw Error('skill_eval_session_changed');
+    if(!productObservation?.executionAuthority&&!intentVerificationDefinition&&!ownIntentAuthority)return work();
+    const guard=()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('skill_eval_permission_revoked');const ledger=sessionStore.getIntentNativeLedgerSync(sessionId);if(ledger)assertSessionWriteOwnership(ledger,instanceId,'record skill evaluation');};
+    const lease=await intentAuthority().acquire({kind:'direct-mutation',invocationId:'skill-eval-'+randomUUID(),assertAdmission:guard,...(productObservation?{signal:productObservation.executionSignal}:{})});
+    try{guard();lease.assertCurrent();return await lease.trackInFlight(Promise.resolve().then(()=>work(lease)));}finally{await lease.releaseAfterDrain();}
+  }});
   const skillScoreStore = new FileSkillScoreStore();
   let persistedSession: PersistedSessionSnapshot | null = null;
 
@@ -353,25 +557,25 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     persistedSession = await sessionStore.loadLast();
     if (!persistedSession) {
       writeError('没有可恢复的历史会话');
-      process.exit(1);
+      process.exitCode = 1; return;
     }
   } else if (opts.resume) {
     persistedSession = await sessionStore.load(opts.resume);
     if (!persistedSession) {
       writeError(`找不到会话: ${opts.resume}`);
-      process.exit(1);
+      process.exitCode = 1; return;
     }
   } else if (opts.takeover) {
     persistedSession = await sessionStore.load(opts.takeover);
     if (!persistedSession) {
       writeError(`找不到会话: ${opts.takeover}`);
-      process.exit(1);
+      process.exitCode = 1; return;
     }
   } else if (opts.forkSession) {
     const forkSource = await sessionStore.load(opts.forkSession);
     if (!forkSource) {
       writeError(`找不到会话: ${opts.forkSession}`);
-      process.exit(1);
+      process.exitCode = 1; return;
     }
     assertKimiK3TargetResumeSupported(
       resolveRegisteredStrictKimiK3Profile(adapter) !== undefined,
@@ -397,6 +601,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
   setCrashContext({startupPhase:'transcript'});
   const transcriptLogger = await FileTranscriptLogger.open(sessionId);
+  bootstrapCleanup.push(() => transcriptLogger.close());
   const multiAgentProgress = new MultiAgentProgressView();
   const subAgentNotices = new SubAgentNoticeQueue();
   let flushSubAgentNotices = (): void => {};
@@ -429,12 +634,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const turnLayout = new TurnLayout();
   const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
   const promptBuilder = new PromptBuilder({ memoryStore });
-  let agent: Agent | undefined;
   let runtimeFacade: RuntimeFacade | undefined;
   let skillCatalogWatcher: SkillCatalogWatcher | undefined;
   let activeBusyCapture: BusyCaptureHandle | null = null;
   let stopBusyCapture: () => void = () => {};
   let currentTurnAbortController: AbortController | null = null;
+  abortSkillProducerTurn=()=>currentTurnAbortController?.abort(finalizationReason);
   const abortedRuntimeTurnIds = new Set<string>();
   let currentOuterTurnId: string | null = null;
   const continuationArbiter = new ContinuationArbiter();
@@ -460,6 +665,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let activeRuntimeTurnId: string | null = null;
   let goalTurnAdmissionEnabled = false;
   let goalLeaseHeartbeat: NodeJS.Timeout | null = null;
+  let goalPublicationGeneration = 0;
+  let goalPublicationWork: { intentId: string; generation: number; promise: Promise<void> } | null = null;
   let currentSkillEvalState: SessionSkillEvalState = persistedSession?.skillEval
     ? cloneSessionSkillEvalState(persistedSession.skillEval)
     : createEmptySessionSkillEvalState(Date.now());
@@ -496,27 +703,42 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (process.env['XIAOK_NO_ESC_INTERRUPT'] === '1') {
       return;
     }
+    intentVerificationAbort?.abort();
+    intentReceiverAbort?.abort();
     currentTurnAbortController?.abort();
   };
+
+  const nativeInputOrigins=new WeakMap<object,string>();
+  const captureNativeInputOrigin=(text:string)=>{const token={};nativeInputOrigins.set(token,text);return token;};
+  let preparedNativeContinuation:{turnToken:string;selection:NonNullable<ReturnType<typeof prepareIntentNativeContinuation>>}|undefined;
+  let nativeExecutionTurn=false;
+  const hasActiveNativeIntent=()=>{const actual=sessionStore.getIntentNativeLedgerSync(sessionId);return !!actual?.nativeContracts?.some(row=>row.intentId===actual.activeIntentId);};
+  const assertNoGoalForNativeIntent=()=>{if(isGoalArmed()||goalTurnDrafts.size||settledGoalTurns.length||pendingGoalCompleteSummary||pendingGoalBlockedClaim||goalPublicationWork||currentGoalState?.pendingCompletionIntentId)throw Error('intent_goal_execution_conflict');};
+  const assertIntentNativeExecutionReady=()=>{const actual=sessionStore.getIntentNativeLedgerSync(sessionId);if(actual?.nativeContracts?.some(row=>row.intentId===actual.activeIntentId))throw Error('intent_native_execution_current_required');};
 
   type RuntimeTurnRequestArg = Parameters<RuntimeFacade['runTurn']>[0];
   type RuntimeTurnChunkHandler = Parameters<RuntimeFacade['runTurn']>[1];
   type RuntimeTurnActivityHandler = Parameters<RuntimeFacade['runTurn']>[3];
-  const runRuntimeTurn = async (
+  const nativeRuntimeRequests=new WeakMap<object,NonNullable<ReturnType<typeof prepareIntentNativeContinuation>>>();
+  const runRuntimeTurnBody = async (
     request: RuntimeTurnRequestArg,
     onChunk: RuntimeTurnChunkHandler,
     externalSignal?: AbortSignal,
     onRuntimeActivity?: RuntimeTurnActivityHandler,
   ): Promise<void> => {
+    if (modelIngressClosed) throw finalizationReason;
+    const nativeSelection=nativeRuntimeRequests.get(request);nativeRuntimeRequests.delete(request);
+    if(hasActiveNativeIntent()&&!nativeSelection)assertIntentNativeExecutionReady();
     const previousController: AbortController | null = currentTurnAbortController;
     const controller = new AbortController();
     currentTurnAbortController = controller;
+    const stopCancellationObservation = observeCommandCancellation(controller.signal);
     const onExternalAbort = externalSignal
-      ? () => controller.abort()
+      ? () => controller.abort(externalSignal.reason)
       : null;
     if (externalSignal && onExternalAbort) {
       if (externalSignal.aborted) {
-        controller.abort();
+        controller.abort(externalSignal.reason);
       } else {
         externalSignal.addEventListener('abort', onExternalAbort, { once: true });
       }
@@ -524,11 +746,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     const previousWatchdog = activeModelWatchdog;
     const watchdog = createTurnActivityWatchdog(resolveTurnTimeoutMs());
     activeModelWatchdog = watchdog;
-    const onTimeout = () => controller.abort();
+    const onTimeout = () => controller.abort(watchdog.signal.reason);
     watchdog.signal.addEventListener('abort', onTimeout, { once: true });
     const started = Date.now();
     log.info('runtime_turn_start', { sessionId });
     try {
+      goalNativeHost.assertNoPending();
+      if(nativeSelection){
+        const current=()=>{controller.signal.throwIfAborted();assertNoGoalForNativeIntent();if(intentNativeLedgerHash(sessionStore.getIntentNativeLedgerSync(sessionId))!==nativeSelection.basis)throw Error('intent_native_input_changed');};
+        current();if(!compoundCoordinator)throw Error('intent_native_execution_current_required');await assertProductIntentExecutionCurrent(compoundCoordinator,controller.signal);current();
+      }else if (isGoalArmed()) await assertGoalExecutionCurrent();
       await runtimeFacade!.runTurn(request, onChunk, controller.signal, (event) => {
         watchdog.observeRuntimeEvent(event);
         if (event.type === 'execution_health' && event.state === 'cleanup_pending' && !opts.print && !opts.json) writeOrchestrationBlock('\n执行长时间无进展或已取消，正在等待工具实际退出并清理资源。\n');
@@ -539,9 +766,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         onRuntimeActivity?.(event);
       });
     } catch (error) {
-      if (watchdog.didTimeout()) throw new Error('模型长时间无响应，已取消本轮；可以继续输入或切换模型。可通过 XIAOK_TURN_TIMEOUT_MS 调整空闲超时。');
+      if (watchdog.didTimeout() && error === watchdog.signal.reason && !modelIngressClosed) throw new Error('模型长时间无响应，已取消本轮；可以继续输入或切换模型。可通过 XIAOK_TURN_TIMEOUT_MS 调整空闲超时。');
       throw error;
     } finally {
+      stopCancellationObservation();
       log.info('runtime_turn_end', { sessionId, durationMs: Date.now() - started, timedOut: watchdog.didTimeout() });
       watchdog.dispose();
       activeModelWatchdog = previousWatchdog;
@@ -555,13 +783,61 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
   };
 
+  const runRuntimeTurn: typeof runRuntimeTurnBody = (...args) => {
+    if (modelIngressClosed) return Promise.reject(finalizationReason);
+    const work = Promise.resolve().then(() => {
+      if (modelIngressClosed) throw finalizationReason;
+      return runRuntimeTurnBody(...args);
+    });
+    actualIntentTurns.add(work);
+    const settled = () => actualIntentTurns.delete(work);
+    void work.then(settled, settled);
+    return work;
+  };
+
+  const runNormalInputRuntimeTurn:typeof runRuntimeTurn=(request,onChunk,signal,onActivity)=>{
+    const prepared=preparedNativeContinuation;preparedNativeContinuation=undefined;
+    if(!prepared)return runRuntimeTurn(request,onChunk,signal,onActivity);
+    if(prepared.turnToken!==intentTurnState.getSnapshot().activeTurnToken)throw Error('intent_native_input_changed');
+    const actualRequest={...request,input:[{type:'text' as const,text:prepared.selection.text}]};
+    nativeRuntimeRequests.set(actualRequest,prepared.selection);nativeExecutionTurn=true;
+    return runRuntimeTurn(actualRequest,onChunk,signal,onActivity);
+  };
+
   try {
     currentIntentLedger = initializeChatIntentLedger(persistedIntentLedger, sessionId, instanceId, ownershipMode, {
       confirmHighRiskTakeover: opts.confirmHighRiskTakeover,
     });
   } catch (error) {
     writeError(String(error instanceof Error ? error.message : error));
-    process.exit(1);
+    process.exitCode = 1; return;
+  }
+
+  const intentAuthority=()=>productObservation?.executionAuthority??(ownIntentAuthority??=createSessionExecutionAuthority({root:sessionStoreRoot,sessionIdentity:sessionId,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:instanceId,scopeId:'cli-intent-native'})}));
+  const releaseDrainedSessionOwnership = async (): Promise<void> => {
+    // The old compound/native authority has been drained and retired. Acquire
+    // a fresh lease before reading the ledger and committing its exact CAS.
+    const authority = createSessionExecutionAuthority({ root: sessionStoreRoot, sessionIdentity: sessionId,
+      hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: instanceId, scopeId: 'cli-session-exit' }) });
+    try {
+      const lease = await authority.acquire({ kind: 'direct-mutation', invocationId: `cli-exit:${randomUUID()}` });
+      try {
+        const ledger = sessionStore.getIntentNativeLedgerSync(sessionId);
+        if (!ledger || ledger.ownership.ownerInstanceId !== instanceId || ledger.ownership.state === 'released') return;
+        await sessionStore.transitionIntentSessionOwnership({ sessionId, instanceId,
+          expectedLedgerHash: intentNativeLedgerHash(ledger), action: 'release', confirmHighRisk: false,
+          requestSource: 'user', now: Date.now(), lease });
+        currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId)!;
+      } finally { await lease.releaseAfterDrain(); }
+    } finally { authority.dispose(); }
+  };
+
+  releaseAfterBootstrap = releaseDrainedSessionOwnership;
+
+  if(persistedIntentLedger?.nativeContracts?.length){
+    if(ownershipMode==='fork')throw Error('intent_native_fork_requires_original_contract');
+    const authority=intentAuthority(),lease=await authority.acquire({invocationId:`intent-native-ownership-${randomUUID()}`,kind:'direct-mutation'});
+    try{const original=sessionStore.getIntentNativeLedgerSync(sessionId);await trackSessionWrite(async () => { await sessionStore.transitionIntentSessionOwnership({sessionId,instanceId,expectedLedgerHash:intentNativeLedgerHash(original),action:ownershipMode==='takeover'?'takeover':'resume',confirmHighRisk:opts.confirmHighRiskTakeover===true,requestSource:'user',now:Date.now(),lease}); });currentIntentLedger=sessionStore.getIntentNativeLedgerSync(sessionId)!;}finally{await lease.releaseAfterDrain();}
   }
 
   const goalStore = new FileGoalStore(getConfigDir('goals'));
@@ -570,35 +846,44 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     sessionId,
     instanceId,
   });
-  const goalService = new GoalService({
-    store: goalStore,
-    ownership: {
-      async assertOwned(goalSessionId, goalInstanceId) {
-        const latestLedger = await intentLedgerStore.load(goalSessionId);
-        if (latestLedger) currentIntentLedger = latestLedger;
-        assertSessionWriteOwnership(currentIntentLedger, goalInstanceId, 'mutate Goal');
-        goalLease.assertOwned();
-      },
+  const goalOwnership = {
+    async assertOwned(goalSessionId: string, goalInstanceId: string) {
+      const latestLedger = await intentLedgerStore.load(goalSessionId);
+      if (latestLedger) currentIntentLedger = latestLedger;
+      assertSessionWriteOwnership(currentIntentLedger, goalInstanceId, 'mutate Goal');
+      goalLease.assertOwned();
     },
-  });
+  };
+  const goalNativeJournal = new FileGoalNativeJournal(getConfigDir('goals'));
+  const originalGoalService = new GoalService({ store: goalStore, ownership: goalOwnership, nativeJournal: goalNativeJournal });
+  const goalWriters = new Set<Promise<unknown>>();
+  // Fixed semantic writers only. A command's private token is valid until its
+  // entire original pipeline settles, including durable postprocessing.
+  const bindGoalWriter = <K extends 'create' | 'replace' | 'fork' | 'pause' | 'resume' | 'cancel' | 'resumePublication' | 'requestCompletion' | 'completeClaim' | 'settleTurn' | 'noteBlockedClaim'>(method: K): GoalService[K] => {
+    const bound = originalGoalService[method].bind(originalGoalService) as (...args: unknown[]) => Promise<unknown>;
+    return ((...args: unknown[]) => {
+      const token = commandContext.getStore();
+      if (modelIngressClosed && (!token || !liveCommands.has(token))) return Promise.reject(finalizationReason);
+      const work = Promise.resolve().then(() => bound(...args));
+      goalWriters.add(work);
+      void work.then(() => goalWriters.delete(work), error => {
+        goalWriters.delete(work);
+        if (error !== finalizationReason) finalizationErrors.push(error);
+      });
+      return work;
+    }) as GoalService[K];
+  };
+  const goalService = {
+    load: originalGoalService.load.bind(originalGoalService),
+    create: bindGoalWriter('create'), replace: bindGoalWriter('replace'), fork: bindGoalWriter('fork'),
+    pause: bindGoalWriter('pause'), resume: bindGoalWriter('resume'), cancel: bindGoalWriter('cancel'),
+    resumePublication: bindGoalWriter('resumePublication'), requestCompletion: bindGoalWriter('requestCompletion'),
+    completeClaim: bindGoalWriter('completeClaim'), settleTurn: bindGoalWriter('settleTurn'), noteBlockedClaim: bindGoalWriter('noteBlockedClaim'),
+  };
+  const goalNativeHost = new CliGoalNativeHost({ store: goalStore, journal: goalNativeJournal,
+    ownership: goalOwnership, sessionId, instanceId });
   currentGoalState = (await goalService.load(sessionId))?.state ?? null;
 
-  if (opts.forkSession && !currentGoalState) {
-    const sourceGoal = await goalStore.load(opts.forkSession);
-    if (sourceGoal) {
-      goalLease.acquire();
-      try {
-        currentGoalState = await goalService.fork({
-          sessionId,
-          instanceId,
-          requestSource: 'user',
-          expectedRevision: null,
-        }, sourceGoal.state);
-      } finally {
-        goalLease.release();
-      }
-    }
-  }
 
   const stopGoalLeaseHeartbeat = (): void => {
     if (goalLeaseHeartbeat) {
@@ -607,14 +892,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
   };
   const disarmGoal = (): void => {
+    goalPublicationGeneration++;
+    goalNativeHost.invalidate();
     goalActivation = 'disarmed';
-    stopGoalLeaseHeartbeat();
-    goalLease.release();
+    if (!modelIngressClosed && !goalNativeHost.busy && !goalWriters.size) { stopGoalLeaseHeartbeat(); goalLease.release(); }
   };
   const isGoalArmed = (): boolean => goalActivation === 'armed';
-  const armGoal = (recoverExpired = false): void => {
+  const ensureGoalLease = (recoverExpired = false): void => {
+    if (goalLeaseHeartbeat) { goalLease.assertOwned(); return; }
     goalLease.acquire({ recoverExpired });
-    goalActivation = 'armed';
     stopGoalLeaseHeartbeat();
     goalLeaseHeartbeat = setInterval(() => {
       try {
@@ -626,12 +912,31 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }, 10_000);
     goalLeaseHeartbeat.unref?.();
   };
+  const armGoal = (recoverExpired = false): void => {
+    if (modelIngressClosed) return;
+    goalNativeHost.assertNoPending();
+    if (currentGoalState?.pendingCompletionIntentId) throw Error('goal_publication_pending');
+    ensureGoalLease(recoverExpired);
+    goalActivation = 'armed';
+  };
   const goalMutationContext = (requestSource: 'user' | 'runtime') => ({
     sessionId,
     instanceId,
     requestSource,
     expectedRevision: currentGoalState?.revision ?? null,
   });
+  const assertGoalExecutionCurrent = async (): Promise<void> => {
+    goalNativeHost.assertNoPending();
+    const state = currentGoalState, generation = goalPublicationGeneration;
+    if (!state) throw Error('goal_execution_missing');
+    const route = readInstalledCurrentOwner({ ownerKind: 'goal', ownerId: state.goalId });
+    if (route.kind !== 'ordinary') await assertGoalNativeApplicationCurrent(goalApplicationFromState(state));
+    await goalOwnership.assertOwned(sessionId, instanceId);
+    const actual = (await goalService.load(sessionId))?.state ?? null;
+    if (generation !== goalPublicationGeneration || goalNativeStateHash(actual) !== goalNativeStateHash(state)
+      || goalNativeStateHash(currentGoalState) !== goalNativeStateHash(state)) throw Error('goal_execution_changed');
+    goalNativeHost.assertNoPending(); goalLease.assertOwned();
+  };
   // Resolve model capabilities early (needed for getPromptInput)
   let modelCapabilities = resolveModelCapabilities(adapter);
 
@@ -885,14 +1190,27 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       getTurnIntentPlan: () => intentTurnState.getSnapshot().currentTurnIntentPlan,
     }),
     ...createGoalTools({
-      getGoal: () => ({
-        state: currentGoalState,
-        activation: goalActivation,
-      }),
+      getGoal: async () => {
+        const original = await goalService.load(sessionId);
+        if (!original) return { state: null, activation: goalActivation };
+        let currentCompletion = await observeGoalCompletion(original.state);
+        const latest = await goalService.load(sessionId);
+        if (!latest) return { state: null, activation: goalActivation };
+        if (JSON.stringify(latest.state) !== JSON.stringify(original.state)) currentCompletion = unobservedGoalCompletion(latest.state);
+        return { state: latest.state, activation: goalActivation, currentCompletion };
+      },
       async requestComplete(summary) {
         if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
           return { accepted: false, reason: 'no armed active Goal' };
         }
+        const draft = activeRuntimeTurnId ? goalTurnDrafts.get(activeRuntimeTurnId) : undefined;
+        if (!draft || draft.goalId !== currentGoalState.goalId || draft.epoch !== currentGoalState.epoch) {
+          return { accepted: false, reason: 'no admitted original Goal turn' };
+        }
+        await goalService.requestCompletion(goalMutationContext('runtime'), {
+          taskId: `cli:${sessionId}`, turnId: draft.turnId, summary,
+        });
+        currentGoalState = (await goalService.load(sessionId))!.state;
         pendingGoalCompleteSummary = summary;
         return { accepted: true };
       },
@@ -1079,6 +1397,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
     },
     onSubAgentEvent: (event) => {
+      if (event.kind === 'finished' && event.status === 'completed') agent?.notifySubtaskBoundary();
       const block = multiAgentProgress.updateRun(event, process.stdout.columns ?? 100);
       try {
         transcriptLogger.record({ type: 'subagent_progress', event, timestamp: event.timestamp });
@@ -1091,31 +1410,87 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
     },
   });
-  const registry = registryFactory.createRegistry(cwd);
+  let registry = registryFactory.createRegistry(cwd);
   const reminders = registryFactory.getReminderApi();
 
   // Top-level hooks runner for lifecycle events (SessionStart / UserPromptSubmit / Stop)
   const lifecycleHooks = createHooksRunner({
     hooks: pluginRuntime.hookConfigs,
+    finalHookAdmission: () => lifecycleHookDenied() ? undefined : { reason: finalizationExitReason },
     context: {
       session_id: sessionId,
       cwd,
       transcript_path: transcriptLogger.path,
     },
   });
-  const buildCleanupSteps = (): Array<() => void | Promise<void>> => [
-    () => registryFactory.dispose(),
-    () => transcriptLogger.close(),
-    () => platform.dispose(),
-    () => disposeModelAdapter(adapter),
-    () => memoryStore.close?.(),
-    ...embeddedChannels.map((ch) => () => ch.cleanup()),
-  ];
-  const onCleanupError = (error: unknown): void => {
-    log.warn('chat cleanup failed', { error: String(error) });
+  const lifecycleHookDenied = (): boolean => {
+    const actual = sessionStore.getIntentNativeLedgerSync(sessionId);
+    return !!(intentVerificationDefinition || actual?.nativeContracts?.length || productObservation?.summary.compoundExecution);
   };
-  const cleanupRuntimeResourcesWithTimeout = async (): Promise<void> => {
-    await runCleanupWithTimeout(buildCleanupSteps(), 2000, onCleanupError);
+  const runLifecycleHooks:typeof lifecycleHooks.runHooks=async(event,payload)=>{
+    if(lifecycleHookDenied())return {ok:false,message:'intent_native_execution_current_required'};
+    return lifecycleHooks.runHooks(event,payload);
+  };
+  const goalPublicationOwners = new Set<{ controller: AbortController; work: Promise<void> }>();
+  const goalPublicationFailures: unknown[] = [];
+  freezeIngress = () => {
+    agent?.stopNewRuns(finalizationReason);
+    inputReader.close();
+    goalTurnAdmissionEnabled = false;
+    goalActivation = 'disarmed';
+    goalPublicationGeneration++;
+    for (const host of [intentReceiverHost, intentVerificationHost, intentPublicationHost, intentNativeHost, goalNativeHost]) {
+      if (host) void host.close().catch(error => finalizationErrors.push(error));
+    }
+    for (const owner of goalPublicationOwners) owner.controller.abort(finalizationReason);
+    intentVerificationAbort?.abort(finalizationReason);
+    intentReceiverAbort?.abort(finalizationReason);
+    currentTurnAbortController?.abort(finalizationReason);
+    // Do not release Goal/session ownership while accepted writers still run.
+  };
+  finalizeOwners = async errors => {
+    freezeIngress();
+    const settle = async (operations: Array<() => void | Promise<unknown>>) => {
+      const results = await Promise.allSettled(operations.map(operation => Promise.resolve().then(operation)));
+      for (const result of results) if (result.status === 'rejected' && result.reason !== finalizationReason) errors.push(result.reason);
+    };
+    await settle([
+      () => agent?.waitForStoppedResources(),
+      () => stopIntentRuntimeSync(), () => stopSkillEvalRuntimeSync(),
+      () => lifecycleHooks.closeAndDrain(),
+      ...[intentReceiverHost, intentVerificationHost, intentPublicationHost, intentNativeHost].filter(host => !!host).map(host => async () => {
+        await host!.close(); await host!.waitForClosedResources();
+      }),
+      async () => { await goalNativeHost.close(); await goalNativeHost.waitForClosedResources(); },
+      ...[...goalWriters, ...sessionWriters, ...[...goalPublicationOwners].map(owner => owner.work)].map(work => () => work),
+      () => registryFactory.dispose(),
+    ]);
+    await settle([() => registryFactory.waitForDisposedResources()]);
+    detachedClosed = true;
+    await drainContinuations(detachedWork);
+    await settle([() => drainCliRegistryWriters(registryFactory, compoundCoordinator)]);
+    errors.push(...goalPublicationFailures);
+    // A bounded stop or an unknown writer failure never retires the domain or
+    // transfers ownership. All peers above are nevertheless physically drained.
+    // Commands, model reads/returns, hooks and registry producers have ended.
+    // An empty trace population before that barrier is not physical closure.
+    traceClosed = true;
+    await drainContinuations(traceWork);
+    if (errors.length) throw new AggregateError(errors, 'chat_finalization_unconfirmed');
+    await settle([async () => { agent?.dispose(); await agent?.waitForDisposedResources(); }]);
+    if (errors.length) throw new AggregateError(errors, 'chat_agent_cleanup_unconfirmed');
+    await productObservation?.dispose();
+    goalActivation = 'disarmed';
+    stopGoalLeaseHeartbeat(); goalLease.release();
+    ownIntentAuthority?.dispose();
+    await releaseDrainedSessionOwnership();
+    finishTerminal();
+    await settle([
+      () => verificationClient?.dispose(), () => registry.dispose(), () => transcriptLogger.close(),
+      () => platform.dispose(), () => disposeModelAdapter(adapter), () => memoryStore.close?.(),
+      ...embeddedChannels.map(channel => () => channel.cleanup()),
+    ]);
+    if (errors.length) throw new AggregateError(errors, 'chat_resource_cleanup_unconfirmed');
   };
 
   const rawRuntimeHooks = createRuntimeHooks();
@@ -1132,6 +1507,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     command: 'xiaok chat',
     version: cliVersion,
     onWarning: (error) => {
+      finalizationErrors.push(error);
       log.warn('runtime trace recorder warning', { error: String(error) });
     },
   });
@@ -1144,20 +1520,84 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         || event.type === 'turn_aborted'
         || event.type === 'session_end'
       ) {
-        void traceRecorder.flush();
+        void trackTrace(() => traceRecorder.flush());
       }
     });
   }
   log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
   setCrashContext({startupPhase:'agent'});
+  let observationSession: AgentSessionState | undefined;
+  if (observationPolicy) {
+    observationSession = new AgentSessionState();
+    observationSession.restoreSnapshot({ ...observationSession.exportSnapshot(), sessionId, cwd,
+      createdAt: sessionCreatedAt, updatedAt: Date.now(), lineage: sessionLineage });
+    const binding = resolveRuntimeModelBinding(config);
+    try {
+      productObservation = await createProductObservationOwner({ policy: observationPolicy, session: observationSession,
+        executionPersistence:{store:sessionStore,root:sessionStoreRoot},compoundStorage,
+        profileRoot: getConfigDir('observation-profile'), environmentRoot: join(homedir(), '.cache', 'xiaok', 'sol-pi', 'deepseek-recipe-0.1.1'),
+        credentialSecrets: [binding.apiKey, ...Object.values(binding.headers)].filter(value => typeof value === 'string' && value.length > 0),
+        permissionManager, hostCwd: cwd, persist: async snapshot => {
+          const pending=persistCompoundPublicationSnapshot(observationSession!,snapshot);if(pending){await pending;return;}
+          if(hasActiveNativeIntent())throw Error('intent_native_history_writer_required');
+          await sessionStore.save({ ...snapshot,
+          sessionId, cwd, model: adapter.getModelName(), createdAt: sessionCreatedAt, updatedAt: Date.now(),
+          forkedFromSessionId, lineage: sessionLineage, intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+          skillEval: currentSkillEvalState, skillExecution: currentSkillExecutionState });} });
+      // Isolate both executable tools and provider schemas. The shared registry
+      // remains authoritative for permission changes and native replacement.
+      const observationTools = [productObservation.recallTool];
+      if (productObservation.summary.ordinaryChildren) observationTools.push(createProductObservationSubagentTool({
+        product: productObservation, parentOwner: productObservation.owner, sourceRegistry: registry, adapter: () => adapter,
+        cwd, persist: snapshot => sessionStore.save(snapshot), buildSystemPrompt: async promptCwd => buildPrompt(skills, promptCwd),
+        onCompleted: () => agent?.notifySubtaskBoundary(),
+      }));
+      if(productObservation.summary.compoundExecution){
+        observationTools.push(...createIntentDelegationTools({ledgerStore:intentLedgerStore,sessionId,instanceId,getTurnIntentPlan:()=>intentTurnState.getSnapshot().currentTurnIntentPlan}).filter(isIntentProducerTool));
+        registry=registry.forkForCompoundObservation(observationTools,['read','write','edit','bash','grep','glob']);
+      }else registry = registry.forkForObservation(observationTools, ['read', 'write', 'edit', 'bash', 'grep', 'glob']);
+      if (productObservation.summary.compoundExecution) {
+        if (!isEmptyConfiguredHooksRunner(lifecycleHooks)) throw Error('compound_unsupervised_lifecycle_hooks');
+        let validationBackend:import('../runtime/sol-pi/compound-validation.js').CompoundValidationBackend|undefined;
+        if(validationMaterialPaths.length){
+          const {createInstalledVerificationClient}=await import('../runtime/verification/controller-client.js');
+          try {
+            verificationClient=await createInstalledVerificationClient();
+            await verificationClient.requireQualifiedExecution();
+          } catch (error) {
+            writeError('SOL_PI_VERIFICATION_UNAVAILABLE：受保护验证服务尚未安装或未通过资格检查，本次会话未启动。');
+            throw error;
+          }
+          const active=productObservation,nativeSession=observationSession;
+          validationBackend=createProductValidationBackend({workspaceRoot:cwd,expiresAt:active.summary.expiresAt,client:verificationClient,
+            assertCurrent:()=>{active.executionSignal.throwIfAborted();active.owner.assertSession(nativeSession);},
+            authorize:request=>authorizeCliValidationMaterials({...request,requestSource:'user',selectedPaths:validationMaterialPaths,cwd,writeReview:text=>process.stderr.write(text+'\n')}),
+          });
+        }
+        compoundCoordinator = await installProductCompoundCoordinator({product:productObservation,session:observationSession,store:sessionStore,root:sessionStoreRoot,registry,validationBackend});
+      }
+      log.info('observation_authorization', productObservation.summary);
+      process.stderr.write(`观察归档已按显式策略启用：deepseek-flash，仅本次会话的本地原生工具。使用 /observation 查看或撤销。\n`);
+      const semanticPolicy=productObservation.summary.semanticCompaction;
+      if(semanticPolicy)process.stderr.write(`语义压缩：${semanticPolicy.mode==='mechanism-experiment'?'显式实验，额外摘要调用可能增加费用':'自动模式，仅满足成本条件时执行'}；最多 ${semanticPolicy.maxCalls} 次摘要，按核验价格预留的预算上限 $${(semanticPolicy.maxCostUnits/1e9).toFixed(6)} USD。\n`);
+    } catch (error) {
+      log.warn('observation_startup_failed', {error:String(error)});
+      // The outer finally completes bootstrap and drains the same owners.
+      throw error;
+    }
+  }
   agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, {
+    ...(observationSession ? { initialSession: observationSession, observationOwner: productObservation!.owner,semanticCompactionOwner:productObservation!.semanticCompactionOwner } : {}),
     hooks: runtimeHooks,
     memoryStore,
     maxIterations: resolveAgentMaxIterations(),
+    onSemanticCompactionDecision: (decision) => { log.debug('semantic_compaction_candidate', decision); },
+    onSemanticCompactionOutcome: (outcome) => { lastSemanticOutcome=outcome;log.info('semantic_compaction_outcome', outcome); },
   });
   setCrashContext({startupPhase:'ready'});
-  agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
-  agent.setPromptSnapshot(initialPromptSnapshot);
+  const commandAgent = agent;
+  commandAgent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
+  commandAgent.setPromptSnapshot(initialPromptSnapshot);
   runtimeFacade = new RuntimeFacade({
     promptBuilder,
     getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
@@ -1177,11 +1617,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   if (persistedSession) {
-    agent.restoreSession(persistedSession);
+    commandAgent.restoreSession(persistedSession);
   }
 
-  await sessionStore.save({
-    ...agent.exportSession(),
+  const startupSnapshot = commandAgent.exportSession();
+  const startupHistoryBasis = observationSession?.getPublishedHistoryBasis();
+  await trackSessionWrite(() => sessionStore.save({
+    ...startupSnapshot,
+    ...(startupHistoryBasis === undefined ? {} : {historyDigest: startupHistoryBasis}),
     sessionId,
     cwd: process.cwd(),
     model: adapter.getModelName(),
@@ -1192,12 +1635,67 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     intentDelegation: currentIntentLedger,
     skillEval: currentSkillEvalState,
     skillExecution: currentSkillExecutionState,
-  });
+  }));
+
+  if(intentVerificationDefinition||currentIntentLedger.nativeContracts?.length){
+    intentNativeHost=createIntentNativeContractHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_native_product_revoked');}});
+    intentPublicationHost=createIntentPublicationHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,workspaceRoot:cwd,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_publication_product_revoked');}});
+    intentReceiverHost=createIntentReceiverPublicationHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,workspaceRoot:cwd,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_receiver_product_revoked');}});
+    intentVerificationHost=createIntentVerificationHost({store:sessionStore,authority:intentAuthority(),sessionId,instanceId,workspaceRoot:cwd,assertAdmission:()=>{productObservation?.executionSignal.throwIfAborted();if(productObservation?.getStatus().revoked)throw Error('intent_verification_product_revoked');},reviewMaterials:async review=>{const text=['本次独立验证材料：',...review.materials.map(m=>`${m.path} · ${m.size} bytes · SHA-256 ${m.sha256}`),`命令：${review.exactCommand.argv.map(arg=>JSON.stringify(arg)).join(' ')}`,`工作目录：${review.exactCommand.cwdRelative}`,`有效期：${new Date(review.expiresAt).toISOString()}`].join('\n');if(opts.json)process.stderr.write(text+'\n');else if(opts.print||initialInput?.trim().startsWith('/intent verify'))process.stdout.write(text+'\n');else writeProgressTranscriptNote(text);}});
+  }
+
+  async function handleIntentReceiverCommand(text:string):Promise<unknown>{
+    const command=parseIntentReceiverCommand(text);if(!command)throw Error('intent_receiver_command');if(command.kind==='help')return intentReceiverHelp;
+    if(command.kind==='cancel'){intentReceiverAbort?.abort(Error('intent_receiver_user_cancelled'));return '已请求中断；等待原发布操作实际排空。';}
+    const host=intentReceiverHost;if(!host)throw Error('intent_receiver_host_unavailable');if(command.kind==='status')return (intentPublicationHost?.list()??[]).map(candidate=>({candidateId:candidate.id,attempts:host.list(candidate.id),projection:candidate.businessProjection??null}));
+    if(!('candidateId'in command))throw Error('intent_receiver_command');
+    if(intentReceiverAbort)throw Error('intent_receiver_busy');const controller=new AbortController();intentReceiverAbort=controller;
+    try{const input={candidateId:command.candidateId,requestSource:'user' as const,signal:controller.signal};if(command.kind==='publish')return await host.publish(input);if(command.kind==='recover')return await host.recover(input);if(command.kind==='retry')return await host.retry(input);return await host.project(input);}finally{if(intentReceiverAbort===controller)intentReceiverAbort=undefined;}
+  }
+
+  async function handleIntentVerificationCommand(text:string):Promise<unknown>{
+    const command=parseIntentVerificationCommand(text);if(!command)throw Error('intent_verification_command');
+    if(command.kind==='help')return intentVerificationHelp;
+    if(command.kind==='cancel'){intentVerificationAbort?.abort(Error('intent_verification_user_cancelled'));return '已请求中断；仍等待实际操作排空，未声明物理停止。';}
+    const host=intentVerificationHost;if(!host)throw Error('intent_verification_host_unavailable');
+    if(command.kind==='status')return (intentPublicationHost?.list()??[]).flatMap(candidate=>host.list(candidate.id));
+    if(intentVerificationAbort)throw Error('intent_verification_busy');const controller=new AbortController();intentVerificationAbort=controller;
+    try{if(command.kind==='reserve')return await host.reserve({...readIntentVerificationSelectionFile(command.path),requestSource:'user',signal:controller.signal});if(command.kind==='enroll')return await host.advance({id:command.id,requestSource:'user',signal:controller.signal});if(command.kind==='run')return await host.execute({id:command.id,requestSource:'user',signal:controller.signal});if(command.kind==='recover')return await host.recover({id:command.id,requestSource:'user',signal:controller.signal});throw Error('intent_verification_command');}
+    finally{if(intentVerificationAbort===controller)intentVerificationAbort=undefined;}
+  }
+
+  async function handleIntentPublicationCommand(text:string):Promise<unknown>{
+    const command=parseIntentPublicationCommand(text),host=intentPublicationHost;if(!command||!host)throw Error('intent_publication_host_unavailable');
+    if(command.kind==='draft')return host.draft({requestSource:'user'});
+    if(command.kind==='status')return host.list();
+    if(command.kind==='parent'){const candidate=await host.captureParent({requestSource:'user'});return host.advance({candidateId:candidate.id,requestSource:'user'});}
+    if(command.kind==='retry')return host.retry({candidateId:command.candidateId,requestSource:'user'});
+    if(command.kind==='approve'){const configuration=readIntentPublicationSelectionFile(command.path),candidate=await host.capture({...configuration,requestSource:'user'});return host.advance({candidateId:candidate.id,requestSource:'user'});}
+    const candidate=host.list().at(-1);if(!candidate)throw Error('intent_candidate_missing');return host.recover({candidateId:candidate.id,requestSource:'user'});
+  }
+
+  if (observationSession && startupHistoryBasis !== undefined) observationSession.notePublishedHistory(startupSnapshot, startupHistoryBasis);
+
+  // The new session owner must be durable before the Goal service reloads it.
+  if (opts.forkSession && !currentGoalState) {
+    const sourceGoal = await goalStore.load(opts.forkSession);
+    if (sourceGoal) {
+      ensureGoalLease();
+      try {
+        const sourceRoute = readInstalledCurrentOwner({ ownerKind: 'goal', ownerId: sourceGoal.state.goalId });
+        if (sourceRoute.kind === 'ordinary' && readInstalledCurrentProfile().kind === 'ordinary') {
+          currentGoalState = await goalService.fork({ sessionId, instanceId, requestSource: 'user', expectedRevision: null }, sourceGoal.state);
+        } else {
+          await goalNativeHost.reserveFork(opts.forkSession);
+        }
+      } finally { disarmGoal(); }
+    }
+  }
 
   // 触发 SessionStart hook
-  void lifecycleHooks.runHooks('SessionStart', {
+  void trackDetached(() => runLifecycleHooks('SessionStart', {
     source: opts.continue || opts.resume || opts.takeover ? 'resume' : 'startup',
-  });
+  }));
 
   // 创建 UI 组件
   const mdRenderer = new MarkdownRenderer();
@@ -1229,12 +1727,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     });
     return true;
   });
-  const stopIntentRuntimeSync = wireIntentDelegationToRuntimeSync({
+  stopIntentRuntimeSync = wireIntentDelegationToRuntimeSync({
     hooks: runtimeHooks,
     ledgerStore: intentLedgerStore,
     sessionId,
   });
-  const stopSkillEvalRuntimeSync = wireSkillEvalToRuntimeSync({
+  stopSkillEvalRuntimeSync = wireSkillEvalToRuntimeSync({
     hooks: runtimeHooks,
     ledgerStore: intentLedgerStore,
     skillEvalStore,
@@ -1953,6 +2451,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     await refreshIntentLedger();
+    if(nativeExecutionTurn||hasActiveNativeIntent())return;
     const intent = currentIntentLedger.intents.find((candidate) => candidate.intentId === intentId);
     if (!intent || intent.overallStatus === 'waiting_user' || isTerminalIntentStatus(intent.overallStatus)) {
       return;
@@ -1966,7 +2465,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const createConfiguredIntentBoundaryResolver = (): ReturnType<IntentBoundaryResolverFactory> => {
-    const boundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
+    const originalBoundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
+    const boundaryConfig = intentVerificationDefinition || currentIntentLedger.nativeContracts?.length ? {...originalBoundaryConfig,llmClassifier:'off' as const} : originalBoundaryConfig;
     const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
     return resolverFactory({
       config: boundaryConfig,
@@ -1991,11 +2491,21 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   let intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
 
-  const prepareIntentReminderForInput = async (input: string): Promise<void> => {
+  const prepareIntentReminderForInput = async (input: string,origin?:object,hasAttachments=false): Promise<void> => {
+    const user=!!origin&&nativeInputOrigins.get(origin)===input;if(origin)nativeInputOrigins.delete(origin);
+    preparedNativeContinuation=undefined;nativeExecutionTurn=false;
     const turnToken = beginPreparedIntentTurnContext();
+    const canonical=sessionStore.getIntentNativeLedgerSync(sessionId),activeNative=canonical?.nativeContracts?.find(row=>row.intentId===canonical.activeIntentId);
+    if((intentVerificationDefinition||activeNative)&&!user){intentTurnState.setPlan(turnToken,undefined);return;}
+    const stale=activeNative?.subjects.some(row=>row.attempts.at(-1)?.phase==='stale')&&!activeNative?.subjects.some(row=>row.attempts.at(-1)?.phase==='enrolling');
+    if(activeNative&&!stale){
+      assertNoGoalForNativeIntent();const selection=prepareIntentNativeContinuation(canonical,input,hasAttachments);
+      intentTurnState.setPlan(turnToken,selection?.plan);if(selection){currentIntentLedger=canonical!;preparedNativeContinuation={turnToken,selection};intentTurnState.setActiveIntentReminderBlock(turnToken,buildIntentReminderBlock(currentIntentLedger,instanceId));}return;
+    }
     const activeIntent = getWaitingUserIntentForInput(input);
 
     const decision = await intentBoundaryResolver.resolve({
+      ...(intentVerificationDefinition?{newIntentId:`intent_${randomUUID()}`} : {}),
       instanceId,
       sessionId,
       input,
@@ -2029,6 +2539,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const clearTurnIntentContext = (): void => {
+    preparedNativeContinuation=undefined;
     intentTurnState.clearTurnContextPreservingCompletedSummary();
     currentTurnStageObservedSkillNames = new Map<number, Set<string>>();
   };
@@ -2080,13 +2591,25 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     return { stages, results, debugEvents };
   };
 
-  const primeTurnIntentPlan = async (renderTranscriptBlock = false): Promise<void> => {
+  const primeTurnIntentPlan = async (renderTranscriptBlock = false): Promise<boolean> => {
     const snapshot = intentTurnState.getSnapshot();
     const turnIntentPlan = snapshot.currentTurnIntentPlan;
     const turnToken = snapshot.activeTurnToken;
+    const actual=sessionStore.getIntentNativeLedgerSync(sessionId);
+    const activeNative=actual?.nativeContracts?.find(row=>row.intentId===actual.activeIntentId);
+    if(preparedNativeContinuation){if(preparedNativeContinuation.turnToken!==turnToken||intentNativeLedgerHash(actual)!==preparedNativeContinuation.selection.basis)return false;currentIntentLedger=actual!;return true;}
+    const staleGeneration=activeNative?.subjects.some(s=>s.attempts.at(-1)!.phase==='stale')&&!activeNative.subjects.some(s=>s.attempts.at(-1)!.phase==='enrolling');
+    if(activeNative&&!(staleGeneration&&intentVerificationDefinition&&turnIntentPlan?.continuationMode==='new_intent'))return false;
     if (!turnIntentPlan || !turnToken) {
-      return;
+      return true;
     }
+    if(intentVerificationDefinition && turnIntentPlan.continuationMode==='new_intent'){
+      if(!intentNativeHost)throw Error('intent_native_host_unavailable');
+      await intentNativeHost.reserve({plan:turnIntentPlan,definition:intentVerificationDefinition,requestSource:'user'});
+      currentIntentLedger=sessionStore.getIntentNativeLedgerSync(sessionId)!;
+      return false;
+    }
+    if(currentIntentLedger.nativeContracts?.some(row=>row.intentId===currentIntentLedger.activeIntentId))return false;
 
     const beforeIntentCount = currentIntentLedger.intents.length;
     currentIntentLedger = await bootstrapTurnIntentPlan(
@@ -2107,6 +2630,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         renderIntentSummaryLine();
       }
     }
+    return true;
   };
 
   const maybePrepareFreshContextHandoff = async (): Promise<void> => {
@@ -2120,11 +2644,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       return;
     }
 
+    if (productObservation) throw new Error('SOL_PI_FRESH_SESSION_REQUIRED: protected observation history cannot be consumed as a fresh-context handoff');
     currentIntentLedger = await intentLedgerStore.saveDispatchedIntent(
       sessionId,
       consumeFreshContextHandoff(activeIntent, Date.now()),
     );
-    agent.clearHistory();
+    commandAgent.clearHistory();
     runtimeFacade?.resetSkillTracking();
     const turnToken = intentTurnState.getSnapshot().activeTurnToken;
     if (turnToken) {
@@ -2165,7 +2690,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
   };
 
-  const persistSession = async (options: {
+  const persistSessionBody = async (options: {
     refreshIntentLedger?: boolean;
     refreshSkillEvalState?: boolean;
   } = {}): Promise<void> => {
@@ -2175,9 +2700,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (options.refreshSkillEvalState ?? true) {
       await refreshSkillEvalState();
     }
-    const snapshot = agent.exportSession();
+    if(!agent)throw Error('chat_agent_unavailable');
+    const snapshot = commandAgent.exportSession();
+    const historyBasis = observationSession?.getPublishedHistoryBasis();
+    if(observationSession){const publication=persistCompoundPublicationSnapshot(observationSession,snapshot);if(publication){await publication;if(historyBasis!==undefined)observationSession.notePublishedHistory(snapshot,historyBasis);return;}}
+    if(nativeExecutionTurn||hasActiveNativeIntent())throw Error('intent_native_history_writer_required');
     await sessionStore.save({
       ...snapshot,
+      ...(historyBasis === undefined ? {} : {historyDigest: historyBasis}),
       sessionId,
       cwd: process.cwd(),
       model: adapter.getModelName(),
@@ -2185,11 +2715,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       updatedAt: Date.now(),
       forkedFromSessionId,
       lineage: sessionLineage,
-      intentDelegation: currentIntentLedger,
+      intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
       skillEval: currentSkillEvalState,
       skillExecution: currentSkillExecutionState,
     });
+    if (observationSession && historyBasis !== undefined) observationSession.notePublishedHistory(snapshot, historyBasis);
   };
+
+  const persistSession: typeof persistSessionBody = (...args) => trackSessionWrite(() => persistSessionBody(...args));
 
   const pauseCurrentGoalForInterruption = async (
     reason: string,
@@ -2223,6 +2756,87 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     pendingGoalBlockedClaim = null;
     disarmGoal();
     writeProgressTranscriptNote(`Goal 已暂停：${reason}`);
+  };
+
+  // Publication has its own lifetime: keep ownership, but return the terminal
+  // input loop immediately so pause/cancel remain usable during native review.
+  const startGoalPublication = (action: 'start' | 'recover' | 'retry', requestSource: 'user' | 'scheduler'): void => {
+    if (modelIngressClosed) throw finalizationReason;
+    const state = currentGoalState, intentId = state?.pendingCompletionIntentId;
+    if (!state || !intentId) throw Error('goal_publication_not_pending');
+    if (goalPublicationWork?.intentId === intentId && goalPublicationWork.generation === goalPublicationGeneration) {
+      writeProgressTranscriptNote('原完成确认仍在处理中，可暂停或稍后查询。');
+      return;
+    }
+    ensureGoalLease(true);
+    goalActivation = 'disarmed';
+    goalTurnAdmissionEnabled = false;
+    const generation = ++goalPublicationGeneration, application = goalIdentityJson(goalApplicationFromState(state));
+    const current = () => generation === goalPublicationGeneration && currentGoalState
+      && goalIdentityJson(goalApplicationFromState(currentGoalState)) === application
+      && currentGoalState.pendingCompletionIntentId === intentId;
+    const assertAdmission = () => {
+      if (!current() || currentGoalState?.status !== 'active') throw Error('goal_publication_disarmed');
+      goalLease.assertOwned();
+    };
+    const controller = new AbortController();
+    const originalWork = (async () => {
+      const attempt = await createGoalPublicationWorkflow({ store: goalStore, assertAdmission }).run({
+        sessionId, intentId, action, requestSource, signal: controller.signal,
+      });
+      if (!current()) return;
+      const latest = await goalService.load(sessionId);
+      if (!current() || !latest || goalIdentityJson(goalApplicationFromState(latest.state)) !== application) return;
+      currentGoalState = latest.state;
+      if (attempt.status === 'committed' && latest.state.status === 'active') {
+        assertAdmission();
+        const completed = await goalService.completeClaim(goalMutationContext('runtime'), intentId);
+        if (current()) { currentGoalState = completed; writeProgressTranscriptNote('Goal 已完成，原发布结果已确认。'); }
+      } else {
+        writeProgressTranscriptNote(`原发布结果：${attempt.status}。可用 /goal publication recover 查询，或 /goal publication continue 继续确认。`);
+      }
+    })();
+    const owner = { controller, work: Promise.resolve() };
+    const work = originalWork.catch(async error => {
+      if (error !== finalizationReason) goalPublicationFailures.push(error);
+      if (!current()) return;
+      const latest = await goalService.load(sessionId).catch(() => null);
+      if (!current()) return;
+      if (latest && goalIdentityJson(goalApplicationFromState(latest.state)) === application) currentGoalState = latest.state;
+      writeProgressTranscriptNote(`完成确认尚未收敛：${formatErrorText(String(error))}。原申请已保留，可用 /goal publication recover 查询。`);
+    }).finally(() => {
+      goalPublicationOwners.delete(owner);
+      if (goalPublicationWork?.promise === work) goalPublicationWork = null;
+      if (generation === goalPublicationGeneration) disarmGoal();
+    });
+    void work.then(() => {}, error => { if (error !== finalizationReason) goalPublicationFailures.push(error); });
+    owner.work = work;
+    goalPublicationOwners.add(owner);
+    goalPublicationWork = { intentId, generation, promise: work };
+    writeProgressTranscriptNote('工作轮次已结算，正在确认原发布结果；不会再启动任务。');
+  };
+
+  const startGoalNativeWork = (action: 'create' | 'replace' | 'recover' | 'continue' | 'cancel', input?: ReturnType<typeof inferGoalInput>): void => {
+    if (action !== 'cancel' && goalNativeHost.busy) throw Error('goal_native_host_busy');
+    ensureGoalLease(true);
+    goalActivation = 'disarmed'; goalTurnAdmissionEnabled = false;
+    const generation = ++goalPublicationGeneration;
+    const operation = trackDetached(() => action === 'create' || action === 'replace'
+      ? goalNativeHost.create(action, input!, goalVerificationDefinition)
+      : action === 'recover' ? goalNativeHost.recover() : action === 'continue' ? goalNativeHost.continue() : goalNativeHost.cancel());
+    void trackDetached(() => operation.then(result => {
+      if (generation !== goalPublicationGeneration) return;
+      currentGoalState = result.goal;
+      pendingGoalCompleteSummary = null; pendingGoalBlockedClaim = null;
+      writeProgressTranscriptNote(result.mutation.status === 'applied'
+        ? 'Goal 原生授权已确认，当前未启动；输入 /goal resume 开始执行。'
+        : `目标变更状态：${result.mutation.status}。可用 /goal native status 查询，recover 恢复原请求，continue 显式继续，cancel 取消。`);
+    }).catch(error => {
+      if (generation === goalPublicationGeneration) writeProgressTranscriptNote(`目标变更尚未完成：${formatErrorText(String(error))}。原申请保留，可用 /goal native recover 恢复。`);
+    }).finally(() => {
+      if (!modelIngressClosed && !isGoalArmed() && !goalNativeHost.busy && !goalWriters.size) { stopGoalLeaseHeartbeat(); goalLease.release(); }
+    }));
+    writeProgressTranscriptNote('正在处理目标原生申请；不会启动任务，终端仍可查询、暂停或取消。');
   };
 
   const finalizeSettledGoalTurns = async (lastAssistantText: string): Promise<void> => {
@@ -2261,9 +2875,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
         let terminalDecision: Parameters<GoalService['settleTurn']>[1]['terminalDecision'] = { kind: 'none' };
         let missingCompletionKinds: string[] = [];
-        if (draft === lastCompleted && pendingGoalCompleteSummary) {
-          const document = await goalService.load(sessionId);
-          if (!document) throw new Error('Goal document disappeared before completion evaluation');
+        const document = await goalService.load(sessionId);
+        if (!document) throw new Error('Goal document disappeared before completion evaluation');
+        const completionClaim = document.completionIntents?.find(intent => intent.taskId === `cli:${sessionId}`
+          && intent.turnId === draft.turnId && intent.status === 'claimed'
+          && goalIdentityJson(intent.application) === goalIdentityJson(goalApplicationFromState(currentGoalState!)));
+        if (completionClaim) {
           const proposedEvidence = evidence.map((record, index) => ({
             goalId: currentGoalState!.goalId,
             epoch: currentGoalState!.epoch,
@@ -2277,7 +2894,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             [...document.evidence, ...proposedEvidence],
           );
           if (evaluation.ok) {
-            terminalDecision = { kind: 'complete', reason: pendingGoalCompleteSummary };
+            terminalDecision = readInstalledCurrentOwner({ ownerKind: 'goal', ownerId: currentGoalState.goalId }).kind === 'ordinary'
+              ? { kind: 'complete', reason: completionClaim.summary }
+              : { kind: 'publication_pending', intentId: completionClaim.intentId };
           } else {
             missingCompletionKinds = evaluation.missingKinds;
           }
@@ -2290,6 +2909,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           evidence,
           terminalDecision,
         });
+        if (currentGoalState.pendingCompletionIntentId) {
+          startGoalPublication('start', 'scheduler');
+          return;
+        }
         if (currentGoalState.status === 'complete') {
           disarmGoal();
           writeProgressTranscriptNote('Goal 已完成。');
@@ -2321,18 +2944,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     } catch (error) {
       handleGoalCommitFailure(error);
     }
-  };
-
-  const releaseSessionOwnershipForExit = async (): Promise<void> => {
-    disarmGoal();
-    await refreshIntentLedger();
-    const ownerInstanceId = currentIntentLedger.ownership.ownerInstanceId;
-    if (ownerInstanceId !== instanceId) {
-      return;
-    }
-
-    currentIntentLedger = releaseSessionOwnership(currentIntentLedger, instanceId, Date.now());
-    await persistSession({ refreshIntentLedger: false });
   };
 
   const wrapOverlayText = (text: string, maxWidth: number): string[] => {
@@ -2512,9 +3123,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   if (!initialInput && currentGoalState && ['active', 'paused', 'blocked'].includes(currentGoalState.status)) {
     process.stdout.write(`${dim('Goal 已保留但未自动继续；输入 /goal resume 明确恢复。')}\n`);
   }
+  if (!opts.print && !opts.json && goalNativeHost.latest()?.status === 'reserved') {
+    process.stdout.write(`${dim('Goal 原生申请已保留，尚未授权或启动；输入 /goal native continue 明确继续，或 /goal native cancel 取消。')}\n`);
+  }
+
+  if (!hasActiveNativeIntent()) await persistSession();
+  finishBootstrap();
+  if (modelIngressClosed) { await finalizeChat(); return; }
 
   // 单次任务模式
   if (initialInput) {
+    let singleShotExitCode = 0;
+    await runCliCommand(async () => {
     const inputBlocks = await parseInputBlocks(
       initialInput,
       resolveModelCapabilities(adapter).supportsImageInput,
@@ -2536,7 +3156,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
       await refreshSkills();
       await refreshIntentLedger();
-      await prepareIntentReminderForInput(initialInput);
+      if(initialInput.trim().startsWith('/intent receiver')){const result=await handleIntentReceiverCommand(initialInput);process.stdout.write((typeof result==='string'?result:JSON.stringify(result,null,2))+'\n');throw intentNativeHandled;}
+      if(initialInput.trim().startsWith('/intent verify')){const result=await handleIntentVerificationCommand(initialInput);process.stdout.write(JSON.stringify(result,null,2)+'\n');throw intentNativeHandled;}
+      if(initialInput.trim().startsWith('/intent publish')){const result=await handleIntentPublicationCommand(initialInput);process.stdout.write(JSON.stringify(result,null,2)+'\n');throw intentNativeHandled;}
+      if(initialInput.trim().startsWith('/intent native')){
+        const command=parseIntentNativeCommand(initialInput);if(!command||!intentNativeHost)throw Error('intent_native_host_unavailable');const nativeHost=intentNativeHost;const row=nativeHost.list().at(-1);if(!row)throw Error('intent_native_missing');
+        const result=command.kind==='status'?row:command.kind==='continue'?await intentNativeHost.advance({intentId:row.intentId,requestSource:'user'}):command.kind==='recover'?await intentNativeHost.recover({intentId:row.intentId,requestSource:'user'}):await intentNativeHost.retrySubject({intentId:row.intentId,stageId:command.stageId,requestSource:'user'});
+        process.stdout.write(JSON.stringify(result,null,2)+'\n');throw intentNativeHandled;
+      }
+      await prepareIntentReminderForInput(initialInput,captureNativeInputOrigin(initialInput),inputBlocks.some(block=>block.type!=='text'));
 
       // Stage executor debug output (when --skill-debug is enabled)
       if (skillDebugEnabled) {
@@ -2544,12 +3172,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         process.stdout.write(formatDebugOutput(stageOutput) + '\n\n');
       }
 
-      await primeTurnIntentPlan();
+      if(!await primeTurnIntentPlan()){
+        process.stdout.write((opts.json?JSON.stringify({sessionId,status:'intent_native_pending'}):'Intent 原始合同已保存，等待 /intent native continue；本次未执行模型任务。')+'\n');
+        throw intentNativeHandled;
+      }
       await maybePrepareFreshContextHandoff();
       const turnTimeoutMs = resolveTurnTimeoutMs();
       const turnWatchdog = createTurnActivityWatchdog(turnTimeoutMs);
       try {
-        await runRuntimeTurn({
+        await runNormalInputRuntimeTurn({
           sessionId,
           cwd,
           source: 'chat',
@@ -2572,14 +3203,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           }
         }, turnWatchdog.signal, (event) => turnWatchdog.observeRuntimeEvent(event));
       } catch (turnError) {
-        if (turnWatchdog.didTimeout()) {
+        if (turnWatchdog.didTimeout() && turnError === turnWatchdog.signal.reason) {
           const partialText = printChunks.join('');
           process.stderr.write(`xiaok: turn made no progress for ${turnTimeoutMs}ms (set XIAOK_TURN_TIMEOUT_MS=0 to disable)\n`);
           if (opts.print || opts.json) {
             process.stdout.write(formatPrintOutput({
               sessionId,
               text: partialText,
-              usage: agent.getUsage(),
+              usage: commandAgent.getUsage(),
               num_turns: 1,
               ask_user_calls: askUserCalls,
               tool_calls: toolCallsList,
@@ -2591,9 +3222,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           }
           await flushStandardStreams();
           clearTurnIntentContext();
-          await releaseSessionOwnershipForExit();
-          await cleanupRuntimeResourcesWithTimeout();
-          process.exit(124);
+          singleShotExitCode = 124;
+          return;
         }
         throw turnError;
       } finally {
@@ -2605,7 +3235,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         process.stdout.write(formatPrintOutput({
           sessionId,
           text: printChunks.join(''),
-          usage: agent.getUsage(),
+          usage: commandAgent.getUsage(),
           num_turns: 1,
           ask_user_calls: askUserCalls,
           tool_calls: toolCallsList,
@@ -2616,18 +3246,17 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         process.stdout.write('\n');
       }
     } catch (e) {
-      writeError(String(e));
-      process.exit(1);
+      if(e!==intentNativeHandled){writeError(String(e));singleShotExitCode = 1;}
     } finally {
       clearTurnIntentContext();
-      await releaseSessionOwnershipForExit();
-      await cleanupRuntimeResourcesWithTimeout();
     }
+    });
+    await finalizeChat();
     if (!opts.print && !opts.json) {
       process.stdout.write('\n');
     }
     await flushStandardStreams();
-    process.exit(0);
+    process.exit(singleShotExitCode);
     return;
   }
 
@@ -2707,7 +3336,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     // Async update check — show hint below welcome if newer version exists
-    checkForUpdate(cliVersion).then((result) => {
+    void trackDetached(() => checkForUpdate(cliVersion).then((result) => {
+      if (modelIngressClosed) return;
       if (result?.hasUpdate && !terminalUiSuspended) {
         const hint = `${boldCyan('⬆')} ${dim(`有新版本可用: ${result.latest} (当前 ${result.current})，运行`)} ${boldCyan('npm i -g xiaokcode')} ${dim('更新')}`;
         if (scrollRegion.isActive()) {
@@ -2716,7 +3346,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           process.stdout.write(`  ${hint}\n`);
         }
       }
-    }).catch(() => {});
+    }).catch(() => {}));
 
     // 设置初始 usage
     statusBar.update({ inputTokens: 0, outputTokens: 0 });
@@ -3033,6 +3663,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   let deferredInput: string | null = null;
   let deferredInputKind: 'user' | 'broker' | 'goal' = 'user';
+  let deferredNativeInputOrigin:object|undefined,pendingQueuedNativeInputOrigin:object|undefined;
   let pendingQueuedInput: string | null = null;
   let normalTurnChromePrimed = false;
   let turnHadAskUserQuestion = false;
@@ -3054,7 +3685,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       stopBusyCapture();
     }
     if (queuedInput !== null && queuedInput.trim().length > 0) {
-      pendingQueuedInput = queuedInput;
+      pendingQueuedInput = queuedInput;pendingQueuedNativeInputOrigin=captureNativeInputOrigin(queuedInput);
     }
   };
 
@@ -3084,6 +3715,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (
       goalTurnAdmissionEnabled
       && isGoalArmed()
+      && !currentGoalState?.pendingCompletionIntentId
       && currentGoalState?.status === 'active'
     ) {
       goalTurnDrafts.set(e.turnId, {
@@ -3164,13 +3796,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     goalTurnDrafts.get(event.turnId)?.collector.accept(event);
   });
 
-  runtimeHooks.on('intent_created', async (event) => {
+  runtimeHooks.on('intent_created', (event) => {
+    void trackDetached(async () => {
     await refreshIntentLedger();
     writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, event.intentId));
     renderIntentSummaryLine();
+    });
   });
 
-  runtimeHooks.on('stage_activated', async (event) => {
+  runtimeHooks.on('stage_activated', (event) => {
+    void trackDetached(async () => {
     await refreshIntentLedger();
     intentTurnState.noteStageActivated(event.turnId, event.order);
     writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
@@ -3179,9 +3814,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       label: event.label,
     }));
     renderIntentSummaryLine();
+    });
   });
 
-  runtimeHooks.on('step_activated', async (event) => {
+  runtimeHooks.on('step_activated', (event) => {
+    void trackDetached(async () => {
     await refreshIntentLedger();
     intentTurnState.noteStepRunning(event.turnId);
     writeOrchestrationBlock(formatProgressTranscriptBlock({
@@ -3190,9 +3827,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       message: `Active step moved to ${event.stepId.split(':step:')[1] ?? event.stepId}`,
     }));
     renderIntentSummaryLine();
+    });
   });
 
-  runtimeHooks.on('breadcrumb_emitted', async (event) => {
+  runtimeHooks.on('breadcrumb_emitted', (event) => {
+    void trackDetached(async () => {
     await refreshIntentLedger();
     intentTurnState.noteBreadcrumbStatus(event.turnId, event.status);
     writeOrchestrationBlock(formatProgressTranscriptBlock({
@@ -3201,19 +3840,24 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       message: event.message,
     }));
     renderIntentSummaryLine();
+    });
   });
 
-  runtimeHooks.on('receipt_emitted', async (event) => {
+  runtimeHooks.on('receipt_emitted', (event) => {
+    void trackDetached(async () => {
     await refreshIntentLedger();
-    intentTurnState.setStageCompleted(event.turnId, intentTurnState.getSnapshot().currentTurnIntentPlan?.stages.length ?? 1);
+    if(!nativeExecutionTurn&&!hasActiveNativeIntent())intentTurnState.setStageCompleted(event.turnId, intentTurnState.getSnapshot().currentTurnIntentPlan?.stages.length ?? 1);
     writeOrchestrationBlock(formatReceiptTranscriptBlock(event.note));
     renderIntentSummaryLine();
+    });
   });
 
-  runtimeHooks.on('salvage_emitted', async (event) => {
+  runtimeHooks.on('salvage_emitted', (event) => {
+    void trackDetached(async () => {
     await refreshIntentLedger();
     writeOrchestrationBlock(formatSalvageTranscriptBlock(event.summary, event.reason));
     renderIntentSummaryLine();
+    });
   });
 
   runtimeHooks.on('turn_completed', (event) => {
@@ -3229,7 +3873,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     turnHadAskUserQuestion = false;
     toolExplorer.reset();
     const turnPlan = intentTurnState.getSnapshot().currentTurnIntentPlan;
-    if (turnPlan?.stages.length) {
+    if (turnPlan?.stages.length&&!nativeExecutionTurn&&!hasActiveNativeIntent()) {
       intentTurnState.setStageCompleted(event.turnId, turnPlan.stages.length);
       const completedSummaryLine = getCurrentTurnSummaryLine();
       intentTurnState.captureCompletedSummary(event.turnId, completedSummaryLine);
@@ -3257,7 +3901,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
     runtimeState.markBusyFinishing();
     stopActivity();
-    void refreshIntentLedger().then(renderIntentSummaryLine);
+    void trackDetached(() => refreshIntentLedger().then(renderIntentSummaryLine));
   });
 
   runtimeHooks.on('turn_failed', (event) => {
@@ -3276,7 +3920,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     endStreamingPhaseForInterrupt();
     runtimeState.markInputReady();
     resetTurnChrome();
-    void refreshIntentLedger().then(renderIntentSummaryLine);
+    void trackDetached(() => refreshIntentLedger().then(renderIntentSummaryLine));
   });
 
   runtimeHooks.on('turn_aborted', (event) => {
@@ -3294,7 +3938,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     endStreamingPhaseForInterrupt();
     runtimeState.markInputReady();
     resetTurnChrome();
-    void refreshIntentLedger().then(renderIntentSummaryLine);
+    void trackDetached(() => refreshIntentLedger().then(renderIntentSummaryLine));
   });
 
   runtimeHooks.on('turn_stop', (event) => {
@@ -3335,57 +3979,33 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   process.stdout.on('resize', handleResize);
 
   const exitConfirmation = createExitConfirmation();
-  let exiting = false;
-  const shutdownTerminal = async (reason: 'sigint' | 'sighup' | 'sigterm' | 'stdin_end') => {
-    if (exiting) return;
-    exiting = true;
-    currentTurnAbortController?.abort();
-    try {
-      stopBusyCapture();
-      stopActivity();
-      try { scrollRegion.end(); } catch {}
-      try { releaseRawInputMode(); } catch {}
-      if (handleResize) {
-        process.stdout.off('resize', handleResize);
-      }
-      skillCatalogWatcher?.close();
-      clearTurnIntentContext();
-      await releaseSessionOwnershipForExit();
-      await lifecycleHooks.runHooks('SessionEnd', { reason });
-    } catch (error) {
-      log.warn('terminal shutdown cleanup failed', { error: String(error) });
-    } finally {
-      setStreamErrorHandler(null);
-      process.stdout.write = originalStdoutWrite;
-      process.stderr.write = originalStderrWrite;
-      try { await cleanupRuntimeResourcesWithTimeout(); } catch {}
-      try { statusBar.destroy(); } catch {}
-      if (reason === 'sigint') {
-        try { process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`); } catch {}
-      }
-      disposeInterruptHandlers();
-      process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
-    }
+  const shutdownTerminal = (reason: ExitSignal) => exitFromSignal(reason);
+  finishTerminal = () => {
+    stopBusyCapture(); stopActivity();
+    try { scrollRegion.end(); } catch {}
+    try { releaseRawInputMode(); } catch {}
+    if (handleResize) process.stdout.off('resize', handleResize);
+    skillCatalogWatcher?.close();
+    setStreamErrorHandler(null);
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+    try { statusBar.destroy(); } catch {}
+    disposeInterruptHandlers();
   };
   const onInterrupt = () => {
-    if (exiting || interactiveBashActive || externalShellActive) return;
+    if (modelIngressClosed || interactiveBashActive || externalShellActive) return;
     if (exitConfirmation.press()) { void shutdownTerminal('sigint'); return; }
+    intentVerificationAbort?.abort();
+    intentReceiverAbort?.abort();
     currentTurnAbortController?.abort();
     writeProgressTranscriptNote('2 秒内再按 Ctrl+C 退出；继续输入可取消退出。');
   };
-  const onHangup = () => { void shutdownTerminal('sighup'); };
-  const onTerminate = () => { void shutdownTerminal('sigterm'); };
+  interrupt = onInterrupt;
   const onInputEnd = () => { void shutdownTerminal('stdin_end'); };
   inputReader.setInterruptHandler(onInterrupt, () => exitConfirmation.reset());
-  process.on('SIGINT', onInterrupt);
-  process.on('SIGHUP', onHangup);
-  process.on('SIGTERM', onTerminate);
   process.stdin.on('end', onInputEnd);
   disposeInterruptHandlers = () => {
     inputReader.setInterruptHandler();
-    process.off('SIGINT', onInterrupt);
-    process.off('SIGHUP', onHangup);
-    process.off('SIGTERM', onTerminate);
     process.stdin.off('end', onInputEnd);
   };
 
@@ -3399,7 +4019,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
       runtimeState.markInputReady();
       renderFooterChrome();
-      deferredInput = result.deferredInput;
+      deferredInput = result.deferredInput;deferredNativeInputOrigin=captureNativeInputOrigin(result.deferredInput);
       deferredInputKind = 'user';
     }
 
@@ -3408,29 +4028,27 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     }
 
     clearTurnIntentContext();
-    await releaseSessionOwnershipForExit();
-    scrollRegion.end();
-    statusBar.destroy();
     process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
     return true;
   };
 
     // 交互循环
-    interactiveLoop: while (true) {
+    interactiveLoop: while (!modelIngressClosed) {
       await refreshSkills();
       stashQueuedInputIfAny({ stopCapture: false });
 
       let input: string | null;
+      let nativeInputOrigin:object|undefined;
       let inputKind: 'user' | 'broker' | 'goal' = 'user';
       if (deferredInput !== null) {
         stopBusyCapture();
-        input = deferredInput;
+        input = deferredInput;nativeInputOrigin=deferredNativeInputOrigin;deferredNativeInputOrigin=undefined;
         inputKind = deferredInputKind;
         deferredInput = null;
         deferredInputKind = 'user';
       } else if (pendingQueuedInput !== null) {
         stopBusyCapture();
-        input = pendingQueuedInput;
+        input = pendingQueuedInput;nativeInputOrigin=pendingQueuedNativeInputOrigin;pendingQueuedNativeInputOrigin=undefined;
         pendingQueuedInput = null;
       } else {
         // 输入前的分隔线 — scroll region 激活后跳过，由 footer 处理
@@ -3444,30 +4062,49 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           : undefined);
         interactiveNotificationsReady = true;
         flushSubAgentNotices();
-        input = await pendingInput;
+        input = await pendingInput;if(input!==null)nativeInputOrigin=captureNativeInputOrigin(input);
       }
 
+    if (input === null && modelIngressClosed) break;
     if (input === null || input.trim() === '/exit') {
       stopBusyCapture();
       clearTurnIntentContext();
-      await releaseSessionOwnershipForExit();
-      scrollRegion.end();
-      statusBar.destroy();
       log.info('chat exited', { sessionId });
       process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
       break;
     }
 
+    const commandInputKind: 'user' | 'broker' | 'goal' = ((kind: 'user' | 'broker' | 'goal') => kind)(inputKind);
+    const commandDirective = await runCliCommand(async (): Promise<'continue' | 'exit' | void> => {
     const trimmed = input.trim();
-    if (!trimmed) continue;
+    if (!trimmed) return 'continue';
 
     if (intentTurnState.getSnapshot().completedTurnIntentSummaryLine) {
       intentTurnState.clearCompletedSummary();
       renderFooterChrome();
     }
 
+    if(trimmed.startsWith('/intent receiver')){
+      try{const command=parseIntentReceiverCommand(trimmed);if(!command)throw Error('intent_receiver_command');if(['status','help','cancel'].includes(command.kind)){const value=await handleIntentReceiverCommand(trimmed);writeCommandOutput(trimmed,(typeof value==='string'?value:JSON.stringify(value,null,2))+'\n\n');}else{void trackDetached(() => trackDetached(() => handleIntentReceiverCommand(trimmed)).then(value=>writeProgressTranscriptNote(`Intent 发布/阶段投影记录已保存；未自动启动模型。下一阶段请显式继续。\n${JSON.stringify(value)}`),error=>writeProgressTranscriptNote(`Intent 发布操作未完成：${String(error)}；用 /intent receiver recover <候选ID> 收敛原请求。`)));writeCommandOutput(trimmed,'Intent 发布操作已开始；ESC/cancel请求中断并等待原操作排空。\n\n');}}catch(error){writeCommandOutput(trimmed,String(error)+'\n\n');}return 'continue';
+    }
+    if(trimmed.startsWith('/intent verify')){
+      try{const command=parseIntentVerificationCommand(trimmed);if(!command)throw Error('intent_verification_command');if(['status','help','cancel'].includes(command.kind)){const result=await handleIntentVerificationCommand(trimmed);writeCommandOutput(trimmed,(typeof result==='string'?result:JSON.stringify(result,null,2))+'\n\n');}else{void trackDetached(() => trackDetached(() => handleIntentVerificationCommand(trimmed)).then(value=>writeProgressTranscriptNote(`Intent 验证历史已保存；未投影业务成功或启动模型。\n${JSON.stringify(value)}`),error=>writeProgressTranscriptNote(`Intent 验证操作未完成：${String(error)}；用 /intent verify recover <记录ID> 收敛原请求。`)));writeCommandOutput(trimmed,'Intent 验证操作已开始；ESC/cancel只请求中断，恢复不会重复执行。\n\n');}}catch(error){writeCommandOutput(trimmed,String(error)+'\n\n');}return 'continue';
+    }
+
+    if(trimmed.startsWith('/intent publish')){
+      try{const command=parseIntentPublicationCommand(trimmed);if(!command)throw Error('intent_publication_command');if(command.kind==='draft'||command.kind==='status'){writeCommandOutput(trimmed,JSON.stringify(await handleIntentPublicationCommand(trimmed),null,2)+'\n\n');}else{void trackDetached(() => trackDetached(() => handleIntentPublicationCommand(trimmed)).then(value=>writeProgressTranscriptNote(`Intent 候选原生状态已保存；业务仍等待独立验证，未启动模型。\n${JSON.stringify(value)}`),error=>writeProgressTranscriptNote(`Intent 候选操作未完成：${String(error)}`)));writeCommandOutput(trimmed,'Intent 候选操作已开始；不会自动执行模型或宣布业务完成。\n\n');}}catch(error){writeCommandOutput(trimmed,String(error)+'\n\n');}return 'continue';
+    }
+
+    if(trimmed.startsWith('/intent native')){
+      try{const command=parseIntentNativeCommand(trimmed);if(!command||!intentNativeHost)throw Error('intent_native_host_unavailable');const nativeHost=intentNativeHost;const row=nativeHost.list().at(-1);if(!row)throw Error('intent_native_missing');if(command.kind==='status'){writeCommandOutput(trimmed,JSON.stringify(row,null,2)+'\n\n');}else{
+        const work=trackDetached(()=>command.kind==='continue'?nativeHost.advance({intentId:row.intentId,requestSource:'user'}):command.kind==='recover'?nativeHost.recover({intentId:row.intentId,requestSource:'user'}):nativeHost.retrySubject({intentId:row.intentId,stageId:command.stageId,requestSource:'user'}));
+        void trackDetached(()=>work.then(value=>writeProgressTranscriptNote(`Intent 原生请求状态已保存：${value.subjects.map(s=>`${s.stageId??'parent'}=${s.attempts.at(-1)!.phase}`).join(', ')}；未启动模型。`),error=>writeProgressTranscriptNote(`Intent 原生操作未完成：${String(error)}`)));
+        writeCommandOutput(trimmed,'Intent 原生操作已开始；状态只记录原请求事实。\n\n');
+      }}catch(error){writeCommandOutput(trimmed,String(error)+'\n\n');}return 'continue';
+    }
+
     const shellEscape = parseShellEscapeInput(trimmed);
-    const shouldPrimeNormalTurnChrome = inputKind !== 'goal' && shellEscape === null && !trimmed.startsWith('/');
+    const shouldPrimeNormalTurnChrome = commandInputKind !== 'goal' && shellEscape === null && !trimmed.startsWith('/');
     let normalInputTurnChromeStarted = false;
     if (shouldPrimeNormalTurnChrome) {
       mdRenderer.reset();
@@ -3482,20 +4119,49 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     if (shellEscape?.kind === 'usage') {
       dismissWelcomeScreen();
       writeCommandOutput(trimmed, '用法：! <command>\n\n');
-      continue;
+      return 'continue';
     }
     if (shellEscape?.kind === 'command') {
+      if (compoundCoordinator) {writeCommandOutput(trimmed,'当前会话启用了受记录的编辑执行；本地 ! 命令没有同一执行监督，不能在此会话绕过运行。\n');return 'continue';}
       await runLocalShellEscape(shellEscape.command, trimmed);
-      continue;
+      return 'continue';
     }
 
     // 处理内置命令
+    if (trimmed === '/observation' || trimmed.startsWith('/observation ')) {
+      if (!productObservation) {
+        writeCommandOutput(trimmed, '当前会话未启用观察归档；新会话可使用 --observation-policy <file>。\n');
+        return 'continue';
+      }
+      const action = trimmed.slice('/observation'.length).trim() || 'status';
+      if (action === 'stop') {
+        if (productObservation.getStatus().revoked) { writeCommandOutput(trimmed, '授权已撤销；请新建会话。\n'); return 'continue'; }
+        productObservation.owner.stopNewCapture();
+        writeCommandOutput(trimmed, '已停止新增归档和投影；现有已授权引用仍可召回。\n');
+      } else if (action === 'revoke') {
+        productObservation.revoke();
+        writeCommandOutput(trimmed, '已撤销观察披露授权；受保护历史停止发送，已有工具操作保留。请新建会话继续。\n');
+      } else if (action === 'status') {
+        const state = productObservation.getStatus();
+        const policy=productObservation.summary.semanticCompaction;
+        const reservations=commandAgent.getSessionState().exportSnapshot().semanticCompaction?.reservations??[];
+        const reserved=reservations.reduce((sum,row)=>sum+row.maximumCostUnits,0);
+        const outcome=lastSemanticOutcome;
+        const semanticStatus=outcome?.status==='compacted'?'历史已压缩，原始要求和执行事实保留':outcome?.status==='failed'?'压缩未完成':outcome?.status==='skipped'?
+          outcome.reason==='insufficient_benefit'?'预计节约不足以覆盖额外成本':outcome.reason==='stale_revision'?'对话内容变化，未应用旧摘要':outcome.reason?.includes('budget')?'摘要预算不足':outcome.reason?.includes('gain')?'未达到缩减要求':'当前条件不满足，未压缩':'等待已确认的子任务边界';
+        writeCommandOutput(trimmed, `观察归档状态：${state.revoked ? '已撤销，受保护历史停止发送' : state.ownerMode === 'recall-only' ? '已停止新增，保留现有召回' : '已启用'}。\n${policy?`语义压缩：${semanticStatus}。摘要调用 ${reservations.length}/${policy.maxCalls}；按发送前核验价格预留 $${(reserved/1e9).toFixed(6)} / $${(policy.maxCostUnits/1e9).toFixed(6)} USD（并非实际账单）。\n`:''}`);
+      } else {
+        writeCommandOutput(trimmed, '用法：/observation status | stop | revoke\n');
+      }
+      return 'continue';
+    }
     if (trimmed === '/clear') {
+      if (productObservation) { writeCommandOutput(trimmed, '观察归档会话保留受保护历史；清空上下文请退出后新建会话。\n'); return 'continue'; }
       // /clear clears the conversation context, not just the screen: the
       // agent session history, usage counters and the persisted snapshot for
       // this session are reset so the status bar context reflects reality.
       // Goal state and the transcript audit file are intentionally kept.
-      agent.clearHistory();
+      commandAgent.clearHistory();
       runtimeFacade?.resetSkillTracking();
       statusBar.update({ inputTokens: 0, outputTokens: 0 });
       await persistSession();
@@ -3514,65 +4180,109 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       });
       scrollRegion.setWelcomeRows(contentRows);
       welcomeVisible = true;
-      continue;
+      return 'continue';
     }
 
     dismissWelcomeScreen();
 
     if (trimmed === '/help') {
       writeCommandOutput(trimmed, buildChatHelpText(skills));
-      continue;
+      return 'continue';
     }
 
     const goalCommand = parseGoalSlashCommand(trimmed);
     if (goalCommand) {
       if (goalCommand.kind === 'help') {
         writeCommandOutput(trimmed, `${GOAL_COMMAND_HELP}\n\n`);
-        continue;
+        return 'continue';
       }
       if (goalCommand.kind === 'invalid') {
         writeCommandOutput(trimmed, `${goalCommand.message}\n\n`);
-        continue;
+        return 'continue';
       }
       if (goalCommand.kind === 'status') {
+        currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+        const original = currentGoalState;
+        let completion = original ? await observeGoalCompletion(original) : null;
+        currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+        if (currentGoalState && JSON.stringify(currentGoalState) !== JSON.stringify(original)) completion = unobservedGoalCompletion(currentGoalState);
+        const native = goalNativeHost.latest();
+        if (native) writeCommandOutput(trimmed, `目标变更：${native.status} · ${native.target.objective}\n`);
+        const verification = completion?.kind === 'protected' ? `当前完成验证：${completion.state}\n`
+          : completion?.kind === 'unavailable' ? '当前完成验证不可查询\n' : '';
         writeCommandOutput(trimmed, currentGoalState
-          ? `${formatGoalStatus(currentGoalState)}\nActivation：${goalActivation}\n\n`
+          ? `${formatGoalStatus(currentGoalState)}\n${verification}Activation：${goalActivation}\n\n`
           : '当前会话没有 Goal。\n\n');
-        continue;
+        return 'continue';
       }
 
       try {
+        if (goalCommand.kind === 'native') {
+          if (goalCommand.action === 'status') {
+            const row = goalNativeHost.latest();
+            writeCommandOutput(trimmed, row ? `目标变更：${row.status} · ${row.target.objective}\nActivation：${goalActivation}\n\n` : '当前没有目标原生申请。\n\n');
+          } else startGoalNativeWork(goalCommand.action);
+          return 'continue';
+        }
+        if (goalCommand.kind === 'publication') {
+          currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+          const intentId = currentGoalState?.pendingCompletionIntentId;
+          if (!intentId) { writeCommandOutput(trimmed, '当前 Goal 没有待确认的发布申请。\n\n'); return 'continue'; }
+          const attempts = await goalStore.listCompletionAttempts(sessionId, intentId), latest = attempts.at(-1);
+          if (goalCommand.action === 'recover' && !latest) {
+            writeCommandOutput(trimmed, '原工作轮次已结算，尚未发起发布；输入 /goal publication continue 明确发起。\n\n');
+            return 'continue';
+          }
+          if (goalCommand.action === 'continue') {
+            if (!currentGoalState || !['active', 'paused', 'blocked'].includes(currentGoalState.status)) throw Error('goal_publication_not_pending');
+            ensureGoalLease(true);
+            if (currentGoalState.status !== 'active') currentGoalState = await goalService.resumePublication(goalMutationContext('user'));
+          }
+          const action = goalCommand.action === 'recover' ? 'recover'
+            : !latest ? 'start' : ['not_prepared', 'not_approved', 'cancelled'].includes(latest.status) ? 'retry' : 'recover';
+          startGoalPublication(action, 'user');
+          return 'continue';
+        }
         if (goalCommand.kind === 'pause') {
+          disarmGoal();
+          if (!currentGoalState && goalNativeHost.latest()) { writeCommandOutput(trimmed, '目标变更已停止推进；原申请可用 /goal native recover 查询。\n\n'); return 'continue'; }
           if (!currentGoalState) {
             writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
-            continue;
+            return 'continue';
           }
           if (currentGoalState.status === 'paused') {
             disarmGoal();
             writeCommandOutput(trimmed, 'Goal 已处于 paused。\n\n');
-            continue;
+            return 'continue';
           }
           if (currentGoalState.status !== 'active') {
             writeCommandOutput(trimmed, `当前 Goal 状态为 ${currentGoalState.status}，不能 pause。\n\n`);
-            continue;
+            return 'continue';
           }
-          if (!isGoalArmed()) armGoal(true);
+          ensureGoalLease(true);
           currentGoalState = await goalService.pause(goalMutationContext('user'), 'user_paused');
           disarmGoal();
           writeCommandOutput(trimmed, 'Goal 已暂停。\n\n');
           renderIntentSummaryLine();
-          continue;
+          return 'continue';
         }
 
         if (goalCommand.kind === 'resume') {
           if (!currentGoalState) {
             writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
-            continue;
+            return 'continue';
           }
           if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
             writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}，请创建或 replace。\n\n`);
-            continue;
+            return 'continue';
           }
+          if (currentGoalState.pendingCompletionIntentId) {
+            writeCommandOutput(trimmed, 'Goal 正在等待完成确认；请使用 /goal publication recover 或 /goal publication continue，不会启动新任务。\n\n');
+            return 'continue';
+          }
+          goalNativeHost.assertNoPending();
+          ensureGoalLease(true);
+          await assertGoalExecutionCurrent();
           if (!isGoalArmed()) armGoal(true);
           if (currentGoalState.status === 'paused' || currentGoalState.status === 'blocked') {
             currentGoalState = await goalService.resume(
@@ -3584,57 +4294,65 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           deferredInputKind = 'goal';
           writeCommandOutput(trimmed, 'Goal 已恢复，将继续执行。\n\n');
           renderIntentSummaryLine();
-          continue;
+          return 'continue';
         }
 
         if (goalCommand.kind === 'cancel') {
+          disarmGoal();
+          const native = goalNativeHost.latest();
+          if (native && !['applied','retired','stale'].includes(native.status)) startGoalNativeWork('cancel');
           if (!currentGoalState) {
             writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
-            continue;
+            return 'continue';
           }
           if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
             writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}。\n\n`);
-            continue;
+            return 'continue';
           }
-          if (!isGoalArmed()) armGoal(true);
+          ensureGoalLease(true);
           currentGoalState = await goalService.cancel(goalMutationContext('user'), 'user_cancelled');
           disarmGoal();
           writeCommandOutput(trimmed, 'Goal 已取消。\n\n');
           renderIntentSummaryLine();
-          continue;
+          return 'continue';
         }
 
         const replacing = goalCommand.kind === 'replace';
         if (!replacing && currentGoalState && !['complete', 'cancelled'].includes(currentGoalState.status)) {
           writeCommandOutput(trimmed, '当前会话已有 Goal；请使用 /goal replace <objective>。\n\n');
-          continue;
+          return 'continue';
         }
         if (replacing && !currentGoalState) {
           writeCommandOutput(trimmed, '当前会话没有可替换的 Goal。\n\n');
-          continue;
+          return 'continue';
         }
+        goalNativeHost.assertNoPending();
         const goalInput = inferGoalInput(goalCommand.objective);
+        if (!goalVerificationDefinition && readInstalledCurrentProfile().kind !== 'ordinary') throw Error('goal_verification_definition_required: 请用 --goal-verification <file> 提供原始验收定义');
         writeCommandOutput(trimmed, `${formatGoalPreview(goalInput, replacing)}\n\n`);
         const confirmation = await inputReader.read('确认？输入 yes：');
         if (confirmation?.trim().toLowerCase() !== 'yes') {
           writeCommandOutput(trimmed, '已取消，Goal 未变更。\n\n');
-          continue;
+          return 'continue';
         }
-        if (!isGoalArmed()) armGoal(replacing);
+        if (goalVerificationDefinition) { startGoalNativeWork(replacing ? 'replace' : 'create', goalInput); return 'continue'; }
+        ensureGoalLease(replacing);
         currentGoalState = replacing
           ? await goalService.replace(goalMutationContext('user'), goalInput)
-          : await goalService.create(goalMutationContext('user'), goalInput);
+          : await goalService.create({ ...goalMutationContext('user'), expectedRevision: null }, goalInput);
+        goalPublicationGeneration++;
+        goalActivation = modelIngressClosed ? 'disarmed' : 'armed';
         pendingGoalCompleteSummary = null;
         pendingGoalBlockedClaim = null;
         deferredInput = currentGoalState.objective;
-        deferredInputKind = 'user';
+        deferredInputKind = 'goal';deferredNativeInputOrigin=undefined;
         writeCommandOutput(trimmed, replacing ? 'Goal 已替换并启动。\n\n' : 'Goal 已创建并启动。\n\n');
         renderIntentSummaryLine();
       } catch (error) {
         disarmGoal();
         writeCommandOutput(trimmed, `Goal 操作失败：${formatErrorText(String(error))}\n\n`);
       }
-      continue;
+      return 'continue';
     }
 
     if (reminders) {
@@ -3645,7 +4363,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       });
       if (reminderOutput !== null) {
         writeCommandOutput(trimmed, `${reminderOutput}\n\n`);
-        continue;
+        return 'continue';
       }
     }
 
@@ -3662,7 +4380,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } else {
         writeCommandOutput(trimmed, `已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
       }
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/skill-debug' || trimmed.startsWith('/skill-debug ')) {
@@ -3675,13 +4393,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         skillDebugEnabled = !skillDebugEnabled;
       }
       writeCommandOutput(trimmed, `Skill debug mode: ${skillDebugEnabled ? 'ON' : 'OFF'}\n每次输入将显示 stage 分析（intent、context 检查、耗时预估）。\n\n`);
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/yzjchannel') {
+      if(intentVerificationDefinition||sessionStore.getIntentNativeLedgerSync(sessionId)?.nativeContracts?.length){writeCommandOutput(trimmed,'intent_native_execution_current_required：此原 Intent 会话不能开启未绑定的后台模型入口。\n');return 'continue';}
+      if (productObservation) { writeCommandOutput(trimmed, 'SOL_PI_CHANNEL_NOT_READY：观察归档仅限当前本地会话；外部通道请退出后新建普通会话。\n'); return 'continue'; }
       if (embeddedChannels.length > 0) {
         writeCommandOutput(trimmed, '已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
-        continue;
+        return 'continue';
       }
       const yzjConfig = (() => {
         try {
@@ -3691,13 +4411,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           return null;
         }
       })();
-      if (!yzjConfig) continue;
+      if (!yzjConfig) return 'continue';
 
       const namedChannels = config.channels?.yzj?.namedChannels ?? [];
       const selectedChannel = await selectYZJChannel(namedChannels);
       if (!selectedChannel) {
         writeCommandOutput(trimmed, '已取消。\n\n');
-        continue;
+        return 'continue';
       }
 
       const transport = new YZJTransport({ webhookUrl: yzjConfig.webhookUrl });
@@ -3715,30 +4435,31 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
       await embedded.start();
       embeddedChannels.push(embedded);
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
       const [, requestedMode] = trimmed.split(/\s+/, 2);
       if (!requestedMode) {
         writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
-        continue;
+        return 'continue';
       }
 
       if (!['default', 'auto', 'plan'].includes(requestedMode)) {
         writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
-        continue;
+        return 'continue';
       }
 
       permissionManager.setMode(requestedMode as 'default' | 'auto' | 'plan');
       statusBar.updateMode(requestedMode);
       writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/compact') {
-      const compaction = agent.forceCompact();
-      statusBar.update(agent.getUsage()); // 立即更新 statusline 显示
+      if (productObservation) { writeCommandOutput(trimmed, '观察归档会话暂不支持手动压缩受保护历史。\n'); return 'continue'; }
+      const compaction = commandAgent.forceCompact();
+      statusBar.update(commandAgent.getUsage()); // 立即更新 statusline 显示
       if (compaction) {
         writeCommandOutput(
           trimmed,
@@ -3747,10 +4468,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } else {
         writeCommandOutput(trimmed, `${dim('当前历史很短，暂时无需压缩。')}\n\n`);
       }
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/models') {
+      if (productObservation) {
+        writeCommandOutput(trimmed, '观察归档会话已绑定本次模型；切换模型请新建会话。\n');
+        return 'continue';
+      }
       if (scrollRegion.isActive() && !terminalUiSuspended) {
         scrollRegion.clearOverlayPromptState();
         replRenderer.prepareForInput();
@@ -3817,7 +4542,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           modelCapabilities = nextModelCapabilities;
           config = newConfig;
           intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
-          agent.setAdapter(adapter);
+          commandAgent.setAdapter(adapter);
           if (currentProfile !== nextProfile) writeCommandOutput(trimmed, '模型协议已切换，历史已转换为最近的可见上下文（最多 40KB）。\n');
           memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
           statusBar.updateModel(adapter.getModelName(), modelCapabilities.contextLimit);
@@ -3828,7 +4553,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } else {
         writeCommandOutput(trimmed, '已取消\n\n');
       }
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/settings') {
@@ -3842,7 +4567,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } catch (e) {
         writeError(String(e));
       }
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/context') {
@@ -3852,32 +4577,32 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       } catch (e) {
         writeError(String(e));
       }
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/doctor') {
       writeCommandOutput(trimmed, 'chat 中已不再支持 /doctor，请直接运行：xiaok doctor\n\n');
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/init') {
       writeCommandOutput(trimmed, 'chat 中已不再支持 /init，请直接运行：xiaok init\n\n');
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/review') {
       writeCommandOutput(trimmed, 'chat 中已不再支持 /review，请直接运行：xiaok review\n\n');
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/pr') {
       writeCommandOutput(trimmed, 'chat 中已不再支持 /pr，请直接运行：xiaok pr\n\n');
-      continue;
+      return 'continue';
     }
 
     if (trimmed === '/commit' || trimmed.startsWith('/commit ')) {
       writeCommandOutput(trimmed, 'chat 中已不再支持 /commit，请直接运行：xiaok commit\n\n');
-      continue;
+      return 'continue';
     }
 
     // Clear terminal renderer state — but NOT when scroll region is active,
@@ -3904,7 +4629,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     // Note: In scroll region mode, we DON'T write input here because
     // clearLastInput() will clear the screen. Instead, input is written
     // after clearLastInput() via writeSubmittedInput().
-    if (!scrollRegion.isActive() && inputKind !== 'goal') {
+    if (!scrollRegion.isActive() && commandInputKind !== 'goal') {
       process.stdout.write(formatSubmittedInput(trimmed));
     }
 
@@ -3918,6 +4643,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       }
       if (skill) {
         try {
+          assertIntentNativeExecutionReady();
           const plan = buildSkillExecutionPlan([skill.name], skills);
           const primaryStep = plan.resolved[plan.resolved.length - 1];
           const invocation = activateTrackedSkillPlan(
@@ -3951,8 +4677,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
               worktreeManager: platform.worktreeManager,
               forkContext: {
                 taskId: sessionId,
-                session: agent.exportSession(),
-                messages: agent.exportSession().messages,
+                session: commandAgent.exportSession(),
+                messages: commandAgent.exportSession().messages,
                 systemPrompt: await buildPrompt(skills),
                 toolDefinitions: registry.getToolDefinitions(),
               },
@@ -4009,7 +4735,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             clearTurnIntentContext();
             const feedbackResult = await maybeCollectCompletedIntentFeedback();
             if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
-              break interactiveLoop;
+              return 'exit';
             }
           }
 
@@ -4017,7 +4743,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             process.stdout.write('\n');
           }
         } catch (e) {
-          if (isAbortError(e)) {
+          if (isCurrentCommandCancellation(e)) {
             handleTurnAbort();
           } else {
             stashQueuedInputIfAny();
@@ -4033,7 +4759,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
           `找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`,
         );
       }
-      continue;
+      return 'continue';
     }
 
     // 普通输入
@@ -4044,19 +4770,20 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     resetStreamingSegment();
     try {
       if (!normalInputTurnChromeStarted) {
-        beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);
+        beginNormalInputTurnChrome(commandInputKind === 'goal' ? '' : trimmed);
         normalTurnChromePrimed = true;
       }
 
       // UserPromptSubmit hook — broker 可在此注入额外上下文
-      const promptHookResult = inputKind === 'goal'
+      const promptHookResult = commandInputKind === 'goal'
         ? { additionalContext: undefined }
-        : await lifecycleHooks.runHooks('UserPromptSubmit', { prompt: trimmed });
+        : await runLifecycleHooks('UserPromptSubmit', { prompt: trimmed });
       let effectiveInput = trimmed;
       if (promptHookResult.additionalContext) {
         effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
       }
 
+      goalNativeHost.assertNoPending();
       const inputBlocks = await parseInputBlocks(
         effectiveInput,
         resolveModelCapabilities(adapter).supportsImageInput,
@@ -4064,7 +4791,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       renderSubmittedImageBlocks(inputBlocks);
       clearPastedImagePaths();
       await refreshIntentLedger();
-      await prepareIntentReminderForInput(trimmed);
+      await prepareIntentReminderForInput(input,nativeInputOrigin,inputBlocks.some(block=>block.type!=='text'));
 
       // Stage executor debug output (when --skill-debug is enabled)
       if (skillDebugEnabled) {
@@ -4079,12 +4806,13 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
       let lastAssistantText = '';
       currentOuterTurnId = null;
-      await primeTurnIntentPlan(true);
+      const nativeReady = await primeTurnIntentPlan(true);
+      if(!nativeReady){writeCommandOutput(trimmed,'Intent 等待原生登记或独立验证；/intent native status 查看原状态，continue 只推进下一次原生批准，不自动执行。\n\n');clearTurnIntentContext();return 'continue';}
 
       await maybePrepareFreshContextHandoff();
-      goalTurnAdmissionEnabled = isGoalArmed();
+      goalTurnAdmissionEnabled = !preparedNativeContinuation&&isGoalArmed();
       const turnResult = await runInteractiveRuntimeTurn(
-        runRuntimeTurn,
+        runNormalInputRuntimeTurn,
         createInteractiveRuntimeTurnRequest(inputBlocks),
         createInteractiveTurnChunkHandlers((delta) => {
           lastAssistantText += delta;
@@ -4092,7 +4820,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       );
       lastAssistantText = turnResult.assistantText;
       flushStreamingMarkdown();
-      lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
+      if(!nativeExecutionTurn)lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
       goalTurnAdmissionEnabled = false;
       if (lastAssistantText.trim().length > 0) {
         transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
@@ -4105,10 +4833,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       clearTurnIntentContext();
       const feedbackResult = await maybeCollectCompletedIntentFeedback();
       if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
-        break interactiveLoop;
+        return 'exit';
       }
       if (deferredInput !== null) {
-        continue interactiveLoop;
+        return 'continue';
       }
       if (!scrollRegion.isActive()) {
         process.stdout.write('\n');
@@ -4118,7 +4846,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       // 用户 turn settled 后由 Stop hook 从最新状态重新计算。
       stashQueuedInputIfAny({ stopCapture: false });
       if (pendingQueuedInput !== null) {
-        continue interactiveLoop;
+        return 'continue';
       }
 
       let brokerContinuation: string | null = null;
@@ -4126,7 +4854,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         && abortedRuntimeTurnIds.has(currentOuterTurnId);
       if (!outerTurnWasAborted) {
         try {
-          const stopResult = await lifecycleHooks.runHooks('Stop', {
+          const stopResult = await runLifecycleHooks('Stop', {
             stopHookActive: true,
             lastAssistantMessage: lastAssistantText,
           });
@@ -4134,7 +4862,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             ? stopResult.message
             : null;
         } catch (stopError) {
-          await lifecycleHooks.runHooks('StopFailure', {
+          await runLifecycleHooks('StopFailure', {
             error: stopError instanceof Error ? stopError.message : String(stopError),
             lastAssistantMessage: lastAssistantText,
           });
@@ -4144,6 +4872,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       const goalContinuation = (
         !outerTurnWasAborted
         && isGoalArmed()
+        && !currentGoalState?.pendingCompletionIntentId
         && currentGoalState?.status === 'active'
       ) ? buildGoalContinuationInput(currentGoalState).prompt : null;
       const continuation = continuationArbiter.select({
@@ -4152,9 +4881,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         goalContinuation,
       });
       if (continuation) {
-        deferredInput = continuation.input;
+        deferredInput = continuation.input;deferredNativeInputOrigin=continuation.kind==='user'?pendingQueuedNativeInputOrigin:undefined;pendingQueuedNativeInputOrigin=undefined;
         deferredInputKind = continuation.kind;
-        continue interactiveLoop;
+        return 'continue';
       }
 
     } catch (e) {
@@ -4162,12 +4891,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       await finalizeSettledGoalTurns('');
       if (isGoalArmed() && currentGoalState?.status === 'active') {
         await pauseCurrentGoalForInterruption(
-          isAbortError(e) ? 'user_aborted' : 'runtime_error',
-          isAbortError(e) ? 'user' : 'runtime',
+          isCurrentCommandCancellation(e) ? 'user_aborted' : 'runtime_error',
+          isCurrentCommandCancellation(e) ? 'user' : 'runtime',
         );
       }
       clearTurnIntentContext();
-      if (isAbortError(e)) {
+      if (isCurrentCommandCancellation(e)) {
         handleTurnAbort();
       } else {
         stashQueuedInputIfAny();
@@ -4183,30 +4912,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     normalTurnChromePrimed = false;
     // Live activity is stopped when content streaming starts, so do not clear
     // the activity row again here; that row may now contain assistant text.
+    });
+    if (commandDirective === 'exit') break;
     }
   } finally {
-    disposeInterruptHandlers();
-    disarmGoal();
-    stopBusyCapture();
-    releaseRawInputMode();
-    stopActivity();
-    if (handleResize) {
-      process.stdout.off('resize', handleResize);
-    }
-    try {
-      statusBar.destroy();
-    } catch {}
-    try {
-      scrollRegion.end();
-    } catch (e) { log.warn('scrollRegion.end failed in post-loop cleanup', (e as Error).message) }
-    setStreamErrorHandler(null);
-    process.stdout.write = originalStdoutWrite;
-    process.stderr.write = originalStderrWrite;
-    stopIntentRuntimeSync();
-    stopSkillEvalRuntimeSync();
-    skillCatalogWatcher?.close();
-    await lifecycleHooks.runHooks('SessionEnd', { reason: 'exit' });
-    await cleanupRuntimeResourcesWithTimeout();
+    try { await finalizeChat(); } finally { finishTerminal(); }
+
+  }
+  } finally {
+    // A bootstrap failure seals the same population and uses the same drain.
+    finishBootstrap();
+    try { await finalizeChat(); } finally { removeSignalHandlers(); }
+
   }
 }
 
@@ -4290,6 +5007,10 @@ export function registerChatCommands(program: Command): void {
     .description('启动 AI skill 任务交付工作台（默认命令）')
     .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
     .option('--dry-run', '打印工具调用但不执行')
+    .option('--observation-policy <file>', '按显式用户策略启用本次观察归档与召回（新会话）')
+    .option('--intent-verification <file>', '冻结 Intent 原始验收 JSON；/intent native 管理登记；/intent publish draft|approve <JSON>|parent|status|recover|retry <候选ID> 管理候选；/intent verify help 配置独立验证；/intent receiver help 原发布与阶段投影（不自动启动模型）')
+    .option('--goal-verification <file>', '冻结本次 Goal 原始验收 JSON；原生授权后用 /goal resume 启动')
+    .option('--validation-material <file>', '逐文件选择隔离验证材料，可重复；仍需系统授权', (file:string,files:string[])=>[...files,file], [])
     .option('-p, --print', '以纯文本模式输出单次结果')
     .option('--json', '以 JSON 模式输出单次结果')
     .option('--resume <id>', '恢复已保存会话')

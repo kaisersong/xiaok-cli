@@ -1,4 +1,7 @@
 import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } from '../providers/model-reasoning-effort.js';
+import { resolveObservationProviderDisclosure } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { resolveSemanticSummaryAttempt } from '../../runtime/sol-pi/semantic-summary-attempt.js';
+import { createProviderDisclosureFetch, getProviderDisclosureSignal, assertProviderDisclosureActive, disposeProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 import OpenAI from 'openai';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
@@ -391,145 +394,167 @@ export class OpenAIAdapter {
         return clone;
     }
     async *stream(messages, tools, systemPrompt, options) {
-        assertKimiTransportAllowed(this.harnessContext.identity);
-        const profileId = this.getOwnedHarnessProfileId();
-        const strictProfile = profileId === 'kimi-k3-coding-openai'
-            || profileId === 'kimi-k3-256k-coding-openai'
-            ? profileId
-            : undefined;
-        if (!strictProfile && options?.providerConversationAuthorization) {
-            throw new Error('KIMI_K3_AUTHORIZATION_PROFILE_MISMATCH');
+        const disclosure = resolveObservationProviderDisclosure(options?.providerDisclosure);
+        if (disclosure !== undefined) {
+            assertProviderDisclosureActive(disclosure);
+            const disclosureSignal = getProviderDisclosureSignal(disclosure);
+            options = { ...options, providerDisclosure: disclosure, signal: options?.signal ? AbortSignal.any([options.signal, disclosureSignal]) : disclosureSignal };
         }
-        const authorizationReservation = strictProfile
-            ? reserveProviderConversationAuthorization({
-                authorization: options?.providerConversationAuthorization,
-                adapter: this,
-                messages,
-            })
-            : undefined;
-        let authorizationConsumed = false;
-        const authorizeDispatch = authorizationReservation
-            ? () => {
-                if (!authorizationConsumed) {
-                    consumeProviderConversationAuthorization({
+        try {
+            assertKimiTransportAllowed(this.harnessContext.identity);
+            const profileId = this.getOwnedHarnessProfileId();
+            const strictProfile = profileId === 'kimi-k3-coding-openai'
+                || profileId === 'kimi-k3-256k-coding-openai'
+                ? profileId
+                : undefined;
+            if (!strictProfile && options?.providerConversationAuthorization) {
+                throw new Error('KIMI_K3_AUTHORIZATION_PROFILE_MISMATCH');
+            }
+            const authorizationReservation = strictProfile
+                ? reserveProviderConversationAuthorization({
+                    authorization: options?.providerConversationAuthorization,
+                    adapter: this,
+                    messages,
+                })
+                : undefined;
+            let authorizationConsumed = false;
+            const authorizeDispatch = authorizationReservation
+                ? () => {
+                    if (!authorizationConsumed) {
+                        consumeProviderConversationAuthorization({
+                            reservation: authorizationReservation,
+                            adapter: this,
+                            messages,
+                        });
+                        authorizationConsumed = true;
+                        return;
+                    }
+                    verifyConsumedProviderConversationAuthorizationForRetry({
                         reservation: authorizationReservation,
                         adapter: this,
                         messages,
                     });
-                    authorizationConsumed = true;
+                }
+                : undefined;
+            const bufferedUsage = (this.harnessContext.flags.normalizeUsage
+                && this.harnessContext.profile.extractUsage !== undefined);
+            let usageSourceEmitted = false;
+            const reportUsageSource = (usageSource) => {
+                if (usageSourceEmitted) {
                     return;
                 }
-                verifyConsumedProviderConversationAuthorizationForRetry({
-                    reservation: authorizationReservation,
-                    adapter: this,
-                    messages,
+                usageSourceEmitted = true;
+                this.onUsageDiagnostic({
+                    type: 'usage_source',
+                    harnessProfileId: 'kimi-k3-coding-openai',
+                    usageSource,
                 });
-            }
-            : undefined;
-        const bufferedUsage = (this.harnessContext.flags.normalizeUsage
-            && this.harnessContext.profile.extractUsage !== undefined);
-        let usageSourceEmitted = false;
-        const reportUsageSource = (usageSource) => {
-            if (usageSourceEmitted) {
-                return;
-            }
-            usageSourceEmitted = true;
-            this.onUsageDiagnostic({
-                type: 'usage_source',
-                harnessProfileId: 'kimi-k3-coding-openai',
-                usageSource,
-            });
-        };
-        let attempt = 0;
-        while (true) {
-            throwIfCallerAborted(options?.signal);
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
-            const signal = options?.signal
-                ? AbortSignal.any([controller.signal, options.signal])
-                : controller.signal;
-            let emittedAny = false;
-            let emittedBufferedUsage = false;
-            const attemptState = { outputChars: 0 };
-            try {
-                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal, bufferedUsage ? attemptState : undefined, authorizeDispatch)) {
-                    emittedAny = true;
-                    yield chunk;
-                }
-                if (options?.signal?.aborted) {
-                    throw abortReason(options.signal);
-                }
-                if (bufferedUsage) {
-                    const providerUsage = attemptState.latestProviderUsage;
-                    reportUsageSource(providerUsage ? 'provider' : 'estimate');
-                    emittedBufferedUsage = true;
-                    yield {
-                        type: 'usage',
-                        usage: providerUsage
-                            ?? estimateStreamUsage(messages, systemPrompt, attemptState.outputChars),
-                    };
-                    throwIfCallerAborted(options?.signal);
-                    yield { type: 'done' };
-                }
-                return;
-            }
-            catch (error) {
-                clearTimeout(timer);
-                const terminalError = options?.signal?.aborted
-                    ? (options.signal.reason ?? error)
-                    : error;
-                // 已产出 chunk 后重试会重复输出，必须放弃重试
-                if (options?.signal?.aborted
-                    || emittedAny
-                    || !isRetryableError(error)
-                    || attempt >= MAX_RETRIES) {
-                    if (bufferedUsage) {
-                        if (attemptState.latestProviderUsage && !emittedBufferedUsage) {
-                            reportUsageSource('provider');
-                            emittedBufferedUsage = true;
-                            yield {
-                                type: 'usage',
-                                usage: attemptState.latestProviderUsage,
-                            };
-                            throwIfCallerAborted(options?.signal);
-                        }
-                        else if (!attemptState.latestProviderUsage && !emittedBufferedUsage) {
-                            reportUsageSource('missing_on_error');
-                        }
-                    }
-                    throw terminalError;
-                }
-                const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+            };
+            let attempt = 0;
+            while (true) {
+                throwIfCallerAborted(options?.signal);
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+                const signal = options?.signal
+                    ? AbortSignal.any([controller.signal, options.signal])
+                    : controller.signal;
+                let emittedAny = false;
+                let emittedBufferedUsage = false;
+                const attemptState = { outputChars: 0 };
                 try {
-                    await sleep(delayMs, options?.signal);
-                }
-                catch (backoffError) {
-                    const backoffTerminalError = options?.signal?.aborted
-                        ? (options.signal.reason ?? backoffError)
-                        : backoffError;
-                    if (bufferedUsage) {
-                        if (attemptState.latestProviderUsage && !emittedBufferedUsage) {
-                            reportUsageSource('provider');
-                            emittedBufferedUsage = true;
-                            yield {
-                                type: 'usage',
-                                usage: attemptState.latestProviderUsage,
-                            };
-                        }
-                        else if (!attemptState.latestProviderUsage && !emittedBufferedUsage) {
-                            reportUsageSource('missing_on_error');
-                        }
+                    for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options, signal, bufferedUsage ? attemptState : undefined, authorizeDispatch)) {
+                        emittedAny = true;
+                        yield chunk;
                     }
-                    throw backoffTerminalError;
+                    if (options?.signal?.aborted) {
+                        throw abortReason(options.signal);
+                    }
+                    if (bufferedUsage) {
+                        const providerUsage = attemptState.latestProviderUsage;
+                        reportUsageSource(providerUsage ? 'provider' : 'estimate');
+                        emittedBufferedUsage = true;
+                        yield {
+                            type: 'usage',
+                            usage: providerUsage
+                                ?? estimateStreamUsage(messages, systemPrompt, attemptState.outputChars),
+                        };
+                        throwIfCallerAborted(options?.signal);
+                        yield { type: 'done' };
+                    }
+                    return;
                 }
-                attempt += 1;
-            }
-            finally {
-                clearTimeout(timer);
+                catch (error) {
+                    if (disclosure !== undefined)
+                        assertProviderDisclosureActive(disclosure);
+                    clearTimeout(timer);
+                    const terminalError = options?.signal?.aborted
+                        ? (options.signal.reason ?? error)
+                        : error;
+                    // 已产出 chunk 后重试会重复输出，必须放弃重试
+                    if (options?.signal?.aborted
+                        || options?.semanticSummaryAttempt !== undefined
+                        || emittedAny
+                        || !isRetryableError(error)
+                        || attempt >= MAX_RETRIES) {
+                        if (bufferedUsage) {
+                            if (attemptState.latestProviderUsage && !emittedBufferedUsage) {
+                                reportUsageSource('provider');
+                                emittedBufferedUsage = true;
+                                yield {
+                                    type: 'usage',
+                                    usage: attemptState.latestProviderUsage,
+                                };
+                                throwIfCallerAborted(options?.signal);
+                            }
+                            else if (!attemptState.latestProviderUsage && !emittedBufferedUsage) {
+                                reportUsageSource('missing_on_error');
+                            }
+                        }
+                        throw terminalError;
+                    }
+                    const delayMs = Math.min(1000 * 2 ** attempt, 16000);
+                    try {
+                        await sleep(delayMs, options?.signal);
+                    }
+                    catch (backoffError) {
+                        const backoffTerminalError = options?.signal?.aborted
+                            ? (options.signal.reason ?? backoffError)
+                            : backoffError;
+                        if (bufferedUsage) {
+                            if (attemptState.latestProviderUsage && !emittedBufferedUsage) {
+                                reportUsageSource('provider');
+                                emittedBufferedUsage = true;
+                                yield {
+                                    type: 'usage',
+                                    usage: attemptState.latestProviderUsage,
+                                };
+                            }
+                            else if (!attemptState.latestProviderUsage && !emittedBufferedUsage) {
+                                reportUsageSource('missing_on_error');
+                            }
+                        }
+                        throw backoffTerminalError;
+                    }
+                    attempt += 1;
+                }
+                finally {
+                    clearTimeout(timer);
+                }
             }
         }
+        finally {
+            if (disclosure !== undefined)
+                disposeProviderDisclosureContext(disclosure);
+        }
     }
-    async *streamOnce(messages, tools, systemPrompt, options, signal, attemptState, authorizeDispatch) {
+    /** Host request planning only. Strict signed transcripts have no preview path. */
+    getObservationRequestPreview(messages, tools, systemPrompt, options) {
+        if (this.harnessContext.profile.id !== 'generic-openai' || this.harnessContext.identity.protocol !== 'openai_legacy')
+            return undefined;
+        return { serializedBody: JSON.stringify(this.buildChatRequest(messages, tools, systemPrompt, options)),
+            destination: `${this.client.baseURL.replace(/\/+$/, '')}/chat/completions` };
+    }
+    buildChatRequest(messages, tools, systemPrompt, options) {
         const normalizeToolSchema = this.harnessContext.profile.normalizeToolSchema;
         const shouldNormalizeToolSchemas = (this.harnessContext.flags.normalizeToolSchema
             && normalizeToolSchema !== undefined
@@ -701,6 +726,16 @@ export class OpenAIAdapter {
             stream: true,
             stream_options: { include_usage: true },
         };
+        if (options?.semanticSummaryOutputTokens !== undefined) {
+            const maximum = options.semanticSummaryOutputTokens;
+            if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > 8192 || tools.length
+                || this.harnessContext.profile.id !== 'generic-openai'
+                || this.harnessContext.identity.wireModel !== 'deepseek-flash'
+                || !['https://api.deepseek.com', 'https://api.deepseek.com/v1'].includes(this.client.baseURL.replace(/\/+$/, ''))) {
+                throw new Error('SEMANTIC_SUMMARY_OUTPUT_LIMIT_INVALID');
+            }
+            request.max_tokens = maximum;
+        }
         const cacheKey = options?.cacheKey;
         if (this.harnessContext.flags.promptCacheKey
             && this.harnessContext.profile.encodeCacheKey
@@ -715,9 +750,22 @@ export class OpenAIAdapter {
         if (selectedEffort && supportedEfforts.includes(selectedEffort)) {
             Object.assign(request, { reasoning_effort: selectedEffort });
         }
+        return request;
+    }
+    async *streamOnce(messages, tools, systemPrompt, options, signal, attemptState, authorizeDispatch) {
+        const request = this.buildChatRequest(messages, tools, systemPrompt, options);
         const strictKimiK3 = this.harnessContext.profile.id !== 'generic-openai';
+        const semantic = options?.semanticSummaryAttempt === undefined ? undefined : resolveSemanticSummaryAttempt(options.semanticSummaryAttempt);
+        if ((options?.semanticSummaryOutputTokens !== undefined && !semantic)
+            || semantic && (strictKimiK3 || request.max_tokens !== semantic.maxOutputTokens || tools.length)) {
+            throw new Error('SEMANTIC_SUMMARY_ATTEMPT_REQUIRED');
+        }
+        const transport = semantic?.fetch ?? globalThis.fetch.bind(globalThis);
+        const guardedFetch = options?.providerDisclosure ? createProviderDisclosureFetch(options.providerDisclosure, transport) : transport;
+        const client = semantic ? this.client.withOptions({ fetch: guardedFetch, maxRetries: 0 })
+            : options?.providerDisclosure ? this.client.withOptions({ fetch: guardedFetch }) : this.client;
         authorizeDispatch?.();
-        const stream = await runProviderOperation(strictKimiK3, () => this.client.chat.completions.create(request, { signal }));
+        const stream = await runProviderOperation(strictKimiK3, () => client.chat.completions.create(request, { signal }));
         const toolBuffers = new Map();
         const rawThinkParser = {
             active: true,

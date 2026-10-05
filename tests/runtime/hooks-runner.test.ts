@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 
 vi.mock('child_process', () => ({
-  exec: vi.fn(),
+  spawn: vi.fn(),
 }));
 
 import { createHooksRunner } from '../../src/runtime/hooks-runner.js';
@@ -18,14 +18,14 @@ function createMockChild(opts: {
   const child = new EventEmitter() as EventEmitter & {
     stdout: EventEmitter;
     stderr: EventEmitter;
-    stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
+    stdin: EventEmitter & { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
     kill: ReturnType<typeof vi.fn>;
     unref: ReturnType<typeof vi.fn>;
   };
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
-  child.stdin = { write: vi.fn(), end: vi.fn() };
-  child.kill = vi.fn(() => { child.emit('exit', 1); });
+  child.stdin = Object.assign(new EventEmitter(), { write: vi.fn(), end: vi.fn() });
+  child.kill = vi.fn(() => { child.emit('exit', 1); child.emit('close', 1, null); });
   child.unref = vi.fn();
 
   if (!opts.noExit) {
@@ -33,6 +33,7 @@ function createMockChild(opts: {
       if (opts.stdout) child.stdout.emit('data', opts.stdout);
       if (opts.stderr) child.stderr.emit('data', opts.stderr);
       child.emit('exit', opts.exitCode ?? 0);
+      child.emit('close', opts.exitCode ?? 0, null);
     }, opts.delay ?? 0);
   }
 
@@ -45,7 +46,7 @@ describe('hooks runner', () => {
   });
 
   it('blocks tool execution when a matching pre hook fails (exit code 2)', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() =>
       createMockChild({ exitCode: 2, stderr: 'blocked by pre hook' }),
     );
@@ -62,7 +63,7 @@ describe('hooks runner', () => {
   });
 
   it('ignores non-matching hooks', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     const runner = createHooksRunner({
       pre: [{ command: 'echo pre', tools: ['bash'] }],
       timeoutMs: 500,
@@ -75,7 +76,7 @@ describe('hooks runner', () => {
   });
 
   it('returns a warning when a post hook fails (non-zero exit)', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() =>
       createMockChild({ exitCode: 1, stderr: 'post hook failed' }),
     );
@@ -92,7 +93,7 @@ describe('hooks runner', () => {
   });
 
   it('times out long-running hooks', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     const child = createMockChild({ noExit: true });
     mockExec.mockImplementation(() => child);
 
@@ -109,7 +110,7 @@ describe('hooks runner', () => {
   });
 
   it('passes payload via stdin', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     const child = createMockChild({ exitCode: 0 });
     mockExec.mockImplementation(() => child);
 
@@ -120,15 +121,15 @@ describe('hooks runner', () => {
 
     await runner.runPreHooks('write', { file_path: '/tmp/x' });
 
-    expect(child.stdin.write).toHaveBeenCalled();
-    const payload = JSON.parse(child.stdin.write.mock.calls[0][0]);
+    expect(child.stdin.end).toHaveBeenCalled();
+    const payload = JSON.parse(child.stdin.end.mock.calls[0][0]);
     expect(payload.hook_event_name).toBe('PreToolUse');
     expect(payload.session_id).toBe('test-session');
     expect(payload.tool_name).toBe('write');
   });
 
   it('parses structured JSON output from hook stdout', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() =>
       createMockChild({
         exitCode: 0,
@@ -148,7 +149,7 @@ describe('hooks runner', () => {
   });
 
   it('supports pipe-separated matcher', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() => createMockChild({ exitCode: 0 }));
 
     const runner = createHooksRunner({
@@ -166,7 +167,7 @@ describe('hooks runner', () => {
   });
 
   it('runs once-per-session hooks only once', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() => createMockChild({ exitCode: 0 }));
 
     const runner = createHooksRunner({
@@ -180,7 +181,7 @@ describe('hooks runner', () => {
   });
 
   it('runs async hooks without blocking', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     const child = createMockChild({ noExit: true });
     mockExec.mockImplementation(() => child);
 
@@ -192,11 +193,13 @@ describe('hooks runner', () => {
 
     expect(result.ok).toBe(true);
     expect(result.async).toBe(true);
-    expect(child.unref).toHaveBeenCalled();
+    expect(child.unref).not.toHaveBeenCalled();
+    child.emit('exit', 0); child.emit('close', 0, null);
+    await runner.closeAndDrain();
   });
 
   it('parses structured allow decisions from PermissionRequest hook output', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() =>
       createMockChild({
         exitCode: 0,
@@ -216,7 +219,7 @@ describe('hooks runner', () => {
   });
 
   it('treats malformed PermissionRequest hook output as no decision instead of crashing the flow', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() =>
       createMockChild({
         exitCode: 0,
@@ -263,7 +266,7 @@ describe('hooks runner unknown event handling', () => {
   });
 
   it('does not invoke hooks for deleted events', async () => {
-    const mockExec = vi.mocked(exec) as any;
+    const mockExec = vi.mocked(spawn) as any;
     mockExec.mockImplementation(() => createMockChild({ exitCode: 0 }));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {

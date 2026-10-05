@@ -1,3 +1,6 @@
+export type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
+import type {LoopCompletionObservation} from '../../../shared/loop-current-view-types';
+export type {LoopPublicationAction,LoopPublicationActionResult,LoopPublicationStateView,StoredLoopPublicationConfiguration} from '../../../shared/loop-publication-types.js';
 export type { GoalAttachmentRequest, GoalAttachmentSource } from '../../../shared/goal-attachment';
 export type {
   ArtifactWorkspaceEventName,
@@ -362,6 +365,8 @@ export interface AutomationOverviewSnapshotView {
 }
 
 export interface AutomationRunHistoryItemView {
+  historyStatus?:AutomationRunHistoryItemView['status'];
+  completionObservation?:LoopCompletionObservation;
   id: string;
   automationKind: 'loop' | 'notify' | 'agent_task';
   scheduleRunId?: string;
@@ -371,9 +376,9 @@ export interface AutomationRunHistoryItemView {
   title: string;
   startedAt: number;
   finishedAt?: number;
-  status: 'success' | 'failed' | 'blocked' | 'skipped' | 'running';
+  status: 'success' | 'failed' | 'blocked' | 'skipped' | 'running' | 'publication_pending';
   schedulerStatus?: string;
-  loopStatus?: LoopRunStatus;
+  loopStatus?: LoopRunStatus|'publication_pending';
   failureKind?: string;
   message?: string;
   outputPreviewAvailable?: boolean;
@@ -384,14 +389,16 @@ export type LoopOutputActionResultView =
   | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
 
 export type LoopOutputPreviewView =
-  | { ok: true; loopId: string; pathLabel: string; content: string; sizeBytes: number; truncated: boolean }
+  | { ok: true; loopId: string; pathLabel: string; content: string; sizeBytes: number; truncated: boolean;runId?:string;origin?:'verified_publication';checkedAt?:number }
   | { ok: false; loopId: string; error: string; message?: string; pathLabel?: string; sizeBytes?: number; limitBytes?: number };
 
 export type LoopTaskResultView =
-  | { ok: true; loopId: string; runId: string; content: string; taskId?: string }
+  | { ok: true; loopId: string; runId: string; content: string; taskId?: string;origin?:'verified_publication';checkedAt?:number }
   | { ok: false; loopId: string; error: string; message?: string; runId?: string; taskId?: string };
 
 export interface LoopRunView {
+  completionObservation?:LoopCompletionObservation;
+  businessState?:LoopRunStatus|'publication_pending';
   id: string;
   loopId: string;
   status: LoopRunStatus;
@@ -425,6 +432,8 @@ export interface EvidenceAnomalyView {
 }
 
 export type RunLoopNowResultView =
+  | {status:'publication_pending'|'executing';run:LoopRunView}
+  | {status:'already_completed';completedRunId:string}
   | { status: 'success'; run: LoopRunView }
   | { status: 'blocked'; run: LoopRunView }
   | { status: 'failed'; run: LoopRunView }

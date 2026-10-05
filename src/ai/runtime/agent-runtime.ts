@@ -1,4 +1,11 @@
-import type { MessageBlock, ModelAdapter, ToolCall, ToolExecutionContext } from '../../types.js';
+import {ModelStreamPhysicalOwner,type ModelStreamPhysicalRun} from './model-stream-physical-owner.js';
+import {prepareCompoundRootIntentStageView} from '../../runtime/sol-pi/compound-provider-admission.js';
+import { assertDelegatedObservationOwner } from '../../runtime/sol-pi/delegated-session-owner.js';
+import { withObservationExecutionOwner } from '../../runtime/sol-pi/observation-execution-scope.js';
+import { assertSemanticCompactionOwner, type SemanticCompactionOwner, type SemanticCompactionOutcome } from '../../runtime/sol-pi/semantic-compaction-owner.js';
+import type { ObservationSessionOwner } from '../../runtime/sol-pi/observation-session-owner.js';
+import { withObservationMetrics, measureToolResult } from '../../runtime/trace/observation-metrics.js';
+import type { Message, MessageBlock, ModelAdapter, ToolCall, ToolExecutionContext } from '../../types.js';
 import { join } from 'node:path';
 import type { ToolRegistry } from '../tools/index.js';
 import { isSuccessfulModelToolResult } from '../tools/index.js';
@@ -12,7 +19,6 @@ const MAX_COMPACT_MEMORY_REMINDER_CHARS = 8_000;
 const COMPACT_MEMORY_REMINDER_PREFIX = '<system-reminder>\n[Memory restored after compact]\n';
 const COMPACT_MEMORY_REMINDER_SUFFIX = '\n</system-reminder>';
 import type { AgentRuntimeEvent, RuntimeActivity } from './events.js';
-import { isAbortError } from './abort-utils.js';
 import {
   buildPromptCacheSegments,
   resolveModelCapabilities,
@@ -24,6 +30,7 @@ import { resolveRegisteredStrictKimiK3Profile, requiresKimiK3HistoryMigration } 
 import { AgentSessionState } from './session.js';
 import { InvocationToolImages } from './tool-image-channel.js';
 import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { decideCompactionCandidate, type CompactionCandidateDecision } from '../../runtime/sol-pi/compaction-policy.js';
 import { CompactRunner } from './compact-runner.js';
 import { executePortableCompaction } from './portable-compaction-executor.js';
 import type { MemoryStore } from '../memory/store.js';
@@ -42,14 +49,15 @@ import {
   type ProviderConversationSurfaceKind,
 } from './provider-conversation-authorization.js';
 
-function normalizeRuntimeAbortReason(reason: unknown): unknown {
-  if (isAbortError(reason)) return reason;
-  const aborted = new DOMException('Agent run aborted', 'AbortError');
-  Object.defineProperty(aborted, 'cause', { value: reason, configurable: true });
-  return aborted;
-}
-
 export interface AgentRuntimeOptions {
+  /** Fixed host lifetime shared across actual Agent runtime replacements. */
+  modelPhysicalOwner?: ModelStreamPhysicalOwner;
+  semanticCompactionOwner?: SemanticCompactionOwner;
+  onSemanticCompactionOutcome?: (outcome: SemanticCompactionOutcome) => void;
+  /** Host-only; never constructed from agent input or restored authorization. */
+  observationOwner?: ObservationSessionOwner;
+  /** Host diagnostics only; cannot enable the semantic executor. */
+  onSemanticCompactionDecision?: (decision: CompactionCandidateDecision) => void;
   onActivity?: (activity: RuntimeActivity) => void;
   takePendingInput?: () => string | undefined;
   adapter: ModelAdapter;
@@ -72,6 +80,18 @@ export interface AgentRuntimeOptions {
 }
 
 export class AgentRuntime {
+  private readonly modelPhysicalOwner:ModelStreamPhysicalOwner;
+  private readonly semanticCompactionOwner?: SemanticCompactionOwner;
+  private readonly onSemanticCompactionOutcome?: (outcome: SemanticCompactionOutcome) => void;
+  private readonly observationOwner?: ObservationSessionOwner;
+  private pendingSubtaskBoundary = false;
+  private readonly onSemanticCompactionDecision?: (decision: CompactionCandidateDecision) => void;
+
+  /** Host-confirmed completion candidate; never exposed as an agent tool. */
+  notifySubtaskBoundary(): void {
+    this.pendingSubtaskBoundary = true;
+  }
+
   private readonly onActivity?: (activity: RuntimeActivity) => void;
   private readonly takePendingInput?: () => string | undefined;
   private adapter: ModelAdapter;
@@ -98,11 +118,17 @@ export class AgentRuntime {
   private static readonly MAX_EMPTY_RETRIES = 2;
 
   constructor(options: AgentRuntimeOptions) {
+    this.modelPhysicalOwner=options.modelPhysicalOwner??new ModelStreamPhysicalOwner();
+    this.observationOwner = options.observationOwner;
+    this.onSemanticCompactionDecision = options.onSemanticCompactionDecision;
     this.onActivity = options.onActivity;
     this.takePendingInput = options.takePendingInput;
     this.adapter = options.adapter;
     this.registry = options.registry;
     this.session = options.session;
+    this.semanticCompactionOwner = options.semanticCompactionOwner;
+    this.onSemanticCompactionOutcome = options.onSemanticCompactionOutcome;
+    if (this.semanticCompactionOwner) assertSemanticCompactionOwner(this.semanticCompactionOwner, this.session);
     this.controller = options.controller;
     this.systemPrompt = options.systemPrompt;
     this.promptSnapshot = options.promptSnapshot;
@@ -127,6 +153,7 @@ export class AgentRuntime {
     const currentProfile = resolveRegisteredStrictKimiK3Profile(this.adapter);
     const nextProfile = resolveRegisteredStrictKimiK3Profile(adapter);
     if (requiresKimiK3HistoryMigration(currentProfile, nextProfile, this.session.getMessages().length)) {
+      if(prepareCompoundRootIntentStageView(this.session).active)throw Error('intent_stage_context_model_migration');
       const context = buildSynthesizedProviderContext('model-switch', this.session.getMessages());
       this.session.replaceMessages([{ role: 'user', content: [{ type: 'text', text:
         'Previous conversation context after a model switch. This is synthesized context, not a raw provider transcript. Recent visible history is retained within 40KB.\n' + context }] }]);
@@ -150,9 +177,26 @@ export class AgentRuntime {
     externalSignal?: AbortSignal,
     invocationContext?: RunInvocationContext,
   ): Promise<void> {
-    if (externalSignal?.aborted) {
-      throw normalizeRuntimeAbortReason(externalSignal.reason);
+    externalSignal?.throwIfAborted();
+    const physicalRun=this.modelPhysicalOwner.admit();
+    try {
+    if (this.observationOwner) {
+      if (this.executionScope) throw new Error('SOL_PI_OBSERVATION_RESTRICTED_OWNER_NOT_READY');
+      if (this.providerSurfaceKind === 'cli-subagent') assertDelegatedObservationOwner(this.observationOwner, this.session, this.registry);
+      this.observationOwner.assertSession(this.session);
+    } else if (this.session.getProtectedObservationClosure()) {
+      throw new Error('SOL_PI_PROTECTED_OBSERVATION_REAUTHORIZATION_REQUIRED');
     }
+    const signal=externalSignal?AbortSignal.any([externalSignal,this.modelPhysicalOwner.signal]):this.modelPhysicalOwner.signal;
+    return await withObservationExecutionOwner(this.observationOwner, () =>
+      withObservationMetrics(this.providerSurfaceKind === 'cli-subagent' ? 'cli-child' : 'cli',
+        () => this.runMeasuredBody(input, onEvent, signal, invocationContext,physicalRun)));
+    } finally {physicalRun.finish();}
+  }
+
+  private async runMeasuredBody(input: string | MessageBlock[], onEvent: (event: AgentRuntimeEvent) => void,
+    externalSignal: AbortSignal | undefined, invocationContext: RunInvocationContext | undefined,physicalRun:ModelStreamPhysicalRun): Promise<void> {
+    externalSignal?.throwIfAborted();
 
     const run = this.controller.startRun();
     const strictK3Run = this.isStrictK3Adapter(this.adapter);
@@ -212,8 +256,39 @@ export class AgentRuntime {
         const pendingInput = this.takePendingInput?.();
         if (pendingInput) this.session.appendUserText(pendingInput);
 
+        const stageViewActive=prepareCompoundRootIntentStageView(this.session).active;
+        if (this.pendingSubtaskBoundary && !stageViewActive) {
+          // The host completion event can arrive inside tool.execute. Capture the
+          // candidate only after the complete result batch and queued input exist.
+          const sourceRevision = this.session.planCompaction().sourceRevision;
+          this.pendingSubtaskBoundary = false;
+          if (this.semanticCompactionOwner && !autoCompactionBlocked) {
+            const outcome = await this.semanticCompactionOwner.tryCompact({invocationId:run.runId,sourceRevision,
+              adapter:this.adapter,tools:this.registry.getToolDefinitions(),systemPrompt:this.systemPrompt,signal:mergedSignal});
+            if(outcome.attempted)autoCompactionBlocked=true;
+            try { this.onSemanticCompactionOutcome?.(outcome); } catch { /* Host diagnostics do not alter the result. */ }
+            if(outcome.status==='compacted' && outcome.record)onEvent({type:'compact_triggered',runId:run.runId,summary:outcome.record.summary,compactionId:outcome.record.id});
+            if(outcome.status==='failed')onEvent({type:'compact_failed',runId:run.runId,error:outcome.reason??'semantic_compaction_failed'});
+          } else {
+          const plan = this.session.planCompaction();
+          const decision = decideCompactionCandidate({
+            trigger: 'subtask_boundary', runtimeConfirmedCompletion: true,
+            pendingApproval: false, pendingMailboxClaim: false, unpairedToolCalls: plan.invalidReason ? 1 : 0,
+            sourceRevision, currentRevision: plan.sourceRevision, replaceableMessages: plan.replacedMessages,
+            remainingBudget: autoCompactionBlocked ? 0 : 1,
+            // No verified monetary/remaining-turn model or provider/anchor contract yet.
+            remainingRequestsLowerBound: null, currency: '', savingsPerRequestLowerBound: null,
+            summaryCostUpperBound: null, cacheRebuildCostUpperBound: null,
+            recallCostUpperBound: null, uncertaintyMarginUpperBound: null,
+            providerContractVerified: false, anchorsComplete: false,
+          });
+          try { this.onSemanticCompactionDecision?.(decision); } catch { /* Diagnostics cannot break a run. */ }
+          }
+        }
+
         if (
-          !autoCompactionBlocked
+          !stageViewActive && !autoCompactionBlocked
+          && decideCompactionCandidate({ trigger: 'threshold' }).action === 'delegate-existing-threshold'
           && shouldCompact(
             estimateTokens(this.session.getMessages())
               + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
@@ -282,8 +357,10 @@ export class AgentRuntime {
           ? streamCliSubagentProviderConversation
           : streamCliChatTaskProviderConversation;
         let recoveryAttempt = 0;
+        let toolProviderInvocationId: string | undefined;
         onEvent({ type: 'model_request_started', runId: run.runId });
         for await (const chunk of recoverModelStream({
+          physicalRun,
           signal: mergedSignal,
           onRetry: (notice) => {
             const partial = currentAssistantBlocks.filter((block): block is Extract<MessageBlock, { type: 'text' }> => block.type === 'text').map(block => block.text).join('').slice(-12000);
@@ -293,14 +370,29 @@ export class AgentRuntime {
             this.reportActivity({ phase: 'model' });
             onEvent({ type: 'model_recovery', runId: run.runId, ...notice });
           },
-          open: (requestSignal) => streamProviderConversation({
-          adapter: this.adapter as CapabilityAwareAdapter,
-          messages: this.session.getMessages(),
-          tools: this.registry.getToolDefinitions(),
-          systemPrompt: this.systemPrompt,
-          options: this.buildInvocationOptions(requestSignal, invocationContext),
-          invocationId: `${run.runId}:${iteration}:recovery-${recoveryAttempt}`,
-          }),
+          open: (requestSignal) => {
+            const runtime = this;
+            return (async function* () {
+              const logicalInvocationId = `${run.runId}:${iteration}:recovery-${recoveryAttempt}`;
+              toolProviderInvocationId = logicalInvocationId;
+              const tools = runtime.registry.getToolDefinitions();
+              const view=prepareCompoundRootIntentStageView(runtime.session,logicalInvocationId);
+              try {
+              const messages=view.messages;
+              const options = runtime.buildInvocationOptions(requestSignal, invocationContext,messages);
+              const prepared = runtime.observationOwner?.prepareRequest
+                ? await runtime.observationOwner.prepareRequest({ logicalInvocationId, messages, tools,
+                    systemPrompt: runtime.systemPrompt, options,
+                    requestPreview: runtime.adapter.getObservationRequestPreview?.bind(runtime.adapter) })
+                : undefined;
+              requestSignal.throwIfAborted();view.assertCurrent();
+              yield* streamProviderConversation({ adapter: runtime.adapter as CapabilityAwareAdapter,
+                messages: prepared?.messages ?? messages, tools, systemPrompt: runtime.systemPrompt,
+                options: prepared?.providerDisclosure ? { ...options, providerDisclosure: prepared.providerDisclosure } : options,
+                invocationId: logicalInvocationId });
+              } finally {view.dispose();}
+            })();
+          },
         })) {
           this.reportActivity({ phase: chunk.type === 'thinking' ? 'thinking' : 'model' });
           if (chunk.type === 'usage') {
@@ -401,9 +493,23 @@ export class AgentRuntime {
             input: toolCall.input,
           });
 
+          let observationProjectionFailure: { error: unknown } | undefined;
           const toolExecutionContext: ToolExecutionContext = {
             ...baseToolExecutionContext,
             toolInvocationId: toolCall.id,
+            hostProviderInvocationId: toolProviderInvocationId,
+            ...(this.observationOwner ? {
+              observationCollector: this.observationOwner.collectorFor(toolCall.id),
+              observationProvenance: () => this.observationOwner!.getResultProvenance(toolCall.id),
+              projectObservationResult: async (nativeResult: string) => {
+                try { return await this.observationOwner!.projectToolResult(toolCall.id, nativeResult); }
+                catch (error) {
+                  observationProjectionFailure = { error };
+                  const ok = isSuccessfulModelToolResult(nativeResult);
+                  return `${ok ? '' : 'Error: '}[tool execution ${ok ? 'completed' : 'failed'}; observation disclosure blocked]`;
+                }
+              },
+            } : {}),
             runtimeFactSink: {
               emit: (fact) => onEvent({
                 type: 'tool_execution_fact',
@@ -435,11 +541,20 @@ export class AgentRuntime {
           mergedSignal.throwIfAborted();
           const ok = isSuccessfulModelToolResult(result);
           const sessionSnapshot = this.session.exportSnapshot();
+          if (observationProjectionFailure) {
+            toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: result, is_error: !ok });
+            executedToolIds.add(toolCall.id);
+            throw observationProjectionFailure.error;
+          }
+          mergedSignal.throwIfAborted();
           const truncated = truncateToolResult(result, MODEL_OUTPUT_CAP + MODEL_OUTPUT_TRUNCATION_MARKER.length, {
             sessionId: sessionSnapshot.sessionId,
             toolCallId: toolCall.id,
             spillDir: join(sessionSnapshot.cwd, '.xiaok', 'spill'),
           });
+          // Exact final history bytes; failure only makes this observation ineligible for P1-B.
+          try { this.observationOwner?.finalizeToolResult(toolCall.id, truncated.content); } catch { /* provenance is optional; never replay a completed tool */ }
+          measureToolResult('history_result', toolCall.id, toolCall.name, truncated.content);
           toolResults.push({ type: 'tool_result', tool_use_id: toolCall.id, content: truncated.content, is_error: !ok });
           toolResults.push(...invocationImages);
           mergedSignal.throwIfAborted();
@@ -466,11 +581,13 @@ export class AgentRuntime {
 
         this.session.appendUserToolResults(toolResults);
         toolResults = [];
+        await this.registry.publishCompoundHistory?.();
         executedToolIds = new Set<string>();
+        await this.observationOwner?.publishCurrentHistory?.({ strictPrivateProtocol: strictK3Run });
         iteration += 1;
       }
     } catch (error) {
-      if (mergedSignal.aborted || isAbortError(error)) {
+      if (mergedSignal.aborted) {
         const partialSentinel = '\n\n[partial - interrupted by user]';
         const blocks = currentAssistantBlocks.map((block) => ({ ...block })) as MessageBlock[];
 
@@ -501,6 +618,7 @@ export class AgentRuntime {
           .filter((toolCall) => !executedToolIds.has(toolCall.id) && !seenToolResultIds.has(toolCall.id))
           .map((toolCall) => {
             seenToolResultIds.add(toolCall.id);
+            measureToolResult('history_result', toolCall.id, toolCall.name, '[user-cancelled]');
             return {
               type: 'tool_result' as const,
               tool_use_id: toolCall.id,
@@ -521,8 +639,7 @@ export class AgentRuntime {
           .map((block) => block.text)
           .join('');
         onEvent({ type: 'run_aborted', runId: run.runId, partialText });
-        if (isAbortError(error)) throw error;
-        throw normalizeRuntimeAbortReason(mergedSignal.reason);
+        throw error;
       }
 
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -533,7 +650,11 @@ export class AgentRuntime {
       onEvent({ type: 'run_failed', runId: run.runId, error: normalized });
       throw normalized;
     } finally {
-      this.controller.completeRun(run.runId);
+      try { await this.observationOwner?.publishCurrentHistory?.({ strictPrivateProtocol: strictK3Run }); }
+      finally {
+        this.pendingSubtaskBoundary = false;
+        this.controller.completeRun(run.runId);
+      }
     }
   }
 
@@ -555,6 +676,7 @@ export class AgentRuntime {
   private buildInvocationOptions(
     signal?: AbortSignal,
     invocationContext?: RunInvocationContext,
+    messages: Message[] = this.session.getMessages(),
   ): StreamOptions | undefined {
     const options: StreamOptions = {
       ...(signal ? { signal } : {}),
@@ -587,7 +709,7 @@ export class AgentRuntime {
       promptCache: buildPromptCacheSegments(
         systemPromptInput,
         toolDefinitions,
-        this.session.getMessages(),
+        messages,
       ),
     };
   }
@@ -598,14 +720,15 @@ export class AgentRuntime {
       .sort((left, right) => left.name.localeCompare(right.name));
 
     const strictK3 = this.isStrictK3Adapter(this.adapter);
-    const messages = this.session.getMessages().map((message) => ({
+    const stageView=prepareCompoundRootIntentStageView(this.session);
+    const messages = stageView.messages.map((message) => ({
       role: message.role,
       content: message.content
         .filter((block) => !strictK3 || block.type !== 'thinking')
         .map((block) => ({ ...block })),
     }));
     const session = this.session.exportSnapshot();
-    if (strictK3) {
+    if (strictK3 || stageView.active) {
       session.messages = structuredClone(messages);
     }
     const context: ToolExecutionContext = {

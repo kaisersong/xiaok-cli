@@ -108,9 +108,9 @@ describe('artifact workspace runtime contract', () => {
     const created = await host.createTask({ prompt: '生成报告', materials: [] });
     await vi.waitFor(async () => {
       expect((await host.recoverTask(created.taskId)).snapshot.status).toBe('completed');
+      // Publication intentionally dispatches on its own setImmediate chain.
+      expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'completed' });
     });
-
-    expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'completed' });
     const recovered = (await host.recoverTask(created.taskId)).snapshot;
     expect(recovered.events.at(-1)).toEqual({ type: 'task_terminal', status: 'completed' });
   });
@@ -131,9 +131,9 @@ describe('artifact workspace runtime contract', () => {
     const created = await host.createTask({ prompt: '触发失败', materials: [] });
     await vi.waitFor(async () => {
       expect((await host.recoverTask(created.taskId)).snapshot.status).toBe('failed');
+      // Publication intentionally dispatches on its own setImmediate chain.
+      expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'failed' });
     });
-
-    expect(observations.at(-1)).toEqual({ eventType: 'task_terminal', status: 'failed' });
     expect((await host.recoverTask(created.taskId)).snapshot.events.at(-1))
       .toEqual({ type: 'task_terminal', status: 'failed' });
   });
@@ -178,7 +178,7 @@ describe('desktop tool loop invocation and consumer ordering', () => {
     rootDir = join(tmpdir(), `xiaok-desktop-tool-loop-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
     registry = new ToolRegistry({ autoMode: true }, [{
-      permission: 'read',
+      permission: 'safe',
       definition: {
         name: 'noop',
         description: 'Return a deterministic tool result',
@@ -388,6 +388,31 @@ describe('desktop tool loop invocation and consumer ordering', () => {
     );
   });
 
+  it('recovers finalization after a completed tool without executing that tool again', async () => {
+    const execute = vi.fn(async () => '{"ok":true}');
+    registry = new ToolRegistry({ autoMode: true }, [{ permission: 'safe', definition: {
+      name: 'noop', description: 'deterministic result', inputSchema: { type: 'object', properties: {} },
+    }, execute }]);
+    const context = baseContext(), usage = vi.fn(); let calls = 0;
+    const seenTools: string[][] = [];
+    const execution = runDesktopToolLoop({ ...context, maxIterations: 1, onUsage: usage, adapter: {
+      async *stream(messages, tools) {
+        seenTools.push(tools.map(tool => tool.name)); calls++;
+        if (calls === 1) { yield { type: 'tool_use', id: 'once', name: 'noop', input: {} }; return; }
+        const completed = messages.flatMap(message => message.content).find(block => block.type === 'tool_result' && block.tool_use_id === 'once');
+        expect(completed).toMatchObject({ type: 'tool_result', tool_use_id: 'once', content: expect.stringContaining('"ok":true') });
+        yield { type: 'usage', usage: { inputTokens: calls, outputTokens: 1 } };
+        if (calls === 2) throw Error('terminated');
+        yield { type: 'text', delta: 'final answer' }; yield { type: 'done' };
+      },
+    } });
+    await expect(execution).rejects.toMatchObject({ code: 'tool_loop_iteration_limit', partialReply: 'final answer', used: 1 });
+    expect(execute).toHaveBeenCalledOnce(); expect(seenTools).toEqual([['noop', 'tool_search'], [], []]);
+    expect(usage).toHaveBeenCalledTimes(2);
+    expect(usage.mock.calls.map(call => call.slice(0, 2))).toEqual([[2, 1], [3, 1]]);
+    expect(usage.mock.calls[0]?.[2]).not.toBe(usage.mock.calls[1]?.[2]);
+  });
+
   it('checks abort after usage-only clean exhaustion before committing an assistant turn', async () => {
     const controller = new AbortController();
     const usage = vi.fn();
@@ -471,7 +496,7 @@ describe('artifact workspace narrow tools', () => {
       taskId: 'task-owned',
       executionScope: { kind: 'artifact_workspace_generation', generationRequestId: 'request-1', leaseId: 'lease-1' },
       materials: [],
-      emitRuntimeEvent(event) {
+      async emitRuntimeEvent(event) {
         emitted.push(event as unknown as Record<string, unknown>);
       },
       skillInvocation: null,
@@ -574,7 +599,7 @@ describe('artifact workspace narrow tools', () => {
       sessionId: 'session-1', turnId: 'turn-1', intentId: 'intent-1', stepId: 'step-1', taskId: 'task-owned',
       executionScope: { kind: 'artifact_workspace_generation', generationRequestId: 'request-1', leaseId: 'lease-1' },
       materials: [],
-      emitRuntimeEvent(event) { emitted.push(event as unknown as Record<string, unknown>); },
+      async emitRuntimeEvent(event) { emitted.push(event as unknown as Record<string, unknown>); },
       skillInvocation: null, skillCatalog: {} as never, dataRoot: generationRoot, taskStartTime: Date.now(), maxIterations: 4,
       strategies: {
         compact: { enabled: false, shouldCompact: () => false, doCompact: async () => {} },

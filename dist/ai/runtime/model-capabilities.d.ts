@@ -1,5 +1,6 @@
 import type { Message, ModelAdapter, ToolDefinition } from '../../types.js';
 import type { ProviderConversationAuthorization } from './provider-conversation-authorization.js';
+import type { ProviderDisclosureContext } from '../../runtime/sol-pi/provider-disclosure.js';
 export interface CacheControl {
     type: 'ephemeral';
 }
@@ -17,6 +18,11 @@ export interface PromptCacheSegments {
     messages: Message[];
 }
 export interface ModelInvocationOptions {
+    /** Host-created single-attempt capability; never restored from serialized state. */
+    semanticSummaryAttempt?: import('../../runtime/sol-pi/semantic-summary-attempt.js').SemanticSummaryAttempt;
+    /** Exact output reserve used by both the request preview and the actual SDK. */
+    semanticSummaryOutputTokens?: number;
+    providerDisclosure?: ProviderDisclosureContext;
     promptCache?: PromptCacheSegments;
     cacheKey?: string;
     providerConversationAuthorization?: ProviderConversationAuthorization;

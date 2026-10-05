@@ -243,6 +243,101 @@ describe('background runner', () => {
     expect(runner.get(job.jobId)).toMatchObject({ status: 'failed' });
   });
 
+  it('requires shutdown before accepting physical cleanup', async () => {
+    const runner = createBackgroundRunner({ rootDir: testDir, execute: async () => ({ ok: true }), notify: vi.fn() });
+    await expect(runner.waitForDisposedResources()).rejects.toThrow('background_cleanup_not_started');
+    await runner.dispose();
+    await runner.waitForDisposedResources();
+  });
+
+  it('waits for every original executor before reporting a late shutdown rejection', async () => {
+    let rejectA!: (error: Error) => void;
+    let finishB!: () => void;
+    const a = new Promise<void>((_resolve, reject) => { rejectA = reject; });
+    const b = new Promise<void>((resolve) => { finishB = resolve; });
+    const failure = new Error('actual execution cleanup failed');
+    const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5, notify: vi.fn(),
+      execute: async ({ input }) => { await (input === 'A' ? a : b); return { ok: true }; },
+    });
+    await runner.start({ sessionId: 'physical', source: 'chat', input: 'A' });
+    await runner.start({ sessionId: 'physical', source: 'chat', input: 'B' });
+    expect((await runner.dispose()).settled).toBe(false);
+    let settled = false;
+    const physical = runner.waitForDisposedResources();
+    void physical.then(() => { settled = true; }, () => { settled = true; });
+    rejectA(failure);
+    await new Promise(setImmediate);
+    expect(settled).toBe(false);
+    finishB();
+    await expect(physical).rejects.toMatchObject({ errors: expect.arrayContaining([failure]) });
+    await expect(runner.waitForDisposedResources()).rejects.toMatchObject({ errors: expect.arrayContaining([failure]) });
+  });
+
+  it('shares one shutdown attempt when an abort listener reenters dispose', async () => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const execution = new Promise<void>((resolve) => { finish = resolve; });
+    let nested!: ReturnType<ReturnType<typeof createBackgroundRunner>['dispose']>;
+    const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5, notify: vi.fn(),
+      execute: async ({ signal }) => {
+        signal.addEventListener('abort', () => { nested = runner.dispose(); }, { once: true });
+        await execution;
+        return { ok: true };
+      },
+    });
+    try {
+      await runner.start({ sessionId: 'reentrant', source: 'chat', input: 'run' });
+      const stopping = runner.dispose();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(nested).toBeDefined();
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(5);
+      expect((await stopping).settled).toBe(false);
+      expect((await nested).settled).toBe(false);
+      finish();
+      await runner.waitForDisposedResources();
+    } finally { finish(); vi.useRealTimers(); }
+  });
+
+  it('retains original shutdown persistence failure until the executor physically ends', async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5, notify: vi.fn(),
+      execute: async () => { await gate; return { ok: true }; } });
+    const job = await runner.start({ sessionId: 'foreign', source: 'chat', input: 'run' });
+    const file = join(testDir, `${job.jobId}.json`);
+    const foreign = { ...JSON.parse(readFileSync(file, 'utf8')), ownerId: 'another-owner' };
+    writeFileSync(file, JSON.stringify(foreign));
+    await expect(runner.dispose()).rejects.toThrow('state persistence failed');
+    let settled = false;
+    const physical = runner.waitForDisposedResources();
+    void physical.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(setImmediate);
+    expect(settled).toBe(false);
+    finish();
+    await expect(physical).rejects.toMatchObject({ errors: expect.arrayContaining([
+      expect.objectContaining({ message: 'background shutdown state persistence failed' }),
+    ]) });
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(foreign);
+  });
+
+  it('retains an in-flight notification rejection during shutdown', async () => {
+    let started!: () => void;
+    let failNotify!: (error: Error) => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const notify = new Promise<void>((_resolve, reject) => { failNotify = reject; });
+    const failure = new Error('notification cleanup failed');
+    const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5,
+      execute: async () => ({ ok: true }), notify: async () => { started(); await notify; } });
+    await runner.start({ sessionId: 'notifying', source: 'chat', input: 'run' });
+    await entered;
+    expect((await runner.dispose()).settled).toBe(false);
+    const physical = runner.waitForDisposedResources();
+    failNotify(failure);
+    await expect(physical).rejects.toMatchObject({ errors: expect.arrayContaining([failure]) });
+  });
+
   it('reports a never-settling executor as pending after the bounded shutdown', async () => {
     const runner = createBackgroundRunner({ rootDir: testDir, shutdownTimeoutMs: 5, notify: vi.fn(),
       execute: () => new Promise(() => {}),

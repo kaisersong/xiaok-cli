@@ -1,9 +1,112 @@
+import { isDeepStrictEqual } from 'node:util';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { captureIntentData } from '../../runtime/intent-delegation/intent-commit-boundary.js';
 import { createIntentPlan } from '../intent-delegation/planner.js';
 import { DELEGATION_TEMPLATES } from '../intent-delegation/templates.js';
 import { applyIntentStepUpdate, recordStageArtifact } from '../../runtime/intent-delegation/dispatcher.js';
+import { getIntentProducerMutationPort, isIntentDelegationStoreFor } from '../../runtime/intent-delegation/store.js';
 import { assertSessionWriteOwnership } from '../../runtime/intent-delegation/ownership.js';
-export function createIntentDelegationTools(options) {
-    return [
+const producerTools = new WeakMap();
+const producerScope = new AsyncLocalStorage();
+const producerIdentities = new WeakMap();
+function originalProducerTool(tool) {
+    const expected = producerIdentities.get(tool);
+    if (!expected)
+        return false;
+    const descriptors = Object.getOwnPropertyDescriptors(tool);
+    if (Reflect.ownKeys(tool).some(k => typeof k !== 'string') || Object.keys(descriptors).sort().join(',') !== 'definition,execute,permission' || Object.values(descriptors).some(d => !('value' in d)))
+        return false;
+    return descriptors.execute.value === expected.execute && descriptors.permission.value === expected.permission && isDeepStrictEqual(captureIntentData(descriptors.definition.value), expected.definition);
+}
+/** Identity only, never an execution or business grant. */
+export function isIntentProducerTool(tool) { return producerTools.has(tool) && originalProducerTool(tool); }
+/** Read-only identity of the original host-created pair; never inferred from a ledger or tool input. */
+export function readProductIntentProducerInstance(tools, sessionStore, sessionId) {
+    const pair = tools.filter(tool => producerTools.has(tool) || ['intent_step_update', 'intent_stage_artifact'].includes(tool.definition.name));
+    if (!pair.length)
+        return;
+    const origin = producerTools.get(pair[0]);
+    if (!origin || pair.length !== 2 || new Set(pair).size !== 2 || pair.map(tool => tool.definition.name).sort().join(',') !== 'intent_stage_artifact,intent_step_update' || pair.some(tool => !originalProducerTool(tool) || producerTools.get(tool) !== origin) || !isIntentDelegationStoreFor(origin.ledgerStore, sessionStore) || origin.sessionId !== sessionId || typeof origin.instanceId !== 'string' || !origin.instanceId.trim() || Buffer.byteLength(origin.instanceId) > 160 || /[\x00-\x1f\x7f]/.test(origin.instanceId))
+        throw Error('intent_producer_fixed_instance');
+    return origin.instanceId;
+}
+/** Fixed product installation bridge; origin and actual Store come from private factory records. */
+export function createProductIntentProducerRegistryAdapter(options) {
+    const candidates = options.tools.filter(tool => producerTools.has(tool) || ['intent_step_update', 'intent_stage_artifact'].includes(tool.definition.name));
+    if (!candidates.length)
+        return undefined;
+    const origin = producerTools.get(candidates[0]);
+    if (options.requestSource !== 'user' || !origin || !isIntentDelegationStoreFor(origin.ledgerStore, options.sessionStore))
+        throw Error('intent_producer_product_store');
+    return createIntentProducerRegistryAdapter({ tools: candidates, ledgerStore: origin.ledgerStore, sessionId: options.sessionId, requestSource: options.requestSource, assertAdmission: options.assertAdmission });
+}
+export function createIntentProducerRegistryAdapter(options) {
+    if (!['user', 'agent', 'scheduler'].includes(options.requestSource))
+        throw Error('intent_producer_source');
+    const store = options.ledgerStore, sessionId = options.sessionId, source = options.requestSource, admit = options.assertAdmission;
+    const tools = options.tools.filter(tool => producerTools.has(tool));
+    if (tools.length !== 2 || tools.some(tool => !originalProducerTool(tool)) || new Set(tools).size !== 2 || tools.map(tool => tool.definition.name).sort().join(',') !== 'intent_stage_artifact,intent_step_update' || producerTools.get(tools[0]) !== producerTools.get(tools[1]) || tools.some(tool => { const origin = producerTools.get(tool); return origin.ledgerStore !== store || origin.sessionId !== sessionId; }))
+        throw Error('intent_producer_adapter_identity');
+    const instanceId = producerTools.get(tools[0]).instanceId;
+    if (typeof instanceId !== 'string' || !instanceId.trim() || Buffer.byteLength(instanceId) > 160 || /[\x00-\x1f\x7f]/.test(instanceId) || tools.some(tool => producerTools.get(tool).instanceId !== instanceId))
+        throw Error('intent_producer_fixed_instance');
+    return { tools: Object.freeze([...tools]), async execute(request, withLease, assertCurrent) {
+            const context = request.context, origin = request.tool && producerTools.get(request.tool);
+            if (!origin || !tools.includes(request.tool) || !context?.hostProviderInvocationId || !context.toolInvocationId || context.session.sessionId !== sessionId)
+                throw Error('intent_producer_context');
+            const current = () => { assertCurrent(); if (!originalProducerTool(request.tool))
+                throw Error('intent_producer_adapter_identity'); context.signal?.throwIfAborted(); const result = admit(); if (result !== undefined) {
+                void Promise.resolve(result).catch(() => { });
+                throw Error('intent_producer_async_admission');
+            } };
+            current();
+            const prepared = await request.native.prepare(request.name, captureIntentData(request.input), { signal: context.signal });
+            current();
+            if (prepared.kind !== 'prepared')
+                return prepared.message;
+            let registryCurrent;
+            const nativeCurrent = () => { current(); if (registryCurrent) {
+                const result = registryCurrent();
+                if (result !== undefined) {
+                    void Promise.resolve(result).catch(() => { });
+                    throw Error('intent_producer_registry_async');
+                }
+            } };
+            return withLease(async (lease) => {
+                nativeCurrent();
+                lease.assertCurrent();
+                const scope = { options: origin, lease, requestSource: source, providerInvocationId: context.hostProviderInvocationId, toolInvocationId: context.toolInvocationId, active: true, current: nativeCurrent, bindRegistry(context) {
+                        if (registryCurrent || typeof context?.assertPermissionApproval !== 'function')
+                            throw Error('intent_producer_registry_guard');
+                        registryCurrent = context.assertPermissionApproval.bind(context);
+                        nativeCurrent();
+                    } };
+                try {
+                    return await lease.trackInFlight(producerScope.run(scope, () => request.native.execute(prepared.invocation)));
+                }
+                finally {
+                    scope.active = false;
+                }
+            }, context.signal, nativeCurrent);
+        } };
+}
+function currentProducerScope(options) {
+    const scope = producerScope.getStore();
+    if (!scope)
+        return undefined;
+    if (!scope.active || scope.options !== options)
+        throw Error('intent_producer_scope_invalid');
+    scope.current();
+    scope.lease.assertCurrent();
+    return scope;
+}
+export function createIntentDelegationTools(rawOptions) {
+    const descriptors = Object.getOwnPropertyDescriptors(rawOptions);
+    if (Reflect.ownKeys(rawOptions).some(k => typeof k !== 'string') || Object.values(descriptors).some(d => !('value' in d)))
+        throw Error('intent_tool_options_accessor');
+    const options = Object.freeze({ ...rawOptions });
+    const recordProducer = getIntentProducerMutationPort(options.ledgerStore);
+    const tools = [
         {
             permission: 'safe',
             definition: {
@@ -98,7 +201,8 @@ export function createIntentDelegationTools(options) {
                     required: ['instance_id', 'session_id', 'intent_id', 'active_step_id', 'step_status', 'breadcrumb'],
                 },
             },
-            async execute(input) {
+            async execute(input, context) {
+                producerScope.getStore()?.bindRegistry(context);
                 const sessionId = options.sessionId;
                 const intentId = requireNonEmptyString(input.intent_id, 'intent_id');
                 const activeStepId = requireNonEmptyString(input.active_step_id, 'active_step_id');
@@ -112,6 +216,11 @@ export function createIntentDelegationTools(options) {
                 const currentIntent = ledger.intents.find((candidate) => candidate.intentId === intentId);
                 if (!currentIntent) {
                     return `Error: 未找到 intent ${intentId}`;
+                }
+                const scope = currentProducerScope(options);
+                if (scope) {
+                    const saved = await recordProducer(sessionId, intentId, instanceId, { kind: 'step-report', stepId: activeStepId, status: stepStatus, breadcrumb, receiptNote: receiptNote ?? null, blockedReason: blockedReason ?? null, origin: { kind: 'model-report', providerInvocationId: scope.providerInvocationId, toolInvocationId: scope.toolInvocationId } }, scope.requestSource, scope.lease);
+                    return JSON.stringify(saved.latestPlan, null, 2);
                 }
                 const updatedIntent = applyIntentStepUpdate(currentIntent, {
                     stepId: activeStepId,
@@ -178,7 +287,8 @@ export function createIntentDelegationTools(options) {
                     ],
                 },
             },
-            async execute(input) {
+            async execute(input, context) {
+                producerScope.getStore()?.bindRegistry(context);
                 const instanceId = resolveScopedInstanceId(input.instance_id, options.instanceId);
                 const sessionId = options.sessionId;
                 const intentId = requireNonEmptyString(input.intent_id, 'intent_id');
@@ -189,6 +299,14 @@ export function createIntentDelegationTools(options) {
                 const currentIntent = ledger.intents.find((candidate) => candidate.intentId === intentId);
                 if (!currentIntent) {
                     return `Error: 未找到 intent ${intentId}`;
+                }
+                const scope = currentProducerScope(options);
+                if (scope) {
+                    const text = (value) => { if (value === undefined)
+                        return null; if (typeof value !== 'string')
+                        throw Error('intent_producer_text'); return value; };
+                    const saved = await recordProducer(sessionId, intentId, instanceId, { kind: 'artifact-report', stageId, kindOfArtifact: requireArtifactKind(input.kind), storage: requireArtifactStorage(input.storage), label, path: text(input.path), inlineValue: text(input.inline_value), summary: text(input.summary), reportedStructuralValidation: requireValidationState(input.structural_validation, 'structural_validation'), reportedSemanticValidation: requireValidationState(input.semantic_validation, 'semantic_validation'), origin: { kind: 'model-report', providerInvocationId: scope.providerInvocationId, toolInvocationId: scope.toolInvocationId } }, scope.requestSource, scope.lease);
+                    return JSON.stringify(saved.latestPlan, null, 2);
                 }
                 const artifact = {
                     artifactId: `${stageId}:artifact:${Date.now().toString(36)}`,
@@ -245,6 +363,12 @@ export function createIntentDelegationTools(options) {
             },
         },
     ];
+    for (const tool of tools)
+        if (['intent_step_update', 'intent_stage_artifact'].includes(tool.definition.name)) {
+            producerTools.set(tool, options);
+            producerIdentities.set(tool, { execute: tool.execute, permission: tool.permission, definition: captureIntentData(tool.definition) });
+        }
+    return tools;
 }
 function buildIntentPlanDraft(input) {
     const template = DELEGATION_TEMPLATES.find((candidate) => candidate.id === input.templateId);

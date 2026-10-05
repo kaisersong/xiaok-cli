@@ -6,7 +6,7 @@ import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/prov
 import { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
-type Request = Omit<Parameters<typeof streamDesktopSummaryRecovery>[0], 'adapter'> & { adapter?: Pick<ModelAdapter, 'stream'>; beforeRequest?: () => Promise<void> };
+type Request = Omit<Parameters<typeof streamDesktopSummaryRecovery>[0], 'adapter'> & { adapter?: Pick<ModelAdapter, 'stream'> };
 export type ProjectAgentModel = Awaited<ReturnType<typeof createProjectAgentModel>>;
 
 export function validateProjectAgentModelSelection(modelId: unknown, runtimeType: unknown, config: Config, requestSource?: 'user'|'agent'|'scheduler'): void {
@@ -50,31 +50,54 @@ export async function createProjectAgentModel(options: {
       for (;;) {
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
-        await input.beforeRequest?.();
-        input.options?.signal?.throwIfAborted();
         const messages: Message[] = switched ? input.messages.map(message => ({...message, content: message.content.filter(block => block.type !== 'thinking')})).filter(message => message.content.length > 0) : input.messages;
         const systemPrompt = switched ? input.systemPrompt.replace(`你当前运行的模型是: ${initialName}`, `你当前运行的模型是: ${adapter.getModelName()}`) : input.systemPrompt;
+        if (messages.some(message => message.content.some(block => block.type === 'image')) && !binding.capabilities.includes('image_in')) throw new Error('project_agent_model_image_not_supported');
+        if (!canFallback) {
+          // The summary stream owns authority, preparation and invocation callbacks.
+          yield* streamDesktopSummaryRecovery({...input, adapter, messages, systemPrompt});
+          return;
+        }
+        await input.beforeRequest?.();
+        input.options?.signal?.throwIfAborted();
+        if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         const invocationId = randomUUID();
+        const request = {...input, adapter, messages, systemPrompt, invocationId};
+        const prepared = input.prepareRequest ? await input.prepareRequest(request) : request;
+        input.options?.signal?.throwIfAborted();
+        if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
         input.onInvocation?.(invocationId);
         const chunks: StreamChunk[] = [];
+        let providerFailed = false;
+        let providerError: unknown;
+        const iterator = streamDesktopTaskProviderConversation(prepared)[Symbol.asyncIterator]();
         try {
-          if (messages.some(message => message.content.some(block => block.type === 'image')) && !binding.capabilities.includes('image_in')) throw new Error('project_agent_model_image_not_supported');
-          if (!canFallback) {
-            yield* streamDesktopSummaryRecovery({...input, adapter, messages, systemPrompt, invocationId});
-            return;
-          }
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
-          for await (const chunk of streamDesktopTaskProviderConversation({...input, adapter, messages, systemPrompt, invocationId})) {
+          for (;;) {
+            let next: IteratorResult<StreamChunk>;
+            try { next = await iterator.next(); }
+            catch (error) { providerFailed = true; providerError = error; break; }
+            if (next.done) break;
+            const chunk = next.value;
+            // Usage belongs to this actual request even when its visible result fails.
+            if (chunk.type === 'usage') { yield chunk; continue; }
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
-          if (!chunks.some(chunk => chunk.type === 'done') || !chunks.some(chunk => chunk.type === 'tool_use' || (chunk.type === 'text' && chunk.delta.trim()))) throw new Error('project_agent_model_incomplete_response');
-        } catch (error) {
-          input.options?.signal?.throwIfAborted();
-          if (!canFallback || isBoundaryFailure(error)) throw error;
-          canFallback = false;
+        } finally { await iterator.return?.(); }
+        input.options?.signal?.throwIfAborted();
+        if (!providerFailed && (!chunks.some(chunk => chunk.type === 'done') || !chunks.some(chunk => chunk.type === 'tool_use' || (chunk.type === 'text' && chunk.delta.trim())))) {
+          providerFailed = true;
+          providerError = new Error('project_agent_model_incomplete_response');
+        }
+        if (providerFailed) {
+          if (isBoundaryFailure(providerError)) throw providerError;
           const current = resolveRuntimeModelBinding(await options.loadConfig());
-          if (current.modelId === binding.modelId && current.providerId === binding.providerId && current.wireModel === binding.wireModel) throw error;
+          if (current.modelId === binding.modelId && current.providerId === binding.providerId && current.wireModel === binding.wireModel) throw providerError;
+          await input.onRecovery?.({summaryOnly: false});
+          input.options?.signal?.throwIfAborted();
+          if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
+          canFallback = false;
           binding = current; adapter = factory(current); switched = true;
           continue;
         }

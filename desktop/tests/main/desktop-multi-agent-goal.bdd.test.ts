@@ -12,25 +12,39 @@ import { InProcessTaskRuntimeHost } from '../../../src/runtime/task-host/task-ru
 import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
 import { MaterialRegistry } from '../../../src/runtime/task-host/material-registry.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
+import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
 
-const nativeWorker = vi.hoisted(() => ({ output: '', root: '' }));
+const nativeWorker = vi.hoisted(() => ({ output: '', root: '', protectionOutput: '', protectionRoot: '', starts: 0, exits: 0 }));
 vi.mock('node:worker_threads', async importOriginal => {
   const actual = await importOriginal<typeof import('node:worker_threads')>();
   const source = new URL('../../../src/runtime/task-host/delivery-verifier-worker.js', import.meta.url).href;
+  const protectionSource = new URL('../../../src/runtime/task-host/protection-read-worker.ts', import.meta.url).href;
   return { ...actual, Worker: class extends actual.Worker {
     constructor(filename: ConstructorParameters<typeof actual.Worker>[0], options?: ConstructorParameters<typeof actual.Worker>[1]) {
       const mapped = String(filename) === source;
+      const protectionMapped = String(filename) === protectionSource;
       if (mapped && !nativeWorker.output) throw new Error('test compiled Worker entry is not ready');
-      super(mapped ? nativeWorker.output : filename, options);
+      if (protectionMapped && !nativeWorker.protectionOutput) throw new Error('fresh protection Worker entry is not ready');
+      super(mapped ? nativeWorker.output : protectionMapped ? nativeWorker.protectionOutput : filename, options);
+      if (mapped || protectionMapped) { nativeWorker.starts++; this.once('exit', () => nativeWorker.exits++); }
     }
   } };
 });
-beforeAll(async () => { Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts')); });
-afterAll(() => { if (nativeWorker.root) rmSync(nativeWorker.root, { recursive: true, force: true, maxRetries: 3 }); });
+beforeAll(async () => {
+  Object.assign(nativeWorker, await compileVerifierEntry('delivery-verifier-worker.ts'));
+  const protection = await compileProtectionWorkerEntry();
+  nativeWorker.protectionOutput = protection.output; nativeWorker.protectionRoot = protection.root;
+});
+afterAll(() => {
+  for (const root of [nativeWorker.root, nativeWorker.protectionRoot]) if (root) rmSync(root, { recursive: true, force: true, maxRetries: 3 });
+});
 
 describe('BDD: Goal settlement and child execution share the actual group decision boundary', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
-  afterEach(async () => { vi.restoreAllMocks(); for (const action of cleanup.splice(0).reverse()) await action(); });
+  afterEach(async () => {
+    vi.restoreAllMocks(); for (const action of cleanup.splice(0).reverse()) await action();
+    expect(nativeWorker.exits, 'only actual native Worker exit confirms physical completion').toBe(nativeWorker.starts);
+  });
   it.each([false, true].flatMap(complete => ['completed', 'failed', 'interrupted', 'closed', 'handoff-write-failure', 'late-success', 'late-failure', 'queued-interrupted', 'queued-closed', 'init-failed'].map(outcome => ({ complete, outcome }))))('A18 Given complete=$complete and child outcome=$outcome, Then automatic settlement waits for the actual child handoff', async ({ complete, outcome }) => {
     const root = mkdtempSync(join(tmpdir(), 'xiaok-ma-goal-')); cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
     const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite')); const goals = new SqliteGoalStore(join(root, 'goals.sqlite'));

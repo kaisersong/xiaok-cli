@@ -335,6 +335,13 @@ describe('ScheduledPage stale schedule edits', () => {
     expect(mocks.createThread).not.toHaveBeenCalled();
   });
 
+  it('pending publication does not create a task or report a successful Loop start', async () => {
+    mocks.getScheduledTasks.mockResolvedValue([{id:'pending-schedule',name:'Pending Loop',description:'',prompt:'',frequency:'manual',status:'active',executorKind:'loop',loopId:'user-loop-1',createdAt:1,updatedAt:1}]);
+    mocks.runLoopNow.mockResolvedValue({status:'publication_pending',run:{id:'run',status:'running'}});
+    renderScheduledPage();await screen.findByText('Pending Loop');fireEvent.click(screen.getByRole('button',{name:'运行'}));
+    await screen.findByText('等待验证发布');expect(mocks.createTask).not.toHaveBeenCalled();expect(mocks.createThread).not.toHaveBeenCalled();expect(screen.queryByText('循环已启动')).not.toBeInTheDocument();
+  });
+
   it('暂停 Loop 计划时写回 main process 的 TimedAction 状态', async () => {
     const loopSchedule = {
       id: 'loop-schedule-1',

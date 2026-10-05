@@ -29,6 +29,12 @@ export interface LoginOptions {
     plan?: string;
     baseUrl?: string;
 }
+/** Optional owning host control, never a CLI credential or authorization. */
+export interface LoginCancellation {
+    signal: AbortSignal;
+    onInterrupt?(): void;
+    trackWrite?(original: Promise<void>): void;
+}
 export type LoginCommandResult = {
     status: 'saved';
     providerId: string;
@@ -47,5 +53,5 @@ export type SecretInputChunkResult = {
 };
 /** Consume every character because terminals may coalesce paste + Enter. */
 export declare function consumeSecretInputChunk(value: string, chunk: Buffer): SecretInputChunkResult;
-export declare function runLoginCommand(options: LoginOptions): Promise<LoginCommandResult>;
+export declare function runLoginCommand(options: LoginOptions, cancellation?: LoginCancellation): Promise<LoginCommandResult>;
 export declare function registerLoginCommand(program: Command): void;

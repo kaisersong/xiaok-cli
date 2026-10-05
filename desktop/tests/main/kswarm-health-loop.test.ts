@@ -148,7 +148,7 @@ describe('KSwarmServiceHealthScanner', () => {
     scanner.close();
   });
 
-  it('requests notification for a new high severity anomaly once', () => {
+  it('requests notification for a new high severity anomaly once', async () => {
     const scanner = new KSwarmServiceHealthScanner(dbPath, {
       probe: () => ({
         expectedEntryPath: '/app/services/kswarm/src/server/index.js',
@@ -159,8 +159,8 @@ describe('KSwarmServiceHealthScanner', () => {
       }),
     });
 
-    const first = scanner.scan({ loopRunId: 'run-1', now: 1_000 });
-    const second = scanner.scan({ loopRunId: 'run-2', now: 2_000 });
+    const first = await scanner.scan({ loopRunId: 'run-1', now: 1_000 });
+    const second = await scanner.scan({ loopRunId: 'run-2', now: 2_000 });
 
     expect(first.summaryEvidence.metadata.notificationDecision).toMatchObject({
       shouldNotify: true,
@@ -174,7 +174,7 @@ describe('KSwarmServiceHealthScanner', () => {
     scanner.close();
   });
 
-  it('dedupes repeated unresolved anomalies after the first notification', () => {
+  it('dedupes repeated unresolved anomalies after the first notification', async () => {
     const scanner = new KSwarmServiceHealthScanner(dbPath, {
       probe: () => ({
         expectedEntryPath: '/app/services/kswarm/src/server/index.js',
@@ -185,9 +185,9 @@ describe('KSwarmServiceHealthScanner', () => {
       }),
     });
 
-    scanner.scan({ loopRunId: 'run-1', now: 1_000 });
-    scanner.scan({ loopRunId: 'run-2', now: 2_000 });
-    const third = scanner.scan({ loopRunId: 'run-3', now: 3_000 });
+    await scanner.scan({ loopRunId: 'run-1', now: 1_000 });
+    await scanner.scan({ loopRunId: 'run-2', now: 2_000 });
+    const third = await scanner.scan({ loopRunId: 'run-3', now: 3_000 });
 
     expect(third.summaryEvidence.metadata.notificationDecision).toMatchObject({
       shouldNotify: false,
@@ -197,15 +197,15 @@ describe('KSwarmServiceHealthScanner', () => {
     scanner.close();
   });
 
-  it('requests notification on the second source unavailable occurrence', () => {
+  it('requests notification on the second source unavailable occurrence', async () => {
     const scanner = new KSwarmServiceHealthScanner(dbPath, {
       probe: () => {
         throw new Error('probe failed');
       },
     });
 
-    scanner.scan({ loopRunId: 'run-1', now: 1_000 });
-    const second = scanner.scan({ loopRunId: 'run-2', now: 2_000 });
+    await scanner.scan({ loopRunId: 'run-1', now: 1_000 });
+    const second = await scanner.scan({ loopRunId: 'run-2', now: 2_000 });
 
     expect(second.summaryEvidence.metadata.notificationDecision).toMatchObject({
       shouldNotify: true,

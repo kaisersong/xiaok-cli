@@ -1,6 +1,7 @@
+import {inheritDesktopNativeReadonlyDescriptor,assertDesktopNativeDescriptorCurrent} from './desktop-native-catalog-provenance.js';
 import { randomUUID } from 'node:crypto';
 import type { PermissionClass, Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../src/types.js';
-import { isToolPermissionGrant, ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
+import { snapshotToolPermissionGrant, ToolRegistry, type RegistryOptions } from '../../src/ai/tools/index.js';
 import { getCanonicalToolId } from '../../src/ai/tools/tool-identity.js';
 import { MULTI_AGENT_TOOL_NAMES } from '../../src/ai/tools/multi-agent.js';
 import type { ExecutionAuthorizationSnapshot } from '../shared/multi-agent-types.js';
@@ -253,6 +254,7 @@ export class DesktopCapabilityCatalog {
           if (Date.now() >= authority.deadlineAt) throw new DOMException('invocation deadline exceeded', 'AbortError');
           authority.assertCurrent?.(); context?.assertPermissionApproval?.();
           if (this.descriptors.get(key) !== descriptor || !this.available(record, key, descriptor)) throw new Error('capability revoked or scope changed');
+          assertDesktopNativeDescriptorCurrent(descriptor);
           const invoke = descriptor.bindInvocation(authority);
           const boundContext: ToolExecutionContext | undefined = context ? { ...context,
             signal: AbortSignal.any([authority.signal, ...(context.signal ? [context.signal] : [])]),
@@ -262,6 +264,7 @@ export class DesktopCapabilityCatalog {
           return invoke(input, boundContext);
         },
       };
+      inheritDesktopNativeReadonlyDescriptor(descriptor,tool);
       record.tools.set(name, tool); record.handle.registry.registerTool(tool);
     }
   }
@@ -296,7 +299,7 @@ export class DesktopCapabilityCatalog {
           const item = { current, listener }; record.invalidations.add(item); return () => { record.invalidations.delete(item); };
         },
       });
-      return isToolPermissionGrant(result) ? result : false;
+      return snapshotToolPermissionGrant(result) ?? false;
     }
     if (remaining <= 0) return false;
     return new Promise<boolean | ToolPermissionGrant>((resolve, reject) => {
@@ -306,13 +309,14 @@ export class DesktopCapabilityCatalog {
         clearTimeout(timer); authority.signal.removeEventListener('abort', abort);
         if (error) { reject(error.reason); return; }
         if (authority.signal.aborted || Date.now() >= minDeadlineAt) { resolve(false); return; }
-        if (!isToolPermissionGrant(approved)) { resolve(approved === true); return; }
+        const grant = snapshotToolPermissionGrant(approved);
+        if (!grant) { resolve(approved === true); return; }
         // Preserve the input-consuming receipt rather than truthiness. This
         // invocation-local adapter also retains the captured short deadline
         // through a later async opaque journal; it never renews that deadline.
         resolve({ approved: true,
-          prepareInput: finalInput => { assertApprovalCurrent(); return approved.prepareInput(finalInput); },
-          assertCurrent: () => { assertApprovalCurrent(); return approved.assertCurrent(); },
+          prepareInput: finalInput => { assertApprovalCurrent(); return grant.prepareInput(finalInput); },
+          assertCurrent: () => { assertApprovalCurrent(); return grant.assertCurrent(); },
         });
       };
       const abort = () => finish(false);

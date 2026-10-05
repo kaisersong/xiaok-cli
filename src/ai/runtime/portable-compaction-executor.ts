@@ -16,6 +16,7 @@ export type NativeCompactionFailureClass =
 
 export type PortableCompactionTrigger =
   | { kind: 'threshold' }
+  | { kind: 'semantic' }
   | {
       kind: 'native_failure';
       failureClass: NativeCompactionFailureClass;
@@ -51,6 +52,8 @@ export type PortableCompactionExecutionOutcome =
     );
 
 export interface PortableCompactionPorts {
+  /** Semantic owner validates anchors and persists CAS before installing live history. */
+  applySemanticPlan?(plan: CompactionPlan, summaryText: string): CompactionApplyOutcome | Promise<CompactionApplyOutcome>;
   summarizePrefix(
     messages: readonly Message[],
     signal: AbortSignal,
@@ -86,7 +89,7 @@ export async function executePortableCompaction(
 ): Promise<PortableCompactionExecutionOutcome> {
   throwIfAborted(request.signal);
 
-  if (request.plan.invalidReason) {
+  if (request.plan.invalidReason || (request.trigger.kind === 'semantic' && !ports.applySemanticPlan)) {
     return {
       status: 'invalid_plan',
       record: null,
@@ -118,7 +121,9 @@ export async function executePortableCompaction(
     if (isClosedAbortError(error)) throw error;
 
     return {
-      ...ports.applyPlan(request.plan, undefined),
+      ...(request.trigger.kind === 'semantic'
+        ? { status: 'no_gain' as const, record: null }
+        : ports.applyPlan(request.plan, undefined)),
       trigger: request.trigger,
       summaryAttempted: true,
       summaryModelFailed: true,
@@ -126,6 +131,16 @@ export async function executePortableCompaction(
     };
   }
 
+  if (request.trigger.kind === 'semantic') {
+    return {
+      ...(summaryText.trim()
+        ? await ports.applySemanticPlan!(request.plan, summaryText)
+        : { status: 'no_gain' as const, record: null }),
+      trigger: request.trigger,
+      summaryAttempted: true,
+      summaryModelFailed: false,
+    };
+  }
   return {
     ...ports.applyPlan(request.plan, summaryText),
     trigger: request.trigger,

@@ -1,0 +1,58 @@
+import { captureApplicationData } from './application-value-data.js';
+import { assertIntentApplicationEnvelope } from './intent-application-binding.js';
+import { canonicalVerificationJson as json } from './protocol.js';
+import { parseBusinessApplicationBinding, businessApplicationBindingHash, businessApplicationOwner } from './business-application-binding.js';
+function shape(v, keys) { if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).sort().join(',') !== keys.sort().join(','))
+    throw Error('application_review_shape'); }
+function id(v) { if (typeof v !== 'string' || !v || Buffer.byteLength(v) > 160 || /[\x00-\x1f\x7f]/.test(v))
+    throw Error('application_review_identity'); }
+function int(v, min = 0, max = Number.MAX_SAFE_INTEGER) { if (!Number.isSafeInteger(v) || v < min || v > max)
+    throw Error('application_review_number'); }
+function hash(v) { if (typeof v !== 'string' || !/^[a-f0-9]{64}$/.test(v))
+    throw Error('application_review_hash'); }
+function freeze(v) { if (v && typeof v === 'object') {
+    Object.values(v).forEach(freeze);
+    Object.freeze(v);
+} return v; }
+function ascii(raw) { return Buffer.from(json(raw).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))); }
+/** Complete native review parser. A parsed value/hash has no approval authority. */
+export function parseApplicationBindingReview(raw) {
+    assertIntentApplicationEnvelope(raw);
+    const intent = Object.getOwnPropertyDescriptor((Object.getOwnPropertyDescriptor(raw, 'binding')?.value ?? {}), 'kind')?.value === 'intent', limit = intent ? 1048576 : 65536;
+    const snapshot = captureApplicationData(raw, { maximumBytes: limit, maximumNodes: limit, invalid: 'application_review_shape', limit: 'application_review_limit' });
+    const serialized = json(snapshot);
+    if (Buffer.byteLength(serialized) > limit || ascii(snapshot).length > limit)
+        throw Error('application_review_limit');
+    const r = JSON.parse(serialized);
+    shape(r, ['version', 'purpose', 'authorityId', 'challengeId', 'principal', 'requestSource', 'owner', 'registrationHash', 'previousBindingHash', 'binding', 'bindingHash', 'deadline']);
+    if (r.version !== 1 || r.purpose !== 'completion-application-binding' || r.requestSource !== 'user')
+        throw Error('application_review_purpose');
+    id(r.authorityId);
+    id(r.challengeId);
+    shape(r.principal, ['uid', 'accountGeneration', 'auditSessionId']);
+    int(r.principal.uid, 1, 0xfffffffe);
+    int(r.principal.auditSessionId, 1, 0xfffffffe);
+    if (typeof r.principal.accountGeneration !== 'string' || !/^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/.test(r.principal.accountGeneration))
+        throw Error('application_review_principal');
+    shape(r.owner, ['profileId', 'ownerKind', 'ownerId']);
+    id(r.owner.profileId);
+    id(r.owner.ownerId);
+    if (!['goal', 'loop', 'intent'].includes(r.owner.ownerKind))
+        throw Error('application_review_owner');
+    hash(r.registrationHash);
+    if (r.previousBindingHash !== null)
+        hash(r.previousBindingHash);
+    hash(r.bindingHash);
+    r.binding = parseBusinessApplicationBinding(r.binding);
+    if (json({ ownerKind: r.owner.ownerKind, ownerId: r.owner.ownerId }) !== json(businessApplicationOwner(r.binding)) || businessApplicationBindingHash(r.binding) !== r.bindingHash)
+        throw Error('application_review_binding');
+    shape(r.deadline, ['domainId', 'qualificationEpoch', 'notBefore', 'validUntil']);
+    id(r.deadline.domainId);
+    int(r.deadline.qualificationEpoch);
+    int(r.deadline.notBefore);
+    int(r.deadline.validUntil);
+    if (r.deadline.validUntil <= r.deadline.notBefore || r.deadline.validUntil - r.deadline.notBefore > 300000)
+        throw Error('application_review_deadline');
+    return freeze(r);
+}
+export function applicationBindingReviewBytes(raw) { return ascii(parseApplicationBindingReview(raw)); }

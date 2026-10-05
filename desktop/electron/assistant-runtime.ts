@@ -1,3 +1,5 @@
+import {readLoopCompletedRun} from './loop-completion-consumer.js';
+import {captureLoopRunContext,assertOrdinaryLoopOwner} from './loop-run-context.js';
 import {
   completeAssistantJson,
   validateEveningReflection,
@@ -108,7 +110,8 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
   });
 
   return {
-    async runLoopNow(loopId, trigger, signal) {
+    async runLoopNow(loopId, trigger, signal, rawContext) {
+      const context=captureLoopRunContext(rawContext);
       const assistantKind = assistantKindForLoop(loopId);
       if (!assistantKind) return { status: 'skipped', reason: 'missing_loop' };
       const startedAt = now();
@@ -123,15 +126,23 @@ export function createAssistantRuntime(options: CreateAssistantRuntimeOptions): 
         trigger,
         now: startedAt,
       });
-      const begin = options.loopStore.beginLoopRun(loopId, effectiveTrigger, startedAt, staleAfterMs);
-      if (begin.status !== 'started') return begin;
+      const begin = options.loopStore.beginLoopRun(loopId, effectiveTrigger, startedAt, staleAfterMs,context);
+      if (begin.status !== 'started') {
+        if(begin.status==='already_running'){const run=options.loopStore.getLoopRun(begin.activeRunId);if(run&&options.loopStore.getLoopRunLifecycle(run.id)?.businessState==='publication_pending'){options.loopStore.recoverLoopPublicationCandidates({runId:run.id,requestSource:context.requestSource});return {status:'publication_pending',run};}}
+        if(begin.status==='already_completed'){const run=options.loopStore.getLoopRun(begin.completedRunId);if(!run)throw Error('loop_completion_missing');if(!await readLoopCompletedRun(options.loopStore,{runId:run.id,loopId,logicalRunKey:String(effectiveTrigger.logicalRunKey??'').trim(),requestSource:context.requestSource,...(signal?{signal}:{})}))return {status:'publication_pending',run};}
+        return begin;
+      }
+      const producer=options.loopStore.getLoopRunPublicationBasis(begin.run.id)?options.loopStore.openLoopPublicationProducer(begin.run):undefined;
+      if(!producer)assertOrdinaryLoopOwner('loop_run',begin.run.id);
 
       await executor.execute({
         kind: assistantKind,
         runId: begin.run.id,
         now: startedAt,
         signal,
+        publicationProducer:producer,
       });
+      if(options.loopStore.getLoopRunLifecycle(begin.run.id)?.businessState==='publication_pending'){options.loopStore.recoverLoopPublicationCandidates({runId:begin.run.id,requestSource:context.requestSource});return {status:'publication_pending',run:options.loopStore.getLoopRun(begin.run.id)!};}
       const persisted = options.loopStore.getLoopRun(begin.run.id) ?? begin.run;
       return resultFromRun(persisted);
     },
@@ -144,7 +155,7 @@ function assistantKindForLoop(loopId: string): AssistantKind | undefined {
   return undefined;
 }
 
-function assistantTrigger(input: {
+export function assistantTrigger(input: {
   assistantKind: AssistantKind;
   profile: AssistantProfile;
   trigger?: LoopRunTrigger;
@@ -184,5 +195,5 @@ function localDate(instant: number, timeZone: string): string {
 function resultFromRun(run: LoopRun): Extract<RunLoopNowResult, { run: LoopRun }> {
   if (run.status === 'success') return { status: 'success', run };
   if (run.status === 'blocked') return { status: 'blocked', run };
-  return { status: 'failed', run };
+  return {status:run.status==='running'?'executing':'failed',run};
 }

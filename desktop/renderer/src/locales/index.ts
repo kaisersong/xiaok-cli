@@ -7,6 +7,11 @@ import type { GuardFailure, HostDeliveryRecord } from '../../../../src/runtime/t
 export type Locale = "zh" | "en";
 
 export interface LocaleStrings {
+  loopPublication: import('./loop-publication').LoopPublicationLabels;
+  observation: {enable:string;ready:string;cancel:string;stop:string;revoke:string;active:string;recallOnly:string;revokedStopping:string;revoked:string;unavailable:string;closed:string;failed:string;filesUnsupported:string;
+    compoundExperiment:string;compoundStep:Record<'not_started'|'pending'|'denied'|'succeeded'|'failed'|'cancelled'|'unknown',string>;compoundEdit:(status:string)=>string;compoundValidation:(status:string)=>string;compoundUnknown:(count:number)=>string;
+    semanticState:Record<'waiting'|'compacted'|'skipped'|'failed',string>;semanticReason:Record<'economics'|'changed'|'no-gain'|'budget'|'unavailable',string>;
+    semanticBudget:(attempts:number,maximum:number,reserved:string,budget:string)=>string;semanticExperiment:string};
   diffView: { showFull: string };
   roomWorkspace: RoomWorkspaceLabels;
   localCodex: string;
@@ -34,7 +39,7 @@ export interface LocaleStrings {
     contentSegmented: string; contentSegment: (current: number, total: number) => string;
     previousContentSegment: string; nextContentSegment: string;
     queuedReceipt: (agentId: string, expectedTurn?: number) => string;
-    checkOperation: string; userSender: string; moreGroups: string;
+    checkOperation: string; userSender: string; finalContentUnavailable: string; moreGroups: string;
     resources: string; resourcesEmpty: string; moreResources: string; keepResource: string; retryCleanup: string; resourceConfirmation: string;
     confirmKeep: string; keepExplanation: string; newGroup: string; confirmReset: string; resetExplanation: string; resetPending: string;
     resourceStates: Record<string, string>;
@@ -1341,6 +1346,15 @@ export interface LocaleStrings {
     userLoopOutputDirectoryLabel: string;
     userLoopOutputFileNameLabel: string;
     userLoopOutputPath: string;
+    userLoopArtifactsOpen: string;
+    userLoopArtifactsLoading: string;
+    userLoopArtifactsUnavailable: string;
+    userLoopArtifactsEmpty: string;
+    userLoopArtifactsPrevious: string;
+    userLoopArtifactsNext: string;
+    userLoopArtifactsPage: (first:number,last:number,total:number)=>string;
+    userLoopArtifactBytes: (size:number)=>string;
+    userLoopWorkspaceNavigationHint: string;
     userLoopOpenOutputDirectory: string;
     userLoopPreviewOutputFile: string;
     userLoopViewTaskResult: string;
@@ -1359,6 +1373,9 @@ export interface LocaleStrings {
     loopDiagnosticsDesc: string;
     loopDiagnosticsRefresh: string;
     loopDiagnosticsRunNow: string;
+    loopDiagnosticsCopyLabels: {loop:string;status:string;history:string;observation:string;finishedAt:string;openAnomalies:string;owner:string;seen:string;suggestedAction:string;logs:string;none:string};
+    loopDiagnosticsVerifiedAt: (time: string) => string;
+    loopDiagnosticsPublicationPending: string;
     loopDiagnosticsRunning: string;
     loopDiagnosticsAlreadyRunning: string;
     loopDiagnosticsLastRun: string;
@@ -3022,6 +3039,22 @@ export interface LocaleStrings {
   };
 
   goalBar: {
+    verificationDefinition: string;
+    verificationDefinitionHelp: string;
+    verificationDefinitionInvalid: string;
+    nativePending: string;
+    recoverNative: string;
+    continueNative: string;
+    cancelNative: string;
+    nativeRetired: string;
+
+    statusVerificationUnavailable: string;
+    statusNeedsRevalidation: string;
+    statusPublicationPending: string;
+    statusBindingPending: string;
+    statusBindingRequired: string;
+    statusBindingMismatch: string;
+    statusVerifiedComplete: string;
     createGoal: string;
     goal: string;
     completionCriterion: string;
@@ -3034,6 +3067,8 @@ export interface LocaleStrings {
     confirmCreate: string;
     close: string;
     pause: string;
+    recoverPublication: string;
+    continuePublication: string;
     resume: string;
     retry: string;
     cancelGoal: string;

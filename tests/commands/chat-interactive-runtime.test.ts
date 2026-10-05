@@ -1789,7 +1789,9 @@ describe('chat interactive runtime', () => {
       const lines = harness.screen.lines();
       const noticeIndex = findLineIndex(lines, '正在执行工具...');
       const toolIndex = findLineIndex(lines, 'Read silent.txt');
-      expect(noticeIndex).toBeGreaterThanOrEqual(0);
+      expect(noticeIndex).toBeGreaterThanOrEqual(1);
+      expect(lines[noticeIndex - 1].trim()).toBe('');
+      expect(lines[noticeIndex - 2].trim()).toBe('');
       expect(toolIndex).toBeGreaterThan(noticeIndex);
 
       await waitForInputTurnReady(harness);
@@ -3509,7 +3511,6 @@ describe('chat interactive runtime', () => {
           label: 'Kimi K3 1M',
           runtimeOptions: {
             contextLimit: 1_048_576,
-            reasoningEffort: 'max',
           },
         },
       },
@@ -3534,6 +3535,7 @@ describe('chat interactive runtime', () => {
         provider: 'kimi',
         model: 'k3',
         label: 'Kimi K3 1M',
+        reasoningEffort: 'low',
       })
       .mockResolvedValueOnce({
         modelId: 'kimi-k2.7',
@@ -3633,6 +3635,10 @@ describe('chat interactive runtime', () => {
         expect(harness.output.normalized).toContain('已切换到：[kimi] Kimi K3 1M (k3)');
       }, { timeoutMs: 3_000 });
       expect.soft(statusBarUpdateSpy.mock.calls.at(-1)).toEqual(['k3', 1_048_576]);
+      expect.soft(readPersistedConfig().models['kimi-k3-one-million']?.runtimeOptions).toEqual({
+        contextLimit: 1_048_576,
+        reasoningEffort: 'low',
+      });
       await runProbe('k3', 1_048_576);
 
       // The generic fake adapter keeps this test focused on atomic policy refresh; the

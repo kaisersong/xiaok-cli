@@ -47,5 +47,6 @@
 | sibling 资源、构建产物新鲜度、packaging/release/CI | [.agents/guidance/packaging.md](.agents/guidance/packaging.md) |
 | `src/ui/**` 或 `src/commands/chat.ts` 中直接影响 TUI 的代码 | [.agents/guidance/terminal.md](.agents/guidance/terminal.md) |
 | 新方案、竞品借鉴、安全/性能/检索优化、复杂修复 | [.agents/guidance/evidence-and-design.md](.agents/guidance/evidence-and-design.md) |
+| TypeSafe / Jev 相关方案、集成或验证 | [.agents/skills/typesafe-ai/SKILL.md](.agents/skills/typesafe-ai/SKILL.md)：使用该技能，按任务读取官方实时文档与相关 cookbook，并遵守本项目的基线、评审和验证要求 |
 
 性能/token 优化先测真实基线，收益不足 5% 不做（安全动机除外）。检索改动先用真实语料量噪声与失败案例、冻结判定规则和查询分桶，再比较 Hit@K/MRR/NDCG 与无答案误召；保留原验收条件，不能通过缩范围把它们裁掉。

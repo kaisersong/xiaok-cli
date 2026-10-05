@@ -12,6 +12,7 @@ import type { TaskSnapshot } from '../../../src/runtime/task-host/types';
 
 const fixtures = vi.hoisted(() => ({ createTask: vi.fn(), createTaskWithFiles: vi.fn(), getThread: vi.fn(), recoverTask: vi.fn(), updateThreadTaskId: vi.fn(), subscribeTask: vi.fn(), files: [] as Array<{ filePath: string; name: string }> }));
 vi.mock('../../renderer/src/api', () => ({ api: {
+    getObservationTaskStatus: vi.fn(async () => ({ mode: 'unavailable' })),
   createTask: fixtures.createTask, createTaskWithFiles: fixtures.createTaskWithFiles, getThread: fixtures.getThread,
   recoverTask: fixtures.recoverTask,
   updateThreadTitle: vi.fn(async () => {}), updateThreadTaskId: fixtures.updateThreadTaskId, subscribeTask: fixtures.subscribeTask, listSkills: vi.fn(async () => []),

@@ -1,4 +1,12 @@
 import type {OpenFileResult, ReadFileResult, SaveFileInput, SaveFileResult} from '../shared/file-ipc-contract.js';
+import type { CompoundExecutionStatus, SemanticCompactionStatus } from '../shared/host-observation-types.js';
+import type {LoopArtifactPageRequest} from '../shared/loop-artifacts.js';
+import type {LoopRunObservationView} from '../shared/host-observation-types.js';
+import type {AutomationRunHistoryItem} from '../shared/host-observation-types.js';
+import type {LoopPublicationAction,LoopPublicationActionResult,LoopPublicationStateView,StoredLoopPublicationConfiguration} from '../shared/loop-publication-types.js';
+import type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
+export type { DesktopGoalNativeMutationProjection } from '../shared/host-observation-types.js';
+import type { GoalCompletionObservation } from '../shared/host-observation-types.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
 import type { MultiAgentDesktopAPI } from '../shared/multi-agent-types.js';
@@ -15,7 +23,7 @@ import type {
   TaskUnderstanding,
   UserAnswer,
 } from '../../src/runtime/task-host/types.js';
-import type { GoalActivation, GoalInput, GoalState } from '../../src/runtime/goal/types.js';
+import type { GoalActivation, GoalCreationInput, GoalInput, GoalState } from '../shared/host-observation-types.js';
 import type {
   ModelRuntimeConstraints,
   ModelRuntimeOptions,
@@ -75,6 +83,11 @@ export const PRELOAD_API_KEYS = [
   'selectDirectory',
   'selectMaterials',
   'importMaterial',
+  'prepareObservationTask',
+  'createObservationTask',
+  'stopObservationTask',
+  'revokeObservationTask',
+  'getObservationTaskStatus',
   'createTask',
   'createTaskWithFiles',
   'subscribeTask',
@@ -104,9 +117,15 @@ export const PRELOAD_API_KEYS = [
   'subscribeLocalExecutionAuthorization',
   'unsubscribeLocalExecutionAuthorization',
   'getGoal',
+  'getGoalNativeMutation',
+  'recoverGoalNativeMutation',
+  'continueGoalNativeMutation',
+  'cancelGoalNativeMutation',
   'createGoal',
   'pauseGoal',
   'resumeGoal',
+  'recoverGoalPublication',
+  'continueGoalPublication',
   'cancelGoal',
   'replaceGoal',
   'ackGoalTaskAttached',
@@ -226,7 +245,11 @@ export const PRELOAD_API_KEYS = [
   'openLoopOutputDirectory',
   'readLoopOutputPreview',
   'readLoopTaskResult',
+  'listLoopPublishedArtifacts',
   'getLoopRuns',
+  'getLoopPublicationConfiguration',
+  'getLoopPublicationState',
+  'performLoopPublicationAction',
   'getEvidenceAnomalies',
   'runLoopNow',
   'listLoopConstraints',
@@ -442,12 +465,23 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   selectDirectory: 'desktop:selectDirectory',
   selectMaterials: 'desktop:selectMaterials',
   importMaterial: 'desktop:importMaterial',
+  prepareObservationTask: 'desktop:prepareObservationTask',
+  createObservationTask: 'desktop:createObservationTask',
+  stopObservationTask: 'desktop:stopObservationTask',
+  revokeObservationTask: 'desktop:revokeObservationTask',
+  getObservationTaskStatus: 'desktop:getObservationTaskStatus',
   createTask: 'desktop:createTask',
   createTaskWithFiles: 'desktop:createTaskWithFiles',
   getGoal: 'desktop:goal:get',
+  getGoalNativeMutation: 'desktop:goal:getNativeMutation',
+  recoverGoalNativeMutation: 'desktop:goal:recoverNativeMutation',
+  continueGoalNativeMutation: 'desktop:goal:continueNativeMutation',
+  cancelGoalNativeMutation: 'desktop:goal:cancelNativeMutation',
   createGoal: 'desktop:goal:create',
   pauseGoal: 'desktop:goal:pause',
   resumeGoal: 'desktop:goal:resume',
+  recoverGoalPublication: 'desktop:goal:recoverPublication',
+  continueGoalPublication: 'desktop:goal:continuePublication',
   cancelGoal: 'desktop:goal:cancel',
   replaceGoal: 'desktop:goal:replace',
   ackGoalTaskAttached: 'desktop:goal:ackTaskAttached',
@@ -559,7 +593,11 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
   openLoopOutputDirectory: 'desktop:loops:openOutputDirectory',
   readLoopOutputPreview: 'desktop:loops:readOutputPreview',
   readLoopTaskResult: 'desktop:loops:readTaskResult',
+  listLoopPublishedArtifacts: 'desktop:loops:listPublishedArtifacts',
   getLoopRuns: 'desktop:loops:listRuns',
+  getLoopPublicationConfiguration: 'desktop:loops:getPublicationConfiguration',
+  getLoopPublicationState: 'desktop:loops:getPublicationState',
+  performLoopPublicationAction: 'desktop:loops:performPublicationAction',
   getEvidenceAnomalies: 'desktop:loops:listAnomalies',
   runLoopNow: 'desktop:loops:runNow',
   listLoopConstraints: 'desktop:loops:listConstraints',
@@ -1268,6 +1306,7 @@ export interface KSwarmAgentSemanticInput {
 }
 
 export interface DesktopGoalProjection {
+  currentCompletion?: GoalCompletionObservation;
   state: GoalState;
   activation: GoalActivation;
   waitingReason?: 'waiting_children' | 'children_need_attention';
@@ -1323,6 +1362,11 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   selectDirectory(): Promise<{ filePath: string }>;
   selectMaterials(): Promise<{ filePaths: string[] }>;
   importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }): Promise<MaterialView>;
+  prepareObservationTask(): Promise<{draftId:string;expiresAt:number;model:string}|null>;
+  createObservationTask(input:{draftId:string;prompt:string;threadId?:string}): Promise<{taskId:string}>;
+  stopObservationTask(taskId:string): Promise<{mode:string}>;
+  revokeObservationTask(taskId:string): Promise<{mode:string}>;
+  getObservationTaskStatus(taskId:string): Promise<{mode:string;semantic?:SemanticCompactionStatus;compound?:CompoundExecutionStatus}>;
   createTask(input: {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
@@ -1334,11 +1378,17 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
     context?: TaskCreateContext;
   }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   getGoal(threadId: string): Promise<DesktopGoalProjection | null>;
-  createGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  getGoalNativeMutation(threadId: string): Promise<DesktopGoalNativeMutationProjection | null>;
+  recoverGoalNativeMutation(input: { threadId: string }): Promise<{ mutation: DesktopGoalNativeMutationProjection; goal: DesktopGoalProjection | null }>;
+  continueGoalNativeMutation(input: { threadId: string } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  cancelGoalNativeMutation(input: { threadId: string }): Promise<DesktopGoalNativeMutationProjection>;
+  createGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   pauseGoal(threadId: string): Promise<DesktopGoalProjection>;
   resumeGoal(input: { threadId: string; turnLimit?: number } & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  recoverGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
+  continueGoalPublication(input: { threadId: string }): Promise<DesktopGoalProjection | null>;
   cancelGoal(threadId: string): Promise<DesktopGoalProjection>;
-  replaceGoal(input: { threadId: string } & GoalInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
+  replaceGoal(input: { threadId: string } & GoalCreationInput & GoalAttachmentRequest): Promise<DesktopGoalMutationResult>;
   ackGoalTaskAttached(input: { threadId: string; attachmentId: string }): Promise<void>;
   setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
   onGoalChanged(handler: (input: DesktopGoalChangedEvent) => void): () => void;
@@ -1466,13 +1516,17 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   createLoopSchedule(input: unknown): Promise<unknown>;
   getLoopScheduleBindings(): Promise<unknown[]>;
   getAutomationOverviewSnapshot(): Promise<unknown>;
-  getAutomationRunHistory(): Promise<unknown[]>;
+  getAutomationRunHistory(): Promise<AutomationRunHistoryItem[]>;
   getAutomationsConfig(): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
   setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
   openLoopOutputDirectory(loopId: string): Promise<unknown>;
   readLoopOutputPreview(loopId: string): Promise<unknown>;
   readLoopTaskResult(loopId: string): Promise<unknown>;
-  getLoopRuns(loopId: string): Promise<unknown[]>;
+  listLoopPublishedArtifacts(loopId:string,page:LoopArtifactPageRequest):Promise<unknown>;
+  getLoopRuns(loopId: string): Promise<LoopRunObservationView[]>;
+  getLoopPublicationConfiguration(loopId:string):Promise<Readonly<StoredLoopPublicationConfiguration>|null>;
+  getLoopPublicationState(runId:string):Promise<Readonly<LoopPublicationStateView>>;
+  performLoopPublicationAction(input:LoopPublicationAction):Promise<LoopPublicationActionResult>;
   getEvidenceAnomalies(loopId: string): Promise<unknown[]>;
   runLoopNow(loopId: string): Promise<unknown>;
   listLoopConstraints(loopId: string): Promise<unknown[]>;
@@ -1723,12 +1777,23 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory') as Promise<{ filePath: string }>,
     selectMaterials: () => ipcRenderer.invoke('desktop:selectMaterials') as ReturnType<DesktopApi['selectMaterials']>,
     importMaterial: (input) => ipcRenderer.invoke('desktop:importMaterial', input) as ReturnType<DesktopApi['importMaterial']>,
+    prepareObservationTask: () => ipcRenderer.invoke('desktop:prepareObservationTask') as ReturnType<DesktopApi['prepareObservationTask']>,
+    createObservationTask: input => ipcRenderer.invoke('desktop:createObservationTask',input) as ReturnType<DesktopApi['createObservationTask']>,
+    stopObservationTask: taskId => ipcRenderer.invoke('desktop:stopObservationTask',{taskId}) as ReturnType<DesktopApi['stopObservationTask']>,
+    revokeObservationTask: taskId => ipcRenderer.invoke('desktop:revokeObservationTask',{taskId}) as ReturnType<DesktopApi['revokeObservationTask']>,
+    getObservationTaskStatus: taskId => ipcRenderer.invoke('desktop:getObservationTaskStatus',{taskId}) as ReturnType<DesktopApi['getObservationTaskStatus']>,
     createTask: (input) => ipcRenderer.invoke('desktop:createTask', input) as ReturnType<DesktopApi['createTask']>,
     createTaskWithFiles: (input) => ipcRenderer.invoke('desktop:createTaskWithFiles', input) as ReturnType<DesktopApi['createTaskWithFiles']>,
     getGoal: (threadId) => ipcRenderer.invoke('desktop:goal:get', { threadId }) as ReturnType<DesktopApi['getGoal']>,
+    getGoalNativeMutation: (threadId) => ipcRenderer.invoke('desktop:goal:getNativeMutation', { threadId }) as ReturnType<DesktopApi['getGoalNativeMutation']>,
+    recoverGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:recoverNativeMutation', input) as ReturnType<DesktopApi['recoverGoalNativeMutation']>,
+    continueGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:continueNativeMutation', input) as ReturnType<DesktopApi['continueGoalNativeMutation']>,
+    cancelGoalNativeMutation: (input) => ipcRenderer.invoke('desktop:goal:cancelNativeMutation', input) as ReturnType<DesktopApi['cancelGoalNativeMutation']>,
     createGoal: (input) => ipcRenderer.invoke('desktop:goal:create', input) as ReturnType<DesktopApi['createGoal']>,
     pauseGoal: (threadId) => ipcRenderer.invoke('desktop:goal:pause', { threadId }) as ReturnType<DesktopApi['pauseGoal']>,
     resumeGoal: (input) => ipcRenderer.invoke('desktop:goal:resume', input) as ReturnType<DesktopApi['resumeGoal']>,
+    recoverGoalPublication: input => ipcRenderer.invoke('desktop:goal:recoverPublication', input) as ReturnType<DesktopApi['recoverGoalPublication']>,
+    continueGoalPublication: input => ipcRenderer.invoke('desktop:goal:continuePublication', input) as ReturnType<DesktopApi['continueGoalPublication']>,
     cancelGoal: (threadId) => ipcRenderer.invoke('desktop:goal:cancel', { threadId }) as ReturnType<DesktopApi['cancelGoal']>,
     replaceGoal: (input) => ipcRenderer.invoke('desktop:goal:replace', input) as ReturnType<DesktopApi['replaceGoal']>,
     ackGoalTaskAttached: (input) => ipcRenderer.invoke('desktop:goal:ackTaskAttached', input) as Promise<void>,
@@ -1993,13 +2058,17 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input) as Promise<unknown>,
     getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings') as Promise<unknown[]>,
     getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<unknown>,
-    getAutomationRunHistory: () => ipcRenderer.invoke('desktop:automations:getRunHistory') as Promise<unknown[]>,
+    getAutomationRunHistory: () => ipcRenderer.invoke('desktop:automations:getRunHistory') as Promise<AutomationRunHistoryItem[]>,
     getAutomationsConfig: () => ipcRenderer.invoke('desktop:automations:getConfig') as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
     setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
     openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId) as Promise<unknown>,
     readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId) as Promise<unknown>,
+    listLoopPublishedArtifacts: (loopId,page) => ipcRenderer.invoke('desktop:loops:listPublishedArtifacts',loopId,page) as Promise<unknown>,
     readLoopTaskResult: (loopId) => ipcRenderer.invoke('desktop:loops:readTaskResult', loopId) as Promise<unknown>,
-    getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<unknown[]>,
+    getLoopRuns: (loopId) => ipcRenderer.invoke('desktop:loops:listRuns', loopId) as Promise<LoopRunObservationView[]>,
+    getLoopPublicationConfiguration: loopId => ipcRenderer.invoke('desktop:loops:getPublicationConfiguration',loopId) as Promise<StoredLoopPublicationConfiguration|null>,
+    getLoopPublicationState: runId => ipcRenderer.invoke('desktop:loops:getPublicationState',runId) as Promise<LoopPublicationStateView>,
+    performLoopPublicationAction: input => ipcRenderer.invoke('desktop:loops:performPublicationAction',input) as Promise<LoopPublicationActionResult>,
     getEvidenceAnomalies: (loopId) => ipcRenderer.invoke('desktop:loops:listAnomalies', loopId) as Promise<unknown[]>,
     runLoopNow: (loopId) => ipcRenderer.invoke('desktop:loops:runNow', loopId) as Promise<unknown>,
     listLoopConstraints: (loopId) => ipcRenderer.invoke('desktop:loops:listConstraints', loopId) as Promise<unknown[]>,
@@ -2098,8 +2167,8 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     retryCollaborationRoomWorkspaceChange: (input) => ipcRenderer.invoke('desktop:roomWorkspace:retryChange', input) as ReturnType<RoomWorkspaceApi['retryCollaborationRoomWorkspaceChange']>,
     getCollaborationRoom: (roomId: string) => ipcRenderer.invoke('desktop:collaborationRoom:getRoom', roomId) as Promise<unknown>,
     createCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:createRoom', input) as Promise<unknown>,
-    archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,
     deleteCollaborationRoom: (input: {roomId: string; expectedRoomRevision: number}) => ipcRenderer.invoke('desktop:collaborationRoom:deleteRoom', input) as Promise<unknown>,
+    archiveCollaborationRoom: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:archiveRoom', input) as Promise<unknown>,
     updateCollaborationRoomMembers: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:updateMembers', input) as Promise<unknown>,
     sendCollaborationRoomMessage: (input) => ipcRenderer.invoke('desktop:collaborationRoom:sendMessage', input) as ReturnType<DesktopApi['sendCollaborationRoomMessage']>,
     markCollaborationRoomSeen: (input: unknown) => ipcRenderer.invoke('desktop:collaborationRoom:markSeen', input) as Promise<unknown>,

@@ -37,21 +37,26 @@ describe('transcript storage contracts', () => {
 
   it('restores transcript stream wrappers before SIGINT closes the logger', () => {
     const source = readFileSync(join(process.cwd(), 'src/commands/chat.ts'), 'utf8');
-    const shutdownStart = source.indexOf('const shutdownTerminal = async');
-    const interruptStart = source.indexOf('const onInterrupt =', shutdownStart);
+    const shutdownStart = source.indexOf('const shutdownTerminal = (reason: ExitSignal) => exitFromSignal(reason);');
+    const terminalStart = source.indexOf('finishTerminal = () => {', shutdownStart);
+    const interruptStart = source.indexOf('const onInterrupt =', terminalStart);
     expect(shutdownStart).toBeGreaterThan(0);
-    expect(interruptStart).toBeGreaterThan(shutdownStart);
-    const handler = source.slice(shutdownStart, interruptStart);
-    const interrupt = source.slice(interruptStart, source.indexOf('const onHangup =', interruptStart));
+    expect(terminalStart).toBeGreaterThan(shutdownStart);
+    expect(interruptStart).toBeGreaterThan(terminalStart);
+    const terminal = source.slice(terminalStart, interruptStart);
+    const interrupt = source.slice(interruptStart, source.indexOf('interrupt = onInterrupt;', interruptStart));
     expect(interrupt).toContain("shutdownTerminal('sigint')");
-    expect(source).toContain("process.on('SIGINT', onInterrupt)");
-    const restoreIndex = handler.indexOf('process.stdout.write = originalStdoutWrite;');
-    const restoreStderrIndex = handler.indexOf('process.stderr.write = originalStderrWrite;');
-    const cleanupIndex = handler.indexOf('await cleanupRuntimeResourcesWithTimeout();');
-    expect(restoreIndex).toBeGreaterThan(0);
-    expect(restoreIndex).toBeLessThan(cleanupIndex);
-    expect(restoreStderrIndex).toBeGreaterThan(0);
-    expect(restoreStderrIndex).toBeLessThan(cleanupIndex);
+    expect(source).toContain("process.on('SIGINT', dispatchInterrupt)");
+    expect(terminal).toContain('process.stdout.write = originalStdoutWrite;');
+    expect(terminal).toContain('process.stderr.write = originalStderrWrite;');
+    const finalizer = source.slice(source.indexOf('finalizeOwners = async errors =>'), source.indexOf('const rawRuntimeHooks ='));
+    const drainIndex = finalizer.indexOf('await drainContinuations(detachedWork);');
+    const restoreIndex = finalizer.indexOf('finishTerminal();');
+    const closeIndex = finalizer.indexOf('() => transcriptLogger.close(),');
+    expect(drainIndex).toBeGreaterThan(-1);
+    expect(restoreIndex).toBeGreaterThan(drainIndex);
+    expect(closeIndex).toBeGreaterThan(restoreIndex);
+
   });
 });
 

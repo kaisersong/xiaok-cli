@@ -1,6 +1,37 @@
+import { parseIntentReceiverCommand, intentReceiverHelp } from './chat-intent-receiver.js';
+import { createIntentReceiverPublicationHost } from '../runtime/intent-delegation/receiver-publication-host.js';
+import { parseIntentVerificationCommand, readIntentVerificationSelectionFile, intentVerificationHelp } from './chat-intent-verification.js';
+import { createIntentVerificationHost } from '../runtime/intent-delegation/verification-host.js';
+import { parseIntentPublicationCommand, readIntentPublicationSelectionFile } from './chat-intent-publication.js';
+import { createIntentPublicationHost } from '../runtime/intent-delegation/publication-host.js';
+import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { describeChatFinalizationFailures, drainCliRegistryWriters } from './chat-owned-writers.js';
+import { readIntentVerificationFile, parseIntentNativeCommand, prepareIntentNativeContinuation } from './chat-intent-native.js';
+import { createIntentNativeContractHost } from '../runtime/intent-delegation/native-contract-host.js';
+import { intentNativeLedgerHash } from '../runtime/intent-delegation/native-contract-journal.js';
+import { createSessionExecutionAuthority, createSessionExecutionContext } from '../ai/runtime/session-store/execution-authority.js';
+import { CliGoalNativeHost, readGoalVerificationFile } from './chat-goal-native.js';
+import { FileGoalNativeJournal, goalNativeStateHash } from '../runtime/goal/native-mutation-journal.js';
+import { assertGoalNativeApplicationCurrent } from '../runtime/goal/native-mutation-projection.js';
+import { readInstalledCurrentProfile } from '../runtime/verification/migration-markers.js';
+import { canonicalVerificationJson as goalIdentityJson } from '../runtime/verification/protocol.js';
+import { createGoalPublicationWorkflow } from '../runtime/goal/publication-workflow.js';
+import { goalApplicationFromState } from '../runtime/goal/completion-intent.js';
+import { readInstalledCurrentOwner } from '../runtime/verification/installed-owner-state.js';
+import { observeGoalCompletion, unobservedGoalCompletion } from '../runtime/goal/completion-observation.js';
+import { resolveCompoundHostStorage } from '../runtime/sol-pi/compound-host-storage.js';
+import { createProductValidationBackend } from '../runtime/sol-pi/product-validation-backend.js';
+import { authorizeCliValidationMaterials } from './validation-materials.js';
+import { installProductCompoundCoordinator, assertProductIntentExecutionCurrent, persistCompoundPublicationSnapshot } from '../runtime/sol-pi/product-compound-coordinator.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
+import { homedir } from 'node:os';
+import { AgentSessionState } from '../ai/runtime/session.js';
+import { resolveRuntimeModelBinding } from '../ai/providers/control-plane.js';
+import { parseObservationPolicyFile, prepareObservationConfig, createProductObservationOwner, describeProductObservationPolicy } from '../runtime/sol-pi/product-bootstrap.js';
+import { createProductObservationSubagentTool } from '../runtime/sol-pi/product-subagent-tool.js';
 import { DEFAULT_INTENT_BOUNDARY_CONFIG } from '../types.js';
 import { getConfigDir, loadConfig, saveConfig } from '../utils/config.js';
 import { loadCredentials } from '../auth/token-store.js';
@@ -10,7 +41,7 @@ import { createChatAdapterWithLoginBootstrap } from './chat-login-bootstrap.js';
 import { PermissionManager } from '../ai/permissions/manager.js';
 import { createAskUserTool } from '../ai/tools/ask-user.js';
 import { createAskUserQuestionTool } from '../ai/tools/ask-user-question.js';
-import { createIntentDelegationTools } from '../ai/tools/intent-delegation.js';
+import { createIntentDelegationTools, isIntentProducerTool } from '../ai/tools/intent-delegation.js';
 import { createGoalTools } from '../ai/tools/goal.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
@@ -19,7 +50,7 @@ import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
 import { createRuntimeHooks } from '../runtime/hooks.js';
-import { createHooksRunner } from '../runtime/hooks-runner.js';
+import { createHooksRunner, isEmptyConfiguredHooksRunner } from '../runtime/hooks-runner.js';
 import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
 import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
 import { writeError, formatErrorText, isTTY } from '../utils/ui.js';
@@ -60,7 +91,7 @@ import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand } from './chat-shell-escape.js';
 import { retainRawInputModeForSession } from '../ui/input-mode.js';
 import { createExitConfirmation } from '../ui/exit-confirmation.js';
-import { createTurnActivityWatchdog, resolveAgentMaxIterations, resolveTurnTimeoutMs, runCleanupWithTimeout } from './chat-runtime-config.js';
+import { createTurnActivityWatchdog, resolveAgentMaxIterations, resolveTurnTimeoutMs } from './chat-runtime-config.js';
 import { buildChatHelpText } from './registry.js';
 import { createPlatformRuntimeContext } from '../platform/runtime/context.js';
 import { createPlatformRegistryFactory } from '../platform/runtime/registry-factory.js';
@@ -75,7 +106,6 @@ import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
 import { createUninstallSkillTool } from '../ai/tools/uninstall-skill.js';
 import { executeNamedSubAgent } from '../ai/agents/subagent-executor.js';
-import { isAbortError } from '../ai/runtime/abort-utils.js';
 import { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 import { SessionIntentDelegationStore, createEmptySessionIntentLedger } from '../runtime/intent-delegation/store.js';
 import { SessionSkillEvalStore } from '../runtime/intent-delegation/skill-eval-store.js';
@@ -85,7 +115,7 @@ import { wireSkillEvalToRuntimeSync } from '../runtime/intent-delegation/skill-e
 import { cloneSessionSkillEvalState, createEmptySessionSkillEvalState, inferDeliverableFamily, } from '../runtime/intent-delegation/skill-eval.js';
 import { consumeFreshContextHandoff, hasPendingFreshContextHandoff, resolveOwnedActiveIntent, } from '../runtime/intent-delegation/handoff.js';
 import { wireIntentDelegationToRuntimeSync } from '../runtime/intent-delegation/runtime-sync.js';
-import { assertSessionWriteOwnership, markSessionOwned, releaseSessionOwnership, resumeSessionOwnership, takeoverSessionOwnership, } from '../runtime/intent-delegation/ownership.js';
+import { assertSessionWriteOwnership, markSessionOwned, resumeSessionOwnership, takeoverSessionOwnership, } from '../runtime/intent-delegation/ownership.js';
 import { EmbeddedYZJChannel } from '../channels/embedded-yzj.js';
 import { selectYZJChannel } from '../ui/channel-selector.js';
 import { resolveYZJConfig } from '../channels/yzj.js';
@@ -162,265 +192,588 @@ async function flushStandardStreams() {
     ]);
 }
 async function runChat(initialInput, opts) {
-    if ((opts.print || opts.json) && !initialInput) {
-        writeError('print/json 模式需要提供单次输入');
-        process.exit(1);
-    }
-    if (initialInput && isUnsupportedSingleShotGoalInput(initialInput)) {
-        writeError('Goal Mode 仅支持交互式 chat；print/json/单次输入不能创建或恢复 Goal');
+    if (opts.observationPolicy && (opts.continue || opts.resume || opts.takeover || opts.forkSession || opts.dryRun)) {
+        writeError('SOL_PI_FRESH_SESSION_REQUIRED：观察归档仅支持新建普通会话；恢复和 dry-run 不启用。');
         process.exitCode = 2;
         return;
     }
-    const sessionModeFlags = [opts.continue, opts.resume, opts.takeover, opts.forkSession].filter(Boolean);
-    if (sessionModeFlags.length > 1) {
-        writeError('--continue / --resume / --takeover / --fork-session 只能同时使用一个');
-        process.exit(1);
+    const intentNativeHandled = Symbol('intent-native-handled');
+    const intentVerificationDefinition = opts.intentVerification ? readIntentVerificationFile(opts.intentVerification) : undefined;
+    const goalVerificationDefinition = opts.goalVerification ? readGoalVerificationFile(opts.goalVerification) : undefined;
+    const validationMaterialPaths = Object.freeze([...(opts.validationMaterial ?? [])]);
+    if (validationMaterialPaths.length && !opts.observationPolicy) {
+        writeError('SOL_PI_VALIDATION_POLICY_REQUIRED：验证材料必须与显式 compoundExecution 策略一起使用。');
+        process.exitCode = 2;
+        return;
     }
-    if (opts.confirmHighRiskTakeover && !opts.takeover) {
-        writeError('--confirm-high-risk-takeover 只能与 --takeover 一起使用');
-        process.exit(1);
+    const observationPolicy = opts.observationPolicy ? parseObservationPolicyFile(opts.observationPolicy) : undefined;
+    if (validationMaterialPaths.length && (!observationPolicy || !describeProductObservationPolicy(observationPolicy).compoundExecution)) {
+        writeError('SOL_PI_VALIDATION_POLICY_REQUIRED：策略尚未启用 compoundExecution。');
+        process.exitCode = 2;
+        return;
     }
-    // 检测 CI 环境
-    const autoMode = opts.auto || !isTTY();
-    if (!isTTY() && !opts.auto) {
-        console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
-    }
-    // 加载配置和凭据
-    log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
-    let config = await loadConfig();
-    let adapter;
-    setCrashContext({ startupPhase: 'adapter' });
-    try {
-        const bootstrap = await createChatAdapterWithLoginBootstrap(config, {
-            interactive: isTTY(),
-            hasInitialInput: initialInput !== undefined,
-        });
-        config = bootstrap.config;
-        adapter = bootstrap.adapter;
-    }
-    catch (e) {
-        writeError(String(e));
-        process.exit(1);
-    }
-    // print/json 无头模式（一次性子任务）不初始化分层记忆与向量检索：
-    // 跳过 sqlite/ONNX/embedding 启动开销，避免无谓的 embedding 请求
-    setCrashContext({ startupPhase: 'memory' });
-    const memoryStore = await createMemoryStoreAsync(opts.print || opts.json
-        ? { ...(config.memory ?? {}), type: 'file' }
-        : config.memory);
-    memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
-    setCrashContext({ startupPhase: 'credentials' });
-    const creds = await loadCredentials();
-    const devApp = await getDevAppIdentity();
-    const cwd = process.cwd();
-    const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
-    setCrashContext({ startupPhase: 'platform' });
-    const platform = await createPlatformRuntimeContext({ cwd, builtinCommands });
-    const pluginRuntime = platform.pluginRuntime;
-    let skillDebugEnabled = opts.skillDebug ?? false;
-    const customAgents = platform.customAgents;
-    const sessionStore = createFileSessionStore();
-    const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
-    const skillEvalStore = new SessionSkillEvalStore(sessionStore);
-    const skillScoreStore = new FileSkillScoreStore();
-    let persistedSession = null;
-    if (opts.continue) {
-        persistedSession = await sessionStore.loadLast();
-        if (!persistedSession) {
-            writeError('没有可恢复的历史会话');
-            process.exit(1);
-        }
-    }
-    else if (opts.resume) {
-        persistedSession = await sessionStore.load(opts.resume);
-        if (!persistedSession) {
-            writeError(`找不到会话: ${opts.resume}`);
-            process.exit(1);
-        }
-    }
-    else if (opts.takeover) {
-        persistedSession = await sessionStore.load(opts.takeover);
-        if (!persistedSession) {
-            writeError(`找不到会话: ${opts.takeover}`);
-            process.exit(1);
-        }
-    }
-    else if (opts.forkSession) {
-        const forkSource = await sessionStore.load(opts.forkSession);
-        if (!forkSource) {
-            writeError(`找不到会话: ${opts.forkSession}`);
-            process.exit(1);
-        }
-        assertKimiK3TargetResumeSupported(resolveRegisteredStrictKimiK3Profile(adapter) !== undefined, forkSource);
-        persistedSession = await sessionStore.fork(opts.forkSession);
-    }
-    if (persistedSession) {
-        assertKimiK3TargetResumeSupported(resolveRegisteredStrictKimiK3Profile(adapter) !== undefined, persistedSession);
-    }
-    const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
-    const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
-    const forkedFromSessionId = persistedSession?.forkedFromSessionId;
-    const sessionLineage = persistedSession?.lineage ?? [sessionId];
-    const persistedIntentLedger = persistedSession?.intentDelegation ?? null;
-    const instanceId = resolveChatInstanceId();
-    const ownershipMode = opts.forkSession
-        ? 'fork'
-        : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
-    setCrashContext({ startupPhase: 'transcript' });
-    const transcriptLogger = await FileTranscriptLogger.open(sessionId);
-    const multiAgentProgress = new MultiAgentProgressView();
-    const subAgentNotices = new SubAgentNoticeQueue();
-    let flushSubAgentNotices = () => { };
-    let interactiveNotificationsReady = false;
-    const transcriptBuffer = new TranscriptBuffer({
-        onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
-    });
-    let nextInlineImageId = 1;
-    let terminalUiSuspended = false;
-    let terminalUiFailureNoted = false;
-    let terminalUiFallbackStream = null;
-    const terminalLog = createLogger('chat', { stderr: false });
-    let suspendInteractiveUi = (_context, _error, _fallbackStream) => {
-        terminalUiSuspended = true;
-    };
-    // 设置环境变量，让 plugin hook 可以 fallback 读取
-    process.env['XIAOK_CODE_SESSION_ID'] = sessionId;
-    // 加载 skills
-    const skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginRuntime.skillRoots });
-    let skills = await skillCatalog.reload();
-    const replRenderer = new ReplRenderer(process.stdout);
-    const inputReader = new InputReader(replRenderer);
-    const toolExplorer = new ToolExplorer(formatToolActivity);
-    const turnLayout = new TurnLayout();
-    const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
-    const promptBuilder = new PromptBuilder({ memoryStore });
+    let intentNativeHost;
+    let intentVerificationHost;
+    let intentVerificationAbort;
+    let intentReceiverHost;
+    let intentReceiverAbort;
+    let intentPublicationHost;
     let agent;
-    let runtimeFacade;
-    let skillCatalogWatcher;
-    let activeBusyCapture = null;
-    let stopBusyCapture = () => { };
-    let currentTurnAbortController = null;
-    const abortedRuntimeTurnIds = new Set();
-    let currentOuterTurnId = null;
-    const continuationArbiter = new ContinuationArbiter();
-    const intentTurnState = createChatIntentTurnState();
-    let preparedIntentTurnSequence = 0;
-    let currentTurnStageObservedSkillNames = new Map();
-    let currentIntentLedger;
-    let currentGoalState = null;
-    let goalActivation = 'disarmed';
-    let pendingGoalCompleteSummary = null;
-    let pendingGoalBlockedClaim = null;
-    const goalTurnDrafts = new Map();
-    const settledGoalTurns = [];
-    let activeRuntimeTurnId = null;
-    let goalTurnAdmissionEnabled = false;
-    let goalLeaseHeartbeat = null;
-    let currentSkillEvalState = persistedSession?.skillEval
-        ? cloneSessionSkillEvalState(persistedSession.skillEval)
-        : createEmptySessionSkillEvalState(Date.now());
-    let currentSkillExecutionState = persistedSession?.skillExecution
-        ? cloneSessionSkillExecutionState(persistedSession.skillExecution)
-        : createEmptySessionSkillExecutionState(Date.now());
-    const skillAdherenceStore = new FileSkillAdherenceStore();
-    let activeSkillInvocationId = null;
-    const beginPreparedIntentTurnContext = () => {
-        const turnToken = `${sessionId}:prepared-intent:${++preparedIntentTurnSequence}`;
-        intentTurnState.beginTurn(turnToken);
-        currentTurnStageObservedSkillNames = new Map();
-        return turnToken;
+    let stopSkillEvalRuntimeSync = () => Promise.resolve();
+    let modelIngressClosed = false, abortSkillProducerTurn = () => { };
+    const actualIntentTurns = new Set();
+    let ownIntentAuthority;
+    let stopIntentRuntimeSync = () => Promise.resolve();
+    const commandContext = new AsyncLocalStorage();
+    const liveCommands = new Set();
+    const commandWork = new Set();
+    const commandCancellations = new WeakMap();
+    const observeCommandCancellation = (signal) => {
+        const token = commandContext.getStore();
+        const record = () => { if (token && liveCommands.has(token))
+            commandCancellations.get(token)?.add(signal.reason); };
+        signal.addEventListener('abort', record, { once: true });
+        if (signal.aborted)
+            record();
+        return () => signal.removeEventListener('abort', record);
     };
-    const carryPreparedIntentContextToRuntimeTurn = (turnToken) => {
-        const snapshot = intentTurnState.getSnapshot();
-        const plan = snapshot.currentTurnIntentPlan;
-        const reminderBlock = snapshot.activeIntentReminderBlock;
-        intentTurnState.beginTurn(turnToken);
-        if (plan) {
-            intentTurnState.setPlan(turnToken, plan);
-        }
-        if (reminderBlock) {
-            intentTurnState.setActiveIntentReminderBlock(turnToken, reminderBlock);
-        }
-        currentTurnStageObservedSkillNames = new Map();
+    const isCurrentCommandCancellation = (error) => {
+        if (modelIngressClosed && error === finalizationReason)
+            return true;
+        const token = commandContext.getStore();
+        return !!(token && liveCommands.has(token) && commandCancellations.get(token)?.has(error));
     };
-    let activeModelWatchdog;
-    const requestCurrentTurnAbort = () => {
-        if (process.env['XIAOK_NO_ESC_INTERRUPT'] === '1') {
+    const sessionWriters = new Set();
+    const trackOwnedWrite = (work) => {
+        sessionWriters.add(work);
+        void work.then(() => sessionWriters.delete(work), error => {
+            sessionWriters.delete(work);
+            if (error !== finalizationReason)
+                finalizationErrors.push(error);
+        });
+        return work;
+    };
+    const trackSessionWrite = (body) => trackOwnedWrite(Promise.resolve().then(body));
+    let finalizationExitReason = 'exit';
+    const finalizationErrors = [];
+    const finalizationReason = new DOMException('CLI session is closing', 'AbortError');
+    const bootstrapAbort = new AbortController();
+    let finalization;
+    let finishBootstrap;
+    const bootstrap = new Promise(resolve => { finishBootstrap = resolve; });
+    let freezeIngress = () => { agent?.stopNewRuns(finalizationReason); abortSkillProducerTurn(); };
+    const bootstrapCleanup = [];
+    let releaseAfterBootstrap = async () => { };
+    let finalizeOwners = async (errors) => {
+        const collect = async (operations) => {
+            const results = await Promise.allSettled(operations.map(operation => Promise.resolve().then(operation)));
+            for (const result of results)
+                if (result.status === 'rejected')
+                    errors.push(result.reason);
+        };
+        agent?.stopNewRuns(finalizationReason);
+        await collect([() => agent?.waitForStoppedResources(), () => stopSkillEvalRuntimeSync(), () => compoundCoordinator?.dispose()]);
+        // No model/runtime producer remains before sealing final trace admission.
+        traceClosed = true;
+        await drainContinuations(traceWork);
+        if (!errors.length) {
+            await collect([async () => { agent?.dispose(); await agent?.waitForDisposedResources(); }]);
+            if (!errors.length)
+                await collect([() => productObservation?.dispose()]);
+            if (!errors.length) {
+                ownIntentAuthority?.dispose();
+                await collect([releaseAfterBootstrap]);
+            }
+        }
+        // Registered bootstrap resources are closed even when a writer failed;
+        // the durable domain/ownership remains conservative in that case.
+        await collect(bootstrapCleanup);
+        await drainContinuations(traceWork);
+        if (errors.length) {
+            traceClosed = true;
+            throw new AggregateError(errors, 'chat_finalization_unconfirmed');
+        }
+    };
+    const runCliCommand = (body) => {
+        if (modelIngressClosed)
+            return Promise.reject(finalizationReason);
+        const token = {};
+        liveCommands.add(token);
+        commandCancellations.set(token, new Set());
+        const work = Promise.resolve().then(() => commandContext.run(token, body));
+        commandWork.add(work);
+        void work.then(() => { commandWork.delete(work); liveCommands.delete(token); commandCancellations.delete(token); }, error => {
+            commandWork.delete(work);
+            liveCommands.delete(token);
+            commandCancellations.delete(token);
+            if (error !== finalizationReason)
+                finalizationErrors.push(error);
+        });
+        return work;
+    };
+    const detachedWork = new Set(), traceWork = new Set();
+    let detachedClosed = false, traceClosed = false;
+    const trackContinuation = (body, population, sealed) => {
+        const work = sealed ? Promise.reject(finalizationReason) : Promise.resolve().then(body);
+        population.add(work);
+        void work.then(() => population.delete(work), error => {
+            population.delete(work);
+            if (error !== finalizationReason)
+                finalizationErrors.push(error);
+        });
+        return work;
+    };
+    const trackDetached = (body) => trackContinuation(body, detachedWork, detachedClosed);
+    const trackTrace = (body) => trackContinuation(body, traceWork, traceClosed);
+    const drainContinuations = async (population) => {
+        while (population.size)
+            await Promise.allSettled([...population]);
+    };
+    const finalizeChat = () => {
+        if (finalization)
+            return finalization;
+        modelIngressClosed = true;
+        // Publish before abort callbacks or input settlement can reenter shutdown.
+        finalization = Promise.resolve().then(async () => {
+            await bootstrap;
+            await Promise.allSettled([...commandWork]);
+            await finalizeOwners(finalizationErrors);
+        });
+        try {
+            bootstrapAbort.abort(finalizationReason);
+            freezeIngress();
+        }
+        catch (error) {
+            finalizationErrors.push(error);
+        }
+        return finalization;
+    };
+    let signalExit;
+    let finishTerminal = () => { };
+    const exitFromSignal = (reason) => {
+        if (signalExit)
+            return signalExit;
+        finalizationExitReason = reason;
+        signalExit = finalizeChat().then(() => {
+            finishTerminal();
+            process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
+        }, error => {
+            log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
+            finishTerminal();
+            process.exit(1);
+        });
+        return signalExit;
+    };
+    let interrupt = () => { void exitFromSignal('sigint'); };
+    const dispatchInterrupt = () => interrupt();
+    const dispatchHangup = () => { void exitFromSignal('sighup'); };
+    const dispatchTerminate = () => { void exitFromSignal('sigterm'); };
+    process.on('SIGINT', dispatchInterrupt);
+    process.on('SIGHUP', dispatchHangup);
+    process.on('SIGTERM', dispatchTerminate);
+    const removeSignalHandlers = () => {
+        process.off('SIGINT', dispatchInterrupt);
+        process.off('SIGHUP', dispatchHangup);
+        process.off('SIGTERM', dispatchTerminate);
+    };
+    let verificationClient;
+    let productObservation;
+    let compoundCoordinator;
+    let lastSemanticOutcome;
+    try {
+        if ((opts.print || opts.json) && !initialInput) {
+            writeError('print/json 模式需要提供单次输入');
+            process.exitCode = 1;
             return;
         }
-        currentTurnAbortController?.abort();
-    };
-    const runRuntimeTurn = async (request, onChunk, externalSignal, onRuntimeActivity) => {
-        const previousController = currentTurnAbortController;
-        const controller = new AbortController();
-        currentTurnAbortController = controller;
-        const onExternalAbort = externalSignal
-            ? () => controller.abort()
-            : null;
-        if (externalSignal && onExternalAbort) {
-            if (externalSignal.aborted) {
-                controller.abort();
-            }
-            else {
-                externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+        if (initialInput && isUnsupportedSingleShotGoalInput(initialInput)) {
+            writeError('Goal Mode 仅支持交互式 chat；print/json/单次输入不能创建或恢复 Goal');
+            process.exitCode = 2;
+            return;
+        }
+        const sessionModeFlags = [opts.continue, opts.resume, opts.takeover, opts.forkSession].filter(Boolean);
+        if (sessionModeFlags.length > 1) {
+            writeError('--continue / --resume / --takeover / --fork-session 只能同时使用一个');
+            process.exitCode = 1;
+            return;
+        }
+        if (opts.confirmHighRiskTakeover && !opts.takeover) {
+            writeError('--confirm-high-risk-takeover 只能与 --takeover 一起使用');
+            process.exitCode = 1;
+            return;
+        }
+        // 检测 CI 环境
+        const autoMode = opts.auto || !isTTY();
+        if (!isTTY() && !opts.auto) {
+            console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
+        }
+        // 加载配置和凭据
+        log.info('chat started', { initialInput: initialInput?.slice(0, 80) });
+        let config = await loadConfig();
+        if (observationPolicy)
+            config = prepareObservationConfig(config, observationPolicy);
+        let adapter;
+        setCrashContext({ startupPhase: 'adapter' });
+        try {
+            const bootstrap = observationPolicy ? { config, adapter: createAdapter(config) } : await createChatAdapterWithLoginBootstrap(config, {
+                interactive: isTTY(),
+                hasInitialInput: initialInput !== undefined,
+                cancellation: { signal: bootstrapAbort.signal, onInterrupt: dispatchInterrupt, trackWrite: work => { trackOwnedWrite(work); } },
+            });
+            config = bootstrap.config;
+            adapter = bootstrap.adapter;
+        }
+        catch (e) {
+            if (e !== finalizationReason)
+                finalizationErrors.push(e);
+            writeError(String(e));
+            process.exitCode = 1;
+            return;
+        }
+        bootstrapCleanup.push(() => disposeModelAdapter(adapter));
+        // print/json 无头模式（一次性子任务）不初始化分层记忆与向量检索：
+        // 跳过 sqlite/ONNX/embedding 启动开销，避免无谓的 embedding 请求
+        setCrashContext({ startupPhase: 'memory' });
+        const memoryStore = await createMemoryStoreAsync(opts.print || opts.json
+            ? { ...(config.memory ?? {}), type: 'file' }
+            : config.memory);
+        bootstrapCleanup.push(() => memoryStore.close?.());
+        memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
+        setCrashContext({ startupPhase: 'credentials' });
+        const creds = await loadCredentials();
+        const devApp = await getDevAppIdentity();
+        const cwd = process.cwd();
+        const builtinCommands = ['chat', 'doctor', 'init', 'review', 'pr', 'commit', 'settings', 'context'];
+        setCrashContext({ startupPhase: 'platform' });
+        const platform = await createPlatformRuntimeContext({ cwd, builtinCommands });
+        bootstrapCleanup.push(() => platform.dispose());
+        const pluginRuntime = platform.pluginRuntime;
+        let skillDebugEnabled = opts.skillDebug ?? false;
+        const customAgents = platform.customAgents;
+        const compoundStorage = observationPolicy && describeProductObservationPolicy(observationPolicy).compoundExecution
+            ? resolveCompoundHostStorage({ configRoot: getConfigDir() }) : undefined;
+        const sessionStoreRoot = compoundStorage?.canonicalRoot ?? getConfigDir('sessions');
+        const sessionStore = createFileSessionStore(sessionStoreRoot);
+        const intentLedgerStore = new SessionIntentDelegationStore(sessionStore);
+        const skillEvalStore = new SessionSkillEvalStore(sessionStore, { withMutationLease: async (targetSession, work) => {
+                if (targetSession !== sessionId)
+                    throw Error('skill_eval_session_changed');
+                if (!productObservation?.executionAuthority && !intentVerificationDefinition && !ownIntentAuthority)
+                    return work();
+                const guard = () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
+                    throw Error('skill_eval_permission_revoked'); const ledger = sessionStore.getIntentNativeLedgerSync(sessionId); if (ledger)
+                    assertSessionWriteOwnership(ledger, instanceId, 'record skill evaluation'); };
+                const lease = await intentAuthority().acquire({ kind: 'direct-mutation', invocationId: 'skill-eval-' + randomUUID(), assertAdmission: guard, ...(productObservation ? { signal: productObservation.executionSignal } : {}) });
+                try {
+                    guard();
+                    lease.assertCurrent();
+                    return await lease.trackInFlight(Promise.resolve().then(() => work(lease)));
+                }
+                finally {
+                    await lease.releaseAfterDrain();
+                }
+            } });
+        const skillScoreStore = new FileSkillScoreStore();
+        let persistedSession = null;
+        if (opts.continue) {
+            persistedSession = await sessionStore.loadLast();
+            if (!persistedSession) {
+                writeError('没有可恢复的历史会话');
+                process.exitCode = 1;
+                return;
             }
         }
-        const previousWatchdog = activeModelWatchdog;
-        const watchdog = createTurnActivityWatchdog(resolveTurnTimeoutMs());
-        activeModelWatchdog = watchdog;
-        const onTimeout = () => controller.abort();
-        watchdog.signal.addEventListener('abort', onTimeout, { once: true });
-        const started = Date.now();
-        log.info('runtime_turn_start', { sessionId });
-        try {
-            await runtimeFacade.runTurn(request, onChunk, controller.signal, (event) => {
-                watchdog.observeRuntimeEvent(event);
-                if (event.type === 'execution_health' && event.state === 'cleanup_pending' && !opts.print && !opts.json)
-                    writeOrchestrationBlock('\n执行长时间无进展或已取消，正在等待工具实际退出并清理资源。\n');
-                if (event.type === 'model_recovery') {
-                    log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs });
-                    if (!opts.print && !opts.json)
-                        writeOrchestrationBlock(`\n模型连接中断，${Math.ceil(event.delayMs / 1000)} 秒后自动续接（第 ${event.attempt} 次，恢复窗口剩余 ${Math.ceil(event.remainingMs / 60000)} 分钟）。Esc 可中断。\n`);
+        else if (opts.resume) {
+            persistedSession = await sessionStore.load(opts.resume);
+            if (!persistedSession) {
+                writeError(`找不到会话: ${opts.resume}`);
+                process.exitCode = 1;
+                return;
+            }
+        }
+        else if (opts.takeover) {
+            persistedSession = await sessionStore.load(opts.takeover);
+            if (!persistedSession) {
+                writeError(`找不到会话: ${opts.takeover}`);
+                process.exitCode = 1;
+                return;
+            }
+        }
+        else if (opts.forkSession) {
+            const forkSource = await sessionStore.load(opts.forkSession);
+            if (!forkSource) {
+                writeError(`找不到会话: ${opts.forkSession}`);
+                process.exitCode = 1;
+                return;
+            }
+            assertKimiK3TargetResumeSupported(resolveRegisteredStrictKimiK3Profile(adapter) !== undefined, forkSource);
+            persistedSession = await sessionStore.fork(opts.forkSession);
+        }
+        if (persistedSession) {
+            assertKimiK3TargetResumeSupported(resolveRegisteredStrictKimiK3Profile(adapter) !== undefined, persistedSession);
+        }
+        const sessionId = persistedSession?.sessionId ?? sessionStore.createSessionId();
+        const sessionCreatedAt = persistedSession?.createdAt ?? Date.now();
+        const forkedFromSessionId = persistedSession?.forkedFromSessionId;
+        const sessionLineage = persistedSession?.lineage ?? [sessionId];
+        const persistedIntentLedger = persistedSession?.intentDelegation ?? null;
+        const instanceId = resolveChatInstanceId();
+        const ownershipMode = opts.forkSession
+            ? 'fork'
+            : (opts.takeover ? 'takeover' : (opts.continue || opts.resume ? 'resume' : 'new'));
+        setCrashContext({ startupPhase: 'transcript' });
+        const transcriptLogger = await FileTranscriptLogger.open(sessionId);
+        bootstrapCleanup.push(() => transcriptLogger.close());
+        const multiAgentProgress = new MultiAgentProgressView();
+        const subAgentNotices = new SubAgentNoticeQueue();
+        let flushSubAgentNotices = () => { };
+        let interactiveNotificationsReady = false;
+        const transcriptBuffer = new TranscriptBuffer({
+            onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
+        });
+        let nextInlineImageId = 1;
+        let terminalUiSuspended = false;
+        let terminalUiFailureNoted = false;
+        let terminalUiFallbackStream = null;
+        const terminalLog = createLogger('chat', { stderr: false });
+        let suspendInteractiveUi = (_context, _error, _fallbackStream) => {
+            terminalUiSuspended = true;
+        };
+        // 设置环境变量，让 plugin hook 可以 fallback 读取
+        process.env['XIAOK_CODE_SESSION_ID'] = sessionId;
+        // 加载 skills
+        const skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginRuntime.skillRoots });
+        let skills = await skillCatalog.reload();
+        const replRenderer = new ReplRenderer(process.stdout);
+        const inputReader = new InputReader(replRenderer);
+        const toolExplorer = new ToolExplorer(formatToolActivity);
+        const turnLayout = new TurnLayout();
+        const skillTool = createSkillTool(skillCatalog, platform.capabilityRegistry);
+        const promptBuilder = new PromptBuilder({ memoryStore });
+        let runtimeFacade;
+        let skillCatalogWatcher;
+        let activeBusyCapture = null;
+        let stopBusyCapture = () => { };
+        let currentTurnAbortController = null;
+        abortSkillProducerTurn = () => currentTurnAbortController?.abort(finalizationReason);
+        const abortedRuntimeTurnIds = new Set();
+        let currentOuterTurnId = null;
+        const continuationArbiter = new ContinuationArbiter();
+        const intentTurnState = createChatIntentTurnState();
+        let preparedIntentTurnSequence = 0;
+        let currentTurnStageObservedSkillNames = new Map();
+        let currentIntentLedger;
+        let currentGoalState = null;
+        let goalActivation = 'disarmed';
+        let pendingGoalCompleteSummary = null;
+        let pendingGoalBlockedClaim = null;
+        const goalTurnDrafts = new Map();
+        const settledGoalTurns = [];
+        let activeRuntimeTurnId = null;
+        let goalTurnAdmissionEnabled = false;
+        let goalLeaseHeartbeat = null;
+        let goalPublicationGeneration = 0;
+        let goalPublicationWork = null;
+        let currentSkillEvalState = persistedSession?.skillEval
+            ? cloneSessionSkillEvalState(persistedSession.skillEval)
+            : createEmptySessionSkillEvalState(Date.now());
+        let currentSkillExecutionState = persistedSession?.skillExecution
+            ? cloneSessionSkillExecutionState(persistedSession.skillExecution)
+            : createEmptySessionSkillExecutionState(Date.now());
+        const skillAdherenceStore = new FileSkillAdherenceStore();
+        let activeSkillInvocationId = null;
+        const beginPreparedIntentTurnContext = () => {
+            const turnToken = `${sessionId}:prepared-intent:${++preparedIntentTurnSequence}`;
+            intentTurnState.beginTurn(turnToken);
+            currentTurnStageObservedSkillNames = new Map();
+            return turnToken;
+        };
+        const carryPreparedIntentContextToRuntimeTurn = (turnToken) => {
+            const snapshot = intentTurnState.getSnapshot();
+            const plan = snapshot.currentTurnIntentPlan;
+            const reminderBlock = snapshot.activeIntentReminderBlock;
+            intentTurnState.beginTurn(turnToken);
+            if (plan) {
+                intentTurnState.setPlan(turnToken, plan);
+            }
+            if (reminderBlock) {
+                intentTurnState.setActiveIntentReminderBlock(turnToken, reminderBlock);
+            }
+            currentTurnStageObservedSkillNames = new Map();
+        };
+        let activeModelWatchdog;
+        const requestCurrentTurnAbort = () => {
+            if (process.env['XIAOK_NO_ESC_INTERRUPT'] === '1') {
+                return;
+            }
+            intentVerificationAbort?.abort();
+            intentReceiverAbort?.abort();
+            currentTurnAbortController?.abort();
+        };
+        const nativeInputOrigins = new WeakMap();
+        const captureNativeInputOrigin = (text) => { const token = {}; nativeInputOrigins.set(token, text); return token; };
+        let preparedNativeContinuation;
+        let nativeExecutionTurn = false;
+        const hasActiveNativeIntent = () => { const actual = sessionStore.getIntentNativeLedgerSync(sessionId); return !!actual?.nativeContracts?.some(row => row.intentId === actual.activeIntentId); };
+        const assertNoGoalForNativeIntent = () => { if (isGoalArmed() || goalTurnDrafts.size || settledGoalTurns.length || pendingGoalCompleteSummary || pendingGoalBlockedClaim || goalPublicationWork || currentGoalState?.pendingCompletionIntentId)
+            throw Error('intent_goal_execution_conflict'); };
+        const assertIntentNativeExecutionReady = () => { const actual = sessionStore.getIntentNativeLedgerSync(sessionId); if (actual?.nativeContracts?.some(row => row.intentId === actual.activeIntentId))
+            throw Error('intent_native_execution_current_required'); };
+        const nativeRuntimeRequests = new WeakMap();
+        const runRuntimeTurnBody = async (request, onChunk, externalSignal, onRuntimeActivity) => {
+            if (modelIngressClosed)
+                throw finalizationReason;
+            const nativeSelection = nativeRuntimeRequests.get(request);
+            nativeRuntimeRequests.delete(request);
+            if (hasActiveNativeIntent() && !nativeSelection)
+                assertIntentNativeExecutionReady();
+            const previousController = currentTurnAbortController;
+            const controller = new AbortController();
+            currentTurnAbortController = controller;
+            const stopCancellationObservation = observeCommandCancellation(controller.signal);
+            const onExternalAbort = externalSignal
+                ? () => controller.abort(externalSignal.reason)
+                : null;
+            if (externalSignal && onExternalAbort) {
+                if (externalSignal.aborted) {
+                    controller.abort(externalSignal.reason);
                 }
-                onRuntimeActivity?.(event);
+                else {
+                    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+                }
+            }
+            const previousWatchdog = activeModelWatchdog;
+            const watchdog = createTurnActivityWatchdog(resolveTurnTimeoutMs());
+            activeModelWatchdog = watchdog;
+            const onTimeout = () => controller.abort(watchdog.signal.reason);
+            watchdog.signal.addEventListener('abort', onTimeout, { once: true });
+            const started = Date.now();
+            log.info('runtime_turn_start', { sessionId });
+            try {
+                goalNativeHost.assertNoPending();
+                if (nativeSelection) {
+                    const current = () => { controller.signal.throwIfAborted(); assertNoGoalForNativeIntent(); if (intentNativeLedgerHash(sessionStore.getIntentNativeLedgerSync(sessionId)) !== nativeSelection.basis)
+                        throw Error('intent_native_input_changed'); };
+                    current();
+                    if (!compoundCoordinator)
+                        throw Error('intent_native_execution_current_required');
+                    await assertProductIntentExecutionCurrent(compoundCoordinator, controller.signal);
+                    current();
+                }
+                else if (isGoalArmed())
+                    await assertGoalExecutionCurrent();
+                await runtimeFacade.runTurn(request, onChunk, controller.signal, (event) => {
+                    watchdog.observeRuntimeEvent(event);
+                    if (event.type === 'execution_health' && event.state === 'cleanup_pending' && !opts.print && !opts.json)
+                        writeOrchestrationBlock('\n执行长时间无进展或已取消，正在等待工具实际退出并清理资源。\n');
+                    if (event.type === 'model_recovery') {
+                        log.info('model_recovery', { sessionId, attempt: event.attempt, delayMs: event.delayMs, remainingMs: event.remainingMs });
+                        if (!opts.print && !opts.json)
+                            writeOrchestrationBlock(`\n模型连接中断，${Math.ceil(event.delayMs / 1000)} 秒后自动续接（第 ${event.attempt} 次，恢复窗口剩余 ${Math.ceil(event.remainingMs / 60000)} 分钟）。Esc 可中断。\n`);
+                    }
+                    onRuntimeActivity?.(event);
+                });
+            }
+            catch (error) {
+                if (watchdog.didTimeout() && error === watchdog.signal.reason && !modelIngressClosed)
+                    throw new Error('模型长时间无响应，已取消本轮；可以继续输入或切换模型。可通过 XIAOK_TURN_TIMEOUT_MS 调整空闲超时。');
+                throw error;
+            }
+            finally {
+                stopCancellationObservation();
+                log.info('runtime_turn_end', { sessionId, durationMs: Date.now() - started, timedOut: watchdog.didTimeout() });
+                watchdog.dispose();
+                activeModelWatchdog = previousWatchdog;
+                watchdog.signal.removeEventListener('abort', onTimeout);
+                if (externalSignal && onExternalAbort) {
+                    externalSignal.removeEventListener('abort', onExternalAbort);
+                }
+                if (currentTurnAbortController === controller) {
+                    currentTurnAbortController = previousController;
+                }
+            }
+        };
+        const runRuntimeTurn = (...args) => {
+            if (modelIngressClosed)
+                return Promise.reject(finalizationReason);
+            const work = Promise.resolve().then(() => {
+                if (modelIngressClosed)
+                    throw finalizationReason;
+                return runRuntimeTurnBody(...args);
+            });
+            actualIntentTurns.add(work);
+            const settled = () => actualIntentTurns.delete(work);
+            void work.then(settled, settled);
+            return work;
+        };
+        const runNormalInputRuntimeTurn = (request, onChunk, signal, onActivity) => {
+            const prepared = preparedNativeContinuation;
+            preparedNativeContinuation = undefined;
+            if (!prepared)
+                return runRuntimeTurn(request, onChunk, signal, onActivity);
+            if (prepared.turnToken !== intentTurnState.getSnapshot().activeTurnToken)
+                throw Error('intent_native_input_changed');
+            const actualRequest = { ...request, input: [{ type: 'text', text: prepared.selection.text }] };
+            nativeRuntimeRequests.set(actualRequest, prepared.selection);
+            nativeExecutionTurn = true;
+            return runRuntimeTurn(actualRequest, onChunk, signal, onActivity);
+        };
+        try {
+            currentIntentLedger = initializeChatIntentLedger(persistedIntentLedger, sessionId, instanceId, ownershipMode, {
+                confirmHighRiskTakeover: opts.confirmHighRiskTakeover,
             });
         }
         catch (error) {
-            if (watchdog.didTimeout())
-                throw new Error('模型长时间无响应，已取消本轮；可以继续输入或切换模型。可通过 XIAOK_TURN_TIMEOUT_MS 调整空闲超时。');
-            throw error;
+            writeError(String(error instanceof Error ? error.message : error));
+            process.exitCode = 1;
+            return;
         }
-        finally {
-            log.info('runtime_turn_end', { sessionId, durationMs: Date.now() - started, timedOut: watchdog.didTimeout() });
-            watchdog.dispose();
-            activeModelWatchdog = previousWatchdog;
-            watchdog.signal.removeEventListener('abort', onTimeout);
-            if (externalSignal && onExternalAbort) {
-                externalSignal.removeEventListener('abort', onExternalAbort);
+        const intentAuthority = () => productObservation?.executionAuthority ?? (ownIntentAuthority ??= createSessionExecutionAuthority({ root: sessionStoreRoot, sessionIdentity: sessionId, hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: instanceId, scopeId: 'cli-intent-native' }) }));
+        const releaseDrainedSessionOwnership = async () => {
+            // The old compound/native authority has been drained and retired. Acquire
+            // a fresh lease before reading the ledger and committing its exact CAS.
+            const authority = createSessionExecutionAuthority({ root: sessionStoreRoot, sessionIdentity: sessionId,
+                hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: instanceId, scopeId: 'cli-session-exit' }) });
+            try {
+                const lease = await authority.acquire({ kind: 'direct-mutation', invocationId: `cli-exit:${randomUUID()}` });
+                try {
+                    const ledger = sessionStore.getIntentNativeLedgerSync(sessionId);
+                    if (!ledger || ledger.ownership.ownerInstanceId !== instanceId || ledger.ownership.state === 'released')
+                        return;
+                    await sessionStore.transitionIntentSessionOwnership({ sessionId, instanceId,
+                        expectedLedgerHash: intentNativeLedgerHash(ledger), action: 'release', confirmHighRisk: false,
+                        requestSource: 'user', now: Date.now(), lease });
+                    currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId);
+                }
+                finally {
+                    await lease.releaseAfterDrain();
+                }
             }
-            if (currentTurnAbortController === controller) {
-                currentTurnAbortController = previousController;
+            finally {
+                authority.dispose();
+            }
+        };
+        releaseAfterBootstrap = releaseDrainedSessionOwnership;
+        if (persistedIntentLedger?.nativeContracts?.length) {
+            if (ownershipMode === 'fork')
+                throw Error('intent_native_fork_requires_original_contract');
+            const authority = intentAuthority(), lease = await authority.acquire({ invocationId: `intent-native-ownership-${randomUUID()}`, kind: 'direct-mutation' });
+            try {
+                const original = sessionStore.getIntentNativeLedgerSync(sessionId);
+                await trackSessionWrite(async () => { await sessionStore.transitionIntentSessionOwnership({ sessionId, instanceId, expectedLedgerHash: intentNativeLedgerHash(original), action: ownershipMode === 'takeover' ? 'takeover' : 'resume', confirmHighRisk: opts.confirmHighRiskTakeover === true, requestSource: 'user', now: Date.now(), lease }); });
+                currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId);
+            }
+            finally {
+                await lease.releaseAfterDrain();
             }
         }
-    };
-    try {
-        currentIntentLedger = initializeChatIntentLedger(persistedIntentLedger, sessionId, instanceId, ownershipMode, {
-            confirmHighRiskTakeover: opts.confirmHighRiskTakeover,
+        const goalStore = new FileGoalStore(getConfigDir('goals'));
+        const goalLease = new GoalSessionLease({
+            rootDir: getConfigDir('goal-leases'),
+            sessionId,
+            instanceId,
         });
-    }
-    catch (error) {
-        writeError(String(error instanceof Error ? error.message : error));
-        process.exit(1);
-    }
-    const goalStore = new FileGoalStore(getConfigDir('goals'));
-    const goalLease = new GoalSessionLease({
-        rootDir: getConfigDir('goal-leases'),
-        sessionId,
-        instanceId,
-    });
-    const goalService = new GoalService({
-        store: goalStore,
-        ownership: {
+        const goalOwnership = {
             async assertOwned(goalSessionId, goalInstanceId) {
                 const latestLedger = await intentLedgerStore.load(goalSessionId);
                 if (latestLedger)
@@ -428,1424 +781,790 @@ async function runChat(initialInput, opts) {
                 assertSessionWriteOwnership(currentIntentLedger, goalInstanceId, 'mutate Goal');
                 goalLease.assertOwned();
             },
-        },
-    });
-    currentGoalState = (await goalService.load(sessionId))?.state ?? null;
-    if (opts.forkSession && !currentGoalState) {
-        const sourceGoal = await goalStore.load(opts.forkSession);
-        if (sourceGoal) {
-            goalLease.acquire();
-            try {
-                currentGoalState = await goalService.fork({
-                    sessionId,
-                    instanceId,
-                    requestSource: 'user',
-                    expectedRevision: null,
-                }, sourceGoal.state);
+        };
+        const goalNativeJournal = new FileGoalNativeJournal(getConfigDir('goals'));
+        const originalGoalService = new GoalService({ store: goalStore, ownership: goalOwnership, nativeJournal: goalNativeJournal });
+        const goalWriters = new Set();
+        // Fixed semantic writers only. A command's private token is valid until its
+        // entire original pipeline settles, including durable postprocessing.
+        const bindGoalWriter = (method) => {
+            const bound = originalGoalService[method].bind(originalGoalService);
+            return ((...args) => {
+                const token = commandContext.getStore();
+                if (modelIngressClosed && (!token || !liveCommands.has(token)))
+                    return Promise.reject(finalizationReason);
+                const work = Promise.resolve().then(() => bound(...args));
+                goalWriters.add(work);
+                void work.then(() => goalWriters.delete(work), error => {
+                    goalWriters.delete(work);
+                    if (error !== finalizationReason)
+                        finalizationErrors.push(error);
+                });
+                return work;
+            });
+        };
+        const goalService = {
+            load: originalGoalService.load.bind(originalGoalService),
+            create: bindGoalWriter('create'), replace: bindGoalWriter('replace'), fork: bindGoalWriter('fork'),
+            pause: bindGoalWriter('pause'), resume: bindGoalWriter('resume'), cancel: bindGoalWriter('cancel'),
+            resumePublication: bindGoalWriter('resumePublication'), requestCompletion: bindGoalWriter('requestCompletion'),
+            completeClaim: bindGoalWriter('completeClaim'), settleTurn: bindGoalWriter('settleTurn'), noteBlockedClaim: bindGoalWriter('noteBlockedClaim'),
+        };
+        const goalNativeHost = new CliGoalNativeHost({ store: goalStore, journal: goalNativeJournal,
+            ownership: goalOwnership, sessionId, instanceId });
+        currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+        const stopGoalLeaseHeartbeat = () => {
+            if (goalLeaseHeartbeat) {
+                clearInterval(goalLeaseHeartbeat);
+                goalLeaseHeartbeat = null;
             }
-            finally {
+        };
+        const disarmGoal = () => {
+            goalPublicationGeneration++;
+            goalNativeHost.invalidate();
+            goalActivation = 'disarmed';
+            if (!modelIngressClosed && !goalNativeHost.busy && !goalWriters.size) {
+                stopGoalLeaseHeartbeat();
                 goalLease.release();
             }
-        }
-    }
-    const stopGoalLeaseHeartbeat = () => {
-        if (goalLeaseHeartbeat) {
-            clearInterval(goalLeaseHeartbeat);
-            goalLeaseHeartbeat = null;
-        }
-    };
-    const disarmGoal = () => {
-        goalActivation = 'disarmed';
-        stopGoalLeaseHeartbeat();
-        goalLease.release();
-    };
-    const isGoalArmed = () => goalActivation === 'armed';
-    const armGoal = (recoverExpired = false) => {
-        goalLease.acquire({ recoverExpired });
-        goalActivation = 'armed';
-        stopGoalLeaseHeartbeat();
-        goalLeaseHeartbeat = setInterval(() => {
-            try {
-                goalLease.heartbeat();
-            }
-            catch (error) {
-                log.warn('goal lease heartbeat failed', { error: String(error) });
-                disarmGoal();
-            }
-        }, 10_000);
-        goalLeaseHeartbeat.unref?.();
-    };
-    const goalMutationContext = (requestSource) => ({
-        sessionId,
-        instanceId,
-        requestSource,
-        expectedRevision: currentGoalState?.revision ?? null,
-    });
-    // Resolve model capabilities early (needed for getPromptInput)
-    let modelCapabilities = resolveModelCapabilities(adapter);
-    const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
-        cliDelegation: { interactive: isTTY() },
-        enterpriseId: creds?.enterpriseId ?? null,
-        devApp,
-        budget: modelCapabilities.contextLimit,
-        skills: nextSkills,
-        pluginCommands: pluginRuntime.commandDeclarations,
-        lspDiagnostics: platform.lspManager.getSummary(),
-        agents: customAgents.map((item) => ({
-            name: item.name,
-            model: item.model,
-            allowedTools: item.allowedTools,
-        })),
-        autoContext: await loadAutoContext({
-            cwd: promptCwd,
-            maxChars: Math.max(1_200, modelCapabilities.contextLimit * 2),
-        }),
-    });
-    const buildPromptSnapshot = async (promptCwd = cwd, nextSkills = skills, channel = 'chat') => promptBuilder.build({
-        ...(await getPromptInput(promptCwd, nextSkills)),
-        cwd: promptCwd,
-        channel,
-    });
-    const buildPrompt = async (nextSkills = skills, promptCwd = cwd) => (await buildPromptSnapshot(promptCwd, nextSkills)).rendered;
-    const refreshSkills = async () => {
-        skills = await skillCatalog.reload();
-        inputReader.setSkills(skills);
-        runtimeFacade?.resetSkillTracking();
-    };
-    const getInvocationById = (invocationId) => {
-        if (!invocationId) {
-            return undefined;
-        }
-        return currentSkillExecutionState.invocations.find((invocation) => invocation.invocationId === invocationId);
-    };
-    const getTrackedInvocation = (agentId) => {
-        const active = getInvocationById(activeSkillInvocationId);
-        if (active && active.status === 'running') {
-            return active;
-        }
-        return findLatestRunningInvocation(currentSkillExecutionState, agentId)
-            ?? findLatestRunningInvocation(currentSkillExecutionState);
-    };
-    const activateTrackedSkillPlan = (plan, agentId = 'main') => {
-        const activation = activateSkillInvocation(currentSkillExecutionState, {
-            sessionId,
-            agentId,
-            plan,
-        });
-        currentSkillExecutionState = activation.state;
-        activeSkillInvocationId = activation.invocation.invocationId;
-        return activation.invocation;
-    };
-    const recordSkillReferenceEvidence = (invocation, absolutePath, agentId) => {
-        const normalizedAbsolutePath = absolutePath.replaceAll('\\', '/');
-        for (const step of invocation.plan.resolved) {
-            for (const relativePath of step.requiredReferences) {
-                const expectedAbsolutePath = join(step.rootDir, relativePath).replaceAll('\\', '/');
-                if (expectedAbsolutePath !== normalizedAbsolutePath) {
-                    continue;
-                }
-                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
-                    type: 'read_reference',
-                    agentId,
-                    path: relativePath,
-                });
-            }
-        }
-    };
-    const recordSkillScriptEvidence = (invocation, command, agentId) => {
-        const normalizedCommand = command.trim().replace(/\s+/g, ' ');
-        const matchedRequiredCommands = [];
-        for (const step of invocation.plan.resolved) {
-            for (const requiredCommand of step.requiredScripts) {
-                const normalizedRequired = requiredCommand.trim().replace(/\s+/g, ' ');
-                if (normalizedCommand !== normalizedRequired) {
-                    continue;
-                }
-                matchedRequiredCommands.push(normalizedRequired);
-                currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
-                    type: 'run_script',
-                    agentId,
-                    command: normalizedRequired,
-                });
-            }
-        }
-        return matchedRequiredCommands;
-    };
-    const invocationRequiresStep = (invocation, stepId) => (invocation.plan.resolved.some((step) => step.requiredSteps.includes(stepId)));
-    const recordSkillStepCompletionEvidence = (invocation, stepId, agentId) => {
-        if (!invocationRequiresStep(invocation, stepId)) {
-            return;
-        }
-        currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
-            type: 'step_completed',
-            agentId,
-            stepId,
-        });
-    };
-    const recordSkillArtifactFileEvidence = (invocation, filePath, agentId) => {
-        const fileName = basename(filePath).toLowerCase();
-        if (fileName === 'brief.json') {
-            recordSkillStepCompletionEvidence(invocation, 'create_brief_json', agentId);
-        }
-    };
-    const recordSkillCommandStepEvidence = (invocation, matchedRequiredCommands, agentId) => {
-        if (matchedRequiredCommands.length === 0) {
-            return;
-        }
-        const normalizedCommands = matchedRequiredCommands.join('\n').toLowerCase();
-        if (/(^|[/\s_-])render(?:_from_brief)?(?:[.\s_-]|$)/u.test(normalizedCommands)) {
-            recordSkillStepCompletionEvidence(invocation, 'render_from_brief', agentId);
-        }
-        if (/(^|[/\s_-])(validate|check)(?:[.\s_-]|$)/u.test(normalizedCommands)) {
-            recordSkillStepCompletionEvidence(invocation, 'validate_artifact', agentId);
-        }
-    };
-    const observeSkillToolResult = (event) => {
-        if (event.toolName !== 'skill' || !event.ok) {
-            return;
-        }
-        try {
-            const parsed = JSON.parse(event.result);
-            if (parsed.type !== 'skill_plan') {
+        };
+        const isGoalArmed = () => goalActivation === 'armed';
+        const ensureGoalLease = (recoverExpired = false) => {
+            if (goalLeaseHeartbeat) {
+                goalLease.assertOwned();
                 return;
             }
-            activateTrackedSkillPlan(parsed, event.agentId);
-        }
-        catch (e) {
-            log.warn('skill result JSON parse failed', e.message);
-        }
-    };
-    const observeSkillEvidence = (event) => {
-        const invocation = getTrackedInvocation(event.agentId);
-        if (!invocation) {
-            return;
-        }
-        if (event.toolName === 'read' && event.ok && typeof event.input.file_path === 'string') {
-            recordSkillReferenceEvidence(invocation, event.input.file_path, event.agentId);
-            return;
-        }
-        if ((event.toolName === 'write' || event.toolName === 'edit') && event.ok && typeof event.input.file_path === 'string') {
-            recordSkillArtifactFileEvidence(invocation, event.input.file_path, event.agentId);
-            return;
-        }
-        if (event.toolName === 'bash' && event.ok && typeof event.input.command === 'string') {
-            const matchedRequiredCommands = recordSkillScriptEvidence(invocation, event.input.command, event.agentId);
-            recordSkillCommandStepEvidence(invocation, matchedRequiredCommands, event.agentId);
-        }
-    };
-    // Lazy callbacks for AskUserQuestion — assigned after functions are declared.
-    // This avoids TS2448 (use-before-declare) for const-declared functions.
-    let askUserOnEnter = null;
-    let askUserOnExit = null;
-    let askUserRenderFrame = null;
-    let askUserClearFrame = null;
-    async function readQuestionText(_question, signal) {
-        const answer = await inputReader.read('Enter your answer: ', { signal });
-        signal?.throwIfAborted();
-        return answer;
-    }
-    const workflowTools = [
-        createAskUserTool({
-            ask: async (question, placeholder, interaction, signal) => {
-                if (!isTTY()) {
-                    throw new Error('当前运行模式不支持 ask_user 交互');
-                }
-                askUserOnEnter?.();
+            goalLease.acquire({ recoverExpired });
+            stopGoalLeaseHeartbeat();
+            goalLeaseHeartbeat = setInterval(() => {
                 try {
-                    if (interaction?.options.length) {
-                        const result = await askQuestion({
-                            question,
-                            options: interaction.options,
-                            multiSelect: interaction.multiSelect ?? false,
-                            renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
-                            clearFrame: () => askUserClearFrame?.(),
-                            readText: readQuestionText,
-                            signal,
-                        });
-                        return [...result.labels, result.otherText]
-                            .filter((value) => Boolean(value))
-                            .join(', ');
-                    }
-                    const promptText = `\n${dim('Agent question:')} ${question}\n`;
-                    if (replRenderer.hasActiveScrollRegion()) {
-                        scrollRegion.writeAtContentCursor(promptText);
-                    }
-                    else {
-                        process.stdout.write(promptText);
-                    }
-                    const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ', { signal });
-                    signal?.throwIfAborted();
-                    if (answer === null) {
-                        throw new Error('用户取消了问题输入');
-                    }
-                    return answer;
+                    goalLease.heartbeat();
                 }
-                finally {
-                    askUserOnExit?.();
+                catch (error) {
+                    log.warn('goal lease heartbeat failed', { error: String(error) });
+                    disarmGoal();
                 }
-            },
-        }),
-        ...createIntentDelegationTools({
-            ledgerStore: intentLedgerStore,
+            }, 10_000);
+            goalLeaseHeartbeat.unref?.();
+        };
+        const armGoal = (recoverExpired = false) => {
+            if (modelIngressClosed)
+                return;
+            goalNativeHost.assertNoPending();
+            if (currentGoalState?.pendingCompletionIntentId)
+                throw Error('goal_publication_pending');
+            ensureGoalLease(recoverExpired);
+            goalActivation = 'armed';
+        };
+        const goalMutationContext = (requestSource) => ({
             sessionId,
             instanceId,
-            getTurnIntentPlan: () => intentTurnState.getSnapshot().currentTurnIntentPlan,
-        }),
-        ...createGoalTools({
-            getGoal: () => ({
-                state: currentGoalState,
-                activation: goalActivation,
+            requestSource,
+            expectedRevision: currentGoalState?.revision ?? null,
+        });
+        const assertGoalExecutionCurrent = async () => {
+            goalNativeHost.assertNoPending();
+            const state = currentGoalState, generation = goalPublicationGeneration;
+            if (!state)
+                throw Error('goal_execution_missing');
+            const route = readInstalledCurrentOwner({ ownerKind: 'goal', ownerId: state.goalId });
+            if (route.kind !== 'ordinary')
+                await assertGoalNativeApplicationCurrent(goalApplicationFromState(state));
+            await goalOwnership.assertOwned(sessionId, instanceId);
+            const actual = (await goalService.load(sessionId))?.state ?? null;
+            if (generation !== goalPublicationGeneration || goalNativeStateHash(actual) !== goalNativeStateHash(state)
+                || goalNativeStateHash(currentGoalState) !== goalNativeStateHash(state))
+                throw Error('goal_execution_changed');
+            goalNativeHost.assertNoPending();
+            goalLease.assertOwned();
+        };
+        // Resolve model capabilities early (needed for getPromptInput)
+        let modelCapabilities = resolveModelCapabilities(adapter);
+        const getPromptInput = async (promptCwd = cwd, nextSkills = skills) => ({
+            cliDelegation: { interactive: isTTY() },
+            enterpriseId: creds?.enterpriseId ?? null,
+            devApp,
+            budget: modelCapabilities.contextLimit,
+            skills: nextSkills,
+            pluginCommands: pluginRuntime.commandDeclarations,
+            lspDiagnostics: platform.lspManager.getSummary(),
+            agents: customAgents.map((item) => ({
+                name: item.name,
+                model: item.model,
+                allowedTools: item.allowedTools,
+            })),
+            autoContext: await loadAutoContext({
+                cwd: promptCwd,
+                maxChars: Math.max(1_200, modelCapabilities.contextLimit * 2),
             }),
-            async requestComplete(summary) {
-                if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
-                    return { accepted: false, reason: 'no armed active Goal' };
-                }
-                pendingGoalCompleteSummary = summary;
-                return { accepted: true };
-            },
-            async requestBlocked(claim) {
-                if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
-                    return { accepted: false, reason: 'no armed active Goal' };
-                }
-                pendingGoalBlockedClaim = claim;
-                return { accepted: true };
-            },
-        }),
-        createAskUserQuestionTool({
-            interactive: isTTY(),
-            onEnterInteractive: () => askUserOnEnter?.(),
-            onExitInteractive: () => askUserOnExit?.(),
-            renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
-            clearFrame: () => askUserClearFrame?.(),
-            readText: readQuestionText,
-        }),
-        createInstallSkillTool({
-            cwd,
-            capabilityRegistry: platform.capabilityRegistry,
-            onInstall: refreshSkills,
-        }),
-        createUninstallSkillTool({
-            cwd,
-            capabilityRegistry: platform.capabilityRegistry,
-            onUninstall: refreshSkills,
-        }),
-    ];
-    const initialPromptSnapshot = await buildPromptSnapshot();
-    const persistedPermissionSettings = await loadSettings(cwd);
-    const persistedPermissionRules = mergeRules(persistedPermissionSettings);
-    const permissionManager = new PermissionManager({
-        mode: autoMode ? 'auto' : 'default',
-        allowRules: persistedPermissionRules.allowRules,
-        denyRules: persistedPermissionRules.denyRules,
-    });
-    const expandSandboxTargets = (rule, deniedPath) => {
-        if (!rule) {
-            return [deniedPath];
-        }
-        const extracted = extractSandboxAllowedPaths([rule]);
-        return extracted.length > 0 ? extracted : [deniedPath];
-    };
-    const persistedSandboxAllowedPaths = extractSandboxAllowedPaths(persistedPermissionRules.allowRules);
-    if (persistedSandboxAllowedPaths.length > 0) {
-        platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
-    }
-    inputReader.setModeCycleHandler(() => {
-        const nextMode = PermissionManager.nextMode(permissionManager.getMode());
-        permissionManager.setMode(nextMode);
-        statusBar.updateMode(nextMode);
-        return nextMode;
-    });
-    // 嵌入式 channel 管理
-    const embeddedChannels = [];
-    const embeddedApprovalStore = new InMemoryApprovalStore();
-    let interactiveBashActive = false;
-    const registryFactory = createPlatformRegistryFactory({
-        notifyReminder: (message) => {
-            const block = `\n[reminder] ${message}\n`;
-            if (opts.print || opts.json) {
-                process.stdout.write(block);
-                return;
+        });
+        const buildPromptSnapshot = async (promptCwd = cwd, nextSkills = skills, channel = 'chat') => promptBuilder.build({
+            ...(await getPromptInput(promptCwd, nextSkills)),
+            cwd: promptCwd,
+            channel,
+        });
+        const buildPrompt = async (nextSkills = skills, promptCwd = cwd) => (await buildPromptSnapshot(promptCwd, nextSkills)).rendered;
+        const refreshSkills = async () => {
+            skills = await skillCatalog.reload();
+            inputReader.setSkills(skills);
+            runtimeFacade?.resetSkillTracking();
+        };
+        const getInvocationById = (invocationId) => {
+            if (!invocationId) {
+                return undefined;
             }
-            transcriptBuffer.record({ kind: 'command_output', command: '[reminder]', output: block });
-            subAgentNotices.push(block);
-            flushSubAgentNotices();
-        },
-        runInteractiveBash: !opts.print && !opts.json && process.stdin.isTTY && process.stdout.isTTY && process.platform !== 'win32'
-            ? async (input, context) => {
-                if (interactiveBashActive)
-                    return 'Error: 本地交互终端正被另一条命令使用，请稍后重试。';
-                context?.signal?.throwIfAborted();
-                interactiveBashActive = true;
-                const busy = activeBusyCapture;
-                busy?.pause();
-                const inputLease = inputReader.suspendForExternalProcess();
-                try {
-                    return await withPausedLiveActivity(async () => {
-                        try {
-                            scrollRegion.end();
-                            terminalOutput.write('stdout', '\n[xiaok] sudo 交互终端：请在此输入密码（不回显），Ctrl+C / Esc 取消。\n');
-                            const result = await runPtyCommand(String(input.command), {
-                                cwd: typeof input.workdir === 'string' ? input.workdir : cwd,
-                                timeoutMs: typeof input.timeout_ms === 'number' ? input.timeout_ms : 120000,
-                                maxChars: typeof input.max_chars === 'number' ? input.max_chars : 12000,
-                                signal: context?.signal, write: text => { terminalOutput.write('stdout', text); },
-                            });
-                            if (context?.toolInvocationId)
-                                context.runtimeFactSink?.emit({ invocationId: context.toolInvocationId, toolName: 'bash', factKind: 'command_result', exitCode: result.timedOut ? null : result.exitCode });
-                            if (result.timedOut)
-                                return `Error: 命令超时\n${result.output}`;
-                            return result.exitCode === 0 ? result.output || '（命令执行成功，无输出）' : `Error (exit ${result.exitCode}): ${result.output}`;
-                        }
-                        finally {
-                            terminalOutput.write('stdout', '\n');
-                            scrollRegion.resumeAfterExternalCommand({ inputPrompt: getFooterInputPrompt(), summaryLine: getCurrentIntentSummaryLine(), statusLine: statusBar.getStatusLine() });
-                        }
+            return currentSkillExecutionState.invocations.find((invocation) => invocation.invocationId === invocationId);
+        };
+        const getTrackedInvocation = (agentId) => {
+            const active = getInvocationById(activeSkillInvocationId);
+            if (active && active.status === 'running') {
+                return active;
+            }
+            return findLatestRunningInvocation(currentSkillExecutionState, agentId)
+                ?? findLatestRunningInvocation(currentSkillExecutionState);
+        };
+        const activateTrackedSkillPlan = (plan, agentId = 'main') => {
+            const activation = activateSkillInvocation(currentSkillExecutionState, {
+                sessionId,
+                agentId,
+                plan,
+            });
+            currentSkillExecutionState = activation.state;
+            activeSkillInvocationId = activation.invocation.invocationId;
+            return activation.invocation;
+        };
+        const recordSkillReferenceEvidence = (invocation, absolutePath, agentId) => {
+            const normalizedAbsolutePath = absolutePath.replaceAll('\\', '/');
+            for (const step of invocation.plan.resolved) {
+                for (const relativePath of step.requiredReferences) {
+                    const expectedAbsolutePath = join(step.rootDir, relativePath).replaceAll('\\', '/');
+                    if (expectedAbsolutePath !== normalizedAbsolutePath) {
+                        continue;
+                    }
+                    currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
+                        type: 'read_reference',
+                        agentId,
+                        path: relativePath,
                     });
                 }
-                finally {
+            }
+        };
+        const recordSkillScriptEvidence = (invocation, command, agentId) => {
+            const normalizedCommand = command.trim().replace(/\s+/g, ' ');
+            const matchedRequiredCommands = [];
+            for (const step of invocation.plan.resolved) {
+                for (const requiredCommand of step.requiredScripts) {
+                    const normalizedRequired = requiredCommand.trim().replace(/\s+/g, ' ');
+                    if (normalizedCommand !== normalizedRequired) {
+                        continue;
+                    }
+                    matchedRequiredCommands.push(normalizedRequired);
+                    currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
+                        type: 'run_script',
+                        agentId,
+                        command: normalizedRequired,
+                    });
+                }
+            }
+            return matchedRequiredCommands;
+        };
+        const invocationRequiresStep = (invocation, stepId) => (invocation.plan.resolved.some((step) => step.requiredSteps.includes(stepId)));
+        const recordSkillStepCompletionEvidence = (invocation, stepId, agentId) => {
+            if (!invocationRequiresStep(invocation, stepId)) {
+                return;
+            }
+            currentSkillExecutionState = recordSkillEvidence(currentSkillExecutionState, invocation.invocationId, {
+                type: 'step_completed',
+                agentId,
+                stepId,
+            });
+        };
+        const recordSkillArtifactFileEvidence = (invocation, filePath, agentId) => {
+            const fileName = basename(filePath).toLowerCase();
+            if (fileName === 'brief.json') {
+                recordSkillStepCompletionEvidence(invocation, 'create_brief_json', agentId);
+            }
+        };
+        const recordSkillCommandStepEvidence = (invocation, matchedRequiredCommands, agentId) => {
+            if (matchedRequiredCommands.length === 0) {
+                return;
+            }
+            const normalizedCommands = matchedRequiredCommands.join('\n').toLowerCase();
+            if (/(^|[/\s_-])render(?:_from_brief)?(?:[.\s_-]|$)/u.test(normalizedCommands)) {
+                recordSkillStepCompletionEvidence(invocation, 'render_from_brief', agentId);
+            }
+            if (/(^|[/\s_-])(validate|check)(?:[.\s_-]|$)/u.test(normalizedCommands)) {
+                recordSkillStepCompletionEvidence(invocation, 'validate_artifact', agentId);
+            }
+        };
+        const observeSkillToolResult = (event) => {
+            if (event.toolName !== 'skill' || !event.ok) {
+                return;
+            }
+            try {
+                const parsed = JSON.parse(event.result);
+                if (parsed.type !== 'skill_plan') {
+                    return;
+                }
+                activateTrackedSkillPlan(parsed, event.agentId);
+            }
+            catch (e) {
+                log.warn('skill result JSON parse failed', e.message);
+            }
+        };
+        const observeSkillEvidence = (event) => {
+            const invocation = getTrackedInvocation(event.agentId);
+            if (!invocation) {
+                return;
+            }
+            if (event.toolName === 'read' && event.ok && typeof event.input.file_path === 'string') {
+                recordSkillReferenceEvidence(invocation, event.input.file_path, event.agentId);
+                return;
+            }
+            if ((event.toolName === 'write' || event.toolName === 'edit') && event.ok && typeof event.input.file_path === 'string') {
+                recordSkillArtifactFileEvidence(invocation, event.input.file_path, event.agentId);
+                return;
+            }
+            if (event.toolName === 'bash' && event.ok && typeof event.input.command === 'string') {
+                const matchedRequiredCommands = recordSkillScriptEvidence(invocation, event.input.command, event.agentId);
+                recordSkillCommandStepEvidence(invocation, matchedRequiredCommands, event.agentId);
+            }
+        };
+        // Lazy callbacks for AskUserQuestion — assigned after functions are declared.
+        // This avoids TS2448 (use-before-declare) for const-declared functions.
+        let askUserOnEnter = null;
+        let askUserOnExit = null;
+        let askUserRenderFrame = null;
+        let askUserClearFrame = null;
+        async function readQuestionText(_question, signal) {
+            const answer = await inputReader.read('Enter your answer: ', { signal });
+            signal?.throwIfAborted();
+            return answer;
+        }
+        const workflowTools = [
+            createAskUserTool({
+                ask: async (question, placeholder, interaction, signal) => {
+                    if (!isTTY()) {
+                        throw new Error('当前运行模式不支持 ask_user 交互');
+                    }
+                    askUserOnEnter?.();
                     try {
-                        inputLease.resume();
-                        busy?.resume();
+                        if (interaction?.options.length) {
+                            const result = await askQuestion({
+                                question,
+                                options: interaction.options,
+                                multiSelect: interaction.multiSelect ?? false,
+                                renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
+                                clearFrame: () => askUserClearFrame?.(),
+                                readText: readQuestionText,
+                                signal,
+                            });
+                            return [...result.labels, result.otherText]
+                                .filter((value) => Boolean(value))
+                                .join(', ');
+                        }
+                        const promptText = `\n${dim('Agent question:')} ${question}\n`;
+                        if (replRenderer.hasActiveScrollRegion()) {
+                            scrollRegion.writeAtContentCursor(promptText);
+                        }
+                        else {
+                            process.stdout.write(promptText);
+                        }
+                        const answer = await inputReader.read(placeholder ? `${placeholder}: ` : 'Answer: ', { signal });
+                        signal?.throwIfAborted();
+                        if (answer === null) {
+                            throw new Error('用户取消了问题输入');
+                        }
+                        return answer;
                     }
                     finally {
-                        interactiveBashActive = false;
-                        flushSubAgentNotices();
+                        askUserOnExit?.();
                     }
-                }
-            } : undefined,
-        platform,
-        source: 'chat',
-        sessionId,
-        transcriptPath: transcriptLogger.path,
-        adapter: () => adapter,
-        skillTool,
-        workflowTools,
-        memoryStore,
-        dryRun: opts.dryRun,
-        permissionManager,
-        onPrompt: async (name, input) => {
-            const tuiDecide = async () => {
-                const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
-                if (choice.action === 'deny')
-                    return false;
-                if (choice.action === 'allow_once')
-                    return true;
-                if (choice.action === 'allow_session') {
-                    permissionManager.addSessionRule(choice.rule);
-                    return true;
-                }
-                if (choice.action === 'allow_project') {
-                    await addAllowRule('project', choice.rule, cwd);
-                    permissionManager.addSessionRule(choice.rule);
-                    return true;
-                }
-                if (choice.action === 'allow_global') {
-                    await addAllowRule('global', choice.rule, cwd);
-                    permissionManager.addSessionRule(choice.rule);
-                    return true;
-                }
-                return false;
-            };
-            return withPausedLiveActivity(async () => {
-                if (embeddedChannels.length > 0) {
-                    return embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input);
-                }
-                return tuiDecide();
-            });
-        },
-        onSandboxDenied: async (deniedPath, toolName) => {
-            return withPausedLiveActivity(async () => {
-                const choice = await showPermissionPrompt(`sandbox-expand:${toolName}`, { file_path: deniedPath, _hint: `文件在工作目录外，是否允许扩展沙箱访问并读取？` }, { transcriptLogger, renderer: replRenderer });
-                if (choice.action === 'deny')
-                    return { shouldProceed: false };
-                if (choice.action === 'allow_once') {
-                    platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
-                    return { shouldProceed: true };
-                }
-                if (choice.action === 'allow_session') {
-                    platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
-                    permissionManager.addSessionRule(choice.rule);
-                    return { shouldProceed: true };
-                }
-                if (choice.action === 'allow_project') {
-                    platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
-                    await addAllowRule('project', choice.rule, cwd);
-                    permissionManager.addSessionRule(choice.rule);
-                    return { shouldProceed: true };
-                }
-                if (choice.action === 'allow_global') {
-                    platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
-                    await addAllowRule('global', choice.rule, cwd);
-                    permissionManager.addSessionRule(choice.rule);
-                    return { shouldProceed: true };
-                }
-                return { shouldProceed: false };
-            });
-        },
-        buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
-        notifyBackgroundJob: async (job) => {
-            const line = `\n[background] ${job.jobId} ${job.status}${job.resultSummary ? `: ${job.resultSummary}` : ''}\n`;
-            if (replRenderer.hasActiveScrollRegion()) {
-                scrollRegion.writeAtContentCursor(line);
+                },
+            }),
+            ...createIntentDelegationTools({
+                ledgerStore: intentLedgerStore,
+                sessionId,
+                instanceId,
+                getTurnIntentPlan: () => intentTurnState.getSnapshot().currentTurnIntentPlan,
+            }),
+            ...createGoalTools({
+                getGoal: async () => {
+                    const original = await goalService.load(sessionId);
+                    if (!original)
+                        return { state: null, activation: goalActivation };
+                    let currentCompletion = await observeGoalCompletion(original.state);
+                    const latest = await goalService.load(sessionId);
+                    if (!latest)
+                        return { state: null, activation: goalActivation };
+                    if (JSON.stringify(latest.state) !== JSON.stringify(original.state))
+                        currentCompletion = unobservedGoalCompletion(latest.state);
+                    return { state: latest.state, activation: goalActivation, currentCompletion };
+                },
+                async requestComplete(summary) {
+                    if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
+                        return { accepted: false, reason: 'no armed active Goal' };
+                    }
+                    const draft = activeRuntimeTurnId ? goalTurnDrafts.get(activeRuntimeTurnId) : undefined;
+                    if (!draft || draft.goalId !== currentGoalState.goalId || draft.epoch !== currentGoalState.epoch) {
+                        return { accepted: false, reason: 'no admitted original Goal turn' };
+                    }
+                    await goalService.requestCompletion(goalMutationContext('runtime'), {
+                        taskId: `cli:${sessionId}`, turnId: draft.turnId, summary,
+                    });
+                    currentGoalState = (await goalService.load(sessionId)).state;
+                    pendingGoalCompleteSummary = summary;
+                    return { accepted: true };
+                },
+                async requestBlocked(claim) {
+                    if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed()) {
+                        return { accepted: false, reason: 'no armed active Goal' };
+                    }
+                    pendingGoalBlockedClaim = claim;
+                    return { accepted: true };
+                },
+            }),
+            createAskUserQuestionTool({
+                interactive: isTTY(),
+                onEnterInteractive: () => askUserOnEnter?.(),
+                onExitInteractive: () => askUserOnExit?.(),
+                renderFrame: (lines) => askUserRenderFrame?.(lines) ?? false,
+                clearFrame: () => askUserClearFrame?.(),
+                readText: readQuestionText,
+            }),
+            createInstallSkillTool({
+                cwd,
+                capabilityRegistry: platform.capabilityRegistry,
+                onInstall: refreshSkills,
+            }),
+            createUninstallSkillTool({
+                cwd,
+                capabilityRegistry: platform.capabilityRegistry,
+                onUninstall: refreshSkills,
+            }),
+        ];
+        const initialPromptSnapshot = await buildPromptSnapshot();
+        const persistedPermissionSettings = await loadSettings(cwd);
+        const persistedPermissionRules = mergeRules(persistedPermissionSettings);
+        const permissionManager = new PermissionManager({
+            mode: autoMode ? 'auto' : 'default',
+            allowRules: persistedPermissionRules.allowRules,
+            denyRules: persistedPermissionRules.denyRules,
+        });
+        const expandSandboxTargets = (rule, deniedPath) => {
+            if (!rule) {
+                return [deniedPath];
             }
-            else {
-                process.stdout.write(line);
-            }
-        },
-        onToolObserved: async (event) => {
-            recordToolObservation(transcriptBuffer, event);
-            observeSkillToolResult(event);
-            observeSkillEvidence(event);
-        },
-        onMultiAgentEvent: (event) => {
-            multiAgentProgress.update(event);
-            try {
-                transcriptLogger.record({ type: 'multi_agent', event, timestamp: event.timestamp });
-            }
-            catch (error) {
-                log.debug('multi_agent_transcript_failed', String(error));
-            }
-        },
-        onSubAgentEvent: (event) => {
-            const block = multiAgentProgress.updateRun(event, process.stdout.columns ?? 100);
-            try {
-                transcriptLogger.record({ type: 'subagent_progress', event, timestamp: event.timestamp });
-            }
-            catch (error) {
-                log.debug('subagent_progress_transcript_failed', String(error));
-            }
-            if (!opts.print && !opts.json) {
+            const extracted = extractSandboxAllowedPaths([rule]);
+            return extracted.length > 0 ? extracted : [deniedPath];
+        };
+        const persistedSandboxAllowedPaths = extractSandboxAllowedPaths(persistedPermissionRules.allowRules);
+        if (persistedSandboxAllowedPaths.length > 0) {
+            platform.sandboxPolicy.expandAllowedPaths(persistedSandboxAllowedPaths);
+        }
+        inputReader.setModeCycleHandler(() => {
+            const nextMode = PermissionManager.nextMode(permissionManager.getMode());
+            permissionManager.setMode(nextMode);
+            statusBar.updateMode(nextMode);
+            return nextMode;
+        });
+        // 嵌入式 channel 管理
+        const embeddedChannels = [];
+        const embeddedApprovalStore = new InMemoryApprovalStore();
+        let interactiveBashActive = false;
+        const registryFactory = createPlatformRegistryFactory({
+            notifyReminder: (message) => {
+                const block = `\n[reminder] ${message}\n`;
+                if (opts.print || opts.json) {
+                    process.stdout.write(block);
+                    return;
+                }
+                transcriptBuffer.record({ kind: 'command_output', command: '[reminder]', output: block });
                 subAgentNotices.push(block);
                 flushSubAgentNotices();
-            }
-        },
-    });
-    const registry = registryFactory.createRegistry(cwd);
-    const reminders = registryFactory.getReminderApi();
-    // Top-level hooks runner for lifecycle events (SessionStart / UserPromptSubmit / Stop)
-    const lifecycleHooks = createHooksRunner({
-        hooks: pluginRuntime.hookConfigs,
-        context: {
-            session_id: sessionId,
-            cwd,
-            transcript_path: transcriptLogger.path,
-        },
-    });
-    const buildCleanupSteps = () => [
-        () => registryFactory.dispose(),
-        () => transcriptLogger.close(),
-        () => platform.dispose(),
-        () => disposeModelAdapter(adapter),
-        () => memoryStore.close?.(),
-        ...embeddedChannels.map((ch) => () => ch.cleanup()),
-    ];
-    const onCleanupError = (error) => {
-        log.warn('chat cleanup failed', { error: String(error) });
-    };
-    const cleanupRuntimeResourcesWithTimeout = async () => {
-        await runCleanupWithTimeout(buildCleanupSteps(), 2000, onCleanupError);
-    };
-    const rawRuntimeHooks = createRuntimeHooks();
-    const runtimeHooks = {
-        on: rawRuntimeHooks.on,
-        onAny: rawRuntimeHooks.onAny,
-        emit(event) {
-            rawRuntimeHooks.emit({ ...event, sessionId });
-        },
-    };
-    const traceRecorder = createRuntimeTraceRecorderFromEnv({
-        sessionId,
-        cwd,
-        command: 'xiaok chat',
-        version: cliVersion,
-        onWarning: (error) => {
-            log.warn('runtime trace recorder warning', { error: String(error) });
-        },
-    });
-    if (traceRecorder) {
-        rawRuntimeHooks.onAny((event) => {
-            traceRecorder.handleEvent(event);
-            if (event.type === 'turn_completed'
-                || event.type === 'turn_failed'
-                || event.type === 'turn_aborted'
-                || event.type === 'session_end') {
-                void traceRecorder.flush();
-            }
-        });
-    }
-    log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
-    setCrashContext({ startupPhase: 'agent' });
-    agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, {
-        hooks: runtimeHooks,
-        memoryStore,
-        maxIterations: resolveAgentMaxIterations(),
-    });
-    setCrashContext({ startupPhase: 'ready' });
-    agent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
-    agent.setPromptSnapshot(initialPromptSnapshot);
-    runtimeFacade = new RuntimeFacade({
-        promptBuilder,
-        getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
-        agent,
-        getSkillEntries: () => toSkillEntries(skills),
-        getIntentReminderBlock: () => intentTurnState.getSnapshot().activeIntentReminderBlock,
-        getGoalReminderBlock: () => (isGoalArmed() && currentGoalState?.status === 'active'
-            ? buildGoalContextBlock(currentGoalState)
-            : undefined),
-    });
-    skillCatalogWatcher = createSkillCatalogWatcher({
-        cwd,
-        options: { extraRoots: pluginRuntime.skillRoots },
-        onChange: refreshSkills,
-    });
-    if (persistedSession) {
-        agent.restoreSession(persistedSession);
-    }
-    await sessionStore.save({
-        ...agent.exportSession(),
-        sessionId,
-        cwd: process.cwd(),
-        model: adapter.getModelName(),
-        createdAt: sessionCreatedAt,
-        updatedAt: Date.now(),
-        forkedFromSessionId,
-        lineage: sessionLineage,
-        intentDelegation: currentIntentLedger,
-        skillEval: currentSkillEvalState,
-        skillExecution: currentSkillExecutionState,
-    });
-    // 触发 SessionStart hook
-    void lifecycleHooks.runHooks('SessionStart', {
-        source: opts.continue || opts.resume || opts.takeover ? 'resume' : 'startup',
-    });
-    // 创建 UI 组件
-    const mdRenderer = new MarkdownRenderer();
-    const statusBar = new StatusBar();
-    const scrollRegion = new ScrollRegionManager();
-    replRenderer.setScrollRegion(scrollRegion);
-    inputReader.setStatusLineProvider(() => {
-        const summaryLine = getCurrentIntentSummaryLine();
-        const statusLine = statusBar.getStatusLine();
-        const lines = [];
-        if (summaryLine) {
-            lines.push(summaryLine);
-        }
-        lines.push(statusLine || ' ');
-        return lines;
-    });
-    inputReader.setScrollPromptRenderer((frame) => {
-        if (!scrollRegion.isActive())
-            return false;
-        const placeholder = frame.placeholder === '> ' ? '' : frame.placeholder;
-        scrollRegion.renderPromptFrame({
-            inputValue: frame.inputValue,
-            cursor: frame.cursor,
-            placeholder,
-            summaryLine: frame.summaryLine,
-            statusLine: frame.statusLine,
-            overlayLines: frame.overlayLines,
-            overlayKind: frame.overlayKind,
-        });
-        return true;
-    });
-    const stopIntentRuntimeSync = wireIntentDelegationToRuntimeSync({
-        hooks: runtimeHooks,
-        ledgerStore: intentLedgerStore,
-        sessionId,
-    });
-    const stopSkillEvalRuntimeSync = wireSkillEvalToRuntimeSync({
-        hooks: runtimeHooks,
-        ledgerStore: intentLedgerStore,
-        skillEvalStore,
-        scoreStore: skillScoreStore,
-        sessionId,
-    });
-    let streamingSegmentText = '';
-    let turnVisibleAssistantTextSeen = false;
-    let turnThinkingOnlyToolNoticeWritten = false;
-    let thinkingOnlyToolNoticeTimer = null;
-    const resetStreamingSegment = () => {
-        streamingSegmentText = '';
-    };
-    const noteVisibleAssistantText = (delta) => {
-        if (/\S/.test(delta)) {
-            turnVisibleAssistantTextSeen = true;
-        }
-    };
-    const flushStreamingMarkdown = () => {
-        try {
-            if (scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
-                // Footer/prompt redraws (e.g. typing while the turn is busy) leave the
-                // real cursor inside the footer, so anchor back before writing the tail.
-                scrollRegion.positionCursorAtContentCursor();
-            }
-            // Row/column bookkeeping already happened during the write via the
-            // newline and column-advance callbacks; recomputing it here would
-            // overwrite exact values with a second, less precise wrap model.
-            mdRenderer.flush();
-        }
-        finally {
-            resetStreamingSegment();
-        }
-    };
-    // 收集历史消息用于稍后打印（在欢迎页之后）
-    const historyMessages = persistedSession?.messages ?? [];
-    let welcomeVisible = historyMessages.length === 0 && !opts.dryRun;
-    let contentRows = 0; // tracks how many rows of content have been written
-    let handleResize = null;
-    suspendInteractiveUi = (context, error, fallbackStream = null) => {
-        if (terminalUiSuspended) {
-            return;
-        }
-        terminalUiSuspended = true;
-        terminalUiFallbackStream = fallbackStream;
-        terminalLog.warn('UI suspended', { context, fallbackStream });
-        runtimeState.deactivateTurn();
-        inputReader.setForcePlainMode(false);
-        if (!terminalUiFailureNoted) {
-            terminalUiFailureNoted = true;
-            const rawMessage = `\n[xiaok] UI 输出已停用：${context} (${String(error)})\n`;
-            const isBrokenPipe = /\bEPIPE\b/i.test(String(error));
-            try {
-                transcriptLogger.recordOutput('stderr', rawMessage);
-            }
-            catch { }
-            if (!isBrokenPipe) {
+            },
+            runInteractiveBash: !opts.print && !opts.json && process.stdin.isTTY && process.stdout.isTTY && process.platform !== 'win32'
+                ? async (input, context) => {
+                    if (interactiveBashActive)
+                        return 'Error: 本地交互终端正被另一条命令使用，请稍后重试。';
+                    context?.signal?.throwIfAborted();
+                    interactiveBashActive = true;
+                    const busy = activeBusyCapture;
+                    busy?.pause();
+                    const inputLease = inputReader.suspendForExternalProcess();
+                    try {
+                        return await withPausedLiveActivity(async () => {
+                            try {
+                                scrollRegion.end();
+                                terminalOutput.write('stdout', '\n[xiaok] sudo 交互终端：请在此输入密码（不回显），Ctrl+C / Esc 取消。\n');
+                                const result = await runPtyCommand(String(input.command), {
+                                    cwd: typeof input.workdir === 'string' ? input.workdir : cwd,
+                                    timeoutMs: typeof input.timeout_ms === 'number' ? input.timeout_ms : 120000,
+                                    maxChars: typeof input.max_chars === 'number' ? input.max_chars : 12000,
+                                    signal: context?.signal, write: text => { terminalOutput.write('stdout', text); },
+                                });
+                                if (context?.toolInvocationId)
+                                    context.runtimeFactSink?.emit({ invocationId: context.toolInvocationId, toolName: 'bash', factKind: 'command_result', exitCode: result.timedOut ? null : result.exitCode });
+                                if (result.timedOut)
+                                    return `Error: 命令超时\n${result.output}`;
+                                return result.exitCode === 0 ? result.output || '（命令执行成功，无输出）' : `Error (exit ${result.exitCode}): ${result.output}`;
+                            }
+                            finally {
+                                terminalOutput.write('stdout', '\n');
+                                scrollRegion.resumeAfterExternalCommand({ inputPrompt: getFooterInputPrompt(), summaryLine: getCurrentIntentSummaryLine(), statusLine: statusBar.getStatusLine() });
+                            }
+                        });
+                    }
+                    finally {
+                        try {
+                            inputLease.resume();
+                            busy?.resume();
+                        }
+                        finally {
+                            interactiveBashActive = false;
+                            flushSubAgentNotices();
+                        }
+                    }
+                } : undefined,
+            platform,
+            source: 'chat',
+            sessionId,
+            transcriptPath: transcriptLogger.path,
+            adapter: () => adapter,
+            skillTool,
+            workflowTools,
+            memoryStore,
+            dryRun: opts.dryRun,
+            permissionManager,
+            onPrompt: async (name, input) => {
+                const tuiDecide = async () => {
+                    const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
+                    if (choice.action === 'deny')
+                        return false;
+                    if (choice.action === 'allow_once')
+                        return true;
+                    if (choice.action === 'allow_session') {
+                        permissionManager.addSessionRule(choice.rule);
+                        return true;
+                    }
+                    if (choice.action === 'allow_project') {
+                        await addAllowRule('project', choice.rule, cwd);
+                        permissionManager.addSessionRule(choice.rule);
+                        return true;
+                    }
+                    if (choice.action === 'allow_global') {
+                        await addAllowRule('global', choice.rule, cwd);
+                        permissionManager.addSessionRule(choice.rule);
+                        return true;
+                    }
+                    return false;
+                };
+                return withPausedLiveActivity(async () => {
+                    if (embeddedChannels.length > 0) {
+                        return embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input);
+                    }
+                    return tuiDecide();
+                });
+            },
+            onSandboxDenied: async (deniedPath, toolName) => {
+                return withPausedLiveActivity(async () => {
+                    const choice = await showPermissionPrompt(`sandbox-expand:${toolName}`, { file_path: deniedPath, _hint: `文件在工作目录外，是否允许扩展沙箱访问并读取？` }, { transcriptLogger, renderer: replRenderer });
+                    if (choice.action === 'deny')
+                        return { shouldProceed: false };
+                    if (choice.action === 'allow_once') {
+                        platform.sandboxPolicy.expandAllowedPaths([deniedPath]);
+                        return { shouldProceed: true };
+                    }
+                    if (choice.action === 'allow_session') {
+                        platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
+                        permissionManager.addSessionRule(choice.rule);
+                        return { shouldProceed: true };
+                    }
+                    if (choice.action === 'allow_project') {
+                        platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
+                        await addAllowRule('project', choice.rule, cwd);
+                        permissionManager.addSessionRule(choice.rule);
+                        return { shouldProceed: true };
+                    }
+                    if (choice.action === 'allow_global') {
+                        platform.sandboxPolicy.expandAllowedPaths(expandSandboxTargets(choice.rule, deniedPath));
+                        await addAllowRule('global', choice.rule, cwd);
+                        permissionManager.addSessionRule(choice.rule);
+                        return { shouldProceed: true };
+                    }
+                    return { shouldProceed: false };
+                });
+            },
+            buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
+            notifyBackgroundJob: async (job) => {
+                const line = `\n[background] ${job.jobId} ${job.status}${job.resultSummary ? `: ${job.resultSummary}` : ''}\n`;
+                if (replRenderer.hasActiveScrollRegion()) {
+                    scrollRegion.writeAtContentCursor(line);
+                }
+                else {
+                    process.stdout.write(line);
+                }
+            },
+            onToolObserved: async (event) => {
+                recordToolObservation(transcriptBuffer, event);
+                observeSkillToolResult(event);
+                observeSkillEvidence(event);
+            },
+            onMultiAgentEvent: (event) => {
+                multiAgentProgress.update(event);
                 try {
-                    terminalOutput.write(fallbackStream === 'stdout' ? 'stdout' : 'stderr', rawMessage);
+                    transcriptLogger.record({ type: 'multi_agent', event, timestamp: event.timestamp });
                 }
-                catch { }
-            }
-        }
-        try {
-            stopActivity();
-        }
-        catch { }
-        try {
-            statusBar.destroy();
-        }
-        catch { }
-        try {
-            scrollRegion.end();
-        }
-        catch (e) {
-            terminalLog.warn('scrollRegion.end failed in suspendInteractiveUi', e.message);
-        }
-    };
-    const runtimeState = new TuiRuntimeState({
-        getActivitySummary: (now) => multiAgentProgress.summary(now, Math.max(1, (process.stdout.columns ?? 100) - 1)),
-        statusBar,
-        scrollRegion,
-        onSuspendInteractiveUi: (context, error) => {
-            suspendInteractiveUi(context, error);
-        },
-        isTerminalUiSuspended: () => terminalUiSuspended,
-    });
-    const beginActivity = (label, restart = false, startedAt = Date.now()) => {
-        runtimeState.beginActivity(label, restart, startedAt);
-    };
-    const scheduleActivityResume = (label, delayMs = 180) => {
-        runtimeState.scheduleActivityResume(label, delayMs);
-    };
-    const scheduleActivityPause = (delayMs = 180) => {
-        runtimeState.scheduleActivityPause(delayMs);
-    };
-    const pauseActivity = () => {
-        runtimeState.pauseActivity();
-    };
-    const stopLiveActivityTimer = () => {
-        runtimeState.stopLiveActivityTimer();
-    };
-    const withPausedLiveActivity = async (action) => {
-        try {
-            return await runtimeState.withPausedLiveActivity(action);
-        }
-        finally {
-            flushSubAgentNotices();
-        }
-    };
-    function ensureBusyInputCapture() {
-        if (terminalUiSuspended || !scrollRegion.isActive()) {
-            return;
-        }
-        if (activeBusyCapture?.isActive()) {
-            return;
-        }
-        activeBusyCapture?.stop();
-        activeBusyCapture = inputReader.startBusyCapture({
-            placeholder: getFooterInputPrompt(),
-            onAbortRequest: requestCurrentTurnAbort,
-        });
-    }
-    let askUserQuestionPromptActive = false;
-    const enterAskUserQuestionPrompt = () => {
-        stopBusyCapture();
-        if (!askUserQuestionPromptActive) {
-            askUserQuestionPromptActive = true;
-            runtimeState.enterInteractivePrompt();
-        }
-        if (scrollRegion.isActive()) {
-            scrollRegion.clearActivityLine();
-            scrollRegion.positionCursorAtContentCursor();
-        }
-    };
-    const exitAskUserQuestionPrompt = () => {
-        if (askUserQuestionPromptActive) {
-            askUserQuestionPromptActive = false;
-            runtimeState.exitInteractivePrompt();
-        }
-        flushSubAgentNotices();
-        ensureBusyInputCapture();
-        runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
-    };
-    // Wire up lazy callbacks for AskUserQuestion interactive prompt.
-    askUserOnEnter = enterAskUserQuestionPrompt;
-    askUserOnExit = exitAskUserQuestionPrompt;
-    askUserRenderFrame = (lines) => {
-        if (terminalUiSuspended || !scrollRegion.isActive()) {
-            return false;
-        }
-        scrollRegion.renderPromptFrame({
-            inputValue: '',
-            cursor: 0,
-            placeholder: getFooterInputPrompt(),
-            summaryLine: getCurrentIntentSummaryLine(),
-            statusLine: statusBar.getStatusLine(),
-            overlayLines: lines,
-            overlayKind: 'question',
-            owner: 'renderer',
-        });
-        return true;
-    };
-    askUserClearFrame = () => {
-        if (terminalUiSuspended || !scrollRegion.isActive()) {
-            return;
-        }
-        scrollRegion.renderPromptFrame({
-            inputValue: '',
-            cursor: 0,
-            placeholder: getFooterInputPrompt(),
-            summaryLine: getCurrentIntentSummaryLine(),
-            statusLine: statusBar.getStatusLine(),
-            overlayLines: [],
-            owner: 'renderer',
-        });
-        scrollRegion.positionCursorAtContentCursor();
-    };
-    const stopActivity = () => {
-        runtimeState.stopActivity();
-    };
-    const resetTurnChrome = () => {
-        stopActivity();
-        toolExplorer.reset();
-        turnLayout.reset();
-        mdRenderer.reset();
-        resetStreamingSegment();
-    };
-    const handleTurnFailure = (error) => {
-        endStreamingPhaseForInterrupt();
-        runtimeState.markInputReady();
-        resetTurnChrome();
-        const errorText = `\x1b[31mError:\x1b[0m ${formatErrorText(String(error))}`;
-        if (scrollRegion.isActive() && !terminalUiSuspended) {
-            try {
-                scrollRegion.writeAtContentCursor(errorText + '\n');
-            }
-            catch (uiError) {
-                suspendInteractiveUi('handle_turn_failure', uiError);
-                writeError(String(error));
-            }
-        }
-        else {
-            writeError(String(error));
-        }
-        renderFooterChrome();
-    };
-    const handleTurnAbort = () => {
-        endStreamingPhaseForInterrupt();
-        runtimeState.markInputReady();
-        resetTurnChrome();
-        const noticeText = yellow('- Request cancelled');
-        if (scrollRegion.isActive() && !terminalUiSuspended) {
-            try {
-                scrollRegion.writeAtContentCursor(noticeText + '\n');
-            }
-            catch (uiError) {
-                suspendInteractiveUi('handle_turn_abort', uiError);
-                process.stderr.write(noticeText + '\n');
-            }
-        }
-        else {
-            process.stderr.write(noticeText + '\n');
-        }
-        renderFooterChrome();
-    };
-    const getFooterInputPrompt = () => runtimeState.getFooterInputPrompt();
-    const renderFooterChrome = () => {
-        if (!scrollRegion.isActive()) {
-            return;
-        }
-        try {
-            flushStreamingMarkdown();
-            const footerOptions = {
-                inputPrompt: getFooterInputPrompt(),
-                summaryLine: getCurrentIntentSummaryLine(),
-                statusLine: statusBar.getStatusLine(),
-            };
-            renderFooterChromeInOrder({
-                scrollRegion,
-                replRenderer,
-                mdRenderer,
-            }, footerOptions);
-        }
-        catch (error) {
-            suspendInteractiveUi('render_footer_chrome', error);
-        }
-    };
-    const endStreamingPhaseForInterrupt = () => {
-        if (!scrollRegion.isActive() || !scrollRegion.isContentStreaming()) {
-            return;
-        }
-        try {
-            flushStreamingMarkdown();
-            const footerOptions = {
-                inputPrompt: getFooterInputPrompt(),
-                summaryLine: getCurrentIntentSummaryLine(),
-                statusLine: statusBar.getStatusLine(),
-            };
-            endStreamingPhaseForInterruptInOrder({
-                scrollRegion,
-                runtimeState,
-                mdRenderer,
-            }, footerOptions);
-            replRenderer.prepareForInput();
-        }
-        catch (error) {
-            suspendInteractiveUi('end_streaming_interrupt', error);
-        }
-    };
-    const ensureStreamingPhase = () => {
-        ensureStreamingPhaseInOrder({
-            scrollRegion,
-            runtimeState,
-            turnLayout,
-            mdRenderer,
-            stopLiveActivityTimer,
-            writeFallback: (text) => {
-                process.stdout.write(text);
-            },
-        });
-    };
-    const handleAssistantTextChunk = (delta, appendText) => {
-        writeAssistantTextChunkInOrder(delta, {
-            noteVisibleAssistantText,
-            appendAssistantText: appendText,
-            appendStreamingSegment: (text) => {
-                streamingSegmentText += text;
-            },
-            ensureStreamingPhase,
-            writeMarkdown: (text) => {
-                mdRenderer.write(text);
-            },
-        });
-    };
-    let interactiveRuntimeTurnSequence = 0;
-    const createInteractiveRuntimeTurnRequest = (input, signal) => ({
-        turnToken: `${sessionId}:interactive:${++interactiveRuntimeTurnSequence}`,
-        sessionId,
-        cwd,
-        source: 'chat',
-        input,
-        ...(signal ? { signal } : {}),
-    });
-    const createInteractiveTurnChunkHandlers = (appendAssistantText) => ({
-        writeAssistantText(delta) {
-            handleAssistantTextChunk(delta, appendAssistantText);
-        },
-        updateUsage(usage) {
-            statusBar.update(usage);
-            scrollRegion.updateStatusLine(statusBar.getStatusLine());
-            if (activeRuntimeTurnId) {
-                const draft = goalTurnDrafts.get(activeRuntimeTurnId);
-                if (draft) {
-                    const typedUsage = usage;
-                    draft.usageTokens = typedUsage.inputTokens + typedUsage.outputTokens;
+                catch (error) {
+                    log.debug('multi_agent_transcript_failed', String(error));
                 }
+            },
+            onSubAgentEvent: (event) => {
+                if (event.kind === 'finished' && event.status === 'completed')
+                    agent?.notifySubtaskBoundary();
+                const block = multiAgentProgress.updateRun(event, process.stdout.columns ?? 100);
+                try {
+                    transcriptLogger.record({ type: 'subagent_progress', event, timestamp: event.timestamp });
+                }
+                catch (error) {
+                    log.debug('subagent_progress_transcript_failed', String(error));
+                }
+                if (!opts.print && !opts.json) {
+                    subAgentNotices.push(block);
+                    flushSubAgentNotices();
+                }
+            },
+        });
+        let registry = registryFactory.createRegistry(cwd);
+        const reminders = registryFactory.getReminderApi();
+        // Top-level hooks runner for lifecycle events (SessionStart / UserPromptSubmit / Stop)
+        const lifecycleHooks = createHooksRunner({
+            hooks: pluginRuntime.hookConfigs,
+            finalHookAdmission: () => lifecycleHookDenied() ? undefined : { reason: finalizationExitReason },
+            context: {
+                session_id: sessionId,
+                cwd,
+                transcript_path: transcriptLogger.path,
+            },
+        });
+        const lifecycleHookDenied = () => {
+            const actual = sessionStore.getIntentNativeLedgerSync(sessionId);
+            return !!(intentVerificationDefinition || actual?.nativeContracts?.length || productObservation?.summary.compoundExecution);
+        };
+        const runLifecycleHooks = async (event, payload) => {
+            if (lifecycleHookDenied())
+                return { ok: false, message: 'intent_native_execution_current_required' };
+            return lifecycleHooks.runHooks(event, payload);
+        };
+        const goalPublicationOwners = new Set();
+        const goalPublicationFailures = [];
+        freezeIngress = () => {
+            agent?.stopNewRuns(finalizationReason);
+            inputReader.close();
+            goalTurnAdmissionEnabled = false;
+            goalActivation = 'disarmed';
+            goalPublicationGeneration++;
+            for (const host of [intentReceiverHost, intentVerificationHost, intentPublicationHost, intentNativeHost, goalNativeHost]) {
+                if (host)
+                    void host.close().catch(error => finalizationErrors.push(error));
             }
-        },
-    });
-    const getCurrentIntentSummaryLine = () => {
-        let source = 'none';
-        let line = '';
-        const intentTurnSnapshot = intentTurnState.getSnapshot();
-        if (currentGoalState) {
-            source = 'goal';
-            line = formatGoalSummaryLine(currentGoalState);
-        }
-        else if (intentTurnSnapshot.currentTurnIntentPlan) {
-            source = 'turn';
-            line = getCurrentTurnSummaryLine();
-        }
-        else if (intentTurnSnapshot.completedTurnIntentSummaryLine) {
-            source = 'completed_turn';
-            line = intentTurnSnapshot.completedTurnIntentSummaryLine;
-        }
-        else if (currentIntentLedger.activeIntentId
-            && currentIntentLedger.intents.find((intent) => (intent.intentId === currentIntentLedger.activeIntentId
-                && intent.overallStatus === 'waiting_user'))) {
-            source = 'waiting_user';
-            line = formatCurrentIntentSummaryLine(currentIntentLedger, instanceId);
-        }
-        runtimeState.setSummarySource(source);
-        return line;
-    };
-    function writeProgressTranscriptNote(note, leadingGap = false) {
-        if (!note) {
-            return;
-        }
-        const block = `${leadingGap ? '\n' : ''}${formatProgressNote(note)}`;
-        endStreamingPhaseForInterrupt();
-        if (scrollRegion.isActive()) {
-            try {
-                scrollRegion.writeAtContentCursor(block);
-            }
-            catch (error) {
-                suspendInteractiveUi('write_progress_note', error);
-            }
-            mdRenderer.beginNewSegment();
-            resetStreamingSegment();
-            return;
-        }
-        process.stdout.write(block);
-        mdRenderer.beginNewSegment();
-        resetStreamingSegment();
-    }
-    const maybeWriteThinkingOnlyToolNotice = () => {
-        if (turnVisibleAssistantTextSeen || turnThinkingOnlyToolNoticeWritten) {
-            return;
-        }
-        if (thinkingOnlyToolNoticeTimer) {
-            clearTimeout(thinkingOnlyToolNoticeTimer);
-            thinkingOnlyToolNoticeTimer = null;
-        }
-        if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
-            turnThinkingOnlyToolNoticeWritten = true;
-            turnLayout.noteProgressNote();
-            writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE, true);
-            return;
-        }
-    };
-    const isTerminalIntentStatus = (status) => status === 'completed' || status === 'failed' || status === 'cancelled';
-    const refreshIntentLedger = async () => {
-        currentIntentLedger = await intentLedgerStore.load(sessionId) ?? currentIntentLedger;
-    };
-    const refreshSkillEvalState = async () => {
-        currentSkillEvalState = await skillEvalStore.load(sessionId) ?? currentSkillEvalState;
-    };
-    const runStrictContinuationTurn = async (input) => {
-        let continuationText = '';
-        await maybePrepareFreshContextHandoff();
-        const continuationResult = await runInteractiveRuntimeTurn(runRuntimeTurn, createInteractiveRuntimeTurnRequest(input), createInteractiveTurnChunkHandlers((delta) => {
-            continuationText += delta;
-        }));
-        continuationText = continuationResult.assistantText;
-        flushStreamingMarkdown();
-        await finalizeCurrentTurnIntentIfNeeded();
-        return continuationText;
-    };
-    const strictSkillAdherenceFlow = createStrictSkillAdherenceFlow({
-        getTrackedInvocation: () => getTrackedInvocation(),
-        getInvocationById: (invocationId) => getInvocationById(invocationId),
-        getSkillExecutionState: () => currentSkillExecutionState,
-        setSkillExecutionState: (nextState) => {
-            currentSkillExecutionState = nextState;
-        },
-        continuationRunner: { runContinuation: runStrictContinuationTurn },
-        adherenceStore: skillAdherenceStore,
-        writeProgressTranscriptNote,
-    });
-    const maybeRunStrictCompletionLoop = strictSkillAdherenceFlow.maybeRunStrictCompletionLoop;
-    const renderIntentSummaryLine = () => {
-        if (!scrollRegion.isActive() || scrollRegion.isContentStreaming()) {
-            return;
-        }
-        try {
-            scrollRegion.renderFooter({
-                inputPrompt: getFooterInputPrompt(),
-                summaryLine: getCurrentIntentSummaryLine(),
-                statusLine: statusBar.getStatusLine(),
+            for (const owner of goalPublicationOwners)
+                owner.controller.abort(finalizationReason);
+            intentVerificationAbort?.abort(finalizationReason);
+            intentReceiverAbort?.abort(finalizationReason);
+            currentTurnAbortController?.abort(finalizationReason);
+            // Do not release Goal/session ownership while accepted writers still run.
+        };
+        finalizeOwners = async (errors) => {
+            freezeIngress();
+            const settle = async (operations) => {
+                const results = await Promise.allSettled(operations.map(operation => Promise.resolve().then(operation)));
+                for (const result of results)
+                    if (result.status === 'rejected' && result.reason !== finalizationReason)
+                        errors.push(result.reason);
+            };
+            await settle([
+                () => agent?.waitForStoppedResources(),
+                () => stopIntentRuntimeSync(), () => stopSkillEvalRuntimeSync(),
+                () => lifecycleHooks.closeAndDrain(),
+                ...[intentReceiverHost, intentVerificationHost, intentPublicationHost, intentNativeHost].filter(host => !!host).map(host => async () => {
+                    await host.close();
+                    await host.waitForClosedResources();
+                }),
+                async () => { await goalNativeHost.close(); await goalNativeHost.waitForClosedResources(); },
+                ...[...goalWriters, ...sessionWriters, ...[...goalPublicationOwners].map(owner => owner.work)].map(work => () => work),
+                () => registryFactory.dispose(),
+            ]);
+            await settle([() => registryFactory.waitForDisposedResources()]);
+            detachedClosed = true;
+            await drainContinuations(detachedWork);
+            await settle([() => drainCliRegistryWriters(registryFactory, compoundCoordinator)]);
+            errors.push(...goalPublicationFailures);
+            // A bounded stop or an unknown writer failure never retires the domain or
+            // transfers ownership. All peers above are nevertheless physically drained.
+            // Commands, model reads/returns, hooks and registry producers have ended.
+            // An empty trace population before that barrier is not physical closure.
+            traceClosed = true;
+            await drainContinuations(traceWork);
+            if (errors.length)
+                throw new AggregateError(errors, 'chat_finalization_unconfirmed');
+            await settle([async () => { agent?.dispose(); await agent?.waitForDisposedResources(); }]);
+            if (errors.length)
+                throw new AggregateError(errors, 'chat_agent_cleanup_unconfirmed');
+            await productObservation?.dispose();
+            goalActivation = 'disarmed';
+            stopGoalLeaseHeartbeat();
+            goalLease.release();
+            ownIntentAuthority?.dispose();
+            await releaseDrainedSessionOwnership();
+            finishTerminal();
+            await settle([
+                () => verificationClient?.dispose(), () => registry.dispose(), () => transcriptLogger.close(),
+                () => platform.dispose(), () => disposeModelAdapter(adapter), () => memoryStore.close?.(),
+                ...embeddedChannels.map(channel => () => channel.cleanup()),
+            ]);
+            if (errors.length)
+                throw new AggregateError(errors, 'chat_resource_cleanup_unconfirmed');
+        };
+        const rawRuntimeHooks = createRuntimeHooks();
+        const runtimeHooks = {
+            on: rawRuntimeHooks.on,
+            onAny: rawRuntimeHooks.onAny,
+            emit(event) {
+                rawRuntimeHooks.emit({ ...event, sessionId });
+            },
+        };
+        const traceRecorder = createRuntimeTraceRecorderFromEnv({
+            sessionId,
+            cwd,
+            command: 'xiaok chat',
+            version: cliVersion,
+            onWarning: (error) => {
+                finalizationErrors.push(error);
+                log.warn('runtime trace recorder warning', { error: String(error) });
+            },
+        });
+        if (traceRecorder) {
+            rawRuntimeHooks.onAny((event) => {
+                traceRecorder.handleEvent(event);
+                if (event.type === 'turn_completed'
+                    || event.type === 'turn_failed'
+                    || event.type === 'turn_aborted'
+                    || event.type === 'session_end') {
+                    void trackTrace(() => traceRecorder.flush());
+                }
             });
         }
-        catch (error) {
-            suspendInteractiveUi('render_intent_summary', error);
-        }
-    };
-    const hasContinuationCue = (input) => (/^(继续|继续做|继续写|继续生成|再改一版|基于(刚才|上一个|上一版|刚才那个)|按(刚才|上一个|上一版)|重新生成同一件事)/u).test(input.trim());
-    const isSupplementOrClarification = (input) => (/^(补充|补一下|补一个|再补充|这里还有|答案是|是|不是|可以|不可以|用中文|用英文|好的，继续|继续吧)/u).test(input.trim());
-    const getWaitingUserIntentForInput = (input) => {
-        if (!currentIntentLedger.activeIntentId) {
-            return undefined;
-        }
-        const activeIntent = currentIntentLedger.intents.find((intent) => (intent.intentId === currentIntentLedger.activeIntentId
-            && intent.overallStatus === 'waiting_user'));
-        if (!activeIntent) {
-            return undefined;
-        }
-        if (!hasContinuationCue(input) && !isSupplementOrClarification(input)) {
-            return undefined;
-        }
-        return activeIntent;
-    };
-    const resetCurrentTurnSummary = () => {
-        const snapshot = intentTurnState.getSnapshot();
-        if (snapshot.activeTurnToken) {
-            intentTurnState.setPlan(snapshot.activeTurnToken, snapshot.currentTurnIntentPlan);
-        }
-        currentTurnStageObservedSkillNames = new Map();
-    };
-    const normalizeStageMatchText = (value) => value.toLowerCase();
-    const stageLooksLikeReport = (value) => /(报告|report|brief|document|doc)/iu.test(value);
-    const stageLooksLikeSlides = (value) => /(幻灯片|slide|slides|deck|ppt|presentation)/iu.test(value);
-    const stageLooksLikeMarkdown = (value) => /(^|[^a-z])md([^a-z]|$)|markdown|提取\s*markdown/iu.test(value);
-    const scoreStageForSkillName = (stage, skillName) => {
-        const stageText = normalizeStageMatchText(`${stage.deliverable} ${stage.label}`);
-        const skillText = normalizeStageMatchText(skillName);
-        let score = 0;
-        if (stageLooksLikeReport(stageText) && /(report|报告)/iu.test(skillText)) {
-            score += 20;
-        }
-        if (stageLooksLikeSlides(stageText) && /(slide|slides|deck|ppt|幻灯片)/iu.test(skillText)) {
-            score += 20;
-        }
-        if (stageLooksLikeMarkdown(stageText) && /(^|[^a-z])md([^a-z]|$)|markdown|extract/iu.test(skillText)) {
-            score += 20;
-        }
-        return score;
-    };
-    const scoreStageForToolInput = (stage, toolName, toolInput) => {
-        const stageText = normalizeStageMatchText(`${stage.deliverable} ${stage.label}`);
-        const inputText = normalizeStageMatchText(JSON.stringify(toolInput));
-        const toolText = `${normalizeStageMatchText(toolName)} ${inputText}`;
-        let score = 0;
-        if (stageLooksLikeReport(stageText) && /(report|报告|\.report\.md|生成报告|report-)/iu.test(toolText)) {
-            score += 12;
-        }
-        if (stageLooksLikeSlides(stageText) && /(slide|slides|deck|ppt|幻灯片|演示文稿)/iu.test(toolText)) {
-            score += 12;
-        }
-        if (stageLooksLikeMarkdown(stageText)
-            && /(markdown|merged_md|提取\s*markdown|\.md["'\s,}])/iu.test(toolText)
-            && !/\.report\.md/iu.test(toolText)) {
-            score += 8;
-        }
-        return score;
-    };
-    const findBestMatchingStageIndex = (scoreStage) => {
-        const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
-        if (!plan) {
-            return -1;
-        }
-        let bestIndex = -1;
-        let bestScore = 0;
-        plan.stages.forEach((stage, index) => {
-            const score = scoreStage(stage);
-            if (score > bestScore || (score === bestScore && score > 0 && index > bestIndex)) {
-                bestIndex = index;
-                bestScore = score;
-            }
-        });
-        return bestScore > 0 ? bestIndex : -1;
-    };
-    const inferStageIndexForSkillName = (skillName) => (findBestMatchingStageIndex((stage) => scoreStageForSkillName(stage, skillName)));
-    const inferStageIndexForTool = (toolName, toolInput) => (findBestMatchingStageIndex((stage) => scoreStageForToolInput(stage, toolName, toolInput)));
-    const advanceCurrentTurnStage = (turnToken, stageIndex, announce = false) => {
-        const snapshot = intentTurnState.getSnapshot();
-        const plan = snapshot.currentTurnIntentPlan;
-        if (!intentTurnState.isActiveTurn(turnToken)
-            || !plan
-            || stageIndex < 0
-            || stageIndex >= plan.stages.length) {
-            return;
-        }
-        if (stageIndex > snapshot.currentTurnStageIndex) {
-            intentTurnState.noteStageActivated(turnToken, stageIndex);
-            if (announce) {
-                const stage = plan.stages[stageIndex];
-                if (stage) {
-                    writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
-                        order: stage.order,
-                        totalStages: plan.stages.length,
-                        label: stage.label,
-                    }));
-                }
-            }
-        }
-    };
-    const getStageSkillNames = (stage) => ([...(currentTurnStageObservedSkillNames.get(stage.order) ?? [])]);
-    const recordCurrentTurnStageSkill = (turnToken, stageIndex, skillName) => {
-        const normalized = skillName.trim();
-        const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
-        if (!intentTurnState.isActiveTurn(turnToken)
-            || !plan
-            || stageIndex < 0
-            || stageIndex >= plan.stages.length
-            || !normalized
-            || normalized.startsWith('generic_llm::')) {
-            return;
-        }
-        const current = currentTurnStageObservedSkillNames.get(stageIndex) ?? new Set();
-        current.add(normalized);
-        currentTurnStageObservedSkillNames.set(stageIndex, current);
-    };
-    const maybeAdvanceCurrentTurnStageForTool = (turnToken, toolName, toolInput) => {
-        if (!intentTurnState.isActiveTurn(turnToken) || !intentTurnState.getSnapshot().currentTurnIntentPlan) {
-            return;
-        }
-        if (toolName !== 'skill') {
-            advanceCurrentTurnStage(turnToken, inferStageIndexForTool(toolName, toolInput), true);
-            intentTurnState.noteStepRunning(turnToken);
-            return;
-        }
-        const skillName = typeof toolInput.name === 'string' ? toolInput.name.trim() : '';
-        if (!skillName) {
-            intentTurnState.noteStepRunning(turnToken);
-            return;
-        }
-        const stageIndex = inferStageIndexForSkillName(skillName);
-        advanceCurrentTurnStage(turnToken, stageIndex, true);
-        recordCurrentTurnStageSkill(turnToken, stageIndex, skillName);
-        intentTurnState.noteStepRunning(turnToken);
-    };
-    const getCurrentTurnSummaryLine = () => {
-        const snapshot = intentTurnState.getSnapshot();
-        const plan = snapshot.currentTurnIntentPlan;
-        if (!plan) {
-            return '';
-        }
-        const stages = plan.stages;
-        const stage = stages[Math.min(snapshot.currentTurnStageIndex, Math.max(stages.length - 1, 0))];
-        if (!stage) {
-            return '';
-        }
-        return formatCurrentTurnIntentSummaryLine({
-            deliverable: plan.deliverable,
-            stageOrder: stage.order,
-            totalStages: stages.length,
-            stageLabel: stage.label,
-            skillNames: getStageSkillNames(stage),
-            status: snapshot.currentTurnStageStatus,
-        });
-    };
-    const getCurrentTurnStageSummaryBlock = () => {
-        const snapshot = intentTurnState.getSnapshot();
-        const plan = snapshot.currentTurnIntentPlan;
-        if (!plan || plan.stages.length <= 1) {
-            return '';
-        }
-        const totalStages = plan.stages.length;
-        return formatIntentStageSummaryTranscriptBlock({
-            deliverable: plan.deliverable,
-            stages: plan.stages.map((stage) => ({
-                order: stage.order,
-                totalStages,
-                label: stage.label,
-                skillNames: getStageSkillNames(stage),
-                status: stage.order <= snapshot.currentTurnStageIndex ? 'Completed' : 'Skipped',
-            })),
-        });
-    };
-    const finalizeCurrentTurnIntentIfNeeded = async () => {
-        const intentId = intentTurnState.getSnapshot().currentTurnIntentPlan?.intentId;
-        if (!intentId) {
-            return;
-        }
-        await refreshIntentLedger();
-        const intent = currentIntentLedger.intents.find((candidate) => candidate.intentId === intentId);
-        if (!intent || intent.overallStatus === 'waiting_user' || isTerminalIntentStatus(intent.overallStatus)) {
-            return;
-        }
-        currentIntentLedger = await intentLedgerStore.updateIntent(sessionId, intentId, {
-            overallStatus: 'completed',
-            latestReceipt: intent.latestReceipt ?? `Completed ${intent.finalDeliverable || intent.deliverable}`,
-            blockedReason: '',
-        });
-    };
-    const createConfiguredIntentBoundaryResolver = () => {
-        const boundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
-        const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
-        return resolverFactory({
-            config: boundaryConfig,
-            llmClassify: boundaryConfig.llmClassifier === 'off'
-                ? undefined
-                : async (boundaryInput, ruleDecision) => classifyBoundaryWithLlm({
-                    input: boundaryInput.input,
-                    sessionId: boundaryInput.sessionId,
-                    instanceId: boundaryInput.instanceId,
-                    cwd: boundaryInput.cwd,
-                    providedSourcePaths: [],
-                    ruleDecision,
-                }, createAdapterBoundaryInvoker(adapter, boundaryConfig)),
-            emitDebug: (event) => {
-                log.info('intent_boundary_decision', event);
-            },
-        });
-    };
-    let intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
-    const prepareIntentReminderForInput = async (input) => {
-        const turnToken = beginPreparedIntentTurnContext();
-        const activeIntent = getWaitingUserIntentForInput(input);
-        const decision = await intentBoundaryResolver.resolve({
-            instanceId,
-            sessionId,
-            input,
-            cwd,
-            skills,
-            skillScoreLookup: ({ skillName, intentType, stageRole, deliverable }) => skillScoreStore.getBoost({
-                skillName,
-                intentType,
-                stageRole,
-                deliverableFamily: inferDeliverableFamily(deliverable),
-            }),
-            activeIntent: activeIntent
-                ? {
-                    intentId: activeIntent.intentId,
-                    deliverable: activeIntent.deliverable,
-                    intentType: activeIntent.intentType,
-                    templateId: activeIntent.templateId,
-                }
-                : undefined,
-        });
-        intentTurnState.setPlan(turnToken, decision.kind === 'intent' ? decision.plan : undefined);
-        const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
-        if (plan?.continuationMode === 'continue_active') {
-            intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
-            return;
-        }
-        intentTurnState.setActiveIntentReminderBlock(turnToken, undefined);
-    };
-    const clearTurnIntentContext = () => {
-        intentTurnState.clearTurnContextPreservingCompletedSummary();
-        currentTurnStageObservedSkillNames = new Map();
-    };
-    // Stage executor debug analysis
-    const runStageAnalysis = async (userInput) => {
-        const stages = analyzeStageIntent(userInput, skills, cwd);
-        const debugEvents = [];
-        debugEvents.push({
-            timestamp: Date.now(),
-            phase: 'intent_analysis',
-            detail: `Detected ${stages.length} stages: ${stages.map(s => s.title).join(', ')}`,
-            durationMs: 1,
-            level: 'info',
-        });
-        const currentTokens = agent?.getUsage().inputTokens ?? 0;
-        const usageRate = modelCapabilities.contextLimit > 0 ? Math.round(currentTokens / modelCapabilities.contextLimit * 100) : 0;
-        const results = stages.map(stage => {
-            const skill = skills.find(s => s.name === stage.skill);
-            const skillSize = skill?.content.length ?? 0;
-            const refsSize = skill ? skill.referencesManifest.reduce((sum, r) => sum + r.size, 0) : 0;
-            const needsSubagent = usageRate > 60;
-            return {
-                stage,
-                status: 'completed',
-                timing: {
-                    totalMs: 0,
-                    contextCheckMs: 0,
-                    subagentSpawnMs: needsSubagent ? 1 : 0,
-                    subagentExecMs: 0,
-                    skillLoadMs: Math.ceil((skillSize + refsSize) / 1000) * 100,
-                    skillExecMs: 0,
-                    artifactReadMs: 0,
-                },
-                debugEvents: [],
-                contextCheck: {
-                    usagePercent: usageRate,
-                    estimatedNeeded: Math.ceil((skillSize + refsSize) / 4) + 4000,
-                    available: modelCapabilities.contextLimit - currentTokens,
-                    needsSubagent,
-                },
-            };
-        });
-        return { stages, results, debugEvents };
-    };
-    const primeTurnIntentPlan = async (renderTranscriptBlock = false) => {
-        const snapshot = intentTurnState.getSnapshot();
-        const turnIntentPlan = snapshot.currentTurnIntentPlan;
-        const turnToken = snapshot.activeTurnToken;
-        if (!turnIntentPlan || !turnToken) {
-            return;
-        }
-        const beforeIntentCount = currentIntentLedger.intents.length;
-        currentIntentLedger = await bootstrapTurnIntentPlan(intentLedgerStore, sessionId, currentIntentLedger, turnIntentPlan);
-        if (turnIntentPlan.continuationMode === 'new_intent') {
-            intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
-            const createdIntent = currentIntentLedger.intents.find((intent) => intent.intentId === turnIntentPlan.intentId);
-            if (createdIntent) {
-                currentSkillEvalState = await skillEvalStore.ensureObservationsForIntent(sessionId, createdIntent);
-            }
-            if (renderTranscriptBlock && currentIntentLedger.intents.length > beforeIntentCount) {
-                writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, turnIntentPlan.intentId));
-                renderIntentSummaryLine();
-            }
-        }
-    };
-    const maybePrepareFreshContextHandoff = async () => {
-        await refreshIntentLedger();
-        if (!hasPendingFreshContextHandoff(currentIntentLedger, instanceId) || !agent) {
-            return;
-        }
-        const activeIntent = resolveOwnedActiveIntent(currentIntentLedger, instanceId);
-        if (!activeIntent) {
-            return;
-        }
-        currentIntentLedger = await intentLedgerStore.saveDispatchedIntent(sessionId, consumeFreshContextHandoff(activeIntent, Date.now()));
-        agent.clearHistory();
-        runtimeFacade?.resetSkillTracking();
-        const turnToken = intentTurnState.getSnapshot().activeTurnToken;
-        if (turnToken) {
-            intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
-        }
-        await persistSession();
-    };
-    const writeOrchestrationBlock = (block) => {
-        if (!block) {
-            return;
-        }
-        endStreamingPhaseForInterrupt();
-        if (scrollRegion.isActive()) {
-            scrollRegion.clearActivity();
-        }
-        const separatedBlock = block.startsWith('\n') ? block : `\n${block}`;
-        if (scrollRegion.isActive()) {
+        log.info('agent created', { provider: config.defaultProvider, model: config.defaultModelId, skills: skills.length });
+        setCrashContext({ startupPhase: 'agent' });
+        let observationSession;
+        if (observationPolicy) {
+            observationSession = new AgentSessionState();
+            observationSession.restoreSnapshot({ ...observationSession.exportSnapshot(), sessionId, cwd,
+                createdAt: sessionCreatedAt, updatedAt: Date.now(), lineage: sessionLineage });
+            const binding = resolveRuntimeModelBinding(config);
             try {
-                scrollRegion.writeAtContentCursor(separatedBlock);
+                productObservation = await createProductObservationOwner({ policy: observationPolicy, session: observationSession,
+                    executionPersistence: { store: sessionStore, root: sessionStoreRoot }, compoundStorage,
+                    profileRoot: getConfigDir('observation-profile'), environmentRoot: join(homedir(), '.cache', 'xiaok', 'sol-pi', 'deepseek-recipe-0.1.1'),
+                    credentialSecrets: [binding.apiKey, ...Object.values(binding.headers)].filter(value => typeof value === 'string' && value.length > 0),
+                    permissionManager, hostCwd: cwd, persist: async (snapshot) => {
+                        const pending = persistCompoundPublicationSnapshot(observationSession, snapshot);
+                        if (pending) {
+                            await pending;
+                            return;
+                        }
+                        if (hasActiveNativeIntent())
+                            throw Error('intent_native_history_writer_required');
+                        await sessionStore.save({ ...snapshot,
+                            sessionId, cwd, model: adapter.getModelName(), createdAt: sessionCreatedAt, updatedAt: Date.now(),
+                            forkedFromSessionId, lineage: sessionLineage, intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+                            skillEval: currentSkillEvalState, skillExecution: currentSkillExecutionState });
+                    } });
+                // Isolate both executable tools and provider schemas. The shared registry
+                // remains authoritative for permission changes and native replacement.
+                const observationTools = [productObservation.recallTool];
+                if (productObservation.summary.ordinaryChildren)
+                    observationTools.push(createProductObservationSubagentTool({
+                        product: productObservation, parentOwner: productObservation.owner, sourceRegistry: registry, adapter: () => adapter,
+                        cwd, persist: snapshot => sessionStore.save(snapshot), buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
+                        onCompleted: () => agent?.notifySubtaskBoundary(),
+                    }));
+                if (productObservation.summary.compoundExecution) {
+                    observationTools.push(...createIntentDelegationTools({ ledgerStore: intentLedgerStore, sessionId, instanceId, getTurnIntentPlan: () => intentTurnState.getSnapshot().currentTurnIntentPlan }).filter(isIntentProducerTool));
+                    registry = registry.forkForCompoundObservation(observationTools, ['read', 'write', 'edit', 'bash', 'grep', 'glob']);
+                }
+                else
+                    registry = registry.forkForObservation(observationTools, ['read', 'write', 'edit', 'bash', 'grep', 'glob']);
+                if (productObservation.summary.compoundExecution) {
+                    if (!isEmptyConfiguredHooksRunner(lifecycleHooks))
+                        throw Error('compound_unsupervised_lifecycle_hooks');
+                    let validationBackend;
+                    if (validationMaterialPaths.length) {
+                        const { createInstalledVerificationClient } = await import('../runtime/verification/controller-client.js');
+                        try {
+                            verificationClient = await createInstalledVerificationClient();
+                            await verificationClient.requireQualifiedExecution();
+                        }
+                        catch (error) {
+                            writeError('SOL_PI_VERIFICATION_UNAVAILABLE：受保护验证服务尚未安装或未通过资格检查，本次会话未启动。');
+                            throw error;
+                        }
+                        const active = productObservation, nativeSession = observationSession;
+                        validationBackend = createProductValidationBackend({ workspaceRoot: cwd, expiresAt: active.summary.expiresAt, client: verificationClient,
+                            assertCurrent: () => { active.executionSignal.throwIfAborted(); active.owner.assertSession(nativeSession); },
+                            authorize: request => authorizeCliValidationMaterials({ ...request, requestSource: 'user', selectedPaths: validationMaterialPaths, cwd, writeReview: text => process.stderr.write(text + '\n') }),
+                        });
+                    }
+                    compoundCoordinator = await installProductCompoundCoordinator({ product: productObservation, session: observationSession, store: sessionStore, root: sessionStoreRoot, registry, validationBackend });
+                }
+                log.info('observation_authorization', productObservation.summary);
+                process.stderr.write(`观察归档已按显式策略启用：deepseek-flash，仅本次会话的本地原生工具。使用 /observation 查看或撤销。\n`);
+                const semanticPolicy = productObservation.summary.semanticCompaction;
+                if (semanticPolicy)
+                    process.stderr.write(`语义压缩：${semanticPolicy.mode === 'mechanism-experiment' ? '显式实验，额外摘要调用可能增加费用' : '自动模式，仅满足成本条件时执行'}；最多 ${semanticPolicy.maxCalls} 次摘要，按核验价格预留的预算上限 $${(semanticPolicy.maxCostUnits / 1e9).toFixed(6)} USD。\n`);
             }
             catch (error) {
-                suspendInteractiveUi('write_orchestration_block', error);
+                log.warn('observation_startup_failed', { error: String(error) });
+                // The outer finally completes bootstrap and drains the same owners.
+                throw error;
             }
-            mdRenderer.beginNewSegment();
-            resetStreamingSegment();
-            return;
         }
-        process.stdout.write(separatedBlock);
-        mdRenderer.beginNewSegment();
-        resetStreamingSegment();
-    };
-    flushSubAgentNotices = () => {
-        subAgentNotices.flush(interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
-            && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
-            && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
-    };
-    const persistSession = async (options = {}) => {
-        if (options.refreshIntentLedger ?? true) {
-            await refreshIntentLedger();
+        agent = new Agent(adapter, registry, initialPromptSnapshot.rendered, {
+            ...(observationSession ? { initialSession: observationSession, observationOwner: productObservation.owner, semanticCompactionOwner: productObservation.semanticCompactionOwner } : {}),
+            hooks: runtimeHooks,
+            memoryStore,
+            maxIterations: resolveAgentMaxIterations(),
+            onSemanticCompactionDecision: (decision) => { log.debug('semantic_compaction_candidate', decision); },
+            onSemanticCompactionOutcome: (outcome) => { lastSemanticOutcome = outcome; log.info('semantic_compaction_outcome', outcome); },
+        });
+        setCrashContext({ startupPhase: 'ready' });
+        const commandAgent = agent;
+        commandAgent.getSessionState().attachPromptSnapshot(initialPromptSnapshot.id, initialPromptSnapshot.memoryRefs);
+        commandAgent.setPromptSnapshot(initialPromptSnapshot);
+        runtimeFacade = new RuntimeFacade({
+            promptBuilder,
+            getPromptInput: async (promptCwd) => getPromptInput(promptCwd, skills),
+            agent,
+            getSkillEntries: () => toSkillEntries(skills),
+            getIntentReminderBlock: () => intentTurnState.getSnapshot().activeIntentReminderBlock,
+            getGoalReminderBlock: () => (isGoalArmed() && currentGoalState?.status === 'active'
+                ? buildGoalContextBlock(currentGoalState)
+                : undefined),
+        });
+        skillCatalogWatcher = createSkillCatalogWatcher({
+            cwd,
+            options: { extraRoots: pluginRuntime.skillRoots },
+            onChange: refreshSkills,
+        });
+        if (persistedSession) {
+            commandAgent.restoreSession(persistedSession);
         }
-        if (options.refreshSkillEvalState ?? true) {
-            await refreshSkillEvalState();
-        }
-        const snapshot = agent.exportSession();
-        await sessionStore.save({
-            ...snapshot,
+        const startupSnapshot = commandAgent.exportSession();
+        const startupHistoryBasis = observationSession?.getPublishedHistoryBasis();
+        await trackSessionWrite(() => sessionStore.save({
+            ...startupSnapshot,
+            ...(startupHistoryBasis === undefined ? {} : { historyDigest: startupHistoryBasis }),
             sessionId,
             cwd: process.cwd(),
             model: adapter.getModelName(),
@@ -1856,329 +1575,1541 @@ async function runChat(initialInput, opts) {
             intentDelegation: currentIntentLedger,
             skillEval: currentSkillEvalState,
             skillExecution: currentSkillExecutionState,
-        });
-    };
-    const pauseCurrentGoalForInterruption = async (reason, requestSource) => {
-        try {
-            if (isGoalArmed() && currentGoalState?.status === 'active') {
-                currentGoalState = await goalService.pause(goalMutationContext(requestSource), reason);
+        }));
+        if (intentVerificationDefinition || currentIntentLedger.nativeContracts?.length) {
+            intentNativeHost = createIntentNativeContractHost({ store: sessionStore, authority: intentAuthority(), sessionId, instanceId, assertAdmission: () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
+                    throw Error('intent_native_product_revoked'); } });
+            intentPublicationHost = createIntentPublicationHost({ store: sessionStore, authority: intentAuthority(), sessionId, instanceId, workspaceRoot: cwd, assertAdmission: () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
+                    throw Error('intent_publication_product_revoked'); } });
+            intentReceiverHost = createIntentReceiverPublicationHost({ store: sessionStore, authority: intentAuthority(), sessionId, instanceId, workspaceRoot: cwd, assertAdmission: () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
+                    throw Error('intent_receiver_product_revoked'); } });
+            intentVerificationHost = createIntentVerificationHost({ store: sessionStore, authority: intentAuthority(), sessionId, instanceId, workspaceRoot: cwd, assertAdmission: () => { productObservation?.executionSignal.throwIfAborted(); if (productObservation?.getStatus().revoked)
+                    throw Error('intent_verification_product_revoked'); }, reviewMaterials: async (review) => { const text = ['本次独立验证材料：', ...review.materials.map(m => `${m.path} · ${m.size} bytes · SHA-256 ${m.sha256}`), `命令：${review.exactCommand.argv.map(arg => JSON.stringify(arg)).join(' ')}`, `工作目录：${review.exactCommand.cwdRelative}`, `有效期：${new Date(review.expiresAt).toISOString()}`].join('\n'); if (opts.json)
+                    process.stderr.write(text + '\n');
+                else if (opts.print || initialInput?.trim().startsWith('/intent verify'))
+                    process.stdout.write(text + '\n');
+                else
+                    writeProgressTranscriptNote(text); } });
+        }
+        async function handleIntentReceiverCommand(text) {
+            const command = parseIntentReceiverCommand(text);
+            if (!command)
+                throw Error('intent_receiver_command');
+            if (command.kind === 'help')
+                return intentReceiverHelp;
+            if (command.kind === 'cancel') {
+                intentReceiverAbort?.abort(Error('intent_receiver_user_cancelled'));
+                return '已请求中断；等待原发布操作实际排空。';
+            }
+            const host = intentReceiverHost;
+            if (!host)
+                throw Error('intent_receiver_host_unavailable');
+            if (command.kind === 'status')
+                return (intentPublicationHost?.list() ?? []).map(candidate => ({ candidateId: candidate.id, attempts: host.list(candidate.id), projection: candidate.businessProjection ?? null }));
+            if (!('candidateId' in command))
+                throw Error('intent_receiver_command');
+            if (intentReceiverAbort)
+                throw Error('intent_receiver_busy');
+            const controller = new AbortController();
+            intentReceiverAbort = controller;
+            try {
+                const input = { candidateId: command.candidateId, requestSource: 'user', signal: controller.signal };
+                if (command.kind === 'publish')
+                    return await host.publish(input);
+                if (command.kind === 'recover')
+                    return await host.recover(input);
+                if (command.kind === 'retry')
+                    return await host.retry(input);
+                return await host.project(input);
+            }
+            finally {
+                if (intentReceiverAbort === controller)
+                    intentReceiverAbort = undefined;
             }
         }
-        catch (error) {
-            log.warn('goal pause failed', { reason, error: String(error) });
+        async function handleIntentVerificationCommand(text) {
+            const command = parseIntentVerificationCommand(text);
+            if (!command)
+                throw Error('intent_verification_command');
+            if (command.kind === 'help')
+                return intentVerificationHelp;
+            if (command.kind === 'cancel') {
+                intentVerificationAbort?.abort(Error('intent_verification_user_cancelled'));
+                return '已请求中断；仍等待实际操作排空，未声明物理停止。';
+            }
+            const host = intentVerificationHost;
+            if (!host)
+                throw Error('intent_verification_host_unavailable');
+            if (command.kind === 'status')
+                return (intentPublicationHost?.list() ?? []).flatMap(candidate => host.list(candidate.id));
+            if (intentVerificationAbort)
+                throw Error('intent_verification_busy');
+            const controller = new AbortController();
+            intentVerificationAbort = controller;
+            try {
+                if (command.kind === 'reserve')
+                    return await host.reserve({ ...readIntentVerificationSelectionFile(command.path), requestSource: 'user', signal: controller.signal });
+                if (command.kind === 'enroll')
+                    return await host.advance({ id: command.id, requestSource: 'user', signal: controller.signal });
+                if (command.kind === 'run')
+                    return await host.execute({ id: command.id, requestSource: 'user', signal: controller.signal });
+                if (command.kind === 'recover')
+                    return await host.recover({ id: command.id, requestSource: 'user', signal: controller.signal });
+                throw Error('intent_verification_command');
+            }
+            finally {
+                if (intentVerificationAbort === controller)
+                    intentVerificationAbort = undefined;
+            }
         }
-        finally {
+        async function handleIntentPublicationCommand(text) {
+            const command = parseIntentPublicationCommand(text), host = intentPublicationHost;
+            if (!command || !host)
+                throw Error('intent_publication_host_unavailable');
+            if (command.kind === 'draft')
+                return host.draft({ requestSource: 'user' });
+            if (command.kind === 'status')
+                return host.list();
+            if (command.kind === 'parent') {
+                const candidate = await host.captureParent({ requestSource: 'user' });
+                return host.advance({ candidateId: candidate.id, requestSource: 'user' });
+            }
+            if (command.kind === 'retry')
+                return host.retry({ candidateId: command.candidateId, requestSource: 'user' });
+            if (command.kind === 'approve') {
+                const configuration = readIntentPublicationSelectionFile(command.path), candidate = await host.capture({ ...configuration, requestSource: 'user' });
+                return host.advance({ candidateId: candidate.id, requestSource: 'user' });
+            }
+            const candidate = host.list().at(-1);
+            if (!candidate)
+                throw Error('intent_candidate_missing');
+            return host.recover({ candidateId: candidate.id, requestSource: 'user' });
+        }
+        if (observationSession && startupHistoryBasis !== undefined)
+            observationSession.notePublishedHistory(startupSnapshot, startupHistoryBasis);
+        // The new session owner must be durable before the Goal service reloads it.
+        if (opts.forkSession && !currentGoalState) {
+            const sourceGoal = await goalStore.load(opts.forkSession);
+            if (sourceGoal) {
+                ensureGoalLease();
+                try {
+                    const sourceRoute = readInstalledCurrentOwner({ ownerKind: 'goal', ownerId: sourceGoal.state.goalId });
+                    if (sourceRoute.kind === 'ordinary' && readInstalledCurrentProfile().kind === 'ordinary') {
+                        currentGoalState = await goalService.fork({ sessionId, instanceId, requestSource: 'user', expectedRevision: null }, sourceGoal.state);
+                    }
+                    else {
+                        await goalNativeHost.reserveFork(opts.forkSession);
+                    }
+                }
+                finally {
+                    disarmGoal();
+                }
+            }
+        }
+        // 触发 SessionStart hook
+        void trackDetached(() => runLifecycleHooks('SessionStart', {
+            source: opts.continue || opts.resume || opts.takeover ? 'resume' : 'startup',
+        }));
+        // 创建 UI 组件
+        const mdRenderer = new MarkdownRenderer();
+        const statusBar = new StatusBar();
+        const scrollRegion = new ScrollRegionManager();
+        replRenderer.setScrollRegion(scrollRegion);
+        inputReader.setStatusLineProvider(() => {
+            const summaryLine = getCurrentIntentSummaryLine();
+            const statusLine = statusBar.getStatusLine();
+            const lines = [];
+            if (summaryLine) {
+                lines.push(summaryLine);
+            }
+            lines.push(statusLine || ' ');
+            return lines;
+        });
+        inputReader.setScrollPromptRenderer((frame) => {
+            if (!scrollRegion.isActive())
+                return false;
+            const placeholder = frame.placeholder === '> ' ? '' : frame.placeholder;
+            scrollRegion.renderPromptFrame({
+                inputValue: frame.inputValue,
+                cursor: frame.cursor,
+                placeholder,
+                summaryLine: frame.summaryLine,
+                statusLine: frame.statusLine,
+                overlayLines: frame.overlayLines,
+                overlayKind: frame.overlayKind,
+            });
+            return true;
+        });
+        stopIntentRuntimeSync = wireIntentDelegationToRuntimeSync({
+            hooks: runtimeHooks,
+            ledgerStore: intentLedgerStore,
+            sessionId,
+        });
+        stopSkillEvalRuntimeSync = wireSkillEvalToRuntimeSync({
+            hooks: runtimeHooks,
+            ledgerStore: intentLedgerStore,
+            skillEvalStore,
+            scoreStore: skillScoreStore,
+            sessionId,
+        });
+        let streamingSegmentText = '';
+        let turnVisibleAssistantTextSeen = false;
+        let turnThinkingOnlyToolNoticeWritten = false;
+        let thinkingOnlyToolNoticeTimer = null;
+        const resetStreamingSegment = () => {
+            streamingSegmentText = '';
+        };
+        const noteVisibleAssistantText = (delta) => {
+            if (/\S/.test(delta)) {
+                turnVisibleAssistantTextSeen = true;
+            }
+        };
+        const flushStreamingMarkdown = () => {
+            try {
+                if (scrollRegion.isActive() && scrollRegion.isContentStreaming()) {
+                    // Footer/prompt redraws (e.g. typing while the turn is busy) leave the
+                    // real cursor inside the footer, so anchor back before writing the tail.
+                    scrollRegion.positionCursorAtContentCursor();
+                }
+                // Row/column bookkeeping already happened during the write via the
+                // newline and column-advance callbacks; recomputing it here would
+                // overwrite exact values with a second, less precise wrap model.
+                mdRenderer.flush();
+            }
+            finally {
+                resetStreamingSegment();
+            }
+        };
+        // 收集历史消息用于稍后打印（在欢迎页之后）
+        const historyMessages = persistedSession?.messages ?? [];
+        let welcomeVisible = historyMessages.length === 0 && !opts.dryRun;
+        let contentRows = 0; // tracks how many rows of content have been written
+        let handleResize = null;
+        suspendInteractiveUi = (context, error, fallbackStream = null) => {
+            if (terminalUiSuspended) {
+                return;
+            }
+            terminalUiSuspended = true;
+            terminalUiFallbackStream = fallbackStream;
+            terminalLog.warn('UI suspended', { context, fallbackStream });
+            runtimeState.deactivateTurn();
+            inputReader.setForcePlainMode(false);
+            if (!terminalUiFailureNoted) {
+                terminalUiFailureNoted = true;
+                const rawMessage = `\n[xiaok] UI 输出已停用：${context} (${String(error)})\n`;
+                const isBrokenPipe = /\bEPIPE\b/i.test(String(error));
+                try {
+                    transcriptLogger.recordOutput('stderr', rawMessage);
+                }
+                catch { }
+                if (!isBrokenPipe) {
+                    try {
+                        terminalOutput.write(fallbackStream === 'stdout' ? 'stdout' : 'stderr', rawMessage);
+                    }
+                    catch { }
+                }
+            }
+            try {
+                stopActivity();
+            }
+            catch { }
+            try {
+                statusBar.destroy();
+            }
+            catch { }
+            try {
+                scrollRegion.end();
+            }
+            catch (e) {
+                terminalLog.warn('scrollRegion.end failed in suspendInteractiveUi', e.message);
+            }
+        };
+        const runtimeState = new TuiRuntimeState({
+            getActivitySummary: (now) => multiAgentProgress.summary(now, Math.max(1, (process.stdout.columns ?? 100) - 1)),
+            statusBar,
+            scrollRegion,
+            onSuspendInteractiveUi: (context, error) => {
+                suspendInteractiveUi(context, error);
+            },
+            isTerminalUiSuspended: () => terminalUiSuspended,
+        });
+        const beginActivity = (label, restart = false, startedAt = Date.now()) => {
+            runtimeState.beginActivity(label, restart, startedAt);
+        };
+        const scheduleActivityResume = (label, delayMs = 180) => {
+            runtimeState.scheduleActivityResume(label, delayMs);
+        };
+        const scheduleActivityPause = (delayMs = 180) => {
+            runtimeState.scheduleActivityPause(delayMs);
+        };
+        const pauseActivity = () => {
+            runtimeState.pauseActivity();
+        };
+        const stopLiveActivityTimer = () => {
+            runtimeState.stopLiveActivityTimer();
+        };
+        const withPausedLiveActivity = async (action) => {
+            try {
+                return await runtimeState.withPausedLiveActivity(action);
+            }
+            finally {
+                flushSubAgentNotices();
+            }
+        };
+        function ensureBusyInputCapture() {
+            if (terminalUiSuspended || !scrollRegion.isActive()) {
+                return;
+            }
+            if (activeBusyCapture?.isActive()) {
+                return;
+            }
+            activeBusyCapture?.stop();
+            activeBusyCapture = inputReader.startBusyCapture({
+                placeholder: getFooterInputPrompt(),
+                onAbortRequest: requestCurrentTurnAbort,
+            });
+        }
+        let askUserQuestionPromptActive = false;
+        const enterAskUserQuestionPrompt = () => {
+            stopBusyCapture();
+            if (!askUserQuestionPromptActive) {
+                askUserQuestionPromptActive = true;
+                runtimeState.enterInteractivePrompt();
+            }
+            if (scrollRegion.isActive()) {
+                scrollRegion.clearActivityLine();
+                scrollRegion.positionCursorAtContentCursor();
+            }
+        };
+        const exitAskUserQuestionPrompt = () => {
+            if (askUserQuestionPromptActive) {
+                askUserQuestionPromptActive = false;
+                runtimeState.exitInteractivePrompt();
+            }
+            flushSubAgentNotices();
+            ensureBusyInputCapture();
+            runtimeState.beginActivity(describeLiveActivity('AskUserQuestion', {}), true);
+        };
+        // Wire up lazy callbacks for AskUserQuestion interactive prompt.
+        askUserOnEnter = enterAskUserQuestionPrompt;
+        askUserOnExit = exitAskUserQuestionPrompt;
+        askUserRenderFrame = (lines) => {
+            if (terminalUiSuspended || !scrollRegion.isActive()) {
+                return false;
+            }
+            scrollRegion.renderPromptFrame({
+                inputValue: '',
+                cursor: 0,
+                placeholder: getFooterInputPrompt(),
+                summaryLine: getCurrentIntentSummaryLine(),
+                statusLine: statusBar.getStatusLine(),
+                overlayLines: lines,
+                overlayKind: 'question',
+                owner: 'renderer',
+            });
+            return true;
+        };
+        askUserClearFrame = () => {
+            if (terminalUiSuspended || !scrollRegion.isActive()) {
+                return;
+            }
+            scrollRegion.renderPromptFrame({
+                inputValue: '',
+                cursor: 0,
+                placeholder: getFooterInputPrompt(),
+                summaryLine: getCurrentIntentSummaryLine(),
+                statusLine: statusBar.getStatusLine(),
+                overlayLines: [],
+                owner: 'renderer',
+            });
+            scrollRegion.positionCursorAtContentCursor();
+        };
+        const stopActivity = () => {
+            runtimeState.stopActivity();
+        };
+        const resetTurnChrome = () => {
+            stopActivity();
+            toolExplorer.reset();
+            turnLayout.reset();
+            mdRenderer.reset();
+            resetStreamingSegment();
+        };
+        const handleTurnFailure = (error) => {
+            endStreamingPhaseForInterrupt();
+            runtimeState.markInputReady();
+            resetTurnChrome();
+            const errorText = `\x1b[31mError:\x1b[0m ${formatErrorText(String(error))}`;
+            if (scrollRegion.isActive() && !terminalUiSuspended) {
+                try {
+                    scrollRegion.writeAtContentCursor(errorText + '\n');
+                }
+                catch (uiError) {
+                    suspendInteractiveUi('handle_turn_failure', uiError);
+                    writeError(String(error));
+                }
+            }
+            else {
+                writeError(String(error));
+            }
+            renderFooterChrome();
+        };
+        const handleTurnAbort = () => {
+            endStreamingPhaseForInterrupt();
+            runtimeState.markInputReady();
+            resetTurnChrome();
+            const noticeText = yellow('- Request cancelled');
+            if (scrollRegion.isActive() && !terminalUiSuspended) {
+                try {
+                    scrollRegion.writeAtContentCursor(noticeText + '\n');
+                }
+                catch (uiError) {
+                    suspendInteractiveUi('handle_turn_abort', uiError);
+                    process.stderr.write(noticeText + '\n');
+                }
+            }
+            else {
+                process.stderr.write(noticeText + '\n');
+            }
+            renderFooterChrome();
+        };
+        const getFooterInputPrompt = () => runtimeState.getFooterInputPrompt();
+        const renderFooterChrome = () => {
+            if (!scrollRegion.isActive()) {
+                return;
+            }
+            try {
+                flushStreamingMarkdown();
+                const footerOptions = {
+                    inputPrompt: getFooterInputPrompt(),
+                    summaryLine: getCurrentIntentSummaryLine(),
+                    statusLine: statusBar.getStatusLine(),
+                };
+                renderFooterChromeInOrder({
+                    scrollRegion,
+                    replRenderer,
+                    mdRenderer,
+                }, footerOptions);
+            }
+            catch (error) {
+                suspendInteractiveUi('render_footer_chrome', error);
+            }
+        };
+        const endStreamingPhaseForInterrupt = () => {
+            if (!scrollRegion.isActive() || !scrollRegion.isContentStreaming()) {
+                return;
+            }
+            try {
+                flushStreamingMarkdown();
+                const footerOptions = {
+                    inputPrompt: getFooterInputPrompt(),
+                    summaryLine: getCurrentIntentSummaryLine(),
+                    statusLine: statusBar.getStatusLine(),
+                };
+                endStreamingPhaseForInterruptInOrder({
+                    scrollRegion,
+                    runtimeState,
+                    mdRenderer,
+                }, footerOptions);
+                replRenderer.prepareForInput();
+            }
+            catch (error) {
+                suspendInteractiveUi('end_streaming_interrupt', error);
+            }
+        };
+        const ensureStreamingPhase = () => {
+            ensureStreamingPhaseInOrder({
+                scrollRegion,
+                runtimeState,
+                turnLayout,
+                mdRenderer,
+                stopLiveActivityTimer,
+                writeFallback: (text) => {
+                    process.stdout.write(text);
+                },
+            });
+        };
+        const handleAssistantTextChunk = (delta, appendText) => {
+            writeAssistantTextChunkInOrder(delta, {
+                noteVisibleAssistantText,
+                appendAssistantText: appendText,
+                appendStreamingSegment: (text) => {
+                    streamingSegmentText += text;
+                },
+                ensureStreamingPhase,
+                writeMarkdown: (text) => {
+                    mdRenderer.write(text);
+                },
+            });
+        };
+        let interactiveRuntimeTurnSequence = 0;
+        const createInteractiveRuntimeTurnRequest = (input, signal) => ({
+            turnToken: `${sessionId}:interactive:${++interactiveRuntimeTurnSequence}`,
+            sessionId,
+            cwd,
+            source: 'chat',
+            input,
+            ...(signal ? { signal } : {}),
+        });
+        const createInteractiveTurnChunkHandlers = (appendAssistantText) => ({
+            writeAssistantText(delta) {
+                handleAssistantTextChunk(delta, appendAssistantText);
+            },
+            updateUsage(usage) {
+                statusBar.update(usage);
+                scrollRegion.updateStatusLine(statusBar.getStatusLine());
+                if (activeRuntimeTurnId) {
+                    const draft = goalTurnDrafts.get(activeRuntimeTurnId);
+                    if (draft) {
+                        const typedUsage = usage;
+                        draft.usageTokens = typedUsage.inputTokens + typedUsage.outputTokens;
+                    }
+                }
+            },
+        });
+        const getCurrentIntentSummaryLine = () => {
+            let source = 'none';
+            let line = '';
+            const intentTurnSnapshot = intentTurnState.getSnapshot();
+            if (currentGoalState) {
+                source = 'goal';
+                line = formatGoalSummaryLine(currentGoalState);
+            }
+            else if (intentTurnSnapshot.currentTurnIntentPlan) {
+                source = 'turn';
+                line = getCurrentTurnSummaryLine();
+            }
+            else if (intentTurnSnapshot.completedTurnIntentSummaryLine) {
+                source = 'completed_turn';
+                line = intentTurnSnapshot.completedTurnIntentSummaryLine;
+            }
+            else if (currentIntentLedger.activeIntentId
+                && currentIntentLedger.intents.find((intent) => (intent.intentId === currentIntentLedger.activeIntentId
+                    && intent.overallStatus === 'waiting_user'))) {
+                source = 'waiting_user';
+                line = formatCurrentIntentSummaryLine(currentIntentLedger, instanceId);
+            }
+            runtimeState.setSummarySource(source);
+            return line;
+        };
+        function writeProgressTranscriptNote(note, leadingGap = false) {
+            if (!note) {
+                return;
+            }
+            const block = `${leadingGap ? '\n' : ''}${formatProgressNote(note)}`;
+            endStreamingPhaseForInterrupt();
+            if (scrollRegion.isActive()) {
+                try {
+                    scrollRegion.writeAtContentCursor(block);
+                }
+                catch (error) {
+                    suspendInteractiveUi('write_progress_note', error);
+                }
+                mdRenderer.beginNewSegment();
+                resetStreamingSegment();
+                return;
+            }
+            process.stdout.write(block);
+            mdRenderer.beginNewSegment();
+            resetStreamingSegment();
+        }
+        const maybeWriteThinkingOnlyToolNotice = () => {
+            if (turnVisibleAssistantTextSeen || turnThinkingOnlyToolNoticeWritten) {
+                return;
+            }
+            if (thinkingOnlyToolNoticeTimer) {
+                clearTimeout(thinkingOnlyToolNoticeTimer);
+                thinkingOnlyToolNoticeTimer = null;
+            }
+            if (!turnVisibleAssistantTextSeen && !turnThinkingOnlyToolNoticeWritten) {
+                turnThinkingOnlyToolNoticeWritten = true;
+                turnLayout.noteProgressNote();
+                writeProgressTranscriptNote(THINKING_ONLY_TOOL_TURN_NOTICE, true);
+                return;
+            }
+        };
+        const isTerminalIntentStatus = (status) => status === 'completed' || status === 'failed' || status === 'cancelled';
+        const refreshIntentLedger = async () => {
+            currentIntentLedger = await intentLedgerStore.load(sessionId) ?? currentIntentLedger;
+        };
+        const refreshSkillEvalState = async () => {
+            currentSkillEvalState = await skillEvalStore.load(sessionId) ?? currentSkillEvalState;
+        };
+        const runStrictContinuationTurn = async (input) => {
+            let continuationText = '';
+            await maybePrepareFreshContextHandoff();
+            const continuationResult = await runInteractiveRuntimeTurn(runRuntimeTurn, createInteractiveRuntimeTurnRequest(input), createInteractiveTurnChunkHandlers((delta) => {
+                continuationText += delta;
+            }));
+            continuationText = continuationResult.assistantText;
+            flushStreamingMarkdown();
+            await finalizeCurrentTurnIntentIfNeeded();
+            return continuationText;
+        };
+        const strictSkillAdherenceFlow = createStrictSkillAdherenceFlow({
+            getTrackedInvocation: () => getTrackedInvocation(),
+            getInvocationById: (invocationId) => getInvocationById(invocationId),
+            getSkillExecutionState: () => currentSkillExecutionState,
+            setSkillExecutionState: (nextState) => {
+                currentSkillExecutionState = nextState;
+            },
+            continuationRunner: { runContinuation: runStrictContinuationTurn },
+            adherenceStore: skillAdherenceStore,
+            writeProgressTranscriptNote,
+        });
+        const maybeRunStrictCompletionLoop = strictSkillAdherenceFlow.maybeRunStrictCompletionLoop;
+        const renderIntentSummaryLine = () => {
+            if (!scrollRegion.isActive() || scrollRegion.isContentStreaming()) {
+                return;
+            }
+            try {
+                scrollRegion.renderFooter({
+                    inputPrompt: getFooterInputPrompt(),
+                    summaryLine: getCurrentIntentSummaryLine(),
+                    statusLine: statusBar.getStatusLine(),
+                });
+            }
+            catch (error) {
+                suspendInteractiveUi('render_intent_summary', error);
+            }
+        };
+        const hasContinuationCue = (input) => (/^(继续|继续做|继续写|继续生成|再改一版|基于(刚才|上一个|上一版|刚才那个)|按(刚才|上一个|上一版)|重新生成同一件事)/u).test(input.trim());
+        const isSupplementOrClarification = (input) => (/^(补充|补一下|补一个|再补充|这里还有|答案是|是|不是|可以|不可以|用中文|用英文|好的，继续|继续吧)/u).test(input.trim());
+        const getWaitingUserIntentForInput = (input) => {
+            if (!currentIntentLedger.activeIntentId) {
+                return undefined;
+            }
+            const activeIntent = currentIntentLedger.intents.find((intent) => (intent.intentId === currentIntentLedger.activeIntentId
+                && intent.overallStatus === 'waiting_user'));
+            if (!activeIntent) {
+                return undefined;
+            }
+            if (!hasContinuationCue(input) && !isSupplementOrClarification(input)) {
+                return undefined;
+            }
+            return activeIntent;
+        };
+        const resetCurrentTurnSummary = () => {
+            const snapshot = intentTurnState.getSnapshot();
+            if (snapshot.activeTurnToken) {
+                intentTurnState.setPlan(snapshot.activeTurnToken, snapshot.currentTurnIntentPlan);
+            }
+            currentTurnStageObservedSkillNames = new Map();
+        };
+        const normalizeStageMatchText = (value) => value.toLowerCase();
+        const stageLooksLikeReport = (value) => /(报告|report|brief|document|doc)/iu.test(value);
+        const stageLooksLikeSlides = (value) => /(幻灯片|slide|slides|deck|ppt|presentation)/iu.test(value);
+        const stageLooksLikeMarkdown = (value) => /(^|[^a-z])md([^a-z]|$)|markdown|提取\s*markdown/iu.test(value);
+        const scoreStageForSkillName = (stage, skillName) => {
+            const stageText = normalizeStageMatchText(`${stage.deliverable} ${stage.label}`);
+            const skillText = normalizeStageMatchText(skillName);
+            let score = 0;
+            if (stageLooksLikeReport(stageText) && /(report|报告)/iu.test(skillText)) {
+                score += 20;
+            }
+            if (stageLooksLikeSlides(stageText) && /(slide|slides|deck|ppt|幻灯片)/iu.test(skillText)) {
+                score += 20;
+            }
+            if (stageLooksLikeMarkdown(stageText) && /(^|[^a-z])md([^a-z]|$)|markdown|extract/iu.test(skillText)) {
+                score += 20;
+            }
+            return score;
+        };
+        const scoreStageForToolInput = (stage, toolName, toolInput) => {
+            const stageText = normalizeStageMatchText(`${stage.deliverable} ${stage.label}`);
+            const inputText = normalizeStageMatchText(JSON.stringify(toolInput));
+            const toolText = `${normalizeStageMatchText(toolName)} ${inputText}`;
+            let score = 0;
+            if (stageLooksLikeReport(stageText) && /(report|报告|\.report\.md|生成报告|report-)/iu.test(toolText)) {
+                score += 12;
+            }
+            if (stageLooksLikeSlides(stageText) && /(slide|slides|deck|ppt|幻灯片|演示文稿)/iu.test(toolText)) {
+                score += 12;
+            }
+            if (stageLooksLikeMarkdown(stageText)
+                && /(markdown|merged_md|提取\s*markdown|\.md["'\s,}])/iu.test(toolText)
+                && !/\.report\.md/iu.test(toolText)) {
+                score += 8;
+            }
+            return score;
+        };
+        const findBestMatchingStageIndex = (scoreStage) => {
+            const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+            if (!plan) {
+                return -1;
+            }
+            let bestIndex = -1;
+            let bestScore = 0;
+            plan.stages.forEach((stage, index) => {
+                const score = scoreStage(stage);
+                if (score > bestScore || (score === bestScore && score > 0 && index > bestIndex)) {
+                    bestIndex = index;
+                    bestScore = score;
+                }
+            });
+            return bestScore > 0 ? bestIndex : -1;
+        };
+        const inferStageIndexForSkillName = (skillName) => (findBestMatchingStageIndex((stage) => scoreStageForSkillName(stage, skillName)));
+        const inferStageIndexForTool = (toolName, toolInput) => (findBestMatchingStageIndex((stage) => scoreStageForToolInput(stage, toolName, toolInput)));
+        const advanceCurrentTurnStage = (turnToken, stageIndex, announce = false) => {
+            const snapshot = intentTurnState.getSnapshot();
+            const plan = snapshot.currentTurnIntentPlan;
+            if (!intentTurnState.isActiveTurn(turnToken)
+                || !plan
+                || stageIndex < 0
+                || stageIndex >= plan.stages.length) {
+                return;
+            }
+            if (stageIndex > snapshot.currentTurnStageIndex) {
+                intentTurnState.noteStageActivated(turnToken, stageIndex);
+                if (announce) {
+                    const stage = plan.stages[stageIndex];
+                    if (stage) {
+                        writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
+                            order: stage.order,
+                            totalStages: plan.stages.length,
+                            label: stage.label,
+                        }));
+                    }
+                }
+            }
+        };
+        const getStageSkillNames = (stage) => ([...(currentTurnStageObservedSkillNames.get(stage.order) ?? [])]);
+        const recordCurrentTurnStageSkill = (turnToken, stageIndex, skillName) => {
+            const normalized = skillName.trim();
+            const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+            if (!intentTurnState.isActiveTurn(turnToken)
+                || !plan
+                || stageIndex < 0
+                || stageIndex >= plan.stages.length
+                || !normalized
+                || normalized.startsWith('generic_llm::')) {
+                return;
+            }
+            const current = currentTurnStageObservedSkillNames.get(stageIndex) ?? new Set();
+            current.add(normalized);
+            currentTurnStageObservedSkillNames.set(stageIndex, current);
+        };
+        const maybeAdvanceCurrentTurnStageForTool = (turnToken, toolName, toolInput) => {
+            if (!intentTurnState.isActiveTurn(turnToken) || !intentTurnState.getSnapshot().currentTurnIntentPlan) {
+                return;
+            }
+            if (toolName !== 'skill') {
+                advanceCurrentTurnStage(turnToken, inferStageIndexForTool(toolName, toolInput), true);
+                intentTurnState.noteStepRunning(turnToken);
+                return;
+            }
+            const skillName = typeof toolInput.name === 'string' ? toolInput.name.trim() : '';
+            if (!skillName) {
+                intentTurnState.noteStepRunning(turnToken);
+                return;
+            }
+            const stageIndex = inferStageIndexForSkillName(skillName);
+            advanceCurrentTurnStage(turnToken, stageIndex, true);
+            recordCurrentTurnStageSkill(turnToken, stageIndex, skillName);
+            intentTurnState.noteStepRunning(turnToken);
+        };
+        const getCurrentTurnSummaryLine = () => {
+            const snapshot = intentTurnState.getSnapshot();
+            const plan = snapshot.currentTurnIntentPlan;
+            if (!plan) {
+                return '';
+            }
+            const stages = plan.stages;
+            const stage = stages[Math.min(snapshot.currentTurnStageIndex, Math.max(stages.length - 1, 0))];
+            if (!stage) {
+                return '';
+            }
+            return formatCurrentTurnIntentSummaryLine({
+                deliverable: plan.deliverable,
+                stageOrder: stage.order,
+                totalStages: stages.length,
+                stageLabel: stage.label,
+                skillNames: getStageSkillNames(stage),
+                status: snapshot.currentTurnStageStatus,
+            });
+        };
+        const getCurrentTurnStageSummaryBlock = () => {
+            const snapshot = intentTurnState.getSnapshot();
+            const plan = snapshot.currentTurnIntentPlan;
+            if (!plan || plan.stages.length <= 1) {
+                return '';
+            }
+            const totalStages = plan.stages.length;
+            return formatIntentStageSummaryTranscriptBlock({
+                deliverable: plan.deliverable,
+                stages: plan.stages.map((stage) => ({
+                    order: stage.order,
+                    totalStages,
+                    label: stage.label,
+                    skillNames: getStageSkillNames(stage),
+                    status: stage.order <= snapshot.currentTurnStageIndex ? 'Completed' : 'Skipped',
+                })),
+            });
+        };
+        const finalizeCurrentTurnIntentIfNeeded = async () => {
+            const intentId = intentTurnState.getSnapshot().currentTurnIntentPlan?.intentId;
+            if (!intentId) {
+                return;
+            }
+            await refreshIntentLedger();
+            if (nativeExecutionTurn || hasActiveNativeIntent())
+                return;
+            const intent = currentIntentLedger.intents.find((candidate) => candidate.intentId === intentId);
+            if (!intent || intent.overallStatus === 'waiting_user' || isTerminalIntentStatus(intent.overallStatus)) {
+                return;
+            }
+            currentIntentLedger = await intentLedgerStore.updateIntent(sessionId, intentId, {
+                overallStatus: 'completed',
+                latestReceipt: intent.latestReceipt ?? `Completed ${intent.finalDeliverable || intent.deliverable}`,
+                blockedReason: '',
+            });
+        };
+        const createConfiguredIntentBoundaryResolver = () => {
+            const originalBoundaryConfig = config.intentBoundary ?? DEFAULT_INTENT_BOUNDARY_CONFIG;
+            const boundaryConfig = intentVerificationDefinition || currentIntentLedger.nativeContracts?.length ? { ...originalBoundaryConfig, llmClassifier: 'off' } : originalBoundaryConfig;
+            const resolverFactory = intentBoundaryResolverFactoryForTests ?? createIntentBoundaryResolver;
+            return resolverFactory({
+                config: boundaryConfig,
+                llmClassify: boundaryConfig.llmClassifier === 'off'
+                    ? undefined
+                    : async (boundaryInput, ruleDecision) => classifyBoundaryWithLlm({
+                        input: boundaryInput.input,
+                        sessionId: boundaryInput.sessionId,
+                        instanceId: boundaryInput.instanceId,
+                        cwd: boundaryInput.cwd,
+                        providedSourcePaths: [],
+                        ruleDecision,
+                    }, createAdapterBoundaryInvoker(adapter, boundaryConfig)),
+                emitDebug: (event) => {
+                    log.info('intent_boundary_decision', event);
+                },
+            });
+        };
+        let intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
+        const prepareIntentReminderForInput = async (input, origin, hasAttachments = false) => {
+            const user = !!origin && nativeInputOrigins.get(origin) === input;
+            if (origin)
+                nativeInputOrigins.delete(origin);
+            preparedNativeContinuation = undefined;
+            nativeExecutionTurn = false;
+            const turnToken = beginPreparedIntentTurnContext();
+            const canonical = sessionStore.getIntentNativeLedgerSync(sessionId), activeNative = canonical?.nativeContracts?.find(row => row.intentId === canonical.activeIntentId);
+            if ((intentVerificationDefinition || activeNative) && !user) {
+                intentTurnState.setPlan(turnToken, undefined);
+                return;
+            }
+            const stale = activeNative?.subjects.some(row => row.attempts.at(-1)?.phase === 'stale') && !activeNative?.subjects.some(row => row.attempts.at(-1)?.phase === 'enrolling');
+            if (activeNative && !stale) {
+                assertNoGoalForNativeIntent();
+                const selection = prepareIntentNativeContinuation(canonical, input, hasAttachments);
+                intentTurnState.setPlan(turnToken, selection?.plan);
+                if (selection) {
+                    currentIntentLedger = canonical;
+                    preparedNativeContinuation = { turnToken, selection };
+                    intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
+                }
+                return;
+            }
+            const activeIntent = getWaitingUserIntentForInput(input);
+            const decision = await intentBoundaryResolver.resolve({
+                ...(intentVerificationDefinition ? { newIntentId: `intent_${randomUUID()}` } : {}),
+                instanceId,
+                sessionId,
+                input,
+                cwd,
+                skills,
+                skillScoreLookup: ({ skillName, intentType, stageRole, deliverable }) => skillScoreStore.getBoost({
+                    skillName,
+                    intentType,
+                    stageRole,
+                    deliverableFamily: inferDeliverableFamily(deliverable),
+                }),
+                activeIntent: activeIntent
+                    ? {
+                        intentId: activeIntent.intentId,
+                        deliverable: activeIntent.deliverable,
+                        intentType: activeIntent.intentType,
+                        templateId: activeIntent.templateId,
+                    }
+                    : undefined,
+            });
+            intentTurnState.setPlan(turnToken, decision.kind === 'intent' ? decision.plan : undefined);
+            const plan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+            if (plan?.continuationMode === 'continue_active') {
+                intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
+                return;
+            }
+            intentTurnState.setActiveIntentReminderBlock(turnToken, undefined);
+        };
+        const clearTurnIntentContext = () => {
+            preparedNativeContinuation = undefined;
+            intentTurnState.clearTurnContextPreservingCompletedSummary();
+            currentTurnStageObservedSkillNames = new Map();
+        };
+        // Stage executor debug analysis
+        const runStageAnalysis = async (userInput) => {
+            const stages = analyzeStageIntent(userInput, skills, cwd);
+            const debugEvents = [];
+            debugEvents.push({
+                timestamp: Date.now(),
+                phase: 'intent_analysis',
+                detail: `Detected ${stages.length} stages: ${stages.map(s => s.title).join(', ')}`,
+                durationMs: 1,
+                level: 'info',
+            });
+            const currentTokens = agent?.getUsage().inputTokens ?? 0;
+            const usageRate = modelCapabilities.contextLimit > 0 ? Math.round(currentTokens / modelCapabilities.contextLimit * 100) : 0;
+            const results = stages.map(stage => {
+                const skill = skills.find(s => s.name === stage.skill);
+                const skillSize = skill?.content.length ?? 0;
+                const refsSize = skill ? skill.referencesManifest.reduce((sum, r) => sum + r.size, 0) : 0;
+                const needsSubagent = usageRate > 60;
+                return {
+                    stage,
+                    status: 'completed',
+                    timing: {
+                        totalMs: 0,
+                        contextCheckMs: 0,
+                        subagentSpawnMs: needsSubagent ? 1 : 0,
+                        subagentExecMs: 0,
+                        skillLoadMs: Math.ceil((skillSize + refsSize) / 1000) * 100,
+                        skillExecMs: 0,
+                        artifactReadMs: 0,
+                    },
+                    debugEvents: [],
+                    contextCheck: {
+                        usagePercent: usageRate,
+                        estimatedNeeded: Math.ceil((skillSize + refsSize) / 4) + 4000,
+                        available: modelCapabilities.contextLimit - currentTokens,
+                        needsSubagent,
+                    },
+                };
+            });
+            return { stages, results, debugEvents };
+        };
+        const primeTurnIntentPlan = async (renderTranscriptBlock = false) => {
+            const snapshot = intentTurnState.getSnapshot();
+            const turnIntentPlan = snapshot.currentTurnIntentPlan;
+            const turnToken = snapshot.activeTurnToken;
+            const actual = sessionStore.getIntentNativeLedgerSync(sessionId);
+            const activeNative = actual?.nativeContracts?.find(row => row.intentId === actual.activeIntentId);
+            if (preparedNativeContinuation) {
+                if (preparedNativeContinuation.turnToken !== turnToken || intentNativeLedgerHash(actual) !== preparedNativeContinuation.selection.basis)
+                    return false;
+                currentIntentLedger = actual;
+                return true;
+            }
+            const staleGeneration = activeNative?.subjects.some(s => s.attempts.at(-1).phase === 'stale') && !activeNative.subjects.some(s => s.attempts.at(-1).phase === 'enrolling');
+            if (activeNative && !(staleGeneration && intentVerificationDefinition && turnIntentPlan?.continuationMode === 'new_intent'))
+                return false;
+            if (!turnIntentPlan || !turnToken) {
+                return true;
+            }
+            if (intentVerificationDefinition && turnIntentPlan.continuationMode === 'new_intent') {
+                if (!intentNativeHost)
+                    throw Error('intent_native_host_unavailable');
+                await intentNativeHost.reserve({ plan: turnIntentPlan, definition: intentVerificationDefinition, requestSource: 'user' });
+                currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId);
+                return false;
+            }
+            if (currentIntentLedger.nativeContracts?.some(row => row.intentId === currentIntentLedger.activeIntentId))
+                return false;
+            const beforeIntentCount = currentIntentLedger.intents.length;
+            currentIntentLedger = await bootstrapTurnIntentPlan(intentLedgerStore, sessionId, currentIntentLedger, turnIntentPlan);
+            if (turnIntentPlan.continuationMode === 'new_intent') {
+                intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
+                const createdIntent = currentIntentLedger.intents.find((intent) => intent.intentId === turnIntentPlan.intentId);
+                if (createdIntent) {
+                    currentSkillEvalState = await skillEvalStore.ensureObservationsForIntent(sessionId, createdIntent);
+                }
+                if (renderTranscriptBlock && currentIntentLedger.intents.length > beforeIntentCount) {
+                    writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, turnIntentPlan.intentId));
+                    renderIntentSummaryLine();
+                }
+            }
+            return true;
+        };
+        const maybePrepareFreshContextHandoff = async () => {
+            await refreshIntentLedger();
+            if (!hasPendingFreshContextHandoff(currentIntentLedger, instanceId) || !agent) {
+                return;
+            }
+            const activeIntent = resolveOwnedActiveIntent(currentIntentLedger, instanceId);
+            if (!activeIntent) {
+                return;
+            }
+            if (productObservation)
+                throw new Error('SOL_PI_FRESH_SESSION_REQUIRED: protected observation history cannot be consumed as a fresh-context handoff');
+            currentIntentLedger = await intentLedgerStore.saveDispatchedIntent(sessionId, consumeFreshContextHandoff(activeIntent, Date.now()));
+            commandAgent.clearHistory();
+            runtimeFacade?.resetSkillTracking();
+            const turnToken = intentTurnState.getSnapshot().activeTurnToken;
+            if (turnToken) {
+                intentTurnState.setActiveIntentReminderBlock(turnToken, buildIntentReminderBlock(currentIntentLedger, instanceId));
+            }
+            await persistSession();
+        };
+        const writeOrchestrationBlock = (block) => {
+            if (!block) {
+                return;
+            }
+            endStreamingPhaseForInterrupt();
+            if (scrollRegion.isActive()) {
+                scrollRegion.clearActivity();
+            }
+            const separatedBlock = block.startsWith('\n') ? block : `\n${block}`;
+            if (scrollRegion.isActive()) {
+                try {
+                    scrollRegion.writeAtContentCursor(separatedBlock);
+                }
+                catch (error) {
+                    suspendInteractiveUi('write_orchestration_block', error);
+                }
+                mdRenderer.beginNewSegment();
+                resetStreamingSegment();
+                return;
+            }
+            process.stdout.write(separatedBlock);
+            mdRenderer.beginNewSegment();
+            resetStreamingSegment();
+        };
+        flushSubAgentNotices = () => {
+            subAgentNotices.flush(interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
+                && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
+                && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
+        };
+        const persistSessionBody = async (options = {}) => {
+            if (options.refreshIntentLedger ?? true) {
+                await refreshIntentLedger();
+            }
+            if (options.refreshSkillEvalState ?? true) {
+                await refreshSkillEvalState();
+            }
+            if (!agent)
+                throw Error('chat_agent_unavailable');
+            const snapshot = commandAgent.exportSession();
+            const historyBasis = observationSession?.getPublishedHistoryBasis();
+            if (observationSession) {
+                const publication = persistCompoundPublicationSnapshot(observationSession, snapshot);
+                if (publication) {
+                    await publication;
+                    if (historyBasis !== undefined)
+                        observationSession.notePublishedHistory(snapshot, historyBasis);
+                    return;
+                }
+            }
+            if (nativeExecutionTurn || hasActiveNativeIntent())
+                throw Error('intent_native_history_writer_required');
+            await sessionStore.save({
+                ...snapshot,
+                ...(historyBasis === undefined ? {} : { historyDigest: historyBasis }),
+                sessionId,
+                cwd: process.cwd(),
+                model: adapter.getModelName(),
+                createdAt: sessionCreatedAt,
+                updatedAt: Date.now(),
+                forkedFromSessionId,
+                lineage: sessionLineage,
+                intentDelegation: (currentIntentLedger.nativeContracts?.length ? currentIntentLedger : (sessionStore.getIntentNativeLedgerSync(sessionId) ?? currentIntentLedger)),
+                skillEval: currentSkillEvalState,
+                skillExecution: currentSkillExecutionState,
+            });
+            if (observationSession && historyBasis !== undefined)
+                observationSession.notePublishedHistory(snapshot, historyBasis);
+        };
+        const persistSession = (...args) => trackSessionWrite(() => persistSessionBody(...args));
+        const pauseCurrentGoalForInterruption = async (reason, requestSource) => {
+            try {
+                if (isGoalArmed() && currentGoalState?.status === 'active') {
+                    currentGoalState = await goalService.pause(goalMutationContext(requestSource), reason);
+                }
+            }
+            catch (error) {
+                log.warn('goal pause failed', { reason, error: String(error) });
+            }
+            finally {
+                pendingGoalCompleteSummary = null;
+                pendingGoalBlockedClaim = null;
+                disarmGoal();
+            }
+        };
+        const handleGoalCommitFailure = (error) => {
+            const reason = error instanceof GoalTamperDetectedError
+                ? 'tamper_detected'
+                : 'goal_state_flush_failed';
+            if (currentGoalState?.status === 'active') {
+                currentGoalState = {
+                    ...currentGoalState,
+                    status: 'paused',
+                    terminalReason: reason,
+                };
+            }
             pendingGoalCompleteSummary = null;
             pendingGoalBlockedClaim = null;
             disarmGoal();
-        }
-    };
-    const handleGoalCommitFailure = (error) => {
-        const reason = error instanceof GoalTamperDetectedError
-            ? 'tamper_detected'
-            : 'goal_state_flush_failed';
-        if (currentGoalState?.status === 'active') {
-            currentGoalState = {
-                ...currentGoalState,
-                status: 'paused',
-                terminalReason: reason,
+            writeProgressTranscriptNote(`Goal 已暂停：${reason}`);
+        };
+        // Publication has its own lifetime: keep ownership, but return the terminal
+        // input loop immediately so pause/cancel remain usable during native review.
+        const startGoalPublication = (action, requestSource) => {
+            if (modelIngressClosed)
+                throw finalizationReason;
+            const state = currentGoalState, intentId = state?.pendingCompletionIntentId;
+            if (!state || !intentId)
+                throw Error('goal_publication_not_pending');
+            if (goalPublicationWork?.intentId === intentId && goalPublicationWork.generation === goalPublicationGeneration) {
+                writeProgressTranscriptNote('原完成确认仍在处理中，可暂停或稍后查询。');
+                return;
+            }
+            ensureGoalLease(true);
+            goalActivation = 'disarmed';
+            goalTurnAdmissionEnabled = false;
+            const generation = ++goalPublicationGeneration, application = goalIdentityJson(goalApplicationFromState(state));
+            const current = () => generation === goalPublicationGeneration && currentGoalState
+                && goalIdentityJson(goalApplicationFromState(currentGoalState)) === application
+                && currentGoalState.pendingCompletionIntentId === intentId;
+            const assertAdmission = () => {
+                if (!current() || currentGoalState?.status !== 'active')
+                    throw Error('goal_publication_disarmed');
+                goalLease.assertOwned();
             };
-        }
-        pendingGoalCompleteSummary = null;
-        pendingGoalBlockedClaim = null;
-        disarmGoal();
-        writeProgressTranscriptNote(`Goal 已暂停：${reason}`);
-    };
-    const finalizeSettledGoalTurns = async (lastAssistantText) => {
-        if (settledGoalTurns.length === 0)
-            return;
-        const drafts = settledGoalTurns.splice(0);
-        const lastCompleted = [...drafts].reverse().find(item => item.outcome === 'completed');
-        try {
-            for (const draft of drafts) {
-                if (!currentGoalState
-                    || !isGoalArmed()
-                    || currentGoalState.status !== 'active'
-                    || draft.goalId !== currentGoalState.goalId
-                    || draft.epoch !== currentGoalState.epoch) {
-                    continue;
-                }
-                if (draft.outcome !== 'completed') {
-                    await pauseCurrentGoalForInterruption(draft.outcome === 'aborted' ? 'user_aborted' : 'runtime_error', draft.outcome === 'aborted' ? 'user' : 'runtime');
+            const controller = new AbortController();
+            const originalWork = (async () => {
+                const attempt = await createGoalPublicationWorkflow({ store: goalStore, assertAdmission }).run({
+                    sessionId, intentId, action, requestSource, signal: controller.signal,
+                });
+                if (!current())
                     return;
+                const latest = await goalService.load(sessionId);
+                if (!current() || !latest || goalIdentityJson(goalApplicationFromState(latest.state)) !== application)
+                    return;
+                currentGoalState = latest.state;
+                if (attempt.status === 'committed' && latest.state.status === 'active') {
+                    assertAdmission();
+                    const completed = await goalService.completeClaim(goalMutationContext('runtime'), intentId);
+                    if (current()) {
+                        currentGoalState = completed;
+                        writeProgressTranscriptNote('Goal 已完成，原发布结果已确认。');
+                    }
                 }
-                const evidence = draft.collector.flush().map(item => item.record);
-                if (draft === lastCompleted && lastAssistantText.trim()) {
-                    evidence.push({
-                        ownerKind: 'goal',
-                        ownerId: currentGoalState.goalId,
-                        kind: 'answer',
-                        summary: 'Goal turn produced a non-empty final response',
-                        metadata: { responseId: draft.turnId },
-                    });
+                else {
+                    writeProgressTranscriptNote(`原发布结果：${attempt.status}。可用 /goal publication recover 查询，或 /goal publication continue 继续确认。`);
                 }
-                let terminalDecision = { kind: 'none' };
-                let missingCompletionKinds = [];
-                if (draft === lastCompleted && pendingGoalCompleteSummary) {
+            })();
+            const owner = { controller, work: Promise.resolve() };
+            const work = originalWork.catch(async (error) => {
+                if (error !== finalizationReason)
+                    goalPublicationFailures.push(error);
+                if (!current())
+                    return;
+                const latest = await goalService.load(sessionId).catch(() => null);
+                if (!current())
+                    return;
+                if (latest && goalIdentityJson(goalApplicationFromState(latest.state)) === application)
+                    currentGoalState = latest.state;
+                writeProgressTranscriptNote(`完成确认尚未收敛：${formatErrorText(String(error))}。原申请已保留，可用 /goal publication recover 查询。`);
+            }).finally(() => {
+                goalPublicationOwners.delete(owner);
+                if (goalPublicationWork?.promise === work)
+                    goalPublicationWork = null;
+                if (generation === goalPublicationGeneration)
+                    disarmGoal();
+            });
+            void work.then(() => { }, error => { if (error !== finalizationReason)
+                goalPublicationFailures.push(error); });
+            owner.work = work;
+            goalPublicationOwners.add(owner);
+            goalPublicationWork = { intentId, generation, promise: work };
+            writeProgressTranscriptNote('工作轮次已结算，正在确认原发布结果；不会再启动任务。');
+        };
+        const startGoalNativeWork = (action, input) => {
+            if (action !== 'cancel' && goalNativeHost.busy)
+                throw Error('goal_native_host_busy');
+            ensureGoalLease(true);
+            goalActivation = 'disarmed';
+            goalTurnAdmissionEnabled = false;
+            const generation = ++goalPublicationGeneration;
+            const operation = trackDetached(() => action === 'create' || action === 'replace'
+                ? goalNativeHost.create(action, input, goalVerificationDefinition)
+                : action === 'recover' ? goalNativeHost.recover() : action === 'continue' ? goalNativeHost.continue() : goalNativeHost.cancel());
+            void trackDetached(() => operation.then(result => {
+                if (generation !== goalPublicationGeneration)
+                    return;
+                currentGoalState = result.goal;
+                pendingGoalCompleteSummary = null;
+                pendingGoalBlockedClaim = null;
+                writeProgressTranscriptNote(result.mutation.status === 'applied'
+                    ? 'Goal 原生授权已确认，当前未启动；输入 /goal resume 开始执行。'
+                    : `目标变更状态：${result.mutation.status}。可用 /goal native status 查询，recover 恢复原请求，continue 显式继续，cancel 取消。`);
+            }).catch(error => {
+                if (generation === goalPublicationGeneration)
+                    writeProgressTranscriptNote(`目标变更尚未完成：${formatErrorText(String(error))}。原申请保留，可用 /goal native recover 恢复。`);
+            }).finally(() => {
+                if (!modelIngressClosed && !isGoalArmed() && !goalNativeHost.busy && !goalWriters.size) {
+                    stopGoalLeaseHeartbeat();
+                    goalLease.release();
+                }
+            }));
+            writeProgressTranscriptNote('正在处理目标原生申请；不会启动任务，终端仍可查询、暂停或取消。');
+        };
+        const finalizeSettledGoalTurns = async (lastAssistantText) => {
+            if (settledGoalTurns.length === 0)
+                return;
+            const drafts = settledGoalTurns.splice(0);
+            const lastCompleted = [...drafts].reverse().find(item => item.outcome === 'completed');
+            try {
+                for (const draft of drafts) {
+                    if (!currentGoalState
+                        || !isGoalArmed()
+                        || currentGoalState.status !== 'active'
+                        || draft.goalId !== currentGoalState.goalId
+                        || draft.epoch !== currentGoalState.epoch) {
+                        continue;
+                    }
+                    if (draft.outcome !== 'completed') {
+                        await pauseCurrentGoalForInterruption(draft.outcome === 'aborted' ? 'user_aborted' : 'runtime_error', draft.outcome === 'aborted' ? 'user' : 'runtime');
+                        return;
+                    }
+                    const evidence = draft.collector.flush().map(item => item.record);
+                    if (draft === lastCompleted && lastAssistantText.trim()) {
+                        evidence.push({
+                            ownerKind: 'goal',
+                            ownerId: currentGoalState.goalId,
+                            kind: 'answer',
+                            summary: 'Goal turn produced a non-empty final response',
+                            metadata: { responseId: draft.turnId },
+                        });
+                    }
+                    let terminalDecision = { kind: 'none' };
+                    let missingCompletionKinds = [];
                     const document = await goalService.load(sessionId);
                     if (!document)
                         throw new Error('Goal document disappeared before completion evaluation');
-                    const proposedEvidence = evidence.map((record, index) => ({
-                        goalId: currentGoalState.goalId,
-                        epoch: currentGoalState.epoch,
-                        goalTurnId: draft.turnId,
-                        evidenceId: `pending_${draft.turnId}_${index}`,
-                        record,
-                        recordedAt: Date.now(),
-                    }));
-                    const evaluation = new GoalCompletionEvaluator().evaluate(currentGoalState, [...document.evidence, ...proposedEvidence]);
-                    if (evaluation.ok) {
-                        terminalDecision = { kind: 'complete', reason: pendingGoalCompleteSummary };
+                    const completionClaim = document.completionIntents?.find(intent => intent.taskId === `cli:${sessionId}`
+                        && intent.turnId === draft.turnId && intent.status === 'claimed'
+                        && goalIdentityJson(intent.application) === goalIdentityJson(goalApplicationFromState(currentGoalState)));
+                    if (completionClaim) {
+                        const proposedEvidence = evidence.map((record, index) => ({
+                            goalId: currentGoalState.goalId,
+                            epoch: currentGoalState.epoch,
+                            goalTurnId: draft.turnId,
+                            evidenceId: `pending_${draft.turnId}_${index}`,
+                            record,
+                            recordedAt: Date.now(),
+                        }));
+                        const evaluation = new GoalCompletionEvaluator().evaluate(currentGoalState, [...document.evidence, ...proposedEvidence]);
+                        if (evaluation.ok) {
+                            terminalDecision = readInstalledCurrentOwner({ ownerKind: 'goal', ownerId: currentGoalState.goalId }).kind === 'ordinary'
+                                ? { kind: 'complete', reason: completionClaim.summary }
+                                : { kind: 'publication_pending', intentId: completionClaim.intentId };
+                        }
+                        else {
+                            missingCompletionKinds = evaluation.missingKinds;
+                        }
+                        pendingGoalCompleteSummary = null;
                     }
-                    else {
-                        missingCompletionKinds = evaluation.missingKinds;
+                    currentGoalState = await goalService.settleTurn(goalMutationContext('runtime'), {
+                        turnId: draft.turnId,
+                        tokensUsed: draft.usageTokens ?? 0,
+                        activeWallClockMs: Math.max(0, Date.now() - draft.startedAt),
+                        evidence,
+                        terminalDecision,
+                    });
+                    if (currentGoalState.pendingCompletionIntentId) {
+                        startGoalPublication('start', 'scheduler');
+                        return;
                     }
-                    pendingGoalCompleteSummary = null;
+                    if (currentGoalState.status === 'complete') {
+                        disarmGoal();
+                        writeProgressTranscriptNote('Goal 已完成。');
+                        return;
+                    }
+                    if (missingCompletionKinds.length > 0) {
+                        writeProgressTranscriptNote(`Goal 尚缺完成证据：${missingCompletionKinds.join(', ')}`);
+                    }
+                    if (currentGoalState.status !== 'active') {
+                        disarmGoal();
+                        writeProgressTranscriptNote(`Goal 已停止：${currentGoalState.terminalReason ?? currentGoalState.status}`);
+                        return;
+                    }
                 }
-                currentGoalState = await goalService.settleTurn(goalMutationContext('runtime'), {
-                    turnId: draft.turnId,
-                    tokensUsed: draft.usageTokens ?? 0,
-                    activeWallClockMs: Math.max(0, Date.now() - draft.startedAt),
-                    evidence,
-                    terminalDecision,
-                });
-                if (currentGoalState.status === 'complete') {
-                    disarmGoal();
-                    writeProgressTranscriptNote('Goal 已完成。');
+                if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed())
                     return;
-                }
-                if (missingCompletionKinds.length > 0) {
-                    writeProgressTranscriptNote(`Goal 尚缺完成证据：${missingCompletionKinds.join(', ')}`);
-                }
-                if (currentGoalState.status !== 'active') {
-                    disarmGoal();
-                    writeProgressTranscriptNote(`Goal 已停止：${currentGoalState.terminalReason ?? currentGoalState.status}`);
-                    return;
+                if (pendingGoalBlockedClaim) {
+                    const claim = pendingGoalBlockedClaim;
+                    pendingGoalBlockedClaim = null;
+                    currentGoalState = await goalService.noteBlockedClaim(goalMutationContext('runtime'), claim);
+                    if (currentGoalState.status === 'blocked') {
+                        disarmGoal();
+                        writeProgressTranscriptNote(`Goal blocked：${claim.reason}`);
+                        return;
+                    }
                 }
             }
-            if (!currentGoalState || currentGoalState.status !== 'active' || !isGoalArmed())
-                return;
-            if (pendingGoalBlockedClaim) {
-                const claim = pendingGoalBlockedClaim;
-                pendingGoalBlockedClaim = null;
-                currentGoalState = await goalService.noteBlockedClaim(goalMutationContext('runtime'), claim);
-                if (currentGoalState.status === 'blocked') {
-                    disarmGoal();
-                    writeProgressTranscriptNote(`Goal blocked：${claim.reason}`);
-                    return;
+            catch (error) {
+                handleGoalCommitFailure(error);
+            }
+        };
+        const wrapOverlayText = (text, maxWidth) => {
+            const safeWidth = Math.max(1, maxWidth);
+            const rawLines = stripAnsi(text).split(/\r?\n/u);
+            const wrappedLines = [];
+            for (const rawLine of rawLines) {
+                if (rawLine.length === 0) {
+                    wrappedLines.push('');
+                    continue;
+                }
+                let remaining = rawLine;
+                while (remaining.length > 0) {
+                    if (getDisplayWidth(remaining) <= safeWidth) {
+                        wrappedLines.push(remaining);
+                        break;
+                    }
+                    const slice = sliceByDisplayColumns(remaining, 0, safeWidth);
+                    if (!slice) {
+                        wrappedLines.push(remaining);
+                        break;
+                    }
+                    wrappedLines.push(slice);
+                    remaining = remaining.slice(slice.length);
                 }
             }
+            return wrappedLines;
+        };
+        const promptFeedbackChoice = async (message) => withPausedLiveActivity(async () => {
+            runtimeState.enterWaitingFeedback();
+            try {
+                const feedbackLine = `[xiaok] ${message}`;
+                const feedbackOverlayLines = wrapOverlayText(feedbackLine, Math.max(1, (process.stdout.columns ?? 80) - 2));
+                if (!scrollRegion.isActive()) {
+                    const note = `\n${feedbackLine}\n`;
+                    process.stdout.write(note);
+                }
+                while (true) {
+                    const answer = await inputReader.read('> ', scrollRegion.isActive() ? { overlayLines: feedbackOverlayLines, overlayKind: 'feedback' } : undefined);
+                    if (answer === null) {
+                        return { outcome: 'skip', exitRequested: true };
+                    }
+                    const trimmedAnswer = answer.trim();
+                    const normalizedAnswer = trimmedAnswer.toLowerCase();
+                    if (trimmedAnswer === '' || normalizedAnswer === 's' || normalizedAnswer === 'skip') {
+                        return { outcome: 'skip' };
+                    }
+                    if (normalizedAnswer === 'y' || normalizedAnswer === 'yes') {
+                        return { outcome: 'positive' };
+                    }
+                    if (normalizedAnswer === 'n' || normalizedAnswer === 'no') {
+                        return { outcome: 'negative' };
+                    }
+                    // Treat ordinary free-form follow-up text as "skip feedback and continue".
+                    // Otherwise the completed-intent feedback loop swallows the next user turn.
+                    return { outcome: 'skip', deferredInput: answer };
+                }
+            }
+            finally {
+                runtimeState.markInputReady();
+                renderIntentSummaryLine();
+            }
+        });
+        const buildFeedbackRecord = (intentId, kind, sentiment, observationIds, note) => ({
+            feedbackId: `feedback_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+            sessionId,
+            intentId,
+            kind,
+            sentiment,
+            observationIds,
+            note,
+            createdAt: Date.now(),
+        });
+        const maybeCollectCompletedIntentFeedback = async () => {
+            const noFeedbackResult = { deferredInput: null, exitRequested: false };
+            if (!COMPLETED_INTENT_FEEDBACK_ENABLED) {
+                return noFeedbackResult;
+            }
+            if (!isTTY() || opts.auto) {
+                return noFeedbackResult;
+            }
+            await refreshIntentLedger();
+            await refreshSkillEvalState();
+            const activeIntent = currentIntentLedger.activeIntentId
+                ? currentIntentLedger.intents.find((intent) => intent.intentId === currentIntentLedger.activeIntentId)
+                : undefined;
+            if (!activeIntent || activeIntent.overallStatus !== 'completed') {
+                return noFeedbackResult;
+            }
+            if (currentSkillEvalState.promptedIntentIds.includes(activeIntent.intentId)) {
+                return noFeedbackResult;
+            }
+            const relevantObservations = currentSkillEvalState.observations.filter((observation) => (observation.intentId === activeIntent.intentId && Boolean(observation.actualSkillName)));
+            currentSkillEvalState = await skillEvalStore.markPromptedIntent(sessionId, activeIntent.intentId);
+            if (relevantObservations.length === 0) {
+                return noFeedbackResult;
+            }
+            const observationIds = relevantObservations.map((observation) => observation.observationId);
+            const pendingFeedback = [];
+            const outcome = await promptFeedbackChoice('这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
+            if (outcome.exitRequested) {
+                return { deferredInput: null, exitRequested: true };
+            }
+            if (outcome.deferredInput) {
+                return { deferredInput: outcome.deferredInput, exitRequested: false };
+            }
+            if (outcome.outcome !== 'skip') {
+                pendingFeedback.push(buildFeedbackRecord(activeIntent.intentId, 'outcome', outcome.outcome, observationIds));
+            }
+            if (pendingFeedback.length === 0) {
+                return noFeedbackResult;
+            }
+            for (const feedback of pendingFeedback) {
+                currentSkillEvalState = await skillEvalStore.recordFeedback(sessionId, feedback);
+                skillScoreStore.recordFeedback(feedback, relevantObservations);
+            }
+            await persistSession();
+            return noFeedbackResult;
+        };
+        // 初始化状态栏（在单次任务模式之前）
+        const fullModelName = adapter.getModelName();
+        statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode(), {
+            contextLimit: modelCapabilities.contextLimit,
+        });
+        const branch = await getCurrentBranch(process.cwd());
+        if (branch)
+            statusBar.updateBranch(branch);
+        statusBar.update({ inputTokens: 0, outputTokens: 0 });
+        if (!initialInput && currentGoalState && ['active', 'paused', 'blocked'].includes(currentGoalState.status)) {
+            process.stdout.write(`${dim('Goal 已保留但未自动继续；输入 /goal resume 明确恢复。')}\n`);
         }
-        catch (error) {
-            handleGoalCommitFailure(error);
+        if (!opts.print && !opts.json && goalNativeHost.latest()?.status === 'reserved') {
+            process.stdout.write(`${dim('Goal 原生申请已保留，尚未授权或启动；输入 /goal native continue 明确继续，或 /goal native cancel 取消。')}\n`);
         }
-    };
-    const releaseSessionOwnershipForExit = async () => {
-        disarmGoal();
-        await refreshIntentLedger();
-        const ownerInstanceId = currentIntentLedger.ownership.ownerInstanceId;
-        if (ownerInstanceId !== instanceId) {
+        if (!hasActiveNativeIntent())
+            await persistSession();
+        finishBootstrap();
+        if (modelIngressClosed) {
+            await finalizeChat();
             return;
         }
-        currentIntentLedger = releaseSessionOwnership(currentIntentLedger, instanceId, Date.now());
-        await persistSession({ refreshIntentLedger: false });
-    };
-    const wrapOverlayText = (text, maxWidth) => {
-        const safeWidth = Math.max(1, maxWidth);
-        const rawLines = stripAnsi(text).split(/\r?\n/u);
-        const wrappedLines = [];
-        for (const rawLine of rawLines) {
-            if (rawLine.length === 0) {
-                wrappedLines.push('');
-                continue;
-            }
-            let remaining = rawLine;
-            while (remaining.length > 0) {
-                if (getDisplayWidth(remaining) <= safeWidth) {
-                    wrappedLines.push(remaining);
-                    break;
+        // 单次任务模式
+        if (initialInput) {
+            let singleShotExitCode = 0;
+            await runCliCommand(async () => {
+                const inputBlocks = await parseInputBlocks(initialInput, resolveModelCapabilities(adapter).supportsImageInput);
+                clearPastedImagePaths();
+                const printChunks = [];
+                const toolCallsList = [];
+                let askUserCalls = 0;
+                const startTime = Date.now();
+                if (!opts.print && !opts.json) {
+                    process.stdout.write('\n');
                 }
-                const slice = sliceByDisplayColumns(remaining, 0, safeWidth);
-                if (!slice) {
-                    wrappedLines.push(remaining);
-                    break;
-                }
-                wrappedLines.push(slice);
-                remaining = remaining.slice(slice.length);
-            }
-        }
-        return wrappedLines;
-    };
-    const promptFeedbackChoice = async (message) => withPausedLiveActivity(async () => {
-        runtimeState.enterWaitingFeedback();
-        try {
-            const feedbackLine = `[xiaok] ${message}`;
-            const feedbackOverlayLines = wrapOverlayText(feedbackLine, Math.max(1, (process.stdout.columns ?? 80) - 2));
-            if (!scrollRegion.isActive()) {
-                const note = `\n${feedbackLine}\n`;
-                process.stdout.write(note);
-            }
-            while (true) {
-                const answer = await inputReader.read('> ', scrollRegion.isActive() ? { overlayLines: feedbackOverlayLines, overlayKind: 'feedback' } : undefined);
-                if (answer === null) {
-                    return { outcome: 'skip', exitRequested: true };
-                }
-                const trimmedAnswer = answer.trim();
-                const normalizedAnswer = trimmedAnswer.toLowerCase();
-                if (trimmedAnswer === '' || normalizedAnswer === 's' || normalizedAnswer === 'skip') {
-                    return { outcome: 'skip' };
-                }
-                if (normalizedAnswer === 'y' || normalizedAnswer === 'yes') {
-                    return { outcome: 'positive' };
-                }
-                if (normalizedAnswer === 'n' || normalizedAnswer === 'no') {
-                    return { outcome: 'negative' };
-                }
-                // Treat ordinary free-form follow-up text as "skip feedback and continue".
-                // Otherwise the completed-intent feedback loop swallows the next user turn.
-                return { outcome: 'skip', deferredInput: answer };
-            }
-        }
-        finally {
-            runtimeState.markInputReady();
-            renderIntentSummaryLine();
-        }
-    });
-    const buildFeedbackRecord = (intentId, kind, sentiment, observationIds, note) => ({
-        feedbackId: `feedback_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-        sessionId,
-        intentId,
-        kind,
-        sentiment,
-        observationIds,
-        note,
-        createdAt: Date.now(),
-    });
-    const maybeCollectCompletedIntentFeedback = async () => {
-        const noFeedbackResult = { deferredInput: null, exitRequested: false };
-        if (!COMPLETED_INTENT_FEEDBACK_ENABLED) {
-            return noFeedbackResult;
-        }
-        if (!isTTY() || opts.auto) {
-            return noFeedbackResult;
-        }
-        await refreshIntentLedger();
-        await refreshSkillEvalState();
-        const activeIntent = currentIntentLedger.activeIntentId
-            ? currentIntentLedger.intents.find((intent) => intent.intentId === currentIntentLedger.activeIntentId)
-            : undefined;
-        if (!activeIntent || activeIntent.overallStatus !== 'completed') {
-            return noFeedbackResult;
-        }
-        if (currentSkillEvalState.promptedIntentIds.includes(activeIntent.intentId)) {
-            return noFeedbackResult;
-        }
-        const relevantObservations = currentSkillEvalState.observations.filter((observation) => (observation.intentId === activeIntent.intentId && Boolean(observation.actualSkillName)));
-        currentSkillEvalState = await skillEvalStore.markPromptedIntent(sessionId, activeIntent.intentId);
-        if (relevantObservations.length === 0) {
-            return noFeedbackResult;
-        }
-        const observationIds = relevantObservations.map((observation) => observation.observationId);
-        const pendingFeedback = [];
-        const outcome = await promptFeedbackChoice('这次结果是否满足预期？ [y] 满意 / [n] 不满意 / [s] 跳过');
-        if (outcome.exitRequested) {
-            return { deferredInput: null, exitRequested: true };
-        }
-        if (outcome.deferredInput) {
-            return { deferredInput: outcome.deferredInput, exitRequested: false };
-        }
-        if (outcome.outcome !== 'skip') {
-            pendingFeedback.push(buildFeedbackRecord(activeIntent.intentId, 'outcome', outcome.outcome, observationIds));
-        }
-        if (pendingFeedback.length === 0) {
-            return noFeedbackResult;
-        }
-        for (const feedback of pendingFeedback) {
-            currentSkillEvalState = await skillEvalStore.recordFeedback(sessionId, feedback);
-            skillScoreStore.recordFeedback(feedback, relevantObservations);
-        }
-        await persistSession();
-        return noFeedbackResult;
-    };
-    // 初始化状态栏（在单次任务模式之前）
-    const fullModelName = adapter.getModelName();
-    statusBar.init(fullModelName, sessionId, process.cwd(), opts.dryRun ? 'dry-run' : permissionManager.getMode(), {
-        contextLimit: modelCapabilities.contextLimit,
-    });
-    const branch = await getCurrentBranch(process.cwd());
-    if (branch)
-        statusBar.updateBranch(branch);
-    statusBar.update({ inputTokens: 0, outputTokens: 0 });
-    if (!initialInput && currentGoalState && ['active', 'paused', 'blocked'].includes(currentGoalState.status)) {
-        process.stdout.write(`${dim('Goal 已保留但未自动继续；输入 /goal resume 明确恢复。')}\n`);
-    }
-    // 单次任务模式
-    if (initialInput) {
-        const inputBlocks = await parseInputBlocks(initialInput, resolveModelCapabilities(adapter).supportsImageInput);
-        clearPastedImagePaths();
-        const printChunks = [];
-        const toolCallsList = [];
-        let askUserCalls = 0;
-        const startTime = Date.now();
-        if (!opts.print && !opts.json) {
-            process.stdout.write('\n');
-        }
-        try {
-            await platform.mcpReady;
-            const capabilityHealthNotice = buildCapabilityHealthNotice(platform.health);
-            if (capabilityHealthNotice) {
-                process.stderr.write(`${capabilityHealthNotice}\n`);
-            }
-            await refreshSkills();
-            await refreshIntentLedger();
-            await prepareIntentReminderForInput(initialInput);
-            // Stage executor debug output (when --skill-debug is enabled)
-            if (skillDebugEnabled) {
-                const stageOutput = await runStageAnalysis(initialInput);
-                process.stdout.write(formatDebugOutput(stageOutput) + '\n\n');
-            }
-            await primeTurnIntentPlan();
-            await maybePrepareFreshContextHandoff();
-            const turnTimeoutMs = resolveTurnTimeoutMs();
-            const turnWatchdog = createTurnActivityWatchdog(turnTimeoutMs);
-            try {
-                await runRuntimeTurn({
-                    sessionId,
-                    cwd,
-                    source: 'chat',
-                    input: inputBlocks,
-                }, (chunk) => {
-                    if (chunk.type === 'text') {
-                        printChunks.push(chunk.delta);
-                        if (!opts.print && !opts.json) {
-                            mdRenderer.write(chunk.delta);
+                try {
+                    await platform.mcpReady;
+                    const capabilityHealthNotice = buildCapabilityHealthNotice(platform.health);
+                    if (capabilityHealthNotice) {
+                        process.stderr.write(`${capabilityHealthNotice}\n`);
+                    }
+                    await refreshSkills();
+                    await refreshIntentLedger();
+                    if (initialInput.trim().startsWith('/intent receiver')) {
+                        const result = await handleIntentReceiverCommand(initialInput);
+                        process.stdout.write((typeof result === 'string' ? result : JSON.stringify(result, null, 2)) + '\n');
+                        throw intentNativeHandled;
+                    }
+                    if (initialInput.trim().startsWith('/intent verify')) {
+                        const result = await handleIntentVerificationCommand(initialInput);
+                        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+                        throw intentNativeHandled;
+                    }
+                    if (initialInput.trim().startsWith('/intent publish')) {
+                        const result = await handleIntentPublicationCommand(initialInput);
+                        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+                        throw intentNativeHandled;
+                    }
+                    if (initialInput.trim().startsWith('/intent native')) {
+                        const command = parseIntentNativeCommand(initialInput);
+                        if (!command || !intentNativeHost)
+                            throw Error('intent_native_host_unavailable');
+                        const nativeHost = intentNativeHost;
+                        const row = nativeHost.list().at(-1);
+                        if (!row)
+                            throw Error('intent_native_missing');
+                        const result = command.kind === 'status' ? row : command.kind === 'continue' ? await intentNativeHost.advance({ intentId: row.intentId, requestSource: 'user' }) : command.kind === 'recover' ? await intentNativeHost.recover({ intentId: row.intentId, requestSource: 'user' }) : await intentNativeHost.retrySubject({ intentId: row.intentId, stageId: command.stageId, requestSource: 'user' });
+                        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+                        throw intentNativeHandled;
+                    }
+                    await prepareIntentReminderForInput(initialInput, captureNativeInputOrigin(initialInput), inputBlocks.some(block => block.type !== 'text'));
+                    // Stage executor debug output (when --skill-debug is enabled)
+                    if (skillDebugEnabled) {
+                        const stageOutput = await runStageAnalysis(initialInput);
+                        process.stdout.write(formatDebugOutput(stageOutput) + '\n\n');
+                    }
+                    if (!await primeTurnIntentPlan()) {
+                        process.stdout.write((opts.json ? JSON.stringify({ sessionId, status: 'intent_native_pending' }) : 'Intent 原始合同已保存，等待 /intent native continue；本次未执行模型任务。') + '\n');
+                        throw intentNativeHandled;
+                    }
+                    await maybePrepareFreshContextHandoff();
+                    const turnTimeoutMs = resolveTurnTimeoutMs();
+                    const turnWatchdog = createTurnActivityWatchdog(turnTimeoutMs);
+                    try {
+                        await runNormalInputRuntimeTurn({
+                            sessionId,
+                            cwd,
+                            source: 'chat',
+                            input: inputBlocks,
+                        }, (chunk) => {
+                            if (chunk.type === 'text') {
+                                printChunks.push(chunk.delta);
+                                if (!opts.print && !opts.json) {
+                                    mdRenderer.write(chunk.delta);
+                                }
+                            }
+                            if (chunk.type === 'tool_use') {
+                                toolCallsList.push(chunk.name);
+                                if (chunk.name === 'AskUserQuestion' || chunk.name === 'ask_user') {
+                                    askUserCalls += 1;
+                                }
+                            }
+                            if (chunk.type === 'usage') {
+                                statusBar.update(chunk.usage);
+                            }
+                        }, turnWatchdog.signal, (event) => turnWatchdog.observeRuntimeEvent(event));
+                    }
+                    catch (turnError) {
+                        if (turnWatchdog.didTimeout() && turnError === turnWatchdog.signal.reason) {
+                            const partialText = printChunks.join('');
+                            process.stderr.write(`xiaok: turn made no progress for ${turnTimeoutMs}ms (set XIAOK_TURN_TIMEOUT_MS=0 to disable)\n`);
+                            if (opts.print || opts.json) {
+                                process.stdout.write(formatPrintOutput({
+                                    sessionId,
+                                    text: partialText,
+                                    usage: commandAgent.getUsage(),
+                                    num_turns: 1,
+                                    ask_user_calls: askUserCalls,
+                                    tool_calls: toolCallsList,
+                                    duration_ms: Date.now() - startTime,
+                                }, Boolean(opts.json)) + '\n');
+                            }
+                            else {
+                                mdRenderer.flush();
+                                process.stdout.write('\n');
+                            }
+                            await flushStandardStreams();
+                            clearTurnIntentContext();
+                            singleShotExitCode = 124;
+                            return;
                         }
+                        throw turnError;
                     }
-                    if (chunk.type === 'tool_use') {
-                        toolCallsList.push(chunk.name);
-                        if (chunk.name === 'AskUserQuestion' || chunk.name === 'ask_user') {
-                            askUserCalls += 1;
-                        }
+                    finally {
+                        turnWatchdog.dispose();
                     }
-                    if (chunk.type === 'usage') {
-                        statusBar.update(chunk.usage);
-                    }
-                }, turnWatchdog.signal, (event) => turnWatchdog.observeRuntimeEvent(event));
-            }
-            catch (turnError) {
-                if (turnWatchdog.didTimeout()) {
-                    const partialText = printChunks.join('');
-                    process.stderr.write(`xiaok: turn made no progress for ${turnTimeoutMs}ms (set XIAOK_TURN_TIMEOUT_MS=0 to disable)\n`);
+                    await finalizeCurrentTurnIntentIfNeeded();
+                    await persistSession();
                     if (opts.print || opts.json) {
                         process.stdout.write(formatPrintOutput({
                             sessionId,
-                            text: partialText,
-                            usage: agent.getUsage(),
+                            text: printChunks.join(''),
+                            usage: commandAgent.getUsage(),
                             num_turns: 1,
                             ask_user_calls: askUserCalls,
                             tool_calls: toolCallsList,
@@ -2189,731 +3120,718 @@ async function runChat(initialInput, opts) {
                         mdRenderer.flush();
                         process.stdout.write('\n');
                     }
-                    await flushStandardStreams();
-                    clearTurnIntentContext();
-                    await releaseSessionOwnershipForExit();
-                    await cleanupRuntimeResourcesWithTimeout();
-                    process.exit(124);
                 }
-                throw turnError;
-            }
-            finally {
-                turnWatchdog.dispose();
-            }
-            await finalizeCurrentTurnIntentIfNeeded();
-            await persistSession();
-            if (opts.print || opts.json) {
-                process.stdout.write(formatPrintOutput({
-                    sessionId,
-                    text: printChunks.join(''),
-                    usage: agent.getUsage(),
-                    num_turns: 1,
-                    ask_user_calls: askUserCalls,
-                    tool_calls: toolCallsList,
-                    duration_ms: Date.now() - startTime,
-                }, Boolean(opts.json)) + '\n');
-            }
-            else {
-                mdRenderer.flush();
+                catch (e) {
+                    if (e !== intentNativeHandled) {
+                        writeError(String(e));
+                        singleShotExitCode = 1;
+                    }
+                }
+                finally {
+                    clearTurnIntentContext();
+                }
+            });
+            await finalizeChat();
+            if (!opts.print && !opts.json) {
                 process.stdout.write('\n');
             }
+            await flushStandardStreams();
+            process.exit(singleShotExitCode);
+            return;
         }
-        catch (e) {
-            writeError(String(e));
-            process.exit(1);
-        }
-        finally {
-            clearTurnIntentContext();
-            await releaseSessionOwnershipForExit();
-            await cleanupRuntimeResourcesWithTimeout();
-        }
-        if (!opts.print && !opts.json) {
-            process.stdout.write('\n');
-        }
-        await flushStandardStreams();
-        process.exit(0);
-        return;
-    }
-    // 交互模式 - 显示欢迎界面
-    const getActiveProviderLabel = () => {
-        const providerId = config.defaultProvider;
-        const profile = getProviderProfile(providerId);
-        return (profile?.label ?? providerId).toLowerCase();
-    };
-    // 首次使用引导：没有任何可用 provider key 时，在欢迎页下方提示 xiaok login
-    const hasAnyProviderKey = listProviderProfiles().some((profile) => resolveProviderApiKey(config, profile.id) !== '');
-    inputReader.setTranscriptLogger(transcriptLogger);
-    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-    const originalStderrWrite = process.stderr.write.bind(process.stderr);
-    const isBrokenPipeError = (error) => (typeof error === 'object'
-        && error !== null
-        && 'code' in error
-        && error.code === 'EPIPE');
-    const terminalOutput = createTerminalOutputRouter({
-        stdout: originalStdoutWrite,
-        stderr: originalStderrWrite,
-        onFailure: (stream, error, fallback) => {
-            terminalLog.error('stream_error', { stream, error: String(error), fallback });
-            terminalUiFallbackStream = fallback;
-            if (stream === 'stdout' && isBrokenPipeError(error) && fallback === 'stderr')
-                return;
-            suspendInteractiveUi(stream + '_stream_error', error, fallback);
-        },
-    });
-    process.stdout.write = ((chunk, ...args) => {
-        if (!terminalOutput.hasOutput())
-            return true;
-        const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-        transcriptLogger.recordOutput('stdout', text);
-        if (terminalUiSuspended && !terminalUiFallbackStream)
-            return true;
-        return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stdout', chunk, ...args);
-    });
-    process.stderr.write = ((chunk, ...args) => {
-        if (!terminalOutput.hasOutput())
-            return true;
-        const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-        transcriptLogger.recordOutput('stderr', text);
-        if (terminalUiSuspended && !terminalUiFallbackStream)
-            return true;
-        return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stderr', chunk, ...args);
-    });
-    const releaseRawInputMode = retainRawInputModeForSession();
-    let disposeInterruptHandlers = () => { };
-    try {
-        // 激活 scroll region（必须在欢迎屏幕之前）
-        // 这样欢迎内容自然填充到 scroll region 内，footer 固定在底部
-        scrollRegion.begin();
-        // 显示欢迎界面
-        contentRows = renderWelcomeScreen({
-            model: getActiveProviderLabel(),
-            cwd: process.cwd(),
-            sessionId,
-            mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
-            version: cliVersion,
+        // 交互模式 - 显示欢迎界面
+        const getActiveProviderLabel = () => {
+            const providerId = config.defaultProvider;
+            const profile = getProviderProfile(providerId);
+            return (profile?.label ?? providerId).toLowerCase();
+        };
+        // 首次使用引导：没有任何可用 provider key 时，在欢迎页下方提示 xiaok login
+        const hasAnyProviderKey = listProviderProfiles().some((profile) => resolveProviderApiKey(config, profile.id) !== '');
+        inputReader.setTranscriptLogger(transcriptLogger);
+        const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+        const originalStderrWrite = process.stderr.write.bind(process.stderr);
+        const isBrokenPipeError = (error) => (typeof error === 'object'
+            && error !== null
+            && 'code' in error
+            && error.code === 'EPIPE');
+        const terminalOutput = createTerminalOutputRouter({
+            stdout: originalStdoutWrite,
+            stderr: originalStderrWrite,
+            onFailure: (stream, error, fallback) => {
+                terminalLog.error('stream_error', { stream, error: String(error), fallback });
+                terminalUiFallbackStream = fallback;
+                if (stream === 'stdout' && isBrokenPipeError(error) && fallback === 'stderr')
+                    return;
+                suspendInteractiveUi(stream + '_stream_error', error, fallback);
+            },
         });
-        // Initialize scroll region to match welcome screen position.
-        // setWelcomeRows updates both _totalRows and _cursorRow based on
-        // the row count returned by renderWelcomeScreen (console.log calls).
-        scrollRegion.setWelcomeRows(contentRows);
-        // First-run guidance: no provider key at all -> point at `xiaok login`
-        if (!hasAnyProviderKey) {
-            const loginHint = `${boldCyan('🔑')} ${dim('尚未配置任何 AI provider 的 API key，运行')} ${boldCyan('xiaok login')} ${dim('完成配置')}`;
-            if (scrollRegion.isActive()) {
-                scrollRegion.writeAtContentCursor(`  ${loginHint}\n`);
-            }
-            else {
-                process.stdout.write(`  ${loginHint}\n`);
-            }
-        }
-        // Async update check — show hint below welcome if newer version exists
-        checkForUpdate(cliVersion).then((result) => {
-            if (result?.hasUpdate && !terminalUiSuspended) {
-                const hint = `${boldCyan('⬆')} ${dim(`有新版本可用: ${result.latest} (当前 ${result.current})，运行`)} ${boldCyan('npm i -g xiaokcode')} ${dim('更新')}`;
+        process.stdout.write = ((chunk, ...args) => {
+            if (!terminalOutput.hasOutput())
+                return true;
+            const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+            transcriptLogger.recordOutput('stdout', text);
+            if (terminalUiSuspended && !terminalUiFallbackStream)
+                return true;
+            return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stdout', chunk, ...args);
+        });
+        process.stderr.write = ((chunk, ...args) => {
+            if (!terminalOutput.hasOutput())
+                return true;
+            const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+            transcriptLogger.recordOutput('stderr', text);
+            if (terminalUiSuspended && !terminalUiFallbackStream)
+                return true;
+            return terminalOutput.write(terminalUiSuspended ? terminalUiFallbackStream : 'stderr', chunk, ...args);
+        });
+        const releaseRawInputMode = retainRawInputModeForSession();
+        let disposeInterruptHandlers = () => { };
+        try {
+            // 激活 scroll region（必须在欢迎屏幕之前）
+            // 这样欢迎内容自然填充到 scroll region 内，footer 固定在底部
+            scrollRegion.begin();
+            // 显示欢迎界面
+            contentRows = renderWelcomeScreen({
+                model: getActiveProviderLabel(),
+                cwd: process.cwd(),
+                sessionId,
+                mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+                version: cliVersion,
+            });
+            // Initialize scroll region to match welcome screen position.
+            // setWelcomeRows updates both _totalRows and _cursorRow based on
+            // the row count returned by renderWelcomeScreen (console.log calls).
+            scrollRegion.setWelcomeRows(contentRows);
+            // First-run guidance: no provider key at all -> point at `xiaok login`
+            if (!hasAnyProviderKey) {
+                const loginHint = `${boldCyan('🔑')} ${dim('尚未配置任何 AI provider 的 API key，运行')} ${boldCyan('xiaok login')} ${dim('完成配置')}`;
                 if (scrollRegion.isActive()) {
-                    scrollRegion.writeAtContentCursor(`  ${hint}\n`);
+                    scrollRegion.writeAtContentCursor(`  ${loginHint}\n`);
                 }
                 else {
-                    process.stdout.write(`  ${hint}\n`);
+                    process.stdout.write(`  ${loginHint}\n`);
                 }
             }
-        }).catch(() => { });
-        // 设置初始 usage
-        statusBar.update({ inputTokens: 0, outputTokens: 0 });
-        if (opts.dryRun)
-            process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
-        // 打印历史消息（session resume）- 在欢迎页之后
-        const recordHistoryBlockInBuffer = (role, block) => {
-            if (block.type === 'text') {
-                if (!block.text || block.text.startsWith('<system-reminder>'))
+            // Async update check — show hint below welcome if newer version exists
+            void trackDetached(() => checkForUpdate(cliVersion).then((result) => {
+                if (modelIngressClosed)
                     return;
-                transcriptBuffer.record({ kind: role, text: block.text });
-                return;
-            }
-            if (block.type === 'thinking') {
-                transcriptBuffer.record({ kind: 'thinking', text: block.thinking });
-                return;
-            }
-            if (block.type === 'tool_use') {
-                transcriptBuffer.record({
-                    kind: 'tool_use',
-                    agentId: 'main',
-                    name: block.name,
-                    summary: JSON.stringify(block.input),
-                });
-                return;
-            }
-            if (block.type === 'tool_result') {
-                transcriptBuffer.record({
-                    kind: 'tool_result',
-                    agentId: 'main',
-                    name: block.tool_use_id,
-                    content: block.content,
-                    isError: block.is_error === true,
-                });
-                return;
-            }
-            const dims = readImageDimensions(Buffer.from(block.source.data, 'base64'));
-            transcriptBuffer.record({
-                kind: 'image',
-                mediaType: block.source.media_type,
-                ...(dims ? { width: dims.width, height: dims.height } : {}),
-            });
-        };
-        if (historyMessages.length > 0) {
-            const historyColumns = process.stdout.columns ?? 80;
-            let replayedRows = 0;
-            const writeHistoryChunk = (chunk) => {
-                if (!chunk)
-                    return;
-                if (scrollRegion.isActive()) {
-                    scrollRegion.writeAtContentCursor(chunk);
-                    return;
-                }
-                process.stdout.write(chunk);
-                replayedRows += countTerminalRowsForOutput(chunk, historyColumns);
-            };
-            writeHistoryChunk('\n');
-            for (const msg of historyMessages) {
-                if (msg.role === 'user') {
-                    for (const block of msg.content) {
-                        recordHistoryBlockInBuffer('user', block);
-                        if (block.type === 'text') {
-                            const text = block.text;
-                            // Skip system-reminder content
-                            if (text && !text.startsWith('<system-reminder>')) {
-                                writeHistoryChunk(formatHistoryBlock(block));
-                            }
-                        }
-                        else {
-                            writeHistoryChunk(formatHistoryBlock(block));
-                        }
+                if (result?.hasUpdate && !terminalUiSuspended) {
+                    const hint = `${boldCyan('⬆')} ${dim(`有新版本可用: ${result.latest} (当前 ${result.current})，运行`)} ${boldCyan('npm i -g xiaokcode')} ${dim('更新')}`;
+                    if (scrollRegion.isActive()) {
+                        scrollRegion.writeAtContentCursor(`  ${hint}\n`);
+                    }
+                    else {
+                        process.stdout.write(`  ${hint}\n`);
                     }
                 }
-                else if (msg.role === 'assistant') {
-                    for (const block of msg.content) {
-                        recordHistoryBlockInBuffer('assistant', block);
-                        if (block.type === 'text') {
-                            for (const line of MarkdownRenderer.renderToLines(block.text)) {
-                                writeHistoryChunk(`${line}\n`);
-                            }
-                        }
-                        else {
-                            writeHistoryChunk(formatHistoryBlock(block));
-                        }
-                    }
+            }).catch(() => { }));
+            // 设置初始 usage
+            statusBar.update({ inputTokens: 0, outputTokens: 0 });
+            if (opts.dryRun)
+                process.stdout.write(`${dim('[dry-run 模式] 工具调用不会实际执行')}\n\n`);
+            // 打印历史消息（session resume）- 在欢迎页之后
+            const recordHistoryBlockInBuffer = (role, block) => {
+                if (block.type === 'text') {
+                    if (!block.text || block.text.startsWith('<system-reminder>'))
+                        return;
+                    transcriptBuffer.record({ kind: role, text: block.text });
+                    return;
                 }
-            }
-            writeHistoryChunk('\n');
-            if (!scrollRegion.isActive()) {
-                scrollRegion.advanceContentCursor(replayedRows);
-            }
-        }
-        const dismissWelcomeScreen = () => {
-            if (!welcomeVisible || !scrollRegion.isActive())
-                return;
-            // Keep the welcome card in the scroll region as a visual separator from
-            // terminal scrollback. Submitted input will append below and scroll it
-            // away naturally as the conversation grows.
-            welcomeVisible = false;
-        };
-        const writeCommandOutput = (commandText, output) => {
-            transcriptBuffer.record({ kind: 'command_output', command: commandText, output });
-            if (!scrollRegion.isActive()) {
-                process.stdout.write(output);
-                return;
-            }
-            try {
-                scrollRegion.clearLastInput();
-                scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
-                scrollRegion.writeAtContentCursor(output);
-                replRenderer.prepareForInput();
-            }
-            catch (error) {
-                suspendInteractiveUi('write_command_output', error);
-            }
-        };
-        const renderSubmittedImageBlocks = (blocks) => {
-            const images = blocks.filter((block) => block.type === 'image');
-            if (images.length === 0)
-                return;
-            const protocol = detectImageProtocol();
-            for (const block of images) {
-                const data = Buffer.from(block.source.data, 'base64');
-                const dims = readImageDimensions(data);
+                if (block.type === 'thinking') {
+                    transcriptBuffer.record({ kind: 'thinking', text: block.thinking });
+                    return;
+                }
+                if (block.type === 'tool_use') {
+                    transcriptBuffer.record({
+                        kind: 'tool_use',
+                        agentId: 'main',
+                        name: block.name,
+                        summary: JSON.stringify(block.input),
+                    });
+                    return;
+                }
+                if (block.type === 'tool_result') {
+                    transcriptBuffer.record({
+                        kind: 'tool_result',
+                        agentId: 'main',
+                        name: block.tool_use_id,
+                        content: block.content,
+                        isError: block.is_error === true,
+                    });
+                    return;
+                }
+                const dims = readImageDimensions(Buffer.from(block.source.data, 'base64'));
                 transcriptBuffer.record({
                     kind: 'image',
                     mediaType: block.source.media_type,
                     ...(dims ? { width: dims.width, height: dims.height } : {}),
                 });
-                if (terminalUiSuspended)
-                    continue;
-                const rendered = renderImageLines({
-                    data,
-                    mediaType: block.source.media_type,
-                    protocol,
-                    columns: process.stdout.columns ?? 80,
-                    maxRows: Math.min(12, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
-                    imageId: nextInlineImageId++,
-                });
-                const placeholder = formatImageFallbackLine(dims);
-                try {
-                    if (rendered.protocol === null) {
-                        const line = `${rendered.lines[0]}\n`;
-                        if (scrollRegion.isActive()) {
-                            scrollRegion.writeAtContentCursor(line);
-                        }
-                        else {
-                            process.stdout.write(line);
-                        }
-                        continue;
+            };
+            if (historyMessages.length > 0) {
+                const historyColumns = process.stdout.columns ?? 80;
+                let replayedRows = 0;
+                const writeHistoryChunk = (chunk) => {
+                    if (!chunk)
+                        return;
+                    if (scrollRegion.isActive()) {
+                        scrollRegion.writeAtContentCursor(chunk);
+                        return;
                     }
-                    const stationary = rendered.protocol === 'kitty';
-                    scrollRegion.writeRawBlock(stationary ? rendered.lines[0] : `${rendered.lines.join('\n')}\n`, rendered.rows, {
-                        cursorStationary: stationary,
-                        logger: transcriptLogger,
-                        placeholder,
-                    });
+                    process.stdout.write(chunk);
+                    replayedRows += countTerminalRowsForOutput(chunk, historyColumns);
+                };
+                writeHistoryChunk('\n');
+                for (const msg of historyMessages) {
+                    if (msg.role === 'user') {
+                        for (const block of msg.content) {
+                            recordHistoryBlockInBuffer('user', block);
+                            if (block.type === 'text') {
+                                const text = block.text;
+                                // Skip system-reminder content
+                                if (text && !text.startsWith('<system-reminder>')) {
+                                    writeHistoryChunk(formatHistoryBlock(block));
+                                }
+                            }
+                            else {
+                                writeHistoryChunk(formatHistoryBlock(block));
+                            }
+                        }
+                    }
+                    else if (msg.role === 'assistant') {
+                        for (const block of msg.content) {
+                            recordHistoryBlockInBuffer('assistant', block);
+                            if (block.type === 'text') {
+                                for (const line of MarkdownRenderer.renderToLines(block.text)) {
+                                    writeHistoryChunk(`${line}\n`);
+                                }
+                            }
+                            else {
+                                writeHistoryChunk(formatHistoryBlock(block));
+                            }
+                        }
+                    }
+                }
+                writeHistoryChunk('\n');
+                if (!scrollRegion.isActive()) {
+                    scrollRegion.advanceContentCursor(replayedRows);
+                }
+            }
+            const dismissWelcomeScreen = () => {
+                if (!welcomeVisible || !scrollRegion.isActive())
+                    return;
+                // Keep the welcome card in the scroll region as a visual separator from
+                // terminal scrollback. Submitted input will append below and scroll it
+                // away naturally as the conversation grows.
+                welcomeVisible = false;
+            };
+            const writeCommandOutput = (commandText, output) => {
+                transcriptBuffer.record({ kind: 'command_output', command: commandText, output });
+                if (!scrollRegion.isActive()) {
+                    process.stdout.write(output);
+                    return;
+                }
+                try {
+                    scrollRegion.clearLastInput();
+                    scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
+                    scrollRegion.writeAtContentCursor(output);
+                    replRenderer.prepareForInput();
                 }
                 catch (error) {
-                    suspendInteractiveUi('render_inline_image', error);
+                    suspendInteractiveUi('write_command_output', error);
                 }
-            }
-        };
-        const formatShellCommandResult = (result) => {
-            if (result.error) {
-                return '\n[xiaok] 本地命令启动失败：' + result.error + '\n';
-            }
-            if (result.signal) {
-                return '\n[xiaok] 本地命令被信号中止：' + result.signal + '\n';
-            }
-            if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
-                return '\n[xiaok] 本地命令退出：exit ' + result.exitCode + '\n';
-            }
-            return '\n[xiaok] 本地命令已完成。\n';
-        };
-        const restoreTerminalAfterShellCommand = () => {
-            if (terminalUiSuspended) {
-                return;
-            }
-            try {
-                runtimeState.markInputReady();
-                scrollRegion.resumeAfterExternalCommand({
-                    inputPrompt: getFooterInputPrompt(),
-                    summaryLine: getCurrentIntentSummaryLine(),
-                    statusLine: statusBar.getStatusLine(),
-                });
-                replRenderer.prepareForInput();
-            }
-            catch (error) {
-                suspendInteractiveUi('restore_shell_escape_footer', error);
-            }
-        };
-        const lookupPagerBinary = (name) => {
-            if (!name) {
+            };
+            const renderSubmittedImageBlocks = (blocks) => {
+                const images = blocks.filter((block) => block.type === 'image');
+                if (images.length === 0)
+                    return;
+                const protocol = detectImageProtocol();
+                for (const block of images) {
+                    const data = Buffer.from(block.source.data, 'base64');
+                    const dims = readImageDimensions(data);
+                    transcriptBuffer.record({
+                        kind: 'image',
+                        mediaType: block.source.media_type,
+                        ...(dims ? { width: dims.width, height: dims.height } : {}),
+                    });
+                    if (terminalUiSuspended)
+                        continue;
+                    const rendered = renderImageLines({
+                        data,
+                        mediaType: block.source.media_type,
+                        protocol,
+                        columns: process.stdout.columns ?? 80,
+                        maxRows: Math.min(12, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
+                        imageId: nextInlineImageId++,
+                    });
+                    const placeholder = formatImageFallbackLine(dims);
+                    try {
+                        if (rendered.protocol === null) {
+                            const line = `${rendered.lines[0]}\n`;
+                            if (scrollRegion.isActive()) {
+                                scrollRegion.writeAtContentCursor(line);
+                            }
+                            else {
+                                process.stdout.write(line);
+                            }
+                            continue;
+                        }
+                        const stationary = rendered.protocol === 'kitty';
+                        scrollRegion.writeRawBlock(stationary ? rendered.lines[0] : `${rendered.lines.join('\n')}\n`, rendered.rows, {
+                            cursorStationary: stationary,
+                            logger: transcriptLogger,
+                            placeholder,
+                        });
+                    }
+                    catch (error) {
+                        suspendInteractiveUi('render_inline_image', error);
+                    }
+                }
+            };
+            const formatShellCommandResult = (result) => {
+                if (result.error) {
+                    return '\n[xiaok] 本地命令启动失败：' + result.error + '\n';
+                }
+                if (result.signal) {
+                    return '\n[xiaok] 本地命令被信号中止：' + result.signal + '\n';
+                }
+                if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
+                    return '\n[xiaok] 本地命令退出：exit ' + result.exitCode + '\n';
+                }
+                return '\n[xiaok] 本地命令已完成。\n';
+            };
+            const restoreTerminalAfterShellCommand = () => {
+                if (terminalUiSuspended) {
+                    return;
+                }
+                try {
+                    runtimeState.markInputReady();
+                    scrollRegion.resumeAfterExternalCommand({
+                        inputPrompt: getFooterInputPrompt(),
+                        summaryLine: getCurrentIntentSummaryLine(),
+                        statusLine: statusBar.getStatusLine(),
+                    });
+                    replRenderer.prepareForInput();
+                }
+                catch (error) {
+                    suspendInteractiveUi('restore_shell_escape_footer', error);
+                }
+            };
+            const lookupPagerBinary = (name) => {
+                if (!name) {
+                    return null;
+                }
+                if (name.includes('/') || name.includes('\\')) {
+                    return existsSync(name) ? name : null;
+                }
+                const searchPath = process.env.PATH ?? '';
+                for (const dir of searchPath.split(delimiter)) {
+                    if (!dir) {
+                        continue;
+                    }
+                    const candidate = join(dir, name);
+                    if (existsSync(candidate)) {
+                        return candidate;
+                    }
+                }
                 return null;
-            }
-            if (name.includes('/') || name.includes('\\')) {
-                return existsSync(name) ? name : null;
-            }
-            const searchPath = process.env.PATH ?? '';
-            for (const dir of searchPath.split(delimiter)) {
-                if (!dir) {
-                    continue;
+            };
+            const getTranscriptPagerStatus = () => {
+                const snapshot = runtimeState.getSnapshot();
+                switch (snapshot.turnSurfaceState) {
+                    case 'streaming_content':
+                    case 'compat_streaming':
+                        return 'streaming';
+                    case 'tool_interrupt':
+                    case 'waiting_feedback':
+                        return 'permission';
+                    case 'busy_finishing':
+                        return 'busy';
+                    default:
+                        return 'idle';
                 }
-                const candidate = join(dir, name);
-                if (existsSync(candidate)) {
-                    return candidate;
-                }
-            }
-            return null;
-        };
-        const getTranscriptPagerStatus = () => {
-            const snapshot = runtimeState.getSnapshot();
-            switch (snapshot.turnSurfaceState) {
-                case 'streaming_content':
-                case 'compat_streaming':
-                    return 'streaming';
-                case 'tool_interrupt':
-                case 'waiting_feedback':
-                    return 'permission';
-                case 'busy_finishing':
-                    return 'busy';
-                default:
-                    return 'idle';
-            }
-        };
-        inputReader.setToggleTranscriptHandler(async () => {
-            await openTranscriptPager({
-                buffer: transcriptBuffer,
-                host: {
-                    getStatus: getTranscriptPagerStatus,
-                    getPager: () => process.env.PAGER,
-                    getPlatform: () => process.platform,
-                    lookupBinary: lookupPagerBinary,
-                    suspendInput: () => inputReader.suspendForExternalProcess(),
-                    endScrollRegion: () => {
-                        scrollRegion.end();
+            };
+            inputReader.setToggleTranscriptHandler(async () => {
+                await openTranscriptPager({
+                    buffer: transcriptBuffer,
+                    host: {
+                        getStatus: getTranscriptPagerStatus,
+                        getPager: () => process.env.PAGER,
+                        getPlatform: () => process.platform,
+                        lookupBinary: lookupPagerBinary,
+                        suspendInput: () => inputReader.suspendForExternalProcess(),
+                        endScrollRegion: () => {
+                            scrollRegion.end();
+                        },
+                        resumeScrollRegion: restoreTerminalAfterShellCommand,
+                        spawnPager: spawnPagerProcess,
+                        writeStdout: (chunk) => {
+                            process.stdout.write(chunk);
+                        },
+                        logDebug: (message) => log.debug('transcript_pager', message),
                     },
-                    resumeScrollRegion: restoreTerminalAfterShellCommand,
-                    spawnPager: spawnPagerProcess,
-                    writeStdout: (chunk) => {
-                        process.stdout.write(chunk);
-                    },
-                    logDebug: (message) => log.debug('transcript_pager', message),
-                },
+                });
             });
-        });
-        const replayShellCommandOutput = (output) => {
-            if (!output) {
-                return;
-            }
-            if (terminalUiSuspended || !scrollRegion.isActive()) {
-                process.stdout.write(output);
-                return;
-            }
-            try {
-                scrollRegion.writeAtContentCursor(output);
-                replRenderer.prepareForInput();
-            }
-            catch (error) {
-                suspendInteractiveUi('replay_shell_escape_output', error);
-            }
-        };
-        let externalShellActive = false;
-        const runLocalShellEscape = async (command, commandText) => {
-            dismissWelcomeScreen();
-            stopBusyCapture();
-            stopActivity();
-            runtimeState.markInputReady();
-            try {
-                if (scrollRegion.isActive()) {
-                    scrollRegion.clearLastInput({ renderFooter: false, inputPrompt: getFooterInputPrompt() });
-                    scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
-                    scrollRegion.end();
+            const replayShellCommandOutput = (output) => {
+                if (!output) {
+                    return;
                 }
-                else {
-                    process.stdout.write(formatSubmittedInput(commandText));
+                if (terminalUiSuspended || !scrollRegion.isActive()) {
+                    process.stdout.write(output);
+                    return;
                 }
-            }
-            catch (error) {
-                suspendInteractiveUi('release_shell_escape_terminal', error);
-            }
-            try {
-                if (process.stdin.isTTY) {
-                    const ttyStdin = process.stdin;
-                    ttyStdin.setRawMode?.(false);
+                try {
+                    scrollRegion.writeAtContentCursor(output);
+                    replRenderer.prepareForInput();
                 }
-            }
-            catch { }
-            const executor = shellEscapeExecutorForTests
-                ?? ((input) => runInteractiveShellCommand(input.command, { cwd: input.cwd }));
-            externalShellActive = true;
-            let result;
-            try {
-                result = await executor({ command, cwd });
-            }
-            finally {
-                externalShellActive = false;
-            }
-            const replayOutput = (result.output ?? '') + formatShellCommandResult(result);
-            restoreTerminalAfterShellCommand();
-            replayShellCommandOutput(replayOutput);
-        };
-        setStreamErrorHandler((error, stream) => {
-            if (stream !== process.stdout && stream !== process.stderr)
-                return false;
-            terminalOutput.fail(stream === process.stdout ? 'stdout' : 'stderr', error);
-            return true;
-        });
-        // 创建输入读取器
-        inputReader.setSkills(skills);
-        let deferredInput = null;
-        let deferredInputKind = 'user';
-        let pendingQueuedInput = null;
-        let normalTurnChromePrimed = false;
-        let turnHadAskUserQuestion = false;
-        stopBusyCapture = () => {
-            activeBusyCapture?.stop();
-            activeBusyCapture = null;
-        };
-        const takeBusyDraft = () => {
-            const draft = activeBusyCapture?.getSnapshot();
-            stopBusyCapture();
-            return draft;
-        };
-        const stashQueuedInputIfAny = (options) => {
-            const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
-            if (options?.stopCapture !== false) {
+                catch (error) {
+                    suspendInteractiveUi('replay_shell_escape_output', error);
+                }
+            };
+            let externalShellActive = false;
+            const runLocalShellEscape = async (command, commandText) => {
+                dismissWelcomeScreen();
                 stopBusyCapture();
-            }
-            if (queuedInput !== null && queuedInput.trim().length > 0) {
-                pendingQueuedInput = queuedInput;
-            }
-        };
-        const beginNormalInputTurnChrome = (submittedInput) => {
-            turnHadAskUserQuestion = false;
-            runtimeState.beginTurn('Thinking', { deferActivity: true });
-            ensureBusyInputCapture();
-            if (submittedInput.length > 0) {
-                transcriptBuffer.record({ kind: 'user', text: submittedInput });
-            }
-            if (!terminalUiSuspended) {
-                scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-            }
-            if (submittedInput.length > 0 && scrollRegion.isActive() && !terminalUiSuspended) {
-                scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));
-            }
-            beginActivity('Thinking', true);
-        };
-        runtimeHooks.on('turn_started', (e) => {
-            log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
-            activeRuntimeTurnId = e.turnId;
-            currentOuterTurnId ??= e.turnId;
-            if (goalTurnAdmissionEnabled
-                && isGoalArmed()
-                && currentGoalState?.status === 'active') {
-                goalTurnDrafts.set(e.turnId, {
-                    turnId: e.turnId,
-                    goalId: currentGoalState.goalId,
-                    epoch: currentGoalState.epoch,
-                    startedAt: Date.now(),
-                    usageTokens: null,
-                    collector: new GoalEvidenceCollector({
+                stopActivity();
+                runtimeState.markInputReady();
+                try {
+                    if (scrollRegion.isActive()) {
+                        scrollRegion.clearLastInput({ renderFooter: false, inputPrompt: getFooterInputPrompt() });
+                        scrollRegion.writeSubmittedInput(formatSubmittedInput(commandText));
+                        scrollRegion.end();
+                    }
+                    else {
+                        process.stdout.write(formatSubmittedInput(commandText));
+                    }
+                }
+                catch (error) {
+                    suspendInteractiveUi('release_shell_escape_terminal', error);
+                }
+                try {
+                    if (process.stdin.isTTY) {
+                        const ttyStdin = process.stdin;
+                        ttyStdin.setRawMode?.(false);
+                    }
+                }
+                catch { }
+                const executor = shellEscapeExecutorForTests
+                    ?? ((input) => runInteractiveShellCommand(input.command, { cwd: input.cwd }));
+                externalShellActive = true;
+                let result;
+                try {
+                    result = await executor({ command, cwd });
+                }
+                finally {
+                    externalShellActive = false;
+                }
+                const replayOutput = (result.output ?? '') + formatShellCommandResult(result);
+                restoreTerminalAfterShellCommand();
+                replayShellCommandOutput(replayOutput);
+            };
+            setStreamErrorHandler((error, stream) => {
+                if (stream !== process.stdout && stream !== process.stderr)
+                    return false;
+                terminalOutput.fail(stream === process.stdout ? 'stdout' : 'stderr', error);
+                return true;
+            });
+            // 创建输入读取器
+            inputReader.setSkills(skills);
+            let deferredInput = null;
+            let deferredInputKind = 'user';
+            let deferredNativeInputOrigin, pendingQueuedNativeInputOrigin;
+            let pendingQueuedInput = null;
+            let normalTurnChromePrimed = false;
+            let turnHadAskUserQuestion = false;
+            stopBusyCapture = () => {
+                activeBusyCapture?.stop();
+                activeBusyCapture = null;
+            };
+            const takeBusyDraft = () => {
+                const draft = activeBusyCapture?.getSnapshot();
+                stopBusyCapture();
+                return draft;
+            };
+            const stashQueuedInputIfAny = (options) => {
+                const queuedInput = activeBusyCapture?.consumeQueued() ?? null;
+                if (options?.stopCapture !== false) {
+                    stopBusyCapture();
+                }
+                if (queuedInput !== null && queuedInput.trim().length > 0) {
+                    pendingQueuedInput = queuedInput;
+                    pendingQueuedNativeInputOrigin = captureNativeInputOrigin(queuedInput);
+                }
+            };
+            const beginNormalInputTurnChrome = (submittedInput) => {
+                turnHadAskUserQuestion = false;
+                runtimeState.beginTurn('Thinking', { deferActivity: true });
+                ensureBusyInputCapture();
+                if (submittedInput.length > 0) {
+                    transcriptBuffer.record({ kind: 'user', text: submittedInput });
+                }
+                if (!terminalUiSuspended) {
+                    scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
+                }
+                if (submittedInput.length > 0 && scrollRegion.isActive() && !terminalUiSuspended) {
+                    scrollRegion.writeSubmittedInput(formatSubmittedInput(submittedInput));
+                }
+                beginActivity('Thinking', true);
+            };
+            runtimeHooks.on('turn_started', (e) => {
+                log.debug('turn_started', JSON.stringify({ turnId: e?.turnId }));
+                activeRuntimeTurnId = e.turnId;
+                currentOuterTurnId ??= e.turnId;
+                if (goalTurnAdmissionEnabled
+                    && isGoalArmed()
+                    && !currentGoalState?.pendingCompletionIntentId
+                    && currentGoalState?.status === 'active') {
+                    goalTurnDrafts.set(e.turnId, {
+                        turnId: e.turnId,
                         goalId: currentGoalState.goalId,
                         epoch: currentGoalState.epoch,
-                        goalTurnId: e.turnId,
-                    }),
-                });
-            }
-            carryPreparedIntentContextToRuntimeTurn(e.turnId);
-            toolExplorer.reset();
-            turnLayout.reset();
-            resetStreamingSegment();
-            turnVisibleAssistantTextSeen = false;
-            turnThinkingOnlyToolNoticeWritten = false;
-            if (thinkingOnlyToolNoticeTimer) {
-                clearTimeout(thinkingOnlyToolNoticeTimer);
-                thinkingOnlyToolNoticeTimer = null;
-            }
-            if (!normalTurnChromePrimed) {
-                beginNormalInputTurnChrome('');
-            }
-        });
-        runtimeHooks.on('tool_started', (e) => {
-            log.debug('tool_started', JSON.stringify({ tool: e?.toolName }));
-            const transcriptSummary = summarizeToolInputForTranscript(e.toolInput);
-            transcriptBuffer.record({
-                kind: 'tool_use',
-                // This hook is emitted only by the main runtime facade. Subagent tool
-                // observations use onToolObserved and retain their own agentId there.
-                agentId: 'main',
-                name: e.toolName,
-                summary: transcriptSummary,
-            });
-            endStreamingPhaseForInterrupt();
-            flushSubAgentNotices();
-            if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
-                turnHadAskUserQuestion = true;
-                maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
-                return;
-            }
-            runtimeState.enterToolInterrupt();
-            beginActivity(describeLiveActivity(e.toolName, e.toolInput));
-            maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
-            maybeWriteThinkingOnlyToolNotice();
-            const activity = toolExplorer.record(e.toolName, e.toolInput);
-            if (activity) {
-                turnLayout.noteToolActivity();
-                pauseActivity();
-                // Write tool output at the tracked content position (inside scroll region)
-                if (scrollRegion.isActive()) {
-                    scrollRegion.writeAtContentCursor(activity);
+                        startedAt: Date.now(),
+                        usageTokens: null,
+                        collector: new GoalEvidenceCollector({
+                            goalId: currentGoalState.goalId,
+                            epoch: currentGoalState.epoch,
+                            goalTurnId: e.turnId,
+                        }),
+                    });
                 }
-                else {
-                    process.stdout.write(activity);
-                }
-                mdRenderer.beginNewSegment();
+                carryPreparedIntentContextToRuntimeTurn(e.turnId);
+                toolExplorer.reset();
+                turnLayout.reset();
                 resetStreamingSegment();
-                beginActivity(describeLiveActivity(e.toolName, e.toolInput), true);
-                renderIntentSummaryLine();
-            }
-        });
-        runtimeHooks.on('tool_finished', (_e) => {
-            log.debug('tool_finished', JSON.stringify({ tool: _e?.toolName, ok: _e?.ok }));
-            goalTurnDrafts.get(_e.turnId)?.collector.accept(_e);
-            flushSubAgentNotices();
-            scheduleActivityResume('Thinking', 160);
-        });
-        runtimeHooks.on('tool_execution_fact', (event) => {
-            goalTurnDrafts.get(event.turnId)?.collector.accept(event);
-        });
-        runtimeHooks.on('intent_created', async (event) => {
-            await refreshIntentLedger();
-            writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, event.intentId));
-            renderIntentSummaryLine();
-        });
-        runtimeHooks.on('stage_activated', async (event) => {
-            await refreshIntentLedger();
-            intentTurnState.noteStageActivated(event.turnId, event.order);
-            writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
-                order: event.order,
-                totalStages: event.totalStages,
-                label: event.label,
-            }));
-            renderIntentSummaryLine();
-        });
-        runtimeHooks.on('step_activated', async (event) => {
-            await refreshIntentLedger();
-            intentTurnState.noteStepRunning(event.turnId);
-            writeOrchestrationBlock(formatProgressTranscriptBlock({
-                stepId: event.stepId,
-                status: 'running',
-                message: `Active step moved to ${event.stepId.split(':step:')[1] ?? event.stepId}`,
-            }));
-            renderIntentSummaryLine();
-        });
-        runtimeHooks.on('breadcrumb_emitted', async (event) => {
-            await refreshIntentLedger();
-            intentTurnState.noteBreadcrumbStatus(event.turnId, event.status);
-            writeOrchestrationBlock(formatProgressTranscriptBlock({
-                stepId: event.stepId,
-                status: event.status,
-                message: event.message,
-            }));
-            renderIntentSummaryLine();
-        });
-        runtimeHooks.on('receipt_emitted', async (event) => {
-            await refreshIntentLedger();
-            intentTurnState.setStageCompleted(event.turnId, intentTurnState.getSnapshot().currentTurnIntentPlan?.stages.length ?? 1);
-            writeOrchestrationBlock(formatReceiptTranscriptBlock(event.note));
-            renderIntentSummaryLine();
-        });
-        runtimeHooks.on('salvage_emitted', async (event) => {
-            await refreshIntentLedger();
-            writeOrchestrationBlock(formatSalvageTranscriptBlock(event.summary, event.reason));
-            renderIntentSummaryLine();
-        });
-        runtimeHooks.on('turn_completed', (event) => {
-            activeRuntimeTurnId = null;
-            const goalDraft = goalTurnDrafts.get(event.turnId);
-            if (goalDraft) {
-                goalDraft.outcome = 'completed';
-                goalDraft.collector.settleTurn();
-                goalTurnDrafts.delete(event.turnId);
-                settledGoalTurns.push(goalDraft);
-            }
-            stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
-            turnHadAskUserQuestion = false;
-            toolExplorer.reset();
-            const turnPlan = intentTurnState.getSnapshot().currentTurnIntentPlan;
-            if (turnPlan?.stages.length) {
-                intentTurnState.setStageCompleted(event.turnId, turnPlan.stages.length);
-                const completedSummaryLine = getCurrentTurnSummaryLine();
-                intentTurnState.captureCompletedSummary(event.turnId, completedSummaryLine);
-                const stageSummaryBlock = getCurrentTurnStageSummaryBlock();
-                if (stageSummaryBlock) {
-                    if (scrollRegion.isActive() && scrollRegion.isContentStreaming() && !terminalUiSuspended) {
-                        flushStreamingMarkdown();
-                        scrollRegion.endContentStreaming({
-                            inputPrompt: getFooterInputPrompt(),
-                            summaryLine: '',
-                            statusLine: statusBar.getStatusLine(),
-                        });
-                        mdRenderer.beginNewSegment();
-                        resetStreamingSegment();
-                    }
-                    if (scrollRegion.isActive() && !terminalUiSuspended) {
-                        scrollRegion.renderFooter({
-                            inputPrompt: getFooterInputPrompt(),
-                            summaryLine: '',
-                            statusLine: statusBar.getStatusLine(),
-                        });
-                    }
-                    writeOrchestrationBlock(stageSummaryBlock);
+                turnVisibleAssistantTextSeen = false;
+                turnThinkingOnlyToolNoticeWritten = false;
+                if (thinkingOnlyToolNoticeTimer) {
+                    clearTimeout(thinkingOnlyToolNoticeTimer);
+                    thinkingOnlyToolNoticeTimer = null;
                 }
-            }
-            runtimeState.markBusyFinishing();
-            stopActivity();
-            void refreshIntentLedger().then(renderIntentSummaryLine);
-        });
-        runtimeHooks.on('turn_failed', (event) => {
-            activeRuntimeTurnId = null;
-            const goalDraft = goalTurnDrafts.get(event.turnId);
-            if (goalDraft) {
-                goalDraft.outcome = 'failed';
-                goalDraft.collector.settleTurn();
-                goalTurnDrafts.delete(event.turnId);
-                settledGoalTurns.push(goalDraft);
-            }
-            turnHadAskUserQuestion = false;
-            intentTurnState.clearTurnContext(event.turnId);
-            currentTurnStageObservedSkillNames = new Map();
-            // Flush before resetTurnChrome(), which discards the renderer buffer.
-            endStreamingPhaseForInterrupt();
-            runtimeState.markInputReady();
-            resetTurnChrome();
-            void refreshIntentLedger().then(renderIntentSummaryLine);
-        });
-        runtimeHooks.on('turn_aborted', (event) => {
-            activeRuntimeTurnId = null;
-            const goalDraft = goalTurnDrafts.get(event.turnId);
-            if (goalDraft) {
-                goalDraft.outcome = 'aborted';
-                goalDraft.collector.settleTurn();
-                goalTurnDrafts.delete(event.turnId);
-                settledGoalTurns.push(goalDraft);
-            }
-            turnHadAskUserQuestion = false;
-            intentTurnState.clearTurnContext(event.turnId);
-            currentTurnStageObservedSkillNames = new Map();
-            endStreamingPhaseForInterrupt();
-            runtimeState.markInputReady();
-            resetTurnChrome();
-            void refreshIntentLedger().then(renderIntentSummaryLine);
-        });
-        runtimeHooks.on('turn_stop', (event) => {
-            if (subAgentNotices.hasPending) {
+                if (!normalTurnChromePrimed) {
+                    beginNormalInputTurnChrome('');
+                }
+            });
+            runtimeHooks.on('tool_started', (e) => {
+                log.debug('tool_started', JSON.stringify({ tool: e?.toolName }));
+                const transcriptSummary = summarizeToolInputForTranscript(e.toolInput);
+                transcriptBuffer.record({
+                    kind: 'tool_use',
+                    // This hook is emitted only by the main runtime facade. Subagent tool
+                    // observations use onToolObserved and retain their own agentId there.
+                    agentId: 'main',
+                    name: e.toolName,
+                    summary: transcriptSummary,
+                });
                 endStreamingPhaseForInterrupt();
                 flushSubAgentNotices();
-            }
-            if (event.reason === 'user_aborted') {
-                abortedRuntimeTurnIds.add(event.turnId);
-            }
-        });
-        // Context 压缩通知
-        runtimeHooks.on('compact_triggered', () => {
-            log.info('compact_triggered');
-            beginActivity('Compacting context');
-            turnLayout.noteProgressNote();
-            pauseActivity();
-            writeProgressTranscriptNote('⚠ 上下文已压缩，保留最近对话');
-        });
-        runtimeHooks.on('compact_failed', (e) => {
-            log.warn('compact_failed', { error: e?.error });
-            writeProgressTranscriptNote(`⚠ 上下文压缩失败: ${e?.error ?? '未知错误'}`);
-        });
-        // 处理终端窗口大小调整
-        handleResize = () => {
-            // Update geometry before the next activity/input repaint can use stale rows.
-            const rows = process.stdout.rows ?? 24;
-            const cols = process.stdout.columns ?? 80;
-            try {
-                scrollRegion.updateSize(rows, cols);
-            }
-            catch (error) {
-                suspendInteractiveUi('resize_render', error);
-            }
-        };
-        process.stdout.on('resize', handleResize);
-        const exitConfirmation = createExitConfirmation();
-        let exiting = false;
-        const shutdownTerminal = async (reason) => {
-            if (exiting)
-                return;
-            exiting = true;
-            currentTurnAbortController?.abort();
-            try {
+                if (e.toolName === 'AskUserQuestion' || e.toolName === 'ask_user') {
+                    turnHadAskUserQuestion = true;
+                    maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
+                    return;
+                }
+                runtimeState.enterToolInterrupt();
+                beginActivity(describeLiveActivity(e.toolName, e.toolInput));
+                maybeAdvanceCurrentTurnStageForTool(e.turnId, e.toolName, e.toolInput);
+                maybeWriteThinkingOnlyToolNotice();
+                const activity = toolExplorer.record(e.toolName, e.toolInput);
+                if (activity) {
+                    turnLayout.noteToolActivity();
+                    pauseActivity();
+                    // Write tool output at the tracked content position (inside scroll region)
+                    if (scrollRegion.isActive()) {
+                        scrollRegion.writeAtContentCursor(activity);
+                    }
+                    else {
+                        process.stdout.write(activity);
+                    }
+                    mdRenderer.beginNewSegment();
+                    resetStreamingSegment();
+                    beginActivity(describeLiveActivity(e.toolName, e.toolInput), true);
+                    renderIntentSummaryLine();
+                }
+            });
+            runtimeHooks.on('tool_finished', (_e) => {
+                log.debug('tool_finished', JSON.stringify({ tool: _e?.toolName, ok: _e?.ok }));
+                goalTurnDrafts.get(_e.turnId)?.collector.accept(_e);
+                flushSubAgentNotices();
+                scheduleActivityResume('Thinking', 160);
+            });
+            runtimeHooks.on('tool_execution_fact', (event) => {
+                goalTurnDrafts.get(event.turnId)?.collector.accept(event);
+            });
+            runtimeHooks.on('intent_created', (event) => {
+                void trackDetached(async () => {
+                    await refreshIntentLedger();
+                    writeOrchestrationBlock(formatIntentCreatedTranscriptBlock(currentIntentLedger, event.intentId));
+                    renderIntentSummaryLine();
+                });
+            });
+            runtimeHooks.on('stage_activated', (event) => {
+                void trackDetached(async () => {
+                    await refreshIntentLedger();
+                    intentTurnState.noteStageActivated(event.turnId, event.order);
+                    writeOrchestrationBlock(formatStageActivatedTranscriptBlock({
+                        order: event.order,
+                        totalStages: event.totalStages,
+                        label: event.label,
+                    }));
+                    renderIntentSummaryLine();
+                });
+            });
+            runtimeHooks.on('step_activated', (event) => {
+                void trackDetached(async () => {
+                    await refreshIntentLedger();
+                    intentTurnState.noteStepRunning(event.turnId);
+                    writeOrchestrationBlock(formatProgressTranscriptBlock({
+                        stepId: event.stepId,
+                        status: 'running',
+                        message: `Active step moved to ${event.stepId.split(':step:')[1] ?? event.stepId}`,
+                    }));
+                    renderIntentSummaryLine();
+                });
+            });
+            runtimeHooks.on('breadcrumb_emitted', (event) => {
+                void trackDetached(async () => {
+                    await refreshIntentLedger();
+                    intentTurnState.noteBreadcrumbStatus(event.turnId, event.status);
+                    writeOrchestrationBlock(formatProgressTranscriptBlock({
+                        stepId: event.stepId,
+                        status: event.status,
+                        message: event.message,
+                    }));
+                    renderIntentSummaryLine();
+                });
+            });
+            runtimeHooks.on('receipt_emitted', (event) => {
+                void trackDetached(async () => {
+                    await refreshIntentLedger();
+                    if (!nativeExecutionTurn && !hasActiveNativeIntent())
+                        intentTurnState.setStageCompleted(event.turnId, intentTurnState.getSnapshot().currentTurnIntentPlan?.stages.length ?? 1);
+                    writeOrchestrationBlock(formatReceiptTranscriptBlock(event.note));
+                    renderIntentSummaryLine();
+                });
+            });
+            runtimeHooks.on('salvage_emitted', (event) => {
+                void trackDetached(async () => {
+                    await refreshIntentLedger();
+                    writeOrchestrationBlock(formatSalvageTranscriptBlock(event.summary, event.reason));
+                    renderIntentSummaryLine();
+                });
+            });
+            runtimeHooks.on('turn_completed', (event) => {
+                activeRuntimeTurnId = null;
+                const goalDraft = goalTurnDrafts.get(event.turnId);
+                if (goalDraft) {
+                    goalDraft.outcome = 'completed';
+                    goalDraft.collector.settleTurn();
+                    goalTurnDrafts.delete(event.turnId);
+                    settledGoalTurns.push(goalDraft);
+                }
+                stashQueuedInputIfAny({ stopCapture: turnHadAskUserQuestion });
+                turnHadAskUserQuestion = false;
+                toolExplorer.reset();
+                const turnPlan = intentTurnState.getSnapshot().currentTurnIntentPlan;
+                if (turnPlan?.stages.length && !nativeExecutionTurn && !hasActiveNativeIntent()) {
+                    intentTurnState.setStageCompleted(event.turnId, turnPlan.stages.length);
+                    const completedSummaryLine = getCurrentTurnSummaryLine();
+                    intentTurnState.captureCompletedSummary(event.turnId, completedSummaryLine);
+                    const stageSummaryBlock = getCurrentTurnStageSummaryBlock();
+                    if (stageSummaryBlock) {
+                        if (scrollRegion.isActive() && scrollRegion.isContentStreaming() && !terminalUiSuspended) {
+                            flushStreamingMarkdown();
+                            scrollRegion.endContentStreaming({
+                                inputPrompt: getFooterInputPrompt(),
+                                summaryLine: '',
+                                statusLine: statusBar.getStatusLine(),
+                            });
+                            mdRenderer.beginNewSegment();
+                            resetStreamingSegment();
+                        }
+                        if (scrollRegion.isActive() && !terminalUiSuspended) {
+                            scrollRegion.renderFooter({
+                                inputPrompt: getFooterInputPrompt(),
+                                summaryLine: '',
+                                statusLine: statusBar.getStatusLine(),
+                            });
+                        }
+                        writeOrchestrationBlock(stageSummaryBlock);
+                    }
+                }
+                runtimeState.markBusyFinishing();
+                stopActivity();
+                void trackDetached(() => refreshIntentLedger().then(renderIntentSummaryLine));
+            });
+            runtimeHooks.on('turn_failed', (event) => {
+                activeRuntimeTurnId = null;
+                const goalDraft = goalTurnDrafts.get(event.turnId);
+                if (goalDraft) {
+                    goalDraft.outcome = 'failed';
+                    goalDraft.collector.settleTurn();
+                    goalTurnDrafts.delete(event.turnId);
+                    settledGoalTurns.push(goalDraft);
+                }
+                turnHadAskUserQuestion = false;
+                intentTurnState.clearTurnContext(event.turnId);
+                currentTurnStageObservedSkillNames = new Map();
+                // Flush before resetTurnChrome(), which discards the renderer buffer.
+                endStreamingPhaseForInterrupt();
+                runtimeState.markInputReady();
+                resetTurnChrome();
+                void trackDetached(() => refreshIntentLedger().then(renderIntentSummaryLine));
+            });
+            runtimeHooks.on('turn_aborted', (event) => {
+                activeRuntimeTurnId = null;
+                const goalDraft = goalTurnDrafts.get(event.turnId);
+                if (goalDraft) {
+                    goalDraft.outcome = 'aborted';
+                    goalDraft.collector.settleTurn();
+                    goalTurnDrafts.delete(event.turnId);
+                    settledGoalTurns.push(goalDraft);
+                }
+                turnHadAskUserQuestion = false;
+                intentTurnState.clearTurnContext(event.turnId);
+                currentTurnStageObservedSkillNames = new Map();
+                endStreamingPhaseForInterrupt();
+                runtimeState.markInputReady();
+                resetTurnChrome();
+                void trackDetached(() => refreshIntentLedger().then(renderIntentSummaryLine));
+            });
+            runtimeHooks.on('turn_stop', (event) => {
+                if (subAgentNotices.hasPending) {
+                    endStreamingPhaseForInterrupt();
+                    flushSubAgentNotices();
+                }
+                if (event.reason === 'user_aborted') {
+                    abortedRuntimeTurnIds.add(event.turnId);
+                }
+            });
+            // Context 压缩通知
+            runtimeHooks.on('compact_triggered', () => {
+                log.info('compact_triggered');
+                beginActivity('Compacting context');
+                turnLayout.noteProgressNote();
+                pauseActivity();
+                writeProgressTranscriptNote('⚠ 上下文已压缩，保留最近对话');
+            });
+            runtimeHooks.on('compact_failed', (e) => {
+                log.warn('compact_failed', { error: e?.error });
+                writeProgressTranscriptNote(`⚠ 上下文压缩失败: ${e?.error ?? '未知错误'}`);
+            });
+            // 处理终端窗口大小调整
+            handleResize = () => {
+                // Update geometry before the next activity/input repaint can use stale rows.
+                const rows = process.stdout.rows ?? 24;
+                const cols = process.stdout.columns ?? 80;
+                try {
+                    scrollRegion.updateSize(rows, cols);
+                }
+                catch (error) {
+                    suspendInteractiveUi('resize_render', error);
+                }
+            };
+            process.stdout.on('resize', handleResize);
+            const exitConfirmation = createExitConfirmation();
+            const shutdownTerminal = (reason) => exitFromSignal(reason);
+            finishTerminal = () => {
                 stopBusyCapture();
                 stopActivity();
                 try {
@@ -2924,656 +3842,980 @@ async function runChat(initialInput, opts) {
                     releaseRawInputMode();
                 }
                 catch { }
-                if (handleResize) {
+                if (handleResize)
                     process.stdout.off('resize', handleResize);
-                }
                 skillCatalogWatcher?.close();
-                clearTurnIntentContext();
-                await releaseSessionOwnershipForExit();
-                await lifecycleHooks.runHooks('SessionEnd', { reason });
-            }
-            catch (error) {
-                log.warn('terminal shutdown cleanup failed', { error: String(error) });
-            }
-            finally {
                 setStreamErrorHandler(null);
                 process.stdout.write = originalStdoutWrite;
                 process.stderr.write = originalStderrWrite;
                 try {
-                    await cleanupRuntimeResourcesWithTimeout();
-                }
-                catch { }
-                try {
                     statusBar.destroy();
                 }
                 catch { }
-                if (reason === 'sigint') {
-                    try {
-                        process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
-                    }
-                    catch { }
-                }
                 disposeInterruptHandlers();
-                process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
-            }
-        };
-        const onInterrupt = () => {
-            if (exiting || interactiveBashActive || externalShellActive)
-                return;
-            if (exitConfirmation.press()) {
-                void shutdownTerminal('sigint');
-                return;
-            }
-            currentTurnAbortController?.abort();
-            writeProgressTranscriptNote('2 秒内再按 Ctrl+C 退出；继续输入可取消退出。');
-        };
-        const onHangup = () => { void shutdownTerminal('sighup'); };
-        const onTerminate = () => { void shutdownTerminal('sigterm'); };
-        const onInputEnd = () => { void shutdownTerminal('stdin_end'); };
-        inputReader.setInterruptHandler(onInterrupt, () => exitConfirmation.reset());
-        process.on('SIGINT', onInterrupt);
-        process.on('SIGHUP', onHangup);
-        process.on('SIGTERM', onTerminate);
-        process.stdin.on('end', onInputEnd);
-        disposeInterruptHandlers = () => {
-            inputReader.setInterruptHandler();
-            process.off('SIGINT', onInterrupt);
-            process.off('SIGHUP', onHangup);
-            process.off('SIGTERM', onTerminate);
-            process.stdin.off('end', onInputEnd);
-        };
-        const handleCompletedIntentFeedbackResult = async (result) => {
-            stashQueuedInputIfAny({ stopCapture: result.deferredInput !== null || result.exitRequested });
-            if (result.deferredInput !== null) {
-                if (scrollRegion.isActive()) {
-                    scrollRegion.clearOverlayPromptState();
+            };
+            const onInterrupt = () => {
+                if (modelIngressClosed || interactiveBashActive || externalShellActive)
+                    return;
+                if (exitConfirmation.press()) {
+                    void shutdownTerminal('sigint');
+                    return;
                 }
-                runtimeState.markInputReady();
-                renderFooterChrome();
-                deferredInput = result.deferredInput;
-                deferredInputKind = 'user';
-            }
-            if (!result.exitRequested) {
-                return false;
-            }
-            clearTurnIntentContext();
-            await releaseSessionOwnershipForExit();
-            scrollRegion.end();
-            statusBar.destroy();
-            process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
-            return true;
-        };
-        // 交互循环
-        interactiveLoop: while (true) {
-            await refreshSkills();
-            stashQueuedInputIfAny({ stopCapture: false });
-            let input;
-            let inputKind = 'user';
-            if (deferredInput !== null) {
-                stopBusyCapture();
-                input = deferredInput;
-                inputKind = deferredInputKind;
-                deferredInput = null;
-                deferredInputKind = 'user';
-            }
-            else if (pendingQueuedInput !== null) {
-                stopBusyCapture();
-                input = pendingQueuedInput;
-                pendingQueuedInput = null;
-            }
-            else {
-                // 输入前的分隔线 — scroll region 激活后跳过，由 footer 处理
-                if (!scrollRegion.isActive() && !terminalUiSuspended) {
-                    renderInputSeparator();
-                }
-                runtimeState.markInputReady();
-                const busyDraft = takeBusyDraft();
-                const pendingInput = inputReader.read('> ', busyDraft?.draft
-                    ? { initialInput: { input: busyDraft.draft, cursor: busyDraft.cursor } }
-                    : undefined);
-                interactiveNotificationsReady = true;
-                flushSubAgentNotices();
-                input = await pendingInput;
-            }
-            if (input === null || input.trim() === '/exit') {
-                stopBusyCapture();
-                clearTurnIntentContext();
-                await releaseSessionOwnershipForExit();
-                scrollRegion.end();
-                statusBar.destroy();
-                log.info('chat exited', { sessionId });
-                process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
-                break;
-            }
-            const trimmed = input.trim();
-            if (!trimmed)
-                continue;
-            if (intentTurnState.getSnapshot().completedTurnIntentSummaryLine) {
-                intentTurnState.clearCompletedSummary();
-                renderFooterChrome();
-            }
-            const shellEscape = parseShellEscapeInput(trimmed);
-            const shouldPrimeNormalTurnChrome = inputKind !== 'goal' && shellEscape === null && !trimmed.startsWith('/');
-            let normalInputTurnChromeStarted = false;
-            if (shouldPrimeNormalTurnChrome) {
-                mdRenderer.reset();
-                resetStreamingSegment();
-                beginNormalInputTurnChrome(trimmed);
-                normalInputTurnChromeStarted = true;
-                normalTurnChromePrimed = true;
-            }
-            await refreshSkills();
-            if (shellEscape?.kind === 'usage') {
-                dismissWelcomeScreen();
-                writeCommandOutput(trimmed, '用法：! <command>\n\n');
-                continue;
-            }
-            if (shellEscape?.kind === 'command') {
-                await runLocalShellEscape(shellEscape.command, trimmed);
-                continue;
-            }
-            // 处理内置命令
-            if (trimmed === '/clear') {
-                // /clear clears the conversation context, not just the screen: the
-                // agent session history, usage counters and the persisted snapshot for
-                // this session are reset so the status bar context reflects reality.
-                // Goal state and the transcript audit file are intentionally kept.
-                agent.clearHistory();
-                runtimeFacade?.resetSkillTracking();
-                statusBar.update({ inputTokens: 0, outputTokens: 0 });
-                await persistSession();
-                scrollRegion.end();
-                // Mirror the startup sequence exactly: begin() performs its own
-                // \x1b[2J\x1b[H full clear, so the welcome screen MUST be rendered
-                // AFTER begin() — rendering it before (with a manual clear) gets the
-                // card immediately wiped by begin()'s own clear.
-                scrollRegion.begin();
-                contentRows = renderWelcomeScreen({
-                    model: getActiveProviderLabel(),
-                    cwd: process.cwd(),
-                    sessionId,
-                    mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
-                    version: cliVersion,
-                });
-                scrollRegion.setWelcomeRows(contentRows);
-                welcomeVisible = true;
-                continue;
-            }
-            dismissWelcomeScreen();
-            if (trimmed === '/help') {
-                writeCommandOutput(trimmed, buildChatHelpText(skills));
-                continue;
-            }
-            const goalCommand = parseGoalSlashCommand(trimmed);
-            if (goalCommand) {
-                if (goalCommand.kind === 'help') {
-                    writeCommandOutput(trimmed, `${GOAL_COMMAND_HELP}\n\n`);
-                    continue;
-                }
-                if (goalCommand.kind === 'invalid') {
-                    writeCommandOutput(trimmed, `${goalCommand.message}\n\n`);
-                    continue;
-                }
-                if (goalCommand.kind === 'status') {
-                    writeCommandOutput(trimmed, currentGoalState
-                        ? `${formatGoalStatus(currentGoalState)}\nActivation：${goalActivation}\n\n`
-                        : '当前会话没有 Goal。\n\n');
-                    continue;
-                }
-                try {
-                    if (goalCommand.kind === 'pause') {
-                        if (!currentGoalState) {
-                            writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
-                            continue;
-                        }
-                        if (currentGoalState.status === 'paused') {
-                            disarmGoal();
-                            writeCommandOutput(trimmed, 'Goal 已处于 paused。\n\n');
-                            continue;
-                        }
-                        if (currentGoalState.status !== 'active') {
-                            writeCommandOutput(trimmed, `当前 Goal 状态为 ${currentGoalState.status}，不能 pause。\n\n`);
-                            continue;
-                        }
-                        if (!isGoalArmed())
-                            armGoal(true);
-                        currentGoalState = await goalService.pause(goalMutationContext('user'), 'user_paused');
-                        disarmGoal();
-                        writeCommandOutput(trimmed, 'Goal 已暂停。\n\n');
-                        renderIntentSummaryLine();
-                        continue;
+                intentVerificationAbort?.abort();
+                intentReceiverAbort?.abort();
+                currentTurnAbortController?.abort();
+                writeProgressTranscriptNote('2 秒内再按 Ctrl+C 退出；继续输入可取消退出。');
+            };
+            interrupt = onInterrupt;
+            const onInputEnd = () => { void shutdownTerminal('stdin_end'); };
+            inputReader.setInterruptHandler(onInterrupt, () => exitConfirmation.reset());
+            process.stdin.on('end', onInputEnd);
+            disposeInterruptHandlers = () => {
+                inputReader.setInterruptHandler();
+                process.stdin.off('end', onInputEnd);
+            };
+            const handleCompletedIntentFeedbackResult = async (result) => {
+                stashQueuedInputIfAny({ stopCapture: result.deferredInput !== null || result.exitRequested });
+                if (result.deferredInput !== null) {
+                    if (scrollRegion.isActive()) {
+                        scrollRegion.clearOverlayPromptState();
                     }
-                    if (goalCommand.kind === 'resume') {
-                        if (!currentGoalState) {
-                            writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
-                            continue;
-                        }
-                        if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
-                            writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}，请创建或 replace。\n\n`);
-                            continue;
-                        }
-                        if (!isGoalArmed())
-                            armGoal(true);
-                        if (currentGoalState.status === 'paused' || currentGoalState.status === 'blocked') {
-                            currentGoalState = await goalService.resume(goalMutationContext('user'), { turnLimit: goalCommand.turnLimit });
-                        }
-                        deferredInput = buildGoalContinuationInput(currentGoalState).prompt;
-                        deferredInputKind = 'goal';
-                        writeCommandOutput(trimmed, 'Goal 已恢复，将继续执行。\n\n');
-                        renderIntentSummaryLine();
-                        continue;
-                    }
-                    if (goalCommand.kind === 'cancel') {
-                        if (!currentGoalState) {
-                            writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
-                            continue;
-                        }
-                        if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
-                            writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}。\n\n`);
-                            continue;
-                        }
-                        if (!isGoalArmed())
-                            armGoal(true);
-                        currentGoalState = await goalService.cancel(goalMutationContext('user'), 'user_cancelled');
-                        disarmGoal();
-                        writeCommandOutput(trimmed, 'Goal 已取消。\n\n');
-                        renderIntentSummaryLine();
-                        continue;
-                    }
-                    const replacing = goalCommand.kind === 'replace';
-                    if (!replacing && currentGoalState && !['complete', 'cancelled'].includes(currentGoalState.status)) {
-                        writeCommandOutput(trimmed, '当前会话已有 Goal；请使用 /goal replace <objective>。\n\n');
-                        continue;
-                    }
-                    if (replacing && !currentGoalState) {
-                        writeCommandOutput(trimmed, '当前会话没有可替换的 Goal。\n\n');
-                        continue;
-                    }
-                    const goalInput = inferGoalInput(goalCommand.objective);
-                    writeCommandOutput(trimmed, `${formatGoalPreview(goalInput, replacing)}\n\n`);
-                    const confirmation = await inputReader.read('确认？输入 yes：');
-                    if (confirmation?.trim().toLowerCase() !== 'yes') {
-                        writeCommandOutput(trimmed, '已取消，Goal 未变更。\n\n');
-                        continue;
-                    }
-                    if (!isGoalArmed())
-                        armGoal(replacing);
-                    currentGoalState = replacing
-                        ? await goalService.replace(goalMutationContext('user'), goalInput)
-                        : await goalService.create(goalMutationContext('user'), goalInput);
-                    pendingGoalCompleteSummary = null;
-                    pendingGoalBlockedClaim = null;
-                    deferredInput = currentGoalState.objective;
+                    runtimeState.markInputReady();
+                    renderFooterChrome();
+                    deferredInput = result.deferredInput;
+                    deferredNativeInputOrigin = captureNativeInputOrigin(result.deferredInput);
                     deferredInputKind = 'user';
-                    writeCommandOutput(trimmed, replacing ? 'Goal 已替换并启动。\n\n' : 'Goal 已创建并启动。\n\n');
-                    renderIntentSummaryLine();
                 }
-                catch (error) {
-                    disarmGoal();
-                    writeCommandOutput(trimmed, `Goal 操作失败：${formatErrorText(String(error))}\n\n`);
+                if (!result.exitRequested) {
+                    return false;
                 }
-                continue;
-            }
-            if (reminders) {
-                const reminderOutput = await executeReminderSlashCommand(trimmed, {
-                    reminders,
-                    sessionId,
-                    creatorUserId: sessionId,
-                });
-                if (reminderOutput !== null) {
-                    writeCommandOutput(trimmed, `${reminderOutput}\n\n`);
-                    continue;
-                }
-            }
-            if (trimmed === '/skills-reload') {
-                const prevCount = skills.length;
+                clearTurnIntentContext();
+                process.stdout.write(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
+                return true;
+            };
+            // 交互循环
+            interactiveLoop: while (!modelIngressClosed) {
                 await refreshSkills();
-                const newCount = skills.length;
-                inputReader.setSkills(skills);
-                const diff = newCount - prevCount;
-                if (diff > 0) {
-                    writeCommandOutput(trimmed, `已刷新 skill 目录，新增 ${diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+                stashQueuedInputIfAny({ stopCapture: false });
+                let input;
+                let nativeInputOrigin;
+                let inputKind = 'user';
+                if (deferredInput !== null) {
+                    stopBusyCapture();
+                    input = deferredInput;
+                    nativeInputOrigin = deferredNativeInputOrigin;
+                    deferredNativeInputOrigin = undefined;
+                    inputKind = deferredInputKind;
+                    deferredInput = null;
+                    deferredInputKind = 'user';
                 }
-                else if (diff < 0) {
-                    writeCommandOutput(trimmed, `已刷新 skill 目录，移除 ${-diff} 个 skill，当前共 ${newCount} 个。\n\n`);
-                }
-                else {
-                    writeCommandOutput(trimmed, `已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
-                }
-                continue;
-            }
-            if (trimmed === '/skill-debug' || trimmed.startsWith('/skill-debug ')) {
-                const arg = trimmed.replace('/skill-debug', '').trim().toLowerCase();
-                if (arg === 'on' || arg === '1' || arg === 'true') {
-                    skillDebugEnabled = true;
-                }
-                else if (arg === 'off' || arg === '0' || arg === 'false') {
-                    skillDebugEnabled = false;
+                else if (pendingQueuedInput !== null) {
+                    stopBusyCapture();
+                    input = pendingQueuedInput;
+                    nativeInputOrigin = pendingQueuedNativeInputOrigin;
+                    pendingQueuedNativeInputOrigin = undefined;
+                    pendingQueuedInput = null;
                 }
                 else {
-                    skillDebugEnabled = !skillDebugEnabled;
-                }
-                writeCommandOutput(trimmed, `Skill debug mode: ${skillDebugEnabled ? 'ON' : 'OFF'}\n每次输入将显示 stage 分析（intent、context 检查、耗时预估）。\n\n`);
-                continue;
-            }
-            if (trimmed === '/yzjchannel') {
-                if (embeddedChannels.length > 0) {
-                    writeCommandOutput(trimmed, '已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
-                    continue;
-                }
-                const yzjConfig = (() => {
-                    try {
-                        return resolveYZJConfig(config);
+                    // 输入前的分隔线 — scroll region 激活后跳过，由 footer 处理
+                    if (!scrollRegion.isActive() && !terminalUiSuspended) {
+                        renderInputSeparator();
                     }
-                    catch {
-                        writeCommandOutput(trimmed, 'YZJ 未配置，请先运行 xiaok yzjchannel config set-webhook-url <url>\n\n');
-                        return null;
+                    runtimeState.markInputReady();
+                    const busyDraft = takeBusyDraft();
+                    const pendingInput = inputReader.read('> ', busyDraft?.draft
+                        ? { initialInput: { input: busyDraft.draft, cursor: busyDraft.cursor } }
+                        : undefined);
+                    interactiveNotificationsReady = true;
+                    flushSubAgentNotices();
+                    input = await pendingInput;
+                    if (input !== null)
+                        nativeInputOrigin = captureNativeInputOrigin(input);
+                }
+                if (input === null && modelIngressClosed)
+                    break;
+                if (input === null || input.trim() === '/exit') {
+                    stopBusyCapture();
+                    clearTurnIntentContext();
+                    log.info('chat exited', { sessionId });
+                    process.stdout.write(`\n再见！${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`);
+                    break;
+                }
+                const commandInputKind = ((kind) => kind)(inputKind);
+                const commandDirective = await runCliCommand(async () => {
+                    const trimmed = input.trim();
+                    if (!trimmed)
+                        return 'continue';
+                    if (intentTurnState.getSnapshot().completedTurnIntentSummaryLine) {
+                        intentTurnState.clearCompletedSummary();
+                        renderFooterChrome();
                     }
-                })();
-                if (!yzjConfig)
-                    continue;
-                const namedChannels = config.channels?.yzj?.namedChannels ?? [];
-                const selectedChannel = await selectYZJChannel(namedChannels);
-                if (!selectedChannel) {
-                    writeCommandOutput(trimmed, '已取消。\n\n');
-                    continue;
-                }
-                const transport = new YZJTransport({ webhookUrl: yzjConfig.webhookUrl });
-                const embedded = new EmbeddedYZJChannel({
-                    runtimeFacade: runtimeFacade,
-                    runtimeHooks,
-                    approvalStore: embeddedApprovalStore,
-                    onPromptOverride: async () => true,
-                    transport,
-                    selectedChannel,
-                    yzjConfig,
-                    sessionId,
-                    cwd,
-                });
-                await embedded.start();
-                embeddedChannels.push(embedded);
-                continue;
-            }
-            if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
-                const [, requestedMode] = trimmed.split(/\s+/, 2);
-                if (!requestedMode) {
-                    writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
-                    continue;
-                }
-                if (!['default', 'auto', 'plan'].includes(requestedMode)) {
-                    writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
-                    continue;
-                }
-                permissionManager.setMode(requestedMode);
-                statusBar.updateMode(requestedMode);
-                writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
-                continue;
-            }
-            if (trimmed === '/compact') {
-                const compaction = agent.forceCompact();
-                statusBar.update(agent.getUsage()); // 立即更新 statusline 显示
-                if (compaction) {
-                    writeCommandOutput(trimmed, `${dim(`已压缩较早对话，保留最近上下文（折叠 ${compaction.replacedMessages} 条历史消息）。`)}\n\n`);
-                }
-                else {
-                    writeCommandOutput(trimmed, `${dim('当前历史很短，暂时无需压缩。')}\n\n`);
-                }
-                continue;
-            }
-            if (trimmed === '/models') {
-                if (scrollRegion.isActive() && !terminalUiSuspended) {
-                    scrollRegion.clearOverlayPromptState();
-                    replRenderer.prepareForInput();
-                }
-                const selected = await selectModel(config, { renderer: replRenderer });
-                if (selected) {
-                    // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
-                    const providerProfile = getProviderProfile(selected.provider);
-                    const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
-                    const selectedProvider = config.providers[selected.provider];
-                    const catalogRuntimeEligible = selected.provider !== 'kimi'
-                        || variant?.model !== 'k3'
-                        || (selectedProvider?.protocol === 'openai_legacy'
-                            && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl));
-                    const variantRuntimeOptions = variant && selectedProvider && catalogRuntimeEligible
-                        ? resolveModelRuntimeOptions({
-                            protocol: selectedProvider.protocol,
-                            baseUrl: selectedProvider.baseUrl,
-                            wireModel: variant.model,
-                            catalogOptions: variant.runtimeOptions,
-                            catalogConstraints: variant.runtimeConstraints,
-                        }).runtimeOptions
-                        : undefined;
-                    const nextModels = config.models[selected.modelId]
-                        ? selected.reasoningEffort
-                            ? {
-                                ...config.models,
-                                [selected.modelId]: {
-                                    ...config.models[selected.modelId],
-                                    runtimeOptions: {
-                                        ...config.models[selected.modelId].runtimeOptions,
-                                        reasoningEffort: selected.reasoningEffort,
-                                    },
-                                },
+                    if (trimmed.startsWith('/intent receiver')) {
+                        try {
+                            const command = parseIntentReceiverCommand(trimmed);
+                            if (!command)
+                                throw Error('intent_receiver_command');
+                            if (['status', 'help', 'cancel'].includes(command.kind)) {
+                                const value = await handleIntentReceiverCommand(trimmed);
+                                writeCommandOutput(trimmed, (typeof value === 'string' ? value : JSON.stringify(value, null, 2)) + '\n\n');
                             }
-                            : config.models
-                        : {
-                            ...config.models,
-                            [selected.modelId]: {
-                                provider: selected.provider,
-                                model: variant?.model ?? selected.model,
-                                label: variant?.label ?? selected.label,
-                                capabilities: variant?.capabilities,
-                                runtimeOptions: variantRuntimeOptions || selected.reasoningEffort
-                                    ? { ...variantRuntimeOptions, ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}) }
-                                    : undefined,
-                            },
-                        };
-                    const newConfig = {
-                        ...config,
-                        models: nextModels,
-                        defaultProvider: selected.provider,
-                        defaultModelId: selected.modelId,
-                    };
-                    try {
-                        const nextAdapter = createAdapter(newConfig);
-                        const currentProfile = resolveRegisteredStrictKimiK3Profile(adapter);
-                        const nextProfile = resolveRegisteredStrictKimiK3Profile(nextAdapter);
-                        const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
-                        await saveConfig(newConfig);
-                        adapter = nextAdapter;
-                        modelCapabilities = nextModelCapabilities;
-                        config = newConfig;
-                        intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
-                        agent.setAdapter(adapter);
-                        if (currentProfile !== nextProfile)
-                            writeCommandOutput(trimmed, '模型协议已切换，历史已转换为最近的可见上下文（最多 40KB）。\n');
-                        memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
-                        statusBar.updateModel(adapter.getModelName(), modelCapabilities.contextLimit);
-                        writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
-                    }
-                    catch (e) {
-                        writeCommandOutput(trimmed, `切换失败：${String(e)}\n\n`);
-                    }
-                }
-                else {
-                    writeCommandOutput(trimmed, '已取消\n\n');
-                }
-                continue;
-            }
-            if (trimmed === '/settings') {
-                try {
-                    const settings = await loadSettings(cwd);
-                    const rules = mergeRules(settings);
-                    writeCommandOutput(trimmed, `${JSON.stringify({
-                        config,
-                        permissions: rules,
-                    }, null, 2)}\n\n`);
-                }
-                catch (e) {
-                    writeError(String(e));
-                }
-                continue;
-            }
-            if (trimmed === '/context') {
-                try {
-                    const context = await loadAutoContext({ cwd });
-                    writeCommandOutput(trimmed, `${formatLoadedContext(context) || '当前没有可展示的仓库上下文。'}\n\n`);
-                }
-                catch (e) {
-                    writeError(String(e));
-                }
-                continue;
-            }
-            if (trimmed === '/doctor') {
-                writeCommandOutput(trimmed, 'chat 中已不再支持 /doctor，请直接运行：xiaok doctor\n\n');
-                continue;
-            }
-            if (trimmed === '/init') {
-                writeCommandOutput(trimmed, 'chat 中已不再支持 /init，请直接运行：xiaok init\n\n');
-                continue;
-            }
-            if (trimmed === '/review') {
-                writeCommandOutput(trimmed, 'chat 中已不再支持 /review，请直接运行：xiaok review\n\n');
-                continue;
-            }
-            if (trimmed === '/pr') {
-                writeCommandOutput(trimmed, 'chat 中已不再支持 /pr，请直接运行：xiaok pr\n\n');
-                continue;
-            }
-            if (trimmed === '/commit' || trimmed.startsWith('/commit ')) {
-                writeCommandOutput(trimmed, 'chat 中已不再支持 /commit，请直接运行：xiaok commit\n\n');
-                continue;
-            }
-            // Clear terminal renderer state — but NOT when scroll region is active,
-            // because the scroll region's endContentStreaming() has already positioned
-            // the footer at the bottom, and TerminalRenderer's initial render (\n)
-            // would scroll it up.
-            if (!scrollRegion.isActive()) {
-                replRenderer.prepareBlockOutput();
-            }
-            // 输入后的分隔线 — scroll region 激活后跳过，footer 已包含分隔效果
-            if (!scrollRegion.isActive() && !terminalUiSuspended) {
-                renderInputSeparator();
-            }
-            // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
-            // Uses the scroll region's tracked content cursor (_contentCursor)
-            // which accounts for all written content including tool explorer output.
-            if (scrollRegion.isActive()) {
-                scrollRegion.positionAfterContent();
-            }
-            // 显示用户输入（带背景色）— 写入 scroll region 内容区
-            // Note: In scroll region mode, we DON'T write input here because
-            // clearLastInput() will clear the screen. Instead, input is written
-            // after clearLastInput() via writeSubmittedInput().
-            if (!scrollRegion.isActive() && inputKind !== 'goal') {
-                process.stdout.write(formatSubmittedInput(trimmed));
-            }
-            // 斜杠命令：直接触发对应 skill
-            const slash = parseSlashCommand(trimmed);
-            if (slash) {
-                let skill = findSkillByCommandName(skills, slash.skillName);
-                if (!skill) {
-                    await refreshSkills();
-                    skill = findSkillByCommandName(skills, slash.skillName);
-                }
-                if (skill) {
-                    try {
-                        const plan = buildSkillExecutionPlan([skill.name], skills);
-                        const primaryStep = plan.resolved[plan.resolved.length - 1];
-                        const invocation = activateTrackedSkillPlan(plan, plan.strategy === 'fork' && primaryStep?.agent ? primaryStep.agent : 'main');
-                        const activeTurnToken = intentTurnState.getSnapshot().activeTurnToken;
-                        if (activeTurnToken) {
-                            intentTurnState.setActiveIntentReminderBlock(activeTurnToken, undefined);
+                            else {
+                                void trackDetached(() => trackDetached(() => handleIntentReceiverCommand(trimmed)).then(value => writeProgressTranscriptNote(`Intent 发布/阶段投影记录已保存；未自动启动模型。下一阶段请显式继续。\n${JSON.stringify(value)}`), error => writeProgressTranscriptNote(`Intent 发布操作未完成：${String(error)}；用 /intent receiver recover <候选ID> 收敛原请求。`)));
+                                writeCommandOutput(trimmed, 'Intent 发布操作已开始；ESC/cancel请求中断并等待原操作排空。\n\n');
+                            }
                         }
-                        process.stdout.write('\n');
+                        catch (error) {
+                            writeCommandOutput(trimmed, String(error) + '\n\n');
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed.startsWith('/intent verify')) {
+                        try {
+                            const command = parseIntentVerificationCommand(trimmed);
+                            if (!command)
+                                throw Error('intent_verification_command');
+                            if (['status', 'help', 'cancel'].includes(command.kind)) {
+                                const result = await handleIntentVerificationCommand(trimmed);
+                                writeCommandOutput(trimmed, (typeof result === 'string' ? result : JSON.stringify(result, null, 2)) + '\n\n');
+                            }
+                            else {
+                                void trackDetached(() => trackDetached(() => handleIntentVerificationCommand(trimmed)).then(value => writeProgressTranscriptNote(`Intent 验证历史已保存；未投影业务成功或启动模型。\n${JSON.stringify(value)}`), error => writeProgressTranscriptNote(`Intent 验证操作未完成：${String(error)}；用 /intent verify recover <记录ID> 收敛原请求。`)));
+                                writeCommandOutput(trimmed, 'Intent 验证操作已开始；ESC/cancel只请求中断，恢复不会重复执行。\n\n');
+                            }
+                        }
+                        catch (error) {
+                            writeCommandOutput(trimmed, String(error) + '\n\n');
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed.startsWith('/intent publish')) {
+                        try {
+                            const command = parseIntentPublicationCommand(trimmed);
+                            if (!command)
+                                throw Error('intent_publication_command');
+                            if (command.kind === 'draft' || command.kind === 'status') {
+                                writeCommandOutput(trimmed, JSON.stringify(await handleIntentPublicationCommand(trimmed), null, 2) + '\n\n');
+                            }
+                            else {
+                                void trackDetached(() => trackDetached(() => handleIntentPublicationCommand(trimmed)).then(value => writeProgressTranscriptNote(`Intent 候选原生状态已保存；业务仍等待独立验证，未启动模型。\n${JSON.stringify(value)}`), error => writeProgressTranscriptNote(`Intent 候选操作未完成：${String(error)}`)));
+                                writeCommandOutput(trimmed, 'Intent 候选操作已开始；不会自动执行模型或宣布业务完成。\n\n');
+                            }
+                        }
+                        catch (error) {
+                            writeCommandOutput(trimmed, String(error) + '\n\n');
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed.startsWith('/intent native')) {
+                        try {
+                            const command = parseIntentNativeCommand(trimmed);
+                            if (!command || !intentNativeHost)
+                                throw Error('intent_native_host_unavailable');
+                            const nativeHost = intentNativeHost;
+                            const row = nativeHost.list().at(-1);
+                            if (!row)
+                                throw Error('intent_native_missing');
+                            if (command.kind === 'status') {
+                                writeCommandOutput(trimmed, JSON.stringify(row, null, 2) + '\n\n');
+                            }
+                            else {
+                                const work = trackDetached(() => command.kind === 'continue' ? nativeHost.advance({ intentId: row.intentId, requestSource: 'user' }) : command.kind === 'recover' ? nativeHost.recover({ intentId: row.intentId, requestSource: 'user' }) : nativeHost.retrySubject({ intentId: row.intentId, stageId: command.stageId, requestSource: 'user' }));
+                                void trackDetached(() => work.then(value => writeProgressTranscriptNote(`Intent 原生请求状态已保存：${value.subjects.map(s => `${s.stageId ?? 'parent'}=${s.attempts.at(-1).phase}`).join(', ')}；未启动模型。`), error => writeProgressTranscriptNote(`Intent 原生操作未完成：${String(error)}`)));
+                                writeCommandOutput(trimmed, 'Intent 原生操作已开始；状态只记录原请求事实。\n\n');
+                            }
+                        }
+                        catch (error) {
+                            writeCommandOutput(trimmed, String(error) + '\n\n');
+                        }
+                        return 'continue';
+                    }
+                    const shellEscape = parseShellEscapeInput(trimmed);
+                    const shouldPrimeNormalTurnChrome = commandInputKind !== 'goal' && shellEscape === null && !trimmed.startsWith('/');
+                    let normalInputTurnChromeStarted = false;
+                    if (shouldPrimeNormalTurnChrome) {
                         mdRenderer.reset();
                         resetStreamingSegment();
-                        if (plan.strategy === 'fork' && primaryStep?.agent) {
-                            let result = await executeNamedSubAgent({
-                                agentDef: customAgents.find((item) => item.name === primaryStep.agent) ?? {
-                                    name: primaryStep.name,
-                                    systemPrompt: primaryStep.content,
-                                    allowedTools: primaryStep.allowedTools,
-                                    model: primaryStep.model,
-                                },
-                                prompt: slash.rest
-                                    ? `执行 skill "${primaryStep.name}"。用户补充说明：${slash.rest}`
-                                    : `执行 skill "${primaryStep.name}"。`,
-                                sessionId,
-                                adapter: () => adapter,
-                                createRegistry: (subCwd, allowedTools) => registryFactory.createRegistry(subCwd, allowedTools),
-                                buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
-                                worktreeManager: platform.worktreeManager,
-                                forkContext: {
-                                    taskId: sessionId,
-                                    session: agent.exportSession(),
-                                    messages: agent.exportSession().messages,
-                                    systemPrompt: await buildPrompt(skills),
-                                    toolDefinitions: registry.getToolDefinitions(),
-                                },
-                            });
-                            if (invocation.strictMode) {
-                                result = await maybeRunStrictCompletionLoop(result);
+                        beginNormalInputTurnChrome(trimmed);
+                        normalInputTurnChromeStarted = true;
+                        normalTurnChromePrimed = true;
+                    }
+                    await refreshSkills();
+                    if (shellEscape?.kind === 'usage') {
+                        dismissWelcomeScreen();
+                        writeCommandOutput(trimmed, '用法：! <command>\n\n');
+                        return 'continue';
+                    }
+                    if (shellEscape?.kind === 'command') {
+                        if (compoundCoordinator) {
+                            writeCommandOutput(trimmed, '当前会话启用了受记录的编辑执行；本地 ! 命令没有同一执行监督，不能在此会话绕过运行。\n');
+                            return 'continue';
+                        }
+                        await runLocalShellEscape(shellEscape.command, trimmed);
+                        return 'continue';
+                    }
+                    // 处理内置命令
+                    if (trimmed === '/observation' || trimmed.startsWith('/observation ')) {
+                        if (!productObservation) {
+                            writeCommandOutput(trimmed, '当前会话未启用观察归档；新会话可使用 --observation-policy <file>。\n');
+                            return 'continue';
+                        }
+                        const action = trimmed.slice('/observation'.length).trim() || 'status';
+                        if (action === 'stop') {
+                            if (productObservation.getStatus().revoked) {
+                                writeCommandOutput(trimmed, '授权已撤销；请新建会话。\n');
+                                return 'continue';
                             }
-                            {
-                                // Not a streaming phase: render to lines and land them at the
-                                // content cursor instead of feeding the streaming renderer,
-                                // whose buffer would stay invisible until an unrelated flush.
-                                const block = `${MarkdownRenderer.renderToLines(result).join('\n')}\n`;
-                                if (scrollRegion.isActive() && !terminalUiSuspended) {
-                                    scrollRegion.writeAtContentCursor(block);
+                            productObservation.owner.stopNewCapture();
+                            writeCommandOutput(trimmed, '已停止新增归档和投影；现有已授权引用仍可召回。\n');
+                        }
+                        else if (action === 'revoke') {
+                            productObservation.revoke();
+                            writeCommandOutput(trimmed, '已撤销观察披露授权；受保护历史停止发送，已有工具操作保留。请新建会话继续。\n');
+                        }
+                        else if (action === 'status') {
+                            const state = productObservation.getStatus();
+                            const policy = productObservation.summary.semanticCompaction;
+                            const reservations = commandAgent.getSessionState().exportSnapshot().semanticCompaction?.reservations ?? [];
+                            const reserved = reservations.reduce((sum, row) => sum + row.maximumCostUnits, 0);
+                            const outcome = lastSemanticOutcome;
+                            const semanticStatus = outcome?.status === 'compacted' ? '历史已压缩，原始要求和执行事实保留' : outcome?.status === 'failed' ? '压缩未完成' : outcome?.status === 'skipped' ?
+                                outcome.reason === 'insufficient_benefit' ? '预计节约不足以覆盖额外成本' : outcome.reason === 'stale_revision' ? '对话内容变化，未应用旧摘要' : outcome.reason?.includes('budget') ? '摘要预算不足' : outcome.reason?.includes('gain') ? '未达到缩减要求' : '当前条件不满足，未压缩' : '等待已确认的子任务边界';
+                            writeCommandOutput(trimmed, `观察归档状态：${state.revoked ? '已撤销，受保护历史停止发送' : state.ownerMode === 'recall-only' ? '已停止新增，保留现有召回' : '已启用'}。\n${policy ? `语义压缩：${semanticStatus}。摘要调用 ${reservations.length}/${policy.maxCalls}；按发送前核验价格预留 $${(reserved / 1e9).toFixed(6)} / $${(policy.maxCostUnits / 1e9).toFixed(6)} USD（并非实际账单）。\n` : ''}`);
+                        }
+                        else {
+                            writeCommandOutput(trimmed, '用法：/observation status | stop | revoke\n');
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed === '/clear') {
+                        if (productObservation) {
+                            writeCommandOutput(trimmed, '观察归档会话保留受保护历史；清空上下文请退出后新建会话。\n');
+                            return 'continue';
+                        }
+                        // /clear clears the conversation context, not just the screen: the
+                        // agent session history, usage counters and the persisted snapshot for
+                        // this session are reset so the status bar context reflects reality.
+                        // Goal state and the transcript audit file are intentionally kept.
+                        commandAgent.clearHistory();
+                        runtimeFacade?.resetSkillTracking();
+                        statusBar.update({ inputTokens: 0, outputTokens: 0 });
+                        await persistSession();
+                        scrollRegion.end();
+                        // Mirror the startup sequence exactly: begin() performs its own
+                        // \x1b[2J\x1b[H full clear, so the welcome screen MUST be rendered
+                        // AFTER begin() — rendering it before (with a manual clear) gets the
+                        // card immediately wiped by begin()'s own clear.
+                        scrollRegion.begin();
+                        contentRows = renderWelcomeScreen({
+                            model: getActiveProviderLabel(),
+                            cwd: process.cwd(),
+                            sessionId,
+                            mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+                            version: cliVersion,
+                        });
+                        scrollRegion.setWelcomeRows(contentRows);
+                        welcomeVisible = true;
+                        return 'continue';
+                    }
+                    dismissWelcomeScreen();
+                    if (trimmed === '/help') {
+                        writeCommandOutput(trimmed, buildChatHelpText(skills));
+                        return 'continue';
+                    }
+                    const goalCommand = parseGoalSlashCommand(trimmed);
+                    if (goalCommand) {
+                        if (goalCommand.kind === 'help') {
+                            writeCommandOutput(trimmed, `${GOAL_COMMAND_HELP}\n\n`);
+                            return 'continue';
+                        }
+                        if (goalCommand.kind === 'invalid') {
+                            writeCommandOutput(trimmed, `${goalCommand.message}\n\n`);
+                            return 'continue';
+                        }
+                        if (goalCommand.kind === 'status') {
+                            currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+                            const original = currentGoalState;
+                            let completion = original ? await observeGoalCompletion(original) : null;
+                            currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+                            if (currentGoalState && JSON.stringify(currentGoalState) !== JSON.stringify(original))
+                                completion = unobservedGoalCompletion(currentGoalState);
+                            const native = goalNativeHost.latest();
+                            if (native)
+                                writeCommandOutput(trimmed, `目标变更：${native.status} · ${native.target.objective}\n`);
+                            const verification = completion?.kind === 'protected' ? `当前完成验证：${completion.state}\n`
+                                : completion?.kind === 'unavailable' ? '当前完成验证不可查询\n' : '';
+                            writeCommandOutput(trimmed, currentGoalState
+                                ? `${formatGoalStatus(currentGoalState)}\n${verification}Activation：${goalActivation}\n\n`
+                                : '当前会话没有 Goal。\n\n');
+                            return 'continue';
+                        }
+                        try {
+                            if (goalCommand.kind === 'native') {
+                                if (goalCommand.action === 'status') {
+                                    const row = goalNativeHost.latest();
+                                    writeCommandOutput(trimmed, row ? `目标变更：${row.status} · ${row.target.objective}\nActivation：${goalActivation}\n\n` : '当前没有目标原生申请。\n\n');
                                 }
-                                else {
-                                    process.stdout.write(block);
+                                else
+                                    startGoalNativeWork(goalCommand.action);
+                                return 'continue';
+                            }
+                            if (goalCommand.kind === 'publication') {
+                                currentGoalState = (await goalService.load(sessionId))?.state ?? null;
+                                const intentId = currentGoalState?.pendingCompletionIntentId;
+                                if (!intentId) {
+                                    writeCommandOutput(trimmed, '当前 Goal 没有待确认的发布申请。\n\n');
+                                    return 'continue';
                                 }
+                                const attempts = await goalStore.listCompletionAttempts(sessionId, intentId), latest = attempts.at(-1);
+                                if (goalCommand.action === 'recover' && !latest) {
+                                    writeCommandOutput(trimmed, '原工作轮次已结算，尚未发起发布；输入 /goal publication continue 明确发起。\n\n');
+                                    return 'continue';
+                                }
+                                if (goalCommand.action === 'continue') {
+                                    if (!currentGoalState || !['active', 'paused', 'blocked'].includes(currentGoalState.status))
+                                        throw Error('goal_publication_not_pending');
+                                    ensureGoalLease(true);
+                                    if (currentGoalState.status !== 'active')
+                                        currentGoalState = await goalService.resumePublication(goalMutationContext('user'));
+                                }
+                                const action = goalCommand.action === 'recover' ? 'recover'
+                                    : !latest ? 'start' : ['not_prepared', 'not_approved', 'cancelled'].includes(latest.status) ? 'retry' : 'recover';
+                                startGoalPublication(action, 'user');
+                                return 'continue';
+                            }
+                            if (goalCommand.kind === 'pause') {
+                                disarmGoal();
+                                if (!currentGoalState && goalNativeHost.latest()) {
+                                    writeCommandOutput(trimmed, '目标变更已停止推进；原申请可用 /goal native recover 查询。\n\n');
+                                    return 'continue';
+                                }
+                                if (!currentGoalState) {
+                                    writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
+                                    return 'continue';
+                                }
+                                if (currentGoalState.status === 'paused') {
+                                    disarmGoal();
+                                    writeCommandOutput(trimmed, 'Goal 已处于 paused。\n\n');
+                                    return 'continue';
+                                }
+                                if (currentGoalState.status !== 'active') {
+                                    writeCommandOutput(trimmed, `当前 Goal 状态为 ${currentGoalState.status}，不能 pause。\n\n`);
+                                    return 'continue';
+                                }
+                                ensureGoalLease(true);
+                                currentGoalState = await goalService.pause(goalMutationContext('user'), 'user_paused');
+                                disarmGoal();
+                                writeCommandOutput(trimmed, 'Goal 已暂停。\n\n');
+                                renderIntentSummaryLine();
+                                return 'continue';
+                            }
+                            if (goalCommand.kind === 'resume') {
+                                if (!currentGoalState) {
+                                    writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
+                                    return 'continue';
+                                }
+                                if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
+                                    writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}，请创建或 replace。\n\n`);
+                                    return 'continue';
+                                }
+                                if (currentGoalState.pendingCompletionIntentId) {
+                                    writeCommandOutput(trimmed, 'Goal 正在等待完成确认；请使用 /goal publication recover 或 /goal publication continue，不会启动新任务。\n\n');
+                                    return 'continue';
+                                }
+                                goalNativeHost.assertNoPending();
+                                ensureGoalLease(true);
+                                await assertGoalExecutionCurrent();
+                                if (!isGoalArmed())
+                                    armGoal(true);
+                                if (currentGoalState.status === 'paused' || currentGoalState.status === 'blocked') {
+                                    currentGoalState = await goalService.resume(goalMutationContext('user'), { turnLimit: goalCommand.turnLimit });
+                                }
+                                deferredInput = buildGoalContinuationInput(currentGoalState).prompt;
+                                deferredInputKind = 'goal';
+                                writeCommandOutput(trimmed, 'Goal 已恢复，将继续执行。\n\n');
+                                renderIntentSummaryLine();
+                                return 'continue';
+                            }
+                            if (goalCommand.kind === 'cancel') {
+                                disarmGoal();
+                                const native = goalNativeHost.latest();
+                                if (native && !['applied', 'retired', 'stale'].includes(native.status))
+                                    startGoalNativeWork('cancel');
+                                if (!currentGoalState) {
+                                    writeCommandOutput(trimmed, '当前会话没有 Goal。\n\n');
+                                    return 'continue';
+                                }
+                                if (currentGoalState.status === 'complete' || currentGoalState.status === 'cancelled') {
+                                    writeCommandOutput(trimmed, `当前 Goal 已 ${currentGoalState.status}。\n\n`);
+                                    return 'continue';
+                                }
+                                ensureGoalLease(true);
+                                currentGoalState = await goalService.cancel(goalMutationContext('user'), 'user_cancelled');
+                                disarmGoal();
+                                writeCommandOutput(trimmed, 'Goal 已取消。\n\n');
+                                renderIntentSummaryLine();
+                                return 'continue';
+                            }
+                            const replacing = goalCommand.kind === 'replace';
+                            if (!replacing && currentGoalState && !['complete', 'cancelled'].includes(currentGoalState.status)) {
+                                writeCommandOutput(trimmed, '当前会话已有 Goal；请使用 /goal replace <objective>。\n\n');
+                                return 'continue';
+                            }
+                            if (replacing && !currentGoalState) {
+                                writeCommandOutput(trimmed, '当前会话没有可替换的 Goal。\n\n');
+                                return 'continue';
+                            }
+                            goalNativeHost.assertNoPending();
+                            const goalInput = inferGoalInput(goalCommand.objective);
+                            if (!goalVerificationDefinition && readInstalledCurrentProfile().kind !== 'ordinary')
+                                throw Error('goal_verification_definition_required: 请用 --goal-verification <file> 提供原始验收定义');
+                            writeCommandOutput(trimmed, `${formatGoalPreview(goalInput, replacing)}\n\n`);
+                            const confirmation = await inputReader.read('确认？输入 yes：');
+                            if (confirmation?.trim().toLowerCase() !== 'yes') {
+                                writeCommandOutput(trimmed, '已取消，Goal 未变更。\n\n');
+                                return 'continue';
+                            }
+                            if (goalVerificationDefinition) {
+                                startGoalNativeWork(replacing ? 'replace' : 'create', goalInput);
+                                return 'continue';
+                            }
+                            ensureGoalLease(replacing);
+                            currentGoalState = replacing
+                                ? await goalService.replace(goalMutationContext('user'), goalInput)
+                                : await goalService.create({ ...goalMutationContext('user'), expectedRevision: null }, goalInput);
+                            goalPublicationGeneration++;
+                            goalActivation = modelIngressClosed ? 'disarmed' : 'armed';
+                            pendingGoalCompleteSummary = null;
+                            pendingGoalBlockedClaim = null;
+                            deferredInput = currentGoalState.objective;
+                            deferredInputKind = 'goal';
+                            deferredNativeInputOrigin = undefined;
+                            writeCommandOutput(trimmed, replacing ? 'Goal 已替换并启动。\n\n' : 'Goal 已创建并启动。\n\n');
+                            renderIntentSummaryLine();
+                        }
+                        catch (error) {
+                            disarmGoal();
+                            writeCommandOutput(trimmed, `Goal 操作失败：${formatErrorText(String(error))}\n\n`);
+                        }
+                        return 'continue';
+                    }
+                    if (reminders) {
+                        const reminderOutput = await executeReminderSlashCommand(trimmed, {
+                            reminders,
+                            sessionId,
+                            creatorUserId: sessionId,
+                        });
+                        if (reminderOutput !== null) {
+                            writeCommandOutput(trimmed, `${reminderOutput}\n\n`);
+                            return 'continue';
+                        }
+                    }
+                    if (trimmed === '/skills-reload') {
+                        const prevCount = skills.length;
+                        await refreshSkills();
+                        const newCount = skills.length;
+                        inputReader.setSkills(skills);
+                        const diff = newCount - prevCount;
+                        if (diff > 0) {
+                            writeCommandOutput(trimmed, `已刷新 skill 目录，新增 ${diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+                        }
+                        else if (diff < 0) {
+                            writeCommandOutput(trimmed, `已刷新 skill 目录，移除 ${-diff} 个 skill，当前共 ${newCount} 个。\n\n`);
+                        }
+                        else {
+                            writeCommandOutput(trimmed, `已刷新 skill 目录，当前共 ${newCount} 个 skill。\n\n`);
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed === '/skill-debug' || trimmed.startsWith('/skill-debug ')) {
+                        const arg = trimmed.replace('/skill-debug', '').trim().toLowerCase();
+                        if (arg === 'on' || arg === '1' || arg === 'true') {
+                            skillDebugEnabled = true;
+                        }
+                        else if (arg === 'off' || arg === '0' || arg === 'false') {
+                            skillDebugEnabled = false;
+                        }
+                        else {
+                            skillDebugEnabled = !skillDebugEnabled;
+                        }
+                        writeCommandOutput(trimmed, `Skill debug mode: ${skillDebugEnabled ? 'ON' : 'OFF'}\n每次输入将显示 stage 分析（intent、context 检查、耗时预估）。\n\n`);
+                        return 'continue';
+                    }
+                    if (trimmed === '/yzjchannel') {
+                        if (intentVerificationDefinition || sessionStore.getIntentNativeLedgerSync(sessionId)?.nativeContracts?.length) {
+                            writeCommandOutput(trimmed, 'intent_native_execution_current_required：此原 Intent 会话不能开启未绑定的后台模型入口。\n');
+                            return 'continue';
+                        }
+                        if (productObservation) {
+                            writeCommandOutput(trimmed, 'SOL_PI_CHANNEL_NOT_READY：观察归档仅限当前本地会话；外部通道请退出后新建普通会话。\n');
+                            return 'continue';
+                        }
+                        if (embeddedChannels.length > 0) {
+                            writeCommandOutput(trimmed, '已有活跃的云之家 channel，请先关闭当前 chat 进程再重新连接。\n\n');
+                            return 'continue';
+                        }
+                        const yzjConfig = (() => {
+                            try {
+                                return resolveYZJConfig(config);
+                            }
+                            catch {
+                                writeCommandOutput(trimmed, 'YZJ 未配置，请先运行 xiaok yzjchannel config set-webhook-url <url>\n\n');
+                                return null;
+                            }
+                        })();
+                        if (!yzjConfig)
+                            return 'continue';
+                        const namedChannels = config.channels?.yzj?.namedChannels ?? [];
+                        const selectedChannel = await selectYZJChannel(namedChannels);
+                        if (!selectedChannel) {
+                            writeCommandOutput(trimmed, '已取消。\n\n');
+                            return 'continue';
+                        }
+                        const transport = new YZJTransport({ webhookUrl: yzjConfig.webhookUrl });
+                        const embedded = new EmbeddedYZJChannel({
+                            runtimeFacade: runtimeFacade,
+                            runtimeHooks,
+                            approvalStore: embeddedApprovalStore,
+                            onPromptOverride: async () => true,
+                            transport,
+                            selectedChannel,
+                            yzjConfig,
+                            sessionId,
+                            cwd,
+                        });
+                        await embedded.start();
+                        embeddedChannels.push(embedded);
+                        return 'continue';
+                    }
+                    if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
+                        const [, requestedMode] = trimmed.split(/\s+/, 2);
+                        if (!requestedMode) {
+                            writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
+                            return 'continue';
+                        }
+                        if (!['default', 'auto', 'plan'].includes(requestedMode)) {
+                            writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
+                            return 'continue';
+                        }
+                        permissionManager.setMode(requestedMode);
+                        statusBar.updateMode(requestedMode);
+                        writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
+                        return 'continue';
+                    }
+                    if (trimmed === '/compact') {
+                        if (productObservation) {
+                            writeCommandOutput(trimmed, '观察归档会话暂不支持手动压缩受保护历史。\n');
+                            return 'continue';
+                        }
+                        const compaction = commandAgent.forceCompact();
+                        statusBar.update(commandAgent.getUsage()); // 立即更新 statusline 显示
+                        if (compaction) {
+                            writeCommandOutput(trimmed, `${dim(`已压缩较早对话，保留最近上下文（折叠 ${compaction.replacedMessages} 条历史消息）。`)}\n\n`);
+                        }
+                        else {
+                            writeCommandOutput(trimmed, `${dim('当前历史很短，暂时无需压缩。')}\n\n`);
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed === '/models') {
+                        if (productObservation) {
+                            writeCommandOutput(trimmed, '观察归档会话已绑定本次模型；切换模型请新建会话。\n');
+                            return 'continue';
+                        }
+                        if (scrollRegion.isActive() && !terminalUiSuspended) {
+                            scrollRegion.clearOverlayPromptState();
+                            replRenderer.prepareForInput();
+                        }
+                        const selected = await selectModel(config, { renderer: replRenderer });
+                        if (selected) {
+                            // 如果选的是 provider 目录里的模型（尚未在 config.models 中），自动注册
+                            const providerProfile = getProviderProfile(selected.provider);
+                            const variant = providerProfile?.availableModels?.find(v => v.modelId === selected.modelId);
+                            const selectedProvider = config.providers[selected.provider];
+                            const catalogRuntimeEligible = selected.provider !== 'kimi'
+                                || variant?.model !== 'k3'
+                                || (selectedProvider?.protocol === 'openai_legacy'
+                                    && isOfficialKimiK3OpenAIEndpoint(selectedProvider.baseUrl));
+                            const variantRuntimeOptions = variant && selectedProvider && catalogRuntimeEligible
+                                ? resolveModelRuntimeOptions({
+                                    protocol: selectedProvider.protocol,
+                                    baseUrl: selectedProvider.baseUrl,
+                                    wireModel: variant.model,
+                                    catalogOptions: variant.runtimeOptions,
+                                    catalogConstraints: variant.runtimeConstraints,
+                                }).runtimeOptions
+                                : undefined;
+                            const nextModels = config.models[selected.modelId]
+                                ? selected.reasoningEffort
+                                    ? {
+                                        ...config.models,
+                                        [selected.modelId]: {
+                                            ...config.models[selected.modelId],
+                                            runtimeOptions: {
+                                                ...config.models[selected.modelId].runtimeOptions,
+                                                reasoningEffort: selected.reasoningEffort,
+                                            },
+                                        },
+                                    }
+                                    : config.models
+                                : {
+                                    ...config.models,
+                                    [selected.modelId]: {
+                                        provider: selected.provider,
+                                        model: variant?.model ?? selected.model,
+                                        label: variant?.label ?? selected.label,
+                                        capabilities: variant?.capabilities,
+                                        runtimeOptions: variantRuntimeOptions || selected.reasoningEffort
+                                            ? { ...variantRuntimeOptions, ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}) }
+                                            : undefined,
+                                    },
+                                };
+                            const newConfig = {
+                                ...config,
+                                models: nextModels,
+                                defaultProvider: selected.provider,
+                                defaultModelId: selected.modelId,
+                            };
+                            try {
+                                const nextAdapter = createAdapter(newConfig);
+                                const currentProfile = resolveRegisteredStrictKimiK3Profile(adapter);
+                                const nextProfile = resolveRegisteredStrictKimiK3Profile(nextAdapter);
+                                const nextModelCapabilities = resolveModelCapabilities(nextAdapter);
+                                await saveConfig(newConfig);
+                                adapter = nextAdapter;
+                                modelCapabilities = nextModelCapabilities;
+                                config = newConfig;
+                                intentBoundaryResolver = createConfiguredIntentBoundaryResolver();
+                                commandAgent.setAdapter(adapter);
+                                if (currentProfile !== nextProfile)
+                                    writeCommandOutput(trimmed, '模型协议已切换，历史已转换为最近的可见上下文（最多 40KB）。\n');
+                                memoryStore.setLLMFn?.(createLLMFromAdapter(adapter));
+                                statusBar.updateModel(adapter.getModelName(), modelCapabilities.contextLimit);
+                                writeCommandOutput(trimmed, `已切换到：[${selected.provider}] ${selected.label} (${selected.model})\n\n`);
+                            }
+                            catch (e) {
+                                writeCommandOutput(trimmed, `切换失败：${String(e)}\n\n`);
                             }
                         }
                         else {
-                            const userMsg = slash.rest
-                                ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
-                                : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
-                            let slashAssistantText = '';
-                            clearTurnIntentContext();
-                            if (!terminalUiSuspended) {
-                                scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
-                            }
-                            await maybePrepareFreshContextHandoff();
-                            await runRuntimeTurn({
-                                sessionId,
-                                cwd,
-                                source: 'chat',
-                                input: userMsg,
-                            }, (chunk) => {
-                                if (chunk.type === 'text') {
-                                    handleAssistantTextChunk(chunk.delta, (delta) => {
-                                        slashAssistantText += delta;
+                            writeCommandOutput(trimmed, '已取消\n\n');
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed === '/settings') {
+                        try {
+                            const settings = await loadSettings(cwd);
+                            const rules = mergeRules(settings);
+                            writeCommandOutput(trimmed, `${JSON.stringify({
+                                config,
+                                permissions: rules,
+                            }, null, 2)}\n\n`);
+                        }
+                        catch (e) {
+                            writeError(String(e));
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed === '/context') {
+                        try {
+                            const context = await loadAutoContext({ cwd });
+                            writeCommandOutput(trimmed, `${formatLoadedContext(context) || '当前没有可展示的仓库上下文。'}\n\n`);
+                        }
+                        catch (e) {
+                            writeError(String(e));
+                        }
+                        return 'continue';
+                    }
+                    if (trimmed === '/doctor') {
+                        writeCommandOutput(trimmed, 'chat 中已不再支持 /doctor，请直接运行：xiaok doctor\n\n');
+                        return 'continue';
+                    }
+                    if (trimmed === '/init') {
+                        writeCommandOutput(trimmed, 'chat 中已不再支持 /init，请直接运行：xiaok init\n\n');
+                        return 'continue';
+                    }
+                    if (trimmed === '/review') {
+                        writeCommandOutput(trimmed, 'chat 中已不再支持 /review，请直接运行：xiaok review\n\n');
+                        return 'continue';
+                    }
+                    if (trimmed === '/pr') {
+                        writeCommandOutput(trimmed, 'chat 中已不再支持 /pr，请直接运行：xiaok pr\n\n');
+                        return 'continue';
+                    }
+                    if (trimmed === '/commit' || trimmed.startsWith('/commit ')) {
+                        writeCommandOutput(trimmed, 'chat 中已不再支持 /commit，请直接运行：xiaok commit\n\n');
+                        return 'continue';
+                    }
+                    // Clear terminal renderer state — but NOT when scroll region is active,
+                    // because the scroll region's endContentStreaming() has already positioned
+                    // the footer at the bottom, and TerminalRenderer's initial render (\n)
+                    // would scroll it up.
+                    if (!scrollRegion.isActive()) {
+                        replRenderer.prepareBlockOutput();
+                    }
+                    // 输入后的分隔线 — scroll region 激活后跳过，footer 已包含分隔效果
+                    if (!scrollRegion.isActive() && !terminalUiSuspended) {
+                        renderInputSeparator();
+                    }
+                    // 将光标移到 scroll region 内容区，避免用户输入覆盖 footer
+                    // Uses the scroll region's tracked content cursor (_contentCursor)
+                    // which accounts for all written content including tool explorer output.
+                    if (scrollRegion.isActive()) {
+                        scrollRegion.positionAfterContent();
+                    }
+                    // 显示用户输入（带背景色）— 写入 scroll region 内容区
+                    // Note: In scroll region mode, we DON'T write input here because
+                    // clearLastInput() will clear the screen. Instead, input is written
+                    // after clearLastInput() via writeSubmittedInput().
+                    if (!scrollRegion.isActive() && commandInputKind !== 'goal') {
+                        process.stdout.write(formatSubmittedInput(trimmed));
+                    }
+                    // 斜杠命令：直接触发对应 skill
+                    const slash = parseSlashCommand(trimmed);
+                    if (slash) {
+                        let skill = findSkillByCommandName(skills, slash.skillName);
+                        if (!skill) {
+                            await refreshSkills();
+                            skill = findSkillByCommandName(skills, slash.skillName);
+                        }
+                        if (skill) {
+                            try {
+                                assertIntentNativeExecutionReady();
+                                const plan = buildSkillExecutionPlan([skill.name], skills);
+                                const primaryStep = plan.resolved[plan.resolved.length - 1];
+                                const invocation = activateTrackedSkillPlan(plan, plan.strategy === 'fork' && primaryStep?.agent ? primaryStep.agent : 'main');
+                                const activeTurnToken = intentTurnState.getSnapshot().activeTurnToken;
+                                if (activeTurnToken) {
+                                    intentTurnState.setActiveIntentReminderBlock(activeTurnToken, undefined);
+                                }
+                                process.stdout.write('\n');
+                                mdRenderer.reset();
+                                resetStreamingSegment();
+                                if (plan.strategy === 'fork' && primaryStep?.agent) {
+                                    let result = await executeNamedSubAgent({
+                                        agentDef: customAgents.find((item) => item.name === primaryStep.agent) ?? {
+                                            name: primaryStep.name,
+                                            systemPrompt: primaryStep.content,
+                                            allowedTools: primaryStep.allowedTools,
+                                            model: primaryStep.model,
+                                        },
+                                        prompt: slash.rest
+                                            ? `执行 skill "${primaryStep.name}"。用户补充说明：${slash.rest}`
+                                            : `执行 skill "${primaryStep.name}"。`,
+                                        sessionId,
+                                        adapter: () => adapter,
+                                        createRegistry: (subCwd, allowedTools) => registryFactory.createRegistry(subCwd, allowedTools),
+                                        buildSystemPrompt: async (promptCwd) => buildPrompt(skills, promptCwd),
+                                        worktreeManager: platform.worktreeManager,
+                                        forkContext: {
+                                            taskId: sessionId,
+                                            session: commandAgent.exportSession(),
+                                            messages: commandAgent.exportSession().messages,
+                                            systemPrompt: await buildPrompt(skills),
+                                            toolDefinitions: registry.getToolDefinitions(),
+                                        },
                                     });
+                                    if (invocation.strictMode) {
+                                        result = await maybeRunStrictCompletionLoop(result);
+                                    }
+                                    {
+                                        // Not a streaming phase: render to lines and land them at the
+                                        // content cursor instead of feeding the streaming renderer,
+                                        // whose buffer would stay invisible until an unrelated flush.
+                                        const block = `${MarkdownRenderer.renderToLines(result).join('\n')}\n`;
+                                        if (scrollRegion.isActive() && !terminalUiSuspended) {
+                                            scrollRegion.writeAtContentCursor(block);
+                                        }
+                                        else {
+                                            process.stdout.write(block);
+                                        }
+                                    }
                                 }
-                                if (chunk.type === 'usage') {
-                                    statusBar.update(chunk.usage);
-                                    scrollRegion.updateStatusLine(statusBar.getStatusLine());
+                                else {
+                                    const userMsg = slash.rest
+                                        ? `执行 skill plan "${plan.primarySkill}"，用户补充说明：${slash.rest}\n\n${JSON.stringify(plan, null, 2)}`
+                                        : `执行 skill plan：\n\n${JSON.stringify(plan, null, 2)}`;
+                                    let slashAssistantText = '';
+                                    clearTurnIntentContext();
+                                    if (!terminalUiSuspended) {
+                                        scrollRegion.clearLastInput({ inputPrompt: getFooterInputPrompt() });
+                                    }
+                                    await maybePrepareFreshContextHandoff();
+                                    await runRuntimeTurn({
+                                        sessionId,
+                                        cwd,
+                                        source: 'chat',
+                                        input: userMsg,
+                                    }, (chunk) => {
+                                        if (chunk.type === 'text') {
+                                            handleAssistantTextChunk(chunk.delta, (delta) => {
+                                                slashAssistantText += delta;
+                                            });
+                                        }
+                                        if (chunk.type === 'usage') {
+                                            statusBar.update(chunk.usage);
+                                            scrollRegion.updateStatusLine(statusBar.getStatusLine());
+                                        }
+                                    });
+                                    flushStreamingMarkdown();
+                                    slashAssistantText = await maybeRunStrictCompletionLoop(slashAssistantText);
+                                    await finalizeCurrentTurnIntentIfNeeded();
+                                    await persistSession();
+                                    // Feedback is a new interactive prompt. Clear the completed turn
+                                    // summary first so the footer does not keep rendering "Completed"
+                                    // intent chrome underneath the feedback input.
+                                    clearTurnIntentContext();
+                                    const feedbackResult = await maybeCollectCompletedIntentFeedback();
+                                    if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
+                                        return 'exit';
+                                    }
                                 }
-                            });
-                            flushStreamingMarkdown();
-                            slashAssistantText = await maybeRunStrictCompletionLoop(slashAssistantText);
-                            await finalizeCurrentTurnIntentIfNeeded();
-                            await persistSession();
-                            // Feedback is a new interactive prompt. Clear the completed turn
-                            // summary first so the footer does not keep rendering "Completed"
-                            // intent chrome underneath the feedback input.
-                            clearTurnIntentContext();
-                            const feedbackResult = await maybeCollectCompletedIntentFeedback();
-                            if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
-                                break interactiveLoop;
+                                if (!scrollRegion.isActive()) {
+                                    process.stdout.write('\n');
+                                }
                             }
+                            catch (e) {
+                                if (isCurrentCommandCancellation(e)) {
+                                    handleTurnAbort();
+                                }
+                                else {
+                                    stashQueuedInputIfAny();
+                                    handleTurnFailure(e);
+                                }
+                            }
+                            if (!scrollRegion.isActive()) {
+                                process.stdout.write('\n');
+                            }
+                        }
+                        else {
+                            writeCommandOutput(trimmed, `找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`);
+                        }
+                        return 'continue';
+                    }
+                    // 普通输入
+                    if (!scrollRegion.isActive()) {
+                        process.stdout.write('\n');
+                    }
+                    mdRenderer.reset();
+                    resetStreamingSegment();
+                    try {
+                        if (!normalInputTurnChromeStarted) {
+                            beginNormalInputTurnChrome(commandInputKind === 'goal' ? '' : trimmed);
+                            normalTurnChromePrimed = true;
+                        }
+                        // UserPromptSubmit hook — broker 可在此注入额外上下文
+                        const promptHookResult = commandInputKind === 'goal'
+                            ? { additionalContext: undefined }
+                            : await runLifecycleHooks('UserPromptSubmit', { prompt: trimmed });
+                        let effectiveInput = trimmed;
+                        if (promptHookResult.additionalContext) {
+                            effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
+                        }
+                        goalNativeHost.assertNoPending();
+                        const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
+                        renderSubmittedImageBlocks(inputBlocks);
+                        clearPastedImagePaths();
+                        await refreshIntentLedger();
+                        await prepareIntentReminderForInput(input, nativeInputOrigin, inputBlocks.some(block => block.type !== 'text'));
+                        // Stage executor debug output (when --skill-debug is enabled)
+                        if (skillDebugEnabled) {
+                            const stageOutput = await runStageAnalysis(trimmed);
+                            const debugText = formatDebugOutput(stageOutput);
+                            if (scrollRegion.isActive() && !terminalUiSuspended) {
+                                scrollRegion.writeAtContentCursor(debugText + '\n');
+                            }
+                            else {
+                                process.stdout.write(debugText + '\n');
+                            }
+                        }
+                        let lastAssistantText = '';
+                        currentOuterTurnId = null;
+                        const nativeReady = await primeTurnIntentPlan(true);
+                        if (!nativeReady) {
+                            writeCommandOutput(trimmed, 'Intent 等待原生登记或独立验证；/intent native status 查看原状态，continue 只推进下一次原生批准，不自动执行。\n\n');
+                            clearTurnIntentContext();
+                            return 'continue';
+                        }
+                        await maybePrepareFreshContextHandoff();
+                        goalTurnAdmissionEnabled = !preparedNativeContinuation && isGoalArmed();
+                        const turnResult = await runInteractiveRuntimeTurn(runNormalInputRuntimeTurn, createInteractiveRuntimeTurnRequest(inputBlocks), createInteractiveTurnChunkHandlers((delta) => {
+                            lastAssistantText += delta;
+                        }));
+                        lastAssistantText = turnResult.assistantText;
+                        flushStreamingMarkdown();
+                        if (!nativeExecutionTurn)
+                            lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
+                        goalTurnAdmissionEnabled = false;
+                        if (lastAssistantText.trim().length > 0) {
+                            transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
+                        }
+                        await finalizeCurrentTurnIntentIfNeeded();
+                        await persistSession();
+                        await finalizeSettledGoalTurns(lastAssistantText);
+                        // Feedback prompt should render against a clean footer, not a completed
+                        // turn summary that still belongs to the previous response.
+                        clearTurnIntentContext();
+                        const feedbackResult = await maybeCollectCompletedIntentFeedback();
+                        if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
+                            return 'exit';
+                        }
+                        if (deferredInput !== null) {
+                            return 'continue';
                         }
                         if (!scrollRegion.isActive()) {
                             process.stdout.write('\n');
                         }
+                        // Busy 时到达的用户输入先于所有自动续轮；旧 broker candidate 不缓存，
+                        // 用户 turn settled 后由 Stop hook 从最新状态重新计算。
+                        stashQueuedInputIfAny({ stopCapture: false });
+                        if (pendingQueuedInput !== null) {
+                            return 'continue';
+                        }
+                        let brokerContinuation = null;
+                        const outerTurnWasAborted = currentOuterTurnId !== null
+                            && abortedRuntimeTurnIds.has(currentOuterTurnId);
+                        if (!outerTurnWasAborted) {
+                            try {
+                                const stopResult = await runLifecycleHooks('Stop', {
+                                    stopHookActive: true,
+                                    lastAssistantMessage: lastAssistantText,
+                                });
+                                brokerContinuation = stopResult.preventContinuation && stopResult.message
+                                    ? stopResult.message
+                                    : null;
+                            }
+                            catch (stopError) {
+                                await runLifecycleHooks('StopFailure', {
+                                    error: stopError instanceof Error ? stopError.message : String(stopError),
+                                    lastAssistantMessage: lastAssistantText,
+                                });
+                            }
+                        }
+                        const goalContinuation = (!outerTurnWasAborted
+                            && isGoalArmed()
+                            && !currentGoalState?.pendingCompletionIntentId
+                            && currentGoalState?.status === 'active') ? buildGoalContinuationInput(currentGoalState).prompt : null;
+                        const continuation = continuationArbiter.select({
+                            queuedUserInput: pendingQueuedInput,
+                            brokerContinuation,
+                            goalContinuation,
+                        });
+                        if (continuation) {
+                            deferredInput = continuation.input;
+                            deferredNativeInputOrigin = continuation.kind === 'user' ? pendingQueuedNativeInputOrigin : undefined;
+                            pendingQueuedNativeInputOrigin = undefined;
+                            deferredInputKind = continuation.kind;
+                            return 'continue';
+                        }
                     }
                     catch (e) {
-                        if (isAbortError(e)) {
+                        goalTurnAdmissionEnabled = false;
+                        await finalizeSettledGoalTurns('');
+                        if (isGoalArmed() && currentGoalState?.status === 'active') {
+                            await pauseCurrentGoalForInterruption(isCurrentCommandCancellation(e) ? 'user_aborted' : 'runtime_error', isCurrentCommandCancellation(e) ? 'user' : 'runtime');
+                        }
+                        clearTurnIntentContext();
+                        if (isCurrentCommandCancellation(e)) {
                             handleTurnAbort();
                         }
                         else {
@@ -3581,174 +4823,38 @@ async function runChat(initialInput, opts) {
                             handleTurnFailure(e);
                         }
                     }
-                    if (!scrollRegion.isActive()) {
-                        process.stdout.write('\n');
+                    runtimeState.deactivateTurn();
+                    stopActivity();
+                    if (deferredInput === null && scrollRegion.isActive()) {
+                        scrollRegion.clearActivityState();
+                        renderFooterChrome();
                     }
-                }
-                else {
-                    writeCommandOutput(trimmed, `找不到 skill "${slash.skillName}"。可用 skills：${skills.map(s => '/' + s.name).join(', ') || '（无）'}\n`);
-                }
-                continue;
-            }
-            // 普通输入
-            if (!scrollRegion.isActive()) {
-                process.stdout.write('\n');
-            }
-            mdRenderer.reset();
-            resetStreamingSegment();
-            try {
-                if (!normalInputTurnChromeStarted) {
-                    beginNormalInputTurnChrome(inputKind === 'goal' ? '' : trimmed);
-                    normalTurnChromePrimed = true;
-                }
-                // UserPromptSubmit hook — broker 可在此注入额外上下文
-                const promptHookResult = inputKind === 'goal'
-                    ? { additionalContext: undefined }
-                    : await lifecycleHooks.runHooks('UserPromptSubmit', { prompt: trimmed });
-                let effectiveInput = trimmed;
-                if (promptHookResult.additionalContext) {
-                    effectiveInput = `${promptHookResult.additionalContext}\n\n${trimmed}`;
-                }
-                const inputBlocks = await parseInputBlocks(effectiveInput, resolveModelCapabilities(adapter).supportsImageInput);
-                renderSubmittedImageBlocks(inputBlocks);
-                clearPastedImagePaths();
-                await refreshIntentLedger();
-                await prepareIntentReminderForInput(trimmed);
-                // Stage executor debug output (when --skill-debug is enabled)
-                if (skillDebugEnabled) {
-                    const stageOutput = await runStageAnalysis(trimmed);
-                    const debugText = formatDebugOutput(stageOutput);
-                    if (scrollRegion.isActive() && !terminalUiSuspended) {
-                        scrollRegion.writeAtContentCursor(debugText + '\n');
-                    }
-                    else {
-                        process.stdout.write(debugText + '\n');
-                    }
-                }
-                let lastAssistantText = '';
-                currentOuterTurnId = null;
-                await primeTurnIntentPlan(true);
-                await maybePrepareFreshContextHandoff();
-                goalTurnAdmissionEnabled = isGoalArmed();
-                const turnResult = await runInteractiveRuntimeTurn(runRuntimeTurn, createInteractiveRuntimeTurnRequest(inputBlocks), createInteractiveTurnChunkHandlers((delta) => {
-                    lastAssistantText += delta;
-                }));
-                lastAssistantText = turnResult.assistantText;
-                flushStreamingMarkdown();
-                lastAssistantText = await maybeRunStrictCompletionLoop(lastAssistantText);
-                goalTurnAdmissionEnabled = false;
-                if (lastAssistantText.trim().length > 0) {
-                    transcriptBuffer.record({ kind: 'assistant', text: lastAssistantText });
-                }
-                await finalizeCurrentTurnIntentIfNeeded();
-                await persistSession();
-                await finalizeSettledGoalTurns(lastAssistantText);
-                // Feedback prompt should render against a clean footer, not a completed
-                // turn summary that still belongs to the previous response.
-                clearTurnIntentContext();
-                const feedbackResult = await maybeCollectCompletedIntentFeedback();
-                if (await handleCompletedIntentFeedbackResult(feedbackResult)) {
-                    break interactiveLoop;
-                }
-                if (deferredInput !== null) {
-                    continue interactiveLoop;
-                }
-                if (!scrollRegion.isActive()) {
-                    process.stdout.write('\n');
-                }
-                // Busy 时到达的用户输入先于所有自动续轮；旧 broker candidate 不缓存，
-                // 用户 turn settled 后由 Stop hook 从最新状态重新计算。
-                stashQueuedInputIfAny({ stopCapture: false });
-                if (pendingQueuedInput !== null) {
-                    continue interactiveLoop;
-                }
-                let brokerContinuation = null;
-                const outerTurnWasAborted = currentOuterTurnId !== null
-                    && abortedRuntimeTurnIds.has(currentOuterTurnId);
-                if (!outerTurnWasAborted) {
-                    try {
-                        const stopResult = await lifecycleHooks.runHooks('Stop', {
-                            stopHookActive: true,
-                            lastAssistantMessage: lastAssistantText,
-                        });
-                        brokerContinuation = stopResult.preventContinuation && stopResult.message
-                            ? stopResult.message
-                            : null;
-                    }
-                    catch (stopError) {
-                        await lifecycleHooks.runHooks('StopFailure', {
-                            error: stopError instanceof Error ? stopError.message : String(stopError),
-                            lastAssistantMessage: lastAssistantText,
-                        });
-                    }
-                }
-                const goalContinuation = (!outerTurnWasAborted
-                    && isGoalArmed()
-                    && currentGoalState?.status === 'active') ? buildGoalContinuationInput(currentGoalState).prompt : null;
-                const continuation = continuationArbiter.select({
-                    queuedUserInput: pendingQueuedInput,
-                    brokerContinuation,
-                    goalContinuation,
+                    normalTurnChromePrimed = false;
+                    // Live activity is stopped when content streaming starts, so do not clear
+                    // the activity row again here; that row may now contain assistant text.
                 });
-                if (continuation) {
-                    deferredInput = continuation.input;
-                    deferredInputKind = continuation.kind;
-                    continue interactiveLoop;
-                }
+                if (commandDirective === 'exit')
+                    break;
             }
-            catch (e) {
-                goalTurnAdmissionEnabled = false;
-                await finalizeSettledGoalTurns('');
-                if (isGoalArmed() && currentGoalState?.status === 'active') {
-                    await pauseCurrentGoalForInterruption(isAbortError(e) ? 'user_aborted' : 'runtime_error', isAbortError(e) ? 'user' : 'runtime');
-                }
-                clearTurnIntentContext();
-                if (isAbortError(e)) {
-                    handleTurnAbort();
-                }
-                else {
-                    stashQueuedInputIfAny();
-                    handleTurnFailure(e);
-                }
+        }
+        finally {
+            try {
+                await finalizeChat();
             }
-            runtimeState.deactivateTurn();
-            stopActivity();
-            if (deferredInput === null && scrollRegion.isActive()) {
-                scrollRegion.clearActivityState();
-                renderFooterChrome();
+            finally {
+                finishTerminal();
             }
-            normalTurnChromePrimed = false;
-            // Live activity is stopped when content streaming starts, so do not clear
-            // the activity row again here; that row may now contain assistant text.
         }
     }
     finally {
-        disposeInterruptHandlers();
-        disarmGoal();
-        stopBusyCapture();
-        releaseRawInputMode();
-        stopActivity();
-        if (handleResize) {
-            process.stdout.off('resize', handleResize);
-        }
+        // A bootstrap failure seals the same population and uses the same drain.
+        finishBootstrap();
         try {
-            statusBar.destroy();
+            await finalizeChat();
         }
-        catch { }
-        try {
-            scrollRegion.end();
+        finally {
+            removeSignalHandlers();
         }
-        catch (e) {
-            log.warn('scrollRegion.end failed in post-loop cleanup', e.message);
-        }
-        setStreamErrorHandler(null);
-        process.stdout.write = originalStdoutWrite;
-        process.stderr.write = originalStderrWrite;
-        stopIntentRuntimeSync();
-        stopSkillEvalRuntimeSync();
-        skillCatalogWatcher?.close();
-        await lifecycleHooks.runHooks('SessionEnd', { reason: 'exit' });
-        await cleanupRuntimeResourcesWithTimeout();
     }
 }
 function resolveChatInstanceId() {
@@ -3811,6 +4917,10 @@ export function registerChatCommands(program) {
         .description('启动 AI skill 任务交付工作台（默认命令）')
         .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
         .option('--dry-run', '打印工具调用但不执行')
+        .option('--observation-policy <file>', '按显式用户策略启用本次观察归档与召回（新会话）')
+        .option('--intent-verification <file>', '冻结 Intent 原始验收 JSON；/intent native 管理登记；/intent publish draft|approve <JSON>|parent|status|recover|retry <候选ID> 管理候选；/intent verify help 配置独立验证；/intent receiver help 原发布与阶段投影（不自动启动模型）')
+        .option('--goal-verification <file>', '冻结本次 Goal 原始验收 JSON；原生授权后用 /goal resume 启动')
+        .option('--validation-material <file>', '逐文件选择隔离验证材料，可重复；仍需系统授权', (file, files) => [...files, file], [])
         .option('-p, --print', '以纯文本模式输出单次结果')
         .option('--json', '以 JSON 模式输出单次结果')
         .option('--resume <id>', '恢复已保存会话')

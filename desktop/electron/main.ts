@@ -1,3 +1,14 @@
+import { createDesktopKSwarmService } from './kswarm-service-lifetime.js';
+import { registerDesktopBeforeQuit, disposeDesktopLifetimeSteps } from './desktop-before-quit.js';
+import {deferLoopArtifactPickerWindowDestroy} from './loop-artifact-save-picker.js';
+import {createLoopOutputService,registerLoopOutputIpc} from './loop-output-service.js';
+import {createLoopCurrentViews,registerLoopCurrentViewIpc} from './loop-current-views.js';
+import {createLoopTimedCompletionHost} from './loop-timed-completion.js';
+import {withDesktopBootstrapWriter} from './desktop-bootstrap-writer.js';
+import {createDesktopLoopPublicationService} from './loop-desktop-publication-service.js';
+import {registerLoopPublicationIpc,createLoopPublicationIpcAuthorizer} from './loop-publication-ipc.js';
+import {createLoopPublicationShutdownOwner} from './loop-publication-shutdown.js';
+import {createShutdownAwareTimedActionService} from './timed-action-service-lifetime.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,14 +45,14 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
-import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
+import { resolveKSwarmServiceLogRoot, type KSwarmService } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
   resolveBundledPluginsDir,
   prepareBundledPluginPythonRuntime,
 } from './deploy-bundled-plugins.js';
 import { DesktopShutdownGate, ShutdownAwareIpcMain } from './shutdown-aware-ipc-main.js';
-import { DesktopShutdownCoordinator } from './desktop-shutdown-coordinator.js';
+import { DesktopShutdownCoordinator, type IngressOwner, type DurableStoreOwner } from './desktop-shutdown-coordinator.js';
 import { PluginProviderRuntimeFacade } from './plugin-provider-runtime-facade.js';
 import { TimedActionStore } from './timed-action-store.js';
 import { ThreadMetaStore } from './thread-meta-store.js';
@@ -61,9 +72,8 @@ import { createDesktopLoopLLMPort } from './loop-llm-port-impl.js';
 import { DesktopExecutionCoordinator } from './desktop-execution-coordinator.js';
 import { DesktopApplicationWindowOwner } from './desktop-application-window-owner.js';
 import { AssistantService } from './assistant-service.js';
-import { AssistantController } from './assistant-controller.js';
-import { listLatestMorningSuggestions } from './assistant-morning-suggestions.js';
-import { buildAssistantMorningContext } from './assistant-morning-context.js';
+import { AssistantController, createAssistantCandidatePromotionTargets } from './assistant-controller.js';
+import { createAssistantPublicationContextReader } from './assistant-publication-context.js';
 import { ASSISTANT_EVENING_LOOP_ID, ASSISTANT_MORNING_LOOP_ID } from './assistant-types.js';
 import { createAssistantRuntime } from './assistant-runtime.js';
 import { createAssistantDesktopSnapshotReader } from './assistant-desktop-snapshot.js';
@@ -93,7 +103,7 @@ import { createRoomProjectScopeGuard } from './room-project-scope-guard.js';
 import { registerRoomWorkspaceIpc } from './room-workspace-ipc.js';
 import { acquireWorkspaceMutationOwner } from './room-workspace-owner.js';
 import { ensureRoomWorkspaceProtocol } from './room-workspace-protocol.js';
-import { buildAutomationOverviewSnapshot, buildAutomationRunHistory } from './automation-overview.js';
+import { buildAutomationOverviewSnapshot } from './automation-overview.js';
 import { attachDesktopContextMenu } from './context-menu.js';
 import {
   createKSwarmRuntimeBridge,
@@ -171,29 +181,30 @@ const pluginProviderRuntime = new PluginProviderRuntimeFacade();
  * attached once `createWindow()` has built the per-process resources.
  */
 const desktopLifetimeSteps: Array<{ name: string; run: () => Promise<void> }> = [];
+const desktopFinalLifetimeSteps: Array<{ name: string; run: () => Promise<void> }> = [];
 function registerLifetimeDisposerStep(name: string, run: () => Promise<void>): void {
   desktopLifetimeSteps.push({ name, run });
 }
+const desktopIngressOwners: IngressOwner[] = [];
+const desktopDurableStores: DurableStoreOwner[] = [];
 const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
   gate: desktopShutdownGate,
   providerRuntime: pluginProviderRuntime,
-  ingressOwners: [],
-  durableStores: [],
+  ingressOwners: desktopIngressOwners,
+  durableStores: desktopDurableStores,
   destroyWindows: () => {
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.destroy();
+      if (!win.isDestroyed() && !deferLoopArtifactPickerWindowDestroy(win)) win.destroy();
     }
   },
   disposeLifetimeResources: async () => {
     // Each step runs at most once, in registration order; a failing step never
     // skips the rest (design §5.5 phase ⑥ independent cleanup).
-    for (const step of desktopLifetimeSteps.splice(0)) {
-      try {
-        await step.run();
-      } catch (error) {
-        debugMain(`lifetime disposer step failed: ${step.name}`, error instanceof Error ? error.message : String(error));
-      }
-    }
+    await disposeDesktopLifetimeSteps([
+      ...desktopLifetimeSteps.splice(0), ...desktopFinalLifetimeSteps.splice(0),
+    ], (name, error) => {
+      debugMain(`lifetime disposer step failed: ${name}`, error instanceof Error ? error.message : String(error));
+    });
   },
   releaseMainSourcePin: async () => {
     // Stage 3 wiring: the trusted source resolver installs the real release here
@@ -210,15 +221,10 @@ const desktopShutdownCoordinator = new DesktopShutdownCoordinator({
  */
 const updaterHandoff = createUpdaterHandoff();
 
-app.on('before-quit', (event) => {
-  // A real before-quit is the only transition into irreversible cleanup.
-  updaterHandoff.commitHandoffOnBeforeQuit();
-  completeUpdaterHandoff();
-  const { preventDefault } = desktopShutdownCoordinator.onBeforeQuit();
-  if (preventDefault) event.preventDefault();
+registerDesktopBeforeQuit(app, desktopShutdownCoordinator, updaterHandoff, completeUpdaterHandoff, error => {
+  debugMain('updater quit hook failed', error instanceof Error ? error.message : String(error));
 });
 
-let isQuitting = false;
 const MAX_MOBILE_ARTIFACT_FILE_BYTES = 20 * 1024 * 1024;
 
 function debugMain(message: string, extra?: unknown): void {
@@ -325,7 +331,7 @@ function findMobileArtifactPreview(dataRoot: string, artifactId: string): Mobile
 }
 
 async function findKSwarmMobileArtifactPreview(
-  kswarmService: ReturnType<typeof createKSwarmService>,
+  kswarmService: KSwarmService,
   artifactId: string,
 ): Promise<MobileArtifactPreview | null> {
   const projects = await fetchKSwarmProjectsForMobile(kswarmService).catch(() => []);
@@ -409,7 +415,7 @@ function isSystemPreviewFileKind(kind: string, contentType: string): boolean {
     || contentType.includes('officedocument');
 }
 
-async function fetchKSwarmProjectsForMobile(kswarmService: ReturnType<typeof createKSwarmService>): Promise<KSwarmProjectLike[]> {
+async function fetchKSwarmProjectsForMobile(kswarmService: KSwarmService): Promise<KSwarmProjectLike[]> {
   const status = kswarmService.getStatus();
   if (!status.running || !status.port) return [];
   const response = await fetch(`http://127.0.0.1:${status.port}/projects`);
@@ -535,7 +541,11 @@ async function createReplacementWindow(): Promise<BrowserWindow> {
   return window;
 }
 
-async function createInitialWindow(): Promise<BrowserWindow> {
+function createInitialWindow(): Promise<BrowserWindow> {
+  return withDesktopBootstrapWriter(desktopShutdownGate, createInitialWindowResources);
+}
+
+async function createInitialWindowResources(): Promise<BrowserWindow> {
   debugMain('createWindow:start');
   const preloadPath = join(__dirname, 'preload.cjs');
   const rendererFile = join(__dirname, '../../../renderer/index.html');
@@ -605,7 +615,8 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     return meetingRecorderController!.close();
   });
   // KSwarm service — manages kswarm server as a child process
-  const kswarmService = createKSwarmService();
+  const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps);
+  if (!kswarmService) return window;
   const kswarmStartPromise = kswarmService.start().catch((err) => {
     console.error('[main] Failed to start kswarm service:', err);
   });
@@ -684,6 +695,9 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
+  desktopIngressOwners.push(services.goalShutdown.ingress);
+  desktopDurableStores.push(services.goalShutdown.durable);
+  if (desktopShutdownCoordinator.isQuitting) services.goalShutdown.ingress.stopAccepting();
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
@@ -887,12 +901,17 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   } else {
     debugMain('mobile-relay:disabled', 'missing relay credentials');
   }
+  const acquireAutomationWriter = (label:string) => desktopShutdownGate.acquire('external',label);
   const loopNotificationPort = createElectronDesktopNotificationPort();
   const loopLlmPort = createDesktopLoopLLMPort(executionCoordinator);
   const loopRuntime = createDesktopLoopRuntime({
     dataRoot,
+    acquireWriter: acquireAutomationWriter,
     taskPort: {
       createTask: (input) => services.createBackgroundTask(input),
+      reserveTask:(input,context)=>services.reserveBackgroundTask(input,context),
+      createReservedTask:(control,guard)=>services.createReservedBackgroundTask(control,guard),
+      discardReservedTask:control=>services.discardReservedBackgroundTask(control),
       recoverTask: (taskId) => services.recoverTask(taskId),
       cancelTask: (taskId, reason) => services.cancelTask(taskId, reason),
     },
@@ -938,6 +957,8 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     ],
   });
   loopStoreRef = loopRuntime.loopStore;
+
+
 
   try {
     await services.recoverStaleTasks();
@@ -1000,7 +1021,13 @@ async function createInitialWindow(): Promise<BrowserWindow> {
 
   // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
-  const timedActionService = new TimedActionService(timedActionStore);
+  const timedActionService = createShutdownAwareTimedActionService(new TimedActionService(timedActionStore), desktopShutdownGate);
+  let timedStoreClosed = false;
+  desktopDurableStores.push({name: 'timed-actions', async close() {
+    if (timedStoreClosed) return;
+    if (desktopShutdownGate.isOpen || desktopShutdownGate.outstanding !== 0) throw Error('timed_action_shutdown_not_drained');
+    timedActionStore.close(); timedStoreClosed = true;
+  }});
   const threadMetaStore = new ThreadMetaStore(join(dataRoot, 'thread-meta.sqlite'));
   services.registerTimedActionService(timedActionService);
   const assistantService = new AssistantService({
@@ -1017,6 +1044,55 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     }
   }).catch(() => {});
   const knowledgeBaseStore = services.getKnowledgeBaseStore();
+  const loopPublicationService = createDesktopLoopPublicationService({
+    store: loopRuntime.loopStore,
+    assistantTargets: createAssistantCandidatePromotionTargets({memoryStore: getDesktopMemoryStore(dataRoot), memoryBackend: getDesktopMemoryBackend(dataRoot), kbStore: knowledgeBaseStore}),
+    assistantProjectCwd: projectId => projectCwdById.get(projectId),
+    sessionRoot: join(dataRoot, 'loop-verification-sessions'),
+    workspaceRoot: process.cwd(),
+    getWindow: () => mainWindow ?? undefined,
+    taskPort: {recoverTask: async taskId => (await services.recoverTask(taskId)).snapshot ?? undefined},
+    captureAdmission() {
+      const view = mainWindow;
+      const original = services.captureLoopPublicationAdmission();
+      const current = () => {
+        original();
+        if (!desktopShutdownGate.isOpen || !view || view.isDestroyed() || mainWindow !== view
+          || !isTrustedDesktopRendererUrl(view.webContents.mainFrame.url, {rendererFile, devServer})) {
+          throw Error('loop_desktop_publication_view_changed');
+        }
+      };
+      current();
+      return current;
+    },
+  });
+  const authorizeLoopCurrentView=createLoopPublicationIpcAuthorizer({getWindow:()=>mainWindow,isTrustedUrl:url=>isTrustedDesktopRendererUrl(url,{rendererFile,devServer})});
+  const loopCurrentViews=createLoopCurrentViews({loopStore:loopRuntime.loopStore,timedStore:timedActionStore,gate:desktopShutdownGate,
+    taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
+    captureAdmission(){const view=mainWindow,original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen||!view||view.isDestroyed()||mainWindow!==view||!isTrustedDesktopRendererUrl(view.webContents.mainFrame.url,{rendererFile,devServer}))throw Error('loop_view_changed');};},
+  });
+  registerLoopCurrentViewIpc(shutdownAwareIpc,loopCurrentViews,authorizeLoopCurrentView);
+  const loopOutputService=createLoopOutputService({store:loopRuntime.loopStore,evidenceStore:loopRuntime.evidenceStore,gate:desktopShutdownGate,
+    taskPort:{recoverTask:async id=>(await services.recoverTask(id)).snapshot??undefined},openPath:path=>shell.openPath(path),
+    captureAdmission(){const view=mainWindow,original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen||!view||view.isDestroyed()||mainWindow!==view||!isTrustedDesktopRendererUrl(view.webContents.mainFrame.url,{rendererFile,devServer}))throw Error('loop_output_view_changed');};},
+  });
+  registerLoopOutputIpc(shutdownAwareIpc,loopOutputService,authorizeLoopCurrentView);
+  const closeLoopOutputs=()=>{void loopOutputService.close().catch(()=>{});};
+  desktopIngressOwners.push({name:'loop-output-consumers',stopAccepting:closeLoopOutputs,abortAllActive:closeLoopOutputs,drain:ms=>desktopShutdownGate.drain(ms)});
+  if(desktopShutdownCoordinator.isQuitting)closeLoopOutputs();
+
+  const closeLoopViews=()=>{void loopCurrentViews.close().catch(()=>{});};
+  desktopIngressOwners.push({name:'loop-current-views',stopAccepting:closeLoopViews,abortAllActive:closeLoopViews,drain:ms=>desktopShutdownGate.drain(ms)});
+  if(desktopShutdownCoordinator.isQuitting)closeLoopViews();
+  const loopPublicationShutdown = createLoopPublicationShutdownOwner(loopPublicationService, desktopShutdownGate, () => loopRuntime.close());
+  desktopIngressOwners.push(loopPublicationShutdown.ingress);
+  desktopDurableStores.push(loopPublicationShutdown.durable);
+  if (desktopShutdownCoordinator.isQuitting) loopPublicationShutdown.ingress.stopAccepting();
+  registerLoopPublicationIpc(shutdownAwareIpc, loopPublicationService, createLoopPublicationIpcAuthorizer({
+    getWindow: () => mainWindow,
+    isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer}),
+  }));
+  const assistantContextReader = createAssistantPublicationContextReader({store: loopRuntime.loopStore, evidenceStore: loopRuntime.evidenceStore, publication: loopPublicationService});
   const assistantSnapshotReader = createAssistantDesktopSnapshotReader({
     listTaskSnapshots: ({ from, to }) => readRecentTaskSnapshots(dataRoot, 100)
       .filter(snapshot => snapshot.updatedAt >= from && snapshot.updatedAt <= to)
@@ -1096,13 +1172,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     collect: async input => {
       const snapshot = await assistantSnapshotReader.collect(input);
       if (input.kind === 'evening') return snapshot;
-      return buildAssistantMorningContext({
-        snapshot,
-        eveningRun: loopRuntime.loopStore.listLoopRuns(ASSISTANT_EVENING_LOOP_ID, 10)
-          .find(run => run.status === 'success'),
-        pendingCandidates: loopRuntime.loopStore.listAssistantCandidates({ statuses: ['pending'] }),
-        pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')],
-      });
+      return await assistantContextReader.buildMorningContext({snapshot, pinnedThreadIds: [...threadMetaStore.getThreadIds('pinned')]});
     },
   });
   const assistantAwareRunner = createLoopExecutionAdapter({
@@ -1116,13 +1186,8 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     memoryBackend: getDesktopMemoryBackend(dataRoot),
     kbStore: knowledgeBaseStore,
     resolveProjectCwd: projectId => projectCwdById.get(projectId),
-    listMorningSuggestions: () => listLatestMorningSuggestions({
-      listRuns: () => loopRuntime.loopStore.listLoopRuns(ASSISTANT_MORNING_LOOP_ID, 10),
-      listEvidence: runId => loopRuntime.evidenceStore.listEvidenceForOwner('loop_run', runId),
-    }),
-  });
-  void assistantController.recoverAccepting().catch(error => {
-    console.warn('[main] assistant candidate recovery failed:', (error as Error).message);
+    assistantPublication: loopPublicationService,
+    listMorningSuggestions: () => assistantContextReader.listMorningSuggestions(),
   });
   const kswarmTeamService = createKSwarmTeamService({
     kswarmService,
@@ -1259,6 +1324,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   });
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
+    authorizeAssistant: createLoopPublicationIpcAuthorizer({getWindow: () => mainWindow, isTrustedUrl: url => isTrustedDesktopRendererUrl(url, {rendererFile, devServer})}),
     authorizeRoomDeletion: event => {
       const source = event as Electron.IpcMainInvokeEvent;
       return Boolean(mainWindow && !mainWindow.isDestroyed()
@@ -1295,10 +1361,6 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     loopStore: loopRuntime.loopStore,
     timedActionStore,
     globalBackgroundAutoRunEnabled,
-  }));
-  shutdownAwareIpc.handle('desktop:automations:getRunHistory', () => buildAutomationRunHistory({
-    loopStore: loopRuntime.loopStore,
-    timedActionStore,
   }));
 
   // Register channel tools with AI runner (for sending messages to yunzhijia, discord, etc.)
@@ -1437,7 +1499,14 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   });
   debugMain('createWindow:mcp-registration-started');
 
+  const loopTimedCompletion=createLoopTimedCompletionHost({
+    timedStore:timedActionStore,loopStore:loopRuntime.loopStore,
+    taskPort:{recoverTask:async taskId=>(await services.recoverTask(taskId)).snapshot??undefined},
+    captureAdmission(){const original=services.captureLoopPublicationAdmission();return()=>{original();if(!desktopShutdownGate.isOpen)throw Error('loop_timed_shutdown');};},
+  });
   const timedActionScheduler = new TimedActionScheduler(timedActionStore, {
+    loopCompletion:loopTimedCompletion,
+    acquireWriter: acquireAutomationWriter,
     executors: createDesktopTimedActionExecutors({
       getMainWindow: () => mainWindow,
       loopRuntime,
@@ -1500,7 +1569,14 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       } catch { /* notification is best-effort */ }
     },
   });
-  timedActionScheduler.start();
+  desktopIngressOwners.push({
+    name: 'timed-action-scheduler',
+    stopAccepting: () => {timedActionScheduler.stopAccepting();void loopTimedCompletion.close().catch(()=>{});},
+    abortAllActive: reason => timedActionScheduler.abortAllActive(reason),
+    drain: deadlineMs => desktopShutdownGate.drain(deadlineMs),
+  });
+  if (desktopShutdownCoordinator.isQuitting) timedActionScheduler.stopAccepting();
+  else timedActionScheduler.start();
 
   shutdownAwareIpc.handle('desktop:syncScheduledTasks', (_event, tasks) => {
     // Deprecated compatibility endpoint. Renderer must not replace main state.
@@ -1630,9 +1706,6 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   // provider close is actually awaited before the process exits.
   registerLifetimeDisposerStep('provider-runtime', () => pluginProviderRuntime.dispose());
   registerLifetimeDisposerStep('kswarm-and-bridges', async () => {
-    await kswarmService.stop().catch((err) => {
-      debugMain('kswarmService.stop failed', err instanceof Error ? err.message : String(err));
-    });
     kswarmStreamBridge.dispose();
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
@@ -1640,8 +1713,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     }
     for (const client of runtimeBridgeClients) client.stop();
     timedActionScheduler.stop();
-    loopRuntime.close();
-    timedActionStore.close();
+    // SQLite owners close only in the coordinator durable-store phase.
     mobileBonjourAdvertiser.stop();
     mobileGateway.stop().catch((err) => {
       debugMain('mobileGateway.stop failed', err instanceof Error ? err.message : String(err));
@@ -1684,6 +1756,13 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     await window.loadFile(rendererFile);
   }
   debugMain('createWindow:loaded');
+  if (desktopShutdownGate.isOpen) {
+    const writer = acquireAutomationWriter('assistant:recover-accepting');
+    void assistantController.recoverAccepting({requestSource: 'scheduler'}).catch(error => {
+      console.warn('[main] assistant candidate recovery failed:', (error as Error).message);
+    }).finally(() => writer.release());
+  }
+
   // Python discovery, venv creation and dependency checks are intentionally
   // post-interactive. Static plugin files are already available, while Python
   // MCP servers remain fail-closed until this main-process-owned command exists.
@@ -1724,7 +1803,7 @@ function configureDesktopView(window: BrowserWindow, devServer?: string): void {
       mainWindow = null;
     }
   });
-  attachCloseToMinimize(window, process.platform, () => !isQuitting);
+  attachCloseToMinimize(window, process.platform, () => !desktopShutdownCoordinator.isQuitting);
   attachWindowRepaintHandlers(window);
 
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -1832,8 +1911,7 @@ if (packagedKimiSmokeResultPath) {
     debugMain('app:second-instance', protocolUrl ? { protocolUrl } : undefined);
     restoreOrCreateWindow();
   });
-  // `isQuitting` is now set by the coordinator's synchronous phase ① rather than
-  // as a listener side effect.
+  // Quitting state belongs to the coordinator's synchronous phase ①.
   registerLifetimeDisposerStep('window-scoped', async () => {
     meetingRecorderController?.dispose();
     destroyMenuBar();

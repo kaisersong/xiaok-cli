@@ -1,3 +1,6 @@
+import {captureLoopProducerValue} from './loop-scan-publication-body.js';
+import {publicationFields,publicationIdentity} from './loop-publication-attempt.js';
+import {canonicalVerificationJson as canonicalJson} from '../../src/runtime/verification/protocol.js';
 import type { MemoryRecord, MemoryStore } from '../../src/ai/memory/store.js';
 import {
   AssistantCandidatePromotionService,
@@ -12,6 +15,7 @@ import { computeKbSourceContentDigest, type KbStore } from './kb-store.js';
 import type { Source } from './kb-types.js';
 
 export interface AssistantCandidateStore {
+  getAssistantCandidatePublicationMode?(candidateId:string):'ordinary'|'protected';
   getAssistantCandidate(id: string): AssistantCandidate | undefined;
   listAssistantCandidates(input?: { statuses?: AssistantCandidateStatus[] }): AssistantCandidate[];
   beginAssistantCandidateAccept(
@@ -22,7 +26,7 @@ export interface AssistantCandidateStore {
   ): AssistantCandidate | undefined;
   markAssistantCandidateAccepted(candidateId: string, targetRef: string, now: number): AssistantCandidate | undefined;
   markAssistantCandidateAcceptFailed(candidateId: string, now: number): AssistantCandidate | undefined;
-  rejectAssistantCandidate(candidateId: string, now: number): AssistantCandidate | undefined;
+  rejectAssistantCandidate(candidateId: string, now: number,requestSource?:AssistantCandidateRequestSource): AssistantCandidate | undefined;
 }
 
 export interface AssistantStatusService {
@@ -42,9 +46,10 @@ export interface AssistantControllerOptions {
   candidates: AssistantCandidateStore;
   memoryStore: MemoryStore;
   memoryBackend: 'layered' | 'fallback';
-  kbStore: Pick<KbStore, 'getCollection' | 'getSource' | 'addSource'>;
+  kbStore: Pick<KbStore, 'getCollection' | 'getSource' | 'addSource' | 'ensureAssistantSource'>;
   resolveProjectCwd?: (projectId: string) => string | undefined;
-  listMorningSuggestions?: () => Array<{ id: string; title: string; summary: string }>;
+  listMorningSuggestions?: () => Array<{ id: string; title: string; summary: string }> | Promise<Array<{ id: string; title: string; summary: string }>>;
+  assistantPublication?: {acceptAssistantCandidate(input:{candidateId:string;collectionId?:string;requestSource:'user'}):Promise<AssistantCandidate>;recoverAssistantCandidate(input:{candidateId:string;requestSource:'scheduler'}):Promise<AssistantCandidate>};
   now?: () => number;
 }
 
@@ -65,13 +70,13 @@ export class AssistantController {
     });
   }
 
-  getOverview(): AssistantOverview {
+  async getOverview(): Promise<AssistantOverview> {
     const { profile } = this.options.assistantService.bootstrap();
     const candidates = this.options.candidates.listAssistantCandidates();
     const pending = candidates.filter(candidate => candidate.status === 'pending');
     return {
       profile,
-      suggestions: (this.options.listMorningSuggestions?.() ?? []).slice(0, 3),
+      suggestions: (await this.options.listMorningSuggestions?.() ?? []).slice(0, 3),
       pendingCandidateCount: pending.length,
       candidates,
     };
@@ -97,6 +102,12 @@ export class AssistantController {
     requestSource: AssistantCandidateRequestSource;
     collectionId?: string;
   }): Promise<AssistantCandidatePromotionRecord> {
+    input=captureLoopProducerValue(input);publicationFields(input,['candidateId','requestSource',...(Object.hasOwn(input,'collectionId')?['collectionId']:[])]);publicationIdentity(input.candidateId);
+    if(input.requestSource!=='user')throw Error('assistant_candidate_user_only');
+    if(this.options.assistantPublication){
+      return await this.options.assistantPublication.acceptAssistantCandidate({candidateId:input.candidateId,requestSource:'user',...(input.collectionId!==undefined?{collectionId:input.collectionId}:{})}) as AssistantCandidatePromotionRecord;
+    }
+    if(this.options.candidates.getAssistantCandidatePublicationMode)throw Error('assistant_publication_host_required');
     return await this.promotion.accept(input);
   }
 
@@ -105,21 +116,34 @@ export class AssistantController {
     requestSource: AssistantCandidateRequestSource;
   }): AssistantCandidate {
     if (input.requestSource !== 'user') throw new Error('assistant_candidate_user_only');
-    const candidate = this.options.candidates.rejectAssistantCandidate(input.candidateId, this.now());
+    const candidate = this.options.candidates.rejectAssistantCandidate(input.candidateId, this.now(),'user');
     if (!candidate) throw new Error('assistant_candidate_not_found');
     if (candidate.status !== 'rejected') throw new Error('assistant_candidate_reject_conflict');
     return candidate;
   }
 
-  async recoverAccepting(): Promise<Array<{ candidateId: string; status: 'accepted' | 'accept_failed' }>> {
-    return await this.promotion.recoverAccepting();
+  async recoverAccepting(input:{requestSource:AssistantCandidateRequestSource}): Promise<Array<{ candidateId: string; status: 'accepted' | 'accept_failed' }>> {
+    if(!input)throw Error('assistant_candidate_recovery_source');
+    input=captureLoopProducerValue(input);publicationFields(input,['requestSource']);
+    if(!['user','scheduler'].includes(input.requestSource))throw Error('assistant_candidate_recovery_source');
+    if(this.options.candidates.getAssistantCandidatePublicationMode&&!this.options.assistantPublication)throw Error('assistant_publication_host_required');
+    const results:Array<{candidateId:string;status:'accepted'|'accept_failed'}>=[];
+    for(const candidate of this.options.candidates.listAssistantCandidates({statuses:['accepting']})){
+      try{
+        if(this.options.assistantPublication){
+          const result=await this.options.assistantPublication.recoverAssistantCandidate({candidateId:candidate.id,requestSource:'scheduler'});
+          if(result.status==='accepted')results.push({candidateId:candidate.id,status:'accepted'});
+        }else results.push(...await this.promotion.recoverAccepting({candidateId:candidate.id,requestSource:input.requestSource}));
+      }catch{/* Preserve the original accepting intent for transient current/permission failures. */}
+    }
+    return results;
   }
 }
 
 export function createAssistantCandidatePromotionTargets(options: {
   memoryStore: MemoryStore;
   memoryBackend: 'layered' | 'fallback';
-  kbStore: Pick<KbStore, 'getCollection' | 'getSource' | 'addSource'>;
+  kbStore: Pick<KbStore, 'getCollection' | 'getSource' | 'addSource' | 'ensureAssistantSource'>;
   now?: () => number;
 }): AssistantCandidatePromotionTargets {
   const now = options.now ?? (() => Date.now());
@@ -140,28 +164,19 @@ export function createAssistantCandidatePromotionTargets(options: {
     },
 
     async ensureKnowledge(input) {
-      const existing = options.kbStore.getSource(input.targetId);
-      if (existing) {
-        assertKnowledgeTargetMatches(existing, input);
-        return { targetRef: `kb://${input.targetId}` };
-      }
-      if (!input.collectionId) throw new Error('assistant_candidate_collection_required');
-      if (!options.kbStore.getCollection(input.collectionId)) throw new Error('assistant_candidate_collection_not_found');
-      const source = options.kbStore.addSource({
+      // Legacy ordinary recovery can recover the collection only from its exact
+      // existing stable target. Protected recovery always supplies durable intent.
+      const collectionId = input.collectionId ?? options.kbStore.getSource(input.targetId)?.collectionId;
+      if (!collectionId) throw new Error('assistant_candidate_collection_required');
+      if (!options.kbStore.ensureAssistantSource) throw Error('assistant_knowledge_durable_store_required');
+      const source = options.kbStore.ensureAssistantSource({
         sourceId: input.targetId,
         clientRequestKey: `assistant-candidate:${input.candidateId}`,
-        collectionId: input.collectionId,
-        kind: 'paste',
-        title: input.title,
-        text: input.content,
-        parseStatus: 'pending',
-        metadata: {
-          assistantCandidateId: input.candidateId,
-          assistantRunId: input.loopRunId,
-          assistantEvidenceRefs: input.provenance.evidenceRefs,
-        },
+        collectionId,
+        kind: 'paste', title: input.title, text: input.content, parseStatus: 'pending',
+        metadata: {assistantCandidateId:input.candidateId,assistantRunId:input.loopRunId,assistantEvidenceRefs:input.provenance.evidenceRefs},
       }, 'user');
-      assertKnowledgeTargetMatches(source, input);
+      assertKnowledgeTargetMatches(source, {...input,collectionId});
       return { targetRef: `kb://${input.targetId}` };
     },
 
@@ -178,7 +193,7 @@ function createCandidateRepository(
 ): AssistantCandidatePromotionRepository {
   const map = (candidate: AssistantCandidate | undefined): AssistantCandidatePromotionRecord | undefined => {
     if (!candidate || !['pending', 'accepting', 'accepted', 'accept_failed'].includes(candidate.status)) return undefined;
-    return {
+    const mapped:AssistantCandidatePromotionRecord = {
       id: candidate.id,
       runId: candidate.runId,
       kind: candidate.kind,
@@ -193,6 +208,8 @@ function createCandidateRepository(
       targetId: candidate.targetId,
       acceptedTargetRef: candidate.acceptedTargetRef,
     };
+    if(store.getAssistantCandidatePublicationMode?.(candidate.id)==='protected')throw Error('assistant_publication_required');
+    return mapped;
   };
   return {
     get(candidateId) {
@@ -252,7 +269,7 @@ function assertMemoryTargetMatches(existing: MemoryRecord, expected: MemoryRecor
     && existing.title === expected.title
     && existing.summary === expected.summary
     && existing.type === expected.type
-    && JSON.stringify(existing.provenance) === JSON.stringify(expected.provenance);
+    && canonicalJson(existing.provenance) === canonicalJson(expected.provenance);
   if (!matches) throw new Error('assistant_memory_target_conflict');
 }
 
@@ -266,7 +283,7 @@ function assertKnowledgeTargetMatches(
     && metadata.clientRequestKey === `assistant-candidate:${input.candidateId}`
     && metadata.assistantCandidateId === input.candidateId
     && metadata.assistantRunId === input.loopRunId
-    && JSON.stringify(metadata.assistantEvidenceRefs ?? []) === JSON.stringify(input.provenance.evidenceRefs)
+    && canonicalJson(metadata.assistantEvidenceRefs ?? []) === canonicalJson(input.provenance.evidenceRefs)
     && metadata.assistantContentDigest === computeKbSourceContentDigest({ text: input.content });
   if (!matches) throw new Error('assistant_knowledge_target_conflict');
 }

@@ -1,3 +1,4 @@
+import {assertOrdinarySourceWriterRoute,observeOrdinarySQLiteWriter} from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -10,7 +11,6 @@ import type {
   MultiAgentApprovalDurable, MultiAgentApprovalStatus, MultiAgentApprovalReason, MultiAgentApprovalEventPayload,
 } from '../shared/multi-agent-types.js';
 
-const MAX_CONTENT_BYTES = 2 * 1024 * 1024;
 const TABLES = ['groups', 'agents', 'events', 'messages', 'contents', 'operations', 'root_turns', 'managed_resources'] as const;
 type Table = typeof TABLES[number];
 type SqlValue = string | number | null;
@@ -27,24 +27,8 @@ export interface ThreadDeletionReceipt {
   result: MultiAgentControlResult;
 }
 
-/** Frozen logical accounting format: recursively key-sorted, finite, plain JSON UTF-8. */
-export function encodeMultiAgentRow(value: unknown): string {
-  const seen = new Set<object>();
-  function canonical(item: unknown): unknown {
-    if (item === null || typeof item === 'string' || typeof item === 'boolean') return item;
-    if (typeof item === 'number' && Number.isFinite(item)) return item;
-    if (typeof item !== 'object' || !item) throw new Error('invalid multi-agent JSON value');
-    if (seen.has(item)) throw new Error('cyclic multi-agent JSON value');
-    seen.add(item);
-    try {
-      if (Array.isArray(item)) return item.map(canonical);
-      if (Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) throw new Error('non-plain multi-agent JSON value');
-      return Object.fromEntries(Object.keys(item).sort().filter(key => (item as Record<string, unknown>)[key] !== undefined)
-        .map(key => [key, canonical((item as Record<string, unknown>)[key])]));
-    } finally { seen.delete(item); }
-  }
-  return JSON.stringify(canonical(value));
-}
+import {encodeMultiAgentRow} from '../../src/runtime/multi-agent/row-codec.js';
+export {encodeMultiAgentRow} from '../../src/runtime/multi-agent/row-codec.js';
 
 export function truncateMultiAgentText(text: string, maxBytes: number): { text: string; truncated: boolean } {
   const bytes = Buffer.from(text, 'utf8');
@@ -52,103 +36,9 @@ export function truncateMultiAgentText(text: string, maxBytes: number): { text: 
   return { text: new TextDecoder().decode(bytes.subarray(0, maxBytes), { stream: true }), truncated: true };
 }
 
-const APPROVAL_STATUSES: readonly MultiAgentApprovalStatus[] = ['pending', 'approved', 'denied', 'expired', 'invalidated'];
-const APPROVAL_REASONS: readonly MultiAgentApprovalReason[] = ['user_denied', 'approval_deadline', 'actor_deadline', 'actor_aborted',
-  'permission_revoked', 'descriptor_changed', 'scope_disposed', 'factory_disposed', 'turn_sealed', 'restart', 'approval_persistence_failed'];
-const APPROVAL_FIELDS = ['approvalId', 'bootId', 'profileId', 'workspaceId', 'threadId', 'groupId', 'agentId', 'turn', 'turnId', 'sourceTaskId',
-  'canonicalName', 'toolName', 'cwd', 'ownerId', 'slotId', 'capabilityId', 'revision', 'permissionRevision', 'invocationNonce', 'inputSha256',
-  'inputByteLength', 'issuedAt', 'minDeadlineAt', 'status', 'persistenceState', 'reason'];
-function scalarRecord(value: unknown, fields: readonly string[], required = fields): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('invalid multi-agent scalar record');
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  if (Reflect.ownKeys(descriptors).some(key => typeof key !== 'string' || !fields.includes(key)
-    || !descriptors[key].enumerable || !Object.hasOwn(descriptors[key], 'value'))
-    || required.some(key => !descriptors[key] || descriptors[key].value === undefined)) throw new Error('invalid multi-agent scalar fields');
-  return value as Record<string, unknown>;
-}
-function boundedString(value: unknown, maximum = 256): asserts value is string {
-  if (typeof value !== 'string' || !value.trim() || value.length > maximum) throw new Error('invalid multi-agent scalar string');
-}
-function safeInteger(value: unknown, minimum = 0): asserts value is number {
-  if (!Number.isSafeInteger(value) || (value as number) < minimum) throw new Error('invalid multi-agent scalar integer');
-}
-function captureApprovalOperation(value: unknown): ApprovalRequestOperation {
-  const operation = scalarRecord(value, ['groupId', 'operationId', 'requestHash', 'command', 'applyState', 'result']);
-  if (operation.command !== 'approval_request' || typeof operation.applyState !== 'string' || !['prepared', 'applied', 'unknown'].includes(operation.applyState)) throw new Error('invalid approval operation');
-  for (const field of ['groupId', 'operationId', 'requestHash']) boundedString(operation[field]);
-  const result = scalarRecord(operation.result, ['approval']);
-  const approval = scalarRecord(result.approval, APPROVAL_FIELDS, APPROVAL_FIELDS.filter(key => key !== 'sourceTaskId' && key !== 'reason'));
-  for (const field of ['approvalId', 'bootId', 'profileId', 'workspaceId', 'threadId', 'groupId', 'agentId', 'turnId', 'canonicalName', 'toolName',
-    'ownerId', 'slotId', 'capabilityId', 'invocationNonce']) boundedString(approval[field]);
-  if (approval.sourceTaskId !== undefined) boundedString(approval.sourceTaskId);
-  boundedString(approval.cwd, 4096);
-  for (const field of ['turn', 'permissionRevision', 'inputByteLength', 'issuedAt', 'minDeadlineAt']) safeInteger(approval[field]);
-  safeInteger(approval.revision, 1);
-  if ((approval.inputByteLength as number) > MAX_CONTENT_BYTES || (approval.minDeadlineAt as number) < (approval.issuedAt as number)
-    || typeof approval.inputSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(approval.inputSha256)
-    || !APPROVAL_STATUSES.includes(approval.status as MultiAgentApprovalStatus)
-    || typeof approval.persistenceState !== 'string' || !['confirmed', 'unknown'].includes(approval.persistenceState)
-    || approval.reason !== undefined && !APPROVAL_REASONS.includes(approval.reason as MultiAgentApprovalReason)
-    || approval.groupId !== operation.groupId || operation.operationId !== `approval-request:${approval.approvalId}`) throw new Error('invalid approval scalar metadata');
-  const json = encodeMultiAgentRow(operation);
-  if (Buffer.byteLength(json) > 4096) throw new Error('approval_metadata_too_large');
-  return JSON.parse(json) as ApprovalRequestOperation;
-}
+import {MAX_CONTENT_BYTES,APPROVAL_STATUSES,APPROVAL_REASONS,boundedString,safeInteger,captureApprovalOperation,captureApprovalOperationForWrite,captureWorkspaceAuthorization,approvalEvent,captureApprovalEvent} from '../../src/runtime/multi-agent/approval-records.js';
+export {captureApprovalOperationForWrite} from '../../src/runtime/multi-agent/approval-records.js';
 
-/**
- * Admission invariant shared by transport and every pending-row writer. A
- * visible request must fit all legal finalizations, including their reason.
- * Read/recovery capture deliberately keeps the original current-row contract.
- */
-export function captureApprovalOperationForWrite(value: unknown): ApprovalRequestOperation {
-  const operation = captureApprovalOperation(value), approval = operation.result.approval;
-  if (approval.status === 'pending') {
-    for (const status of APPROVAL_STATUSES) {
-      if (status === 'pending') continue;
-      for (const reason of [undefined, ...APPROVAL_REASONS]) {
-        captureApprovalOperation({ ...operation, applyState: 'applied', result: { approval: {
-          ...approval, status, persistenceState: 'confirmed', reason,
-        } } });
-      }
-    }
-  }
-  return operation;
-}
-
-function captureWorkspaceAuthorization(value: unknown): WorkspaceExecutionAuthorizationRow {
-  const row = { ...scalarRecord(value, ['profileId', 'workspaceId', 'permissionRevision', 'executionAllowed', 'updatedAt', 'actorId', 'lastReceiptJson']) };
-  boundedString(row.profileId); boundedString(row.workspaceId); safeInteger(row.permissionRevision); safeInteger(row.updatedAt);
-  if (typeof row.executionAllowed !== 'boolean') throw new Error('invalid workspace authorization allowed value');
-  if (row.actorId === null || row.lastReceiptJson === null) {
-    if (row.actorId !== null || row.lastReceiptJson !== null || row.permissionRevision !== 0 || row.executionAllowed !== true) throw new Error('invalid initial workspace authorization');
-  } else {
-    boundedString(row.actorId); boundedString(row.lastReceiptJson, 4096);
-    const envelope = scalarRecord(JSON.parse(row.lastReceiptJson), ['requestHash', 'receipt']);
-    if (typeof envelope.requestHash !== 'string' || !/^[a-f0-9]{64}$/.test(envelope.requestHash)) throw new Error('invalid workspace authorization request hash');
-    const receipt = scalarRecord(envelope.receipt, ['operationId', 'state', 'permissionRevision', 'executionAllowed', 'persistenceState', 'outcome', 'error'],
-      ['operationId', 'state', 'permissionRevision', 'executionAllowed', 'persistenceState']);
-    boundedString(receipt.operationId);
-    if (receipt.state !== 'applied' || receipt.persistenceState !== 'confirmed' || receipt.permissionRevision !== row.permissionRevision
-      || receipt.executionAllowed !== row.executionAllowed || receipt.outcome !== undefined && receipt.outcome !== 'rejected'
-      || receipt.outcome === 'rejected' && (row.executionAllowed !== false || receipt.error !== 'grant_not_applied')
-      || receipt.outcome === undefined && receipt.error !== undefined) throw new Error('invalid workspace authorization receipt');
-    row.lastReceiptJson = encodeMultiAgentRow(envelope);
-  }
-  const json = encodeMultiAgentRow(row);
-  if (Buffer.byteLength(json) > 4096) throw new Error('workspace authorization exceeds reserve record limit');
-  return JSON.parse(json) as WorkspaceExecutionAuthorizationRow;
-}
-function approvalEvent(approval: MultiAgentApprovalDurable): MultiAgentApprovalEventPayload {
-  return { approvalId: approval.approvalId, status: approval.status, persistenceState: approval.persistenceState,
-    ...(approval.reason === undefined ? {} : { reason: approval.reason }) };
-}
-function captureApprovalEvent(value: unknown): MultiAgentApprovalEventPayload {
-  const event = scalarRecord(value, ['approvalId', 'status', 'persistenceState', 'reason'], ['approvalId', 'status', 'persistenceState']);
-  boundedString(event.approvalId);
-  if (!APPROVAL_STATUSES.includes(event.status as MultiAgentApprovalStatus) || typeof event.persistenceState !== 'string' || !['confirmed', 'unknown'].includes(event.persistenceState)
-    || event.reason !== undefined && !APPROVAL_REASONS.includes(event.reason as MultiAgentApprovalReason)) throw new Error('invalid approval event');
-  return JSON.parse(encodeMultiAgentRow(event)) as MultiAgentApprovalEventPayload;
-}
 export interface FinalizeApprovalInput {
   groupId: string; approvalId: string; bootId: string; status: Exclude<MultiAgentApprovalStatus, 'pending'>;
   reason?: MultiAgentApprovalReason; decisionOperation?: MultiAgentOperation;
@@ -194,9 +84,12 @@ export class DesktopMultiAgentStore {
     this.maxBytes = options.maxBytes ?? 100 * 1024 * 1024;
     this.reserveBytes = options.reserveBytes ?? 1024 * 1024;
     if (this.reserveBytes <= 0 || this.maxBytes <= this.reserveBytes) throw new Error('invalid multi-agent byte quota');
+    assertOrdinarySourceWriterRoute();
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     try {
+      observeOrdinarySQLiteWriter(dbPath, 'multi-agent-groups-sqlite-v1');
+      assertOrdinarySourceWriterRoute();
       const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
       if (![0, 1, 2, 3].includes(version.user_version)) throw new Error(`unsupported multi-agent schema version ${version.user_version}`);
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=0;');
@@ -497,8 +390,7 @@ export class DesktopMultiAgentStore {
     return this.transaction(() => {
     const previous = this.getAgent(groupId, input.id);
     const ordinal = input.parentId === null ? undefined : previous ? previous.presentationOrdinal
-      : Number((this.db.prepare("SELECT COALESCE(MAX(json_extract(data_json,'$.presentationOrdinal')),0)+1 AS ordinal FROM agents WHERE group_id=?")
-        .get(groupId) as { ordinal: number }).ordinal);
+      : this.presentationForAgent(groupId,input.id) ?? this.nextPresentationOrdinal(groupId);
     if (ordinal !== undefined && (!Number.isSafeInteger(ordinal) || ordinal < 1)) throw new Error('invalid presentation ordinal');
     const agent: DesktopAgentSnapshot = {
       createdAt: this.now(), executionActive: false, sessionResident: false, runtimeResident: false,
@@ -571,7 +463,7 @@ export class DesktopMultiAgentStore {
     return rows.map(row => this.parse(row));
   }
 
-  sendMessage(groupId: string, input: { sender: MultiAgentSender; receiverId: string; text: string; kind?: MultiAgentMessage['kind']; contentId?: string; truncated?: boolean }, settlement = false): MultiAgentMessage {
+  sendMessage(groupId: string, input: { sender: MultiAgentSender; receiverId: string; text: string; kind?: MultiAgentMessage['kind']; contentId?: string; truncated?: boolean;bodyUnavailable?:true }, settlement = false): MultiAgentMessage {
     return this.transaction(() => {
       if (settlement && (input.sender.kind !== 'agent' || input.kind !== 'result' && input.kind !== 'error')) throw new Error('invalid settlement handoff');
       this.assertWritable(groupId, settlement);
@@ -587,7 +479,7 @@ export class DesktopMultiAgentStore {
       }
       const message: MultiAgentMessage = {
         messageId: randomUUID(), groupId, sender: input.sender, receiverId: input.receiverId,
-        kind: input.kind ?? 'message', preview: input.text, contentId: input.contentId,
+        kind: input.kind ?? 'message', preview: input.text, contentId: input.contentId,...(input.bodyUnavailable?{bodyUnavailable:true as const}:{}),
         truncated: input.truncated ?? false, deliveryState: 'unread', claimId: null, turnId: null, createdAt: this.now(),
       };
       this.putMessage(message);
@@ -621,6 +513,27 @@ export class DesktopMultiAgentStore {
   }
   hasUnread(groupId: string, receiverId: string): boolean {
     return Boolean(this.db.prepare("SELECT 1 FROM messages WHERE group_id=? AND receiver_id=? AND delivery_state='unread' LIMIT 1").get(groupId, receiverId));
+  }
+  /** Main-owned input facts only; this is not a cross-process write fence. */
+  captureSemanticInputBoundary(groupId: string, receiverId: string): (() => void) | undefined {
+    const inspect = () => {
+      if (this.closed) throw new Error('semantic_mailbox_closed');
+      const group = this.requireGroup(groupId), thread = this.getThread(group.threadId);
+      if (group.bootId !== this.bootId || group.historicalOnly || !thread || thread.activeGroupId !== groupId
+        || thread.deleteState && thread.deleteState !== 'none' || !this.getAgent(groupId, receiverId)) throw new Error('semantic_mailbox_owner_changed');
+      const blocked = Boolean(thread.pendingApprovalCount) || Boolean(this.db.prepare(
+        "SELECT 1 FROM messages WHERE group_id=? AND receiver_id=? AND delivery_state<>'context_applied' LIMIT 1").get(groupId, receiverId));
+      const changes = group.lastSeq, threadRevision = thread.threadRevision;
+      const external = this.db.prepare('PRAGMA data_version').get()!.data_version;
+      if (!Number.isSafeInteger(changes) || !Number.isSafeInteger(threadRevision) || !Number.isSafeInteger(external)) throw new Error('semantic_mailbox_revision');
+      return { blocked, changes, threadRevision, external };
+    };
+    const captured = inspect();
+    if (captured.blocked) return undefined;
+    return () => {
+      const current = inspect();
+      if (current.blocked || current.changes !== captured.changes || current.threadRevision !== captured.threadRevision || current.external !== captured.external) throw new Error('semantic_mailbox_changed');
+    };
   }
   unreadMessageIds(groupId: string, receiverId: string, senderIds: readonly string[]): string[] {
     if (!senderIds.length) return [];
@@ -674,11 +587,11 @@ export class DesktopMultiAgentStore {
     });
   }
 
-  putContent(groupId: string, agentId: string, text: string, settlement = false): MultiAgentContent {
+  putContent(groupId: string, agentId: string, text: string, settlement = false, unavailable?: {status: DesktopAgentSnapshot['status']}): MultiAgentContent {
     this.assertWritable(groupId, settlement);
     const clipped = truncateMultiAgentText(text, MAX_CONTENT_BYTES);
     const bytes = Buffer.from(clipped.text, 'utf8');
-    const content: MultiAgentContent = { contentId: randomUUID(), groupId, agentId, utf8Text: clipped.text, byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), truncated: clipped.truncated };
+    const content: MultiAgentContent = { contentId: randomUUID(), groupId, agentId, utf8Text: clipped.text, byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), truncated: clipped.truncated,...(unavailable?{bodyUnavailable:true as const,status:unavailable.status}:{}) };
     this.write('contents', groupId, { content_id: content.contentId }, { group_id: groupId, agent_id: agentId }, content, false);
     return content;
   }
@@ -687,7 +600,7 @@ export class DesktopMultiAgentStore {
     if (!content) throw new Error('unknown content or group mismatch');
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > content.byteLength) throw new Error('invalid content offset');
     const bytes = Buffer.from(content.utf8Text, 'utf8').subarray(offset, offset + this.limit(limit, 64 * 1024));
-    return { contentId, base64: bytes.toString('base64'), nextOffset: offset + bytes.length, byteLength: content.byteLength, sha256: content.sha256, truncated: content.truncated };
+    return { contentId, base64: bytes.toString('base64'), nextOffset: offset + bytes.length, byteLength: content.byteLength, sha256: content.sha256, truncated: content.truncated,...(content.bodyUnavailable?{bodyUnavailable:true as const,status:content.status}:{}) };
   }
 
   /** Internal rollback/retention primitive; caller authorization belongs to the service. */
@@ -706,11 +619,79 @@ export class DesktopMultiAgentStore {
     });
   }
 
+  private nextPresentationOrdinal(groupId:string):number {
+    const row=this.db.prepare("SELECT COALESCE(MAX(ordinal),0) AS ordinal FROM (SELECT json_extract(data_json,'$.presentationOrdinal') AS ordinal FROM agents WHERE group_id=? UNION ALL SELECT json_extract(data_json,'$.presentationReservation.ordinal') AS ordinal FROM operations WHERE group_id=?)").get(groupId,groupId) as {ordinal:number};
+    const ordinal=Number(row.ordinal)+1;
+    if(!Number.isSafeInteger(ordinal)||ordinal<1)throw Error('presentation reservation capacity exhausted');
+    return ordinal;
+  }
+  private presentationForAgent(groupId:string,agentId:string):number|undefined {
+    const rows=this.db.prepare("SELECT data_json,logical_bytes FROM operations WHERE group_id=? AND json_extract(data_json,'$.presentationReservation.agentId')=?").all(groupId,agentId) as unknown as JsonRow[];
+    if(rows.length>1)throw Error('presentation reservation conflict');
+    return rows.length?this.parse<MultiAgentOperation>(rows[0]).presentationReservation!.ordinal:undefined;
+  }
+  /** Host metadata allocation in the same durable operation; never publishes an actor. */
+  reservePresentationOrdinal(input:{groupId:string;operationId:string;requestHash:string;agentId:string}):number {
+    const {groupId,operationId,requestHash,agentId}=input;
+    return this.transaction(()=>{
+      const operation=this.getOperation(groupId,operationId);
+      if(!operation||operation.command!=='spawn'||operation.requestHash!==requestHash)throw Error('operation_id_conflict');
+      if(operation.presentationReservation){if(operation.presentationReservation.agentId!==agentId)throw Error('presentation reservation conflict');return operation.presentationReservation.ordinal;}
+      if(operation.applyState!=='prepared'||operation.result.targetAgentId!==agentId||this.getAgent(groupId,agentId)||this.presentationForAgent(groupId,agentId)!==undefined)throw Error('presentation reservation conflict');
+      const ordinal=this.nextPresentationOrdinal(groupId);
+      this.putOperation({...operation,presentationReservation:{agentId,ordinal}});
+      return ordinal;
+    });
+  }
+
+  /** Immutable metadata only; admission still requires the actual Main and execution capabilities. */
+  reserveManagedFollowupTurn(input:{groupId:string;operationId:string;requestHash:string;agentId:string;previousTurnId:string;expectedTurn:number;rootEpoch:number;messageHash:string;closureHash:string}):NonNullable<MultiAgentOperation['managedTurnReservation']> {
+    const {groupId,operationId,requestHash,agentId,previousTurnId,expectedTurn,rootEpoch,messageHash,closureHash}=input;
+    if(!agentId||!previousTurnId||agentId.length>128||previousTurnId.length>128||!Number.isSafeInteger(expectedTurn)||expectedTurn<2||!Number.isSafeInteger(rootEpoch)||rootEpoch<1||!/^([a-f0-9]{64})$/.test(messageHash)||!/^([a-f0-9]{64})$/.test(closureHash))throw Error('invalid followup reservation');
+    return this.transaction(()=>{
+      const operation=this.getOperation(groupId,operationId);
+      if(!operation||operation.command!=='followup'||operation.requestHash!==requestHash)throw Error('followup reservation conflict');
+      const expected={agentId,previousTurnId,expectedTurn,rootEpoch,messageHash,closureHash};
+      if(operation.managedTurnReservation){const saved=operation.managedTurnReservation;for(const key of Object.keys(expected) as Array<keyof typeof expected>)if(saved[key]!==expected[key])throw Error('followup reservation conflict');return saved;}
+      if(operation.result.state!=='queued_next_admission'||operation.result.targetAgentId!==agentId||operation.result.expectedTurn!==expectedTurn)throw Error('followup reservation conflict');
+      const reserved={...expected,nextTurnId:randomUUID()};
+      this.putOperation({...operation,managedTurnReservation:reserved});return reserved;
+    });
+  }
+
   putOperation(operation: MultiAgentOperation, control = false): void {
+    this.transaction(()=>{
     if (operation.command === 'approval_request') operation = captureApprovalOperationForWrite(operation);
     const existing = this.getOperation(operation.groupId, operation.operationId);
     if (existing && existing.requestHash !== operation.requestHash) throw new Error('operation_id_conflict');
+    if(existing?.command.startsWith('published_message')&&encodeMultiAgentRow(existing)!==encodeMultiAgentRow(operation))throw Error('published_message_immutable');
+    if(existing?.followupInput){
+      if(operation.followupInput&&(operation.followupInput.targetId!==existing.followupInput.targetId||operation.followupInput.message!==existing.followupInput.message))throw Error('followup input conflict');
+      operation={...operation,followupInput:existing.followupInput};
+    }
+    if(existing?.followupAcceptedResult){
+      if(operation.followupAcceptedResult&&JSON.stringify(operation.followupAcceptedResult)!==JSON.stringify(existing.followupAcceptedResult))throw Error('followup receipt conflict');
+      operation={...operation,followupAcceptedResult:existing.followupAcceptedResult};
+    }
+    if(existing?.followupAckBytes!==undefined){
+      if(operation.followupAckBytes!==undefined&&operation.followupAckBytes!==existing.followupAckBytes)throw Error('followup ACK conflict');
+      operation={...operation,followupAckBytes:existing.followupAckBytes};
+    }
+    if(operation.followupAckBytes!==undefined&&(typeof operation.followupAckBytes!=='string'||Buffer.byteLength(operation.followupAckBytes)>8192))throw Error('followup ACK capacity exceeded');
+    if(existing?.managedTurnReservation){
+      if(operation.managedTurnReservation&&JSON.stringify(operation.managedTurnReservation)!==JSON.stringify(existing.managedTurnReservation))throw Error('followup reservation conflict');
+      operation={...operation,managedTurnReservation:existing.managedTurnReservation};
+    }
+    if(existing?.presentationReservation){
+      const reserved=existing.presentationReservation;
+      if(existing?.fixedAckBytes!==undefined){if(operation.fixedAckBytes!==undefined&&operation.fixedAckBytes!==existing.fixedAckBytes)throw Error('fixed ACK conflict');operation={...operation,fixedAckBytes:existing.fixedAckBytes};}
+    if(operation.fixedAckBytes!==undefined&&(typeof operation.fixedAckBytes!=='string'||Buffer.byteLength(operation.fixedAckBytes)>8192))throw Error('fixed ACK capacity exceeded');
+    if(operation.presentationReservation&&(operation.presentationReservation.agentId!==reserved.agentId||operation.presentationReservation.ordinal!==reserved.ordinal))throw Error('presentation reservation conflict');
+      operation={...operation,presentationReservation:reserved};
+    }
+    if(operation.presentationReservation&&(!Number.isSafeInteger(operation.presentationReservation.ordinal)||operation.presentationReservation.ordinal<1||!operation.presentationReservation.agentId))throw Error('invalid presentation reservation');
     this.write('operations', operation.groupId, { group_id: operation.groupId, operation_id: operation.operationId }, {}, operation, control);
+  });
   }
   getOperation(groupId: string, operationId: string): MultiAgentOperation | null { return this.readScoped('operations', groupId, 'operation_id', operationId); }
 

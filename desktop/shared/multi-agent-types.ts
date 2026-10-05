@@ -90,6 +90,7 @@ export interface DesktopAgentSnapshot {
   cleanupError?: string;
   lastResult?: string;
   resultContentId?: string;
+  bodyUnavailable?: true;
   sourceTaskId?: string;
   hostDeliveryStatus?: HostDeliveryRecord['status'];
   guardFailure?: GuardFailure;
@@ -121,6 +122,7 @@ export interface DesktopMultiAgentGroup {
 }
 
 export interface MultiAgentMessage {
+  bodyUnavailable?: true;
   messageId: string;
   groupId: string;
   sender: MultiAgentSender;
@@ -263,9 +265,11 @@ export interface MultiAgentDesktopAPI {
 export interface MultiAgentContent {
   contentId: string; groupId: string; agentId: string; utf8Text: string;
   byteLength: number; sha256: string; truncated: boolean;
+  bodyUnavailable?: true; status?: DesktopAgentStatus;
 }
 export interface MultiAgentContentPage {
   contentId: string; base64: string; nextOffset: number; byteLength: number; sha256: string; truncated: boolean;
+  bodyUnavailable?: true; status?: DesktopAgentStatus;
 }
 
 export interface MultiAgentRootBinding {
@@ -275,7 +279,17 @@ export interface MultiAgentRootBinding {
   status: DesktopAgentStatus;
   delivery?: HostDeliveryRecord;
 }
+export interface ManagedFollowupTurnReservation {
+  readonly agentId:string;readonly previousTurnId:string;readonly nextTurnId:string;
+  readonly expectedTurn:number;readonly rootEpoch:number;readonly messageHash:string;readonly closureHash:string;
+}
 export interface MultiAgentOperation {
+  managedTurnReservation?: ManagedFollowupTurnReservation;
+  followupInput?:Readonly<{targetId:string;message:string}>;
+  followupAcceptedResult?: Record<string,unknown>;
+  followupAckBytes?:string;
+  presentationReservation?: Readonly<{agentId:string;ordinal:number}>;
+  fixedAckBytes?: string;
   groupId: string; operationId: string; requestHash: string; command: string;
   applyState: 'prepared' | 'applied' | 'unknown';
   result: Record<string, unknown>;

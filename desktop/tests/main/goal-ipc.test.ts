@@ -30,10 +30,16 @@ describe('desktop Goal IPC', () => {
     const services = {
       getDataRoot: () => '/tmp/xiaok-goal-ipc-test',
       createTask: vi.fn(async (input: unknown) => input),
+      getGoalNativeMutation: vi.fn(async (threadId: string) => ({ threadId })),
+      recoverGoalNativeMutation: vi.fn(async (input: unknown) => input),
+      continueGoalNativeMutation: vi.fn(async (input: unknown) => input),
+      cancelGoalNativeMutation: vi.fn(async (input: unknown) => input),
       getGoal: vi.fn(async (threadId: string) => ({ threadId })),
       createGoal: vi.fn(async (input: unknown) => input),
       pauseGoal: vi.fn(async (threadId: string) => ({ threadId })),
       resumeGoal: vi.fn(async (input: unknown) => input),
+      recoverGoalPublication: vi.fn(async (input: unknown) => input),
+      continueGoalPublication: vi.fn(async (input: unknown) => input),
       cancelGoal: vi.fn(async (threadId: string) => ({ threadId })),
       replaceGoal: vi.fn(async (input: unknown) => input),
       ackGoalTaskAttached: vi.fn(async () => undefined),
@@ -62,6 +68,27 @@ describe('desktop Goal IPC', () => {
     expect(services.createTask).toHaveBeenCalledWith({
       prompt: 'hello', materials: [], context: { threadId: 'thread_1' },
     }, undefined);
+
+    for (const [channel, method] of [['recoverPublication', 'recoverGoalPublication'], ['continuePublication', 'continueGoalPublication']] as const) {
+      for (const extra of [{ requestSource: 'agent' }, { intentId: 'forged' }, { challenge: {} }]) {
+        await expect(handlers.get(`desktop:goal:${channel}`)?.({}, { threadId: 'thread_1', ...extra })).rejects.toThrow(/field|input/);
+      }
+      await handlers.get(`desktop:goal:${channel}`)?.({}, { threadId: 'thread_1' });
+      expect(services[method]).toHaveBeenCalledWith({ threadId: 'thread_1', requestSource: 'user' });
+    }
+
+    const verificationDefinition = { version: 1, obligations: [{ obligationId: 'original', predicateId: 'artifact', predicateVersion: '1', semantics: 'current-subject', recipe: { kind: 'artifact-content', checks: [{ id: 'check', path: 'result.txt', sha256: 'a'.repeat(64), structure: 'utf8' }] } }] };
+    await handlers.get('desktop:goal:create')?.({}, { threadId: 'thread_1', objective: 'original', expectedEvidenceKinds: ['file_artifact'], verificationDefinition });
+    expect(services.createGoal).toHaveBeenLastCalledWith({ threadId: 'thread_1', objective: 'original', expectedEvidenceKinds: ['file_artifact'], verificationDefinition });
+    await expect(handlers.get('desktop:goal:create')?.({}, { threadId: 'thread_1', objective: 'original', expectedEvidenceKinds: ['file_artifact'], verificationDefinition: {} })).rejects.toThrow();
+    for (const [channel, method] of [['recoverNativeMutation', 'recoverGoalNativeMutation'], ['continueNativeMutation', 'continueGoalNativeMutation'], ['cancelNativeMutation', 'cancelGoalNativeMutation']] as const) {
+      expect(handlers.has(`desktop:goal:${channel}`)).toBe(true);
+      for (const extra of [{ requestSource: 'agent' }, { mutationId: 'forged' }, { owner: {} }]) await expect(handlers.get(`desktop:goal:${channel}`)?.({}, { threadId: 'thread_1', ...extra })).rejects.toThrow(/field|input/);
+      await handlers.get(`desktop:goal:${channel}`)?.({}, { threadId: 'thread_1' });
+      expect(services[method]).toHaveBeenCalledWith({ threadId: 'thread_1', requestSource: 'user' });
+    }
+    await handlers.get('desktop:goal:getNativeMutation')?.({}, { threadId: 'thread_1' });
+    expect(services.getGoalNativeMutation).toHaveBeenCalledWith('thread_1');
 
     goalChanged?.({ threadId: 'thread_1', goal: { state: { status: 'active' } } });
     taskPrepared?.({ threadId: 'thread_1', attachmentId: 'attachment_1', taskId: 'task_1' });

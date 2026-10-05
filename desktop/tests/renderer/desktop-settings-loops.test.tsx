@@ -1,3 +1,4 @@
+import {StrictMode} from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -205,6 +206,18 @@ describe('Automations Loops page', () => {
     });
   });
 
+  it('shows publication pending instead of completion after the Main run response', async () => {
+    mocks.runLoopNow.mockResolvedValue({status:'publication_pending',run:{id:'pending',loopId:'user-loop-1',status:'running'}});
+    renderSettings();await screen.findByText('Weekly Briefing');fireEvent.click(screen.getByLabelText('run-loop-user-loop-1'));
+    await screen.findByText('等待验证发布');expect(mocks.runLoopNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows persisted publication pending after reload without running again', async () => {
+    mocks.getLoopRuns.mockResolvedValue([{id:'pending',loopId:'user-loop-1',status:'running',businessState:'publication_pending',startedAt:1}]);
+    renderSettings();await screen.findByText('Weekly Briefing');
+    await screen.findByText('等待验证发布');expect(mocks.runLoopNow).not.toHaveBeenCalled();
+  });
+
   it('opens the output directory and previews the output file through loopId-based APIs', async () => {
     renderSettings();
 
@@ -329,4 +342,55 @@ describe('Automations Loops page', () => {
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' }));
     expect(document.getElementById('loop-user-loop-1')).toBeTruthy();
   });
+  it('does not display cached execution success as a fresh completion observation', async () => {
+    mocks.getLoopRuns.mockResolvedValue([{id:'historical',loopId:'user-loop-1',status:'success',businessState:'success',startedAt:1,updatedAt:2,trigger:{kind:'manual'},evidenceIds:[]}]);
+    renderSettings();await screen.findByText('Weekly Briefing');
+    expect((await screen.findAllByText('等待验证发布')).length).toBeGreaterThan(0);
+    expect(mocks.runLoopNow).not.toHaveBeenCalled();
+  });
+  it('shows a dated verified observation and clears it when refresh fails', async () => {
+    mocks.getLoopRuns.mockResolvedValue([{id:'observed',loopId:'user-loop-1',status:'success',businessState:'success',completionObservation:{state:'verified_at_read',checkedAt:1000},startedAt:1,updatedAt:2,trigger:{kind:'manual'},evidenceIds:[]}]);
+    renderSettings('/automations/diagnostics');await screen.findByText('Artifact Evidence Regression');await screen.findByText(/核验通过/);
+    mocks.getLoopRuns.mockRejectedValueOnce(Error('offline'));
+    fireEvent.click(screen.getByRole('button',{name:'刷新'}));
+    await waitFor(()=>expect(screen.queryByText(/核验通过/)).not.toBeInTheDocument());
+    expect((await screen.findAllByText('等待验证发布')).length).toBeGreaterThan(0);
+  });
+
+  it('ignores an older successful response after a newer request has required revalidation', async () => {
+    const definitions=await mocks.getLoopDefinitions();let release!:(value:unknown)=>void;
+    mocks.getLoopDefinitions.mockImplementationOnce(()=>new Promise(resolve=>release=resolve));
+    mocks.getLoopRuns.mockResolvedValue([{id:'current',loopId:'user-loop-1',status:'success',businessState:'publication_pending',completionObservation:{state:'needs_revalidation',checkedAt:2000},startedAt:1,updatedAt:2,trigger:{kind:'manual'},evidenceIds:[]}]);
+    render(<StrictMode><MemoryRouter initialEntries={['/automations/loops']}><LocaleProvider><Routes><Route path='/automations/:tab' element={<AutomationsPage/>}/></Routes></LocaleProvider></MemoryRouter></StrictMode>);
+    await screen.findByText('Weekly Briefing');expect((await screen.findAllByText('等待验证发布')).length).toBeGreaterThan(0);
+    const count=mocks.getLoopRuns.mock.calls.length;
+    mocks.getLoopRuns.mockResolvedValue([{id:'old',loopId:'user-loop-1',status:'success',businessState:'success',completionObservation:{state:'verified_at_read',checkedAt:1000},startedAt:1,updatedAt:2,trigger:{kind:'manual'},evidenceIds:[]}]);
+    release(definitions);await waitFor(()=>expect(mocks.getLoopRuns.mock.calls.length).toBeGreaterThan(count));
+    expect(screen.queryByText(/核验通过/)).not.toBeInTheDocument();
+  });
+
+  it('copies historical execution and dated verification on separate localized lines', async () => {
+    const writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText}});
+    mocks.getLoopRuns.mockResolvedValue([{id:'observed',loopId:'artifact-evidence-regression',status:'success',businessState:'success',completionObservation:{state:'verified_at_read',checkedAt:1000},startedAt:1,updatedAt:2,trigger:{kind:'manual'},evidenceIds:[]}]);
+    renderSettings('/automations/diagnostics');await screen.findByText(/核验通过/);fireEvent.click(screen.getByLabelText('copy-loop-diagnostics-artifact-evidence-regression'));await waitFor(()=>expect(writeText).toHaveBeenCalledTimes(1));expect(writeText.mock.calls[0][0]).toContain('历史执行状态: success\n本次核验观察: 于 ');expect(writeText.mock.calls[0][0]).not.toContain('Latest run:');
+  });
+
+  it('clears loading when a silent run refresh supersedes an in-flight visible refresh', async () => {
+    renderSettings('/automations/diagnostics');await screen.findByText('Artifact Evidence Regression');
+    const button=screen.getByRole('button',{name:'刷新'});await waitFor(()=>expect(button).not.toBeDisabled());
+    const definitions=await mocks.getLoopDefinitions();let release!:(value:unknown)=>void;
+    mocks.getLoopDefinitions.mockImplementationOnce(()=>new Promise(resolve=>release=resolve));
+    fireEvent.click(button);expect(button).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('run-loop-artifact-evidence-regression'));
+    await waitFor(()=>expect(mocks.runLoopNow).toHaveBeenCalled());
+    await waitFor(()=>expect(button).not.toBeDisabled());release(definitions);
+  });
+
+  it('clears the previous output bytes before a refresh and keeps them cleared on failure', async () => {
+    mocks.readLoopOutputPreview.mockResolvedValueOnce({ok:true,loopId:'user-loop-1',pathLabel:'briefing.md',content:'Old published bytes',sizeBytes:19,truncated:false});
+    renderSettings();await screen.findByText('Weekly Briefing');fireEvent.click(screen.getByRole('button',{name:'预览输出文件: Weekly Briefing'}));await screen.findByText('Old published bytes');
+    mocks.readLoopOutputPreview.mockRejectedValueOnce(Error('publication_expired'));fireEvent.click(screen.getByRole('button',{name:'预览输出文件: Weekly Briefing'}));
+    await waitFor(()=>expect(screen.queryByText('Old published bytes')).not.toBeInTheDocument());
+  });
+
 });

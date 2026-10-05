@@ -1,4 +1,4 @@
-import { exec, spawn, type ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { request as httpRequest } from 'http';
 import { request as httpsRequest } from 'https';
 
@@ -115,6 +115,8 @@ export type HookConfigOrCommand = HookConfig | string;
 
 export interface HooksRunnerConfig {
   hooks?: HookConfigOrCommand[];
+  /** Bound by the lifecycle host; checked after original work drains. No tool admission. */
+  finalHookAdmission?: () => Record<string, unknown> | undefined | Promise<Record<string, unknown> | undefined>;
   /** Backward-compat: plain pre-hook commands */
   pre?: Array<{ command: string; tools?: string[] }>;
   /** Backward-compat: plain post-hook commands */
@@ -153,6 +155,8 @@ export interface HookRunResult {
 // ---------------------------------------------------------------------------
 
 export interface HooksRunner {
+  /** Seal admission and drain original transports, preserving unknown failures. */
+  closeAndDrain(): Promise<void>;
   /** Run hooks registered for a specific event. */
   runHooks(eventName: HookEventName, payload: Record<string, unknown>): Promise<HookRunResult>;
   /** Convenience: run PreToolUse hooks */
@@ -341,133 +345,90 @@ function interpretExitCode(
 // Executors
 // ---------------------------------------------------------------------------
 
-async function executeCommand(
+function executeCommand(
   config: CommandHookConfig,
   timeoutMs: number,
   payloadJson: string,
+  signal: AbortSignal,
   extraEnv?: Record<string, string>,
 ): Promise<CommandResult> {
+  signal.throwIfAborted();
   return new Promise<CommandResult>((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
-
-    const child = exec(config.command, {
-      shell: config.shell || undefined,
-      env: {
-        ...process.env,
-        ...extraEnv,
-        XIAOK_HOOK_PAYLOAD: payloadJson,
-      },
+    let stdout = '', stderr = '';
+    const errors = new Set<unknown>();
+    const child = spawn(config.command, [], {
+      shell: config.shell || true,
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+      env: { ...process.env, ...extraEnv, XIAOK_HOOK_PAYLOAD: payloadJson },
+      stdio: 'pipe',
     });
-
-    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
-    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
-
-    // Send payload via stdin
-    if (child.stdin) {
-      child.stdin.write(payloadJson);
-      child.stdin.end();
-    }
-
-    let killed = false;
-
-    const timer = setTimeout(() => {
-      killed = true;
-      child.kill();
-      reject(new Error(`hook timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      if (!killed) {
-        resolve({ exitCode: code ?? 1, stdout, stderr });
+    const remember = (error: unknown) => { errors.add(error); };
+    const terminate = () => {
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
+        else child.kill('SIGTERM');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error);
       }
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
-}
-
-function executeCommandAsync(
-  config: CommandHookConfig,
-  payloadJson: string,
-  onRewake?: () => void,
-  extraEnv?: Record<string, string>,
-): void {
-  const child = exec(config.command, {
-    shell: config.shell || undefined,
-    env: {
-      ...process.env,
-      ...extraEnv,
-      XIAOK_HOOK_PAYLOAD: payloadJson,
-    },
-  });
-
-  if (child.stdin) {
-    child.stdin.write(payloadJson);
-    child.stdin.end();
-  }
-
-  // For asyncRewake, listen for exit code 2
-  if (config.asyncRewake && onRewake) {
-    child.on('exit', (code) => {
-      if (code === 2) onRewake();
-    });
-  }
-
-  // Detach — don't let it hold the process
-  child.unref();
-}
-
-async function executeHttp(
-  config: HttpHookConfig,
-  timeoutMs: number,
-  payloadJson: string,
-): Promise<CommandResult> {
-  return new Promise<CommandResult>((resolve, reject) => {
-    const url = new URL(config.url);
-    const isHttps = url.protocol === 'https:';
-    const reqFn = isHttps ? httpsRequest : httpRequest;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Content-Length': String(Buffer.byteLength(payloadJson)),
-      ...(config.headers ?? {}),
     };
-
-    const req = reqFn(
-      {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method: 'POST',
-        headers,
-        timeout: timeoutMs,
-      },
-      (res) => {
-        let body = '';
-        res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        res.on('end', () => {
-          const statusCode = res.statusCode ?? 500;
-          resolve({
-            exitCode: statusCode >= 200 && statusCode < 300 ? 0 : 1,
-            stdout: body,
-            stderr: statusCode >= 400 ? `HTTP ${statusCode}` : '',
-          });
-        });
-      },
-    );
-
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error(`HTTP hook timeout after ${timeoutMs}ms`));
+    const abort = () => { remember(signal.reason); terminate(); };
+    signal.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(() => { remember(new Error(`hook timeout after ${timeoutMs}ms`)); terminate(); }, timeoutMs);
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdin.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') remember(error); });
+    child.on('error', remember);
+    // exit does not prove stdio or descendants have ended.
+    child.once('close', (code, terminationSignal) => {
+      clearTimeout(timer); signal.removeEventListener('abort', abort);
+      if (process.platform !== 'win32' && child.pid) {
+        try { process.kill(-child.pid, 0); remember(new Error('hook_process_group_unconfirmed')); }
+        catch (error) { if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') remember(error); }
+      }
+      if (terminationSignal && !errors.size) remember(new Error(`hook terminated by ${terminationSignal}`));
+      const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
+      if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'hook_transport_failed'));
+      else if (errors.size) reject(signal.reason);
+      else resolve({ exitCode: code ?? 1, stdout, stderr });
     });
-    req.on('error', reject);
-    req.write(payloadJson);
-    req.end();
+    child.stdin.end(payloadJson);
+    if (signal.aborted) abort();
+  });
+}
+
+function executeHttp(config: HttpHookConfig, timeoutMs: number, payloadJson: string, signal: AbortSignal): Promise<CommandResult> {
+  signal.throwIfAborted();
+  return new Promise<CommandResult>((resolve, reject) => {
+    const url = new URL(config.url), isHttps = url.protocol === 'https:';
+    let body = '', statusCode = 500, requestClosed = false, responseClosed = true, responseEnded = false;
+    let response: import('node:http').IncomingMessage | undefined;
+    const errors = new Set<unknown>();
+    const finish = () => {
+      if (!requestClosed || !responseClosed) return;
+      const unknown = [...errors].filter(error => !signal.aborted || error !== signal.reason);
+      if (unknown.length) reject(unknown.length === 1 ? unknown[0] : new AggregateError(unknown, 'HTTP_hook_transport_failed'));
+      else if (errors.size) reject(signal.reason);
+      else if (!responseEnded) reject(new Error('HTTP hook response incomplete'));
+      else resolve({ exitCode: statusCode >= 200 && statusCode < 300 ? 0 : 1, stdout: body, stderr: statusCode >= 400 ? `HTTP ${statusCode}` : '' });
+    };
+    const req = (isHttps ? httpsRequest : httpRequest)({
+      hostname: url.hostname, port: url.port || (isHttps ? 443 : 80), path: url.pathname + url.search, method: 'POST',
+      agent: false, headers: { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(payloadJson)), ...(config.headers ?? {}) },
+    }, res => {
+      response = res; responseClosed = false; statusCode = res.statusCode ?? 500;
+      res.on('data', chunk => { body += chunk.toString(); });
+      res.on('end', () => { responseEnded = true; });
+      res.on('error', error => { errors.add(error); });
+      res.once('close', () => { responseClosed = true; finish(); });
+    });
+    const abort = () => { errors.add(signal.reason); response?.destroy(signal.reason); req.destroy(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(() => { const error = new Error(`HTTP hook timeout after ${timeoutMs}ms`); errors.add(error); response?.destroy(error); req.destroy(error); }, timeoutMs);
+    req.on('error', error => { errors.add(error); });
+    req.once('close', () => { clearTimeout(timer); signal.removeEventListener('abort', abort); requestClosed = true; finish(); });
+    req.end(payloadJson);
+    if (signal.aborted) abort();
   });
 }
 
@@ -481,7 +442,7 @@ async function executePrompt(
   }
 
   const fullPrompt = config.prompt.replace('$ARGUMENTS', payloadJson);
-  try {
+  {
     const response = await promptExecutor(fullPrompt, config.model);
     const trimmed = response.trim();
 
@@ -497,8 +458,6 @@ async function executePrompt(
     }
 
     return { exitCode: 0, stdout: trimmed, stderr: '' };
-  } catch (error) {
-    return { exitCode: 1, stdout: '', stderr: String(error) };
   }
 }
 
@@ -506,10 +465,28 @@ async function executePrompt(
 // Factory
 // ---------------------------------------------------------------------------
 
+const emptyConfiguredRunners = new WeakSet<object>();
+/** Host factory fact, never a plugin-provided declaration. Callers may omit this
+ * genuinely empty runner entirely; this does not qualify any executable hook. */
+export function isEmptyConfiguredHooksRunner(runner: HooksRunner): boolean {
+  return emptyConfiguredRunners.has(runner);
+}
+
 export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
   const defaultTimeout = config.timeoutMs ?? 10000;
   const ctx: Partial<HookSharedContext> = config.context ?? {};
   const executedOnce = new Set<string>();
+  let closed = false, closing: Promise<void> | undefined;
+  const closeReason = new Error('hook_owner_closed');
+  const controllers = new Set<AbortController>();
+  const pending = new Set<Promise<unknown>>(), failures = new Set<unknown>();
+  const own = <T>(work: Promise<T>): Promise<T> => {
+    pending.add(work);
+    void work.then(() => pending.delete(work), error => {
+      pending.delete(work); if (error !== closeReason) failures.add(error);
+    });
+    return work;
+  };
 
   // Normalize all hook sources into unified HookConfig[]
   const allHooks: HookConfig[] = [
@@ -522,7 +499,20 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
     })),
   ];
 
-  async function runHooks(eventName: HookEventName, payload: Record<string, unknown>): Promise<HookRunResult> {
+  function runHooks(eventName: HookEventName, payload: Record<string, unknown>): Promise<HookRunResult> {
+    if (closed) return Promise.resolve({ ok: false, message: 'hook_owner_closed' });
+    return runOwned(eventName, payload);
+  }
+  function runOwned(eventName: HookEventName, payload: Record<string, unknown>): Promise<HookRunResult> {
+    const controller = new AbortController(); controllers.add(controller);
+    const rawWork = new Set<Promise<unknown>>();
+    const ownRaw = <T>(raw: Promise<T>): Promise<T> => { rawWork.add(raw); return own(raw); };
+    const work = own(Promise.resolve().then(() => executeHooks(eventName, payload, controller.signal, ownRaw)));
+    const retire = async () => { await Promise.allSettled([...rawWork]); controllers.delete(controller); };
+    void work.then(retire, retire);
+    return work;
+  }
+  async function executeHooks(eventName: HookEventName, payload: Record<string, unknown>, signal: AbortSignal, ownRaw: <T>(work: Promise<T>) => Promise<T>): Promise<HookRunResult> {
     const merged: HookRunResult = { ok: true };
     if (!isKnownHookEvent(eventName)) {
       console.warn(
@@ -537,6 +527,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
     }
 
     for (const hook of allHooks) {
+      if (signal.aborted) return { ok: false, message: String(signal.reason) };
       if (!shouldMatch(hook, eventName, payload)) continue;
 
       // Once-per-session check
@@ -551,11 +542,10 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
       // Async (fire-and-forget) mode
       if (hook.async && hook.type !== 'http' && hook.type !== 'prompt') {
         const cmdConfig = hook as CommandHookConfig;
-        executeCommandAsync(cmdConfig, payloadJson, hook.asyncRewake
-          ? () => config.onAsyncRewake?.(eventName, payload)
-          : undefined,
-          extraEnv,
-        );
+        const raw = ownRaw(executeCommand(cmdConfig, timeout, payloadJson, signal, extraEnv));
+        void ownRaw(raw.then(result => {
+          if (!closed && cmdConfig.asyncRewake && result.exitCode === 2) config.onAsyncRewake?.(eventName, payload);
+        }, () => {}));
         merged.async = true;
         continue;
       }
@@ -565,11 +555,11 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
         const hookType = hook.type ?? 'command';
 
         if (hookType === 'http') {
-          result = await executeHttp(hook as HttpHookConfig, timeout, payloadJson);
+          result = await ownRaw(executeHttp(hook as HttpHookConfig, timeout, payloadJson, signal));
         } else if (hookType === 'prompt') {
-          result = await executePrompt(hook as PromptHookConfig, payloadJson, config.promptExecutor);
+          result = await ownRaw(executePrompt(hook as PromptHookConfig, payloadJson, config.promptExecutor)).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }));
         } else {
-          result = await executeCommand(hook as CommandHookConfig, timeout, payloadJson, extraEnv);
+          result = await ownRaw(executeCommand(hook as CommandHookConfig, timeout, payloadJson, signal, extraEnv));
         }
 
         const interpreted = interpretExitCode(result, eventName);
@@ -606,8 +596,26 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
     return merged;
   }
 
-  return {
+  const runner: HooksRunner = {
     runHooks,
+    closeAndDrain() {
+      if (closing) return closing;
+      closed = true;
+      closing = Promise.resolve().then(async () => {
+        // An accepted run can register its raw transport in the next microtask.
+        while (pending.size) await Promise.allSettled([...pending]);
+        try {
+          const payload = await config.finalHookAdmission?.();
+          if (payload !== undefined) {
+            await runOwned('SessionEnd', payload);
+            while (pending.size) await Promise.allSettled([...pending]);
+          }
+        } catch (error) { if (error !== closeReason) failures.add(error); }
+        if (failures.size) throw new AggregateError([...failures], 'hook_physical_drain_unconfirmed');
+      });
+      for (const controller of controllers) controller.abort(closeReason);
+      return closing;
+    },
 
     async runPreHooks(toolName, input) {
       return runHooks('PreToolUse', { tool_name: toolName, tool_input: input });
@@ -618,4 +626,6 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
       return result.message ? [result.message] : [];
     },
   };
+  if (allHooks.length === 0) emptyConfiguredRunners.add(runner);
+  return runner;
 }
