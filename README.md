@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.7 (October 3, 2026).** CLI and Desktop metadata are aligned at **1.5.7**. This update adds numbered `ask_user` option shortcuts, the Windows Computer Use host and backend, drained Windows shell output, typed Desktop file IPC contracts, and repository governance gates. Get currently available installers from the [latest published release](https://github.com/kaisersong/xiaok-cli/releases/latest); 1.5.7 becomes downloadable after the [release build](https://github.com/kaisersong/xiaok-cli/actions/workflows/desktop-release.yml) and publication checks complete. See [Version History](#version-history).
+**Release target: 1.5.9 (October 5, 2026).** CLI and Desktop metadata are aligned at **1.5.9**. This release includes image reads as vision input, inline CLI image placement, safer Desktop model-disconnect recovery, readable narration, and approvals in the chat with an explicit task-scoped option. npm and installer availability are verified separately; use [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) for published assets. See [Version History](#version-history).
 
 ---
 
@@ -249,11 +249,11 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). Version `desktop-v1.5.7` provides these assets once release CI completes:
+Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The `desktop-v1.5.9` release build targets these assets; they become downloadable after signing, notarization, and publication checks complete:
 
-- `xiaok-1.5.7-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.7-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.7.exe` — Windows x64 installer.
+- `xiaok-1.5.9-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.9-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.9.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
@@ -467,7 +467,7 @@ git clone https://github.com/kaisersong/intent-broker.git
 git clone https://github.com/kaisersong/kai-xiaok-plugins.git
 ```
 
-Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins all three siblings to `desktop-v1.5.7`; changing local source does not update those release tags. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
+Run these from the parent of `xiaok-cli`. Update compatible checkouts together. The [release workflow](.github/workflows/desktop-release.yml) pins sibling source commits: KSwarm `d4be312`, Intent Broker `0791810`, and plugins `a5b473c`; local uncommitted changes are excluded from release builds. [electron-builder.json](desktop/electron-builder.json) declares the packaged service/plugin resources.
 
 ---
 
@@ -558,6 +558,20 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.9 — Release preparation, October 5, 2026
+
+- CLI batches SubAgent and Thinking refresh into one terminal frame, preventing blank-frame flicker while preserving drafts and transcript.
+- CLI image reads return validated PNG/JPEG/GIF/WebP content to vision-capable models; inline terminal images remain in the conversation transcript.
+- Desktop separates narration across tool boundaries in streaming and history, avoids duplicate summaries, and shows approvals inside the chat. Users can explicitly allow identical operations for the current task; changed inputs and future tasks still need approval.
+- Desktop recovers disconnected tool turns while retaining completed effects, and explains responses that close without a result.
+- MCP tool events forward invocation progress. CLI and Desktop version metadata are aligned; sibling source commits are pinned for repeatable packaging.
+- See [release notes](release-notes/1.5.9.md) for checks and publication status. Uncommitted work in other agent checkouts is excluded.
+
+### v1.5.8 — CLI release, October 4, 2026
+
+- CLI startup tolerates unavailable capability health-cache storage on Windows; native CUA ABI compatibility checks were updated.
+- Published package: `xiaokcode@1.5.8`. Desktop installers use their own release lifecycle.
 
 ### v1.5.7 — Release preparation, October 3, 2026
 
