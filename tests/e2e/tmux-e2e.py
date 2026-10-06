@@ -1836,8 +1836,8 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         assert_contains(permission_prompt, "bash", "permission tool name did not render")
         assert_contains(permission_prompt, permission_command, "permission command summary did not render")
         assert_true(count_occurrences(permission_prompt, "xiaok 想要执行以下操作") == 1, f"permission prompt duplicated:\n{permission_prompt}")
-        assert_true("❯ 允许一次" in permission_prompt, f"default permission selection was not visible:\n{permission_prompt}")
-        assert_overlay_above_prompt_with_gap(permission_prompt, "↑↓ 选择")
+        assert_true("❯ 1. 允许一次" in permission_prompt, f"default permission selection was not visible:\n{permission_prompt}")
+        assert_overlay_above_prompt_with_gap(permission_prompt, "数字直选")
         assert_no_truncated_footer_status(permission_prompt)
 
         tmux.send_key("Down")
@@ -1845,14 +1845,14 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
         time.sleep(0.2)
         project_selected = tmux.capture()
         assert_true(
-            "❯ 始终允许 bash(cmd *) (保存到项目)" in project_selected,
+            "❯ 3. 始终允许 bash(cmd *) (保存到项目)" in project_selected,
             f"permission selection did not move to project allow:\n{project_selected}",
         )
         assert_true(
             count_occurrences(project_selected, "xiaok 想要执行以下操作") == 1,
             f"permission prompt duplicated during navigation:\n{project_selected}",
         )
-        assert_overlay_above_prompt_with_gap(project_selected, "↑↓ 选择")
+        assert_overlay_above_prompt_with_gap(project_selected, "数字直选")
         assert_no_truncated_footer_status(project_selected)
         tmux.send_key("Enter")
 
@@ -1903,24 +1903,24 @@ def run_terminal_e2e(project_dir: Path, keep_session: bool = False) -> None:
                 "xiaok 想要执行以下操作" in text
                 and "sandbox-expand:bash" in text
                 and str(sandbox_fixture) in text
-                and "↑↓ 选择" in text
+                and "数字直选" in text
                 and has_input_prompt(text)
             ),
             timeout=12,
         )
         assert_contains(sandbox_prompt, "sandbox-expand:bash", "sandbox prompt tool name did not render")
         assert_contains(sandbox_prompt, str(sandbox_fixture), "sandbox prompt target path did not render")
-        assert_overlay_above_prompt_with_gap(sandbox_prompt, "↑↓ 选择")
+        assert_overlay_above_prompt_with_gap(sandbox_prompt, "数字直选")
 
         tmux.send_key("Down")
         tmux.send_key("Down")
         time.sleep(0.2)
         sandbox_project_selected = tmux.capture()
         assert_true(
-            "保存到项目" in sandbox_project_selected and "❯ 始终允许 sandbox-expand:bash(" in sandbox_project_selected,
+            "保存到项目" in sandbox_project_selected and "❯ 3. 始终允许 sandbox-expand:bash(" in sandbox_project_selected,
             f"sandbox prompt selection did not move to project allow:\n{sandbox_project_selected}",
         )
-        assert_overlay_above_prompt_with_gap(sandbox_project_selected, "↑↓ 选择")
+        assert_overlay_above_prompt_with_gap(sandbox_project_selected, "数字直选")
         tmux.send_key("Enter")
 
         first_sandbox_result = tmux.wait_for(

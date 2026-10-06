@@ -1,6 +1,6 @@
 import { createTerminalController } from './terminal-controller.js';
 import { TerminalRenderer } from './terminal-renderer.js';
-import { boldCyan, dim, yellow } from './render.js';
+import { formatPermissionPromptLines } from './permission-prompt.js';
 function getTerminalSize(stream) {
     return {
         columns: stream.columns ?? process.stdout.columns ?? 80,
@@ -56,16 +56,10 @@ export class ReplRenderer {
         };
     }
     buildPermissionOverlayLines(modal) {
-        return [
-            `${yellow('⚡')} xiaok 想要执行以下操作`,
-            `${'工具'}: ${boldCyan(modal.toolName)}`,
-            ...modal.targetLines,
-            ...modal.options.map((option, index) => {
-                const selected = index === modal.selectedIndex;
-                return selected ? boldCyan(`❯ ${option}`) : dim(`  ${option}`);
-            }),
-            dim('↑↓ 选择  Enter 确认  Esc 取消'),
-        ];
+        const lines = formatPermissionPromptLines(modal.toolName, {}, modal.options.map((label, index) => ({
+            label, selected: index === modal.selectedIndex,
+        })));
+        return [...lines.slice(0, 2), ...modal.targetLines, ...lines.slice(2)];
     }
     render() {
         this.syncTerminalSize();

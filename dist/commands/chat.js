@@ -825,7 +825,9 @@ async function runChat(initialInput, opts) {
         permissionManager,
         onPrompt: async (name, input) => {
             const tuiDecide = async () => {
-                const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
+                const choice = await showPermissionPrompt(name, input, {
+                    transcriptLogger, renderer: replRenderer, permissionMode: permissionManager.getMode(),
+                });
                 if (choice.action === 'deny')
                     return false;
                 if (choice.action === 'allow_once')

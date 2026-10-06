@@ -5,6 +5,8 @@ import type { PermissionChoice } from '../types.js';
 import { getUiCopy, type UiLocale } from './locale.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
+import type { PermissionMode } from '../ai/permissions/manager.js';
+import { requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
 
 interface PromptOption {
   label: string;
@@ -109,6 +111,7 @@ export function formatPermissionPromptLines(
   input: Record<string, unknown>,
   options: PromptRenderOption[],
   locale: UiLocale = 'zh-CN',
+  permissionMode?: PermissionMode,
 ): string[] {
   const copy = getUiCopy(locale);
   const target = extractTarget(input, locale);
@@ -116,6 +119,11 @@ export function formatPermissionPromptLines(
     `${yellow('⚡')} ${copy.approvalTitle}`,
     `${copy.toolLabel}: ${boldCyan(toolName)}`,
   ];
+
+  if (permissionMode === 'auto' && toolName === 'bash' && typeof input.command === 'string') {
+    const risk = requiresAutoPromptForBashCommand(input.command);
+    if (risk?.reason) lines.push(dim(copy.autoApprovalReason(risk.reason)));
+  }
 
   if (target) {
     lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
@@ -146,6 +154,7 @@ export async function showPermissionPrompt(
   config?: {
     transcriptLogger?: TranscriptLogger;
     renderer?: ReplRenderer;
+    permissionMode?: PermissionMode;
   },
 ): Promise<PermissionChoice> {
   const rule = deriveRule(toolName, input);
@@ -186,6 +195,7 @@ export async function showPermissionPrompt(
         toolName,
         input,
         promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })),
+        'zh-CN', config?.permissionMode,
       );
 
       if (renderWithRenderer && renderer) {
@@ -248,6 +258,7 @@ export async function showPermissionPrompt(
         toolName,
         input,
         promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })),
+        'zh-CN', config?.permissionMode,
       ).length;
       stdout.write('\x1b7'); // save cursor
       for (let i = 0; i < totalLines; i++) {
@@ -296,7 +307,7 @@ export async function showPermissionPrompt(
       }
 
       // Number keys → 直接选择对应项
-      const num = parseInt(key, 10);
+      const num = /^[1-9]$/.test(key) ? Number(key) : 0;
       if (num >= 1 && num <= promptOptions.length) {
         transcriptLogger?.record({
           type: 'permission_prompt_decision',
