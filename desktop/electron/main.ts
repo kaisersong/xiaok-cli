@@ -1157,6 +1157,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     kswarmRequest: (path, init) => kswarmService.request(path, { ...init, headers: { ...init?.headers, 'x-kswarm-mutation-token': kswarmService.getDesktopMutationToken() } }),
   });
   const collaborationRoomBrokerClient = scopedRoomClients.roomClient;
+  services.bindConversationProjectRoomClient(collaborationRoomBrokerClient);
   const roomWorkspaceBroker = scopedRoomClients.workspaceBroker;
   setRoomHistoryBrokerClient(collaborationRoomBrokerClient);
   const ensureWorkspaceProtocol = () => ensureRoomWorkspaceProtocol({

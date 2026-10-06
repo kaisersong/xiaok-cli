@@ -161,7 +161,8 @@ import {
   type PreparedGoalTask,
 } from './desktop-goal-coordinator.js';
 import { SqliteGoalStore } from './goal-store-sqlite.js';
-import { DesktopExecutionCoordinator, withExecutionLane } from './desktop-execution-coordinator.js';
+import { DesktopExecutionCoordinator, currentExecutionLane, withExecutionLane } from './desktop-execution-coordinator.js';
+import { ConversationProjectService, type ConversationProjectRoomClient } from './conversation-project-service.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -873,6 +874,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     now: options.now,
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
+  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService });
   const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
   const coordinateRunner = (runner: TaskRunner): TaskRunner => input => (
     executionCoordinator.run(input.signal, () => runner(input))
@@ -957,6 +959,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let kbStore: ReturnType<typeof createKbStoreSqlite> | undefined;
   const kswarmCreateProjectToolOptions: KSwarmCreateProjectToolOptions = {
     enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
+    finalizeProjectProposal: (proposal, context) => conversationProjects.isAuthorized(context.taskId)
+      ? conversationProjects.create(proposal, { ...context, requestSource: 'agent' })
+      : Promise.resolve(undefined),
   };
   registerKSwarmTools(registry, options.kswarmService, kswarmCreateProjectToolOptions);
 
@@ -1771,16 +1776,24 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     await multiAgentReady;
     await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user');
   };
-  const localTaskHost = multiAgentService ? {
+  const localTaskHost = {
     prepareTask: async (input: TaskCreateInput) => {
-      await multiAgentReady;
-      if (input.executionScope && input.executionScope.kind !== 'goal_turn') return host.prepareTask(input);
-      const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
-      await prepareMultiAgentThread(threadId);
-      return multiAgentService.prepareRoot(host, threadId, input);
+      let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
+      if (multiAgentService && (!input.executionScope || input.executionScope.kind === 'goal_turn')) {
+        await multiAgentReady;
+        const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
+        await prepareMultiAgentThread(threadId);
+        prepared = await multiAgentService.prepareRoot(host, threadId, input);
+      } else {
+        prepared = await host.prepareTask(input);
+      }
+      if (currentExecutionLane() === 'foreground') {
+        conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+      }
+      return prepared;
     },
     startTask: host.startTask.bind(host), cancelTask: host.cancelTask.bind(host),
-  } : host;
+  };
   goalCoordinator = new DesktopGoalCoordinator({
     store: goalStore,
     taskHost: localTaskHost,
@@ -2899,7 +2912,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
         }
         if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
-        return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor) : goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context });
+        return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor)
+          : conversationProjects.withUserRequest({ prompt: input.prompt, threadId: context?.threadId }, { requestSource: 'user' },
+            () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context }));
       });
     },
     async getModelConfig() {
@@ -3143,8 +3158,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
       if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
-      return afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input));
+      return conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
+        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input)));
     },
+    /** Main-only binding; never exposed through preload or a model tool. */
+    bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => conversationProjects.bindRoomClient(client),
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
     createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'>) =>
       withExecutionLane('background', () => afterLocalRecovery(() => goalCoordinator.admitUserTask({
@@ -5532,6 +5550,7 @@ interface ToolLoopStrategies {
 }
 
 interface ToolLoopContext {
+  finalizeProjectProposal?: (proposal: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
   projectModel?: ProjectAgentModel;
   canResumeSummary?: () => boolean;
   adapter: Pick<ModelAdapter, 'stream'> & { getCapabilities?(): Partial<import('../../src/ai/runtime/model-capabilities.js').ModelCapabilities> };
@@ -6171,6 +6190,17 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         scoped: Boolean(ctx.mailbox),
       }); } catch (error) { toolImages.finish(false); throw error; }
       let { ok, result } = execution;
+      if (ok && isToolName(toolCall.name, 'create_project') && ctx.finalizeProjectProposal) {
+        let proposal: Record<string, unknown> | undefined;
+        try {
+          const parsed = JSON.parse(result);
+          if (isRecord(parsed?.proposal) && parsed.proposal.kind === 'project_proposal') proposal = parsed.proposal;
+        } catch { /* A failed/non-JSON tool result cannot authorize creation. */ }
+        if (proposal) {
+          const finalized = await ctx.finalizeProjectProposal(proposal);
+          if (finalized) { result = JSON.stringify(finalized); ok = finalized.ok === true; }
+        }
+      }
       const invocationImages = toolImages.finish(ok);
       ctx.signal.throwIfAborted();
       if (ok) {
@@ -6497,6 +6527,7 @@ type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'acti
 
 interface KSwarmCreateProjectToolOptions {
   enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
+  finalizeProjectProposal?: (proposal: Record<string, unknown>, context: { taskId: string; signal: AbortSignal }) => Promise<Record<string, unknown> | undefined>;
 }
 
 export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, options: KSwarmCreateProjectToolOptions = {}): Tool {
@@ -6504,7 +6535,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '生成一份多智能体协作项目提案（ProjectProposal）。此工具只能产出提案：严禁直接创建正式项目、严禁修改任何项目状态；正式项目必须由用户在桌面端确认后通过协作空间（Room-first）路径创建。当用户表达想要多智能体协作/工作流时调用此工具生成提案；单人可完成的任务（写报告、写调研、生成文档、分析材料等）严禁调用，直接执行。',
+      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后经 Room-first 创建真实项目，默认规划完成后自动激活并派发，无需用户再次去界面确认或点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -6539,11 +6570,9 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
       },
     },
     async execute(input) {
-      // Proposal-only contract (design §9.3, §10.1, §16.3): this tool must
-      // never perform KSwarm mutations (no POST /projects, no agent
-      // auto-creation). It assembles the exact create request the user will
-      // confirm, and returns it as a ProjectProposal. Formal creation runs
-      // through the trusted user Room-first path after confirmation.
+      // The tool remains read-only. The host may finalize this definition
+      // through main-owned Room-first creation when its real task context
+      // holds an explicit user authorization; tool input cannot mint one.
       // Identity fields (requestSource/actor) are transport facts and are
       // dropped from the proposal payload.
       const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder, executionMode, startPolicy, _xiaokRequestScope } = input as {
@@ -6719,7 +6748,10 @@ function normalizeCreateProjectKeyPart(value: unknown): string {
 
 function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requirements?: string }): string {
   const text = `${input.goal || ''}\n${input.requirements || ''}`;
-  const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(text);
+  const formatRequests = text
+    .replace(/markdown\s*(?:不算(?:交付)?(?:完成)?|不是(?:最终)?交付物|不是(?:最终)?报告)/gi, '')
+    .replace(/(?:不要|不接受|不得|严禁|不能(?:只)?(?:用)?|不允许|not\s+|no\s+)\s*(?:普通)?\s*markdown/gi, '');
+  const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(formatRequests);
   const explicitPptx = /(\.pptx\b|\bpptx\b|\bpowerpoint\b|\bppt\s*(文件|file|deck)?\b)/i.test(text);
   const explicitPdf = /(\.pdf\b|\bpdf\b|PDF文件|pdf文件)/i.test(text);
   const slide = /(幻灯片|演示文稿|slide deck|slides|presentation)/i.test(text);
@@ -7450,6 +7482,9 @@ export function createDesktopModelRunnerWithRegistry(
       messages,
       allToolDefs,
       registry: invocationRegistry,
+      finalizeProjectProposal: createProjectToolOptions.finalizeProjectProposal
+        ? proposal => createProjectToolOptions.finalizeProjectProposal!(proposal, { taskId, signal })
+        : undefined,
       invocationOptions,
       signal,
       taskDeadline: resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs),
