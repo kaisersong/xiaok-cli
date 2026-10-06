@@ -203,7 +203,7 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
   answerQuestion: (input) => ipcRenderer.invoke('desktop:answerQuestion', input),
   cancelTask: (taskId) => ipcRenderer.invoke('desktop:cancelTask', { taskId }),
   getActiveTask: () => ipcRenderer.invoke('desktop:getActiveTask'),
-  recoverTask: (taskId) => ipcRenderer.invoke('desktop:recoverTask', { taskId }),
+  recoverTask: (taskId, legacyPrompt) => ipcRenderer.invoke('desktop:recoverTask', { taskId, legacyPrompt }),
   openArtifact: (artifactId) => ipcRenderer.invoke('desktop:openArtifact', { artifactId }),
   // Wire shapes: desktop/shared/file-ipc-contract.ts (validated in main).
   openFileInSystemApp: (filePath) => ipcRenderer.invoke('desktop:openFileInSystemApp', { filePath }),

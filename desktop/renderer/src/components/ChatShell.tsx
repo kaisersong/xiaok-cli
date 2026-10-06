@@ -1187,14 +1187,16 @@ export function ChatShell() {
         let lastSubSinceIndex = 0;
         let lastSubToolStepsMsgId: string | null = null;
         let lastSnapshot: TaskSnapshot | undefined;
+        const missingTaskIds: string[] = [];
         for (const tid of allTaskIds) {
           // Check again after each async operation
           if (!loadCurrent()) return;
 
           try {
-            const { snapshot } = await api.recoverTask(tid);
+            const { snapshot, recoveredFromTaskId } = await api.recoverTask(tid, allTaskIds.length === 1 ? threadData.title ?? undefined : undefined);
             if (!loadCurrent()) return;
             if (snapshot) {
+              if (recoveredFromTaskId) allMessages.push({ id: `history-recovery-${tid}`, role: 'assistant', content: t.chatShell.historyRecovered(recoveredFromTaskId) });
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
               const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
@@ -1234,11 +1236,13 @@ export function ChatShell() {
                 }
               }
             }
-          } catch { if (!loadCurrent()) return; /* skip failed task */ }
+          } catch { if (!loadCurrent()) return; missingTaskIds.push(tid); }
         }
 
         // Final check before setting any state
         if (!loadCurrent()) return;
+
+        if (missingTaskIds.length) allMessages.push({ id: 'history-unavailable', role: 'assistant', content: t.chatShell.historyUnavailable(missingTaskIds.join(', ')) });
 
         // Now set all state atomically after final check
         setThread(threadData);

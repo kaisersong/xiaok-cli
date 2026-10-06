@@ -3182,6 +3182,8 @@ export const zh: LocaleStrings = {
   chatShell: {
     attachmentLabel: "附件:",
     cuUnavailable: "Computer Use 当前不可用。",
+    historyUnavailable: (taskIds) => `历史任务记录暂时无法读取（${taskIds}）。会话仍保留；已有项目及产物不会因此删除，也不会自动重跑。`,
+    historyRecovered: (taskId) => `原任务记录不可用，以下显示唯一同标题的成功历史记录（${taskId}）。这是该历史任务的真实内容，未改写原任务或重新启动项目。`,
     taskCreateFailed: "任务创建失败，请检查模型配置或稍后重试。",
     goalAttachmentQuerying: "任务附着结果尚未确认，正在只读核对。",
     goalAttachmentUnknown: "任务附着结果尚未确认；可能已经开始，请勿重复提交。可重新打开会话查看已保存状态。",

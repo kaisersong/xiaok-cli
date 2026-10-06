@@ -1,3 +1,4 @@
+import { findLegacyTaskHistory } from './legacy-task-history.js';
 import { getSupportedModelReasoningEfforts } from '../../src/ai/providers/model-reasoning-effort.js';
 import { resolveProviderTransport } from '../../src/ai/providers/auth-resolver.js';
 import { createProjectAgentModel, validateProjectAgentModelSelection, type ProjectAgentModel } from './project-agent-model.js';
@@ -2253,7 +2254,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     };
   }
 
-  async function runKSwarmAssignPo({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+  async function runKSwarmAssignPo({ payload, targetParticipantId, startAfterPlanning }: { payload: Record<string, unknown>; targetParticipantId?: string; startAfterPlanning?: boolean }) {
     try {
       const projectId = readString(payload.projectId) || readString(payload.taskId);
       if (!projectId) return { ok: false as const, error: 'project_id_missing' };
@@ -2301,6 +2302,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             error: tasksError instanceof Error ? tasksError.message : String(tasksError),
             phase: 'tasks' as const,
           };
+        }
+      }
+      if (startAfterPlanning) {
+        // Broker planning used to stop after persisting the board. Read the
+        // canonical user policy, then enter the same activation gate as the
+        // durable bootstrap queue; never infer permission from model output.
+        const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+        if (!isRecord(detail)) throw new Error('project_policy_unavailable');
+        const project = isRecord(detail.project) ? detail.project : detail;
+        const policy = readString(project.requestedStartPolicy);
+        if (project.poAgent !== fromAgent) throw new Error('project_po_mismatch');
+        if (policy === 'auto_activate_after_plan' || policy === 'activate_and_dispatch_after_plan') {
+          await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/activate-and-start`, withKSwarmDesktopMutationToken(options.kswarmService, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromAgent, startPolicy: policy,
+              idempotencyKey: `initial-plan-bootstrap:${projectId}:${policy}` }),
+          }));
         }
       }
       return { ok: true as const };
@@ -3221,7 +3239,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       return null;
     },
-    recoverTask: (taskId:string) => codexTasks.owns(taskId)?codexTasks.host.recoverTask(taskId):recoverTaskWithWorkflowArtifacts(taskId),
+    async recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }> {
+      try { return await (codexTasks.owns(taskId) ? codexTasks.host.recoverTask(taskId) : recoverTaskWithWorkflowArtifacts(taskId)); }
+      catch (error) {
+        // Only a physically missing legacy task may use this read-only fallback.
+        // Existing-but-unreadable/protected tasks retain their original error.
+        if (!legacyPrompt || existsSync(join(options.dataRoot, 'tasks', 'snapshots', `${taskId}.json`))) throw error;
+        const snapshot = await findLegacyTaskHistory({ root: join(options.dataRoot, 'tasks'), prompt: legacyPrompt,
+          read: id => snapshotStore.recoverTask(id) });
+        if (!snapshot) throw error;
+        return { snapshot, recoveredFromTaskId: snapshot.taskId };
+      }
+    },
     async recoverStaleTasks(): Promise<void> {
       await multiAgentReady;
       const active = await host.getActiveTasks();
@@ -6535,7 +6564,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后经 Room-first 创建真实项目，默认规划完成后自动激活并派发，无需用户再次去界面确认或点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
+      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后建立真实 Xiaok 项目，默认规划完成后自动激活并派发，不要求用户创建或操作协作空间，无需再次确认或手工点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -6650,7 +6679,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
           ...(clientRequestKey ? { clientRequestKey } : {}),
           createdAt: new Date().toISOString(),
-          note: '提案未执行：正式项目需要用户在桌面端确认后，经协作空间（Room-first）路径创建。',
+          note: '当前仅返回未执行的项目定义，尚无正式项目。只有可信用户会话具有明确创建授权时，主进程才会建立真实 Xiaok 项目；严禁声称已创建或指向不存在的提案确认界面。',
         };
         return JSON.stringify({ ok: true, proposal });
       } catch (err) {

@@ -3202,6 +3202,8 @@ export const en: LocaleStrings = {
   chatShell: {
     attachmentLabel: "Attachments:",
     cuUnavailable: "Computer Use is currently unavailable.",
+    historyUnavailable: (taskIds) => `Historical task records are unavailable (${taskIds}). The conversation remains saved; existing projects and artifacts are preserved and will not restart automatically.`,
+    historyRecovered: (taskId) => `The original task record is unavailable. Below is the only completed legacy record with this exact title (${taskId}). Its original content is shown without rewriting the missing task or restarting the project.`,
     taskCreateFailed: "Failed to create task. Please check model configuration or try again later.",
     goalAttachmentQuerying: "Task attachment is unconfirmed. Checking its saved state without restarting it.",
     goalAttachmentUnknown: "Task attachment is unconfirmed and execution may have started. Do not resubmit; reopen the conversation to view saved state.",

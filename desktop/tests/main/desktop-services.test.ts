@@ -2194,6 +2194,83 @@ describe('desktop services', () => {
     });
   });
 
+  it.each(['plan_only', 'auto_activate_after_plan', 'activate_and_dispatch_after_plan'] as const)('honors persisted %s after broker planning completes', async (startPolicy) => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          if (path === '/projects/proj-1' && !init?.body) return Response.json({ project: { id: 'proj-1', poAgent: 'xiaok-po', requestedStartPolicy: startPolicy } });
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, taskIds: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                rationale: '核心交付物',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmAssignPo({
+      startAfterPlanning: true,
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        projectName: 'Project',
+        goal: 'Write report',
+        requirements: 'Chinese output',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    if (startPolicy !== 'plan_only') expect(requests[2].body).toMatchObject({ startPolicy, fromAgent: 'xiaok-po' });
+    expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
+    expect(requests.map(item => item.path)).toEqual([
+      '/projects/proj-1/plan',
+      '/projects/proj-1/tasks',
+      ...(startPolicy === 'plan_only' ? [] : ['/projects/proj-1/activate-and-start']),
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({ analysis: '项目目标明确，先输出一份报告。' }),
+    });
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '撰写报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
   it('softens generated hard item counts for current-period research when user did not request a count', async () => {
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     const services = createDesktopServices({

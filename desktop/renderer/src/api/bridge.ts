@@ -442,9 +442,9 @@ export const api = {
     return r;
   },
 
-  async recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }> {
+  async recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }> {
     log.info('recoverTask', taskId);
-    const r = await window.xiaokDesktop.recoverTask(taskId);
+    const r = await window.xiaokDesktop.recoverTask(taskId, legacyPrompt);
     log.info('recoverTask ok', JSON.stringify({ status: r?.snapshot?.status }));
     return r;
   },

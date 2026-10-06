@@ -132,6 +132,29 @@ afterEach(() => {
 });
 
 describe('ChatShell draft prompt navigation state', () => {
+  it('labels the real identity of recovered legacy content without starting a new project', async () => {
+    mockGetThread.mockResolvedValue({ id: 'thread-legacy', title: '创建项目, 让10个智能体搞定本月国外主要AI产品动态分析', status: 'idle',
+      mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task_missing', taskIds: ['task_missing'] });
+    mockRecoverTask.mockResolvedValue({ recoveredFromTaskId: 'task_old', snapshot: { taskId: 'task_old', sessionId: 'sess_old', status: 'completed', prompt: '原始创建请求',
+      events: [{ type: 'assistant_delta', delta: '真实项目已经创建 proj-original' }], materials: [], createdAt: 1, updatedAt: 2 } });
+    render(<MemoryRouter initialEntries={['/t/thread-legacy']}><LocaleProvider>
+      <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+    </LocaleProvider></MemoryRouter>);
+    expect(await screen.findByText(/唯一同标题的成功历史记录（task_old）/)).toBeInTheDocument();
+    expect(await screen.findByText(/真实项目已经创建 proj-original/)).toBeInTheDocument();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+  it('shows an explicit notice instead of silently opening an empty missing history', async () => {
+    mockGetThread.mockResolvedValue({ id: 'thread-missing', title: '历史项目会话', status: 'idle',
+      mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task_missing', taskIds: ['task_missing'] });
+    mockRecoverTask.mockRejectedValue(new Error('task not found: task_missing'));
+    render(<MemoryRouter initialEntries={['/t/thread-missing']}><LocaleProvider>
+      <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+    </LocaleProvider></MemoryRouter>);
+    expect(await screen.findByText(/历史任务记录暂时无法读取/)).toBeInTheDocument();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
   it('hides the Goal task panel while Artifact canvas owns the right side and restores it after close', async () => {
     window.xiaokDesktop = {
       getGoal: vi.fn().mockResolvedValue({

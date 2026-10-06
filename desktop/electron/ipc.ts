@@ -1095,7 +1095,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:recoverTask', async (_event, input) => {
     log('info', 'recoverTask', { taskId: input?.taskId });
-    const r = await services.recoverTask(input.taskId);
+    const r = await services.recoverTask(input.taskId, typeof input.legacyPrompt === 'string' ? input.legacyPrompt : undefined);
     log('info', 'recoverTask ok', { status: r?.snapshot?.status });
     return r;
   });

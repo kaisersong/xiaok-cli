@@ -3087,6 +3087,8 @@ export interface LocaleStrings {
   chatShell: {
     attachmentLabel: string;
     cuUnavailable: string;
+    historyUnavailable: (taskIds: string) => string;
+    historyRecovered: (taskId: string) => string;
     taskCreateFailed: string;
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
