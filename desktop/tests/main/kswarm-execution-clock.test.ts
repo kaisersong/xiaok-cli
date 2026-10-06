@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from '../../electron/kswarm-execution-clock.js';
+import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs, resolveKSwarmProjectWorkerCapacity } from '../../electron/kswarm-execution-clock.js';
 describe('KSwarm actual execution clock', () => {
+  it('honors configured project concurrency and tolerates old or invalid settings', () => {
+    expect(resolveKSwarmProjectWorkerCapacity(9)).toBe(9);
+    expect(resolveKSwarmProjectWorkerCapacity(1)).toBe(1);
+    for (const value of [undefined, null, '9', 0, -1, 11, 1.5, {}]) {
+      expect(resolveKSwarmProjectWorkerCapacity(value)).toBe(3);
+    }
+  });
   it.each([undefined, null, {}, { required: true }, { version: 1, kind: 'other', required: true }])('keeps the legacy bound for incomplete or unrelated contracts %j', contract => {
     expect(resolveKSwarmWorkerRunMs({ evidenceContract: contract })).toBe(20 * 60 * 1000);
   });

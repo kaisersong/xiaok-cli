@@ -1,4 +1,8 @@
 /** Main-owned execution start, distinct from queue admission. */
+export function resolveKSwarmProjectWorkerCapacity(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 10 ? value : 3;
+}
+
 export function resolveKSwarmWorkerRunMs(task: { evidenceContract?: unknown }): number {
   const contract = task.evidenceContract as Record<string, unknown> | undefined;
   return contract?.version === 1 && contract.kind === 'external_source_v1' && contract.required === true

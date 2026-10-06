@@ -101,6 +101,20 @@ function arraysEqual(a: string[] | undefined, b: string[] | undefined): boolean 
   return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
 }
 
+/** Public metadata only; transport bindings and observed health belong to main/server owners. */
+export function buildManagedXiaokAgentSemanticPayload(
+  payload: Partial<ManagedXiaokAgentPayload>,
+  options: { update?: boolean } = {},
+): Record<string, unknown> {
+  const fields = ['id', 'name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities',
+    'outputCapabilities', 'runtimeType', 'runtimeSource', 'runtimeModel', 'runtimeHealth', 'maxConcurrentTasks', 'desktopModelId'];
+  const source = payload as Record<string, unknown>;
+  return Object.fromEntries(fields.flatMap(key => {
+    if (options.update && ['id', 'runtimeType', 'runtimeHealth'].includes(key)) return [];
+    return source[key] === undefined ? [] : [[key, source[key]]];
+  }));
+}
+
 export function buildManagedXiaokAgentPayload(
   input: ManagedXiaokAgentInput,
   config: Config,

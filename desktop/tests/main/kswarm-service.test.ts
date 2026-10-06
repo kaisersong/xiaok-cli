@@ -1262,7 +1262,7 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     writeFileSync(serverPath, '', 'utf8');
     writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
     vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
-    const requests: Array<{ path: string; method: string; token: string | null }> = [];
+    const requests: Array<{ path: string; method: string; token: string | null; body: Record<string, unknown> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
       const method = init?.method || 'GET';
@@ -1273,8 +1273,13 @@ describe('kswarm durable-state fail-stop exit classification', () => {
         workflowCapabilities: { schemaVersion: 'kswarm_workflow_patterns_v1', compiledContract: true, patternPublicView: true },
         service: { entryPath: serverPath },
       }), { status: 200 });
-      requests.push({ path: url.pathname, method, token });
-      if (method !== 'GET') return new Response('{}', { status: token ? 200 : 401 });
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      requests.push({ path: url.pathname, method, token, body });
+      if (method !== 'GET') {
+        const forbidden = ['apiKey', 'baseUrl', 'provider', 'model', 'customEnv', 'runtimePath', 'execution', 'credential', 'secret'];
+        const invalid = forbidden.some(key => Object.hasOwn(body, key)) || (method === 'PUT' && Object.hasOwn(body, 'runtimeType'));
+        return new Response('{}', { status: !token ? 401 : invalid ? 400 : 200 });
+      }
       if (url.pathname === '/agents') return new Response(JSON.stringify({ agents: [{ id: 'xiaok-po', status: 'online', runtimeType: 'xiaok', name: 'outdated' }] }), { status: 200 });
       if (url.pathname === '/agents/xiaok-po') return new Response(JSON.stringify({ agent: { id: 'xiaok-po', status: 'online', runtimeType: 'xiaok', name: 'outdated' } }), { status: 200 });
       return new Response('{}', { status: 200 });
@@ -1289,6 +1294,15 @@ describe('kswarm durable-state fail-stop exit classification', () => {
         expect.objectContaining({ path: '/agents/xiaok-po/restart', method: 'POST' }),
       ]));
       expect(mutations.every(request => request.token === service.getDesktopMutationToken())).toBe(true);
+      for (const request of mutations) {
+        for (const field of ['apiKey', 'baseUrl', 'provider', 'model', 'customEnv', 'runtimePath', 'execution', 'credential', 'secret']) {
+          expect(request.body).not.toHaveProperty(field);
+        }
+        if (request.method === 'PUT') {
+          expect(request.body).not.toHaveProperty('runtimeType');
+          expect(request.body).not.toHaveProperty('runtimeHealth');
+        }
+      }
       expect(requests.filter(request => request.method === 'GET').every(request => request.token === null)).toBe(true);
     } finally {
       await service.stop();

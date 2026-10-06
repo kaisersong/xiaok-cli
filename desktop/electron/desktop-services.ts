@@ -338,7 +338,7 @@ export function getDesktopMemoryBackend(dataRoot: string): 'layered' | 'fallback
   return _desktopMemoryStoreBackend;
 }
 import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
-import { buildManagedXiaokAgentPayload } from './managed-xiaok-agent.js';
+import { buildManagedXiaokAgentPayload, buildManagedXiaokAgentSemanticPayload } from './managed-xiaok-agent.js';
 import { ArtifactWorkspaceStore } from './artifact-workspace-store.js';
 import { ArtifactWorkspaceFileManager } from './artifact-workspace-files.js';
 import {
@@ -3089,8 +3089,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const config = await loadConfig();
       if (input.desktopModelId !== undefined) validateProjectAgentModelSelection(input.desktopModelId, 'xiaok', config, context?.requestSource);
       const payload = buildManagedXiaokAgentPayload(input, config);
-      const semanticPayload = Object.fromEntries(['id', 'name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'outputCapabilities', 'runtimeType', 'runtimeSource', 'runtimeModel', 'runtimeHealth', 'maxConcurrentTasks', 'desktopModelId']
-        .flatMap(key => (payload as unknown as Record<string, unknown>)[key] === undefined ? [] : [[key, (payload as unknown as Record<string, unknown>)[key]]]));
+      const semanticPayload = buildManagedXiaokAgentSemanticPayload(payload);
       return requestKSwarmJson(options.kswarmService, '/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },

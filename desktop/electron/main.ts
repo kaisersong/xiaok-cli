@@ -1,3 +1,4 @@
+import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -660,7 +661,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
-  const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
+  const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
   const computerUseAppIdentity = process.platform === 'win32'
     ? await (await import('./windows-computer-use-identity.js')).resolveWindowsComputerUseIdentity({

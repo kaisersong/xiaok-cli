@@ -27,7 +27,7 @@ import {
   type ServiceLaunchSpec,
 } from './kswarm-service-paths.js';
 import { loadConfig } from '../../src/utils/config.js';
-import { buildManagedXiaokAgentPayload, diffManagedXiaokAgentPatch } from './managed-xiaok-agent.js';
+import { buildManagedXiaokAgentPayload, buildManagedXiaokAgentSemanticPayload, diffManagedXiaokAgentPatch } from './managed-xiaok-agent.js';
 import type { KSwarmHealthDiagnosticInput } from './kswarm-service-diagnostics.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -931,7 +931,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
           const createRes = await fetchKSwarm('/agents', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(desired),
+            body: JSON.stringify(buildManagedXiaokAgentSemanticPayload(desired)),
           });
           if (!createRes.ok && createRes.status !== 409) {
             console.warn(`[kswarm-service] Failed to create seed agent ${desired.id}: ${createRes.status}`);
@@ -942,7 +942,9 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         const detailRes = await fetchKSwarm(`/agents/${desired.id}`);
         const detailPayload = detailRes.ok ? await detailRes.json() as { agent?: Record<string, unknown> } : null;
         const currentAgent = detailPayload?.agent ?? existing;
-        const patch = diffManagedXiaokAgentPatch(currentAgent, desired);
+        const rawPatch = diffManagedXiaokAgentPatch(currentAgent, desired);
+        const semanticPatch = rawPatch ? buildManagedXiaokAgentSemanticPayload(rawPatch, { update: true }) : {};
+        const patch = Object.keys(semanticPatch).length > 0 ? semanticPatch : null;
         if (patch) {
           const updateRes = await fetchKSwarm(`/agents/${desired.id}`, {
             method: 'PUT',
