@@ -1239,6 +1239,7 @@ export interface ProjectTeamOperationView {
 }
 
 export interface CreateKSwarmProjectSemanticInput {
+  startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
   name: string;
   goal: string;
   requirements?: string;
@@ -1435,7 +1436,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
   kswarmResumeWorkflowRun(input: { projectId: string; workflowRunId: string }): Promise<{ restored: boolean; reason?: string; jobId?: string }>;
-  kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[] }): Promise<{ ok: boolean; status?: string; error?: string }>;
+  kswarmStartProjectPlanning(input: { projectId: string; projectName: string; goal: string; requirements: string; planningGuidance: string; poAgent: string; members: string[]; startPolicy?: 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan' }): Promise<{ ok: boolean; status?: string; error?: string }>;
   getAssistantOverview(): Promise<AssistantOverviewView>;
   activateAssistant(): Promise<unknown>;
   pauseAssistant(): Promise<unknown>;

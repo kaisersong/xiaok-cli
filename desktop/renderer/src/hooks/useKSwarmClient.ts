@@ -87,6 +87,8 @@ export interface KSwarmTask {
   execution?: KSwarmTaskExecution | null;
 }
 
+export type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
+
 export type KSwarmProjectExecutionMode = 'direct' | 'auto' | 'workflow_preferred';
 
 export interface KSwarmTaskExecution {
@@ -126,6 +128,7 @@ export interface KSwarmPhase {
 }
 
 export interface KSwarmProject {
+  requestedStartPolicy?: KSwarmProjectStartPolicy;
   id: string;
   name: string;
   goal?: string;
@@ -279,6 +282,7 @@ export interface KSwarmProjectAgentSelection {
 }
 
 export interface CreateKSwarmProjectInput {
+  startPolicy?: KSwarmProjectStartPolicy;
   name: string;
   goal: string;
   requirements?: string;
@@ -1137,13 +1141,12 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
         planningGuidance: guidance.planningGuidance || undefined,
         enableSummary: input.enableSummary ?? true,
         autoStartPlanning: false,
-      }) as CreateKSwarmProjectResponse | null
+        startPolicy: input.startPolicy ?? 'activate_and_dispatch_after_plan',
+      }) as CreateKSwarmProjectResponse | KSwarmProject | null
       : null;
-    // Server returns { ok, project, preparation, planningStart } — unwrap the
-    // project. Treating the whole envelope as a KSwarmProject left id/name
-    // undefined, so the planning bootstrap below enqueued an empty projectId
-    // and the project silently never planned.
-    const result = response?.project ?? null;
+    // Main's semantic API returns the project directly. Older bridges return
+    // an envelope; accept both and use canonical values for the bootstrap.
+    const result = response && 'project' in response ? response.project : response as KSwarmProject | null;
     if (!result || !result.id) {
       console.error('[createProject] Project create returned no project id', response);
       return null;
@@ -1160,8 +1163,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
           goal: input.goal,
           requirements: input.requirements || '',
           planningGuidance: guidance.planningGuidance || '',
-          poAgent: input.poAgent,
-          members: input.members || [],
+          poAgent: result.poAgent || input.poAgent,
+          members: result.members ?? input.members ?? [],
+          startPolicy: result.requestedStartPolicy ?? input.startPolicy ?? 'activate_and_dispatch_after_plan',
         });
         if (!enqueueResult?.ok) {
           console.error('[createProject] Planning bootstrap enqueue rejected', enqueueResult);
