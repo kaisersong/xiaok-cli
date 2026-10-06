@@ -195,7 +195,9 @@ export class ScrollRegionManager {
     const reservedRowsAboveInput = overlayRows > 0
       ? overlayRows + this.config.gapHeight + summaryReserveRows
       : this.config.gapHeight + summaryReserveRows;
-    return Math.max(1, this.getInputStartRow(inputFrameRows) - reservedRowsAboveInput - 1);
+    const overlayStartRow = this.getInputStartRow(inputFrameRows) - reservedRowsAboveInput;
+    const leadingGapRows = overlayRows > 0 && overlayStartRow >= 3 ? 1 : 0;
+    return Math.max(1, overlayStartRow - leadingGapRows - 1);
   }
 
   /**
@@ -249,10 +251,15 @@ export class ScrollRegionManager {
     overlayKind?: ScrollPromptFrame['overlayKind'],
   ): string[] {
     const inputFrameRows = this.getInputFrameRows(inputRows);
-    const maxOverlayRows = Math.max(
+    const availableRows = Math.max(
       0,
       this.config.rows - inputFrameRows - 1 - this.config.gapHeight - this.getSummaryReserveRows(),
     );
+    // Keep the transcript tail (including its final newline) and a separator
+    // above menus. In tiny terminals prioritize visible choices and the input.
+    const maxOverlayRows = availableRows >= 4
+      ? availableRows - 3
+      : Math.max(0, availableRows - (availableRows > 1 ? 1 : 0));
     if (maxOverlayRows <= 0) {
       return [];
     }
@@ -975,10 +982,12 @@ export class ScrollRegionManager {
       1,
       this.getInputStartRow(previousInputRows) - this.config.gapHeight - this.getSummaryReserveRows(),
     );
+    const scrollBottom = this.getScrollBottomForLayout(inputFrameRows, overlayRows, frame.summaryLine ?? this.lastSummaryLine);
+    const leadingGapStartRow = scrollBottom + 1;
+    const previousLeadingGapStartRow = previousOverlayRows > 0 ? previousScrollBottom + 1 : previousOverlayStartRow;
     const clearStartRow = isPermissionOverlay && shouldSkipPermissionOverlayReserve()
       ? 1
-      : Math.min(previousOverlayStartRow, overlayStartRow);
-    const scrollBottom = Math.max(1, overlayStartRow - 1);
+      : Math.min(previousLeadingGapStartRow, leadingGapStartRow);
     const isPlaceholder = !this.lastInputValue;
 
     this.stream.write(RESET_SCROLL_REGION);
@@ -998,6 +1007,11 @@ export class ScrollRegionManager {
     this.setScrollRegion(scrollBottom);
     for (let row = clearStartRow; row <= statusBarRow; row += 1) {
       this.clearScreenRow(row);
+    }
+
+    for (let row = leadingGapStartRow; row < overlayStartRow; row += 1) {
+      this.clearScreenRow(row);
+      this.stream.write(this.padLine('', cols, false));
     }
 
     overlayLines.forEach((line, index) => {
