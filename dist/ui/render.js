@@ -7,7 +7,6 @@ import { getToolActivityLabel, getUiCopy } from './locale.js';
 import { publicAgentSummary } from '../ai/agents/subagent-presentation.js';
 import { getDisplayWidth, stripAnsi } from './display-width.js';
 import { BUILD_TIME } from '../build-info.js';
-import { punctumWordmark } from './punctum.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOGO_PATH = join(__dirname, '../../data/logo.txt');
 let colorsEnabled = process.stdout.isTTY !== false &&
@@ -229,13 +228,6 @@ export function renderWelcomeScreen(opts) {
     }
     if (useAsciiFrame && logo.length > 4) {
         logo = logo.slice(0, 4);
-    }
-    const wordmark = punctumWordmark();
-    if (wordmark) {
-        // Replace only the existing graphic; keep its row budget and footer geometry.
-        logo = [...wordmark];
-        while (logo.length < (useAsciiFrame ? 4 : 6))
-            logo.push('');
     }
     const tips = [
         boldYellow("快速开始指南"),

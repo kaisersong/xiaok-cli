@@ -82,7 +82,12 @@ export async function packCli({ output = root, npmCli = process.env.npm_execpath
   const scratch = await mkdtemp(join(tmpdir(), 'xiaok-cli-pack-'));
   try {
     const manifest = await readJson(join(root, 'package.json'));
-    for (const file of manifest.files) await cp(join(root, file), join(scratch, file), { recursive: true });
+    for (const file of manifest.files) {
+      await cp(join(root, file), join(scratch, file), {
+        recursive: true,
+        filter: (source) => source !== join(root, 'data', 'fonts', 'punctum'),
+      });
+    }
     for (const file of ['README.md', 'README.zh-CN.md', 'LICENSE']) {
       try { await cp(join(root, file), join(scratch, file)); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
