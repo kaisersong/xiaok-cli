@@ -334,6 +334,7 @@ function ConversationFirstHome({
   const attentionEmptyLabel = availabilityMessages.join(' · ') || t.welcome.noAttention;
   return (
     <div data-testid="welcome-home" className="mx-auto flex w-full max-w-[920px] flex-col items-center pb-24">
+      <div data-testid="welcome-brand" aria-hidden="true" className="punctum-brand">{t.welcome.brandName}</div>
       <h1 className="min-h-[2.5rem] text-center text-3xl font-medium text-[var(--c-text-primary)]">{typedGreeting}</h1>
       <p className="mt-1 text-sm text-[var(--c-text-secondary)]">{t.welcome.conversationSubtitle}</p>
       <div className="mt-6 w-full max-w-2xl">
@@ -456,7 +457,7 @@ function MetricStrip({
         <div key={metric.testId} className="flex items-center gap-3 px-2 py-1">
           <span className="grid size-8 place-items-center rounded-md bg-[var(--c-bg-deep)] text-[var(--c-accent)]">{metric.icon}</span>
           <div>
-            <p data-testid={metric.testId} className="text-lg font-semibold tabular-nums text-[var(--c-text-primary)]">{metric.value}</p>
+            <p data-testid={metric.testId} className="punctum-number tabular-nums text-[var(--c-text-primary)]">{metric.value}</p>
             <p className="text-[11px] text-[var(--c-text-secondary)]">{metric.label}</p>
           </div>
         </div>

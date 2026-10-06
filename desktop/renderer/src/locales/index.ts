@@ -2619,6 +2619,7 @@ export interface LocaleStrings {
 
   // welcome page
   welcome: {
+    brandName: string;
     greetingSuffix: string;
     inputPlaceholder: string;
     goalQuickPrompt: string;

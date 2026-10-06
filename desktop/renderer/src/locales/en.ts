@@ -2706,6 +2706,7 @@ export const en: LocaleStrings = {
 
   // welcome page
   welcome: {
+    brandName: 'XIAOK',
     greetingSuffix: ", let's get work done!",
     inputPlaceholder: "Describe what you need...",
     conversationSubtitle: "Start with a conversation while keeping ongoing work in view.",
