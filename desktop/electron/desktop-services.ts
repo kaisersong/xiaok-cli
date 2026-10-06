@@ -1,4 +1,4 @@
-import { KSwarmExecutionClock } from './kswarm-execution-clock.js';
+import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from './kswarm-execution-clock.js';
 import { findLegacyTaskHistory } from './legacy-task-history.js';
 import { getSupportedModelReasoningEfforts } from '../../src/ai/providers/model-reasoning-effort.js';
 import { resolveProviderTransport } from '../../src/ai/providers/auth-resolver.js';
@@ -877,7 +877,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService });
-  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
   const scopedKSwarmHosts = new Set<WeakRef<InProcessTaskRuntimeHost>>();
   const resolveScopedTaskHost = (taskId: string, fallback: InProcessTaskRuntimeHost): InProcessTaskRuntimeHost => {
     for (const reference of scopedKSwarmHosts) {
@@ -1889,7 +1889,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return createProjectAgentModel({ modelId, loadConfig });
   };
 
-  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { control?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
+  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { control?: boolean; projectWorker?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
     const execution = { clock: undefined as KSwarmExecutionClock | undefined };
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
@@ -1898,7 +1898,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       taskIdleTimeoutMs: 0,
       materialRegistry,
       snapshotStore,
-      runner: input => withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : 'background', () => coordinateRunner(async runInput => {
+      runner: input => withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
         execution.clock = new KSwarmExecutionClock(10 * 60 * 1000);
         execution.clock.start();
         await taskOptions.onStarted?.();
@@ -2034,10 +2034,14 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     };
 
     throwIfAborted();
-    const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
-    const workspaceRoot = handoff.project.workFolder || (artifactsDir ? dirname(artifactsDir) : process.cwd());
-    const clock = new KSwarmExecutionClock();
-    const taskHost = createKSwarmTaskHost(workspaceRoot, targetParticipantId, { onStarted: async () => { clock.start(); await onExecutionStarted?.(); } });
+    const baseArtifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
+    const workspaceRoot = handoff.project.workFolder || (baseArtifactsDir ? dirname(baseArtifactsDir) : process.cwd());
+    const runDirectory = createHash('sha256').update(JSON.stringify([handoff.project.id, handoff.task.id, handoff.runId])).digest('hex').slice(0, 32);
+    const artifactsDir = baseArtifactsDir && executionCoordinator.hasLaneCapacity('project_worker')
+      ? join(baseArtifactsDir, 'run-' + runDirectory) : baseArtifactsDir;
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    const clock = new KSwarmExecutionClock(resolveKSwarmWorkerRunMs(handoff.task));
+    const taskHost = createKSwarmTaskHost(workspaceRoot, targetParticipantId, { projectWorker: true, onStarted: async () => { clock.start(); await onExecutionStarted?.(); } });
     const runStartedAt = Date.now();
     const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
     const requiredOutputsText = formatKSwarmRequiredOutputs(handoff.task.requiredOutputs);
@@ -2048,6 +2052,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       `目标：${handoff.project.goal}`,
       handoff.project.requirements ? `要求：${handoff.project.requirements}` : '',
       artifactsDir ? `产物目录：${artifactsDir}` : '',
+      baseArtifactsDir && artifactsDir !== baseArtifactsDir ? `已有项目资料目录（只读参考，当前产物写入上面的产物目录）：${baseArtifactsDir}` : '',
       `任务：${handoff.task.title}`,
       handoff.task.brief ? `任务说明：${handoff.task.brief}` : '',
       handoff.task.acceptanceCriteria ? `验收标准：${handoff.task.acceptanceCriteria}` : '',

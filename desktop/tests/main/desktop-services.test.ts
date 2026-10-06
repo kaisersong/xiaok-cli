@@ -2039,9 +2039,41 @@ describe('desktop services', () => {
     });
   });
 
-  it('discovers kswarm artifacts written directly to the project artifacts directory', async () => {
+  it('runs project workers concurrently with separate same-name artifact files', async () => {
+    const base = join(rootDir, 'parallel-artifacts');
+    mkdirSync(base, { recursive: true });
+    const legacy = join(base, 'search-evidence.json');
+    writeFileSync(legacy, '{"legacy":true}');
+    let started = 0;
+    let release!: () => void;
+    const bothStarted = new Promise<void>(resolve => { release = resolve; });
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(),
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        const directory = prompt.match(/^产物目录：(.*)$/m)![1];
+        const title = prompt.match(/^任务：(.*)$/m)![1];
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, 'search-evidence.json'), JSON.stringify({ task: title }));
+        if (++started === 2) release();
+        await bothStarted;
+        emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '已完成当前资料收集任务，来源证据已写入文件，可核验交接。' });
+      },
+    });
+    const output = await Promise.all(['A', 'B'].map(id => services.runKSwarmHandoffTask({ handoff: {
+      kind: 'kswarm_task_handoff_v1', runId: 'run-' + id,
+      project: { id: 'proj-parallel', name: 'Project', goal: 'Collect sources', requirements: '', artifactsDir: base },
+      task: { id: '../task-' + id, title: id, brief: '', acceptanceCriteria: '' },
+    } })));
+    const paths = output.map(result => result.artifacts.find(artifact => artifact.label === 'search-evidence.json')!.path);
+    expect(paths[0]).not.toBe(paths[1]);
+    expect(paths.every(path => path.startsWith(base) && /[\\/]run-[0-9a-f]{32}[\\/]/.test(path))).toBe(true);
+    expect(paths.map(path => JSON.parse(readFileSync(path, 'utf8')).task)).toEqual(['A', 'B']);
+    expect(readFileSync(legacy, 'utf8')).toBe('{"legacy":true}');
+  });
+
+  it('discovers kswarm artifacts written directly to the handoff output directory', async () => {
     const artifactsDir = join(rootDir, 'artifacts');
-    const artifactPath = join(artifactsDir, 'research-notes.md');
+    let artifactPath = join(artifactsDir, 'research-notes.md');
     let receivedPrompt = '';
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
@@ -2049,7 +2081,9 @@ describe('desktop services', () => {
       now: () => 300,
       runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
         receivedPrompt = prompt;
-        mkdirSync(artifactsDir, { recursive: true });
+        const outputDirectory = prompt.match(/^产物目录：(.*)$/m)![1];
+        artifactPath = join(outputDirectory, 'research-notes.md');
+        mkdirSync(outputDirectory, { recursive: true });
         writeFileSync(artifactPath, '# Research notes\n\n- 来源：https://example.com 2026-05-20');
         emitRuntimeEvent({
           type: 'receipt_emitted',

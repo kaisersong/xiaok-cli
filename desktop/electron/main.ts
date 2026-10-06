@@ -660,7 +660,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
 
   const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
-  const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+  const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
   let managedPythonCommand: string | undefined;
   const computerUseAppIdentity = process.platform === 'win32'
     ? await (await import('./windows-computer-use-identity.js')).resolveWindowsComputerUseIdentity({
