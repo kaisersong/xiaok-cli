@@ -130,6 +130,9 @@ describe('WelcomePage conversation-first home', () => {
     renderPage();
 
     expect(screen.getByTestId('welcome-home')).toBeInTheDocument();
+    expect(screen.getByTestId('welcome-brand')).toHaveTextContent('XIAOK');
+    expect(screen.getByTestId('welcome-brand')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('welcome-metric-active-projects')).toHaveClass('punctum-number');
     expect(screen.queryByTestId('welcome-home-a')).not.toBeInTheDocument();
     expect(screen.queryByTestId('welcome-home-b')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /方案 [AB]/ })).not.toBeInTheDocument();

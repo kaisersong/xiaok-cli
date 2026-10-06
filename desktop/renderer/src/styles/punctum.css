@@ -1,0 +1,31 @@
+@font-face {
+  font-family: 'Xiaok Punctum';
+  src: url('../../../../data/fonts/punctum/Punctum-VF.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+.punctum-brand {
+  font-family: 'Xiaok Punctum', monospace;
+  font-variation-settings: 'wght' 550, 'ROND' 100;
+  font-size: 70px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--c-accent);
+  margin-bottom: 20px;
+}
+
+.punctum-number, .punctum-timer {
+  font-family: 'Xiaok Punctum', monospace;
+  font-variation-settings: 'wght' 650, 'ROND' 100;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.punctum-timer { font-size: 20px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 640px) {
+  .punctum-brand { font-size: 50px; }
+}
+

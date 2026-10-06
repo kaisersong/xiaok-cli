@@ -2686,6 +2686,7 @@ export const zh: LocaleStrings = {
 
   // welcome page
   welcome: {
+    brandName: 'XIAOK',
     greetingSuffix: "，我们一起来搞定工作吧！",
     inputPlaceholder: "描述你的工作需求...",
     conversationSubtitle: "从对话开始，也能看见正在推进的工作。",
