@@ -2674,6 +2674,30 @@ describe('desktop services', () => {
     } finally { time.mockRestore(); }
   });
 
+  it('delegates scoped queued idle detection to the bounded KSwarm owner', async () => {
+    vi.stubEnv('XIAOK_TASK_IDLE_TIMEOUT_MS', '100');
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const blocker = await coordinator.acquireLease({ policy: 'ordinary', lane: 'background' });
+    const services = createDesktopServices({
+      executionCoordinator: coordinator, dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(),
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '已完成当前用户要求的分析步骤，结果已确认并可交接。' });
+      },
+    });
+    const work = services.runKSwarmHandoffTask({ handoff: {
+      runId: 'run-queued-idle', task: { id: 'task-queued-idle', title: '分析当前步骤', brief: '', acceptanceCriteria: '' },
+      project: { id: 'proj-queued-idle', name: 'Project', goal: 'Analyze current step', requirements: '', workFolder: rootDir },
+    } });
+    void work.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(coordinator.snapshot().waiting).toBe(1), { interval: 5 });
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(coordinator.snapshot().waiting).toBe(1);
+      blocker.release();
+      expect((await work).summary).toContain('已完成当前用户要求');
+    } finally { blocker.release(); vi.unstubAllEnvs(); }
+  });
+
   it('handles kswarm plan approval by requesting dispatch as the PO', async () => {
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     const services = createDesktopServices({

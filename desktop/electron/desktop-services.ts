@@ -1894,6 +1894,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     const scopedHost = new InProcessTaskRuntimeHost({
+      // This scoped owner is bounded by the KSwarm queue/run clocks.
+      taskIdleTimeoutMs: 0,
       materialRegistry,
       snapshotStore,
       runner: input => withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : 'background', () => coordinateRunner(async runInput => {
