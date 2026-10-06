@@ -1,3 +1,4 @@
+import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-compatibility.js';
 import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
@@ -2174,6 +2175,86 @@ describe('desktop services', () => {
       },
     });
 
+    expect(result).toEqual({ ok: true });
+    expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
+    expect(requests.map(item => item.path)).toEqual([
+      '/projects/proj-1/plan',
+      '/projects/proj-1/tasks',
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({ analysis: '项目目标明确，先输出一份报告。' }),
+    });
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '撰写报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
+  it('runs project planning even while a foreground conversation is waiting', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let receivedPrompt = '';
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
+    const foreground = await coordinator.acquireLease({ policy: 'ordinary', lane: 'foreground' });
+    const services = createDesktopServices({
+      executionCoordinator: coordinator,
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, taskIds: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                rationale: '核心交付物',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const run = services.runKSwarmAssignPo({
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        projectName: 'Project',
+        goal: 'Write report',
+        requirements: 'Chinese output',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    const first = await Promise.race([run, new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 2000))]);
+    foreground.release();
+    const result = await run;
+    expect(first).not.toBe('blocked');
     expect(result).toEqual({ ok: true });
     expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
     expect(requests.map(item => item.path)).toEqual([

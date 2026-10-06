@@ -1885,7 +1885,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
+      runner: input => withExecutionLane('background', () => coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
         scopedRegistry,
         scopedTools,
         options.dataRoot,
@@ -1900,7 +1900,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           // report/slide gateways are reachable there too (design §6.2/§6.3).
           ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
         },
-      )),
+      ))(input)),
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
