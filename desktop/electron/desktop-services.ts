@@ -1890,12 +1890,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { control?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
+    const execution = { clock: undefined as KSwarmExecutionClock | undefined };
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     const scopedHost = new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
       runner: input => withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : 'background', () => coordinateRunner(async runInput => {
+        execution.clock = new KSwarmExecutionClock(10 * 60 * 1000);
+        execution.clock.start();
         await taskOptions.onStarted?.();
         return (options.runner ?? createDesktopModelRunnerWithRegistry(
         scopedRegistry,
@@ -1918,6 +1921,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
+    kswarmTextExecutionClocks.set(scopedHost, execution);
     scopedKSwarmHosts.add(new WeakRef(scopedHost));
     return scopedHost;
   };
@@ -3771,6 +3775,8 @@ function kindFromFilename(filename: string): string {
   return 'file';
 }
 
+const kswarmTextExecutionClocks = new WeakMap<InProcessTaskRuntimeHost, { clock?: KSwarmExecutionClock }>();
+
 async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
   prompt: string,
@@ -3789,10 +3795,16 @@ async function runKSwarmRuntimeTextTask(
   const maxAttempts = 2;
   let lastFailure: string | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let retry = false;
+    const execution = kswarmTextExecutionClocks.get(host);
+    if (execution) execution.clock = undefined;
     const created = await host.createTask({ prompt, materials: options.materials ?? [] });
     options.onTaskCreated?.(created.taskId);
     const deadline = Date.now() + 10 * 60 * 1000;
-    while (Date.now() < deadline) {
+    const queueDeadline = Date.now() + 60 * 60 * 1000;
+    while (execution
+      ? (execution.clock ? !execution.clock.expired() : Date.now() < queueDeadline)
+      : Date.now() < deadline) {
       const recovered = await host.recoverTask(created.taskId);
       if (recovered.snapshot.status === 'completed') {
         const artifactEvents = recovered.snapshot.events.filter(event => event.type === 'artifact_recorded');
@@ -3821,12 +3833,16 @@ async function runKSwarmRuntimeTextTask(
           && isRetryableKSwarmRuntimeTaskFailure(lastFailure)
         ) {
           await new Promise(resolve => setTimeout(resolve, 750));
+          retry = true;
           break;
         }
         throw new Error(`desktop_task_${recovered.snapshot.status}: ${lastFailure}`);
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    if (retry) continue;
+    await host.cancelTask(created.taskId);
+    throw new Error('desktop_task_timeout');
   }
   throw new Error(lastFailure ? `desktop_task_failed: ${lastFailure}` : 'desktop_task_timeout');
 }

@@ -2626,6 +2626,54 @@ describe('desktop services', () => {
     });
   });
 
+  it('does not time out a queued PO review after ten minutes', async () => {
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const blocker = await coordinator.acquireLease({ policy: 'ordinary', lane: 'project_control' });
+    let clockNow = Date.now();
+    const time = vi.spyOn(Date, 'now').mockImplementation(() => clockNow);
+    let settled = false;
+    const services = createDesktopServices({
+      executionCoordinator: coordinator, dataRoot: join(rootDir, 'data'), now: () => 300,
+      kswarmService: { ...mockKSwarmService(), request: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }) },
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: JSON.stringify({ passed: true, feedback: '通过。', planRevisionNeeded: false }) });
+      },
+    });
+    const review = services.runKSwarmReviewSubmission({ payload: { projectId: 'proj-queued', taskId: 'task-queued', result: { summary: 'submitted' } } }).then(result => { settled = true; return result; });
+    try {
+      await vi.waitFor(() => expect(coordinator.snapshot().waiting).toBe(1));
+      await new Promise(resolve => setTimeout(resolve, 600));
+      clockNow += 11 * 60 * 1000;
+      await new Promise(resolve => setTimeout(resolve, 750));
+      expect(settled).toBe(false);
+      expect(coordinator.snapshot().waiting).toBe(1);
+      blocker.release();
+      expect(await review).toEqual({ ok: true });
+    } finally { blocker.release(); time.mockRestore(); }
+  });
+
+  it('cancels the actual PO runner before returning execution timeout', async () => {
+    let clockNow = Date.now();
+    const time = vi.spyOn(Date, 'now').mockImplementation(() => clockNow);
+    let started = false;
+    let aborted = false;
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'), now: () => 300,
+      kswarmService: mockKSwarmService(),
+      runner: async ({ signal }) => {
+        started = true;
+        await new Promise<void>(resolve => signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true }));
+      },
+    });
+    const review = services.runKSwarmReviewSubmission({ payload: { projectId: 'proj-timeout', taskId: 'task-timeout', result: { summary: 'submitted' } } });
+    try {
+      await vi.waitFor(() => expect(started).toBe(true));
+      clockNow += 11 * 60 * 1000;
+      expect(await review).toMatchObject({ ok: false, error: 'desktop_task_timeout' });
+      expect(aborted).toBe(true);
+    } finally { time.mockRestore(); }
+  });
+
   it('handles kswarm plan approval by requesting dispatch as the PO', async () => {
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     const services = createDesktopServices({
