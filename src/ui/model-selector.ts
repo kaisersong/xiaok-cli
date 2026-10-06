@@ -71,7 +71,8 @@ export function buildModelOptions(config: Config): ModelOption[] {
     }
   }
 
-  return result;
+  // Stable grouping keeps configured models before catalog variants within each provider.
+  return result.sort((a, b) => a.provider.localeCompare(b.provider, 'en'));
 }
 
 function formatModelSelectorLines(
