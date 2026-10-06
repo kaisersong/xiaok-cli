@@ -13,9 +13,11 @@ import tempfile
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--project-dir', type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument('--cli-entry', type=Path, help='Override the built CLI entry to verify an installed/development command')
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     project = args.project_dir.resolve()
+    cli_entry = args.cli_entry.resolve() if args.cli_entry else project / 'dist/index.js'
     args.output_dir.mkdir(parents=True, exist_ok=True)
     spec = importlib.util.spec_from_file_location('xiaok_terminal_e2e', project / 'tests/e2e/tmux-e2e.py')
     assert spec and spec.loader
@@ -27,6 +29,7 @@ def main() -> None:
             root = Path(folder)
             fixture = root / 'project'
             fixture.mkdir()
+            (root / 'home').mkdir()
             marker = 'SLASH_GAP_LAST'
             body = '\n\n'.join([f'正文第 {i} 段，保留原有输出。' for i in range(20)]) + f'\n\n{marker} 不是权限系统拦错了。'
             server = e2e.FakeOpenAIServer([body], first_token_delay=0.1)
@@ -34,7 +37,7 @@ def main() -> None:
             e2e.write_config(root / 'config', server.base_url)
             tty = e2e.TmuxHarness(
                 f'xiaok-slash-gap-{os.getpid()}-{rows}', fixture, root / 'config', root / 'home',
-                project / 'dist/index.js', e2e.resolve_tmux_binary(),
+                cli_entry, e2e.resolve_tmux_binary(),
                 env_overrides={'XIAOK_DISABLE_GLOBAL_PLUGINS': '1', 'NO_COLOR': ''},
             )
             try:
@@ -75,6 +78,7 @@ def main() -> None:
             root = Path(folder)
             fixture = root / 'project'
             fixture.mkdir()
+            (root / 'home').mkdir()
             marker = 'MENU_GAP_LAST'
             body = '\n\n'.join([f'正文第 {i} 段，保留原有输出。' for i in range(20)]) + f'\n\n{marker} 下面需要用户选择。'
             server = e2e.FakeOpenAIServer([
@@ -85,7 +89,7 @@ def main() -> None:
             e2e.write_config(root / 'config', server.base_url)
             tty = e2e.TmuxHarness(
                 f'xiaok-menu-gap-{os.getpid()}-{tool}', fixture, root / 'config', root / 'home',
-                project / 'dist/index.js', e2e.resolve_tmux_binary(), auto_mode=False,
+                cli_entry, e2e.resolve_tmux_binary(), auto_mode=False,
                 env_overrides={'XIAOK_DISABLE_GLOBAL_PLUGINS': '1', 'NO_COLOR': ''},
             )
             try:
