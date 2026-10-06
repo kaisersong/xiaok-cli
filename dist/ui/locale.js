@@ -1,3 +1,14 @@
+const AUTO_APPROVAL_REASONS_ZH = {
+    'recursive force delete': '递归强制删除',
+    'PowerShell recursive force delete': 'PowerShell 递归强制删除',
+    'Windows recursive directory delete': 'Windows 递归删除目录',
+    'Windows recursive file delete': 'Windows 递归删除文件',
+    'git reset --hard': 'git reset --hard 丢弃改动',
+    'git push --force': 'git push --force 覆盖远端历史',
+    'git push -f': 'git push -f 覆盖远端历史',
+    'git clean -f': 'git clean -f 删除未跟踪文件',
+    'DROP TABLE/DATABASE': 'DROP TABLE/DATABASE 删除数据',
+};
 const TOOL_LABELS = {
     'zh-CN': {
         bash: '执行命令',
@@ -31,6 +42,7 @@ const TOOL_LABELS = {
 const UI_COPY = {
     'zh-CN': {
         approvalTitle: 'xiaok 想要执行以下操作',
+        autoApprovalReason: (reason) => `确认原因: auto 模式仍需确认：${AUTO_APPROVAL_REASONS_ZH[reason] ?? reason}`,
         currentCommandLabel: '本次执行命令',
         commandApprovalScope: (rule) => `始终允许的范围: ${rule}（* 表示任意参数，参数变化无需重复确认）`,
         subAgents: {
@@ -54,6 +66,7 @@ const UI_COPY = {
     },
     en: {
         approvalTitle: 'xiaok wants to run',
+        autoApprovalReason: (reason) => `Approval reason: auto mode still confirms data-loss commands: ${reason}`,
         currentCommandLabel: 'Command to run now',
         commandApprovalScope: (rule) => `Always-allow scope: ${rule} (* means any arguments; argument changes need no new approval)`,
         subAgents: {

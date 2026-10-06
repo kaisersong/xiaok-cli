@@ -2,6 +2,7 @@ import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
 import { getUiCopy } from './locale.js';
+import { requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
 function singleLine(text) {
     return text.replace(/\s+/g, ' ').trim();
 }
@@ -79,13 +80,18 @@ export function buildPermissionPromptOptions(rule) {
         { label: '拒绝', choice: { action: 'deny' } },
     ];
 }
-export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN') {
+export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN', permissionMode) {
     const copy = getUiCopy(locale);
     const target = extractTarget(input, locale);
     const lines = [
         `${yellow('⚡')} ${copy.approvalTitle}`,
         `${copy.toolLabel}: ${boldCyan(toolName)}`,
     ];
+    if (permissionMode === 'auto' && toolName === 'bash' && typeof input.command === 'string') {
+        const risk = requiresAutoPromptForBashCommand(input.command);
+        if (risk?.reason)
+            lines.push(dim(copy.autoApprovalReason(risk.reason)));
+    }
     if (target) {
         lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
     }
@@ -132,7 +138,7 @@ export async function showPermissionPrompt(toolName, input, config) {
             catch { }
         };
         const renderAll = () => {
-            const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })));
+            const lines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })), 'zh-CN', config?.permissionMode);
             if (renderWithRenderer && renderer) {
                 try {
                     if (renderer.hasActiveScrollRegion()) {
@@ -190,7 +196,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                     degradeRenderer('permission_prompt_clear', error);
                 }
             }
-            const totalLines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx }))).length;
+            const totalLines = formatPermissionPromptLines(toolName, input, promptOptions.map((option, idx) => ({ label: option.label, selected: idx === selectedIdx })), 'zh-CN', config?.permissionMode).length;
             stdout.write('\x1b7'); // save cursor
             for (let i = 0; i < totalLines; i++) {
                 stdout.write('\x1b[2K');
@@ -232,7 +238,7 @@ export async function showPermissionPrompt(toolName, input, config) {
                 return;
             }
             // Number keys → 直接选择对应项
-            const num = parseInt(key, 10);
+            const num = /^[1-9]$/.test(key) ? Number(key) : 0;
             if (num >= 1 && num <= promptOptions.length) {
                 transcriptLogger?.record({
                     type: 'permission_prompt_decision',
