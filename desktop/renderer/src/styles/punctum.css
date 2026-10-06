@@ -23,7 +23,12 @@
   line-height: 1;
 }
 
-.punctum-timer { font-size: 20px; font-variant-numeric: tabular-nums; }
+.punctum-timer {
+  font-size: 16px;
+  font-variation-settings: 'wght' 800, 'ROND' 100;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-primary);
+}
 
 @media (max-width: 640px) {
   .punctum-brand { font-size: 50px; }

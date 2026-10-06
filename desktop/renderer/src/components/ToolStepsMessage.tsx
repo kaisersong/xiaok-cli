@@ -61,7 +61,7 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [startedAt]);
-  return <span className="punctum-timer" style={{ color: 'var(--c-accent)' }}>{formatDuration(elapsed)}</span>;
+  return <span className="punctum-timer">{formatDuration(elapsed)}</span>;
 }
 
 function StepCard({ step, elapsed }: { step: ToolStep; elapsed?: number }) {
@@ -158,7 +158,7 @@ export function ToolStepsMessage({ steps, live }: Props) {
             : `${steps.length} steps completed`}
         </span>
         {((live && firstStart != null) || (!live && totalMs != null)) ? (
-          <span className="punctum-timer" style={{ opacity: 0.65 }}>
+          <span className="punctum-timer">
             {live
               ? formatDuration(Date.now() - firstStart!)
               : formatDuration(totalMs!)}
