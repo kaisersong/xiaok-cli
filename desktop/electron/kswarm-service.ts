@@ -799,10 +799,14 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function fetchKSwarm(path: string, init?: RequestInit): Promise<Response> {
+    const headers = new Headers(init?.headers);
+    if ((init?.method ?? 'GET').toUpperCase() !== 'GET') {
+      headers.set('x-kswarm-mutation-token', desktopMutationToken);
+    }
     return requestWithFallbackBaseUrls({
       baseUrls: KSWARM_REQUEST_BASE_URLS,
       path,
-      init,
+      init: { ...init, headers },
       timeoutMs: REQUEST_TIMEOUT_MS,
     });
   }

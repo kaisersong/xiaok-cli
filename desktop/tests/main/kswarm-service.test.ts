@@ -1256,6 +1256,46 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     rmSync(serviceRoot, { recursive: true, force: true });
   });
 
+  it('authenticates seed mutations without adding credentials to read requests', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-seed-auth-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    const requests: Array<{ path: string; method: string; token: string | null }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method || 'GET';
+      const token = new Headers(init?.headers).get('x-kswarm-mutation-token');
+      if (url.port === '4318') return new Response('{}', { status: 200 });
+      if (url.pathname === '/health') return new Response(JSON.stringify({
+        ok: true, features: ['dynamic_workflows'],
+        workflowCapabilities: { schemaVersion: 'kswarm_workflow_patterns_v1', compiledContract: true, patternPublicView: true },
+        service: { entryPath: serverPath },
+      }), { status: 200 });
+      requests.push({ path: url.pathname, method, token });
+      if (method !== 'GET') return new Response('{}', { status: token ? 200 : 401 });
+      if (url.pathname === '/agents') return new Response(JSON.stringify({ agents: [{ id: 'xiaok-po', status: 'online', runtimeType: 'xiaok', name: 'outdated' }] }), { status: 200 });
+      if (url.pathname === '/agents/xiaok-po') return new Response(JSON.stringify({ agent: { id: 'xiaok-po', status: 'online', runtimeType: 'xiaok', name: 'outdated' } }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+    const service = createKSwarmService({ spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn, findPortOwner: async () => null });
+    try {
+      await service.start();
+      const mutations = requests.filter(request => request.method !== 'GET');
+      expect(mutations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: '/agents', method: 'POST' }),
+        expect.objectContaining({ path: '/agents/xiaok-po', method: 'PUT' }),
+        expect.objectContaining({ path: '/agents/xiaok-po/restart', method: 'POST' }),
+      ]));
+      expect(mutations.every(request => request.token === service.getDesktopMutationToken())).toBe(true);
+      expect(requests.filter(request => request.method === 'GET').every(request => request.token === null)).toBe(true);
+    } finally {
+      await service.stop();
+      rmSync(serviceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('does not publish an adopted service after stop wins seed reconciliation', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-stop-'));
     const serverPath = join(serviceRoot, 'server.js');
