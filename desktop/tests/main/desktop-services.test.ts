@@ -2555,6 +2555,77 @@ describe('desktop services', () => {
     });
   });
 
+  it('reviews once on the control lane while user and worker leases are occupied', async () => {
+    const requests: Array<{ path: string; method: string; body: Record<string, unknown> }> = [];
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const user = await coordinator.acquireLease({ policy: 'ordinary', lane: 'foreground' });
+    const worker = await coordinator.acquireLease({ policy: 'ordinary', lane: 'background' });
+    const services = createDesktopServices({
+      executionCoordinator: coordinator,
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          requests.push({ path, method, body });
+          if (path === '/projects/proj-1' && method === 'GET') {
+            return new Response(JSON.stringify({
+              project: { id: 'proj-1', name: 'Project', goal: 'Write report', status: 'active' },
+              tasks: [{ id: 'task-1', title: '撰写报告', status: 'done' }],
+            }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: prompt.includes('项目所有任务已经完成')
+            ? '# 项目小结\n\n项目已完成，交付物可用。'
+            : JSON.stringify({ passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false }),
+        });
+      },
+    });
+
+    const submission = {
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        fromWorker: 'xiaok-worker',
+        result: { summary: 'done', artifacts: [{ path: '/tmp/report.md', kind: 'markdown' }] },
+      },
+    };
+    const first = services.runKSwarmReviewSubmission(submission);
+    const duplicate = services.runKSwarmReviewSubmission(submission);
+    expect(first).toBe(duplicate);
+    const early = await Promise.race([first, new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 2500))]);
+    user.release(); worker.release();
+    expect(early).not.toBe('blocked');
+    const result = await first;
+
+    expect(result).toEqual({ ok: true });
+    expect(requests.map(item => `${item.method} ${item.path}`)).toEqual([
+      'POST /projects/proj-1/tasks/task-1/review',
+      'GET /projects/proj-1',
+      'POST /projects/proj-1/synthesize',
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      review: { passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false },
+    });
+    expect(requests[2].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      synthesis: '# 项目小结\n\n项目已完成，交付物可用。',
+    });
+  });
+
   it('handles kswarm plan approval by requesting dispatch as the PO', async () => {
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     const services = createDesktopServices({

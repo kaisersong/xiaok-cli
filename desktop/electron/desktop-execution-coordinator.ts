@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-export type ExecutionLane = 'foreground' | 'background';
+export type ExecutionLane = 'foreground' | 'background' | 'project_control';
 const admissionLane = new AsyncLocalStorage<ExecutionLane>();
 /** Main-only provenance; never populated from renderer or model input. */
 export function withExecutionLane<T>(lane: ExecutionLane, action: () => T): T {
@@ -57,10 +57,10 @@ export class DesktopExecutionCoordinator {
   private blockedReason?: string;
   readonly capacity: number;
   private readonly laneCapacity: Record<ExecutionLane, number>;
-  private readonly laneActive: Record<ExecutionLane, number> = { foreground: 0, background: 0 };
+  private readonly laneActive: Record<ExecutionLane, number> = { foreground: 0, background: 0, project_control: 0 };
   private readonly multiAgentLeaseMs?: number;
 
-  constructor(options: { capacity?: number; backgroundCapacity?: number; multiAgentLeaseMs?: number } = {}) {
+  constructor(options: { capacity?: number; backgroundCapacity?: number; projectControlCapacity?: number; multiAgentLeaseMs?: number } = {}) {
     if (options.multiAgentLeaseMs !== undefined && (!Number.isSafeInteger(options.multiAgentLeaseMs) || options.multiAgentLeaseMs <= 0)) throw new Error('Invalid explicit lease duration');
     this.multiAgentLeaseMs = options.multiAgentLeaseMs;
     const capacity = options.capacity ?? 1;
@@ -69,8 +69,10 @@ export class DesktopExecutionCoordinator {
     }
     const background = options.backgroundCapacity ?? 0;
     if (!Number.isSafeInteger(background) || background < 0) throw new Error('Invalid background capacity');
-    this.laneCapacity = { foreground: capacity, background };
-    this.capacity = capacity + background;
+    const control = options.projectControlCapacity ?? 0;
+    if (!Number.isSafeInteger(control) || control < 0) throw new Error('Invalid project control capacity');
+    this.laneCapacity = { foreground: capacity, background, project_control: control };
+    this.capacity = capacity + background + control;
   }
 
   async run<T>(signal: AbortSignal | undefined, action: () => Promise<T>, lane?: ExecutionLane): Promise<T> {
@@ -82,6 +84,8 @@ export class DesktopExecutionCoordinator {
       member.release();
     }
   }
+
+  hasLaneCapacity(lane: ExecutionLane): boolean { return this.laneCapacity[lane] > 0; }
 
   snapshot(): { active: number; waiting: number; capacity: number } {
     return { active: this.active, waiting: this.waiters.length, capacity: this.capacity };
@@ -154,7 +158,7 @@ export class DesktopExecutionCoordinator {
     const { signal } = options;
     if (signal?.aborted) return this.rejected(abortReason(signal));
     const lane = options.lane ?? currentExecutionLane();
-    if (lane !== 'foreground' && lane !== 'background') return this.rejected(new Error('Invalid execution lane'));
+    if (lane !== 'foreground' && lane !== 'background' && lane !== 'project_control') return this.rejected(new Error('Invalid execution lane'));
     if (this.laneCapacity[lane] === 0) return this.rejected(new Error('Execution lane capacity is disabled'));
     let waiter!: Waiter;
     const promise = new Promise<ExecutionLease>((resolve, reject) => {

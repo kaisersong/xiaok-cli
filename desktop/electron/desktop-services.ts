@@ -1,3 +1,4 @@
+import { KSwarmExecutionClock } from './kswarm-execution-clock.js';
 import { findLegacyTaskHistory } from './legacy-task-history.js';
 import { getSupportedModelReasoningEfforts } from '../../src/ai/providers/model-reasoning-effort.js';
 import { resolveProviderTransport } from '../../src/ai/providers/auth-resolver.js';
@@ -876,7 +877,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService });
-  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
+  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
   const scopedKSwarmHosts = new Set<WeakRef<InProcessTaskRuntimeHost>>();
   const resolveScopedTaskHost = (taskId: string, fallback: InProcessTaskRuntimeHost): InProcessTaskRuntimeHost => {
     for (const reference of scopedKSwarmHosts) {
@@ -1888,13 +1889,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return createProjectAgentModel({ modelId, loadConfig });
   };
 
-  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string) => {
+  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { control?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     const scopedHost = new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
-      runner: input => withExecutionLane('background', () => coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
+      runner: input => withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : 'background', () => coordinateRunner(async runInput => {
+        await taskOptions.onStarted?.();
+        return (options.runner ?? createDesktopModelRunnerWithRegistry(
         scopedRegistry,
         scopedTools,
         options.dataRoot,
@@ -1909,7 +1912,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           // report/slide gateways are reachable there too (design §6.2/§6.3).
           ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
         },
-      ))(input)),
+      ))(runInput);
+      })(input)),
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
@@ -2015,7 +2019,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     toolRegistry: registry,
   });
 
-  async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }) {
+  async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal, onExecutionStarted }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal; onExecutionStarted?: () => void | Promise<void> }) {
     if(handoff.workspaceContext||handoff.project.requiredProtocol==='room_workspace_v1')throw new Error('workspace_runtime_protocol_required');
     const throwIfAborted = () => {
       if (signal?.aborted) {
@@ -2026,7 +2030,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     throwIfAborted();
     const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
     const workspaceRoot = handoff.project.workFolder || (artifactsDir ? dirname(artifactsDir) : process.cwd());
-    const taskHost = createKSwarmTaskHost(workspaceRoot, targetParticipantId);
+    const clock = new KSwarmExecutionClock();
+    const taskHost = createKSwarmTaskHost(workspaceRoot, targetParticipantId, { onStarted: async () => { clock.start(); await onExecutionStarted?.(); } });
     const runStartedAt = Date.now();
     const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
     const requiredOutputsText = formatKSwarmRequiredOutputs(handoff.task.requiredOutputs);
@@ -2056,8 +2061,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     signal?.addEventListener('abort', cancelCreatedTask, { once: true });
     try {
       throwIfAborted();
-      const deadline = Date.now() + 10 * 60 * 1000;
-      while (Date.now() < deadline) {
+      while (!clock.expired()) {
         throwIfAborted();
         const recovered = await taskHost.recoverTask(created.taskId);
         throwIfAborted();
@@ -2093,6 +2097,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+      await taskHost.cancelTask(created.taskId);
       throw new Error('desktop_task_timeout');
     } finally {
       signal?.removeEventListener('abort', cancelCreatedTask);
@@ -2273,7 +2278,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const members = readStringArray(payload.members);
       const fallbackWorkerId = members[0] || 'xiaok-worker';
       const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
-      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent), prompt);
+      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent, { control: true }), prompt);
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
         userGoal: readString(payload.goal),
@@ -2378,14 +2383,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return { ok: true as const };
   }
 
-  async function runKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+  const pendingKSwarmReviews = new Map<string, ReturnType<typeof executeKSwarmReviewSubmission>>();
+  function runKSwarmReviewSubmission(input: Parameters<typeof executeKSwarmReviewSubmission>[0]) {
+    const result = isRecord(input.payload.result) ? input.payload.result : {};
+    const key = JSON.stringify([input.payload.projectId, input.payload.taskId, input.payload.runId ?? result.runId ?? result.provenance ?? result]);
+    const pending = pendingKSwarmReviews.get(key);
+    if (pending) return pending;
+    const work = executeKSwarmReviewSubmission(input).finally(() => pendingKSwarmReviews.delete(key));
+    pendingKSwarmReviews.set(key, work);
+    return work;
+  }
+
+  async function executeKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
     try {
       const projectId = readString(payload.projectId);
       const taskId = readString(payload.taskId);
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const reviewPrompt = buildKSwarmReviewPrompt(payload);
-      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent), reviewPrompt);
+      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent, { control: true }), reviewPrompt);
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
@@ -2399,7 +2415,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
         if (shouldSynthesizeKSwarmProject(detail)) {
           const synthesisPrompt = buildKSwarmSynthesisPrompt(detail);
-          const synthesis = (await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent), synthesisPrompt)).summary;
+          const synthesis = (await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent, { control: true }), synthesisPrompt)).summary;
           await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/synthesize`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

@@ -257,6 +257,32 @@ describe('kswarm runtime bridge', () => {
     client.stop();
   });
 
+  it('reports queued heartbeats until the actual execution callback runs', async () => {
+    const posts: Array<{ body: any }> = [];
+    const FakeWebSocket = createFakeWebSocket();
+    let start!: () => Promise<void>;
+    let done!: () => void;
+    const waiting = new Promise<void>(resolve => { done = resolve; });
+    const client = createKSwarmRuntimeBridgeBrokerClient({ participantId: 'xiaok-worker',
+      bridge: { reportsExecutionStart: true, handleTaskHandoff: async input => { start = input.onExecutionStarted!; await waiting; return { ok: true }; } },
+      taskHeartbeatIntervalMs: 10,
+      fetchImpl: (async (_url, init) => { posts.push({ body: JSON.parse(String(init?.body ?? '{}')) }); return Response.json({ ok: true, deliveredCount: 1 }); }) as never,
+      WebSocketImpl: FakeWebSocket,
+    });
+    await client.start();
+    FakeWebSocket.instances[0].emitMessage({ type: 'new_intent', event: { kind: 'request_task', fromParticipantId: 'kswarm-hub', taskId: 'task-1',
+      payload: { projectId: 'proj-1', taskId: 'task-1', runId: 'run-1', handoffPath: join(rootDir, 'request.json') } } });
+    await delay(35);
+    const first = posts.filter(p => p.body.kind === 'report_progress');
+    expect(first.length).toBeGreaterThan(1);
+    expect(first.every(p => p.body.payload.stage === 'queued')).toBe(true);
+    await start(); await start(); await delay(20); done(); await delay(10);
+    const progress = posts.filter(p => p.body.kind === 'report_progress');
+    expect(progress.filter(p => p.body.payload.stage === 'started')).toHaveLength(1);
+    expect(progress.some(p => p.body.payload.telemetry?.executionState === 'running')).toBe(true);
+    client.stop();
+  });
+
   it('aborts a running request_task and reports task_cancelled when cancel_task arrives', async () => {
     let capturedSignal: AbortSignal | undefined;
     const handled = vi.fn(async (input: { signal?: AbortSignal }) => {

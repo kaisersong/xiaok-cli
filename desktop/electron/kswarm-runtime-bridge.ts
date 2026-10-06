@@ -50,7 +50,7 @@ export interface KSwarmWorkflowNodeHandoff {
 export interface KSwarmRuntimeBridgeOptions {
   runWorkspaceTask?(input:{handoff:KSwarmTaskHandoff;targetParticipantId?:string;signal?:AbortSignal}):Promise<{ok:true}|{ok:false;error:string}>;
   allowedRoots?: string[];
-  runDesktopTask(input: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }): Promise<{
+  runDesktopTask(input: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal; onExecutionStarted?: () => Promise<void> }): Promise<{
     summary: string;
     artifacts?: Array<{ path: string; kind: string; label?: string }>;
     provenance?: Record<string, unknown>;
@@ -100,6 +100,7 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     runId: string;
     targetParticipantId?: string;
     signal?: AbortSignal;
+    onExecutionStarted?: () => Promise<void>;
   },controller:AbortController): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!isAllowedPath(input.handoffPath, options.allowedRoots)) {
       return { ok: false, error: 'handoff_path_outside_allowed_roots' };
@@ -114,12 +115,14 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     try {
       if(handoff.workspaceContext||handoff.project.requiredProtocol==='room_workspace_v1'){
         if(handoff.workspaceContext?.protocolVersion!==1||!options.runWorkspaceTask)return {ok:false,error:'workspace_runtime_protocol_required'};
+        await input.onExecutionStarted?.();
         return await options.runWorkspaceTask({handoff,targetParticipantId:input.targetParticipantId,signal});
       }
       const executed = await options.runDesktopTask({
         handoff,
         targetParticipantId: input.targetParticipantId,
         signal,
+        onExecutionStarted: input.onExecutionStarted,
       });
       const result = {
         summary: executed.summary,
@@ -169,10 +172,11 @@ export function createKSwarmRuntimeBridge(options: KSwarmRuntimeBridgeOptions) {
     activeTaskControllers.get(taskId)?.abort();
   }
 
-  return { handleTaskHandoff, handleWorkflowNodeHandoff, cancelTask };
+  return { handleTaskHandoff, handleWorkflowNodeHandoff, cancelTask, reportsExecutionStart: true as const };
 }
 
 export interface KSwarmRuntimeBridge {
+  reportsExecutionStart?: boolean;
   handleTaskHandoff(input: {
     handoffPath: string;
     projectId: string;
@@ -180,6 +184,7 @@ export interface KSwarmRuntimeBridge {
     runId: string;
     targetParticipantId?: string;
     signal?: AbortSignal;
+    onExecutionStarted?: () => Promise<void>;
   }): Promise<{ ok: true } | { ok: false; error: string }>;
   cancelTask?(taskId: string): void;
   handleWorkflowNodeHandoff?(input: {
@@ -540,9 +545,16 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     const controller = new AbortController();
     activeTaskControllers.set(taskId, controller);
     await sendIntent('accept_task', event, { projectId, taskId, runId }, targetParticipantId);
-    await sendIntent('report_progress', event, { projectId, taskId, runId, stage: 'started' }, targetParticipantId);
-
-    const stopHeartbeat = startTaskHeartbeat(event, { projectId, taskId, runId }, targetParticipantId);
+    let executing = !options.bridge.reportsExecutionStart;
+    const onExecutionStarted = async () => {
+      if (executing) return;
+      executing = true;
+      await sendIntent('report_progress', event, { projectId, taskId, runId, stage: 'started',
+        telemetry: { executionState: 'running', lastHeartbeatAt: Date.now() } }, targetParticipantId);
+    };
+    await sendIntent('report_progress', event, { projectId, taskId, runId, stage: executing ? 'started' : 'queued',
+      telemetry: { executionState: executing ? 'running' : 'queued', lastHeartbeatAt: Date.now() } }, targetParticipantId);
+    const stopHeartbeat = startTaskHeartbeat(event, { projectId, taskId, runId }, targetParticipantId, () => executing);
     try {
       const result = await options.bridge.handleTaskHandoff({
         handoffPath,
@@ -551,6 +563,7 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
         runId,
         targetParticipantId,
         signal: controller.signal,
+        onExecutionStarted,
       });
       if (!result.ok) {
         if (isTaskCancelledResult(result.error)) {
@@ -685,14 +698,14 @@ export function createKSwarmRuntimeBridgeBrokerClient(options: KSwarmRuntimeBrid
     }
   }
 
-  function startTaskHeartbeat(event: BrokerEvent, payload: { projectId: string; taskId: string; runId: string }, targetParticipantId: string): () => void {
+  function startTaskHeartbeat(event: BrokerEvent, payload: { projectId: string; taskId: string; runId: string }, targetParticipantId: string, isExecuting: () => boolean = () => true): () => void {
     const intervalMs = options.taskHeartbeatIntervalMs ?? 30_000;
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return () => {};
     const timer = setInterval(() => {
       sendIntent('report_progress', event, {
         ...payload,
-        stage: 'running',
-        telemetry: { lastHeartbeatAt: Date.now() },
+        stage: isExecuting() ? 'running' : 'queued',
+        telemetry: { executionState: isExecuting() ? 'running' : 'queued', lastHeartbeatAt: Date.now() },
       }, targetParticipantId).catch(() => {});
     }, intervalMs);
     return () => clearInterval(timer);
