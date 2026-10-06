@@ -1591,7 +1591,8 @@ export async function registerDesktopIpc(
     log('info', 'showSaveDialog', { defaultPath: input?.defaultPath });
     const result = await dialog.showSaveDialog(primaryWindow(), {
       defaultPath: input?.defaultPath,
-      filters: input?.filters ?? [{ name: 'Markdown', extensions: ['md'] }],
+      // Generic downloads retain their extension; callers specify format filters for exports.
+      filters: input?.filters,
     });
     if (result.canceled || !result.filePath) {
       log('info', 'showSaveDialog cancelled');

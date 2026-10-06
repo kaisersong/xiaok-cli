@@ -14,7 +14,7 @@ import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
 import { getDesktopDocumentMimeType } from '../shared/document-formats';
 import { useLocale } from '../contexts/LocaleContext';
-import { fileBasename } from '../lib/file-path';
+import { fileBasename, filePathIdentity, normalizeClipboardFilePath } from '../lib/file-path';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
@@ -779,6 +779,20 @@ function ArtifactOpenButton({
   );
 }
 
+/** Display each output file once even if multiple artifact observations recorded it. */
+function uniqueOutputFiles<T extends { filePath?: string; artifactId?: string }>(files: T[]): T[] {
+  const seen = new Set<string>();
+  return files.filter(file => {
+    const identity = file.filePath
+      ? `path:${filePathIdentity(normalizeClipboardFilePath(file.filePath))}`
+      : file.artifactId ? `artifact:${file.artifactId}` : undefined;
+    if (!identity) return true;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
 function ResultCard({
   result,
   generatedFiles,
@@ -793,8 +807,10 @@ function ResultCard({
   const [kbSaved, setKbSaved] = useState(false);
   const { t } = useLocale();
   const hasSummary = Boolean(result?.summary?.trim());
-  const hasArtifacts = Boolean(result?.artifacts && result.artifacts.length > 0);
-  if (!hasSummary && !hasArtifacts && generatedFiles.length === 0) return null;
+  const artifacts = uniqueOutputFiles(result?.artifacts ?? []);
+  const outputFiles = uniqueOutputFiles(generatedFiles);
+  const hasArtifacts = artifacts.length > 0;
+  if (!hasSummary && !hasArtifacts && outputFiles.length === 0) return null;
 
   const handleSaveToKb = async () => {
     if (!result?.summary) return;
@@ -831,9 +847,9 @@ function ResultCard({
       {hasSummary && result ? (
         <MarkdownRenderer content={result.summary} />
       ) : null}
-      {result?.artifacts && result.artifacts.length > 0 && (
+      {hasArtifacts && (
         <div className="mt-3 flex flex-col gap-2">
-          {result.artifacts.map(a => {
+          {artifacts.map(a => {
             if (isA2uiArtifact(a)) {
               return (
                 <A2uiResultArtifactPreview
@@ -892,9 +908,9 @@ function ResultCard({
           })}
         </div>
       )}
-      {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.length > 0 && (
+      {!hasArtifacts && outputFiles.length > 0 && (
         <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
-          {generatedFiles.map(f => {
+          {outputFiles.map(f => {
             const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
             const displayName = fileBasename(f.name) || f.name;
             const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };
