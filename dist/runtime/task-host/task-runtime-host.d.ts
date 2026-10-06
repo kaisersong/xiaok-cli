@@ -147,6 +147,8 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     activeExecutionCount(): number;
     /** Main owner inspection, including admitted work before executeTask starts. */
     inFlightTaskIds(): string[];
+    /** Main routing fact, including admitted work waiting for its execution lane. */
+    ownsLiveExecution(taskId: string): boolean;
     createTask(input: TaskCreateInput): Promise<{
         taskId: string;
         understanding?: TaskUnderstanding;
