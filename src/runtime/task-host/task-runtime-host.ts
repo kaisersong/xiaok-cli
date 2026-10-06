@@ -456,6 +456,11 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return [...new Set([...this.executionPromises.keys(), ...this.activeExecutions.keys()])];
   }
 
+  /** Main routing fact, including admitted work waiting for its execution lane. */
+  ownsLiveExecution(taskId: string): boolean {
+    return this.executionPromises.has(taskId) || this.activeExecutions.has(taskId);
+  }
+
   async createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     const prepared = await this.prepareTask(input);
     await this.startTask(prepared.taskId);

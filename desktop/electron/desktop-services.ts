@@ -877,6 +877,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService });
   const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
+  const scopedKSwarmHosts = new Set<WeakRef<InProcessTaskRuntimeHost>>();
+  const resolveScopedTaskHost = (taskId: string, fallback: InProcessTaskRuntimeHost): InProcessTaskRuntimeHost => {
+    for (const reference of scopedKSwarmHosts) {
+      const owner = reference.deref();
+      if (!owner) scopedKSwarmHosts.delete(reference);
+      else if (owner.ownsLiveExecution(taskId)) return owner;
+    }
+    return fallback;
+  };
   const coordinateRunner = (runner: TaskRunner): TaskRunner => input => (
     executionCoordinator.run(input.signal, () => runner(input))
   );
@@ -1882,7 +1891,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string) => {
     const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
-    return new InProcessTaskRuntimeHost({
+    const scopedHost = new InProcessTaskRuntimeHost({
       materialRegistry,
       snapshotStore,
       runner: input => withExecutionLane('background', () => coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
@@ -1905,6 +1914,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
+    scopedKSwarmHosts.add(new WeakRef(scopedHost));
+    return scopedHost;
   };
 
   const createCollaborationRoomTaskRunner = () => {
@@ -2444,7 +2455,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     let pending = historicalWorkflowArtifactRecovery.get(taskId);
     if (!pending) {
       pending = (async () => {
-        const recovered = await host.recoverTask(taskId);
+        const recovered = await resolveScopedTaskHost(taskId, host).recoverTask(taskId);
         const lookup = findHistoricalWorkflowStatusLookup(recovered.snapshot);
         return lookup
           ? recoverHistoricalWorkflowStatusArtifacts({
@@ -3225,12 +3236,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     runKSwarmAssignPo,
     runKSwarmReviewSubmission,
     runKSwarmPlanApproved,
-    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number }) => (codexTasks.owns(taskId)?codexTasks.host:host).subscribeTask(taskId,sinceIndex),
-    answerQuestion: (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => codexTasks.owns(input.taskId)?codexTasks.answer(input,nativeActor):host.answerQuestion(input),
-    cancelTask: (taskId:string, reasonOrActor?:string|NativeActor) => codexTasks.owns(taskId)?codexTasks.cancel(taskId,typeof reasonOrActor==='string'?undefined:reasonOrActor):host.cancelTask(taskId,typeof reasonOrActor==='string'?reasonOrActor:undefined),
+    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTask(taskId,sinceIndex),
+    answerQuestion: (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => codexTasks.owns(input.taskId)?codexTasks.answer(input,nativeActor):resolveScopedTaskHost(input.taskId, host).answerQuestion(input),
+    cancelTask: (taskId:string, reasonOrActor?:string|NativeActor) => codexTasks.owns(taskId)?codexTasks.cancel(taskId,typeof reasonOrActor==='string'?undefined:reasonOrActor):resolveScopedTaskHost(taskId, host).cancelTask(taskId,typeof reasonOrActor==='string'?reasonOrActor:undefined),
     async getActiveTask(): Promise<{ taskId: string } | null> {
       for (const ref of await host.getActiveTasks()) {
-        const snapshot = (await (codexTasks.owns(ref.taskId)?codexTasks.host:host).recoverTask(ref.taskId)).snapshot;
+        if (!codexTasks.owns(ref.taskId) && resolveScopedTaskHost(ref.taskId, host) !== host) continue;
+        const snapshot = (await (codexTasks.owns(ref.taskId)?codexTasks.host:resolveScopedTaskHost(ref.taskId, host)).recoverTask(ref.taskId)).snapshot;
         if (snapshot.executionScope?.kind === 'goal_turn') {
           const binding = goalStore.getTaskBinding(ref.taskId);
           if (snapshot.executionScope.origin === 'continuation' || binding?.attachedAt === null) continue;
@@ -3262,7 +3274,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             // path would collapse recoverable generation state into failure.
             continue;
           }
-          await (codexTasks.owns(ref.taskId)?codexTasks.host:host).recoverTask(ref.taskId);
+          await (codexTasks.owns(ref.taskId)?codexTasks.host:resolveScopedTaskHost(ref.taskId, host)).recoverTask(ref.taskId);
         } catch {
           // Per-task recovery failure must not block desktop startup.
         }
