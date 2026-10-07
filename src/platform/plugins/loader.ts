@@ -37,7 +37,8 @@ export async function loadPlugins(dirs: string[], options: PluginLoaderOptions =
     }));
 
     for (const entry of readdirSync(dir)) {
-      if (RESERVED_PLUGIN_DIR_NAMES.includes(entry)) continue;
+      // Backups are not deployments; managed hidden versions are resolved above.
+      if (entry.startsWith('.') || entry.endsWith('.legacy-backup') || RESERVED_PLUGIN_DIR_NAMES.includes(entry)) continue;
       // An active managed version always wins over a same-named legacy directory.
       if (managedNames.has(entry)) continue;
       candidates.push({ name: entry, pluginDir: join(dir, entry) });
