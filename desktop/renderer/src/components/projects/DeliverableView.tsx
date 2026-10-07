@@ -7,7 +7,8 @@ import { FileText, ExternalLink } from 'lucide-react';
 import type { KSwarmProject, KSwarmArtifact, KSwarmTask } from '../../hooks/useKSwarmClient';
 import { useLocale } from '../../contexts/LocaleContext';
 import { ArtifactPreviewModal } from './ArtifactPreviewModal';
-import { artifactDisplayName, formatArtifactGeneratedTime, resolveArtifactUrl } from './artifactActions';
+import { artifactDisplayName, coerceArtifactTime, formatArtifactGeneratedTime, resolveArtifactUrl } from './artifactActions';
+import { filePathIdentity, normalizeClipboardFilePath } from '../../lib/file-path';
 
 interface DeliverableViewProps {
   project: KSwarmProject;
@@ -131,9 +132,14 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
       ? rawArtifacts
           .map((item: unknown) => normalizeDeliverableFile(item, project.id))
           .filter((item): item is KSwarmArtifact => item !== null)
+          .sort((a, b) => Number(artifactDisplayName(a) === 'search-evidence.json') - Number(artifactDisplayName(b) === 'search-evidence.json')
+            || (coerceArtifactTime(b.generatedAt) ?? coerceArtifactTime(b.updatedAt) ?? 0) - (coerceArtifactTime(a.generatedAt) ?? coerceArtifactTime(a.updatedAt) ?? 0))
       : [];
     if (artifacts.length > 0) taskOutputs.push({ task, artifacts });
   }
+
+  taskOutputs.reverse();
+  taskOutputs.sort((a, b) => taskOutputTime(b) - taskOutputTime(a));
 
   const deliverables = project.deliverables || [];
   const rawDeliverable = project.deliverable;
@@ -193,6 +199,37 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
         </div>
       )}
 
+      {/* Task output summaries */}
+      {taskOutputs.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">{t.projectsDeliverableTaskOutputs}</h3>
+          <div className="flex flex-col gap-3">
+            {taskOutputs.map(({ task, artifacts }) => (
+              <div key={task.id} className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] overflow-hidden">
+                {/* Task header with summary */}
+                <div className="px-4 py-3 border-b border-[var(--c-border-subtle)]/50">
+                  <div className="flex items-center gap-2">
+                    <div className={`size-2 rounded-full ${task.status === 'done' ? 'bg-[var(--c-status-success-text)]' : task.status === 'review' ? 'bg-[var(--c-status-warning-text)]' : 'bg-[var(--c-text-muted)]'}`} />
+                    <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{task.title}</span>
+                    {task.assignedAgent && <span className="text-[10px] text-[var(--c-text-muted)]">@{task.assignedAgent}</span>}
+                  </div>
+                  {typeof task.result === 'object' && task.result !== null && task.result.summary && (
+                    <p className="mt-1.5 text-[11px] text-[var(--c-text-tertiary)] pl-4 line-clamp-2">{task.result.summary}</p>
+                  )}
+                </div>
+                {/* Artifacts */}
+                <div className="divide-y divide-[var(--c-border-subtle)]/50">
+                  {artifacts.map((art, i) => (
+                    <div key={i} className="px-4 py-2">
+                      <ArtifactCard artifact={art} taskTitle={task.title} onPreview={setPreviewArtifact} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Workspace files not yet linked to a deliverable/task */}
       {projectFiles.length > 0 && (
         <div>
@@ -210,37 +247,6 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
         </div>
       )}
 
-      {/* Task output summaries */}
-      {taskOutputs.length > 0 && (
-        <div>
-          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">{t.projectsDeliverableTaskOutputs}</h3>
-          <div className="flex flex-col gap-3">
-            {taskOutputs.map(({ task, artifacts }) => (
-              <div key={task.id} className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] overflow-hidden">
-                {/* Task header with summary */}
-                <div className="px-4 py-3 border-b border-[var(--c-border-subtle)]/50">
-                  <div className="flex items-center gap-2">
-                    <div className={`size-2 rounded-full ${task.status === 'done' ? 'bg-[var(--c-status-success-text)]' : task.status === 'review' ? 'bg-[var(--c-status-warning-text)]' : 'bg-[var(--c-text-muted)]'}`} />
-                    <span className="text-[12px] font-medium text-[var(--c-text-primary)]">{task.title}</span>
-                    {task.assignedAgent && <span className="text-[10px] text-[var(--c-text-muted)]">@{task.assignedAgent}</span>}
-                  </div>
-                  {typeof task.result === 'object' && task.result !== null && task.result.summary && (
-                    <p className="mt-1.5 text-[11px] text-[var(--c-text-tertiary)] pl-4">{task.result.summary}</p>
-                  )}
-                </div>
-                {/* Artifacts */}
-                <div className="divide-y divide-[var(--c-border-subtle)]/50">
-                  {artifacts.map((art, i) => (
-                    <div key={i} className="px-4 py-2">
-                      <ArtifactCard artifact={art} taskTitle={task.title} onPreview={setPreviewArtifact} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       {previewArtifact && (
         <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />
       )}
@@ -287,23 +293,18 @@ function addArtifactKeys(target: Set<string>, artifact: KSwarmArtifact) {
 }
 
 function getArtifactKeys(artifact: KSwarmArtifact): string[] {
-  const rawValues = [
-    artifact.filename,
-    artifact.name,
-    artifact.relativePath,
-    artifact.path,
-    artifact.url,
-  ];
-  const keys = new Set<string>();
-  for (const value of rawValues) {
-    if (!value) continue;
-    const raw = String(value).trim();
-    if (!raw) continue;
-    keys.add(raw);
-    const name = basename(raw);
-    if (name) keys.add(name);
+  const keys = artifact.path ? [`path:${filePathIdentity(normalizeClipboardFilePath(artifact.path))}`] : [];
+  const url = resolveArtifactUrl(artifact);
+  if (url) {
+    try { keys.push(decodeURIComponent(url)); } catch { keys.push(url); }
   }
-  return [...keys];
+  return keys;
+}
+
+function taskOutputTime(output: { task: KSwarmTask; artifacts: KSwarmArtifact[] }): number {
+  const artifactTime = Math.max(0, ...output.artifacts.map(artifact => coerceArtifactTime(artifact.generatedAt) ?? coerceArtifactTime(artifact.updatedAt) ?? 0));
+  return coerceArtifactTime(output.task.completedAt) ?? coerceArtifactTime(output.task.updatedAt)
+    ?? (artifactTime || coerceArtifactTime(output.task.createdAt) || 0);
 }
 
 function isGeneratedPlanArtifact(artifact: KSwarmArtifact): boolean {
@@ -347,7 +348,7 @@ function normalizeDeliverableFile(item: unknown, projectId?: string): KSwarmArti
     projectId: stringField(obj, 'projectId') || projectId,
     path: rawPath,
     relativePath,
-    url: rawUrl || artifactUrlFromProject(projectId, filename || displayName),
+    url: rawUrl,
     size: numberField(obj, 'size'),
   };
 }
@@ -386,7 +387,7 @@ function basename(value?: string): string {
 function inferMimeType(value?: string): string | undefined {
   const lower = (value || '').toLowerCase();
   if (!lower) return undefined;
-  if (lower.includes('/')) return value;
+
   if (lower === 'markdown' || lower.endsWith('.md') || lower.endsWith('.markdown')) return 'text/markdown';
   if (lower === 'json' || lower.endsWith('.json')) return 'application/json';
   if (lower === 'html' || lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';

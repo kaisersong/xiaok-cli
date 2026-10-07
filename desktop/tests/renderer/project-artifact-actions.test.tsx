@@ -22,6 +22,58 @@ afterEach(() => {
 });
 
 describe('project artifact actions', () => {
+  it.each([
+    '/workspace/artifacts/run-a/report 中文 100%.md',
+    'C:\\workspace\\artifacts\\run-a\\report 中文 100%.md',
+    '\\\\server\\share\\artifacts\\run-a\\report 中文 100%.md',
+  ])('preserves a nested project path despite a basename-only filename: %s', path => {
+    expect(resolveArtifactUrl({ projectId: 'proj-a', path, filename: 'report 中文 100%.md' }))
+      .toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/run-a/report%20%E4%B8%AD%E6%96%87%20100%25.md');
+  });
+
+  it('opens a nested task Markdown via the real main proxy path and renders its body', async () => {
+    const proxy = vi.fn(async () => '# Nested task report\n\nReadable report body.');
+    mockGetDesktopApi.mockReturnValue({ kswarmProxyGetText: proxy });
+    render(<MemoryRouter><LocaleProvider><DeliverableView
+      project={{ id: 'proj-a', name: 'Project', status: 'active' }}
+      tasks={[{ id: 't1', title: 'Task', status: 'done', result: { artifacts: [{ path: '/workspace/artifacts/run-a/report.md' }] } }]}
+    /></LocaleProvider></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /report\.md/ }));
+    expect(await screen.findByText('Readable report body.')).toBeInTheDocument();
+    expect(proxy).toHaveBeenCalledWith('/projects/proj-a/artifacts/run-a/report.md');
+  });
+
+  it('shows newest task output before workspace files without conflating same-name runs', () => {
+    const tasks: any[] = [
+      { id: 'old', title: 'Old task', status: 'done', completedAt: 100, result: { artifacts: [{ path: '/workspace/artifacts/run-old/report.md' }] } },
+      { id: 'new', title: 'Final task', status: 'done', completedAt: 200, result: { artifacts: [{ path: '/workspace/artifacts/run-new/report.md' }] } },
+    ];
+    render(<MemoryRouter><LocaleProvider><DeliverableView
+      project={{ id: 'proj-a', name: 'Project', status: 'active' }} tasks={tasks}
+      workspaceArtifacts={[{ path: '/workspace/artifacts/run-third/report.md' }]}
+    /></LocaleProvider></MemoryRouter>);
+    const buttons = screen.getAllByRole('button', { name: /report\.md/ });
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveTextContent('Final task');
+    expect(buttons[1]).toHaveTextContent('Old task');
+    expect(buttons[0]).toHaveTextContent('text/markdown');
+    expect(tasks.map(t => t.id)).toEqual(['old', 'new']);
+  });
+
+  it('reverses legacy tasks without timestamps and keeps source evidence after the primary report', () => {
+    render(<MemoryRouter><LocaleProvider><DeliverableView
+      project={{ id: 'proj-a', name: 'Project', status: 'active' }}
+      tasks={[
+        { id: 'old', title: 'Old task', status: 'done', result: { artifacts: [{ filename: 'old.md' }] } },
+        { id: 'new', title: 'Final task', status: 'done', result: { artifacts: [{ filename: 'search-evidence.json', generatedAt: 500 }, { filename: 'final.md', generatedAt: 400 }] } },
+      ]}
+    /></LocaleProvider></MemoryRouter>);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons[0]).toHaveTextContent('final.md');
+    expect(buttons[1]).toHaveTextContent('search-evidence.json');
+    expect(buttons[2]).toHaveTextContent('old.md');
+  });
+
   it('normalizes KSwarm relative artifact URLs for desktop file-origin pages', () => {
     expect(resolveArtifactUrl({ name: 'report.md', mimeType: 'text/markdown', url: '/projects/proj-a/artifacts/report.md' }))
       .toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/report.md');
