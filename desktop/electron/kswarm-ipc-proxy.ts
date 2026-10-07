@@ -31,10 +31,13 @@ const SENSITIVE_REQUEST_KEYS = new Set([
   'secret',
 ]);
 
+// Paths are normalized segment-by-segment before this read-only allowlist.
+const PROJECT_ARTIFACT_READ_PATTERN = /^\/projects\/[^/]+\/artifacts\/[^/]+(?:\/[^/]+)*$/;
+
 const SAFE_GET_PATTERNS = [
   /^\/projects$/,
   /^\/projects\/[^/]+$/,
-  /^\/projects\/[^/]+\/artifacts\/[^/]+$/,
+  PROJECT_ARTIFACT_READ_PATTERN,
   // design §9.1/§9.3：getProjectGateSnapshot 只读 DTO 端点，返回值本身在
   // hub.js 层面已经是 allowlist（不含绝对路径/raw evidence body），这里
   // 只需要放行路径本身，不需要额外的响应字段过滤。
@@ -247,7 +250,7 @@ export function isKSwarmProxyRequestAllowed(
   const normalizedMethod = method.toUpperCase();
   if (normalizedMethod === 'GET') {
     if (responseKind === 'text') {
-      return /^\/projects\/[^/]+\/artifacts\/[^/]+$/.test(pathname);
+      return PROJECT_ARTIFACT_READ_PATTERN.test(pathname);
     }
     return responseKind === 'json' && SAFE_GET_PATTERNS.some((pattern) => pattern.test(pathname));
   }

@@ -167,6 +167,23 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
   return (
     <div className="p-6 space-y-6">
       {/* Project deliverable text */}
+      {/* Workspace files not yet linked to a deliverable/task */}
+      {projectFiles.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">{t.projectsDeliverableProjectFiles}</h3>
+          <div className="flex flex-col gap-2">
+            {projectFiles.map((artifact, i) => (
+              <ArtifactCard
+                key={`${artifact.url || artifact.path || artifact.filename || artifact.name || 'workspace'}-${i}`}
+                artifact={artifact}
+                taskTitle={t.projectsDeliverableProjectWorkspace}
+                onPreview={setPreviewArtifact}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {deliverable && (
         <div className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">{t.projectsDeliverableTitle}</h3>
@@ -226,22 +243,6 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
                   ))}
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-      {/* Workspace files not yet linked to a deliverable/task */}
-      {projectFiles.length > 0 && (
-        <div>
-          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">{t.projectsDeliverableProjectFiles}</h3>
-          <div className="flex flex-col gap-2">
-            {projectFiles.map((artifact, i) => (
-              <ArtifactCard
-                key={`${artifact.url || artifact.path || artifact.filename || artifact.name || 'workspace'}-${i}`}
-                artifact={artifact}
-                taskTitle={t.projectsDeliverableProjectWorkspace}
-                onPreview={setPreviewArtifact}
-              />
             ))}
           </div>
         </div>

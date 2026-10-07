@@ -31,7 +31,7 @@ describe('project artifact actions', () => {
       .toBe('http://127.0.0.1:4400/projects/proj-a/artifacts/run-a/report%20%E4%B8%AD%E6%96%87%20100%25.md');
   });
 
-  it('opens a nested task Markdown via the real main proxy path and renders its body', async () => {
+  it('opens a nested task Markdown with the expected main proxy path and renders its body', async () => {
     const proxy = vi.fn(async () => '# Nested task report\n\nReadable report body.');
     mockGetDesktopApi.mockReturnValue({ kswarmProxyGetText: proxy });
     render(<MemoryRouter><LocaleProvider><DeliverableView
@@ -43,7 +43,7 @@ describe('project artifact actions', () => {
     expect(proxy).toHaveBeenCalledWith('/projects/proj-a/artifacts/run-a/report.md');
   });
 
-  it('shows newest task output before workspace files without conflating same-name runs', () => {
+  it('shows workspace files first and newest task output next without conflating same-name runs', () => {
     const tasks: any[] = [
       { id: 'old', title: 'Old task', status: 'done', completedAt: 100, result: { artifacts: [{ path: '/workspace/artifacts/run-old/report.md' }] } },
       { id: 'new', title: 'Final task', status: 'done', completedAt: 200, result: { artifacts: [{ path: '/workspace/artifacts/run-new/report.md' }] } },
@@ -54,8 +54,9 @@ describe('project artifact actions', () => {
     /></LocaleProvider></MemoryRouter>);
     const buttons = screen.getAllByRole('button', { name: /report\.md/ });
     expect(buttons).toHaveLength(3);
-    expect(buttons[0]).toHaveTextContent('Final task');
-    expect(buttons[1]).toHaveTextContent('Old task');
+    expect(buttons[0]).toHaveTextContent('项目工作区');
+    expect(buttons[1]).toHaveTextContent('Final task');
+    expect(buttons[2]).toHaveTextContent('Old task');
     expect(buttons[0]).toHaveTextContent('text/markdown');
     expect(tasks.map(t => t.id)).toEqual(['old', 'new']);
   });
