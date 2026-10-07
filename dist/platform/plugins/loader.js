@@ -22,7 +22,8 @@ export async function loadPlugins(dirs, options = {}) {
             ...(entry.pointer.pythonRuntimeDir ? { pythonRuntimeDir: entry.pointer.pythonRuntimeDir } : {}),
         }));
         for (const entry of readdirSync(dir)) {
-            if (RESERVED_PLUGIN_DIR_NAMES.includes(entry))
+            // Backups are not deployments; managed hidden versions are resolved above.
+            if (entry.startsWith('.') || entry.endsWith('.legacy-backup') || RESERVED_PLUGIN_DIR_NAMES.includes(entry))
                 continue;
             // An active managed version always wins over a same-named legacy directory.
             if (managedNames.has(entry))
