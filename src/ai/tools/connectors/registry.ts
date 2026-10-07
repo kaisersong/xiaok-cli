@@ -1,3 +1,4 @@
+import { createBingRssSearchProvider } from './search/bing-rss.js';
 import type { ConnectorsConfig, ProviderRuntime } from './config.js';
 import { evaluateProviderRuntimes } from './config.js';
 import { createBraveSearchProvider } from './search/brave.js';
@@ -113,14 +114,21 @@ export class ConnectorRegistry {
     const primary = this.state.search;
     const fallback = this.state.fallbackSearch;
     const usePrimary = !this.state.invalidSearch.has(primary.name);
-    const timedInput = { ...input, signal: input.signal ?? AbortSignal.timeout(30_000) };
+    const deadline = Date.now() + 30_000;
+    const timedInputFor = (primaryAttempt: boolean) => {
+      input.signal?.throwIfAborted();
+      const timeout = AbortSignal.timeout(Math.max(1, Math.min(primaryAttempt ? 15_000 : 30_000, deadline - Date.now())));
+      return {...input, signal:input.signal ? AbortSignal.any([input.signal,timeout]) : timeout};
+    };
 
     if (usePrimary) {
       try {
+        const timedInput = timedInputFor(true);
         const hits = await runWithAbortSignal(primary.search(timedInput), timedInput.signal);
         this.resetSearchWindow(primary.name);
         return { hits, primary: primary.name, effective: primary.name };
       } catch (error) {
+        input.signal?.throwIfAborted();
         const reason = describeSearchError(error);
         this.recordSearchFailure(primary.name);
         if (primary.name === fallback.name) {
@@ -128,6 +136,7 @@ export class ConnectorRegistry {
           throw error;
         }
         try {
+          const timedInput = timedInputFor(false);
           const hits = await runWithAbortSignal(fallback.search(timedInput), timedInput.signal);
           return {
             hits,
@@ -143,6 +152,7 @@ export class ConnectorRegistry {
     }
 
     // Primary already marked invalid in this session — go straight to fallback.
+    const timedInput = timedInputFor(false);
     const hits = await runWithAbortSignal(fallback.search(timedInput), timedInput.signal);
     return {
       hits,
@@ -155,7 +165,7 @@ export class ConnectorRegistry {
   async runFetch(input: FetchRunInput): Promise<FetchRunOutcome> {
     const primary = this.state.fetch;
     const fallback = this.state.fallbackFetch;
-    const usePrimary = !this.state.invalidFetch.has(primary.name);
+    const usePrimary = primary.name === fallback.name || !this.state.invalidFetch.has(primary.name);
     const timedInput = { ...input, signal: input.signal ?? AbortSignal.timeout(30_000) };
 
     if (usePrimary) {
@@ -193,11 +203,13 @@ export class ConnectorRegistry {
   }
 
   private buildState(config: ConnectorsConfig): ConnectorRegistryState {
-    const fallbackSearch = createDuckDuckGoSearchProvider({ fetchFn: this.injections.fetchFn });
+    const duckDuckGo = createDuckDuckGoSearchProvider({ fetchFn: this.injections.fetchFn });
+    const search = this.buildSearchProvider(config, duckDuckGo);
+    const fallbackSearch = search.name === duckDuckGo.name ? createBingRssSearchProvider({fetchFn:this.injections.fetchFn}) : duckDuckGo;
     const fallbackFetch = createBasicFetchProvider({ fetchFn: this.injections.fetchFn });
     return {
       config,
-      search: this.buildSearchProvider(config, fallbackSearch),
+      search,
       fetch: this.buildFetchProvider(config, fallbackFetch),
       fallbackSearch,
       fallbackFetch,
@@ -313,7 +325,12 @@ function describeFetchError(error: unknown): string {
 
 function runWithAbortSignal<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return operation;
-  if (signal.aborted) return Promise.reject(getAbortReason(signal));
+  if (signal.aborted) {
+    // The provider may have rejected synchronously while aborting the caller.
+    // Observe its result even when the caller's cancellation wins the race.
+    void operation.catch(() => undefined);
+    return Promise.reject(getAbortReason(signal));
+  }
 
   return new Promise<T>((resolve, reject) => {
     const cleanup = () => {

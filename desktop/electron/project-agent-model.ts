@@ -3,10 +3,10 @@ import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../src/ai/models.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
-import { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
+import { streamDesktopTaskRecovery } from './desktop-task-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
-type Request = Omit<Parameters<typeof streamDesktopSummaryRecovery>[0], 'adapter'> & { adapter?: Pick<ModelAdapter, 'stream'>; beforeRequest?: () => Promise<void> };
+type Request = Omit<Parameters<typeof streamDesktopTaskRecovery>[0], 'adapter'> & { adapter?: Pick<ModelAdapter, 'stream'>; beforeRequest?: () => Promise<void> };
 export type ProjectAgentModel = Awaited<ReturnType<typeof createProjectAgentModel>>;
 
 export function validateProjectAgentModelSelection(modelId: unknown, runtimeType: unknown, config: Config, requestSource?: 'user'|'agent'|'scheduler'): void {
@@ -50,8 +50,6 @@ export async function createProjectAgentModel(options: {
       for (;;) {
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
-        await input.beforeRequest?.();
-        input.options?.signal?.throwIfAborted();
         const messages: Message[] = switched ? input.messages.map(message => ({...message, content: message.content.filter(block => block.type !== 'thinking')})).filter(message => message.content.length > 0) : input.messages;
         const systemPrompt = switched ? input.systemPrompt.replace(`你当前运行的模型是: ${initialName}`, `你当前运行的模型是: ${adapter.getModelName()}`) : input.systemPrompt;
         const invocationId = randomUUID();
@@ -60,9 +58,11 @@ export async function createProjectAgentModel(options: {
         try {
           if (messages.some(message => message.content.some(block => block.type === 'image')) && !binding.capabilities.includes('image_in')) throw new Error('project_agent_model_image_not_supported');
           if (!canFallback) {
-            yield* streamDesktopSummaryRecovery({...input, adapter, messages, systemPrompt, invocationId});
+            yield* streamDesktopTaskRecovery({...input, adapter, messages, systemPrompt, invocationId});
             return;
           }
+          await input.beforeRequest?.();
+          input.options?.signal?.throwIfAborted();
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
           for await (const chunk of streamDesktopTaskProviderConversation({...input, adapter, messages, systemPrompt, invocationId})) {
             input.options?.signal?.throwIfAborted();

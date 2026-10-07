@@ -1,5 +1,5 @@
-import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'fs';
-import { extname } from 'path';
+import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync, realpathSync } from 'fs';
+import { extname, resolve } from 'path';
 import type { Tool } from '../../types.js';
 import { assertWorkspacePath } from '../permissions/workspace.js';
 import { truncateText } from './truncation.js';
@@ -17,6 +17,8 @@ export interface WorkspaceToolOptions {
   cwd?: string;
   allowOutsideCwd?: boolean;
   artifactRoot?: string;
+  /** Host-owned exact read-only references; never accepted from model input. */
+  readOnlyPaths?: string[];
 }
 
 const OOXML_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx']);
@@ -75,6 +77,7 @@ function classifyReadContent(path: string, header: Buffer): ReadContentKind {
 export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
+  const readOnlyPaths = new Set((options.readOnlyPaths ?? []).flatMap(file => {try {return [realpathSync(file)];}catch{return [];}}));
 
   return {
     permission: 'safe',
@@ -100,7 +103,14 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         limit?: number;
         max_chars?: number;
       };
-      const resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
+      let resolvedPath: string;
+      try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd); }
+      catch (error) {
+        let reference: string | undefined;
+        try { reference = realpathSync(resolve(file_path)); } catch { /* Preserve the original denial. */ }
+        if (!reference || !readOnlyPaths.has(reference)) throw error;
+        resolvedPath = reference;
+      }
       if (!existsSync(resolvedPath)) return `Error: 文件不存在: ${resolvedPath}`;
       if (isSensitiveFilePath(resolvedPath)) {
         return SENSITIVE_FILE_REDACTION;

@@ -1,3 +1,4 @@
+import { resolveKSwarmReviewReadPaths } from './kswarm-review-files.js';
 import { ConversationRoomService, createConversationRoomTool } from './conversation-room-service.js';
 import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from './kswarm-execution-clock.js';
 import { findLegacyTaskHistory } from './legacy-task-history.js';
@@ -1893,9 +1894,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return createProjectAgentModel({ modelId, loadConfig });
   };
 
-  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { control?: boolean; projectWorker?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
+  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string, taskOptions: { readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; onStarted?: () => void | Promise<void> } = {}) => {
     const execution = { clock: undefined as KSwarmExecutionClock | undefined };
-    const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
+    const scopedTools = buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths });
     const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
     const scopedHost = new InProcessTaskRuntimeHost({
       // This scoped owner is bounded by the KSwarm queue/run clocks.
@@ -2108,7 +2109,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           };
         }
         if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
-          throw new Error(`desktop_task_${recovered.snapshot.status}`);
+          throw new Error(`desktop_task_${recovered.snapshot.status}: ${getKSwarmRuntimeTaskFailureReason(recovered.snapshot) || 'unknown_runtime_failure'}`);
         }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -2416,7 +2417,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const reviewPrompt = buildKSwarmReviewPrompt(payload);
-      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent, { control: true }), reviewPrompt);
+      const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+      const readOnlyPaths = resolveKSwarmReviewReadPaths(payload, detail);
+      const runtimeResult = await runKSwarmRuntimeTextTask(createKSwarmTaskHost(process.cwd(), fromAgent, { control: true, readOnlyPaths }), reviewPrompt);
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
