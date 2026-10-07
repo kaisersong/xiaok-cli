@@ -9,9 +9,13 @@ export interface WorkflowLabels {
 
 export function buildProjectCardMessageFromToolResult(response: string): ChatMessage | null {
   const data = parseJsonRecord(response);
-  if (data?.type !== 'project_card') return null;
-  const projectId = readString(data.projectId);
-  const name = readString(data.name);
+  if (!data || data.ok === false) return null;
+  const legacyCard = data.type === 'project_card';
+  if (!legacyCard && (data.ok !== true || data.created !== true)) return null;
+  const project = legacyCard ? data : readRecord(data.project);
+  const projectId = readString(legacyCard ? data.projectId : project.id);
+  if (!legacyCard && readString(data.projectId) && readString(data.projectId) !== projectId) return null;
+  const name = readString(project.name);
   if (!projectId || !name) return null;
   return {
     id: `msg-project-${projectId}`,
@@ -21,11 +25,11 @@ export function buildProjectCardMessageFromToolResult(response: string): ChatMes
       type: 'project_card',
       projectId,
       name,
-      goal: readString(data.goal),
-      status: readString(data.status) || 'created',
-      createdAt: readNumber(data.createdAt) || Date.now(),
-      memberCount: readNumber(data.memberCount) || 0,
-      executionMode: readString(data.executionMode) || undefined,
+      goal: readString(project.goal),
+      status: readString(project.status) || 'created',
+      createdAt: readNumber(project.createdAt) || Date.now(),
+      memberCount: Array.isArray(project.members) ? project.members.length : readNumber(project.memberCount) || 0,
+      executionMode: readString(project.executionMode) || undefined,
     },
   };
 }
