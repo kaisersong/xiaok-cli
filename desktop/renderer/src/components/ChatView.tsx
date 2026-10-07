@@ -1,3 +1,4 @@
+import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
@@ -187,12 +188,13 @@ export interface ComputerUseActionData {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'computer_use_action' | 'result_card';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card';
   content: string;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
   projectData?: ProjectCardData;
+  roomData?: RoomCardData;
   computerUseAction?: ComputerUseActionData;
   result?: TaskResult | null;
   generatedFiles?: GeneratedFile[];
@@ -502,6 +504,8 @@ export function ChatView({
                     memberCount={msg.projectData.memberCount}
                     executionMode={msg.projectData.executionMode}
                   />
+                ) : msg.role === 'room_card' && msg.roomData ? (
+                  <RoomInlineCard {...msg.roomData} />
                 ) : msg.role === 'computer_use_action' && msg.computerUseAction ? (
                   <div className="max-w-[663px] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-sm text-[var(--c-text-primary)] shadow-sm">
                     <div className="font-medium">{t.chatView.needsComputerUse}</div>

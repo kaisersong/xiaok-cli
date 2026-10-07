@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 vi.mock('../../renderer/src/contexts/KSwarmContext', () => ({
   useKSwarm: () => ({
@@ -41,6 +41,7 @@ describe('CollaborationRoomsPage', () => {
     );
 
     fireEvent.click(await screen.findByRole('button', { name: '新建协作空间' }));
+    fireEvent.click(screen.getByRole('button', {name:'高级设置（可选）'}));
     const defaultAgent = screen.getByRole('checkbox', { name: /小 K/ }) as HTMLInputElement;
 
     expect(defaultAgent.checked).toBe(true);
@@ -48,13 +49,15 @@ describe('CollaborationRoomsPage', () => {
   });
 });
 
-const mount = () => render(<MemoryRouter><LocaleProvider><CollaborationRoomsPage /></LocaleProvider></MemoryRouter>);
+function CurrentLocation(){return <output>{useLocation().pathname}</output>;}
+const mount = () => render(<MemoryRouter><LocaleProvider><CollaborationRoomsPage /><CurrentLocation/></LocaleProvider></MemoryRouter>);
 const rooms = [
   {roomId: 'older', title: 'Older active', status: 'active', revision: 1, lastActivityAt: '2026-01-01T12:00:00Z'},
   {roomId: 'archived', title: 'Archived room', status: 'archived', revision: 2, lastActivityAt: '2026-01-03T12:00:00Z'},
   {roomId: 'newer', title: 'Newer active', status: 'active', revision: 1, lastActivityAt: '2026-01-02T12:00:00Z'},
 ];
 beforeEach(() => {
+  vi.mocked(desktop.createCollaborationRoom).mockReset();
   vi.mocked(desktop.listCollaborationRooms).mockReset().mockResolvedValue({ok: true, rooms});
   vi.mocked(desktop.archiveCollaborationRoom).mockReset().mockResolvedValue({ok: true});
   vi.mocked(desktop.deleteCollaborationRoom).mockReset().mockResolvedValue({ok: true});
@@ -142,3 +145,17 @@ it('all collaboration list color variables exist in the production theme', async
   const declarations = new Set([...theme.matchAll(/(--[a-z][\w-]*)\s*:/g)].map(match => match[1]));
   expect(references.filter(name => !declarations.has(name))).toEqual([]);
 });
+
+it('creates from a single goal using main AI defaults and opens the real room', async()=>{
+  vi.mocked(desktop.createCollaborationRoom).mockResolvedValue({ok:true,room:{roomId:'room-goal'}});
+  mount();fireEvent.click(await screen.findByRole('button',{name:'新建协作空间'}));
+  fireEvent.change(screen.getByLabelText('协作目标'),{target:{value:'分析本月AI动态'}});
+  fireEvent.click(screen.getByRole('button',{name:'创建并进入'}));
+  await waitFor(()=>expect(desktop.createCollaborationRoom).toHaveBeenCalled());
+  expect(vi.mocked(desktop.createCollaborationRoom).mock.lastCall?.[0]).toMatchObject({goal:'分析本月AI动态',clientRequestKey:expect.any(String)});
+  expect(vi.mocked(desktop.createCollaborationRoom).mock.lastCall?.[0]).not.toHaveProperty('memberAgentIds');
+  expect(await screen.findByText('/collaboration/room-goal')).toBeInTheDocument();
+});
+
+it('preserves the original manual creation path under optional settings',async()=>{vi.mocked(desktop.createCollaborationRoom).mockResolvedValue({ok:true,room:{roomId:'room-manual'}});mount();fireEvent.click(await screen.findByRole('button',{name:'新建协作空间'}));fireEvent.click(screen.getByRole('button',{name:'高级设置（可选）'}));fireEvent.change(screen.getByLabelText('名称'),{target:{value:'手动空间'}});fireEvent.click(screen.getByRole('button',{name:'创建并进入'}));expect(await screen.findByText('/collaboration/room-manual')).toBeInTheDocument();expect(vi.mocked(desktop.createCollaborationRoom).mock.lastCall?.[0]).toMatchObject({title:'手动空间',memberAgentIds:[]});expect(vi.mocked(desktop.createCollaborationRoom).mock.lastCall?.[0]).not.toHaveProperty('goal');});
+it('keeps the goal and request identity when creation fails and is retried',async()=>{vi.mocked(desktop.createCollaborationRoom).mockResolvedValueOnce({ok:false,code:'room_defaults_failed'}).mockResolvedValueOnce({ok:true,room:{roomId:'room-retry'}});mount();fireEvent.click(await screen.findByRole('button',{name:'新建协作空间'}));fireEvent.change(screen.getByLabelText('协作目标'),{target:{value:'分析AI动态'}});fireEvent.click(screen.getByRole('button',{name:'创建并进入'}));expect(await screen.findByRole('alert')).toBeInTheDocument();expect(screen.getByLabelText('协作目标')).toHaveValue('分析AI动态');fireEvent.click(screen.getByRole('button',{name:'创建并进入'}));expect(await screen.findByText('/collaboration/room-retry')).toBeInTheDocument();const calls=vi.mocked(desktop.createCollaborationRoom).mock.calls as any[];expect(calls[0][0].clientRequestKey).toBe(calls[1][0].clientRequestKey);});

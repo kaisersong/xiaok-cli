@@ -125,6 +125,7 @@ export function createCollaborationRoomService({
   emitRoomEvent,
   getExecutionCapabilities,
   stopRoomExecution,
+  prepareRoomDefaults,
 }: {
   brokerClient: {
     createRoom: (input: unknown, ctx: unknown) => Promise<unknown>;
@@ -140,6 +141,7 @@ export function createCollaborationRoomService({
   kswarmClient: {
     request: (path: string, init?: unknown) => Promise<{ ok: boolean; json: () => Promise<unknown> }>;
   };
+  prepareRoomDefaults?: (input: Record<string, unknown>, signal?: AbortSignal) => Promise<{title:string;description:string;memberAgentIds:string[]}>;
   sagaJournal?: RoomProjectSagaJournalPort;
   wakeDispatcher?: {
     dispatchMessage(input: { roomId: string; roomMessageId: string; logicalAgentIds: string[] }): Promise<unknown>;
@@ -176,7 +178,43 @@ export function createCollaborationRoomService({
     }
   }
 
-  async function createRoom(input: Record<string, unknown>) {
+  const roomCreations = new Map<string, {signature:string;promise:Promise<unknown>}>();
+  const roomDrafts = new Map<string, {signature:string;draft:{title:string;description:string;memberAgentIds:string[]}}>();
+  async function createRoom(input: Record<string, unknown>, authority?: {requestSource:'user';signal?:AbortSignal}) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return {ok:false,code:'room_input_invalid'};
+    if (authority && authority.requestSource!=='user') return {ok:false,code:'room_actor_forbidden'};
+    authority?.signal?.throwIfAborted();
+    const key = isNonEmptyString(input.clientRequestKey) ? input.clientRequestKey : '';
+    if (input.clientRequestKey!==undefined && (!isNonEmptyString(input.clientRequestKey) || key.length>256)) return {ok:false,code:'room_input_invalid'};
+    const signature = JSON.stringify({goal:input.goal,title:input.title,description:input.description,memberAgentIds:input.memberAgentIds});
+    const prior = key ? roomCreations.get(key) : undefined;
+    if (prior) return prior.signature===signature ? prior.promise : {ok:false,code:'room_create_request_conflict'};
+    const draft = key ? roomDrafts.get(key) : undefined;
+    if (draft && draft.signature!==signature) return {ok:false,code:'room_create_request_conflict'};
+    const run = createRoomOnce(input,authority,key,signature).finally(()=>{if(key)roomCreations.delete(key);});
+    if (key) roomCreations.set(key,{signature,promise:run});
+    return run;
+  }
+  async function createRoomOnce(input: Record<string, unknown>, authority: {requestSource:'user';signal?:AbortSignal}|undefined, key:string, signature:string) {
+    if (authority && authority.requestSource!=='user') return {ok:false,code:'room_actor_forbidden'};
+    authority?.signal?.throwIfAborted();
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return {ok:false,code:'room_input_invalid'};
+    if (isNonEmptyString(input.goal)) {
+      if (!prepareRoomDefaults) return {ok:false,code:'room_defaults_unavailable'};
+      try {
+        let draft = key ? roomDrafts.get(key)?.draft : undefined;
+        if (!draft) {
+          draft = await prepareRoomDefaults(input, authority?.signal);
+          if (key) {
+            if (roomDrafts.size>=100) roomDrafts.delete(roomDrafts.keys().next().value!);
+            roomDrafts.set(key,{signature,draft});
+          }
+        }
+        input = {...input,...draft};
+      }
+      catch { return {ok:false,code:'room_defaults_failed'}; }
+    }
+    authority?.signal?.throwIfAborted();
     const title = typeof input.title === 'string' ? input.title.trim() : '';
     const memberAgentIds = input.memberAgentIds;
     if (!title || !Array.isArray(memberAgentIds)) {

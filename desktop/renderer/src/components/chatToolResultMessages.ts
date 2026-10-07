@@ -34,6 +34,14 @@ export function buildProjectCardMessageFromToolResult(response: string): ChatMes
   };
 }
 
+export function buildRoomCardMessageFromToolResult(response: string): ChatMessage | null {
+  const data = parseJsonRecord(response);
+  if (data?.ok !== true || data.created !== true || data.type !== 'room_card') return null;
+  const roomId = readString(data.roomId), title = readString(data.title);
+  if (!roomId || !title) return null;
+  return {id:`msg-room-${roomId}`,role:'room_card',content:'',roomData:{roomId,title,description:readString(data.description),memberCount:readNumber(data.memberCount)}};
+}
+
 export function buildWorkflowMessageFromToolResult(response: string, labels: WorkflowLabels): ChatMessage | null {
   const data = parseJsonRecord(response);
   if (!data?.ok) return null;

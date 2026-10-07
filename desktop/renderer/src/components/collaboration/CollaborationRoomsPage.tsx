@@ -12,6 +12,10 @@ export function CollaborationRoomsPage() {
   const { agents } = useKSwarm();
   const [result, setResult] = useState<RoomListResult | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [goal, setGoal] = useState('');
+  const [advanced, setAdvanced] = useState(false);
+  const [membersTouched, setMembersTouched] = useState(false);
+  const createRequest = useRef<{signature:string;key:string} | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [memberAgentIds, setMemberAgentIds] = useState<string[]>([]);
@@ -101,15 +105,18 @@ export function CollaborationRoomsPage() {
   const formatTime = useMemo(() => new Intl.DateTimeFormat(locale, {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false}), [locale]);
 
   const createRoom = async () => {
-    if (!title.trim()) return;
+    if (submitting || (!title.trim() && !goal.trim())) return;
+    const signature = JSON.stringify({goal,title,description,memberAgentIds,membersTouched});
+    if (createRequest.current?.signature !== signature) createRequest.current = {signature,key:crypto.randomUUID()};
     setSubmitting(true);
     setError(null);
     try {
       const created = await desktop.createCollaborationRoom({
-        title: title.trim(),
+        ...(goal.trim() ? {goal:goal.trim()} : {}),
+        title: title.trim() || undefined,
         description: description.trim() || undefined,
-        memberAgentIds,
-        clientRequestKey: crypto.randomUUID(),
+        ...(!goal.trim() || membersTouched ? {memberAgentIds} : {}),
+        clientRequestKey: createRequest.current!.key,
       }) as { ok?: boolean; room?: { roomId?: string } };
       if (!created?.ok || !created.room?.roomId) {
         setError(t.collaborationRoomCreateFailed);
@@ -229,15 +236,22 @@ export function CollaborationRoomsPage() {
           <div className="w-full max-w-lg rounded-2xl border border-[var(--c-border)] bg-[var(--c-bg-page)] p-6 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-[var(--c-text-heading)]">{t.collaborationRoomsCreate}</h2>
-              <button type="button" aria-label={t.collaborationRoomCancel} onClick={() => setShowCreate(false)} className="rounded-md p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={18} /></button>
+              <button type="button" aria-label={t.collaborationRoomCancel} disabled={submitting} onClick={() => setShowCreate(false)} className="rounded-md p-1 text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"><X size={18} /></button>
             </div>
             <label className="mb-4 block text-sm text-[var(--c-text-secondary)]">
+              <span className="mb-1.5 block">{t.collaborationRoomGoalLabel}</span>
+              <textarea aria-label={t.collaborationRoomGoalLabel} autoFocus value={goal} disabled={submitting} onChange={event=>setGoal(event.target.value)} placeholder={t.collaborationRoomGoalPlaceholder} className="min-h-24 w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]" />
+              <span className="mt-2 block text-xs">{t.collaborationRoomAiDefaultsHint}</span>
+            </label>
+            <button type="button" disabled={submitting} aria-expanded={advanced} onClick={()=>setAdvanced(value=>!value)} className="mb-4 text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomAdvanced}</button>
+            {advanced && <div>
+            <label className="mb-4 block text-sm text-[var(--c-text-secondary)]">
               <span className="mb-1.5 block">{t.collaborationRoomTitleLabel}</span>
-              <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} className="h-10 w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]" />
+              <input disabled={submitting} value={title} onChange={(event) => setTitle(event.target.value)} className="h-10 w-full rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]" />
             </label>
             <label className="mb-4 block text-sm text-[var(--c-text-secondary)]">
               <span className="mb-1.5 block">{t.collaborationRoomDescriptionLabel}</span>
-              <textarea value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-20 w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]" />
+              <textarea disabled={submitting} value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-20 w-full resize-none rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] px-3 py-2 text-[var(--c-text-primary)] outline-none focus:border-[var(--c-accent)]" />
             </label>
             <fieldset>
               <legend className="mb-2 flex items-center gap-2 text-sm text-[var(--c-text-secondary)]"><Users size={15} />{t.collaborationRoomMembersLabel}</legend>
@@ -247,8 +261,8 @@ export function CollaborationRoomsPage() {
                     <input
                       type="checkbox"
                       checked={agent.id === XIAOK_WORKER_SEED_ID || memberAgentIds.includes(agent.id)}
-                      disabled={agent.id === XIAOK_WORKER_SEED_ID}
-                      onChange={(event) => setMemberAgentIds((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id))}
+                      disabled={submitting || agent.id === XIAOK_WORKER_SEED_ID}
+                      onChange={(event) => {setMembersTouched(true);setMemberAgentIds((current) => event.target.checked ? [...current, agent.id] : current.filter((id) => id !== agent.id));}}
                     />
                     <span className="text-sm text-[var(--c-text-primary)]">{agent.name}</span>
                     <span className="ml-auto text-xs text-[var(--c-text-tertiary)]">{agent.id}</span>
@@ -257,10 +271,11 @@ export function CollaborationRoomsPage() {
                 {agents.length === 0 && <p className="p-3 text-center text-sm text-[var(--c-text-secondary)]">{t.collaborationRoomNoMembers}</p>}
               </div>
             </fieldset>
-            {error && <p className="mt-3 text-sm text-destructive-text">{error}</p>}
+            </div>}
+            {error && <p role="alert" className="mt-3 text-sm text-destructive-text">{error}</p>}
             <div className="mt-6 flex justify-end gap-2">
-              <button type="button" onClick={() => setShowCreate(false)} className="h-9 rounded-lg px-4 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">{t.collaborationRoomCancel}</button>
-              <button type="button" disabled={!title.trim() || submitting} onClick={() => void createRoom()} className="h-9 rounded-lg bg-[var(--c-accent-send)] px-4 text-sm font-medium text-[var(--c-accent-send-text)] hover:bg-[var(--c-accent-send-hover)] disabled:opacity-40">{t.collaborationRoomCreateSubmit}</button>
+              <button type="button" disabled={submitting} onClick={() => setShowCreate(false)} className="h-9 rounded-lg px-4 text-sm text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]">{t.collaborationRoomCancel}</button>
+              <button type="button" disabled={(!title.trim() && !goal.trim()) || submitting} onClick={() => void createRoom()} className="h-9 rounded-lg bg-[var(--c-accent-send)] px-4 text-sm font-medium text-[var(--c-accent-send-text)] hover:bg-[var(--c-accent-send-hover)] disabled:opacity-40">{submitting ? t.collaborationRoomAiCreating : t.collaborationRoomCreateSubmit}</button>
             </div>
           </div>
         </div>

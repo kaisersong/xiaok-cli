@@ -1,3 +1,4 @@
+import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
 import { basename, dirname, join } from 'node:path';
@@ -1241,6 +1242,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     onEvent: emitCollaborationRoomEvent,
   });
   const collaborationRoomService = createCollaborationRoomService({
+    prepareRoomDefaults: (input,signal) => prepareCollaborationRoomDefaults(input, {signal,llm:loopLlmPort,loadAgents:async()=>{const response=await kswarmService.request('/agents');if(!response.ok)throw Error('room_agents_unavailable');const body=await response.json();return Array.isArray(body.agents)?body.agents:[];}}),
     brokerClient: collaborationRoomBrokerClient,
     getExecutionCapabilities: agentIds => roomExecutionRouter.capabilities(agentIds),
     kswarmClient: {
@@ -1259,6 +1261,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     emitRoomEvent: emitCollaborationRoomEvent,
     stopRoomExecution: roomId => roomWorkspaceRuntime.cancelRoom(roomId),
   });
+  services.bindConversationRoomCreator((input, context) => context.requestSource==='user' ? collaborationRoomService.createRoom(input,context) : Promise.resolve({ok:false,code:'room_actor_forbidden'}));
   registerSemanticDesktopIpc(shutdownAwareIpc, {
     assistant: assistantController,
     authorizeRoomDeletion: event => {

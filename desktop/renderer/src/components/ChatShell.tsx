@@ -27,6 +27,7 @@ import { getStreamingRenderDelay } from '../lib/streaming-render-policy';
 import { parseComputerUseRecoverableAction, resolveComputerUseUserAction } from '../lib/computer-use-recoverable-action';
 import {
   buildProjectCardMessageFromToolResult,
+  buildRoomCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
   type WorkflowLabels,
 } from './chatToolResultMessages';
@@ -599,6 +600,8 @@ export function ChatShell() {
         const ev = event as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
         const immediateMessage = ev.ok && ev.toolName === 'create_project'
           ? buildProjectCardMessageFromToolResult(ev.response)
+          : ev.ok && ev.toolName === 'create_collaboration_room'
+            ? buildRoomCardMessageFromToolResult(ev.response)
           : ev.ok && (ev.toolName === 'run_dynamic_workflow_script' || ev.toolName === 'get_dynamic_workflow_status')
             ? buildWorkflowMessageFromToolResult(ev.response, t as WorkflowLabels)
             : null;
@@ -966,6 +969,10 @@ export function ChatShell() {
           if (evR.ok && evR.toolName === 'create_project') {
             const message = buildProjectCardMessageFromToolResult(evR.response);
             if (message) msgs.push(message);
+          }
+          if (evR.ok && evR.toolName === 'create_collaboration_room') {
+            const message = buildRoomCardMessageFromToolResult(evR.response);
+            if (message && !msgs.some(item => item.id === message.id)) msgs.push(message);
           }
           if (evR.ok && (evR.toolName === 'run_dynamic_workflow_script' || evR.toolName === 'get_dynamic_workflow_status')) {
             const message = buildWorkflowMessageFromToolResult(evR.response, t as WorkflowLabels);

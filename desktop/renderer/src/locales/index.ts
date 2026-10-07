@@ -78,6 +78,11 @@ export interface LocaleStrings {
   collaborationRoomMentionAll: string;
   collaborationRoomsTitle: string;
   collaborationRoomsSubtitle: string;
+  collaborationRoomGoalLabel: string;
+  collaborationRoomGoalPlaceholder: string;
+  collaborationRoomAiDefaultsHint: string;
+  collaborationRoomAdvanced: string;
+  collaborationRoomAiCreating: string;
   collaborationRoomsCreate: string;
   collaborationRoomsEmptyTitle: string;
   collaborationRoomMore: string;

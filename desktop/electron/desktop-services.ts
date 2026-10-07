@@ -1,3 +1,4 @@
+import { ConversationRoomService, createConversationRoomTool } from './conversation-room-service.js';
 import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from './kswarm-execution-clock.js';
 import { findLegacyTaskHistory } from './legacy-task-history.js';
 import { getSupportedModelReasoningEfforts } from '../../src/ai/providers/model-reasoning-effort.js';
@@ -876,6 +877,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     now: options.now,
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
+  const conversationRooms = new ConversationRoomService({ dataRoot: options.dataRoot });
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService });
   const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
   const scopedKSwarmHosts = new Set<WeakRef<InProcessTaskRuntimeHost>>();
@@ -969,6 +971,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   );
   let kbStore: ReturnType<typeof createKbStoreSqlite> | undefined;
   const kswarmCreateProjectToolOptions: KSwarmCreateProjectToolOptions = {
+    createRoom: (input, context) => conversationRooms.create(input, {...context, requestSource:'agent'}),
     enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
     finalizeProjectProposal: (proposal, context) => conversationProjects.isAuthorized(context.taskId)
       ? conversationProjects.create(proposal, { ...context, requestSource: 'agent' })
@@ -1800,6 +1803,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       if (currentExecutionLane() === 'foreground') {
         conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+        conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
       }
       return prepared;
     },
@@ -2969,8 +2973,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         }
         if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
         return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor)
-          : conversationProjects.withUserRequest({ prompt: input.prompt, threadId: context?.threadId }, { requestSource: 'user' },
-            () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context }));
+          : conversationRooms.withUserRequest({prompt:input.prompt},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, threadId: context?.threadId }, { requestSource: 'user' },
+            () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context })));
       });
     },
     async getModelConfig() {
@@ -3213,10 +3217,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
       if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
-      return conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
-        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input)));
+      return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
+        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
     },
     /** Main-only binding; never exposed through preload or a model tool. */
+    bindConversationRoomCreator: (creator: (input:Record<string,unknown>,context:{requestSource:'user';signal?:AbortSignal})=>Promise<unknown>) => conversationRooms.bindCreator(creator),
     bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => conversationProjects.bindRoomClient(client),
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
     createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'>) =>
@@ -6605,6 +6610,7 @@ interface KSwarmInitialPlanBootstrapInput {
 type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
 
 interface KSwarmCreateProjectToolOptions {
+  createRoom?: (input: Record<string,unknown>, context:{taskId:string;signal?:AbortSignal})=>Promise<Record<string,unknown>>;
   enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
   finalizeProjectProposal?: (proposal: Record<string, unknown>, context: { taskId: string; signal: AbortSignal }) => Promise<Record<string, unknown> | undefined>;
 }
@@ -7652,6 +7658,7 @@ function registerKSwarmTools(
   kswarmService: KSwarmService,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
 ): void {
+  if (createProjectToolOptions.createRoom) registry.registerTool(createConversationRoomTool(createProjectToolOptions.createRoom));
   registry.registerTool(createKSwarmCreateProjectTool(kswarmService, createProjectToolOptions));
   registry.registerTool(createKSwarmInspectProjectTool(kswarmService));
   registry.registerTool(createKSwarmContinueProjectTool(kswarmService));
