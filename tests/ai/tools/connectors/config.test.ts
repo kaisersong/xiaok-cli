@@ -24,6 +24,34 @@ describe('connectors config', () => {
     expect(cfg.fetch.jinaApiKey).toBe('jina-x');
   });
 
+  it('strips copy artifacts (provider label, quotes) from pasted api keys', () => {
+    const cfg = normalizeConnectorsConfig({
+      search: { provider: 'tavily', tavilyApiKey: 'tavily tvly-abc123', braveApiKey: '"brave: BSAxyz"' },
+      fetch: { provider: 'firecrawl', firecrawlApiKey: '  firecrawl:fc-999  ' },
+    });
+    expect(cfg.search.tavilyApiKey).toBe('tvly-abc123');
+    expect(cfg.search.braveApiKey).toBe('BSAxyz');
+    expect(cfg.fetch.firecrawlApiKey).toBe('fc-999');
+  });
+
+  it('never mangles clean keys or keys that merely contain the label', () => {
+    const cfg = normalizeConnectorsConfig({
+      search: { provider: 'tavily', tavilyApiKey: 'tvly-tavilyish-key' },
+      fetch: { provider: 'jina', jinaApiKey: 'jina-clean' },
+    });
+    expect(cfg.search.tavilyApiKey).toBe('tvly-tavilyish-key');
+    expect(cfg.fetch.jinaApiKey).toBe('jina-clean');
+  });
+
+  it('sanitizes api keys provided via env in CLI mode', () => {
+    const cfg = resolveCliConnectorsConfig(undefined, {
+      TAVILY_API_KEY: 'tavily tvly-from-env',
+      JINA_API_KEY: 'jina jina-from-env',
+    } as NodeJS.ProcessEnv);
+    expect(cfg.search.tavilyApiKey).toBe('tvly-from-env');
+    expect(cfg.fetch.jinaApiKey).toBe('jina-from-env');
+  });
+
   it('env overrides take precedence over base config in CLI mode', () => {
     const cfg = resolveCliConnectorsConfig(
       { search: { provider: 'duckduckgo' }, fetch: { provider: 'basic' } },
