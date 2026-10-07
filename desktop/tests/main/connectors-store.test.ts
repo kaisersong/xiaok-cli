@@ -47,6 +47,19 @@ describe('ConnectorsStore', () => {
     expect(reloaded.config.fetch.jinaApiKey).toBe('jina-key');
   });
 
+  it('cleans pasted labels on load and persists only the pure key on save', async () => {
+    const file = join(dataRoot, 'connectors.json');
+    const legacy = JSON.stringify({ schemaVersion: 1,
+      search: { provider: 'tavily', tavilyApiKey: 'tavily tvly-example' }, fetch: { provider: 'basic' } });
+    writeFileSync(file, legacy);
+    const loaded = store.load();
+    expect(loaded.config.search.tavilyApiKey).toBe('tvly-example');
+    expect(readFileSync(file, 'utf8')).toBe(legacy);
+    await store.save({ search: { provider: 'tavily', tavilyApiKey: '  "tavily: tvly-example"  ' }, fetch: { provider: 'basic' } });
+    expect(JSON.parse(readFileSync(file, 'utf8')).search.tavilyApiKey).toBe('tvly-example');
+    expect(new ConnectorsStore({ dataRoot }).load().config.search.tavilyApiKey).toBe('tvly-example');
+  });
+
   it('falls back to defaults and backs up on parse_failed', () => {
     const file = join(dataRoot, 'connectors.json');
     writeFileSync(file, '{ not valid json', 'utf-8');
