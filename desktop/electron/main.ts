@@ -672,6 +672,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
+    restoreHistoricalLaunchWorkspaces: true,
     computerUseAppIdentity,
     computerUseBundledPluginDir: process.platform === 'win32' ? (() => { const root = resolveBundledPluginsDir(); return root ? join(root, 'cua-computer-use') : undefined; })() : undefined,
     getComputerUseReadinessTarget: () => {

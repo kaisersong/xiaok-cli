@@ -6,7 +6,7 @@ Use Desktop for conversations, documents, knowledge, automations, and multi-agen
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-**Release target: 1.5.9 (October 5, 2026).** CLI and Desktop metadata are aligned at **1.5.9**. This release includes image reads as vision input, inline CLI image placement, safer Desktop model-disconnect recovery, readable narration, and approvals in the chat with an explicit task-scoped option. npm and installer availability are verified separately; use [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) for published assets. See [Version History](#version-history).
+**Release target: 1.5.10 (October 8, 2026).** CLI and Desktop metadata are aligned at **1.5.10**. Desktop restores authorized historical conversations in their original workspace after the launch directory changes. Original bindings stay intact, and revoked or mismatched workspace authorization is rejected. Installer availability is verified after the release build; use [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases) for published assets. See [Version History](#version-history).
 
 ---
 
@@ -249,11 +249,11 @@ Desktop is the main graphical workbench, built with Electron and React. Main-pro
 
 ### Download
 
-Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The `desktop-v1.5.9` release build targets these assets; they become downloadable after signing, notarization, and publication checks complete:
+Get currently downloadable installers from [GitHub Releases](https://github.com/kaisersong/xiaok-cli/releases/latest). The `desktop-v1.5.10` release build targets these assets; they become downloadable after signing, notarization, and publication checks complete:
 
-- `xiaok-1.5.9-arm64.dmg` — macOS Apple Silicon installer.
-- `xiaok-1.5.9-arm64-mac.zip` — macOS Apple Silicon archive.
-- `xiaok-setup-1.5.9.exe` — Windows x64 installer.
+- `xiaok-1.5.10-arm64.dmg` — macOS Apple Silicon installer.
+- `xiaok-1.5.10-arm64-mac.zip` — macOS Apple Silicon archive.
+- `xiaok-setup-1.5.10.exe` — Windows x64 installer.
 
 The updater uses `latest-mac.yml` and `latest.yml`. Source-only changes listed here require a new source build or a subsequent published release.
 
@@ -570,6 +570,13 @@ Capabilities follow the selected model and endpoint. A listed provider does not 
 ---
 
 ## Version History
+
+### v1.5.10 — Historical workspace recovery, October 8, 2026
+
+- Restore same-profile historical conversations in their original authorized workspace after launch-directory changes.
+- Preserve thread bindings and history; reject revoked, missing, foreign-profile or mismatched authorization.
+- Restore historical snapshots and subscriptions, and recheck existing historical access tokens after revocation.
+- See [release notes](release-notes/1.5.10.md) for validation and release scope.
 
 ### v1.5.9 — Release preparation, October 5, 2026
 

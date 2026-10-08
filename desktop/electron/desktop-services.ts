@@ -463,6 +463,8 @@ export interface DesktopServicesOptions {
   dataRoot: string;
   /** Main-owned working directory, never copied from renderer task input. */
   workspaceRoot?: string;
+  /** Desktop main may restore independently authorized historical launch domains. */
+  restoreHistoricalLaunchWorkspaces?: boolean;
   now?: () => number;
   runner?: TaskRunner;
   kswarmService: KSwarmService;
@@ -936,6 +938,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     worktrees: multiAgentWorktrees,
     executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
       actorId: `desktop-user:${multiAgentProfileId}` }),
+    ...(options.restoreHistoricalLaunchWorkspaces ? { authorizeHistoricalThreadDomain: (thread: import('./desktop-multi-agent-store.js').MultiAgentThreadBinding): boolean => {
+      // Only main-issued, existing bindings can qualify. No IPC/model path can
+      // initialize a new workspace grant or override a revoked historical one.
+      if (thread.profileId !== multiAgentProfileId || !isAbsolute(thread.cwd)
+        || resolve(thread.cwd) !== thread.cwd || createHash('sha256').update(thread.cwd).digest('hex') !== thread.workspaceId) return false;
+      const stored = multiAgentStore.getThread(thread.threadId);
+      if (!stored || stored.profileId !== thread.profileId || stored.workspaceId !== thread.workspaceId || stored.cwd !== thread.cwd) return false;
+      const authorization = multiAgentStore.readWorkspaceAuthorization({ profileId: thread.profileId, workspaceId: thread.workspaceId });
+      return authorization?.executionAllowed === true;
+    } } : {}),
     onExecutionAuthorizationChanged: snapshot => multiAgentCatalog!.applyExecutionAuthorization(snapshot),
     stopForWorkspaceExecutionRevocation: async () => {
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');

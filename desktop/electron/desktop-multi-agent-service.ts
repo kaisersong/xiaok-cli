@@ -34,7 +34,7 @@ interface DeliveryRecoveryOwner {
   host: InProcessTaskRuntimeHost; source: HostDeliverySource; phase: 'host' | 'consumers';
   expectedDeliveryRevision: number; delivery?: HostDeliveryRecord; receipt?: Omit<HostDeliveryRecoveryReceipt, 'authority'>;
 }
-interface UserAccessState { actorId: string; threadId: string; profileId: string; workspaceId: string; active: boolean }
+interface UserAccessState { actorId: string; threadId: string; profileId: string; workspaceId: string; active: boolean; historicalDomain?: boolean }
 export interface DesktopMultiAgentUserControl {
   access: DesktopMultiAgentUserAccess; requestSource: Source; groupId: string; agentId: string; operationId: string; expectedTurn: number;
 }
@@ -51,6 +51,8 @@ export interface DesktopMultiAgentServiceOptions {
   worktrees?: DesktopMultiAgentWorktrees;
   /** One immutable main-owned execution domain; never renderer supplied. */
   executionDomain?: { profileId: string; workspaceId: string; cwd: string; actorId: string };
+  /** Main-only restoration of an already-persisted, independently authorized launch workspace. */
+  authorizeHistoricalThreadDomain?(thread: MultiAgentThreadBinding): boolean;
   onExecutionAuthorizationChanged?(snapshot: ExecutionAuthorizationSnapshot): void;
   stopForWorkspaceExecutionRevocation?(): Promise<void>;
   createSession(input: {
@@ -457,13 +459,20 @@ export class DesktopMultiAgentService {
 
   private assertExecutionDomain(thread: MultiAgentThreadBinding): void {
     const domain = this.options.executionDomain;
-    if (domain && (thread.profileId !== domain.profileId || thread.workspaceId !== domain.workspaceId || thread.cwd !== domain.cwd)) throw new Error('workspace_execution_domain_mismatch');
+    if (domain && (thread.profileId !== domain.profileId || thread.workspaceId !== domain.workspaceId || thread.cwd !== domain.cwd)
+      && !(thread.profileId === domain.profileId && this.options.authorizeHistoricalThreadDomain?.(thread))) throw new Error('workspace_execution_domain_mismatch');
   }
 
   async registerThreadWithOwnership(binding: MultiAgentThreadBinding, requestSource: Source): Promise<void> {
     if (requestSource !== 'user') throw new Error('thread registration source is not permitted');
     this.assertExecutionDomain(binding);
-    if (this.options.store.getThread(binding.threadId)) { this.options.store.registerThread(binding); return; }
+    const previous = this.options.store.getThread(binding.threadId);
+    if (previous) {
+      this.assertExecutionDomain(previous);
+      // An authorized legacy launch domain stays immutable; never rebind history.
+      if (previous.profileId !== binding.profileId) throw new Error('thread ownership mismatch');
+      this.options.store.registerThread(previous); return;
+    }
     if (!this.initialized || this.disposed || !this.host) throw new Error('multi_agent_runtime_not_ready');
     if (this.options.store.listGroups(binding.threadId).items.length) throw new Error('multi_agent_thread_owner_unknown');
     const inspected = new Set([...this.host.inFlightTaskIds(), ...(await this.host.getActiveTasks()).map(task => task.taskId)]);
@@ -723,7 +732,7 @@ export class DesktopMultiAgentService {
     for (const subscription of [...this.listeners]) {
       const scope = this.userAccess.get(subscription.access);
       if (this.disposed || !scope?.active || scope.threadId !== group.threadId
-        || domain && (scope.profileId !== domain.profileId || scope.workspaceId !== domain.workspaceId)) continue;
+        || domain && (scope.profileId !== domain.profileId || scope.workspaceId !== domain.workspaceId && !scope.historicalDomain)) continue;
       try { subscription.listener(envelope); } catch { /* A viewer cannot undo the failure fence. */ }
     }
   }
@@ -861,9 +870,15 @@ export class DesktopMultiAgentService {
   createUserAccess(input: { requestSource: Source; actorId: string; threadId: string; profileId: string; workspaceId: string }): DesktopMultiAgentUserAccess {
     if (input.requestSource !== 'user' || !input.actorId) throw new Error('user scope is not permitted');
     const thread = this.options.store.getThread(input.threadId);
-    if (!thread || thread.profileId !== input.profileId || thread.workspaceId !== input.workspaceId) throw new Error('thread scope ownership mismatch');
+    if (!thread || thread.profileId !== input.profileId) throw new Error('thread scope ownership mismatch');
+    const domain = this.options.executionDomain;
+    const historicalDomain = thread.workspaceId !== input.workspaceId;
+    if (historicalDomain) {
+      if (!domain || input.workspaceId !== domain.workspaceId || input.actorId !== domain.actorId) throw new Error('thread scope ownership mismatch');
+      this.assertExecutionDomain(thread);
+    }
     const access = Object.freeze({ accessId: randomUUID() });
-    this.userAccess.set(access, { actorId: input.actorId, threadId: input.threadId, profileId: input.profileId, workspaceId: input.workspaceId, active: true });
+    this.userAccess.set(access, { actorId: input.actorId, threadId: input.threadId, profileId: thread.profileId, workspaceId: thread.workspaceId, active: true, ...(historicalDomain ? { historicalDomain: true } : {}) });
     return access;
   }
 
@@ -1394,6 +1409,7 @@ export class DesktopMultiAgentService {
     const thread = this.options.store.getThread(scope.threadId);
     if (!thread || thread.profileId !== scope.profileId || thread.workspaceId !== scope.workspaceId
       || groupId && this.options.store.requireGroup(groupId).threadId !== scope.threadId) throw new Error('user access scope mismatch');
+    if (scope.historicalDomain) this.assertExecutionDomain(thread);
     return scope;
   }
 
