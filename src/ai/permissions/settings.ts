@@ -1,6 +1,7 @@
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile, writeFile, mkdir, chmod, realpath } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join } from 'path';
+import { join, resolve, dirname } from 'path';
 import { homedir } from 'os';
 import type { PermissionSettings } from '../../types.js';
 
@@ -25,7 +26,7 @@ async function readSettings(path: string): Promise<PermissionSettings> {
 }
 
 async function writeSettings(path: string, settings: PermissionSettings): Promise<void> {
-  const dir = join(path, '..');
+  const dir = dirname(path);
   await mkdir(dir, { recursive: true });
   await writeFile(path, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
 }
@@ -34,22 +35,30 @@ async function writeSettings(path: string, settings: PermissionSettings): Promis
 export async function loadSettings(cwd: string): Promise<{
   global: PermissionSettings;
   project: PermissionSettings;
+  approvedProjectAllow: string[];
 }> {
+  cwd = await resolveProjectPath(cwd);
   const [global, project] = await Promise.all([
     readSettings(getGlobalSettingsPath()),
     readSettings(getProjectSettingsPath(cwd)),
   ]);
-  return { global, project };
+  const state = await readLocalRules();
+  const key = projectKey(cwd);
+  const approvedProjectAllow = [
+    ...(project.permissions?.allow ?? []).filter(rule => state.adoptions[key]?.includes(ruleHash(rule))),
+    ...(state.localRules[key] ?? []),
+  ];
+  return { global, project, approvedProjectAllow };
 }
 
 /** 合并两层 settings 的 allow/deny 规则 */
-export function mergeRules(settings: { global: PermissionSettings; project: PermissionSettings }): {
+export function mergeRules(settings: { global: PermissionSettings; project: PermissionSettings; approvedProjectAllow: string[] }): {
   allowRules: string[];
   denyRules: string[];
 } {
   const allowRules = [
     ...(settings.global.permissions?.allow ?? []),
-    ...(settings.project.permissions?.allow ?? []),
+    ...settings.approvedProjectAllow,
   ];
   const denyRules = [
     ...(settings.global.permissions?.deny ?? []),
@@ -64,7 +73,15 @@ export async function addAllowRule(
   rule: string,
   cwd: string,
 ): Promise<void> {
-  const path = scope === 'global' ? getGlobalSettingsPath() : getProjectSettingsPath(cwd);
+  cwd = await resolveProjectPath(cwd);
+  if (scope === 'project') {
+    await updateLocalRules(state => {
+      const key = projectKey(cwd);
+      state.localRules[key] = [...new Set([...(state.localRules[key] ?? []), rule])];
+    });
+    return;
+  }
+  const path = getGlobalSettingsPath();
   const settings = await readSettings(path);
   const allow = settings.permissions?.allow ?? [];
   if (allow.includes(rule)) return; // 已存在，跳过
@@ -81,6 +98,7 @@ export async function addDenyRule(
   rule: string,
   cwd: string,
 ): Promise<void> {
+  cwd = await resolveProjectPath(cwd);
   const path = scope === 'global' ? getGlobalSettingsPath() : getProjectSettingsPath(cwd);
   const settings = await readSettings(path);
   const deny = settings.permissions?.deny ?? [];
@@ -93,3 +111,55 @@ export async function addDenyRule(
 }
 
 export { getGlobalSettingsPath, getProjectSettingsPath };
+
+interface LocalRules {
+  adoptions: Record<string, string[]>;
+  localRules: Record<string, string[]>;
+}
+function projectKey(cwd: string): string {
+  const absolute = cwd;
+  return process.platform === 'win32' ? absolute.toLowerCase() : absolute;
+}
+function ruleHash(rule: string): string { return createHash('sha256').update(rule).digest('hex'); }
+function localRulesPath(): string { return join(dirname(getGlobalSettingsPath()), 'project-rule-adoptions.json'); }
+async function readLocalRules(): Promise<LocalRules> {
+  try {
+    const parsed = JSON.parse(await readFile(localRulesPath(), 'utf8')) as LocalRules;
+    const validMap = (value: unknown): value is Record<string, string[]> =>
+      !!value && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => Array.isArray(item) && item.every(rule => typeof rule === 'string'));
+    if (validMap(parsed.adoptions) && validMap(parsed.localRules)) return parsed;
+  } catch {}
+  return { adoptions: {}, localRules: {} };
+}
+// Cross-process writes are unlocked: lost approvals fail closed and at most require confirmation again.
+let localWrite: Promise<void> = Promise.resolve();
+function updateLocalRules(update: (state: LocalRules) => void | Promise<void>): Promise<void> {
+  const operation = localWrite.then(async () => {
+    const state = await readLocalRules();
+    await update(state);
+    const file = localRulesPath();
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
+    await chmod(file, 0o600).catch(() => {});
+  });
+  localWrite = operation.catch(() => {});
+  return operation;
+}
+export async function listPendingProjectRules(cwd: string): Promise<string[]> {
+  const settings = await loadSettings(cwd);
+  return [...new Set(settings.project.permissions?.allow ?? [])].filter(rule => !settings.approvedProjectAllow.includes(rule));
+}
+/** Record only a current, individually confirmed project rule. */
+export async function adoptProjectRule(cwd: string, rule: string): Promise<void> {
+  cwd = await resolveProjectPath(cwd);
+  await updateLocalRules(async state => {
+    const project = await readSettings(getProjectSettingsPath(cwd));
+    if (!project.permissions?.allow?.includes(rule)) throw new Error('Project rule is no longer present');
+    const key = projectKey(cwd);
+    state.adoptions[key] = [...new Set([...(state.adoptions[key] ?? []), ruleHash(rule)])];
+  });
+}
+
+async function resolveProjectPath(cwd: string): Promise<string> {
+  return realpath(cwd).catch(() => resolve(cwd));
+}

@@ -60,7 +60,7 @@ describe('PermissionManager', () => {
 
     await expect(pm.check('bash', {
       command: "python3 - <<'PY'\nprint(1)\nPY",
-    })).resolves.toBe('allow');
+    })).resolves.toBe('prompt');
   });
 
   it('supports session deny rules with higher priority than allow rules', async () => {
@@ -106,13 +106,13 @@ describe('PermissionManager', () => {
     await expect(pm.check('bash', { command: 'psql -c "DROP TABLE users"' })).resolves.toBe('prompt');
   });
 
-  it('auto mode honors explicit allow rules for warn-level bash commands', async () => {
+  it('auto mode keeps recursive deletion subject to confirmation', async () => {
     const pm = new PermissionManager({
       mode: 'auto',
       allowRules: ['bash(rm -rf ./build *)'],
     });
 
-    await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('allow');
+    await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('prompt');
   });
 
   it('auto mode denies block-level bash commands before prompt fallback', async () => {

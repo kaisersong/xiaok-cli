@@ -28,10 +28,10 @@ import type { RuntimeEvent } from '../runtime/events.js';
 import { createIntentBoundaryResolver } from '../ai/intent-delegation/boundary-resolver.js';
 import { classifyBoundaryWithLlm, createAdapterBoundaryInvoker } from '../ai/intent-delegation/llm-boundary-classifier.js';
 import { writeError, formatErrorText, isTTY } from '../utils/ui.js';
-import { showPermissionPrompt } from '../ui/permission-prompt.js';
+import { showPermissionPrompt, promptProjectRuleAdoption } from '../ui/permission-prompt.js';
 import { askQuestion } from '../ui/ask-question.js';
 import { addAllowRule } from '../ai/permissions/settings.js';
-import { loadSettings, mergeRules } from '../ai/permissions/settings.js';
+import { loadSettings, mergeRules, listPendingProjectRules, adoptProjectRule } from '../ai/permissions/settings.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, toSkillEntries, findSkillByCommandName } from '../ai/skills/loader.js';
 import { createSkillCatalogWatcher, type SkillCatalogWatcher } from '../ai/skills/watcher.js';
 import { createSkillTool } from '../ai/skills/tool.js';
@@ -925,6 +925,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   ];
 
   const initialPromptSnapshot = await buildPromptSnapshot();
+  if (!autoMode && !opts.json && !opts.print && process.stdin.isTTY && process.stdout.isTTY) {
+    for (const rule of await listPendingProjectRules(cwd)) {
+      if (await promptProjectRuleAdoption(rule)) {
+        try { await adoptProjectRule(cwd, rule); }
+        catch { process.stdout.write(`项目规则已变更，跳过：${rule}\n`); }
+      }
+    }
+  }
   const persistedPermissionSettings = await loadSettings(cwd);
   const persistedPermissionRules = mergeRules(persistedPermissionSettings);
 

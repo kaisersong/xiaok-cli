@@ -274,9 +274,7 @@ export async function showPermissionPrompt(
       if (resolved) return;
       resolved = true;
       clearAll();
-      stdin.removeListener('data', onData);
-      stdin.setRawMode(false);
-      stdin.pause();
+      stopPermissionInput(onData);
 
       const summary = formatPermissionDecisionSummary(choice);
       if (summary) {
@@ -358,8 +356,40 @@ export async function showPermissionPrompt(
     };
 
     renderAll();
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.on('data', onData);
+    startPermissionInput(onData);
   });
+}
+
+/** Use the permission input handoff before the REPL starts; Enter defaults to refusal. */
+export async function promptProjectRuleAdoption(rule: string): Promise<boolean> {
+  if (!stdin.isTTY || !stdout.isTTY) return false;
+  stdout.write(`${rule} [y/N] `);
+  return new Promise(resolve => {
+    const finish = (adopt: boolean) => {
+      stopPermissionInput(onData, onEnd);
+      stdout.write('\n');
+      resolve(adopt);
+    };
+    const onData = (data: Buffer | string) => {
+      const key = data.toString();
+      if (/^[yY]$/.test(key)) finish(true);
+      else if (/^[nN\r\n]$/.test(key) || key === '\x03' || key === '\x1b') finish(false);
+    };
+    const onEnd = () => finish(false);
+    startPermissionInput(onData, onEnd);
+  });
+}
+
+/** Shared raw input ownership and handoff for permission prompts. */
+function startPermissionInput(onData: (data: Buffer) => void, onEnd?: () => void): void {
+  stdin.on('data', onData);
+  if (onEnd) stdin.once('end', onEnd);
+  stdin.setRawMode(true);
+  stdin.resume();
+}
+function stopPermissionInput(onData: (data: Buffer) => void, onEnd?: () => void): void {
+  stdin.removeListener('data', onData);
+  if (onEnd) stdin.removeListener('end', onEnd);
+  stdin.setRawMode(false);
+  stdin.pause();
 }
