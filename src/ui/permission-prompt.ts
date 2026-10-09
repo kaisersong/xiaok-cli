@@ -98,7 +98,7 @@ function compactRuleForOption(rule: string, maxLength = 72): string {
 
 function isMandatoryReview(toolName: string, input: Record<string, unknown>): boolean {
   return toolName === 'bash' && typeof input.command === 'string'
-    && (classifyBashCommand(input.command).level !== 'safe' || requiresCommandConfirmation(input.command));
+    && (classifyBashCommand(input.command).level !== 'safe' || requiresCommandConfirmation(input.command) || getCommandWriteTargets(input.command).length > 0);
 }
 
 export function buildPermissionPromptOptions(rule: string, toolName = '', input: Record<string, unknown> = {}): PromptOption[] {

@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { readFile, writeFile, mkdir, chmod, realpath } from 'fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile, writeFile, mkdir, realpath, copyFile, rename, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { homedir } from 'os';
@@ -124,10 +124,17 @@ function ruleHash(rule: string): string { return createHash('sha256').update(rul
 function localRulesPath(): string { return join(dirname(getGlobalSettingsPath()), 'project-rule-adoptions.json'); }
 async function readLocalRules(): Promise<LocalRules> {
   try {
-    const parsed = JSON.parse(await readFile(localRulesPath(), 'utf8')) as LocalRules;
-    const validMap = (value: unknown): value is Record<string, string[]> =>
-      !!value && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => Array.isArray(item) && item.every(rule => typeof rule === 'string'));
-    if (validMap(parsed.adoptions) && validMap(parsed.localRules)) return parsed;
+    const parsed = JSON.parse(await readFile(localRulesPath(), 'utf8'));
+    const cleanMap = (value: unknown): Record<string, string[]> => {
+      const result: Record<string, string[]> = Object.create(null);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+      for (const [key, items] of Object.entries(value)) {
+        if (!key || ['__proto__', 'constructor', 'prototype'].includes(key) || !Array.isArray(items)) continue;
+        result[key] = items.filter((item): item is string => typeof item === 'string');
+      }
+      return result;
+    };
+    return { adoptions: cleanMap(parsed?.adoptions), localRules: cleanMap(parsed?.localRules) };
   } catch {}
   return { adoptions: {}, localRules: {} };
 }
@@ -139,8 +146,18 @@ function updateLocalRules(update: (state: LocalRules) => void | Promise<void>): 
     await update(state);
     const file = localRulesPath();
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
-    await chmod(file, 0o600).catch(() => {});
+    let invalidJson = false;
+    try { JSON.parse(await readFile(file, 'utf8')); }
+    catch (error) {
+      if (error instanceof SyntaxError) invalidJson = true;
+      else if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (invalidJson) await copyFile(file, `${file}.bak`);
+    const temp = join(dirname(file), `.project-rule-adoptions-${process.pid}-${randomUUID()}.tmp`);
+    try {
+      await writeFile(temp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+      await rename(temp, file);
+    } finally { await unlink(temp).catch(() => {}); }
   });
   localWrite = operation.catch(() => {});
   return operation;
