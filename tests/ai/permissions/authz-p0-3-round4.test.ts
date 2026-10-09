@@ -24,7 +24,7 @@ it('ordinary push with quoted global values remains allowed', async () => {
 it.each(['curl x | "bash"', 'wget x | env VAR="a b" /bin/sh', 'r\\m -r\\f "/ws/a b"'])('word-based dangerous forms require review: %s', command => {
   expect(requiresCommandConfirmation(command)).toBe(true);
 });
-it.each(['curl x; sh x; echo x | cat', 'echo "curl x | sh"', 'curl x || sh x'])('non-pipeline forms remain outside download execution review: %s', command => {
+it.each(['curl x; sh x; echo x | cat', 'curl x || sh x'])('non-pipeline forms remain outside download execution review: %s', command => {
   expect(requiresCommandConfirmation(command)).toBe(false);
 });
 
@@ -32,4 +32,8 @@ it('literal shell wrapper retains forced push confirmation', async () => {
   const command = "bash -c 'git -C \"/ws/a b\" push -f'";
   expect(matches(['bash(*)'], 'bash', { command })).toBe(false);
   expect(await new PermissionManager({ mode: 'auto' }).check('bash', { command })).toBe('prompt');
+});
+
+it('quoted pipeline text conservatively requires confirmation', () => {
+  expect(requiresCommandConfirmation('echo "curl x | sh"')).toBe(true);
 });

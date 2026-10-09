@@ -242,7 +242,7 @@ function shellWords(text: string): string[] {
 
 function hasForcedPush(words: string[]): boolean {
   for (let start = 0; start < words.length; start++) {
-    if (words[start] !== 'git') continue;
+    if (posix.basename(words[start]) !== 'git') continue;
     let index = start + 1;
     while (index < words.length && words[index].startsWith('-')) {
       const option = words[index++];
@@ -258,33 +258,52 @@ function hasForcedPush(words: string[]): boolean {
 
 function hasRecursiveDelete(words: string[]): boolean {
   return words.some((word, index) => {
-    if (word !== 'rm') return false;
+    if (posix.basename(word) !== 'rm') return false;
     const flags = words.slice(index + 1);
     return flags.some(flag => flag === '--recursive' || /^-[a-z]*r[a-z]*$/i.test(flag))
       && flags.some(flag => flag === '--force' || /^-[a-z]*f[a-z]*$/i.test(flag));
   });
 }
 
-export function requiresCommandConfirmation(command: string): boolean {
+/** Check all three mandatory-review forms within a single parsed command. */
+function hasConfirmationForm(command: string): boolean {
   const parsed = scanCommandSegments(command);
   const segments = parsed.segments.map(shellWords);
-  for (const words of segments) {
-    if (hasForcedPush(words) || hasRecursiveDelete(words)) return true;
-    // Preserve conservative review of dangerous literal text inside arguments.
-    if (words.some(word => {
-      if (!/\s/.test(word)) return false;
-      const innerWords = shellWords(word);
-      return hasForcedPush(innerWords) || hasRecursiveDelete(innerWords);
-    })) return true;
-  }
+  if (segments.some(words => hasForcedPush(words) || hasRecursiveDelete(words))) return true;
   // Two-step download-to-file then execution is outside this list.
-  // Segment scanning also handles quoted/escaped names and wrapper assignments.
   return segments.some((words, index) => {
-    if (!words.some(word => word === 'curl' || word === 'wget')) return false;
+    if (!words.some(word => /^(?:curl|wget)$/.test(posix.basename(word)))) return false;
     const next = segments[index + 1];
     if (!next || !parsed.pipes.has(index)) return false;
     let shellIndex = 0;
-    while (shellIndex < next.length && (/^(?:sudo|env|command|exec)$/.test(next[shellIndex]) || /^[A-Za-z_][\w]*=/.test(next[shellIndex]))) shellIndex++;
-    return /^(?:.*\/)?(?:sh|bash|zsh|dash|ksh)$/.test(next[shellIndex] ?? '');
+    while (shellIndex < next.length && (/^(?:sudo|env|command|exec)$/.test(posix.basename(next[shellIndex])) || /^[A-Za-z_][\w]*=/.test(next[shellIndex]))) shellIndex++;
+    return /^(?:sh|bash|zsh|dash|ksh)$/.test(posix.basename(next[shellIndex] ?? ''));
   });
+}
+
+function payloadRequiresConfirmation(command: string, depth = 0): boolean {
+  if (depth >= 32) return true;
+  if (hasConfirmationForm(command)) return true;
+  for (const segment of scanCommandSegments(command).segments) {
+    const words = shellWords(segment);
+    // Reparse quoted literal arguments completely, preserving conservative review
+    // even when dangerous text is only a message rather than an executable payload.
+    if (words.some(word => /\s/.test(word) && payloadRequiresConfirmation(word, depth + 1))) return true;
+    for (let index = 0; index < words.length; index++) {
+      const name = posix.basename(words[index]);
+      const payloadIndex = name === 'eval' ? index + 1
+        : /^(?:sh|bash|zsh|dash|ksh)$/.test(name) && /^-[a-z]*c$/.test(words[index + 1] ?? '') ? index + 2 : -1;
+      // eval can concatenate arguments; inspecting the entire wrapper tail also
+      // covers nested wrappers without losing their pipeline segmentation.
+      if (payloadIndex >= 0 && payloadIndex < words.length
+        && payloadRequiresConfirmation(words.slice(payloadIndex).join(' '), depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
+export function requiresCommandConfirmation(command: string): boolean {
+  return payloadRequiresConfirmation(command)
+    // Conservative fallback: removing quotes may expose otherwise hidden forms.
+    || hasConfirmationForm(command.replace(/['"]/g, ''));
 }
