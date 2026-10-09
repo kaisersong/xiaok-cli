@@ -125,17 +125,38 @@ function scanShellLiteral(text: string, index: number, quote: string): { end: nu
   return undefined;
 }
 
-function nextShellWord(text: string): { value: string; end: number } {
+function nextShellWord(text: string): { value: string; end: number; hasExpansion: boolean } {
   let index = 0;
   let quote = '';
   let value = '';
+  let hasExpansion = false;
   while (index < text.length) {
     if (!quote && /\s/.test(text[index])) break;
     const literal = scanShellLiteral(text, index, quote);
     if (literal) { value += literal.value; quote = literal.quote; index = literal.end; }
-    else { value += text[index++]; }
+    else { hasExpansion ||= text[index] === '$'; value += text[index++]; }
   }
-  return { value, end: index };
+  return { value, end: index, hasExpansion };
+}
+
+function commandNameHasExpansion(segment: string): boolean {
+  let remaining = segment.trimStart();
+  while (remaining) {
+    const word = nextShellWord(remaining);
+    if (!/^[A-Za-z_][\w]*=/.test(word.value)) return word.hasExpansion;
+    remaining = remaining.slice(word.end).trimStart();
+  }
+  return false;
+}
+
+function shellPayloadIndex(words: string[], shellIndex: number): number {
+  for (let index = shellIndex + 1; index < words.length; index++) {
+    const option = words[index];
+    if (option === '-O' || option === '-o') { index++; continue; }
+    if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(option)) return index + 1;
+    if (option === '--' || !option.startsWith('-') || option === '-') break;
+  }
+  return -1;
 }
 
 /** A conservative scanner, not a shell interpreter. Unsupported grammar requires confirmation. */
@@ -270,7 +291,9 @@ function hasConfirmationForm(command: string): boolean {
   const parsed = scanCommandSegments(command);
   const segments = parsed.segments.map(shellWords);
   if (segments.some(words => hasForcedPush(words) || hasRecursiveDelete(words))) return true;
-  // Two-step download-to-file then execution is outside this list.
+  // Enumerated curl/wget pipelines into the sh family only. Two-step download
+  // to disk then execution and other downloaders are outside this list; each
+  // command segment still goes through the ordinary permission rules.
   return segments.some((words, index) => {
     if (!words.some(word => /^(?:curl|wget)$/.test(posix.basename(word)))) return false;
     const next = segments[index + 1];
@@ -285,6 +308,7 @@ function payloadRequiresConfirmation(command: string, depth = 0): boolean {
   if (depth >= 32) return true;
   if (hasConfirmationForm(command)) return true;
   for (const segment of scanCommandSegments(command).segments) {
+    if (commandNameHasExpansion(segment)) return true;
     const words = shellWords(segment);
     // Reparse quoted literal arguments completely, preserving conservative review
     // even when dangerous text is only a message rather than an executable payload.
@@ -292,7 +316,7 @@ function payloadRequiresConfirmation(command: string, depth = 0): boolean {
     for (let index = 0; index < words.length; index++) {
       const name = posix.basename(words[index]);
       const payloadIndex = name === 'eval' ? index + 1
-        : /^(?:sh|bash|zsh|dash|ksh)$/.test(name) && /^-[a-z]*c$/.test(words[index + 1] ?? '') ? index + 2 : -1;
+        : /^(?:sh|bash|zsh|dash|ksh)$/.test(name) ? shellPayloadIndex(words, index) : -1;
       // eval can concatenate arguments; inspecting the entire wrapper tail also
       // covers nested wrappers without losing their pipeline segmentation.
       if (payloadIndex >= 0 && payloadIndex < words.length
