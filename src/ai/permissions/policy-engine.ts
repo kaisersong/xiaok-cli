@@ -54,7 +54,7 @@ export function matches(rules: string[], toolName: string, input: Record<string,
 
 /** Whether an allow pattern participates, before conservative safety rejection. */
 export function hasMatchingCommandAllowRule(rules: string[], command: string): boolean {
-  return denyCommandSegments(command).some(segment => matchesTarget(rules, 'bash', { command: segment }));
+  return denyCommandSegments(command, 0, false).some(segment => matchesTarget(rules, 'bash', { command: segment }));
 }
 
 function matchesTarget(rules: string[], toolName: string, input: Record<string, unknown>): boolean {
@@ -245,19 +245,34 @@ function scanCommandSegments(command: string): { segments: string[]; valid: bool
 }
 
 /** Inspect literal wrapper payloads conservatively; no shell execution occurs here. */
-function denyCommandSegments(command: string, depth = 0): string[] {
+function denyCommandSegments(command: string, depth = 0, uncertainWrappers = true): string[] {
   const normalized = command.replace(/\\\n/g, '');
   const segments = parseCommandSegments(normalized).segments;
   const candidates = [command, normalized, ...segments, ...segments.map(segment => segment.replace(/^\{\s+/, ''))];
   if (depth >= 32) return candidates;
   for (const segment of segments) {
     const payload = prefixWrapperPayload(segment);
-    if (payload !== undefined && payload) candidates.push(...denyCommandSegments(payload, depth + 1));
+    if (payload !== undefined && payload) candidates.push(...denyCommandSegments(payload, depth + 1, uncertainWrappers));
+    if (payload === '' && uncertainWrappers) {
+      // An uncertain option can hide the executable at any subsequent word.
+      // Keep raw tails so quoting is preserved; do not use these for allow matching.
+      let remaining = segment.trimStart();
+      let word = nextShellWord(remaining);
+      while (/^[A-Za-z_][\w]*=/.test(word.value)) {
+        remaining = remaining.slice(word.end).trimStart();
+        word = nextShellWord(remaining);
+      }
+      remaining = remaining.slice(word.end).trimStart(); // Skip the wrapper name.
+      while (remaining) {
+        candidates.push(...denyCommandSegments(remaining, depth + 1, uncertainWrappers));
+        remaining = remaining.slice(nextShellWord(remaining).end).trimStart();
+      }
+    }
     const wrapper = /(?:^|\s)(?:(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)\s+-[a-z]*c\s+|eval\s+)/;
     const start = wrapper.exec(segment);
     if (!start) continue;
     const argumentsText = segment.slice(start.index + start[0].length);
-    candidates.push(...denyCommandSegments(argumentsText, depth + 1));
+    candidates.push(...denyCommandSegments(argumentsText, depth + 1, uncertainWrappers));
     let remaining = argumentsText;
     const words: string[] = [];
     while (remaining.trim()) {
@@ -265,12 +280,12 @@ function denyCommandSegments(command: string, depth = 0): string[] {
       const word = nextShellWord(remaining);
       words.push(word.value);
       if (word.value !== remaining.slice(0, word.end)) {
-        candidates.push(...denyCommandSegments(word.value, depth + 1));
+        candidates.push(...denyCommandSegments(word.value, depth + 1, uncertainWrappers));
       }
       remaining = remaining.slice(word.end);
     }
     const unquoted = words.join(' ');
-    if (unquoted !== argumentsText) candidates.push(...denyCommandSegments(unquoted, depth + 1));
+    if (unquoted !== argumentsText) candidates.push(...denyCommandSegments(unquoted, depth + 1, uncertainWrappers));
   }
   return candidates;
 }
