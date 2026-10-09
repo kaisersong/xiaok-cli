@@ -2,6 +2,9 @@ name: 问题反馈 / Bug
 description: 用着出问题了，告诉我们发生了什么
 labels: ["bug", "待分级"]
 body:
+  - type: markdown
+    attributes:
+      value: "**安全问题请不要在公开 Issue 里发布。** 如果你发现的是可能被人利用的安全漏洞，请先不要在这里贴细节。"
   - type: dropdown
     id: surface
     attributes: {label: 你在用哪个端, options: ["Desktop", "CLI"]}
