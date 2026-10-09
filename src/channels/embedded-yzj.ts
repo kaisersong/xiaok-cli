@@ -31,8 +31,10 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
   private readonly options: EmbeddedYZJChannelOptions;
   private wsClient: YZJWebSocketClient | null = null;
   private httpServer: Server | null = null;
-  /** 最近一次向本 channel 发消息的用户，用于把确认请求推回给他。 */
-  private lastReplyTarget: ChannelReplyTarget | null = null;
+  /** 正在执行的、由 channel 消息发起的 turn 的发起人；只有这类 turn 的确认才推送到 channel。 */
+  private activeTurnTarget: ChannelReplyTarget | null = null;
+  /** 本 channel 发出的确认请求 → 允许回复它的用户 openid。 */
+  private readonly approvalOwners = new Map<string, string | undefined>();
 
   constructor(options: EmbeddedYZJChannelOptions) {
     this.options = options;
@@ -93,13 +95,12 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
 
     const command = parseYZJCommand(msg.content);
 
-    if (command.kind === 'approve') {
-      approvalStore.resolve(command.approvalId, 'approve');
-      return;
-    }
-
-    if (command.kind === 'deny') {
-      approvalStore.resolve(command.approvalId, 'deny');
+    if (command.kind === 'approve' || command.kind === 'deny') {
+      if (!this.isAllowedApprover(command.approvalId, msg.operatorOpenid)) {
+        process.stderr.write(`[yzjchannel] ignored ${command.kind} for ${command.approvalId} from a different user\n`);
+        return;
+      }
+      approvalStore.resolve(command.approvalId, command.kind);
       return;
     }
 
@@ -112,7 +113,6 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
         replySummary: msg.content.slice(0, 100),
       },
     };
-    this.lastReplyTarget = replyTarget;
 
     // 普通文本 → 运行 turn，收集 text chunks，推送回复
     const textParts: string[] = [];
@@ -122,6 +122,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
       }
     };
 
+    this.activeTurnTarget = replyTarget;
     try {
       await runtimeFacade.runTurn(
         { sessionId, cwd, source: 'yzj', input: msg.content },
@@ -130,6 +131,10 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     } catch (err) {
       process.stderr.write(`[yzjchannel] runTurn error: ${String(err)}\n`);
       return;
+    } finally {
+      if (this.activeTurnTarget === replyTarget) {
+        this.activeTurnTarget = null;
+      }
     }
 
     const reply = textParts.join('');
@@ -173,9 +178,9 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
   /**
    * 合并终端确认与 channel 确认：任何一侧给出明确决定即生效，绝不自动批准。
    * - 终端确认照常弹出；
-   * - 若已知 channel 用户，同时把确认请求推送到 channel，只有显式 /approve 才算批准；
+   * - 当前 turn 由 channel 消息发起时，同时把确认请求推送给发起人，只有他显式 /approve 才算批准；
    * - channel 侧超时、推送失败或其他错误一律按拒绝处理；
-   * - 尚无 channel 用户时，channel 侧不参与决定，由终端确认决定。
+   * - 终端发起的 turn 不推送到 channel，由终端确认决定。
    */
   makeOnPrompt(
     tuiOnPrompt: (toolName: string, input: Record<string, unknown>) => Promise<boolean>,
@@ -203,13 +208,13 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
 
   /**
    * 向 channel 用户发起一次确认。decision：true=显式批准，false=拒绝/超时/出错，
-   * undefined=没有可推送的 channel 用户（不参与决定）。
+   * undefined=当前不是 channel 发起的 turn（不参与决定）。
    */
   private requestChannelApproval(
     toolName: string,
     input: Record<string, unknown>,
   ): { decision: Promise<boolean | undefined>; cancel: () => void } {
-    const replyTarget = this.lastReplyTarget;
+    const replyTarget = this.activeTurnTarget;
     if (!replyTarget) {
       return { decision: Promise.resolve(undefined), cancel: () => {} };
     }
@@ -217,7 +222,9 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     const { approvalStore, sessionId, approvalTimeoutMs } = this.options;
     let approvalId: string | undefined;
     const cancel = () => {
-      if (approvalId && approvalStore.get(approvalId)) {
+      if (!approvalId) return;
+      this.approvalOwners.delete(approvalId);
+      if (approvalStore.get(approvalId)) {
         approvalStore.expire(approvalId);
       }
     };
@@ -233,6 +240,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
           ...(approvalTimeoutMs !== undefined ? { timeoutMs: approvalTimeoutMs } : {}),
         });
         approvalId = approval.approvalId;
+        this.approvalOwners.set(approval.approvalId, replyTarget.userId);
         const waiting = approvalStore.waitForDecision(approval.approvalId);
         await this.pushApprovalRequest(approval.approvalId, summary, replyTarget);
         const result = await waiting;
@@ -245,6 +253,13 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     })();
 
     return { decision, cancel };
+  }
+
+  /** 本 channel 发出的确认只接受发起人本人的 /approve、/deny。 */
+  private isAllowedApprover(approvalId: string, operatorOpenid: string): boolean {
+    if (!this.approvalOwners.has(approvalId)) return true;
+    const owner = this.approvalOwners.get(approvalId);
+    return owner === undefined || owner === operatorOpenid;
   }
 
   // 测试用公开方法

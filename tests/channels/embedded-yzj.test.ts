@@ -191,10 +191,10 @@ describe('EmbeddedYZJChannel', () => {
   });
 
   describe('tool confirmation (makeOnPrompt) never auto-approves', () => {
-    const inbound = (content: string, msgId = 'msg_in') => ({
-      robotId: 'robot_1',
+    const inbound = (content: string, msgId = 'msg_in', operatorOpenid = 'user_1', robotId = 'robot_1') => ({
+      robotId,
       content,
-      operatorOpenid: 'user_1',
+      operatorOpenid,
       msgId,
       operatorName: 'Alice',
       robotName: 'Bot',
@@ -205,38 +205,69 @@ describe('EmbeddedYZJChannel', () => {
     const pendingForever = () => new Promise<boolean>(() => {});
     const flush = () => new Promise((r) => setTimeout(r, 0));
 
-    it('chat.ts no longer wires an always-true onPromptOverride', () => {
+    /** 让 channel 发起的 turn 一直处于运行中，直到调用 finish()。 */
+    function gatedFacade() {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const facade = { runTurn: vi.fn(async () => { await gate; }) } as unknown as RuntimeFacade;
+      return { facade, finish: () => release() };
+    }
+
+    async function channelTurn(extra: { approvalTimeoutMs?: number; deliverError?: boolean } = {}) {
+      const { facade, finish } = gatedFacade();
+      const { ch } = makeChannel_('robot_1', facade, extra);
+      const turn = ch.handleInboundForTest(inbound('please do it'));
+      await flush();
+      return { ch, done: async () => { finish(); await turn; } };
+    }
+
+    it('chat.ts no longer wires an always-true onPromptOverride and still routes prompts through makeOnPrompt', () => {
       const src = readFileSync(join(__dirname, '../../src/commands/chat.ts'), 'utf-8');
       expect(src).not.toMatch(/onPromptOverride:\s*async\s*\(\)\s*=>\s*true/);
+      expect(src).not.toMatch(/onPromptOverride/);
+      expect(src).toMatch(/makeOnPrompt\(tuiDecide\)/);
     });
 
-    it('without a channel user, the terminal decision is used (deny stays deny)', async () => {
+    it('terminal-originated turns use the terminal decision only (deny stays deny)', async () => {
       const { ch } = makeChannel_();
-      const onPrompt = ch.makeOnPrompt(async () => false);
-      await expect(onPrompt('bash', { command: 'ls' })).resolves.toBe(false);
+      await ch.handleInboundForTest(inbound('earlier message'));
+      sent.length = 0;
+      const tui = vi.fn(async () => false);
+      await expect(ch.makeOnPrompt(tui)('bash', { command: 'ls' })).resolves.toBe(false);
+      expect(tui).toHaveBeenCalledOnce();
       expect(approvalStore.listPending()).toHaveLength(0);
       expect(sent).toHaveLength(0);
     });
 
-    it('without a channel user, terminal approval is still honoured', async () => {
+    it('terminal approval is still honoured', async () => {
       const { ch } = makeChannel_();
       await expect(ch.makeOnPrompt(async () => true)('bash', { command: 'ls' })).resolves.toBe(true);
     });
 
-    it('does not resolve on its own while nobody has answered', async () => {
-      const { ch } = makeChannel_();
-      await ch.handleInboundForTest(inbound('hello'));
-      let settled = false;
-      void ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' }).then(() => { settled = true; });
-      await new Promise((r) => setTimeout(r, 30));
-      expect(settled).toBe(false);
-      expect(approvalStore.listPending()).toHaveLength(1);
+    it('messages for another robot do not make the channel take part in confirmations', async () => {
+      const { facade } = gatedFacade();
+      const { ch } = makeChannel_('robot_1', facade);
+      void ch.handleInboundForTest(inbound('hello', 'msg_x', 'user_1', 'robot_other'));
+      await flush();
+      await expect(ch.makeOnPrompt(async () => false)('bash', { command: 'ls' })).resolves.toBe(false);
+      expect(sent).toHaveLength(0);
+      expect(facade.runTurn).not.toHaveBeenCalled();
     });
 
-    it('pushes the confirmation to the channel user and approves only on explicit /approve', async () => {
-      const { ch } = makeChannel_();
-      await ch.handleInboundForTest(inbound('hello'));
-      sent.length = 0;
+    it('does not resolve on its own while nobody has answered, and asks the terminal too', async () => {
+      const { ch, done } = await channelTurn();
+      const tui = vi.fn(pendingForever);
+      let settled = false;
+      void ch.makeOnPrompt(tui)('bash', { command: 'ls' }).then(() => { settled = true; });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(settled).toBe(false);
+      expect(tui).toHaveBeenCalledOnce();
+      expect(approvalStore.listPending()).toHaveLength(1);
+      await done();
+    });
+
+    it('pushes the confirmation to the turn originator and approves only on their explicit /approve', async () => {
+      const { ch, done } = await channelTurn();
       const decision = ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' });
       await flush();
       const [pending] = approvalStore.listPending();
@@ -245,28 +276,63 @@ describe('EmbeddedYZJChannel', () => {
       expect(sent[0]!.text).toContain(pending!.approvalId);
       await ch.handleInboundForTest(inbound(`/approve ${pending!.approvalId}`, 'msg_ok'));
       await expect(decision).resolves.toBe(true);
+      await done();
+    });
+
+    it('ignores /approve from a different user in the same channel', async () => {
+      const { ch, done } = await channelTurn({ approvalTimeoutMs: 50 });
+      const decision = ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' });
+      await flush();
+      const [pending] = approvalStore.listPending();
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        await ch.handleInboundForTest(inbound(`/approve ${pending!.approvalId}`, 'msg_other', 'user_2'));
+        expect(approvalStore.get(pending!.approvalId)).toBeDefined();
+        await expect(decision).resolves.toBe(false);
+      } finally {
+        stderr.mockRestore();
+      }
+      await done();
     });
 
     it('denies on explicit /deny from the channel', async () => {
-      const { ch } = makeChannel_();
-      await ch.handleInboundForTest(inbound('hello'));
+      const { ch, done } = await channelTurn();
       const decision = ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' });
       await flush();
       const [pending] = approvalStore.listPending();
       await ch.handleInboundForTest(inbound(`/deny ${pending!.approvalId}`, 'msg_no'));
       await expect(decision).resolves.toBe(false);
+      await done();
+    });
+
+    it('keeps consecutive confirmations separate', async () => {
+      const { ch, done } = await channelTurn();
+      const onPrompt = ch.makeOnPrompt(pendingForever);
+      const first = onPrompt('bash', { command: 'ls' });
+      await flush();
+      const [p1] = approvalStore.listPending();
+      await ch.handleInboundForTest(inbound(`/deny ${p1!.approvalId}`, 'msg_d'));
+      await expect(first).resolves.toBe(false);
+      const second = onPrompt('write', { file_path: '/tmp/x' });
+      await flush();
+      const [p2] = approvalStore.listPending();
+      expect(p2!.approvalId).not.toBe(p1!.approvalId);
+      await ch.handleInboundForTest(inbound(`/approve ${p1!.approvalId}`, 'msg_stale'));
+      expect(approvalStore.get(p2!.approvalId)).toBeDefined();
+      await ch.handleInboundForTest(inbound(`/approve ${p2!.approvalId}`, 'msg_a'));
+      await expect(second).resolves.toBe(true);
+      await done();
     });
 
     it('denies when the channel confirmation times out', async () => {
-      const { ch } = makeChannel_('robot_1', undefined, { approvalTimeoutMs: 20 });
-      await ch.handleInboundForTest(inbound('hello'));
+      const { ch, done } = await channelTurn({ approvalTimeoutMs: 20 });
       await expect(ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' })).resolves.toBe(false);
       expect(approvalStore.listPending()).toHaveLength(0);
+      await done();
     });
 
     it('denies when the confirmation cannot be delivered to the channel', async () => {
-      const { ch } = makeChannel_('robot_1', undefined, { deliverError: true });
-      await ch.handleInboundForTest(inbound('hello'));
+      const { ch, done } = await channelTurn({ deliverError: true });
       const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       try {
         await expect(ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' })).resolves.toBe(false);
@@ -274,16 +340,16 @@ describe('EmbeddedYZJChannel', () => {
         stderr.mockRestore();
       }
       expect(approvalStore.listPending()).toHaveLength(0);
+      await done();
     });
 
-    it('denies when the terminal prompt errors and no channel user exists', async () => {
+    it('denies when the terminal prompt errors on a terminal-originated turn', async () => {
       const { ch } = makeChannel_();
       await expect(ch.makeOnPrompt(async () => { throw new Error('tty gone'); })('bash', { command: 'ls' })).resolves.toBe(false);
     });
 
     it('closes the pending channel confirmation once the terminal answers first', async () => {
-      const { ch } = makeChannel_();
-      await ch.handleInboundForTest(inbound('hello'));
+      const { ch, done } = await channelTurn();
       let answer!: (v: boolean) => void;
       const decision = ch.makeOnPrompt(() => new Promise<boolean>((r) => { answer = r; }))('bash', { command: 'ls' });
       await flush();
@@ -292,6 +358,14 @@ describe('EmbeddedYZJChannel', () => {
       answer(false);
       await expect(decision).resolves.toBe(false);
       expect(approvalStore.get(pending!.approvalId)).toBeUndefined();
+      await done();
+    });
+
+    it('stops routing confirmations to the channel after the channel turn ends', async () => {
+      const { ch, done } = await channelTurn();
+      await done();
+      await expect(ch.makeOnPrompt(async () => false)('bash', { command: 'ls' })).resolves.toBe(false);
+      expect(approvalStore.listPending()).toHaveLength(0);
     });
   });
 });
