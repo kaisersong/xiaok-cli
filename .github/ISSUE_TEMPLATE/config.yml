@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 新手常见问题（FAQ）
+    url: https://github.com/kaisersong/xiaok-cli/blob/master/README.zh-CN.md
+    about: 安装、登录、配置模型 Key 的常见问题，先看这里通常最快

@@ -1,0 +1,41 @@
+name: 问题反馈 / Bug
+description: 用着出问题了，告诉我们发生了什么
+labels: ["bug", "待分级"]
+body:
+  - type: dropdown
+    id: surface
+    attributes: {label: 你在用哪个端, options: ["Desktop", "CLI"]}
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes: {label: 版本号, description: "Desktop 在 设置 → 关于；CLI 运行 xiaok --version", placeholder: "1.5.9"}
+    validations: {required: true}
+  - type: dropdown
+    id: os
+    attributes: {label: 系统, options: ["macOS（Apple 芯片）", "macOS（Intel）", "Windows 11", "Windows 10", "Linux", "其他"]}
+    validations: {required: true}
+  - type: input
+    id: model
+    attributes: {label: 用的模型和服务商, placeholder: "例如 Kimi K3 / GLM-5.3 / Claude"}
+  - type: dropdown
+    id: stage
+    attributes: {label: 卡在哪一步, options: ["安装 / 打开", "登录 / 配置模型 Key", "描述任务 / 添加材料", "任务进行中", "预览 / 导出产物", "任务失败后恢复", "升级", "其他"]}
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes: {label: 复现步骤, placeholder: "1. …\n2. …\n3. …"}
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: 你期望的结果}
+    validations: {required: true}
+  - type: textarea
+    id: actual
+    attributes: {label: 实际发生了什么, description: 原样贴报错文字，或者附截图}
+    validations: {required: true}
+  - type: dropdown
+    id: frequency
+    attributes: {label: 出现频率, options: ["每次都出现", "偶尔出现", "只出现过一次"]}
+  - type: textarea
+    id: logs
+    attributes: {label: 日志 / 截图, description: "请先删掉里面的 API Key 和个人信息"}
