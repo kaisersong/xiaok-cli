@@ -383,10 +383,24 @@ export function escapeProjectRuleDisplay(rule: string): string {
   });
 }
 
+function describeProjectRule(rule: string): string {
+  const match = /^([^()]+)\(([\s\S]*)\)$/.exec(rule);
+  const tool = match?.[1] ?? rule;
+  const pattern = match?.[2] ?? '*';
+  if (tool === 'bash') {
+    if (pattern === '*') return '以后运行任何命令都不再询问';
+    if (pattern.endsWith(' *')) return `以后运行以 \`${pattern.slice(0, -2)}\` 开头的命令不再询问`;
+    return `以后运行 \`${pattern}\` 不再询问`;
+  }
+  const actions: Record<string, string> = { write: '写入', edit: '修改', read: '读取' };
+  if (Object.hasOwn(actions, tool)) return `以后${actions[tool]} \`${pattern}\` 不再询问`;
+  return `以后使用 ${tool} 匹配 \`${pattern}\` 时不再询问`;
+}
+
 /** Use the permission input handoff before the REPL starts; Enter defaults to refusal. */
-export async function promptProjectRuleAdoption(rule: string): Promise<boolean> {
+export async function promptProjectRuleAdoption(rule: string, index = 1, total = 1): Promise<boolean> {
   if (!stdin.isTTY || !stdout.isTTY) return false;
-  stdout.write(`${escapeProjectRuleDisplay(rule)} [y/N] `);
+  stdout.write(`(${index}/${total}) ${escapeProjectRuleDisplay(describeProjectRule(rule))}\n${escapeProjectRuleDisplay(rule)} [y/N] `);
   return new Promise(resolve => {
     const finish = (adopt: boolean) => {
       stopPermissionInput(onData, onEnd);

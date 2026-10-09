@@ -49,7 +49,7 @@ function loadReportIntentFixture(name: (typeof reportIntentFixtureNames)[number]
 
 const denseSlowCommand = process.platform === 'win32'
   ? 'ping -n 7 127.0.0.1'
-  : 'node -e "setTimeout(() => {}, 6000)"';
+  : 'sleep 6';
 
 const denseCommandSequence = [
   'printf "cat /Users/song/.xiaok/skills/kai-report-creator/SKILL.md"',

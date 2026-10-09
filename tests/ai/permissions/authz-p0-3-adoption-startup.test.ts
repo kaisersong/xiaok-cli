@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { shouldPromptProjectRuleAdoption, promptPendingProjectRules } from '../../../src/commands/project-rule-adoption.js';
 import { adoptProjectRule, listPendingProjectRules } from '../../../src/ai/permissions/settings.js';
 import { promptProjectRuleAdoption } from '../../../src/ui/permission-prompt.js';
-vi.mock('../../../src/ai/permissions/settings.js', () => ({ adoptProjectRule: vi.fn(), listPendingProjectRules: vi.fn() }));
+vi.mock('../../../src/ai/permissions/settings.js', () => ({ adoptProjectRule: vi.fn(), listPendingProjectRules: vi.fn(), getGlobalSettingsPath: () => "/tmp/xiaok-test/settings.json" }));
 vi.mock('../../../src/ui/permission-prompt.js', async importOriginal => ({ ...await importOriginal<typeof import('../../../src/ui/permission-prompt.js')>(), promptProjectRuleAdoption: vi.fn() }));
 
 it.each([
@@ -16,9 +16,9 @@ it.each([
   expect(shouldPromptProjectRuleAdoption(options)).toBe(expected);
 });
 it.each([
-  [new Error('Project rule is no longer present'), '项目规则已变更，跳过'],
-  [Object.assign(new Error('save failed'), {code: 'EACCES'}), '采纳记录保存失败'],
-  [Object.assign(new Error('save failed'), {code: 'ENOSPC'}), '采纳记录保存失败'],
+  [new Error('Project rule is no longer present'), '这条规则在询问期间被修改了，已跳过，下次启动会重新询问。'],
+  [Object.assign(new Error('save failed'), {code: 'EACCES'}), '这条没有生效，下次启动会再问。'],
+  [Object.assign(new Error('save failed'), {code: 'ENOSPC'}), '这条没有生效，下次启动会再问。'],
 ])('adoption failure is visible and processing continues: %j', async (error, message) => {
   vi.mocked(listPendingProjectRules).mockResolvedValue(['bash(echo \x1b[2J)', 'bash(ls)']);
   vi.mocked(promptProjectRuleAdoption).mockResolvedValue(true);
@@ -27,8 +27,31 @@ it.each([
   try {
     await promptPendingProjectRules('/ws/repo');
     expect(write).toHaveBeenCalledWith(expect.stringContaining(message));
+    expect(write.mock.calls.flat().join('')).toContain('已采纳 1 条，跳过 1 条，');
     expect(write.mock.calls.flat().join('')).not.toContain('\x1b');
     expect(adoptProjectRule).toHaveBeenNthCalledWith(1, '/ws/repo', 'bash(echo \x1b[2J)');
     expect(adoptProjectRule).toHaveBeenNthCalledWith(2, '/ws/repo', 'bash(ls)');
+  } finally { write.mockRestore(); }
+});
+
+it('prints pending count, adoption totals and the actual record path', async () => {
+  vi.mocked(listPendingProjectRules).mockResolvedValue(['bash(ls)', 'read(*)', 'edit(*)']);
+  vi.mocked(promptProjectRuleAdoption).mockReset().mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  vi.mocked(adoptProjectRule).mockReset().mockResolvedValue(undefined);
+  const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    await promptPendingProjectRules('/ws/repo');
+    const output = write.mock.calls.flat().join('');
+    expect(output).toContain('这个项目自带了 3 条放行规则。放行后，匹配的操作不再询问你。下面逐条确认，直接回车就是不采纳。');
+    expect(promptProjectRuleAdoption).toHaveBeenNthCalledWith(1, 'bash(ls)', 1, 3);
+    expect(output).toContain('已采纳 2 条，跳过 1 条，可用 /settings 查看；要撤销，删除 /tmp/xiaok-test/project-rule-adoptions.json 中的记录后重新启动');
+  } finally { write.mockRestore(); }
+});
+it('prints nothing when no project rules are pending', async () => {
+  vi.mocked(listPendingProjectRules).mockResolvedValue([]);
+  const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  try {
+    await promptPendingProjectRules('/ws/repo');
+    expect(write).not.toHaveBeenCalled();
   } finally { write.mockRestore(); }
 });
