@@ -132,6 +132,7 @@ function nextShellWord(text: string, stopAtOperator = false): { value: string; e
   let value = '';
   let hasExpansion = false;
   let hasWildcard = false;
+  let unquoted = '';
   while (index < text.length) {
     if (!quote && (/\s/.test(text[index]) || (stopAtOperator && /[<>&|;]/.test(text[index])))) break;
     const literal = scanShellLiteral(text, index, quote);
@@ -139,9 +140,12 @@ function nextShellWord(text: string, stopAtOperator = false): { value: string; e
     else {
       hasExpansion ||= /[$`]/.test(text[index]);
       hasWildcard ||= /[*?\[]/.test(text[index]);
+      if (!quote) unquoted += text[index];
       value += text[index++];
     }
   }
+  hasExpansion ||= /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(unquoted);
+  if (value === '[' || value === '[[') hasWildcard = false;
   return { value, end: index, hasExpansion, hasWildcard };
 }
 
@@ -199,6 +203,9 @@ function scanCommandSegments(command: string): { segments: string[]; valid: bool
         continue;
       }
       if (!quote && end && ch === end) { if (needsCommand && !text.trim()) valid = false; flush(); index++; return; }
+      if (!quote && (ch === '(' || (ch === '{' && !text.trim() && /\s/.test(command[index + 1] ?? '')))) {
+        valid = false; flush(); index++; scan(ch === '(' ? ')' : '}', depth + 1); continue;
+      }
       const substitution = command.startsWith('$(', index) || (!quote && /[<>]/.test(ch) && command[index + 1] === '(');
       if (substitution || ch === '`') {
         const start = index;
@@ -239,6 +246,8 @@ function denyCommandSegments(command: string, depth = 0): string[] {
   const candidates = [command, normalized, ...segments, ...segments.map(segment => segment.replace(/^\{\s+/, ''))];
   if (depth >= 32) return candidates;
   for (const segment of segments) {
+    const payload = prefixWrapperPayload(segment);
+    if (payload !== undefined && payload) candidates.push(...denyCommandSegments(payload, depth + 1));
     const wrapper = /(?:^|\s)(?:(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)\s+-[a-z]*c\s+|eval\s+)/;
     const start = wrapper.exec(segment);
     if (!start) continue;
@@ -259,6 +268,41 @@ function denyCommandSegments(command: string, depth = 0): string[] {
     if (unquoted !== argumentsText) candidates.push(...denyCommandSegments(unquoted, depth + 1));
   }
   return candidates;
+}
+
+/** Return the raw command tail, retaining quoting and expansion metadata. Unknown
+ * wrapper options fail closed rather than guessing which word is executable. */
+function prefixWrapperPayload(segment: string): string | undefined {
+  let remaining = segment.trimStart();
+  const take = () => {
+    const word = nextShellWord(remaining);
+    remaining = remaining.slice(word.end).trimStart();
+    return word.value;
+  };
+  let name = take();
+  while (/^[A-Za-z_][\w]*=/.test(name) && remaining) name = take();
+  name = posix.basename(name);
+  if (!/^(?:nohup|time|nice|timeout|stdbuf|env)$/.test(name)) return undefined;
+  while (remaining.startsWith('-')) {
+    const option = take();
+    if (option === '--') break;
+    const needsValue = (name === 'nice' && /^(?:-n|--adjustment)$/.test(option))
+      || (name === 'timeout' && /^(?:-k|-s|--kill-after|--signal)$/.test(option))
+      || (name === 'stdbuf' && /^(?:-[ioe]|--(?:input|output|error))$/.test(option))
+      || (name === 'env' && /^(?:-u|--unset|-C|--chdir)$/.test(option));
+    if (needsValue) { if (!remaining) return ''; take(); continue; }
+    const known = (name === 'time' && /^(?:-p)$/.test(option))
+      || (name === 'nice' && /^(?:-n.+|--adjustment=.+|-\d+)$/.test(option))
+      || (name === 'timeout' && /^(?:--(?:foreground|preserve-status|verbose)|-[sv]|-[ks].+|--(?:signal|kill-after)=.+)$/.test(option))
+      || (name === 'stdbuf' && /^(?:-[ioe].+|--(?:input|output|error)=.+)$/.test(option))
+      || (name === 'env' && /^(?:-i|--ignore-environment|-u.+|--(?:unset|chdir)=.+)$/.test(option));
+    if (!known) return '';
+  }
+  if (name === 'timeout') { if (!remaining) return ''; take(); }
+  if (name === 'env') {
+    while (/^[A-Za-z_][\w]*=/.test(nextShellWord(remaining).value) && remaining) take();
+  }
+  return remaining;
 }
 
 function shellWords(text: string): string[] {
@@ -396,6 +440,8 @@ function payloadRequiresConfirmation(command: string, depth = 0): boolean {
   if (hasConfirmationForm(command)) return true;
   for (const segment of scanCommandSegments(command).segments) {
     if (segmentRequiresExpansionConfirmation(segment)) return true;
+    const payload = prefixWrapperPayload(segment);
+    if (payload !== undefined && (!payload || classifyBashCommand(payload).level !== 'safe' || payloadRequiresConfirmation(payload, depth + 1))) return true;
     const words = shellWords(segment);
     // Reparse quoted literal arguments completely, preserving conservative review
     // even when dangerous text is only a message rather than an executable payload.
