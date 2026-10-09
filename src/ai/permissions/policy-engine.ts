@@ -377,17 +377,17 @@ function hasGitExecution(words: string[]): boolean {
     const subcommand = words[index++];
     const args = words.slice(index);
     if (subcommand === 'filter-branch' || subcommand === 'mergetool' || subcommand === 'difftool') return true;
-    if (args.some(word => isLongOptionPrefix(word, 'exec', 3))) return true;
-    if (/^(?:fetch|ls-remote|clone|pull|archive)$/.test(subcommand) && args.some(word => isLongOptionPrefix(word, 'upload-pack', 3))) return true;
+    if (args.some(word => isLongOptionPrefix(word, 'exec', 1))) return true;
+    if (/^(?:fetch|ls-remote|clone|pull|archive)$/.test(subcommand) && args.some(word => isLongOptionPrefix(word, 'upload-pack', 1))) return true;
     // Only clone uses -u for upload-pack; fetch/push use it for unrelated flags.
     if (subcommand === 'clone' && args.some(word => /^-u.*$/.test(word))) return true;
-    if (/^(?:push|send-pack)$/.test(subcommand) && args.some(word => isLongOptionPrefix(word, 'receive-pack', 3))) return true;
-    if (subcommand === 'archive' && args.some(word => isLongOptionPrefix(word, 'remote', 3))) return true;
+    if (/^(?:push|send-pack)$/.test(subcommand) && args.some(word => isLongOptionPrefix(word, 'receive-pack', 1))) return true;
+    if (subcommand === 'archive' && args.some(word => isLongOptionPrefix(word, 'remote', 1))) return true;
     if (subcommand === 'config' && args.some(word => /^(?:alias\..+|core\.(?:pager|sshcommand|editor|hookspath|fsmonitor)|diff\.external|.+\.pager|credential(?:\..+)?\.helper)(?:=|$)/i.test(word))) return true;
     if (subcommand === 'submodule' && args.includes('foreach')) return true;
     if (subcommand === 'bisect' && args.includes('run')) return true;
-    if (subcommand === 'rebase' && args.some(word => /^-x.*$/.test(word) || isLongOptionPrefix(word, 'exec', 3))) return true;
-    if (subcommand === 'diff' && args.some(word => isLongOptionPrefix(word, 'ext-diff', 3))) return true;
+    if (subcommand === 'rebase' && args.some(word => /^-x.*$/.test(word) || isLongOptionPrefix(word, 'exec', 1))) return true;
+    if (subcommand === 'diff' && args.some(word => isLongOptionPrefix(word, 'ext-diff', 1))) return true;
   }
   return false;
 }

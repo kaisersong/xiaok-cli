@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 
 const executionForms = [
+  'git rebase --ex id HEAD~1',
+  'git archive --r=x HEAD',
+  'git archive --re=x HEAD',
+  'git fetch --up=x origin',
+  'git -C repo fetch --upload-pack=x origin',
   'git fetch --upload=x origin',
   'git fetch --upload-p=x origin',
   'git push --receive=x origin',
@@ -54,9 +59,10 @@ const executionForms = [
 const plainForms = [
   'git fetch',
   'git fetch origin',
-  'git fetch --up=x origin',
   'git fetch --upload-packs=x origin',
   'git diff --no-ext-diff',
+  'git diff --stat',
+  'git diff --exit-code',
   'git pull',
   'git clone https://example.invalid/r.git',
   'git ls-remote origin',
@@ -82,6 +88,10 @@ for (const rule of ['bash(git *)', 'bash(*)']) {
   describe(`default ${rule} plain forms`, () => {
     it.each(plainForms)('allows %s', async command => {
       expect(await check('default', [rule], command)).toBe('allow');
+    });
+    it('conservatively prompts for ext:: in an author filter', async () => {
+      // 当前 ext:: 检测保守覆盖选项值，即使 author 过滤本身不执行外部程序。
+      expect(await check('default', [rule], 'git log --author=ext::x')).toBe('prompt');
     });
     it('preserves archive output target handling', async () => {
       expect(await check('default', [rule], 'git archive --format=zip HEAD -o out.zip')).toBe('allow');
