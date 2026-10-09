@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. desktop-v1.5.10)'
+        description: 'Tag to release (e.g. desktop-v1.5.11)'
         required: true
-        default: 'desktop-v1.5.10'
+        default: 'desktop-v1.5.11'
 
 permissions:
   contents: write
@@ -61,13 +61,13 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin a5b473ca1aeed16b85ccf43c4981990ad1fd13ee
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin 3889856041a08a2a282f4d92f0870ba0cc3c09ee
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin d4be3121e04af16c65065f5917e67a66930ca132
+          git -C ../kswarm fetch --depth 1 origin 63f2f1e78a7adf5d75ee3a19e5c1c48c88113ed4
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 079181041c99985da45444505090b13d6d8e26bc
+          git -C ../intent-broker fetch --depth 1 origin 419ea454b958101e9750b28c052e43f316e667fb
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
@@ -276,13 +276,13 @@ jobs:
       - name: Clone desktop sidecar repositories
         run: |
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kai-xiaok-plugins.git ../kai-xiaok-plugins
-          git -C ../kai-xiaok-plugins fetch --depth 1 origin a5b473ca1aeed16b85ccf43c4981990ad1fd13ee
+          git -C ../kai-xiaok-plugins fetch --depth 1 origin 3889856041a08a2a282f4d92f0870ba0cc3c09ee
           git -C ../kai-xiaok-plugins checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/kswarm.git ../kswarm
-          git -C ../kswarm fetch --depth 1 origin d4be3121e04af16c65065f5917e67a66930ca132
+          git -C ../kswarm fetch --depth 1 origin 63f2f1e78a7adf5d75ee3a19e5c1c48c88113ed4
           git -C ../kswarm checkout --detach FETCH_HEAD
           git clone --no-checkout --depth 1 https://github.com/kaisersong/intent-broker.git ../intent-broker
-          git -C ../intent-broker fetch --depth 1 origin 079181041c99985da45444505090b13d6d8e26bc
+          git -C ../intent-broker fetch --depth 1 origin 419ea454b958101e9750b28c052e43f316e667fb
           git -C ../intent-broker checkout --detach FETCH_HEAD
 
       - name: Install sidecar dependencies
