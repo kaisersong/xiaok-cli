@@ -1,0 +1,21 @@
+name: 使用求助
+description: 不确定怎么用、卡在某一步，但不一定是 bug
+labels: ["question"]
+body:
+  - type: markdown
+    attributes: {value: "提问前可以先看看常见问题，安装、登录、配置模型 Key 的问题大多在那里有答案。"}
+  - type: dropdown
+    id: surface
+    attributes: {label: 你在用哪个端, options: ["Desktop", "CLI"]}
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes: {label: 版本号, description: "Desktop 在 设置 → 关于；CLI 运行 xiaok --version"}
+  - type: textarea
+    id: goal
+    attributes: {label: 你想做成什么, placeholder: "例如：把三份会议记录整理成一页周报"}
+    validations: {required: true}
+  - type: textarea
+    id: tried
+    attributes: {label: 你已经试过什么，卡在哪里, description: 可以附截图，请先遮掉 API Key}
+    validations: {required: true}

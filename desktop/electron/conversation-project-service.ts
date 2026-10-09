@@ -1,3 +1,5 @@
+import { compactProjectCreationResponse } from '../../src/runtime/task-host/tool-result-response.js';
+import type { TaskSnapshot } from '../../src/runtime/task-host/types.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -138,6 +140,23 @@ export class ConversationProjectService {
     const run = this.execute(operation, proposal, context.signal).finally(() => this.inflight.delete(context.taskId));
     this.inflight.set(context.taskId, run);
     return run;
+  }
+
+  /** Read-only overlay of a provably matching old truncated success receipt. */
+  restoreCreationCard(snapshot: TaskSnapshot): TaskSnapshot {
+    const operation = this.read(snapshot.taskId);
+    if (!operation?.result || operation.prompt !== snapshot.prompt) return snapshot;
+    const raw = JSON.stringify(operation.result);
+    const compact = compactProjectCreationResponse(raw);
+    if (!compact) return snapshot;
+    let changed = false;
+    const events = snapshot.events.map(event => {
+      if (event.type !== 'canvas_tool_result' || event.toolName !== 'create_project' || !event.ok
+        || event.response.length !== 10000 || !raw.startsWith(event.response)) return event;
+      changed = true;
+      return { ...event, response: compact };
+    });
+    return changed ? { ...snapshot, events } : snapshot;
   }
 
   private filename(taskId: string): string | undefined {

@@ -2,6 +2,7 @@ import { ensureConversationActivityOwner } from '../../src/runtime/conversation-
 import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
 import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
+import { formatTaskToolResultResponse } from '../../src/runtime/task-host/tool-result-response.js';
 import { resolveKSwarmReviewReadPaths } from './kswarm-review-files.js';
 import { ConversationRoomService, createConversationRoomTool } from './conversation-room-service.js';
 import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from './kswarm-execution-clock.js';
@@ -2647,6 +2648,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if (!pending) {
       pending = (async () => {
         const recovered = await resolveScopedTaskHost(taskId, host).recoverTask(taskId);
+        recovered.snapshot = conversationProjects.restoreCreationCard(recovered.snapshot);
         const lookup = findHistoricalWorkflowStatusLookup(recovered.snapshot);
         return lookup
           ? recoverHistoricalWorkflowStatusArtifacts({
@@ -6542,7 +6544,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       const invocationImages = toolImages.finish(ok);
       ctx.signal.throwIfAborted();
       if (ok) {
-        await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+        await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: formatTaskToolResultResponse(toolCall.name, result), toolUseId: toolCall.id });
       } else {
         await ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
       }

@@ -1,9 +1,10 @@
 // @vitest-environment node
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
+import { buildProjectCardMessageFromToolResult } from '../../renderer/src/components/chatToolResultMessages';
 import { createDesktopServices } from '../../electron/desktop-services.js';
 
 // Vitest loads TS source, whose relative .js Worker URL has no source-tree
@@ -38,7 +39,7 @@ describe('Desktop user task project admission', () => {
         { id: 'xiaok-worker', name: 'Worker', roles: ['worker'], status: 'active' },
       ] });
       if (path === '/projects/room-first') {
-        const project = { ...JSON.parse(String(init?.body)), id: 'proj-user-entry', status: 'planning' };
+        const project = { ...JSON.parse(String(init?.body)), id: 'proj-user-entry', status: 'planning', requirements: 'large-production-project'.repeat(1500) };
         projects.push(project);
         return Response.json({ ok: true, project, preparation: { state: 'ready' }, planningStart: { sent: true } });
       }
@@ -76,6 +77,21 @@ describe('Desktop user task project admission', () => {
         await new Promise(resolve => setTimeout(resolve, 10));
       } while (Date.now() < deadline);
       expect(projects).toHaveLength(kind === 'user' ? 1 : 0);
+      if (kind === 'user') {
+        const event = snapshot.events.find((e: any) => e.type === 'canvas_tool_result' && e.toolName === 'create_project');
+        expect(buildProjectCardMessageFromToolResult(event.response)?.projectData?.projectId).toBe('proj-user-entry');
+        const full = JSON.parse(readFileSync(join(root, 'data', 'conversation-projects', `${created.taskId}.json`), 'utf8')).result;
+        expect(JSON.stringify(full).length).toBeGreaterThan(10000);
+        const path = join(root, 'data', 'tasks', 'snapshots', `${created.taskId}.json`);
+        const persisted = JSON.parse(readFileSync(path, 'utf8'));
+        persisted.events = persisted.events.map((item: any) => item === undefined ? item : item.type === 'canvas_tool_result' && item.toolName === 'create_project' ? { ...item, response: JSON.stringify(full).slice(0, 10000) } : item);
+        const originalBytes = JSON.stringify(persisted);
+        writeFileSync(path, originalBytes);
+        const restored = (await services.recoverTask(created.taskId)).snapshot.events.find((item: any) => item.type === 'canvas_tool_result' && item.toolName === 'create_project');
+        expect(buildProjectCardMessageFromToolResult(restored!.response)?.projectData?.projectId).toBe('proj-user-entry');
+        expect(readFileSync(path, 'utf8')).toBe(originalBytes);
+        expect(projects).toHaveLength(1);
+      }
       if (kind === 'user') expect(snapshot.status, JSON.stringify(snapshot.events.filter((event: any) => /error|fail|terminal/.test(event.type)))).toBe('completed');
       else expect(['completed', 'failed']).toContain(snapshot.status);
       const toolResult = snapshot.events.find((event: any) => event.type === 'canvas_tool_result' && event.toolName === 'create_project');

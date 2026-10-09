@@ -504,11 +504,6 @@ export function ChatShell() {
           resultRef.current = resultWithArtifacts;
           if (live) setStatus('completed');
           setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
-          // Only set title if thread has no title yet (preserve user's prompt as title)
-          if (taskId && !titleLockedRef.current) {
-            titleLockedRef.current = true;
-            api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
-          }
         } else {
           // Desktop tasks: artifacts is [], but still set result for generatedFiles extraction
           const finalText = streamRef.current || r.summary;
@@ -1171,6 +1166,7 @@ export function ChatShell() {
       if (!loadCurrent()) return;
 
       if (threadData) {
+        titleLockedRef.current = Boolean(threadData.title?.trim());
         const allTaskIds = (threadData.taskIds && threadData.taskIds.length > 0) ? threadData.taskIds
           : threadData.currentTaskId ? [threadData.currentTaskId] : [];
         const isEmptyHelpThread = allTaskIds.length === 0 && !initialPrompt;
@@ -1204,6 +1200,10 @@ export function ChatShell() {
             const { snapshot, recoveredFromTaskId } = await api.recoverTask(tid, allTaskIds.length === 1 ? threadData.title ?? undefined : undefined);
             if (!loadCurrent()) return;
             if (snapshot) {
+              if (!titleLockedRef.current && snapshot.prompt?.trim()) {
+                titleLockedRef.current = true;
+                api.updateThreadTitle(taskId, snapshot.prompt.trim().slice(0, 40)).catch(() => {});
+              }
               if (recoveredFromTaskId) allMessages.push({ id: `history-recovery-${tid}`, role: 'assistant', content: t.chatShell.historyRecovered(recoveredFromTaskId) });
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
@@ -1387,7 +1387,7 @@ export function ChatShell() {
     setResult(null);
 
     // Update thread title only on first user message (keep original topic as title)
-    if (taskId && messages.filter(m => m.role === 'user').length === 0) {
+    if (taskId && !titleLockedRef.current && !thread?.title?.trim() && messages.filter(m => m.role === 'user').length === 0) {
       titleLockedRef.current = true;
       api.updateThreadTitle(taskId, text.slice(0, 40)).catch(() => {});
     }

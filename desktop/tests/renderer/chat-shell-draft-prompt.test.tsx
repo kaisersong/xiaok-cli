@@ -20,6 +20,7 @@ vi.mock('../../renderer/src/api', () => ({
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
     getObservationTaskStatus: vi.fn().mockResolvedValue({ mode: 'off' }),
+    getObservationPreconditions: vi.fn().mockResolvedValue({ ready: false }),
     subscribeTask: mockSubscribeTask,
     updateThreadTaskId: mockUpdateThreadTaskId,
     updateThreadTitle: mockUpdateThreadTitle,
@@ -133,6 +134,20 @@ afterEach(() => {
 });
 
 describe('ChatShell draft prompt navigation state', () => {
+  it.each(['用户手工标题', null])('preserves first user topic when followup completes (title=%s)', async title => {
+    mockGetThread.mockResolvedValue({ id: 'thread-title', title, status: 'running', mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task-followup', taskIds: ['task-first', 'task-followup'] });
+    mockRecoverTask.mockImplementation(async id => ({ snapshot: { taskId: id, sessionId: id, status: id === 'task-first' ? 'completed' : 'running', prompt: id === 'task-first' ? '创建项目分析金蝶自研模型' : '确认就是Qwen3.8 27B', materials: [], events: [], createdAt: 1, updatedAt: 2 } }));
+    let handler: any;
+    mockSubscribeTask.mockImplementation((_id, next) => { handler = next; return () => {}; });
+    mockUpdateThreadTitle.mockResolvedValue(undefined);
+    const view = render(<MemoryRouter initialEntries={['/t/thread-title']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(() => expect(handler).toBeTypeOf('function'));
+    await act(async () => handler({ type: 'result', result: { summary: '收到，已核实并落实到项目里。', artifacts: [{ artifactId: 'proof', kind: 'text', title: 'proof.md', filePath: '/tmp/proof.md' }] } }));
+    if (title) expect(mockUpdateThreadTitle).not.toHaveBeenCalled();
+    else expect(mockUpdateThreadTitle).toHaveBeenCalledWith('thread-title', '创建项目分析金蝶自研模型');
+    expect(mockUpdateThreadTitle).not.toHaveBeenCalledWith('thread-title', expect.stringContaining('收到'));
+    view.unmount();
+  });
   it('labels the real identity of recovered legacy content without starting a new project', async () => {
     mockGetThread.mockResolvedValue({ id: 'thread-legacy', title: '创建项目, 让10个智能体搞定本月国外主要AI产品动态分析', status: 'idle',
       mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task_missing', taskIds: ['task_missing'] });
