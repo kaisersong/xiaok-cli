@@ -20,6 +20,7 @@ vi.mock('../../renderer/src/api', () => ({
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
     getObservationTaskStatus: vi.fn().mockResolvedValue({ mode: 'off' }),
+    getObservationPreconditions: vi.fn().mockResolvedValue({ ready: false }),
     subscribeTask: mockSubscribeTask,
     updateThreadTaskId: mockUpdateThreadTaskId,
     updateThreadTitle: mockUpdateThreadTitle,
