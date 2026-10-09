@@ -245,14 +245,32 @@ function scanCommandSegments(command: string): { segments: string[]; valid: bool
 }
 
 /** Inspect literal wrapper payloads conservatively; no shell execution occurs here. */
-function denyCommandSegments(command: string, depth = 0, uncertainWrappers = true): string[] {
+// Bound recursive wrapper fan-out, independently of command length or word count.
+const SCAN_LIMIT = 2000;
+const BUDGET_EXCEEDED = '$inspection-budget-exceeded';
+interface ScanBudget { remaining: number; exceeded: boolean }
+function spend(budget: ScanBudget): boolean {
+  budget.remaining -= 1;
+  if (budget.remaining < 0) budget.exceeded = true;
+  return !budget.exceeded;
+}
+
+export function exceedsCommandInspectionBudget(command: string): boolean {
+  const budget = { remaining: SCAN_LIMIT, exceeded: false };
+  denyCommandSegments(command, 0, true, budget);
+  return budget.exceeded;
+}
+
+function denyCommandSegments(command: string, depth = 0, uncertainWrappers = true, budget: ScanBudget = { remaining: SCAN_LIMIT, exceeded: false }): string[] {
+  if (!spend(budget)) return [BUDGET_EXCEEDED];
   const normalized = command.replace(/\\\n/g, '');
   const segments = parseCommandSegments(normalized).segments;
   const candidates = [command, normalized, ...segments, ...segments.map(segment => segment.replace(/^\{\s+/, ''))];
-  if (depth >= 32) return candidates;
+  if (depth >= 32) { budget.exceeded = true; return [...candidates, BUDGET_EXCEEDED]; }
   for (const segment of segments) {
+    if (budget.exceeded) break;
     const payload = prefixWrapperPayload(segment);
-    if (payload !== undefined && payload) candidates.push(...denyCommandSegments(payload, depth + 1, uncertainWrappers));
+    if (payload !== undefined && payload) candidates.push(...denyCommandSegments(payload, depth + 1, uncertainWrappers, budget));
     if (payload === '' && uncertainWrappers) {
       // An uncertain option can hide the executable at any subsequent word.
       // Keep raw tails so quoting is preserved; do not use these for allow matching.
@@ -263,8 +281,8 @@ function denyCommandSegments(command: string, depth = 0, uncertainWrappers = tru
         word = nextShellWord(remaining);
       }
       remaining = remaining.slice(word.end).trimStart(); // Skip the wrapper name.
-      while (remaining) {
-        candidates.push(...denyCommandSegments(remaining, depth + 1, uncertainWrappers));
+      while (remaining && !budget.exceeded) {
+        candidates.push(...denyCommandSegments(remaining, depth + 1, uncertainWrappers, budget));
         remaining = remaining.slice(nextShellWord(remaining).end).trimStart();
       }
     }
@@ -272,7 +290,7 @@ function denyCommandSegments(command: string, depth = 0, uncertainWrappers = tru
     const start = wrapper.exec(segment);
     if (!start) continue;
     const argumentsText = segment.slice(start.index + start[0].length);
-    candidates.push(...denyCommandSegments(argumentsText, depth + 1, uncertainWrappers));
+    candidates.push(...denyCommandSegments(argumentsText, depth + 1, uncertainWrappers, budget));
     let remaining = argumentsText;
     const words: string[] = [];
     while (remaining.trim()) {
@@ -280,12 +298,12 @@ function denyCommandSegments(command: string, depth = 0, uncertainWrappers = tru
       const word = nextShellWord(remaining);
       words.push(word.value);
       if (word.value !== remaining.slice(0, word.end)) {
-        candidates.push(...denyCommandSegments(word.value, depth + 1, uncertainWrappers));
+        candidates.push(...denyCommandSegments(word.value, depth + 1, uncertainWrappers, budget));
       }
       remaining = remaining.slice(word.end);
     }
     const unquoted = words.join(' ');
-    if (unquoted !== argumentsText) candidates.push(...denyCommandSegments(unquoted, depth + 1, uncertainWrappers));
+    if (unquoted !== argumentsText) candidates.push(...denyCommandSegments(unquoted, depth + 1, uncertainWrappers, budget));
   }
   return candidates;
 }
@@ -393,10 +411,11 @@ function hasGitExecution(words: string[]): boolean {
 }
 
 /** List literal output destinations without executing or expanding shell text. */
-export function getCommandWriteTargets(command: string, depth = 0): string[] {
-  if (depth >= 32) return ['$unresolved'];
+export function getCommandWriteTargets(command: string, depth = 0, budget: ScanBudget = { remaining: SCAN_LIMIT, exceeded: false }): string[] {
+  if (!spend(budget) || depth >= 32) return ['$unresolved'];
   const targets: string[] = [];
   for (const segment of parseCommandSegments(command).segments) {
+    if (!spend(budget)) { targets.push('$unresolved'); break; }
     let quote = '';
     for (let index = 0; index < segment.length;) {
       const literal = scanShellLiteral(segment, index, quote);
@@ -426,15 +445,56 @@ export function getCommandWriteTargets(command: string, depth = 0): string[] {
       const payloadIndex = name === 'eval' ? index + 1
         : /^(?:sh|bash|zsh|dash|ksh)$/.test(name) ? shellPayloadIndex(words, index) : -1;
       if (payloadIndex >= 0 && payloadIndex < words.length) {
-        targets.push(...getCommandWriteTargets(words.slice(payloadIndex).join(' '), depth + 1));
+        targets.push(...getCommandWriteTargets(words.slice(payloadIndex).join(' '), depth + 1, budget));
         break;
       }
     }
-    if (words.some(word => posix.basename(word) === 'git')) {
-      for (let index = 0; index < words.length; index++) {
-        const word = words[index];
-        const target = word.startsWith('--output=') ? word.slice(9) : word === '--output' ? words[++index] : undefined;
-        if (target !== undefined && target !== '/dev/null') targets.push(target);
+    for (let start = 0; start < words.length; start++) {
+      if (posix.basename(words[start]) !== 'git') continue;
+      let index = start + 1;
+      let base = '';
+      let unresolved = false;
+      while (index < words.length && words[index].startsWith('-')) {
+        const option = words[index++];
+        if (option === '--') break;
+        if (option === '-C' || option.startsWith('-C')) {
+          const dir = option === '-C' ? words[index++] : option.slice(2);
+          if (dir === undefined || /^[~]|[$`*?\[]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(dir)) unresolved = true;
+          else if (dir) {
+            const api = /^[a-z]:|^\\\\|^\/\//i.test(dir) || /^[a-z]:|^\\\\/i.test(base) ? win32 : posix;
+            base = api.isAbsolute(dir) ? api.normalize(dir) : api.join(base, dir);
+          }
+        } else if (/^(?:-c|--(?:git-dir|work-tree|namespace|exec-path|config-env|super-prefix))$/.test(option)) index++;
+      }
+      const subcommand = words[index++];
+      const args = words.slice(index);
+      const add = (target: string | undefined) => {
+        if (target === undefined || target === '/dev/null') return;
+        const api = /^[a-z]:|^\\\\|^\/\//i.test(base) || /^[a-z]:|^\\\\/i.test(target) ? win32 : posix;
+        targets.push(unresolved ? '$unresolved' : !base || api.isAbsolute(target) ? target : api.join(base, target));
+      };
+      for (let i = 0; i < args.length; i++) {
+        const word = args[i];
+        if (word === '--') break;
+        if (word.startsWith('--output=')) add(word.slice(9));
+        else if (word === '--output') add(args[++i]);
+        else if (subcommand === 'archive' || subcommand === 'format-patch') {
+          if (word === '-o') add(args[++i]);
+          else if (word.startsWith('-o')) add(word.slice(2));
+          else if (subcommand === 'format-patch' && word === '--output-directory') add(args[++i]);
+          else if (subcommand === 'format-patch' && word.startsWith('--output-directory=')) add(word.slice(19));
+        }
+        if (subcommand === 'fast-export') {
+          if (word === '--export-marks') add(args[++i]);
+          else if (word.startsWith('--export-marks=')) add(word.slice(15));
+        }
+      }
+      if (subcommand === 'bundle' && args[0] === 'create') {
+        let i = 1;
+        while (i < args.length && args[i].startsWith('-')) {
+          if (args[i++] === '--') break;
+        }
+        add(args[i]);
       }
     }
   }
@@ -482,17 +542,18 @@ function hasConfirmationForm(command: string, conservative = true): boolean {
   });
 }
 
-function payloadRequiresConfirmation(command: string, depth = 0, conservative = true): boolean {
+function payloadRequiresConfirmation(command: string, depth = 0, conservative = true, budget: ScanBudget = { remaining: SCAN_LIMIT, exceeded: false }): boolean {
+  if (!spend(budget)) return true;
   if (depth >= 32) return conservative;
   if (hasConfirmationForm(command, conservative)) return true;
   for (const segment of scanCommandSegments(command).segments) {
     if (conservative && segmentRequiresExpansionConfirmation(segment)) return true;
     const payload = prefixWrapperPayload(segment);
-    if (payload !== undefined && ((conservative && (!payload || classifyBashCommand(payload).level !== 'safe')) || payloadRequiresConfirmation(payload, depth + 1, conservative))) return true;
+    if (payload !== undefined && ((conservative && (!payload || classifyBashCommand(payload).level !== 'safe')) || payloadRequiresConfirmation(payload, depth + 1, conservative, budget))) return true;
     const words = shellWords(segment);
     // Reparse quoted literal arguments completely, preserving conservative review
     // even when dangerous text is only a message rather than an executable payload.
-    if (words.some(word => /\s/.test(word) && payloadRequiresConfirmation(word, depth + 1, conservative))) return true;
+    if (words.some(word => /\s/.test(word) && payloadRequiresConfirmation(word, depth + 1, conservative, budget))) return true;
     for (let index = 0; index < words.length; index++) {
       const name = posix.basename(words[index]);
       const payloadIndex = name === 'eval' ? index + 1
@@ -500,7 +561,7 @@ function payloadRequiresConfirmation(command: string, depth = 0, conservative = 
       // eval can concatenate arguments; inspecting the entire wrapper tail also
       // covers nested wrappers without losing their pipeline segmentation.
       if (payloadIndex >= 0 && payloadIndex < words.length
-        && payloadRequiresConfirmation(words.slice(payloadIndex).join(' '), depth + 1, conservative)) return true;
+        && payloadRequiresConfirmation(words.slice(payloadIndex).join(' '), depth + 1, conservative, budget)) return true;
     }
   }
   return false;
@@ -511,13 +572,13 @@ function payloadRequiresConfirmation(command: string, depth = 0, conservative = 
  * the allow boundary remains the requirement to match every parsed segment.
  */
 export function requiresCommandConfirmation(command: string): boolean {
-  return payloadRequiresConfirmation(command)
+  return exceedsCommandInspectionBudget(command) || payloadRequiresConfirmation(command)
     // Conservative fallback: removing quotes may expose otherwise hidden forms.
     || hasConfirmationForm(command.replace(/['"]/g, ''));
 }
 
 /** Mandatory forms for AUTO without rule-based approval involvement. */
 export function requiresAlwaysCommandConfirmation(command: string): boolean {
-  return payloadRequiresConfirmation(command, 0, false)
+  return exceedsCommandInspectionBudget(command) || payloadRequiresConfirmation(command, 0, false)
     || hasConfirmationForm(command.replace(/['"]/g, ''), false);
 }

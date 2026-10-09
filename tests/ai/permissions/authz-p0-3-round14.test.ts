@@ -94,7 +94,7 @@ for (const rule of ['bash(git *)', 'bash(*)']) {
       expect(await check('default', [rule], 'git log --author=ext::x')).toBe('prompt');
     });
     it('preserves archive output target handling', async () => {
-      expect(await check('default', [rule], 'git archive --format=zip HEAD -o out.zip')).toBe('allow');
+      expect(await check('default', [rule], 'git archive --format=zip HEAD -o out.zip')).toBe('prompt');
       expect(await check('default', [rule], 'git archive --format=zip HEAD --output=out.zip')).toBe('prompt');
     });
   });

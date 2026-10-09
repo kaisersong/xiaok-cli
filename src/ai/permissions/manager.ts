@@ -86,7 +86,12 @@ export class PermissionManager {
       if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command)) return 'prompt';
       if (conservative) {
         const targets = getCommandWriteTargets(command);
-        if (targets.some(target => isOutsideWorkspace(target, this.cwd))) return 'prompt';
+        const hasWorkdir = Object.hasOwn(input, 'workdir');
+        if (targets.length && hasWorkdir && typeof input.workdir !== 'string') return 'prompt';
+        const api = /^[a-z]:|^\\\\|^\/\//i.test(this.cwd) ? win32 : posix;
+        const effectiveDir = typeof input.workdir === 'string' ? api.resolve(this.cwd, input.workdir) : this.cwd;
+        if (targets.length && hasWorkdir && isOutsideWorkspace(input.workdir as string, this.cwd)) return 'prompt';
+        if (targets.some(target => isOutsideWorkspace(target, this.cwd, effectiveDir))) return 'prompt';
         if (targets.length && this.mode !== 'auto') return 'prompt';
       }
     }
@@ -123,12 +128,12 @@ export class PermissionManager {
 }
 
 /** Resolve lexical paths conservatively across POSIX, drive and UNC forms. */
-function isOutsideWorkspace(target: string, cwd: string): boolean {
+function isOutsideWorkspace(target: string, cwd: string, effectiveDir = cwd): boolean {
   if (/^[~]|[$`]/.test(target)) return true;
   const windows = /^[a-z]:|^\\\\|^\/\//i;
   const api = windows.test(cwd) ? win32 : posix;
   if (windows.test(target) && api !== win32) return true;
   if (api === win32 && posix.isAbsolute(target) && !windows.test(target)) return true;
-  const relative = api.relative(api.resolve(cwd), api.resolve(cwd, target));
+  const relative = api.relative(api.resolve(cwd), api.resolve(effectiveDir, target));
   return relative === '..' || relative.startsWith(`..${api.sep}`) || api.isAbsolute(relative);
 }
