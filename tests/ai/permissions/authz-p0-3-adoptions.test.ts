@@ -39,7 +39,7 @@ it('project approvals are local and tied to exact rule text', async () => {
   }
 });
 
-it('invalid adoption records fail closed and quoted rule hashes preserve exact text', async () => {
+it.each(['bash(echo "x;y" *)', 'bash(echo \x1b[2J *)'])('invalid adoption records fail closed and rule hashes preserve exact text: %j', async (rule) => {
   const root = await mkdtemp(join(tmpdir(), 'p0-exact-'));
   const previous = process.env.XIAOK_CONFIG_DIR;
   process.env.XIAOK_CONFIG_DIR = join(root, 'global');
@@ -47,7 +47,6 @@ it('invalid adoption records fail closed and quoted rule hashes preserve exact t
   try {
     await mkdir(join(repo, '.xiaok'), {recursive:true});
     await mkdir(join(root, 'global'), {recursive:true});
-    const rule = 'bash(echo "x;y" *)';
     const file = join(repo, '.xiaok', 'settings.json');
     const record = join(root, 'global', 'project-rule-adoptions.json');
     const save = (text: string) => writeFile(file, JSON.stringify({permissions:{allow:[text]}}));

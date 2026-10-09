@@ -110,6 +110,34 @@ export function getRuleTarget(input: Record<string, unknown>): string {
   return '';
 }
 
+/** Shared literal quote and escape transitions for segment and word scanning. */
+function scanShellLiteral(text: string, index: number, quote: string): { end: number; quote: string; value: string; valid: boolean } | undefined {
+  const ch = text[index];
+  if (ch === "'" && quote !== '"') return { end: index + 1, quote: quote ? '' : "'", value: '', valid: true };
+  if (quote === "'") return { end: index + 1, quote, value: ch, valid: true };
+  if (ch === '\\') {
+    const next = text[index + 1];
+    if (next === undefined) return { end: index + 1, quote, value: ch, valid: false };
+    if (quote === '"' && !/[$`"\\\n]/.test(next)) return { end: index + 1, quote, value: ch, valid: true };
+    return { end: index + 2, quote, value: next === '\n' ? '' : next, valid: true };
+  }
+  if (ch === '"') return { end: index + 1, quote: quote ? '' : '"', value: '', valid: true };
+  return undefined;
+}
+
+function nextShellWord(text: string): { value: string; end: number } {
+  let index = 0;
+  let quote = '';
+  let value = '';
+  while (index < text.length) {
+    if (!quote && /\s/.test(text[index])) break;
+    const literal = scanShellLiteral(text, index, quote);
+    if (literal) { value += literal.value; quote = literal.quote; index = literal.end; }
+    else { value += text[index++]; }
+  }
+  return { value, end: index };
+}
+
 /** A conservative scanner, not a shell interpreter. Unsupported grammar requires confirmation. */
 export function parseCommandSegments(command: string): { segments: string[]; valid: boolean } {
   command = command.replace(/\\\n/g, '');
@@ -124,14 +152,15 @@ export function parseCommandSegments(command: string): { segments: string[]; val
     const flush = () => { if (text.trim()) segments.push(text.trim()); text = ''; };
     while (index < command.length) {
       const ch = command[index];
-      if (ch === "'" && quote !== '"') { quote = quote ? '' : "'"; text += ch; index++; continue; }
-      if (quote === "'") { text += ch; index++; continue; }
-      if (ch === '\\') {
-        if (index + 1 >= command.length) { valid = false; text += ch; index++; continue; }
-        text += command.slice(index, index + 2); index += 2; continue;
+      const literal = scanShellLiteral(command, index, quote);
+      if (literal) {
+        text += command.slice(index, literal.end);
+        quote = literal.quote;
+        valid &&= literal.valid;
+        index = literal.end;
+        continue;
       }
       if (!quote && end && ch === end) { if (needsCommand && !text.trim()) valid = false; flush(); index++; return; }
-      if (ch === '"') { quote = quote ? '' : '"'; text += ch; index++; continue; }
       const substitution = command.startsWith('$(', index) || (!quote && /[<>]/.test(ch) && command[index + 1] === '(');
       if (substitution || ch === '`') {
         const start = index;
@@ -175,9 +204,20 @@ function denyCommandSegments(command: string, depth = 0): string[] {
     const start = wrapper.exec(segment);
     if (!start) continue;
     const argumentsText = segment.slice(start.index + start[0].length);
-    for (const match of argumentsText.matchAll(/(["'])([\s\S]*?)\1/g)) {
-      candidates.push(...denyCommandSegments(match[2], depth + 1));
+    candidates.push(...denyCommandSegments(argumentsText, depth + 1));
+    let remaining = argumentsText;
+    const words: string[] = [];
+    while (remaining.trim()) {
+      remaining = remaining.trimStart();
+      const word = nextShellWord(remaining);
+      words.push(word.value);
+      if (word.value !== remaining.slice(0, word.end)) {
+        candidates.push(...denyCommandSegments(word.value, depth + 1));
+      }
+      remaining = remaining.slice(word.end);
     }
+    const unquoted = words.join(' ');
+    if (unquoted !== argumentsText) candidates.push(...denyCommandSegments(unquoted, depth + 1));
   }
   return candidates;
 }
@@ -185,7 +225,7 @@ function denyCommandSegments(command: string, depth = 0): string[] {
 export function requiresCommandConfirmation(command: string): boolean {
   // Literal quoting and escaped flag characters retain conservative review requirements.
   const literal = command.replace(/\\\n/g, '').replace(/['"]/g, '').replace(/\\([^\n])/g, '$1');
-  const forcedPush = /\bgit\s+(?:(?:-C|-c|--git-dir|--work-tree)\s+\S+\s+|--[\w-]+=[^\s]+\s+|--[\w-]+\s+|-[a-zA-Z]+\s+)*push\b[^;|&\n]*\s(?:--force(?:-with-lease)?(?:=\S*)?|-([a-z]*f[a-z]*)|\+\S+)(?:\s|$)/;
+  const forcedPush = /\bgit\s+(?:(?:-[Cc]\s*\S+|(?:--git-dir|--work-tree)\s+\S+)\s+|--[\w-]+=[^\s]+\s+|--[\w-]+\s+|-[a-zA-Z]+\s+)*push\b[^;|&\n]*\s(?:--force(?:-with-lease)?(?:=\S*)?|-([a-z]*f[a-z]*)|\+\S+)(?:\s|$)/;
   const recursiveDelete = /\brm\s+[^;&|\n]*/g;
   const deletion = [...literal.matchAll(recursiveDelete)].some(([text]) => {
     const flags = text.split(/\s+/).slice(1);

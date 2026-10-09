@@ -4,7 +4,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { matches } from '../../../src/ai/permissions/policy-engine.js';
+import { matches, requiresCommandConfirmation } from '../../../src/ai/permissions/policy-engine.js';
+import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { loadSettings, mergeRules } from '../../../src/ai/permissions/settings.js';
 
 describe('P0-3 CLI 「始终允许」规则按完整命令匹配（质量用例）', () => {
@@ -45,4 +46,20 @@ describe('P0-3 CLI 「始终允许」规则按完整命令匹配（质量用例�
     const { allowRules } = mergeRules(await loadSettings(repo));
     expect(allowRules).not.toContain('bash(*)');
   });
+});
+
+it.each([
+  'eval rm /ws/x',
+  'eval "rm /ws/x"',
+  'sh -c rm /ws/x',
+  'bash -c "echo \\"x\\"; rm /ws/x"',
+  "eval 'eval rm /ws/x'",
+])('literal wrapper payload retains deny checks: %j', command => {
+  expect(matches(['bash(rm *)'], 'bash', {command}, 'deny')).toBe(true);
+});
+
+it.each(['git -C/ws/repo push -f', 'git -ck=v push --force'])('attached global options retain forced push confirmation: %j', async command => {
+  expect(requiresCommandConfirmation(command)).toBe(true);
+  expect(matches(['bash(*)'], 'bash', {command})).toBe(false);
+  expect(await new PermissionManager({mode: 'auto', allowRules: ['bash(*)']}).check('bash', {command})).toBe('prompt');
 });

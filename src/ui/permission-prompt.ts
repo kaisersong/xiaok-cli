@@ -360,10 +360,15 @@ export async function showPermissionPrompt(
   });
 }
 
+/** Escape repository text without changing its stored identity. */
+export function escapeProjectRuleDisplay(rule: string): string {
+  return rule.replace(/[\x00-\x1f\x7f-\x9f]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 /** Use the permission input handoff before the REPL starts; Enter defaults to refusal. */
 export async function promptProjectRuleAdoption(rule: string): Promise<boolean> {
   if (!stdin.isTTY || !stdout.isTTY) return false;
-  stdout.write(`${rule} [y/N] `);
+  stdout.write(`${escapeProjectRuleDisplay(rule)} [y/N] `);
   return new Promise(resolve => {
     const finish = (adopt: boolean) => {
       stopPermissionInput(onData, onEnd);
