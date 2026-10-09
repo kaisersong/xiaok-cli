@@ -146,13 +146,19 @@ function updateLocalRules(update: (state: LocalRules) => void | Promise<void>): 
     await update(state);
     const file = localRulesPath();
     await mkdir(dirname(file), { recursive: true });
-    let invalidJson = false;
-    try { JSON.parse(await readFile(file, 'utf8')); }
+    let invalidShape = false;
+    try {
+      const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
+      const isPlainMap = (value: unknown): value is Record<string, unknown> =>
+        value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
+      invalidShape = !isPlainMap(parsed) || ['adoptions', 'localRules'].some(key =>
+        Object.hasOwn(parsed, key) && !isPlainMap(parsed[key]));
+    }
     catch (error) {
-      if (error instanceof SyntaxError) invalidJson = true;
+      if (error instanceof SyntaxError) invalidShape = true;
       else if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    if (invalidJson) await copyFile(file, `${file}.bak`);
+    if (invalidShape) await copyFile(file, `${file}.bak`);
     const temp = join(dirname(file), `.project-rule-adoptions-${process.pid}-${randomUUID()}.tmp`);
     try {
       await writeFile(temp, JSON.stringify(state, null, 2) + '\n', { mode: 0o600, flag: 'wx' });

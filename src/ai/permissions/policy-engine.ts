@@ -473,9 +473,13 @@ export function getCommandWriteTargets(command: string, depth = 0, budget: ScanB
         const api = /^[a-z]:|^\\\\|^\/\//i.test(base) || /^[a-z]:|^\\\\/i.test(target) ? win32 : posix;
         targets.push(unresolved ? '$unresolved' : !base || api.isAbsolute(target) ? target : api.join(base, target));
       };
+      let explicitPatchOutput = false;
       for (let i = 0; i < args.length; i++) {
         const word = args[i];
         if (word === '--') break;
+        if (subcommand === 'format-patch' && (word === '--stdout' || word.startsWith('-o')
+          || word === '--output' || word.startsWith('--output=')
+          || word === '--output-directory' || word.startsWith('--output-directory='))) explicitPatchOutput = true;
         if (word.startsWith('--output=')) add(word.slice(9));
         else if (word === '--output') add(args[++i]);
         else if (subcommand === 'archive' || subcommand === 'format-patch') {
@@ -489,6 +493,7 @@ export function getCommandWriteTargets(command: string, depth = 0, budget: ScanB
           else if (word.startsWith('--export-marks=')) add(word.slice(15));
         }
       }
+      if (subcommand === 'format-patch' && !explicitPatchOutput) add('.');
       if (subcommand === 'bundle' && args[0] === 'create') {
         let i = 1;
         while (i < args.length && args[i].startsWith('-')) {

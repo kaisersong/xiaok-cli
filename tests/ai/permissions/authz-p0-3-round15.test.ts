@@ -36,7 +36,7 @@ it('Git -C accumulates and global options locate the subcommand', async () => {
 it('workdir is the resolution base, workspace remains the boundary', async () => {
   for (const mode of ['default','auto'] as const) {
     const manager = new PermissionManager({mode,cwd:'/workspace/project',allowRules:['bash(git *)']});
-    for (const workdir of ['/outside', '../outside', 42, null]) expect(await manager.check('bash',{command:'git status > out',workdir})).toBe('prompt');
+    for (const workdir of ['/outside', '../outside', 42, {}, null]) expect(await manager.check('bash',{command:'git status > out',workdir})).toBe('prompt');
     for (const input of [{command:'git status > out'},{command:'git status > out',workdir:'sub'}]) expect(await manager.check('bash',input)).toBe(mode === 'auto' ? 'allow' : 'prompt');
     expect(await manager.check('bash',{command:'git status > /workspace/project/out',workdir:'/outside'})).toBe('prompt');
   }
@@ -105,6 +105,7 @@ it('adoption corruption preserves other projects and backs up invalid JSON atomi
     expect((await loadSettings(repo)).approvedProjectAllow).toContain('bash(git *)');
     expect(Object.hasOwn(JSON.parse(await readFile(file,'utf8')).localRules, 'constructor')).toBe(false);
     expect(JSON.parse(await readFile(file,'utf8')).localRules.other).toEqual(['bash(ls)']);
+    await expect(stat(`${file}.bak`)).rejects.toMatchObject({code:'ENOENT'});
     await writeFile(file,'{broken');
     await expect(addAllowRule('project','bash(ls)',repo)).resolves.toBeUndefined();
     expect(await readFile(`${file}.bak`,'utf8')).toBe('{broken');
@@ -126,4 +127,42 @@ it('Windows workdir and Git -C keep the workspace boundary', async () => {
 });
 it('npm test remains allowed under its matching rule', async () => {
   for (const mode of ['default','auto'] as const) expect(await new PermissionManager({mode,allowRules:['bash(npm *)']}).check('bash',{command:'npm test'})).toBe('allow');
+});
+
+// Default patch output shares the same -C/workdir boundary as explicit Git outputs.
+it('format-patch defaults to writing in the current Git directory', async () => {
+  expect(getCommandWriteTargets('git format-patch -1')).toEqual(['.']);
+  expect(getCommandWriteTargets('git -C sub format-patch -1')).toEqual(['sub']);
+  expect(getCommandWriteTargets("git -C '$X' format-patch -1")).toEqual(['$unresolved']);
+  expect(getCommandWriteTargets('git format-patch --stdout -1')).toEqual([]);
+  for (const mode of ['default', 'auto'] as const) {
+    const manager = new PermissionManager({mode, cwd:'/workspace/project', allowRules:['bash(git *)']});
+    expect(await manager.check('bash', {command:'git -C ../outside format-patch -1'})).toBe('prompt');
+    expect(await manager.check('bash', {command:'git format-patch -1', workdir:'/tmp/outside'})).toBe('prompt');
+    expect(await manager.check('bash', {command:'git format-patch -1'})).toBe(mode === 'auto' ? 'allow' : 'prompt');
+    expect(await manager.check('bash', {command:'git format-patch --stdout -1'})).toBe('allow');
+    for (const command of ["git -C '$X' archive -o a.zip HEAD", 'git -C ~/x archive -o a.zip HEAD']) {
+      expect(await manager.check('bash', {command})).toBe('prompt');
+    }
+  }
+});
+it.each(['null', '[]', '42', '{"adoptions":"oops","localRules":{}}', '{"adoptions":{},"localRules":[]}'])('backs up invalid local-rule shape %s before adoption', async original => {
+  const root = await mkdtemp(join(tmpdir(), 'round15-shape-'));
+  const previous = process.env.XIAOK_CONFIG_DIR;
+  process.env.XIAOK_CONFIG_DIR = join(root, 'config');
+  try {
+    const repo = join(root, 'repo');
+    await mkdir(join(repo, '.xiaok'), {recursive:true});
+    await mkdir(join(root, 'config'), {recursive:true});
+    await writeFile(join(repo, '.xiaok', 'settings.json'), JSON.stringify({permissions:{allow:['bash(git *)']}}));
+    const file = join(root, 'config', 'project-rule-adoptions.json');
+    await writeFile(file, original);
+    await adoptProjectRule(repo, 'bash(git *)');
+    expect(await readFile(`${file}.bak`, 'utf8')).toBe(original);
+    expect((await loadSettings(repo)).approvedProjectAllow).toContain('bash(git *)');
+    expect(Object.values(JSON.parse(await readFile(file, 'utf8')).adoptions)).toHaveLength(1);
+  } finally {
+    if (previous === undefined) delete process.env.XIAOK_CONFIG_DIR; else process.env.XIAOK_CONFIG_DIR = previous;
+    await rm(root, {recursive:true, force:true});
+  }
 });
