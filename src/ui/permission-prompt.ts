@@ -362,7 +362,10 @@ export async function showPermissionPrompt(
 
 /** Escape repository text without changing its stored identity. */
 export function escapeProjectRuleDisplay(rule: string): string {
-  return rule.replace(/[\x00-\x1f\x7f-\x9f]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  return rule.replace(/[\x00-\x1f\x7f-\x9f]|\p{Cf}/gu, char => {
+    const hex = char.codePointAt(0)!.toString(16).padStart(4, '0');
+    return /\p{Cf}/u.test(char) ? `\\u{${hex}}` : `\\u${hex}`;
+  });
 }
 
 /** Use the permission input handoff before the REPL starts; Enter defaults to refusal. */

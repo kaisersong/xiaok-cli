@@ -140,8 +140,14 @@ function nextShellWord(text: string): { value: string; end: number } {
 
 /** A conservative scanner, not a shell interpreter. Unsupported grammar requires confirmation. */
 export function parseCommandSegments(command: string): { segments: string[]; valid: boolean } {
+  const { segments, valid } = scanCommandSegments(command);
+  return { segments, valid };
+}
+
+function scanCommandSegments(command: string): { segments: string[]; valid: boolean; pipes: Set<number> } {
   command = command.replace(/\\\n/g, '');
   const segments: string[] = [];
+  const pipes = new Set<number>();
   let valid = true;
   let index = 0;
   function scan(end?: string, depth = 0): void {
@@ -177,6 +183,7 @@ export function parseCommandSegments(command: string): { segments: string[]; val
         if (!text.trim() && ch !== '\n') valid = false;
         needsCommand = ch === '|' || (ch === '&' && command[index + 1] === '&');
         flush();
+        if (ch === '|' && command[index + 1] !== '|') pipes.add(segments.length - 1);
         if ((command[index + 1] === ch && ch !== '\n') || (ch === '|' && command[index + 1] === '&')) index++;
         index++; continue;
       }
@@ -190,7 +197,7 @@ export function parseCommandSegments(command: string): { segments: string[]; val
   }
   scan();
   if (segments.some(segment => /^(?:if|then|else|fi|for|while|do|done|case|esac|function)\b/.test(segment))) valid = false;
-  return { segments, valid };
+  return { segments, valid, pipes };
 }
 
 /** Inspect literal wrapper payloads conservatively; no shell execution occurs here. */
@@ -222,17 +229,62 @@ function denyCommandSegments(command: string, depth = 0): string[] {
   return candidates;
 }
 
-export function requiresCommandConfirmation(command: string): boolean {
-  // Literal quoting and escaped flag characters retain conservative review requirements.
-  const literal = command.replace(/\\\n/g, '').replace(/['"]/g, '').replace(/\\([^\n])/g, '$1');
-  const forcedPush = /\bgit\s+(?:(?:-[Cc]\s*\S+|(?:--git-dir|--work-tree)\s+\S+)\s+|--[\w-]+=[^\s]+\s+|--[\w-]+\s+|-[a-zA-Z]+\s+)*push\b[^;|&\n]*\s(?:--force(?:-with-lease)?(?:=\S*)?|-([a-z]*f[a-z]*)|\+\S+)(?:\s|$)/;
-  const recursiveDelete = /\brm\s+[^;&|\n]*/g;
-  const deletion = [...literal.matchAll(recursiveDelete)].some(([text]) => {
-    const flags = text.split(/\s+/).slice(1);
+function shellWords(text: string): string[] {
+  const words: string[] = [];
+  let remaining = text.trimStart();
+  while (remaining) {
+    const word = nextShellWord(remaining);
+    words.push(word.value);
+    remaining = remaining.slice(word.end).trimStart();
+  }
+  return words;
+}
+
+function hasForcedPush(words: string[]): boolean {
+  for (let start = 0; start < words.length; start++) {
+    if (words[start] !== 'git') continue;
+    let index = start + 1;
+    while (index < words.length && words[index].startsWith('-')) {
+      const option = words[index++];
+      if (option === '--') break;
+      if (/^(?:-[Cc]|--(?:git-dir|work-tree|namespace|exec-path|config-env|super-prefix))$/.test(option)) index++;
+      // Attached short values and long =values are already contained in one word.
+    }
+    if (words[index] !== 'push') continue;
+    if (words.slice(index + 1).some(word => /^(?:--force(?:-with-lease)?(?:=.*)?|-[a-z]*f[a-z]*|\+.+)$/.test(word))) return true;
+  }
+  return false;
+}
+
+function hasRecursiveDelete(words: string[]): boolean {
+  return words.some((word, index) => {
+    if (word !== 'rm') return false;
+    const flags = words.slice(index + 1);
     return flags.some(flag => flag === '--recursive' || /^-[a-z]*r[a-z]*$/i.test(flag))
       && flags.some(flag => flag === '--force' || /^-[a-z]*f[a-z]*$/i.test(flag));
   });
-  // Two-step download-to-file then execution is outside this list; every segment still needs approval.
-  const downloadedShell = /\b(?:curl|wget)\b[^\n;]*\|&?\s*(?:(?:sudo|env|command|exec)\s+|[A-Za-z_][\w]*=\S+\s+)*(?:\S*\/)?(?:sh|bash|zsh|dash|ksh)\b/;
-  return forcedPush.test(literal) || deletion || downloadedShell.test(literal);
+}
+
+export function requiresCommandConfirmation(command: string): boolean {
+  const parsed = scanCommandSegments(command);
+  const segments = parsed.segments.map(shellWords);
+  for (const words of segments) {
+    if (hasForcedPush(words) || hasRecursiveDelete(words)) return true;
+    // Preserve conservative review of dangerous literal text inside arguments.
+    if (words.some(word => {
+      if (!/\s/.test(word)) return false;
+      const innerWords = shellWords(word);
+      return hasForcedPush(innerWords) || hasRecursiveDelete(innerWords);
+    })) return true;
+  }
+  // Two-step download-to-file then execution is outside this list.
+  // Segment scanning also handles quoted/escaped names and wrapper assignments.
+  return segments.some((words, index) => {
+    if (!words.some(word => word === 'curl' || word === 'wget')) return false;
+    const next = segments[index + 1];
+    if (!next || !parsed.pipes.has(index)) return false;
+    let shellIndex = 0;
+    while (shellIndex < next.length && (/^(?:sudo|env|command|exec)$/.test(next[shellIndex]) || /^[A-Za-z_][\w]*=/.test(next[shellIndex]))) shellIndex++;
+    return /^(?:.*\/)?(?:sh|bash|zsh|dash|ksh)$/.test(next[shellIndex] ?? '');
+  });
 }
