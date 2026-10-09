@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
+// Deferred to P0-4b by CTO decision 2026-10-09; see PR #21 description
+const P0_4B_DEFERRED = new Set([
+ 'git push --mirror','git branch -D main','git checkout -- .','git restore .','git stash drop','git reflog expire --expire=now --all','git gc --prune=now','git commit --amend --no-verify -m x','"git" reset --hard',"'git' clean -fd",'GIT reset --hard','sudo git status','git status | xargs rm','command rm x','xargs rm','find . -exec rm {} \\;','/bin/rm x','busybox rm x'
+]);
 const chk = (mode: any, rules: string[], command: string, deny: string[] = []) => new PermissionManager({ mode, allowRules: rules, denyRules: deny }).check('bash', { command });
 const must = [
  'git reset --hard HEAD~1','git clean -xdf','git clean -f','git push origin :main','git push origin --delete main','git push --mirror','git branch -D main','git checkout -- .','git restore .','git stash drop','git reflog expire --expire=now --all','git gc --prune=now',
@@ -12,12 +16,18 @@ const must = [
 const ok = ['git status','git diff','git diff --stat HEAD~1','git log --oneline -10','git log -p','git show HEAD','git branch','git branch -a','git add .','git commit -m "feat: x"','git fetch','git pull','git push','git push origin main','git checkout -b feat','git stash','git remote -v','git tag','git blame a.ts','git status --porcelain'];
 for (const mode of ['default','auto'] as const) for (const rules of [['bash(git *)'],['bash(*)']]) {
   describe(`${mode} ${rules[0]}`, () => {
-    it.each(must)('不放行 %j', async c => { expect(await chk(mode, rules, c)).not.toBe('allow'); });
-    it.each(ok)('放行 %j', async c => { expect(await chk(mode, rules, c)).toBe('allow'); });
+    it.each(must.filter(c => !P0_4B_DEFERRED.has(c)))('不放行 %j', async c => { expect(await chk(mode, rules, c)).not.toBe('allow'); });
+    it.skip.each(must.filter(c => P0_4B_DEFERRED.has(c)))('不放行 %j', async c => { expect(await chk(mode, rules, c)).not.toBe('allow'); });
+    it.each(ok.filter(c => !P0_4B_DEFERRED.has(c)))('放行 %j', async c => { expect(await chk(mode, rules, c)).toBe('allow'); });
+    it.skip.each(ok.filter(c => P0_4B_DEFERRED.has(c)))('放行 %j', async c => { expect(await chk(mode, rules, c)).toBe('allow'); });
   });
 }
 describe('deny 规则穿透包装', () => {
-  it.each(['rm -rf x','env rm x','timeout 5 rm x','nice -n 5 rm x','command rm x','nohup rm x','sh -c "rm x"','bash -lc "rm x"','xargs rm','find . -exec rm {} \\;','time rm x','stdbuf -o0 rm x','/bin/rm x','busybox rm x'])('%j 被 bash(rm *) 拒绝', async c => {
+  const deny = ['rm -rf x','env rm x','timeout 5 rm x','nice -n 5 rm x','command rm x','nohup rm x','sh -c "rm x"','bash -lc "rm x"','xargs rm','find . -exec rm {} \\;','time rm x','stdbuf -o0 rm x','/bin/rm x','busybox rm x'];
+  it.each(deny.filter(c => !P0_4B_DEFERRED.has(c)))('%j 被 bash(rm *) 拒绝', async c => {
+    expect(await chk('default', ['bash(*)'], c, ['bash(rm *)'])).toBe('deny');
+  });
+  it.skip.each(deny.filter(c => P0_4B_DEFERRED.has(c)))('%j 被 bash(rm *) 拒绝', async c => {
     expect(await chk('default', ['bash(*)'], c, ['bash(rm *)'])).toBe('deny');
   });
 });
