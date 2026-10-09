@@ -933,6 +933,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const persistedPermissionRules = mergeRules(persistedPermissionSettings);
 
   const permissionManager = new PermissionManager({
+    cwd,
     mode: autoMode ? 'auto' : 'default',
     allowRules: persistedPermissionRules.allowRules,
     denyRules: persistedPermissionRules.denyRules,

@@ -52,6 +52,11 @@ export function matches(rules: string[], toolName: string, input: Record<string,
   return matchesTarget(rules, toolName, input);
 }
 
+/** Whether an allow pattern participates, before conservative safety rejection. */
+export function hasMatchingCommandAllowRule(rules: string[], command: string): boolean {
+  return denyCommandSegments(command).some(segment => matchesTarget(rules, 'bash', { command: segment }));
+}
+
 function matchesTarget(rules: string[], toolName: string, input: Record<string, unknown>): boolean {
   return rules.some((rule) => {
     const parenMatch = rule.match(/^([a-z_]+)\((.*)\)$/i);
@@ -418,10 +423,24 @@ function hasRecursiveDelete(words: string[]): boolean {
 }
 
 /** Check the finite mandatory-review forms within a single parsed command. */
-function hasConfirmationForm(command: string): boolean {
+function hasConfirmationForm(command: string, conservative = true): boolean {
   const parsed = scanCommandSegments(command);
   const segments = parsed.segments.map(shellWords);
-  if (segments.some(words => hasForcedPush(words) || hasGitExecution(words) || hasRecursiveDelete(words))) return true;
+  if (segments.some(words => hasForcedPush(words) || (conservative && hasGitExecution(words)) || hasRecursiveDelete(words))) return true;
+  // Expansion-obfuscated mandatory forms remain recognizable from their literal
+  // operation/flags. Do not extend this to ordinary expanded arguments.
+  if (!conservative && parsed.segments.some((segment, index) => {
+    if (!segmentRequiresExpansionConfirmation(segment)) return false;
+    const words = segments[index];
+    const executable = nextShellWord(segment.trimStart());
+    const expandedExecutable = executable.hasExpansion || executable.hasWildcard;
+    const flags = words.filter(word => word.startsWith('-'));
+    const recursive = flags.some(flag => /^-[a-z]*r|^--recursive/.test(flag));
+    const force = flags.some(flag => /^-[a-z]*f|^--force/.test(flag));
+    return ((posix.basename(executable.value) === 'rm' || expandedExecutable) && recursive && force)
+      || ((posix.basename(executable.value) === 'git' || expandedExecutable) && words.includes('push')
+        && (force || words.some(word => /^\+.+|^:[^:]+|^--delete/.test(word))));
+  })) return true;
   // Enumerated curl/wget pipelines into the sh family only. Two-step download
   // to disk then execution and other downloaders are outside this list; each
   // command segment still goes through the ordinary permission rules.
@@ -435,17 +454,17 @@ function hasConfirmationForm(command: string): boolean {
   });
 }
 
-function payloadRequiresConfirmation(command: string, depth = 0): boolean {
-  if (depth >= 32) return true;
-  if (hasConfirmationForm(command)) return true;
+function payloadRequiresConfirmation(command: string, depth = 0, conservative = true): boolean {
+  if (depth >= 32) return conservative;
+  if (hasConfirmationForm(command, conservative)) return true;
   for (const segment of scanCommandSegments(command).segments) {
-    if (segmentRequiresExpansionConfirmation(segment)) return true;
+    if (conservative && segmentRequiresExpansionConfirmation(segment)) return true;
     const payload = prefixWrapperPayload(segment);
-    if (payload !== undefined && (!payload || classifyBashCommand(payload).level !== 'safe' || payloadRequiresConfirmation(payload, depth + 1))) return true;
+    if (payload !== undefined && ((conservative && (!payload || classifyBashCommand(payload).level !== 'safe')) || payloadRequiresConfirmation(payload, depth + 1, conservative))) return true;
     const words = shellWords(segment);
     // Reparse quoted literal arguments completely, preserving conservative review
     // even when dangerous text is only a message rather than an executable payload.
-    if (words.some(word => /\s/.test(word) && payloadRequiresConfirmation(word, depth + 1))) return true;
+    if (words.some(word => /\s/.test(word) && payloadRequiresConfirmation(word, depth + 1, conservative))) return true;
     for (let index = 0; index < words.length; index++) {
       const name = posix.basename(words[index]);
       const payloadIndex = name === 'eval' ? index + 1
@@ -453,7 +472,7 @@ function payloadRequiresConfirmation(command: string, depth = 0): boolean {
       // eval can concatenate arguments; inspecting the entire wrapper tail also
       // covers nested wrappers without losing their pipeline segmentation.
       if (payloadIndex >= 0 && payloadIndex < words.length
-        && payloadRequiresConfirmation(words.slice(payloadIndex).join(' '), depth + 1)) return true;
+        && payloadRequiresConfirmation(words.slice(payloadIndex).join(' '), depth + 1, conservative)) return true;
     }
   }
   return false;
@@ -467,4 +486,10 @@ export function requiresCommandConfirmation(command: string): boolean {
   return payloadRequiresConfirmation(command)
     // Conservative fallback: removing quotes may expose otherwise hidden forms.
     || hasConfirmationForm(command.replace(/['"]/g, ''));
+}
+
+/** Mandatory forms for AUTO without rule-based approval involvement. */
+export function requiresAlwaysCommandConfirmation(command: string): boolean {
+  return payloadRequiresConfirmation(command, 0, false)
+    || hasConfirmationForm(command.replace(/['"]/g, ''), false);
 }

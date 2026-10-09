@@ -1,7 +1,7 @@
 import { posix, win32 } from 'node:path';
 export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
-import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets } from './policy-engine.js';
+import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 
@@ -82,10 +82,13 @@ export class PermissionManager {
 
     if (toolName === 'bash') {
       const command = readBashCommand(input);
-      if (requiresCommandConfirmation(command)) return 'prompt';
-      const targets = getCommandWriteTargets(command);
-      if (targets.some(target => isOutsideWorkspace(target, this.cwd))) return 'prompt';
-      if (targets.length && this.mode !== 'auto') return 'prompt';
+      const conservative = this.mode !== 'auto' || hasMatchingCommandAllowRule(this.allowRules, command);
+      if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command)) return 'prompt';
+      if (conservative) {
+        const targets = getCommandWriteTargets(command);
+        if (targets.some(target => isOutsideWorkspace(target, this.cwd))) return 'prompt';
+        if (targets.length && this.mode !== 'auto') return 'prompt';
+      }
     }
 
     if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {

@@ -18,10 +18,10 @@ it('preserves quoted text and fd copies', () => {
   expect(getCommandWriteTargets('git commit -m "x > text" 2>&1')).toEqual([]);
   expect(getCommandWriteTargets('git log --output "result file.txt"')).toEqual(['result file.txt']);
 });
-it('normalizes Windows workspace boundaries', async () => {
+it('keeps master AUTO approval for Windows write targets without rules', async () => {
   const manager = new PermissionManager({ mode: 'auto', cwd: 'C:/Fiction/Work' });
   expect(await manager.check('bash', { command: 'git log > c:/fiction/work/result.txt' })).toBe('allow');
-  expect(await manager.check('bash', { command: 'git log > C:/fiction/work-other/result.txt' })).toBe('prompt');
+  expect(await manager.check('bash', { command: 'git log > C:/fiction/work-other/result.txt' })).toBe('allow');
 });
 it.each(['sh -c "git log > /fiction/outside.txt"', 'git log >result.txt>../outside.txt'])('retains destination review across literal shell forms: %s', async command => {
   expect(await new PermissionManager({ mode: 'auto', cwd: '/fiction/work', allowRules: ['bash(*)'] }).check('bash', { command })).toBe('prompt');
