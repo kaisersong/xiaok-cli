@@ -125,28 +125,38 @@ function scanShellLiteral(text: string, index: number, quote: string): { end: nu
   return undefined;
 }
 
-function nextShellWord(text: string): { value: string; end: number; hasExpansion: boolean } {
+function nextShellWord(text: string): { value: string; end: number; hasExpansion: boolean; hasWildcard: boolean } {
   let index = 0;
   let quote = '';
   let value = '';
   let hasExpansion = false;
+  let hasWildcard = false;
   while (index < text.length) {
     if (!quote && /\s/.test(text[index])) break;
     const literal = scanShellLiteral(text, index, quote);
     if (literal) { value += literal.value; quote = literal.quote; index = literal.end; }
-    else { hasExpansion ||= text[index] === '$'; value += text[index++]; }
+    else {
+      hasExpansion ||= /[$`]/.test(text[index]);
+      hasWildcard ||= /[*?\[]/.test(text[index]);
+      value += text[index++];
+    }
   }
-  return { value, end: index, hasExpansion };
+  return { value, end: index, hasExpansion, hasWildcard };
 }
 
-function commandNameHasExpansion(segment: string): boolean {
+function segmentRequiresExpansionConfirmation(segment: string): boolean {
   let remaining = segment.trimStart();
+  let commandWord: ReturnType<typeof nextShellWord> | undefined;
+  let hasExpansion = false;
   while (remaining) {
     const word = nextShellWord(remaining);
-    if (!/^[A-Za-z_][\w]*=/.test(word.value)) return word.hasExpansion;
+    hasExpansion ||= word.hasExpansion;
+    if (!commandWord && !/^[A-Za-z_][\w]*=/.test(word.value)) commandWord = word;
     remaining = remaining.slice(word.end).trimStart();
   }
-  return false;
+  if (!commandWord) return false;
+  if (commandWord.hasExpansion || commandWord.hasWildcard) return true;
+  return hasExpansion && /^(?:git|rm|curl|wget|sh|bash|zsh|dash|ksh|eval|env|sudo|command|exec|xargs)$/.test(posix.basename(commandWord.value));
 }
 
 function shellPayloadIndex(words: string[], shellIndex: number): number {
@@ -308,7 +318,7 @@ function payloadRequiresConfirmation(command: string, depth = 0): boolean {
   if (depth >= 32) return true;
   if (hasConfirmationForm(command)) return true;
   for (const segment of scanCommandSegments(command).segments) {
-    if (commandNameHasExpansion(segment)) return true;
+    if (segmentRequiresExpansionConfirmation(segment)) return true;
     const words = shellWords(segment);
     // Reparse quoted literal arguments completely, preserving conservative review
     // even when dangerous text is only a message rather than an executable payload.
@@ -326,6 +336,10 @@ function payloadRequiresConfirmation(command: string, depth = 0): boolean {
   return false;
 }
 
+/** Conservative form recognition, not an enumeration of shell semantics.
+ * Expansion checks apply to top-level and wrapper-payload segments alike;
+ * the allow boundary remains the requirement to match every parsed segment.
+ */
 export function requiresCommandConfirmation(command: string): boolean {
   return payloadRequiresConfirmation(command)
     // Conservative fallback: removing quotes may expose otherwise hidden forms.

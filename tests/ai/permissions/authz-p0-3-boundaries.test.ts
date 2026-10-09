@@ -8,9 +8,9 @@ describe('command rule boundaries', () => {
     expect(matches(['bash(git *)'],'bash',{command})).toBe(false);
     expect(matches(['bash(git *)','bash(ls)'],'bash',{command})).toBe(true);
   });
-  it.each(['git status $(ls)', 'git status `ls`', 'git status <(ls)', 'git status >(ls)', 'git status "$(ls)"', 'git status "`ls`"', 'git status $(git diff $(ls))'])('nested segments %s', async command => {
+  it.each(['git status $(ls)', 'git status `ls`', 'git status <(ls)', 'git status >(ls)', 'git status "$(ls)"', 'git status "`ls`"', 'git status $(git diff $(ls))'])('nested segments retain review and deny %s', async command => {
     expect(matches(['bash(git *)'],'bash',{command})).toBe(false);
-    expect(matches(['bash(git *)','bash(ls)'],'bash',{command})).toBe(true);
+    expect(matches(['bash(git *)','bash(ls)'],'bash',{command})).toBe(command.includes('<(') || command.includes('>('));
     expect((await engine(['bash(ls)']).evaluate('bash',{command})).action).toBe('deny');
   });
   it.each(['git status "', 'git status (', 'git status \\', 'git status $(ls', 'git status &&', 'git status ||'])('incomplete syntax %s', command => expect(matches(['bash(*)'],'bash',{command})).toBe(false));
