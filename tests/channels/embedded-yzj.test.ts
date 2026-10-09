@@ -108,56 +108,60 @@ describe('EmbeddedYZJChannel', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('resolves approve command', async () => {
+  it('ignores /approve for approvals this channel did not issue', async () => {
     const approval = approvalStore.create({
       sessionId: 'sess_test',
       turnId: 'turn_1',
       summary: 'run bash',
     });
     const { ch } = makeChannel_();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await ch.handleInboundForTest({
+        robotId: 'robot_1',
+        content: `/approve ${approval.approvalId}`,
+        operatorOpenid: 'user_1',
+        msgId: 'msg_approve',
+        operatorName: 'Alice',
+        robotName: 'Bot',
+        groupType: 0,
+        time: Date.now(),
+        type: 1,
+      });
+    } finally {
+      stderr.mockRestore();
+    }
 
-    const decisionPromise = approvalStore.waitForDecision(approval.approvalId);
-
-    await ch.handleInboundForTest({
-      robotId: 'robot_1',
-      content: `/approve ${approval.approvalId}`,
-      operatorOpenid: 'user_1',
-      msgId: 'msg_2',
-      operatorName: 'Alice',
-      robotName: 'Bot',
-      groupType: 0,
-      time: Date.now(),
-      type: 1,
-    });
-
-    const decision = await decisionPromise;
-    expect(decision).toBe('approve');
+    expect(approvalStore.get(approval.approvalId)).toBeDefined();
+    approvalStore.expire(approval.approvalId);
   });
 
-  it('resolves deny command', async () => {
+  it('ignores /deny for approvals this channel did not issue', async () => {
     const approval = approvalStore.create({
       sessionId: 'sess_test',
       turnId: 'turn_1',
       summary: 'run bash',
     });
     const { ch } = makeChannel_();
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await ch.handleInboundForTest({
+        robotId: 'robot_1',
+        content: `/deny ${approval.approvalId}`,
+        operatorOpenid: 'user_1',
+        msgId: 'msg_deny',
+        operatorName: 'Alice',
+        robotName: 'Bot',
+        groupType: 0,
+        time: Date.now(),
+        type: 1,
+      });
+    } finally {
+      stderr.mockRestore();
+    }
 
-    const decisionPromise = approvalStore.waitForDecision(approval.approvalId);
-
-    await ch.handleInboundForTest({
-      robotId: 'robot_1',
-      content: `/deny ${approval.approvalId}`,
-      operatorOpenid: 'user_1',
-      msgId: 'msg_3',
-      operatorName: 'Alice',
-      robotName: 'Bot',
-      groupType: 0,
-      time: Date.now(),
-      type: 1,
-    });
-
-    const decision = await decisionPromise;
-    expect(decision).toBe('deny');
+    expect(approvalStore.get(approval.approvalId)).toBeDefined();
+    approvalStore.expire(approval.approvalId);
   });
 
   it('pushes approval request to channel when pushApprovalRequestForTest is called', async () => {
@@ -293,6 +297,44 @@ describe('EmbeddedYZJChannel', () => {
         stderr.mockRestore();
       }
       await done();
+    });
+
+    it('ignores /deny from a different user and unknown approval ids without crashing', async () => {
+      const { ch, done } = await channelTurn();
+      const decision = ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' });
+      await flush();
+      const [pending] = approvalStore.listPending();
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        await ch.handleInboundForTest(inbound(`/deny ${pending!.approvalId}`, 'msg_other_deny', 'user_2'));
+        await ch.handleInboundForTest(inbound('/approve approval_does_not_exist', 'msg_garbage'));
+      } finally {
+        stderr.mockRestore();
+      }
+      expect(approvalStore.get(pending!.approvalId)).toBeDefined();
+      await ch.handleInboundForTest(inbound(`/approve ${pending!.approvalId}`, 'msg_owner'));
+      await expect(decision).resolves.toBe(true);
+      await done();
+    });
+
+    it('does not route to the channel while two channel turns overlap', async () => {
+      const a = gatedFacade();
+      const { ch } = makeChannel_('robot_1', a.facade);
+      const t1 = ch.handleInboundForTest(inbound('first', 'msg_a', 'user_1'));
+      const t2 = ch.handleInboundForTest(inbound('second', 'msg_b', 'user_2'));
+      await flush();
+      sent.length = 0;
+      await expect(ch.makeOnPrompt(async () => false)('bash', { command: 'ls' })).resolves.toBe(false);
+      expect(approvalStore.listPending()).toHaveLength(0);
+      expect(sent).toHaveLength(0);
+      a.finish();
+      await Promise.all([t1, t2]);
+    });
+
+    it('denies when the terminal prompt throws synchronously', async () => {
+      const { ch } = makeChannel_();
+      const throwsSync = (() => { throw new Error('boom'); }) as unknown as (n: string, i: Record<string, unknown>) => Promise<boolean>;
+      await expect(ch.makeOnPrompt(throwsSync)('bash', { command: 'ls' })).resolves.toBe(false);
     });
 
     it('denies on explicit /deny from the channel', async () => {

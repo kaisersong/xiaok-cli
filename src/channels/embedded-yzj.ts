@@ -31,8 +31,11 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
   private readonly options: EmbeddedYZJChannelOptions;
   private wsClient: YZJWebSocketClient | null = null;
   private httpServer: Server | null = null;
-  /** 正在执行的、由 channel 消息发起的 turn 的发起人；只有这类 turn 的确认才推送到 channel。 */
-  private activeTurnTarget: ChannelReplyTarget | null = null;
+  /**
+   * 正在执行的、由 channel 消息发起的 turn 的发起人。只有恰好一个 channel turn 在跑时，
+   * 确认才推送给它的发起人；多个并发时无法归属，channel 侧不参与，交给终端决定。
+   */
+  private readonly activeTurnTargets = new Set<ChannelReplyTarget>();
   /** 本 channel 发出的确认请求 → 允许回复它的用户 openid。 */
   private readonly approvalOwners = new Map<string, string | undefined>();
 
@@ -97,7 +100,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
 
     if (command.kind === 'approve' || command.kind === 'deny') {
       if (!this.isAllowedApprover(command.approvalId, msg.operatorOpenid)) {
-        process.stderr.write(`[yzjchannel] ignored ${command.kind} for ${command.approvalId} from a different user\n`);
+        process.stderr.write(`[yzjchannel] ignored ${command.kind} for ${command.approvalId}: unknown approval or not the requester\n`);
         return;
       }
       approvalStore.resolve(command.approvalId, command.kind);
@@ -122,7 +125,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
       }
     };
 
-    this.activeTurnTarget = replyTarget;
+    this.activeTurnTargets.add(replyTarget);
     try {
       await runtimeFacade.runTurn(
         { sessionId, cwd, source: 'yzj', input: msg.content },
@@ -132,9 +135,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
       process.stderr.write(`[yzjchannel] runTurn error: ${String(err)}\n`);
       return;
     } finally {
-      if (this.activeTurnTarget === replyTarget) {
-        this.activeTurnTarget = null;
-      }
+      this.activeTurnTargets.delete(replyTarget);
     }
 
     const reply = textParts.join('');
@@ -189,7 +190,7 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
       const channelRequest = this.requestChannelApproval(toolName, input);
       try {
         return await new Promise<boolean>((resolve) => {
-          tuiOnPrompt(toolName, input).then(
+          Promise.resolve().then(() => tuiOnPrompt(toolName, input)).then(
             (decision) => resolve(decision === true),
             () => resolve(false),
           );
@@ -214,8 +215,10 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     toolName: string,
     input: Record<string, unknown>,
   ): { decision: Promise<boolean | undefined>; cancel: () => void } {
-    const replyTarget = this.activeTurnTarget;
-    if (!replyTarget) {
+    const replyTarget = this.activeTurnTargets.size === 1
+      ? [...this.activeTurnTargets][0]!
+      : null;
+    if (!replyTarget || !replyTarget.userId) {
       return { decision: Promise.resolve(undefined), cancel: () => {} };
     }
 
@@ -255,11 +258,10 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     return { decision, cancel };
   }
 
-  /** 本 channel 发出的确认只接受发起人本人的 /approve、/deny。 */
+  /** 只接受本 channel 发出的、且由发起人本人回复的 /approve、/deny；其余一律忽略。 */
   private isAllowedApprover(approvalId: string, operatorOpenid: string): boolean {
-    if (!this.approvalOwners.has(approvalId)) return true;
     const owner = this.approvalOwners.get(approvalId);
-    return owner === undefined || owner === operatorOpenid;
+    return owner !== undefined && owner === operatorOpenid;
   }
 
   // 测试用公开方法
