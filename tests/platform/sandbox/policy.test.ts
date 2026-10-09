@@ -119,17 +119,25 @@ describe('sandbox policy', () => {
       expect(p.checkPath('/opt/docs/readme.md').allowed).toBe(false);
     });
 
-    it('does not crash on symlink loops and keeps them inside only if they really are', () => {
+    it('denies symlink loops instead of throwing', () => {
       const ws = mkdtempSync(join(tmpdir(), 'qa-ws-'));
       symlinkSync(join(ws, 'loop-b'), join(ws, 'loop-a'));
       symlinkSync(join(ws, 'loop-a'), join(ws, 'loop-b'));
       const p = createSandboxPolicy({ pathAllowlist: [ws] });
       expect(() => p.checkPath(join(ws, 'loop-a', 'x'))).not.toThrow();
-      expect(p.checkPath('/elsewhere/loop').allowed).toBe(false);
+      expect(p.checkPath(join(ws, 'loop-a', 'x')).allowed).toBe(false);
     });
 
-    it('returns a decision instead of throwing for paths with NUL bytes', () => {
-      expect(createSandboxPolicy({ pathAllowlist: ['/ws'] }).checkPath('/ws/a\0b').allowed).toBeTypeOf('boolean');
+    it('denies paths containing NUL bytes', () => {
+      expect(createSandboxPolicy({ pathAllowlist: ['/ws'] }).checkPath('/ws/a\0b').allowed).toBe(false);
+    });
+
+    it('applies the denylist through in-workspace symlinks', () => {
+      const ws = mkdtempSync(join(tmpdir(), 'qa-ws-'));
+      mkdirSync(join(ws, 'secret'));
+      symlinkSync(join(ws, 'secret'), join(ws, 'alias'));
+      const p = createSandboxPolicy({ pathAllowlist: [ws], pathDenylist: [join(ws, 'secret')] });
+      expect(p.checkPath(join(ws, 'alias', 'x')).allowed).toBe(false);
     });
 
     it('still allows in-workspace symlinks that stay inside, new files, and a symlinked workspace root', () => {

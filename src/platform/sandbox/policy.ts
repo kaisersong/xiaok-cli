@@ -89,7 +89,7 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
         }
         return { allowed: true };
       } catch {
-        // 无法规范化的路径一律拒绝（fail-closed）
+        // 无法规范化的路径（含 NUL、符号链接环等）一律拒绝（fail-closed）
         return { allowed: false, reason: 'path could not be normalized' };
       }
     },

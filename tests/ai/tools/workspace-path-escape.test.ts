@@ -7,6 +7,7 @@ import { createEditTool } from '../../../src/ai/tools/edit.js';
 import { createReadTool } from '../../../src/ai/tools/read.js';
 import { createRenderUiTool } from '../../../src/ai/tools/render-ui.js';
 import { createSandboxPolicy } from '../../../src/platform/sandbox/policy.js';
+import { buildToolList } from '../../../src/ai/tools/index.js';
 import type { WorkspaceToolOptions } from '../../../src/ai/tools/read.js';
 
 // 沙箱开启时 registry-factory 给文件工具传 allowOutsideCwd: true，并用沙箱策略作 outsideCwdGuard。
@@ -42,7 +43,7 @@ describe('workspace tools in sandbox mode reject path escapes (P0-4)', () => {
   it('write: refuses parent traversal out of the workspace', async () => {
     const { ws, out, options } = setup();
     const name = 'escaped.txt';
-    const target = join(ws, 'sub', '..', '..', basename(out), name);
+    const target = `${ws}/sub/../../${basename(out)}/${name}`;
     await expect(createWriteTool(options).execute({ file_path: target, content: 'x' })).rejects.toThrow(/denied by sandbox/i);
     expect(existsSync(join(out, name))).toBe(false);
   });
@@ -70,12 +71,29 @@ describe('workspace tools in sandbox mode reject path escapes (P0-4)', () => {
 
   it('edit/read/render_ui: refuse parent traversal out of the workspace', async () => {
     const { ws, out, options } = setup();
-    const viaParent = (file: string) => join(ws, 'sub', '..', '..', basename(out), file);
+    const viaParent = (file: string) => `${ws}/sub/../../${basename(out)}/${file}`;
     await expect(createEditTool(options).execute({ file_path: viaParent('secret.txt'), old_string: 'outside', new_string: 'changed' })).rejects.toThrow(/denied by sandbox/i);
     await expect(createReadTool(options).execute({ file_path: viaParent('secret.txt') })).rejects.toThrow(/denied by sandbox/i);
     await expect(createRenderUiTool(options).execute({ title: 'T', sections: [{ kind: 'divider' }], output_path: viaParent('ui.a2ui.json') })).rejects.toThrow(/denied by sandbox/i);
     expect(readFileSync(join(out, 'secret.txt'), 'utf-8')).toBe('outside-content');
     expect(existsSync(join(out, 'ui.a2ui.json'))).toBe(false);
+  });
+
+  it('buildToolList passes the guard through to every file tool', async () => {
+    const { ws, out, options } = setup();
+    const tools = new Map(buildToolList(undefined, options).map((t) => [t.definition.name, t]));
+    await expect(tools.get('write')!.execute({ file_path: join(ws, 'link', 'w.txt'), content: 'x' })).rejects.toThrow(/denied by sandbox/i);
+    await expect(tools.get('edit')!.execute({ file_path: join(ws, 'link', 'secret.txt'), old_string: 'outside', new_string: 'y' })).rejects.toThrow(/denied by sandbox/i);
+    await expect(tools.get('read')!.execute({ file_path: join(ws, 'link', 'secret.txt') })).rejects.toThrow(/denied by sandbox/i);
+    await expect(tools.get('render_ui')!.execute({ title: 'T', sections: [{ kind: 'divider' }], output_path: join(ws, 'link', 'u.a2ui.json') })).rejects.toThrow(/denied by sandbox/i);
+    expect(existsSync(join(out, 'w.txt'))).toBe(false);
+  });
+
+  it('render_ui respects the sandbox denylist inside the workspace', async () => {
+    const { ws, options } = setup();
+    const policy = createSandboxPolicy({ pathAllowlist: [ws], pathDenylist: [join(ws, '.git')] });
+    const tool = createRenderUiTool({ ...options, outsideCwdGuard: (p) => policy.checkPath(p) });
+    await expect(tool.execute({ title: 'T', sections: [{ kind: 'divider' }], output_path: join(ws, '.git', 'x.a2ui.json') })).rejects.toThrow(/denied by sandbox/i);
   });
 
   it('legitimate in-workspace operations still work for all four tools', async () => {

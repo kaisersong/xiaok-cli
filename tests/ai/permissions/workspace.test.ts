@@ -60,12 +60,25 @@ describe('workspace path guard', () => {
       expect(assertWorkspacePath(join(out, 'secret.txt'), ws, 'read', true, allow)).toBe(join(out, 'secret.txt'));
     });
 
-    it('keeps legitimate in-workspace paths working without consulting the guard', () => {
+    it('keeps legitimate in-workspace paths working (with and without a guard)', () => {
       const { ws } = setup();
-      const guard = () => { throw new Error('guard should not be called'); };
-      expect(assertWorkspacePath(join(ws, 'src', 'a.ts'), ws, 'write', true, guard)).toBe(join(ws, 'src', 'a.ts'));
-      expect(assertWorkspacePath(join(ws, 'src', '..', 'b.ts'), ws, 'read')).toBe(join(ws, 'b.ts'));
+      const insideOnly = (p: string) => ({ allowed: p === ws || p.startsWith(`${ws}/`) });
+      expect(assertWorkspacePath(join(ws, 'src', 'a.ts'), ws, 'write', true, insideOnly)).toBe(join(ws, 'src', 'a.ts'));
+      expect(assertWorkspacePath(`${ws}/src/../b.ts`, ws, 'read')).toBe(join(ws, 'b.ts'));
       expect(assertWorkspacePath(join(ws, 'new', 'deep', 'c.ts'), ws, 'write')).toBe(join(ws, 'new', 'deep', 'c.ts'));
+    });
+
+    it('in sandbox mode the guard also decides for in-workspace paths (denylist applies)', () => {
+      const { ws } = setup();
+      const denyEnv = (p: string) => ({ allowed: !p.endsWith('/.env'), reason: 'path is explicitly denied' });
+      expect(() => assertWorkspacePath(join(ws, '.env'), ws, 'write', true, denyEnv)).toThrow(/denied by sandbox/i);
+    });
+
+    it('fails closed on symlink loops', () => {
+      const { ws } = setup();
+      symlinkSync(join(ws, 'loop-b'), join(ws, 'loop-a'));
+      symlinkSync(join(ws, 'loop-a'), join(ws, 'loop-b'));
+      expect(() => assertWorkspacePath(join(ws, 'loop-a', 'x'), ws, 'write')).toThrow();
     });
   });
 });
