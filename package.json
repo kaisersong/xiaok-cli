@@ -86,7 +86,8 @@
     "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs",
     "pack:cli": "node scripts/pack-cli.mjs",
     "verify:cli-install": "node scripts/verify-cli-install.mjs",
-    "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs"
+    "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs",
+    "test:desktop-service-contract": "node --test tests/package/desktop-service-contract.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
