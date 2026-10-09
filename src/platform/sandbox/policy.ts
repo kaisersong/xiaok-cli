@@ -80,13 +80,18 @@ export function createSandboxPolicy(options: SandboxPolicyOptions) {
 
   return {
     checkPath(path: string): SandboxDecision {
-      if (matchesPrefix(denylist, path)) {
-        return { allowed: false, reason: 'path is explicitly denied' };
+      try {
+        if (matchesPrefix(denylist, path)) {
+          return { allowed: false, reason: 'path is explicitly denied' };
+        }
+        if (allowlist.length > 0 && !matchesPrefix(allowlist, path)) {
+          return { allowed: false, reason: 'path is outside allowlist' };
+        }
+        return { allowed: true };
+      } catch {
+        // 无法规范化的路径一律拒绝（fail-closed）
+        return { allowed: false, reason: 'path could not be normalized' };
       }
-      if (allowlist.length > 0 && !matchesPrefix(allowlist, path)) {
-        return { allowed: false, reason: 'path is outside allowlist' };
-      }
-      return { allowed: true };
     },
 
     filterEnv(env: Record<string, string>): Record<string, string> {

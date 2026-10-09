@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createWriteTool } from '../../../src/ai/tools/write.js';
 import { createEditTool } from '../../../src/ai/tools/edit.js';
 import { createReadTool } from '../../../src/ai/tools/read.js';
@@ -42,7 +42,7 @@ describe('workspace tools in sandbox mode reject path escapes (P0-4)', () => {
   it('write: refuses parent traversal out of the workspace', async () => {
     const { ws, out, options } = setup();
     const name = 'escaped.txt';
-    const target = join(ws, 'sub', '..', '..', out.split('/').pop()!, name);
+    const target = join(ws, 'sub', '..', '..', basename(out), name);
     await expect(createWriteTool(options).execute({ file_path: target, content: 'x' })).rejects.toThrow(/denied by sandbox/i);
     expect(existsSync(join(out, name))).toBe(false);
   });
@@ -65,6 +65,16 @@ describe('workspace tools in sandbox mode reject path escapes (P0-4)', () => {
       sections: [{ kind: 'divider' }],
       output_path: join(ws, 'link', 'ui.a2ui.json'),
     })).rejects.toThrow(/denied by sandbox/i);
+    expect(existsSync(join(out, 'ui.a2ui.json'))).toBe(false);
+  });
+
+  it('edit/read/render_ui: refuse parent traversal out of the workspace', async () => {
+    const { ws, out, options } = setup();
+    const viaParent = (file: string) => join(ws, 'sub', '..', '..', basename(out), file);
+    await expect(createEditTool(options).execute({ file_path: viaParent('secret.txt'), old_string: 'outside', new_string: 'changed' })).rejects.toThrow(/denied by sandbox/i);
+    await expect(createReadTool(options).execute({ file_path: viaParent('secret.txt') })).rejects.toThrow(/denied by sandbox/i);
+    await expect(createRenderUiTool(options).execute({ title: 'T', sections: [{ kind: 'divider' }], output_path: viaParent('ui.a2ui.json') })).rejects.toThrow(/denied by sandbox/i);
+    expect(readFileSync(join(out, 'secret.txt'), 'utf-8')).toBe('outside-content');
     expect(existsSync(join(out, 'ui.a2ui.json'))).toBe(false);
   });
 

@@ -104,6 +104,34 @@ describe('sandbox policy', () => {
       expect(createSandboxPolicy({ pathAllowlist: [ws] }).checkPath(join(ws, 'dangling.txt')).allowed).toBe(false);
     });
 
+    it('normalizes Windows-style paths lexically and rejects traversal out of them', () => {
+      const p = createSandboxPolicy({ pathAllowlist: ['C:\\ws'] });
+      expect(p.checkPath('C:\\ws\\src\\a.ts').allowed).toBe(true);
+      expect(p.checkPath('C:/ws/src/a.ts').allowed).toBe(true);
+      expect(p.checkPath('C:\\ws\\..\\evil\\x').allowed).toBe(false);
+      expect(p.checkPath('C:\\ws-other\\x').allowed).toBe(false);
+    });
+
+    it('normalizes runtime-expanded entries too', () => {
+      const p = createSandboxPolicy({ pathAllowlist: ['/repo'] });
+      p.expandAllowedPaths(['/opt/docs/../shared']);
+      expect(p.checkPath('/opt/shared/readme.md').allowed).toBe(true);
+      expect(p.checkPath('/opt/docs/readme.md').allowed).toBe(false);
+    });
+
+    it('does not crash on symlink loops and keeps them inside only if they really are', () => {
+      const ws = mkdtempSync(join(tmpdir(), 'qa-ws-'));
+      symlinkSync(join(ws, 'loop-b'), join(ws, 'loop-a'));
+      symlinkSync(join(ws, 'loop-a'), join(ws, 'loop-b'));
+      const p = createSandboxPolicy({ pathAllowlist: [ws] });
+      expect(() => p.checkPath(join(ws, 'loop-a', 'x'))).not.toThrow();
+      expect(p.checkPath('/elsewhere/loop').allowed).toBe(false);
+    });
+
+    it('returns a decision instead of throwing for paths with NUL bytes', () => {
+      expect(createSandboxPolicy({ pathAllowlist: ['/ws'] }).checkPath('/ws/a\0b').allowed).toBeTypeOf('boolean');
+    });
+
     it('still allows in-workspace symlinks that stay inside, new files, and a symlinked workspace root', () => {
       const ws = mkdtempSync(join(tmpdir(), 'qa-ws-'));
       mkdirSync(join(ws, 'real'));
