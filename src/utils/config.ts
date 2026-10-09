@@ -14,20 +14,35 @@ export function getConfigPath(): string {
   return join(getConfigDir(), 'config.json');
 }
 
-/** config.json 里有模型 API Key，只允许当前用户读写。 */
+/** config.json 里有模型 API Key，只允许当前用户读写。只处理文件本身，不动整个配置目录。 */
 const CONFIG_FILE_MODE = 0o600;
-const CONFIG_DIR_MODE = 0o700;
 
-/**
- * 把文件或目录收紧到指定权限。Windows 不使用 POSIX 权限位，直接跳过；
- * 收紧失败（只读文件系统、文件属于别人等）不应阻断读写配置。
- */
-function restrictMode(path: string, mode: number): void {
+export class ConfigPermissionError extends Error {
+  constructor(path: string, cause?: unknown) {
+    super(`无法把 ${path} 的权限收紧为仅本人可读写，为避免 API Key 被其他用户读到，已停止写入。请检查文件所有者和权限（Mac/Linux 可运行 chmod 600 ${path}）。`);
+    this.name = 'ConfigPermissionError';
+    this.cause = cause;
+  }
+}
+
+/** 读取时尽力收紧老版本留下的 644 文件，失败不阻断读取。Windows 不使用 POSIX 权限位。 */
+function tightenBestEffort(path: string): void {
   if (process.platform === 'win32') return;
   try {
-    if ((statSync(path).mode & 0o777) !== mode) chmodSync(path, mode);
+    if (existsSync(path) && (statSync(path).mode & 0o777) !== CONFIG_FILE_MODE) chmodSync(path, CONFIG_FILE_MODE);
   } catch {
-    // best effort
+    // 读取路径上不报错；真正写入 Key 前会严格检查
+  }
+}
+
+/** 写入 Key 前必须把文件收紧到 600；做不到就抛错，绝不把 Key 写进别人可读的文件。 */
+function tightenOrThrow(path: string): void {
+  if (process.platform === 'win32') return;
+  try {
+    if ((statSync(path).mode & 0o777) !== CONFIG_FILE_MODE) chmodSync(path, CONFIG_FILE_MODE);
+    if ((statSync(path).mode & 0o777) !== CONFIG_FILE_MODE) throw new Error('mode unchanged after chmod');
+  } catch (error) {
+    throw new ConfigPermissionError(path, error);
   }
 }
 
@@ -36,7 +51,7 @@ function backupAndRemove(path: string): void {
   const bak = path + '.bak';
   if (existsSync(bak)) rmSync(bak, { force: true });
   renameSync(path, bak);
-  restrictMode(bak, CONFIG_FILE_MODE);
+  tightenBestEffort(bak);
 }
 
 /** 深拷贝 DEFAULT_CONFIG，避免浅拷贝导致 models 引用共享 */
@@ -46,10 +61,10 @@ function cloneDefaultConfig(): Config {
 
 export async function loadConfig(): Promise<Config> {
   const path = getConfigPath();
+  // 老版本写出的是 644：不管 config.json 是否存在，都顺手收紧它和 .bak，老用户升级后自动修复。
+  tightenBestEffort(path);
+  tightenBestEffort(path + '.bak');
   if (!existsSync(path)) return cloneDefaultConfig();
-  // 老版本写出的是 644 / 755，读取时顺手收紧，老用户升级后自动修复。
-  restrictMode(getConfigDir(), CONFIG_DIR_MODE);
-  restrictMode(path, CONFIG_FILE_MODE);
 
   let raw: string;
   try {
@@ -81,13 +96,11 @@ export async function loadConfig(): Promise<Config> {
 }
 
 export async function saveConfig(config: Config): Promise<void> {
-  const dir = getConfigDir();
-  mkdirSync(dir, { recursive: true, mode: CONFIG_DIR_MODE });
-  restrictMode(dir, CONFIG_DIR_MODE);
+  mkdirSync(getConfigDir(), { recursive: true });
   const path = getConfigPath();
-  // 已有的老文件可能是 644：先收紧再写入，避免新 Key 在写入和 chmod 之间短暂可读。
-  if (existsSync(path)) restrictMode(path, CONFIG_FILE_MODE);
-  // mode 只在新建文件时生效，写完再确认一次。
+  // 老文件可能是 644：先收紧再写入，收紧失败就中止，避免新 Key 写进别人可读的文件。
+  if (existsSync(path)) tightenOrThrow(path);
+  // mode 只在新建文件时生效；写完再确认一次。
   writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
-  restrictMode(path, CONFIG_FILE_MODE);
+  tightenOrThrow(path);
 }

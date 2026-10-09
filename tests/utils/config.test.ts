@@ -209,54 +209,60 @@ describe('getConfigDir', () => {
     process.env.XIAOK_CONFIG_DIR = '/custom/root';
     expect(getConfigDir('desktop')).toBe(join('/custom/root', 'desktop'));
   });
+});
 
-  describe.skipIf(process.platform === 'win32')('file permissions (config holds API keys)', () => {
-    const modeOf = (p: string) => statSync(p).mode & 0o777;
-    let testDir: string;
+describe.skipIf(process.platform === 'win32')('config file permissions (config.json holds API keys)', () => {
+  const modeOf = (p: string) => statSync(p).mode & 0o777;
+  let testDir: string;
 
-    beforeEach(() => {
-      testDir = join(tmpdir(), `xiaok-perm-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-      mkdirSync(testDir, { recursive: true });
-      process.env.XIAOK_CONFIG_DIR = testDir;
-    });
+  beforeEach(() => {
+    testDir = join(tmpdir(), `xiaok-perm-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    chmodSync(testDir, 0o755);
+    process.env.XIAOK_CONFIG_DIR = testDir;
+  });
 
-    afterEach(() => {
-      rmSync(testDir, { recursive: true, force: true });
-      delete process.env.XIAOK_CONFIG_DIR;
-    });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+    delete process.env.XIAOK_CONFIG_DIR;
+  });
 
-    it('creates config.json as 600 and the config dir as 700', async () => {
-      rmSync(testDir, { recursive: true, force: true });
-      await saveConfig(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
-      expect(modeOf(getConfigPath())).toBe(0o600);
-      expect(modeOf(getConfigDir())).toBe(0o700);
-    });
+  it('creates config.json as 600 without changing the config dir mode', async () => {
+    await saveConfig(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+    expect(modeOf(getConfigPath())).toBe(0o600);
+    expect(modeOf(testDir)).toBe(0o755);
+  });
 
-    it('keeps config.json at 600 after every update', async () => {
-      const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
-      await saveConfig(config);
-      chmodSync(getConfigPath(), 0o644);
-      await saveConfig({ ...config, contextBudget: 9000 });
-      expect(modeOf(getConfigPath())).toBe(0o600);
-      expect((await loadConfig()).contextBudget).toBe(9000);
-    });
+  it('keeps config.json at 600 after every update, even over a 644 file', async () => {
+    const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    await saveConfig(config);
+    chmodSync(getConfigPath(), 0o644);
+    await saveConfig({ ...config, contextBudget: 9000 });
+    expect(modeOf(getConfigPath())).toBe(0o600);
+    expect((await loadConfig()).contextBudget).toBe(9000);
+  });
 
-    it('tightens a legacy 644 config.json and 755 dir on load without changing content', async () => {
-      const content = JSON.stringify(DEFAULT_CONFIG, null, 2);
-      writeFileSync(getConfigPath(), content, { mode: 0o644 });
-      chmodSync(getConfigPath(), 0o644);
-      chmodSync(getConfigDir(), 0o755);
-      await loadConfig();
-      expect(modeOf(getConfigPath())).toBe(0o600);
-      expect(modeOf(getConfigDir())).toBe(0o700);
-      expect(readFileSync(getConfigPath(), 'utf8')).toBe(content);
-    });
+  it('tightens a legacy 644 config.json on load without changing content or the dir mode', async () => {
+    const content = JSON.stringify(DEFAULT_CONFIG, null, 2);
+    writeFileSync(getConfigPath(), content);
+    chmodSync(getConfigPath(), 0o644);
+    await loadConfig();
+    expect(modeOf(getConfigPath())).toBe(0o600);
+    expect(modeOf(testDir)).toBe(0o755);
+    expect(readFileSync(getConfigPath(), 'utf8')).toBe(content);
+  });
 
-    it('writes the .bak of a corrupt config as 600', async () => {
-      writeFileSync(getConfigPath(), '{ not json', { mode: 0o644 });
-      chmodSync(getConfigPath(), 0o644);
-      await loadConfig();
-      expect(modeOf(getConfigPath() + '.bak')).toBe(0o600);
-    });
+  it('tightens a leftover 644 config.json.bak even when config.json does not exist', async () => {
+    writeFileSync(getConfigPath() + '.bak', '{"old":"key"}');
+    chmodSync(getConfigPath() + '.bak', 0o644);
+    await loadConfig();
+    expect(modeOf(getConfigPath() + '.bak')).toBe(0o600);
+  });
+
+  it('writes the .bak of a corrupt config as 600', async () => {
+    writeFileSync(getConfigPath(), '{ not json');
+    chmodSync(getConfigPath(), 0o644);
+    await loadConfig();
+    expect(modeOf(getConfigPath() + '.bak')).toBe(0o600);
   });
 });
