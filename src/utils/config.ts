@@ -85,7 +85,9 @@ export async function saveConfig(config: Config): Promise<void> {
   mkdirSync(dir, { recursive: true, mode: CONFIG_DIR_MODE });
   restrictMode(dir, CONFIG_DIR_MODE);
   const path = getConfigPath();
-  // mode 只在新建文件时生效，已存在的文件要再 chmod 一次。
+  // 已有的老文件可能是 644：先收紧再写入，避免新 Key 在写入和 chmod 之间短暂可读。
+  if (existsSync(path)) restrictMode(path, CONFIG_FILE_MODE);
+  // mode 只在新建文件时生效，写完再确认一次。
   writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: CONFIG_FILE_MODE });
   restrictMode(path, CONFIG_FILE_MODE);
 }
