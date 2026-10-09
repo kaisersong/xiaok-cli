@@ -2,7 +2,7 @@ import { OLD_MODEL_EFFORT_CONFIGS } from '../support/model-effort-compatibility.
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 // tests/utils/config.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync, statSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { loadConfig, saveConfig, getConfigPath, getConfigDir } from '../../src/utils/config.js';
@@ -208,5 +208,55 @@ describe('getConfigDir', () => {
   it('respects XIAOK_CONFIG_DIR override for subdir', () => {
     process.env.XIAOK_CONFIG_DIR = '/custom/root';
     expect(getConfigDir('desktop')).toBe(join('/custom/root', 'desktop'));
+  });
+
+  describe.skipIf(process.platform === 'win32')('file permissions (config holds API keys)', () => {
+    const modeOf = (p: string) => statSync(p).mode & 0o777;
+    let testDir: string;
+
+    beforeEach(() => {
+      testDir = join(tmpdir(), `xiaok-perm-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      mkdirSync(testDir, { recursive: true });
+      process.env.XIAOK_CONFIG_DIR = testDir;
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+      delete process.env.XIAOK_CONFIG_DIR;
+    });
+
+    it('creates config.json as 600 and the config dir as 700', async () => {
+      rmSync(testDir, { recursive: true, force: true });
+      await saveConfig(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+      expect(modeOf(getConfigPath())).toBe(0o600);
+      expect(modeOf(getConfigDir())).toBe(0o700);
+    });
+
+    it('keeps config.json at 600 after every update', async () => {
+      const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+      await saveConfig(config);
+      chmodSync(getConfigPath(), 0o644);
+      await saveConfig({ ...config, contextBudget: 9000 });
+      expect(modeOf(getConfigPath())).toBe(0o600);
+      expect((await loadConfig()).contextBudget).toBe(9000);
+    });
+
+    it('tightens a legacy 644 config.json and 755 dir on load without changing content', async () => {
+      const content = JSON.stringify(DEFAULT_CONFIG, null, 2);
+      writeFileSync(getConfigPath(), content, { mode: 0o644 });
+      chmodSync(getConfigPath(), 0o644);
+      chmodSync(getConfigDir(), 0o755);
+      await loadConfig();
+      expect(modeOf(getConfigPath())).toBe(0o600);
+      expect(modeOf(getConfigDir())).toBe(0o700);
+      expect(readFileSync(getConfigPath(), 'utf8')).toBe(content);
+    });
+
+    it('writes the .bak of a corrupt config as 600', async () => {
+      writeFileSync(getConfigPath(), '{ not json', { mode: 0o644 });
+      chmodSync(getConfigPath(), 0o644);
+      await loadConfig();
+      expect(modeOf(getConfigPath() + '.bak')).toBe(0o600);
+    });
   });
 });
