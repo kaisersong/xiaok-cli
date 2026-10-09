@@ -6,6 +6,7 @@ const { mkdtemp, mkdir, rm } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const net = require('node:net');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 function fail(component, message) {
   throw new Error(`packaged service contract: ${component}: ${message}. Update sibling checkouts/dependencies and rebuild Desktop/plugin bundles before packaging.`);
@@ -19,7 +20,7 @@ function file(root, relative, component) {
   if (!existsSync(candidate) || !inside(root, candidate)) fail(component, `missing or escaping packaged file ${relative}`);
   return candidate;
 }
-function validateHealth(name, health, child, entry, label = name) {
+function validateHealth(name, health, child, entry, label = name, workflowSupport) {
   if (health?.ok !== true) fail(label, 'health.ok must be true');
   const service = health.service;
   const hash = createHash('sha256').update(readFileSync(entry)).digest('hex');
@@ -29,6 +30,7 @@ function validateHealth(name, health, child, entry, label = name) {
   const protocol = health.protocols?.room_workspace_v1;
   if (!protocol || ['contextVersion','resultVersion','releaseVersion'].some(key => protocol[key] !== 1)) fail(label, 'room_workspace_v1 versions must all be 1');
   if (name === 'kswarm') {
+    if (typeof workflowSupport !== 'function' || !workflowSupport(health)) fail(label, 'Desktop workflow readiness contract failed');
     if (!['dynamic_workflows','workflow_progress_batch','workflow_script_generated_runs'].every(value => health.features?.includes(value))) fail(label, 'required workflow capabilities are absent');
     if (!Number.isSafeInteger(health.roomEventOutbox?.retryOperationLimit) || health.roomEventOutbox.retryOperationLimit < 1
       || !Array.isArray(health.roomEventOutbox.retryCapacityProjects)) fail(label, 'durable activity outbox contract is absent');
@@ -52,7 +54,7 @@ async function stop(child) {
   const timer = setTimeout(() => child.kill('SIGKILL'), 2000);
   try { await exited; } finally { clearTimeout(timer); }
 }
-async function serviceProbe(name, resources, root, timeoutMs) {
+async function serviceProbe(name, resources, root, timeoutMs, workflowSupport) {
   const serviceRoot = path.join(resources, 'services', name);
   const manifest = JSON.parse(readFileSync(file(serviceRoot, 'package.json', name), 'utf8'));
   const label = `${name}@${manifest.version}`;
@@ -78,7 +80,7 @@ async function serviceProbe(name, resources, root, timeoutMs) {
       await new Promise(resolve => setTimeout(resolve, 30));
     }
     if (!health) fail(label, `health timeout after ${timeoutMs}ms: ${output}`);
-    validateHealth(name, health, child, entry, label);
+    validateHealth(name, health, child, entry, label, workflowSupport);
     if (name === 'kswarm') for (const route of ['activity','activity-identity']) {
       const response = await fetch(`http://127.0.0.1:${selectedPort}/projects/__pack_probe__/${route}`, { signal: AbortSignal.timeout(1000) });
       if (response.status !== 401) fail(label, `${route} must exist and reject an unauthenticated read (got ${response.status})`);
@@ -124,8 +126,10 @@ async function verify({ resources, projectDir, timeoutMs = 10000 }) {
   const root = await mkdtemp(path.join(tmpdir(), 'xiaok-pack-contract-'));
   try {
     const plugins = pluginFiles(resources);
+    const contractPath = file(projectDir, 'dist/main/desktop/shared/kswarm-health-contract.js', 'Desktop health contract');
+    const { hasDynamicWorkflowSupport } = await import(pathToFileURL(contractPath).href);
     const services = [];
-    for (const name of ['kswarm','intent-broker']) services.push(await serviceProbe(name, resources, root, timeoutMs));
+    for (const name of ['kswarm','intent-broker']) services.push(await serviceProbe(name, resources, root, timeoutMs, hasDynamicWorkflowSupport));
     await reportProbe(resources, projectDir, root, timeoutMs);
     return [...services, ...plugins];
   } catch (error) {

@@ -51,6 +51,17 @@ test('new manifest cannot hide an old actual synchronous report bundle', { timeo
     await assert.rejects(verify(f), /render_report returned synchronously|Tasks capability absent/);
   } finally { await rm(f.root, { recursive: true, force: true, maxRetries: 5 }); }
 });
+test('the pack gate obeys the compiled Desktop predicate rather than its own feature list', { timeout: 25000 }, async () => {
+  const f = await fixture();
+  try {
+    const projectDir = join(f.root, 'consumer');
+    const contract = join(projectDir, 'dist/main/desktop/shared/kswarm-health-contract.js');
+    await mkdir(join(contract, '..'), { recursive: true });
+    await writeFile(join(projectDir, 'package.json'), '{"type":"module"}');
+    await writeFile(contract, 'export const hasDynamicWorkflowSupport = () => false;');
+    await assert.rejects(verify({ ...f, projectDir }), /Desktop workflow readiness contract failed/);
+  } finally { await rm(f.root, { recursive: true, force: true, maxRetries: 5 }); }
+});
 test('a merely healthy old service cannot satisfy current process and workspace contracts', () => {
   assert.throws(() => validateHealth('kswarm', { ok: true }, { pid: 1 }, import.meta.filename), /current process\/entry identity/);
   const health = { ok: true, service: { pid: 1, instanceId: 'fixture', entryPath: realpathSync(import.meta.filename),

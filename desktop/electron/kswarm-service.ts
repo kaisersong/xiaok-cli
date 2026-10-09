@@ -1,3 +1,5 @@
+import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
+export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
 import type { ConversationActivityOwnerClient } from '../../src/runtime/conversation-activity/owner-client.js';
 /**
@@ -55,7 +57,6 @@ const MAX_RESTART_ATTEMPTS = 10;
 const MAX_PERSISTENCE_FAIL_STOP_RESTARTS = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DYNAMIC_WORKFLOW_FEATURE = 'dynamic_workflows';
-const WORKFLOW_PATTERN_SCHEMA_VERSION = 'kswarm_workflow_patterns_v1';
 const LEGACY_KSWARM_LOG_ROOT = join(homedir(), '.kswarm', 'logs');
 
 /**
@@ -432,24 +433,6 @@ export function resolveBackgroundNodeRuntime(options: {
     env.ELECTRON_RUN_AS_NODE = '1';
   }
   return { command, env };
-}
-
-export function hasDynamicWorkflowSupport(body: Record<string, unknown> | null): boolean {
-  const features = body?.features;
-  return Array.isArray(features)
-    && features.includes(DYNAMIC_WORKFLOW_FEATURE)
-    && hasWorkflowPatternCapabilities(body);
-}
-
-export function hasWorkflowPatternCapabilities(body: Record<string, unknown> | null): boolean {
-  const capabilities = body?.workflowCapabilities;
-  if (!capabilities || typeof capabilities !== 'object' || Array.isArray(capabilities)) return false;
-  const schemaVersion = (capabilities as Record<string, unknown>).schemaVersion;
-  const compiledContract = (capabilities as Record<string, unknown>).compiledContract;
-  const patternPublicView = (capabilities as Record<string, unknown>).patternPublicView;
-  return schemaVersion === WORKFLOW_PATTERN_SCHEMA_VERSION
-    && compiledContract === true
-    && patternPublicView === true;
 }
 
 export function getKSwarmHealthServiceEntryPath(body: Record<string, unknown> | null): string | null {
@@ -1146,7 +1129,29 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function spawnServer(): Promise<void> {
-    if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
+    if (activityDelegated || activityOwner) {
+      if (!activityOwner) throw new Error('activity_owner_initializing');
+      // Delegation precedes every local stale/incompatible-listener path.
+      // The supervisor owns recovery; a UI must never attempt to kill its source.
+      await activityOwner.request('sourceEnsure', { name: 'kswarm', ownerEpoch: activityOwner.ownerEpoch });
+      const health = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
+      const entry = resolveServicePath('kswarm', 'src/server/index.js');
+      const identity = checkKSwarmHealthServiceIdentity(health.body, entry, computeKSwarmServiceSourceHash(entry));
+      const supported = hasDynamicWorkflowSupport(health.body);
+      const ready = health.ok && supported && Boolean(entry) && identity.compatible;
+      if (!ready) {
+        running = false;
+        lastError = !health.ok ? 'activity_source_unavailable'
+          : !supported ? 'activity_source_contract_mismatch: dynamic_workflows missing'
+            : `activity_source_identity_mismatch: ${identity.reason ?? 'entry_missing'}`;
+        notifyListeners(); return;
+      }
+      const brokerReady = await ensureBroker();
+      await reconcileSeedAgents();
+      if (stopping) return;
+      running = true; lastError = brokerReady ? null : 'intent-broker health check failed';
+      restartCount = 0; healthFailureCount = 0; startHealthCheck(); notifyListeners(); return;
+    }
     if (child) return;
     const existingHealth = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
     if (stopping) return;
@@ -1252,13 +1257,6 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       startHealthCheck();
       notifyListeners();
       return;
-    }
-
-    if (activityDelegated || activityOwner) {
-      if (!activityOwner) throw new Error('activity_owner_initializing');
-      await activityOwner.request('sourceEnsure', { name: 'kswarm', ownerEpoch: activityOwner.ownerEpoch });
-      const ready = await healthCheck(); running = ready; lastError = ready ? null : 'activity_source_unavailable';
-      if (ready) startHealthCheck(); notifyListeners(); return;
     }
 
     if (!serverPath) {
