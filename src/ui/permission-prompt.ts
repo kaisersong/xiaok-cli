@@ -1,3 +1,4 @@
+import { requiresCommandConfirmation, getCommandWriteTargets } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
@@ -6,7 +7,7 @@ import { getUiCopy, type UiLocale } from './locale.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
 import type { PermissionMode } from '../ai/permissions/manager.js';
-import { requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
+import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
 
 interface PromptOption {
   label: string;
@@ -95,7 +96,16 @@ function compactRuleForOption(rule: string, maxLength = 72): string {
   return `${prefix}${inner.slice(0, headLength)}...${inner.slice(-tailLength)}${suffix}`;
 }
 
-export function buildPermissionPromptOptions(rule: string): PromptOption[] {
+function isMandatoryReview(toolName: string, input: Record<string, unknown>): boolean {
+  return toolName === 'bash' && typeof input.command === 'string'
+    && (classifyBashCommand(input.command).level !== 'safe' || requiresCommandConfirmation(input.command));
+}
+
+export function buildPermissionPromptOptions(rule: string, toolName = '', input: Record<string, unknown> = {}): PromptOption[] {
+  if (isMandatoryReview(toolName, input)) return [
+    { label: '允许一次', choice: { action: 'allow_once' } },
+    { label: '拒绝', choice: { action: 'deny' } },
+  ];
   const displayRule = compactRuleForOption(rule);
   return [
     { label: '允许一次', choice: { action: 'allow_once' } },
@@ -129,7 +139,12 @@ export function formatPermissionPromptLines(
     lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
   }
 
-  if (typeof input.command === 'string') {
+  if (toolName === 'bash' && typeof input.command === 'string') {
+    if (isMandatoryReview(toolName, input)) lines.push(dim(copy.mandatoryReview));
+    for (const path of getCommandWriteTargets(input.command)) lines.push(dim(copy.writeTarget(escapeProjectRuleDisplay(path))));
+  }
+
+  if (typeof input.command === 'string' && !isMandatoryReview(toolName, input)) {
     const rule = deriveRule(toolName, input);
     if (rule.endsWith(' *)')) lines.push(dim(copy.commandApprovalScope(rule)));
   }
@@ -169,7 +184,7 @@ export async function showPermissionPrompt(
     ),
   );
 
-  const promptOptions = buildPermissionPromptOptions(rule);
+  const promptOptions = buildPermissionPromptOptions(rule, toolName, input);
 
   // 非 TTY 环境下默认拒绝
   if (!stdin.isTTY) {

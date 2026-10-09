@@ -48,7 +48,7 @@ describe('PermissionManager', () => {
     await expect(pm.check('bash', { command: 'pwd -L' })).resolves.toBe('allow');
   });
 
-  it('matches remembered python rules for multi-line bash commands', async () => {
+  it('requires review for interpreter execution and multiline commands', async () => {
     const pm = new PermissionManager({
       mode: 'default',
       allowRules: ['bash(python3 *)'],
@@ -56,7 +56,7 @@ describe('PermissionManager', () => {
 
     await expect(pm.check('bash', {
       command: 'python3 -c "\\nimport subprocess\\nprint(1)\\n"',
-    })).resolves.toBe('allow');
+    })).resolves.toBe('prompt');
 
     await expect(pm.check('bash', {
       command: "python3 - <<'PY'\nprint(1)\nPY",
@@ -92,10 +92,10 @@ describe('PermissionManager', () => {
 
     await expect(pm.check('bash', { command: 'kill -9 12345' })).resolves.toBe('allow');
     await expect(pm.check('bash', { command: 'chmod -R u+rw ./cache' })).resolves.toBe('allow');
-    await expect(pm.check('bash', { command: 'chown -R song ./cache' })).resolves.toBe('allow');
+    await expect(pm.check('bash', { command: 'chown -R fictional ./cache' })).resolves.toBe('allow');
   });
 
-  it('auto mode prompts for deletion and data-loss bash commands unless explicitly allowed', async () => {
+  it('auto mode prompts for deletion and data-loss bash commands even with remembered approval', async () => {
     const pm = new PermissionManager({ mode: 'auto' });
 
     await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('prompt');

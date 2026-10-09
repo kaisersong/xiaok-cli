@@ -1,11 +1,13 @@
+import { posix, win32 } from 'node:path';
 export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
-import { PermissionPolicyEngine, requiresCommandConfirmation } from './policy-engine.js';
+import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 
 export interface PermissionManagerOptions {
   mode: PermissionMode;
+  cwd?: string;
   allowRules?: string[];
   denyRules?: string[];
 }
@@ -16,11 +18,13 @@ function readBashCommand(input: Record<string, unknown>): string {
 
 export class PermissionManager {
   private mode: PermissionMode;
+  private readonly cwd: string;
   private allowRules: string[];
   private denyRules: string[];
 
   constructor(options: PermissionManagerOptions) {
     this.mode = options.mode;
+    this.cwd = options.cwd ?? process.cwd();
     this.allowRules = options.allowRules ?? [];
     this.denyRules = options.denyRules ?? [];
   }
@@ -79,6 +83,9 @@ export class PermissionManager {
     if (toolName === 'bash') {
       const command = readBashCommand(input);
       if (requiresCommandConfirmation(command)) return 'prompt';
+      const targets = getCommandWriteTargets(command);
+      if (targets.some(target => isOutsideWorkspace(target, this.cwd))) return 'prompt';
+      if (targets.length && this.mode !== 'auto') return 'prompt';
     }
 
     if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
@@ -110,4 +117,15 @@ export class PermissionManager {
 
     return 'prompt';
   }
+}
+
+/** Resolve lexical paths conservatively across POSIX, drive and UNC forms. */
+function isOutsideWorkspace(target: string, cwd: string): boolean {
+  if (/^[~]|[$`]/.test(target)) return true;
+  const windows = /^[a-z]:|^\\\\|^\/\//i;
+  const api = windows.test(cwd) ? win32 : posix;
+  if (windows.test(target) && api !== win32) return true;
+  if (api === win32 && posix.isAbsolute(target) && !windows.test(target)) return true;
+  const relative = api.relative(api.resolve(cwd), api.resolve(cwd, target));
+  return relative === '..' || relative.startsWith(`..${api.sep}`) || api.isAbsolute(relative);
 }

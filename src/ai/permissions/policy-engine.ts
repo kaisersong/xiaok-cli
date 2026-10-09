@@ -1,3 +1,4 @@
+import { classifyBashCommand } from '../tools/bash-safety.js';
 import { posix, win32 } from 'node:path';
 export interface PermissionPolicySnapshot {
   globalAllow: string[];
@@ -46,7 +47,7 @@ export function matches(rules: string[], toolName: string, input: Record<string,
     const parsed = parseCommandSegments(command);
     const matchSegment = (segment: string) => matchesTarget(rules, toolName, { command: segment });
     if (intent === 'deny') return denyCommandSegments(command).some(matchSegment);
-    return parsed.valid && !requiresCommandConfirmation(command) && parsed.segments.length > 0 && parsed.segments.every(matchSegment);
+    return parsed.valid && classifyBashCommand(command).level === 'safe' && !requiresCommandConfirmation(command) && getCommandWriteTargets(command).length === 0 && parsed.segments.length > 0 && parsed.segments.every(matchSegment);
   }
   return matchesTarget(rules, toolName, input);
 }
@@ -125,14 +126,14 @@ function scanShellLiteral(text: string, index: number, quote: string): { end: nu
   return undefined;
 }
 
-function nextShellWord(text: string): { value: string; end: number; hasExpansion: boolean; hasWildcard: boolean } {
+function nextShellWord(text: string, stopAtOperator = false): { value: string; end: number; hasExpansion: boolean; hasWildcard: boolean } {
   let index = 0;
   let quote = '';
   let value = '';
   let hasExpansion = false;
   let hasWildcard = false;
   while (index < text.length) {
-    if (!quote && /\s/.test(text[index])) break;
+    if (!quote && (/\s/.test(text[index]) || (stopAtOperator && /[<>&|;]/.test(text[index])))) break;
     const literal = scanShellLiteral(text, index, quote);
     if (literal) { value += literal.value; quote = literal.quote; index = literal.end; }
     else {
@@ -207,7 +208,7 @@ function scanCommandSegments(command: string): { segments: string[]; valid: bool
         continue;
       }
       if (!quote) {
-        const redirect = command.slice(index).match(/^(?:&>>?|[<>]&[0-9-]+)/);
+        const redirect = command.slice(index).match(/^(?:&>>?|>\||[<>]&[0-9-]+)/);
         if (redirect) { text += redirect[0]; index += redirect[0].length; continue; }
       }
       if (!quote && /[;&|\n]/.test(ch)) {
@@ -282,9 +283,85 @@ function hasForcedPush(words: string[]): boolean {
       // Attached short values and long =values are already contained in one word.
     }
     if (words[index] !== 'push') continue;
+    if (words.slice(index + 1).some(word => /^(?:--delete(?:=.*)?|-[a-z]*d[a-z]*|:[^:]+)$/.test(word))) return true;
     if (words.slice(index + 1).some(word => /^(?:--force(?:-with-lease)?(?:=.*)?|-[a-z]*f[a-z]*|\+.+)$/.test(word))) return true;
   }
   return false;
+}
+
+/** Git can delegate execution to configured programs. This finite list requires
+ * individual review; it does not enumerate all Git or shell execution semantics. */
+function hasGitExecution(words: string[]): boolean {
+  for (let start = 0; start < words.length; start++) {
+    if (posix.basename(words[start]) !== 'git') continue;
+    if (words.slice(0, start).some(word => /^GIT_[\w]*=/.test(word))) return true;
+    let index = start + 1;
+    while (index < words.length && words[index].startsWith('-')) {
+      const option = words[index++];
+      if (/^(?:-c.*|--(?:exec-path|config-env)(?:=.*)?)$/.test(option)) return true;
+      if (option === '--') break;
+      if (/^(?:-C|--(?:git-dir|work-tree|namespace|super-prefix))$/.test(option)) index++;
+    }
+    const subcommand = words[index++];
+    const args = words.slice(index);
+    if (subcommand === 'filter-branch') return true;
+    if (subcommand === 'config' && args.some(word => /^(?:alias\..+|core\.(?:pager|sshcommand|editor|hookspath|fsmonitor)|diff\.external|.+\.pager|credential(?:\..+)?\.helper)(?:=|$)/i.test(word))) return true;
+    if (subcommand === 'submodule' && args.includes('foreach')) return true;
+    if (subcommand === 'bisect' && args.includes('run')) return true;
+    if (subcommand === 'rebase' && args.some(word => /^(?:-x.*|--exec(?:=.*)?)$/.test(word))) return true;
+    if (subcommand === 'difftool' && args.some(word => /^(?:-x.*|--extcmd(?:=.*)?)$/.test(word))) return true;
+    if (subcommand === 'diff' && args.includes('--ext-diff')) return true;
+  }
+  return false;
+}
+
+/** List literal output destinations without executing or expanding shell text. */
+export function getCommandWriteTargets(command: string, depth = 0): string[] {
+  if (depth >= 32) return ['$unresolved'];
+  const targets: string[] = [];
+  for (const segment of parseCommandSegments(command).segments) {
+    let quote = '';
+    for (let index = 0; index < segment.length;) {
+      const literal = scanShellLiteral(segment, index, quote);
+      if (literal) { quote = literal.quote; index = literal.end; continue; }
+      if (!quote) {
+        if (segment.startsWith('>(', index)) { index += 2; continue; }
+        const redirect = segment.slice(index).match(/^(?:&>>?|>\||>>?)/);
+        if (redirect) {
+          index += redirect[0].length;
+          const tail = segment.slice(index).trimStart();
+          index = segment.length - tail.length;
+          if (tail.startsWith('&')) {
+            const fd = tail.match(/^&[0-9-]+/);
+            if (fd) { index += fd[0].length; continue; }
+          }
+          const word = nextShellWord(tail, true);
+          if (word.value && word.value !== '/dev/null') targets.push(word.value);
+          index += Math.max(word.end, 1);
+          continue;
+        }
+      }
+      index++;
+    }
+    const words = shellWords(segment);
+    for (let index = 0; index < words.length; index++) {
+      const name = posix.basename(words[index]);
+      const payloadIndex = name === 'eval' ? index + 1
+        : /^(?:sh|bash|zsh|dash|ksh)$/.test(name) ? shellPayloadIndex(words, index) : -1;
+      if (payloadIndex >= 0 && payloadIndex < words.length) {
+        targets.push(...getCommandWriteTargets(words.slice(payloadIndex).join(' '), depth + 1));
+        break;
+      }
+    }
+    if (words.some(word => posix.basename(word) === 'git')) {
+      for (let index = 0; index < words.length; index++) {
+        const word = words[index];
+        const target = word.startsWith('--output=') ? word.slice(9) : word === '--output' ? words[++index] : undefined;
+        if (target !== undefined && target !== '/dev/null') targets.push(target);
+      }
+    }
+  }
+  return targets;
 }
 
 function hasRecursiveDelete(words: string[]): boolean {
@@ -296,11 +373,11 @@ function hasRecursiveDelete(words: string[]): boolean {
   });
 }
 
-/** Check all three mandatory-review forms within a single parsed command. */
+/** Check the finite mandatory-review forms within a single parsed command. */
 function hasConfirmationForm(command: string): boolean {
   const parsed = scanCommandSegments(command);
   const segments = parsed.segments.map(shellWords);
-  if (segments.some(words => hasForcedPush(words) || hasRecursiveDelete(words))) return true;
+  if (segments.some(words => hasForcedPush(words) || hasGitExecution(words) || hasRecursiveDelete(words))) return true;
   // Enumerated curl/wget pipelines into the sh family only. Two-step download
   // to disk then execution and other downloaders are outside this list; each
   // command segment still goes through the ordinary permission rules.

