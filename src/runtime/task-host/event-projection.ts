@@ -1,3 +1,4 @@
+import { formatTaskToolResultResponse } from './tool-result-response.js';
 import type { RuntimeEvent } from '../events.js';
 import type { ArtifactKind, DesktopTaskEvent, PlanStep, TaskUnderstanding } from './types.js';
 import { A2UI_MIME_TYPE, isA2UIMimeType, summarizeRenderUiInput } from '../../a2ui/index.js';
@@ -230,9 +231,7 @@ function projectRuntimeEventToCanvasEvents(event: RuntimeEvent): DesktopTaskEven
     }];
   }
   if (event.type === 'post_tool_use') {
-    const responseStr = typeof event.toolResponse === 'string'
-      ? event.toolResponse.slice(0, 10000)
-      : JSON.stringify(event.toolResponse).slice(0, 10000);
+    const responseStr = formatTaskToolResultResponse(event.toolName, event.toolResponse);
     return [{
       type: 'canvas_tool_result',
       toolName: event.toolName,
