@@ -1,0 +1,15 @@
+name: 功能建议
+description: 希望小 K 能帮你做到什么
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes: {label: 你想完成的工作是什么, description: 讲讲场景，比如“每周把会议记录整理成周报发给老板”}
+    validations: {required: true}
+  - type: textarea
+    id: pain
+    attributes: {label: 现在卡在哪里或者哪里不方便}
+    validations: {required: true}
+  - type: textarea
+    id: idea
+    attributes: {label: 你心目中的做法（可选）}
