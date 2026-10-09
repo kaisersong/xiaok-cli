@@ -1,5 +1,4 @@
-import { dirname, join } from 'node:path';
-import { adoptProjectRule, listPendingProjectRules, getGlobalSettingsPath } from '../ai/permissions/settings.js';
+import { adoptProjectRule, listPendingProjectRules, getProjectAdoptionRecord } from '../ai/permissions/settings.js';
 import { escapeProjectRuleDisplay, promptProjectRuleAdoption } from '../ui/permission-prompt.js';
 
 export function shouldPromptProjectRuleAdoption(options: {
@@ -29,6 +28,9 @@ export async function promptPendingProjectRules(cwd: string): Promise<void> {
       process.stdout.write(`${message}\n`);
     }
   }
-  const recordPath = join(dirname(getGlobalSettingsPath()), 'project-rule-adoptions.json');
-  process.stdout.write(`已采纳 ${adopted} 条，跳过 ${rules.length - adopted} 条，可用 /settings 查看；要撤销，删除 ${escapeProjectRuleDisplay(recordPath)} 中的记录后重新启动\n`);
+  process.stdout.write(`已采纳 ${adopted} 条，跳过 ${rules.length - adopted} 条，可用 /settings 查看。\n`);
+  if (adopted > 0) {
+    const { file, key } = await getProjectAdoptionRecord(cwd);
+    process.stdout.write(`如需撤销，可清除本项目的采纳记录（会同时撤销本项目全部已采纳规则，下次使用时会重新询问）：用文本编辑器打开 ${escapeProjectRuleDisplay(file)}，把 "adoptions" 里 ${escapeProjectRuleDisplay(JSON.stringify(key))} 后面方括号中的内容清空（改成 []）后保存。\n`);
+  }
 }

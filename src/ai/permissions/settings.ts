@@ -122,6 +122,9 @@ function projectKey(cwd: string): string {
 }
 function ruleHash(rule: string): string { return createHash('sha256').update(rule).digest('hex'); }
 function localRulesPath(): string { return join(dirname(getGlobalSettingsPath()), 'project-rule-adoptions.json'); }
+export async function getProjectAdoptionRecord(cwd: string): Promise<{ file: string; key: string }> {
+  return { file: localRulesPath(), key: projectKey(await resolveProjectPath(cwd)) };
+}
 async function readLocalRules(): Promise<LocalRules> {
   try {
     const parsed = JSON.parse(await readFile(localRulesPath(), 'utf8'));
