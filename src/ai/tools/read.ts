@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync, realpathSync } from 'fs';
 import { extname, resolve } from 'path';
 import type { Tool } from '../../types.js';
-import { assertWorkspacePath } from '../permissions/workspace.js';
+import { assertWorkspacePath, type OutsideWorkspaceGuard } from '../permissions/workspace.js';
 import { truncateText } from './truncation.js';
 import { extractMaterialText } from '../../runtime/materials/text-extractor.js';
 import { detectImageMediaType } from '../../shared/media/image.js';
@@ -16,6 +16,8 @@ import {
 export interface WorkspaceToolOptions {
   cwd?: string;
   allowOutsideCwd?: boolean;
+  /** allowOutsideCwd 时对工作区外（含符号链接指向区外）路径的二次检查，通常是沙箱策略。 */
+  outsideCwdGuard?: OutsideWorkspaceGuard;
   artifactRoot?: string;
   /** Host-owned exact read-only references; never accepted from model input. */
   readOnlyPaths?: string[];
@@ -104,7 +106,7 @@ export function createReadTool(options: WorkspaceToolOptions = {}): Tool {
         max_chars?: number;
       };
       let resolvedPath: string;
-      try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd); }
+      try { resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, options.outsideCwdGuard); }
       catch (error) {
         let reference: string | undefined;
         try { reference = realpathSync(resolve(file_path)); } catch { /* Preserve the original denial. */ }

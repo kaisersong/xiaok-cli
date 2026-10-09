@@ -244,7 +244,14 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     // 构建基础 tool list
     const baseTools = buildToolList(
       options.skillTool,
-      { cwd, allowOutsideCwd: Boolean(options.platform.sandboxEnforcer) },
+      {
+        cwd,
+        allowOutsideCwd: Boolean(options.platform.sandboxEnforcer),
+        // 工具内部再按沙箱策略检查一次（规范化 + 真实路径），不在沙箱包装里的工具（如 render_ui）也受约束
+        ...(options.platform.sandboxEnforcer
+          ? { outsideCwdGuard: (resolvedPath: string) => options.platform.sandboxPolicy.checkPath(resolvedPath) }
+          : {}),
+      },
       extraTools,
     );
 

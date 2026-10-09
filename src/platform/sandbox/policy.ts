@@ -1,3 +1,6 @@
+import { resolve, win32 } from 'node:path';
+import { resolveRealPath } from '../../ai/permissions/workspace.js';
+
 export interface SandboxPolicyOptions {
   pathAllowlist?: string[];
   allowedPaths?: Set<string> | string[];
@@ -15,10 +18,24 @@ function normalizePathForMatch(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/g, '');
 }
 
+const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
+/**
+ * 比较前先规范化：resolve 消除 `.`/`..`，再用 realpath（不存在时取最近已存在父目录）解析符号链接，
+ * 最后统一分隔符。非 Windows 主机上遇到 Windows 风格绝对路径时只做词法规范化。
+ */
+function canonicalizePathForMatch(path: string): string {
+  if (process.platform !== 'win32' && WINDOWS_ABSOLUTE_PATH.test(path)) {
+    return normalizePathForMatch(win32.resolve(path));
+  }
+  return normalizePathForMatch(resolveRealPath(resolve(path)));
+}
+
 function matchesPrefix(prefixes: string[], value: string): boolean {
-  const normalizedValue = normalizePathForMatch(value);
+  if (prefixes.length === 0) return false;
+  const normalizedValue = canonicalizePathForMatch(value);
   return prefixes.some((prefix) => {
-    const normalizedPrefix = normalizePathForMatch(prefix);
+    const normalizedPrefix = canonicalizePathForMatch(prefix);
     return normalizedValue === normalizedPrefix || normalizedValue.startsWith(`${normalizedPrefix}/`);
   });
 }
