@@ -1,5 +1,6 @@
+import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { dirname, resolve, join, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 const REPORT_INTERVAL = 5 * 60_000;
@@ -28,7 +29,8 @@ export class ConversationActivityStore {
         const maximumBytes = options.maxDatabaseBytes ?? 256 * 1024 * 1024;
         if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1024 * 1024)
             throw new Error('invalid_activity_capacity');
-        mkdirSync(dirname(file), { recursive: true });
+        if (!this.readOnly)
+            createPrivateActivityDirectory(dirname(file));
         file = existsSync(file) ? realpathSync(file) : join(realpathSync(dirname(resolve(file))), basename(file));
         if (this.readOnly) {
             this.db = new DatabaseSync(file, { readOnly: true });
@@ -38,6 +40,17 @@ export class ConversationActivityStore {
                 throw new Error('conversation_activity_schema_unsupported');
             }
             return;
+        }
+        try {
+            for (const target of [file, `${file}.owner.sqlite`]) {
+                if (!existsSync(target))
+                    closeSync(openSync(target, 'a', 0o600));
+                if (process.platform !== 'win32')
+                    chmodSync(target, 0o600);
+            }
+        }
+        catch {
+            throw new Error('activity_storage_not_private');
         }
         this.owner = new DatabaseSync(`${file}.owner.sqlite`);
         try {
@@ -53,6 +66,15 @@ export class ConversationActivityStore {
         try {
             this.db = opened = new DatabaseSync(file);
             this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON');
+            try {
+                if (process.platform !== 'win32')
+                    for (const suffix of ['', '-wal', '-shm'])
+                        if (existsSync(file + suffix))
+                            chmodSync(file + suffix, 0o600);
+            }
+            catch {
+                throw new Error('activity_storage_not_private');
+            }
             const pageSize = this.db.prepare('PRAGMA page_size').get().page_size;
             this.db.exec(`PRAGMA max_page_count=${Math.floor(maximumBytes / pageSize)}`);
             const version = this.db.prepare('PRAGMA user_version').get();

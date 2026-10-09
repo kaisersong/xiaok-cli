@@ -22,6 +22,7 @@ interface ActivityStartupNotice {
 }
 interface ActivityStartupNotices {
     queueUnavailable(): void;
+    queueStorageNotPrivate(): void;
     queueStarted(): void;
     take(): ActivityStartupNotice | undefined;
 }

@@ -1,3 +1,4 @@
+import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, realpathSync, readFileSync, openSync, writeFileSync, closeSync, statSync, fsyncSync, linkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +13,7 @@ export interface ActivityOwnerAddress { dataRoot: string; rootHash: string; sock
 
 /** A new per-root protocol; never reuses the legacy reminder daemon socket. */
 export function activityOwnerAddress(dataRoot: string): ActivityOwnerAddress {
-  mkdirSync(dataRoot, { recursive: true }); dataRoot = realpathSync(dataRoot);
+  createPrivateActivityDirectory(dataRoot); dataRoot = realpathSync(dataRoot);
   const uid = process.getuid?.() ?? 'windows-user';
   const rootHash = createHash('sha256').update(`${uid}:${dataRoot}`).digest('hex');
   const socketDir = join(tmpdir(), `xa-${uid}-${rootHash.slice(0, 12)}`);

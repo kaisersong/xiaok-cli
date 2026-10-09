@@ -1,5 +1,6 @@
+import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { join } from 'node:path';
-import { watch as watchFiles, mkdirSync } from 'node:fs';
+import { watch as watchFiles } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { FileTaskSnapshotStore } from '../task-host/snapshot-store.js';
 /** One filesystem hint owner; authoritative facts remain native snapshot files. */
@@ -10,8 +11,8 @@ export class ActivityTaskSnapshotReader {
     watchers;
     constructor(root) {
         this.root = root;
-        mkdirSync(root, { recursive: true });
-        mkdirSync(join(root, 'snapshots'), { recursive: true });
+        createPrivateActivityDirectory(root);
+        createPrivateActivityDirectory(join(root, 'snapshots'));
         const changed = () => { this.generation++; for (const wake of [...this.waiters])
             wake(); };
         this.watchers = [watchFiles(root, changed), watchFiles(join(root, 'snapshots'), changed)];

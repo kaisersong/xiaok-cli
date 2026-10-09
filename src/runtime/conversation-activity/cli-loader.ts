@@ -1,4 +1,5 @@
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createPrivateActivityDirectory } from './storage-permissions.js';
+import { statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CliConversationActivities } from './cli.js';
 
@@ -37,7 +38,10 @@ export async function attachCliConversationActivities(
     if (instance) options.startupNotices?.queueStarted();
     return instance;
   } catch (error) {
-    options.onDebug?.('cli_activity_owner_unavailable', String(error));
+    if (error instanceof Error && error.message === 'activity_storage_not_private') {
+      options.onDebug?.('cli_activity_storage_not_private', error.message);
+      options.startupNotices?.queueStorageNotPrivate();
+    } else options.onDebug?.('cli_activity_owner_unavailable', String(error));
     return undefined;
   }
 }
@@ -52,6 +56,7 @@ interface ActivityStartupNotice {
 }
 interface ActivityStartupNotices {
   queueUnavailable(): void;
+  queueStorageNotPrivate(): void;
   queueStarted(): void;
   take(): ActivityStartupNotice | undefined;
 }
@@ -69,6 +74,11 @@ export function createActivityStartupNotices(options: {
     options.onDebug?.('cli_activity_startup_notice_unavailable', String(error));
   };
   return {
+    queueStorageNotPrivate() {
+      if (queued) return;
+      queued = true;
+      pending = { text: '异步任务跟进已停用：无法把 ~/.xiaok/conversation-activity 设为仅本人可访问，请检查该目录的所有者和权限。', markShown() {} };
+    },
     queueUnavailable() {
       if (queued) return;
       queued = true;
@@ -90,7 +100,7 @@ export function createActivityStartupNotices(options: {
         text: '已在后台启动任务跟进，设 XIAOK_CONVERSATION_ACTIVITY=0 可关闭。',
         markShown() {
           try {
-            mkdirSync(directory, { recursive: true });
+            createPrivateActivityDirectory(directory);
             writeFileSync(marker, '', { mode: 0o600, flag: 'wx' });
           } catch (error) {
             if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) debug(error);

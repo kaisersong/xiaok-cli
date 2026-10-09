@@ -9,9 +9,18 @@ import { activityOwnerAddress } from './owner-protocol.js';
 import type { ActivityOwnerConfig } from './owner-runtime.js';
 import { activityOwnerConfigDigest } from './owner-runtime.js';
 
+/** Only operational environment is inherited by the long-lived owner. */
+export function buildActivityOwnerEnv(parent: NodeJS.ProcessEnv, platform = process.platform): Record<string, string> {
+  const allowed = new Set(['PATH','Path','HOME','USER','LOGNAME','SHELL','TMPDIR','TEMP','TMP','TZ','LANG','LANGUAGE',
+    'DISPLAY','WAYLAND_DISPLAY','DBUS_SESSION_BUS_ADDRESS','XDG_RUNTIME_DIR','XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME',
+    'NODE_OPTIONS','NODE_EXTRA_CA_CERTS','SSL_CERT_FILE','SSL_CERT_DIR','HTTP_PROXY','HTTPS_PROXY','NO_PROXY','http_proxy','https_proxy','no_proxy']);
+  if (platform === 'win32') for (const name of ['USERPROFILE','APPDATA','LOCALAPPDATA','SystemRoot','SYSTEMROOT','windir','ComSpec','PATHEXT','HOMEDRIVE','HOMEPATH']) allowed.add(name);
+  return Object.fromEntries(Object.entries(parent).filter(([name, value]) => value !== undefined && (allowed.has(name) || name.startsWith('LC_') || name.startsWith('XIAOK_') && !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name)))) as Record<string, string>;
+}
+
 /** Native callers attach instead of competing for a writer. No RPC mutation
  * is retried; startup probes are read-only and do not unlink an active socket. */
-export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number } = {}): Promise<ConversationActivityOwnerClient> {
+export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: typeof spawn } = {}): Promise<ConversationActivityOwnerClient> {
   const address = activityOwnerAddress(config.dataRoot);
   const normalized = { ...config, dataRoot: address.dataRoot };
   const expectedDigest = activityOwnerConfigDigest(normalized);
@@ -31,10 +40,12 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
   const temporary = `${configFile}.${randomUUID()}.tmp`;
   writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 }); renameSync(temporary, configFile);
   const logFile = openSync(join(address.dataRoot, 'activity-owner.log'), 'a', 0o600);
-  const child = spawn(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {
-    detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env: { ...process.env, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
-  });
-  closeSync(logFile);
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = (options.spawn ?? spawn)(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {
+      detached: true, stdio: ['ignore', logFile, logFile], windowsHide: true, env: { ...buildActivityOwnerEnv(process.env), ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
+    });
+  } finally { closeSync(logFile); }
   let spawnError: unknown; child.once('error', error => { spawnError = error; });
   child.unref();
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);

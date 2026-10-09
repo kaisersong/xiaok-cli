@@ -7,6 +7,16 @@ import { taskId } from '@modelcontextprotocol/ext-tasks/core';
 import { ConversationActivityStore } from './store.js';
 import { ConversationActivityService } from './service.js';
 import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES } from './owner-protocol.js';
+/** Default grace period after the last client/request/watch change. */
+export const ACTIVITY_OWNER_IDLE_MS = 20 * 60_000;
+/** Bound observation without an authenticated client, including active watches. */
+export const ACTIVITY_OWNER_MAX_UNATTENDED_MS = 24 * 60 * 60_000;
+/** Polling bounds shutdown latency without keeping the process alive. */
+const ACTIVITY_OWNER_IDLE_CHECK_MS = 1000;
+export function activityOwnerTimeout(value, fallback) {
+    const parsed = Number(value);
+    return /^\d+$/.test(value ?? '') && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 const key = z.string().min(1).max(256);
 const USER_METHODS = new Set(['status', 'list', 'work', 'unread', 'read', 'reporting', 'stop', 'subscribe', 'overview', 'unsubscribe', 'mcpInputs', 'mcpAnswer', 'mcpCancel']);
 /** Activity-only owner. It never creates a task, Goal, agent or LLM runner. */
@@ -21,8 +31,42 @@ export class ConversationActivityOwnerHost {
     pending = 0;
     stopped = false;
     actor;
+    now;
+    lastActivity;
+    unattendedSince;
+    watchState = '';
+    idleEmitted = false;
+    idleTimer;
+    idleMs;
+    unattendedMs;
+    checkIdle() {
+        if (this.stopped || this.idleEmitted || !this.options.idle || this.options.ready?.() === false)
+            return;
+        const now = this.now();
+        const watches = this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) }));
+        const state = JSON.stringify(watches);
+        if (this.watchState && state !== this.watchState)
+            this.lastActivity = now;
+        this.watchState = state;
+        if ([...this.clients].some(client => client.active && client.role)) {
+            this.unattendedSince = now;
+            this.lastActivity = now;
+            return;
+        }
+        if (this.pending)
+            return;
+        const unfinished = watches.some(({ watch, projection }) => watch.status === 'active' && !['completed', 'failed', 'cancelled'].includes(projection?.executionState ?? ''));
+        if ((!unfinished && now - this.lastActivity >= this.idleMs) || now - this.unattendedSince >= this.unattendedMs) {
+            this.idleEmitted = true;
+            this.options.idle();
+        }
+    }
     constructor(options) {
         this.options = options;
+        this.now = options.now ?? Date.now;
+        this.lastActivity = this.unattendedSince = this.now();
+        this.idleMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_IDLE_MS, ACTIVITY_OWNER_IDLE_MS);
+        this.unattendedMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_MAX_UNATTENDED_MS, ACTIVITY_OWNER_MAX_UNATTENDED_MS);
         this.address = activityOwnerAddress(options.dataRoot);
         this.store = new ConversationActivityStore(join(this.address.dataRoot, 'conversation-activity.sqlite'));
         this.actor = { requestSource: 'user', actorId: options.actorId };
@@ -92,6 +136,7 @@ export class ConversationActivityOwnerHost {
                                 client.role = authenticateActivityClient(credentials, message);
                                 client.instanceId = message.instanceId;
                                 clearTimeout(handshake);
+                                this.lastActivity = this.unattendedSince = this.now();
                                 this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch });
                             }
                             catch {
@@ -103,7 +148,11 @@ export class ConversationActivityOwnerHost {
                             void this.request(client, message);
                     }
                 });
-                socket.on('close', () => { clearTimeout(handshake); client.active = false; this.clients.delete(client); for (const stop of client.subscriptions.values())
+                socket.on('close', () => { if (client.role) {
+                    this.lastActivity = this.now();
+                    if (![...this.clients].some(other => other !== client && other.active && other.role))
+                        this.unattendedSince = this.now();
+                } clearTimeout(handshake); client.active = false; this.clients.delete(client); for (const stop of client.subscriptions.values())
                     stop(); client.subscriptions.clear(); void this.options.disconnected?.(client.id).catch(error => this.options.onError?.(error)); });
                 socket.on('error', () => socket.destroy());
             });
@@ -112,6 +161,11 @@ export class ConversationActivityOwnerHost {
             writeFileSync(`${statusFile}.${process.pid}.tmp`, JSON.stringify({ ownerEpoch: this.ownerEpoch, pid: process.pid, rootHash: this.address.rootHash }), { mode: 0o600 });
             renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
             this.service.start();
+            this.watchState = JSON.stringify(this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) })));
+            if (this.options.idle) {
+                this.idleTimer = (this.options.setInterval ?? setInterval)(() => this.checkIdle(), ACTIVITY_OWNER_IDLE_CHECK_MS);
+                this.idleTimer.unref();
+            }
         }
         catch (error) {
             await this.stop();
@@ -139,6 +193,7 @@ export class ConversationActivityOwnerHost {
         const { id, method, params } = parsed.data;
         client.pending++;
         this.pending++;
+        this.lastActivity = this.now();
         try {
             if (client.role === 'user' && !USER_METHODS.has(method))
                 throw new Error('activity_method_forbidden');
@@ -152,6 +207,7 @@ export class ConversationActivityOwnerHost {
         finally {
             client.pending--;
             this.pending--;
+            this.lastActivity = this.now();
         }
     }
     async dispatch(client, method, params) {
@@ -315,6 +371,8 @@ export class ConversationActivityOwnerHost {
         if (this.stopped)
             return;
         this.stopped = true;
+        if (this.idleTimer)
+            (this.options.clearInterval ?? clearInterval)(this.idleTimer);
         this.service.dispose();
         for (const client of this.clients)
             client.socket.destroy();
