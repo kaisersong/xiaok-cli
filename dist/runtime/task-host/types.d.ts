@@ -115,11 +115,21 @@ export interface SalvageSummary {
     summary: string[];
     reason?: string;
 }
+/** Stable cursor for a committed event; connection generations are not identities. */
+export interface TaskEventRecord {
+    taskId: string;
+    eventIndex: number;
+    sourceDataEpoch: string;
+    event: DesktopTaskEvent;
+}
 export type DesktopTaskEvent = {
     type: 'execution_health';
     state: import('../execution-health.js').ExecutionHealthState;
 } | {
     type: 'task_started';
+    taskId: string;
+} | {
+    type: 'task_execution_started';
     taskId: string;
 } | {
     type: 'task_terminal';
@@ -313,7 +323,12 @@ export interface TaskRuntimeHost {
     }>;
     subscribeTask(taskId: string, options?: {
         sinceIndex?: number;
+        signal?: AbortSignal;
     }): AsyncIterable<DesktopTaskEvent>;
+    subscribeTaskRecords?(taskId: string, options?: {
+        sinceIndex?: number;
+        signal?: AbortSignal;
+    }): AsyncIterable<TaskEventRecord>;
     answerQuestion(input: {
         taskId: string;
         answer: UserAnswer;

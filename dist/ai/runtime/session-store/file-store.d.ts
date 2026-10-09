@@ -1,3 +1,4 @@
+import { type NativeSessionIdentity } from './identity.js';
 import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 import { type AtomicWriteFile } from '../../../utils/atomic-file.js';
 export declare class FileSessionStore implements SessionStore {
@@ -8,6 +9,7 @@ export declare class FileSessionStore implements SessionStore {
     save(snapshot: PersistedSessionSnapshot): Promise<void>;
     loadLast(): Promise<PersistedSessionSnapshot | null>;
     load(sessionId: string): Promise<PersistedSessionSnapshot | null>;
+    readIdentity(sessionId: string): NativeSessionIdentity | null;
     list(): Promise<SessionListEntry[]>;
     fork(sessionId: string): Promise<PersistedSessionSnapshot>;
     private readSnapshot;

@@ -6,6 +6,7 @@ import {
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { readNativeSessionIdentity, type NativeSessionIdentity } from './identity.js';
 import type { Message } from '../../../types.js';
 import { getConfigDir } from '../../../utils/config.js';
 import type {
@@ -46,9 +47,11 @@ export class FileSessionStore implements SessionStore {
   async save(snapshot: PersistedSessionSnapshot): Promise<void> {
     this.ensureRoot();
     const durableSnapshot = toDurableSessionSnapshot(snapshot);
+    const { sessionId, cwd, intentDelegation, ...rest } = durableSnapshot;
     const document: PersistedSessionDocument = {
       schemaVersion: SESSION_SCHEMA_VERSION,
-      ...durableSnapshot,
+      sessionId, cwd, intentDelegation,
+      ...rest,
     };
     this.atomicWrite(
       this.getFilePath(snapshot.sessionId),
@@ -80,6 +83,11 @@ export class FileSessionStore implements SessionStore {
 
   async load(sessionId: string): Promise<PersistedSessionSnapshot | null> {
     return this.readSnapshot(sessionId);
+  }
+  readIdentity(sessionId: string): NativeSessionIdentity | null {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) return null;
+    const identity = readNativeSessionIdentity(this.getFilePath(sessionId));
+    return identity?.sessionId === sessionId ? identity : null;
   }
 
   async list(): Promise<SessionListEntry[]> {

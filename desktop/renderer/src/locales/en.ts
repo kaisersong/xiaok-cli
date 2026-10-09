@@ -3104,6 +3104,18 @@ export const en: LocaleStrings = {
   scheduledLinkedLoop: "Linked loop",
 
   // chatView
+  conversationActivity: {
+    submitInput: 'Submit', declineInput: 'Decline', cancelWork: 'Cancel work', cancelRequested: 'Cancellation requested; awaiting confirmation', unsupportedInput: 'This input must be handled by the original service.',
+    projectClosed: 'Closed (delivery unconfirmed)',
+    historyGap: 'Some historical updates were compacted or expired; current state is confirmed by the source',
+    lastProgress: 'Last progress',
+    title: 'Work updates', stopped: 'Following stopped', unavailable: 'Status unconfirmed', details: 'View project', lastUpdate: 'Last synced', nextReport: 'Next report',
+    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.',
+    unread: (count) => `${count} unread work updates`,
+    report: (state, time) => `Status report ${time}: ${state}.`,
+    sources: { kswarm: 'Project', task_host: 'Background task', agent_group: 'Agent collaboration', mcp: 'Plugin task' },
+    states: { accepted: 'Accepted', queued: 'Queued', running: 'Running', blocked: 'Blocked', input_required: 'Action required', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' },
+  },
   chatView: {
     executionSyncing: 'Synchronizing execution status…',
     executionDisconnected: 'Execution status disconnected. Please reconnect.',

@@ -1,3 +1,7 @@
+import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
+import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
+import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
+import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
 import { resolveKSwarmReviewReadPaths } from './kswarm-review-files.js';
 import { ConversationRoomService, createConversationRoomTool } from './conversation-room-service.js';
 import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from './kswarm-execution-clock.js';
@@ -167,6 +171,12 @@ import {
 import { SqliteGoalStore } from './goal-store-sqlite.js';
 import { DesktopExecutionCoordinator, currentExecutionLane, withExecutionLane } from './desktop-execution-coordinator.js';
 import { ConversationProjectService, type ConversationProjectRoomClient } from './conversation-project-service.js';
+import { ConversationActivityStore } from '../../src/runtime/conversation-activity/store.js';
+import { ConversationActivityService, type ActivityActor, type ConversationActivityApi } from '../../src/runtime/conversation-activity/service.js';
+import { ConversationActivitySources, type ProjectActivityPage } from '../../src/runtime/conversation-activity/sources.js';
+import { ConversationMcpActivities } from '../../src/runtime/conversation-activity/mcp.js';
+import { callMcpToolWithTasks } from '../../src/platform/mcp/tasks.js';
+import type { ReportingPreference } from '../../src/runtime/conversation-activity/types.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -458,6 +468,8 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  notifyConversationActivity?: (activity: import('../../src/runtime/conversation-activity/types.js').ConversationActivity,
+    watch: import('../../src/runtime/conversation-activity/types.js').WorkWatch) => Promise<'shown' | 'suppressed' | 'failed'>;
   /** Main-owned embedding/profile path; never accepted from renderer or tools. */
   knowledgeDbPath?: string;
   dataRoot: string;
@@ -881,7 +893,49 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   const snapshotStore = new FileTaskSnapshotStore(join(options.dataRoot, 'tasks'));
   const conversationRooms = new ConversationRoomService({ dataRoot: options.dataRoot });
-  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService });
+  let activityStore: ConversationActivityStore | undefined;
+  let activityService: ConversationActivityApi | undefined;
+  let activitySources: ConversationActivitySources | ConversationActivityAttachedSources | undefined;
+  let activityMcp: ConversationMcpActivities | undefined;
+  const activityMcpConnections = new Set<McpClientConnection>();
+  let unsubscribeActivityGroups: (() => void) | undefined;
+  let activityAttachment: Promise<void> | undefined;
+  let activityRoomClient: ConversationProjectRoomClient | undefined;
+  const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
+  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
+    ...(activityEnabled ? { activityHooks: {
+      prepare: async input => {
+        await activityAttachment;
+        if (!activityService) throw new Error('activity_unavailable');
+        await activityService.prepareAssociation(input, { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
+      },
+      created: async input => {
+        if (!activityService || !activitySources) throw new Error('activity_unavailable');
+        const identity = await readActivityIdentity(input.projectId);
+        if (!identity.ok || !identity.sourceDataEpoch || !identity.roomId || !activityRoomClient) throw new Error('activity_source_unsupported');
+        const room = await activityRoomClient.getRoomSnapshot(identity.roomId);
+        if (!isRecord(room) || room.ok === false || !isRecord(room.room)) throw new Error('activity_source_forbidden');
+        const watchId = `project:${input.operationId}`;
+        await activityService.bindWork({ operationId: input.operationId, watchId, source: 'kswarm',
+          logicalSourceId: 'kswarm-local', sourceDataEpoch: identity.sourceDataEpoch, workId: input.projectId });
+        await activitySources.startWatch(watchId);
+        return { activityWatchId: watchId };
+      },
+    } } : {}) });
+  const readActivityProject = async (projectId: string, after: number, signal: AbortSignal): Promise<ProjectActivityPage> => {
+    const response = await options.kswarmService.request(`/projects/${encodeURIComponent(projectId)}/activity?after=${after}`, {
+      signal, headers: { 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
+    });
+    if (!response.ok) throw new Error(`activity_source_http_${response.status}`);
+    return await response.json() as ProjectActivityPage;
+  };
+  const readActivityIdentity = async (projectId: string): Promise<{ ok: boolean; sourceDataEpoch?: string; roomId?: string }> => {
+    const response = await options.kswarmService.request(`/projects/${encodeURIComponent(projectId)}/activity-identity`, {
+      headers: { 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
+    });
+    if (!response.ok) throw new Error(`activity_source_http_${response.status}`);
+    return await response.json();
+  };
   const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
   const scopedKSwarmHosts = new Set<WeakRef<InProcessTaskRuntimeHost>>();
   const resolveScopedTaskHost = (taskId: string, fallback: InProcessTaskRuntimeHost): InProcessTaskRuntimeHost => {
@@ -960,6 +1014,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await goalCoordinator.handleRecoveredHostTerminal(input);
     },
     beforeThreadDeletion: async threadId => {
+      const deletion = multiAgentStore?.getThread(threadId)?.deletionReceipt;
+      if (deletion && activityService) {
+        activityService.handleThreadDeletion(threadId, deletion.operationId);
+        for (const watch of activityStore?.listWatches() ?? []) if (watch.origin.threadId === threadId) { activitySources?.stopWatch(watch.watchId); activityMcp?.stopWatch(watch.watchId); }
+      }
       await codexTasks.stopThread(threadId);
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
       await goalCoordinator.stopForThreadDeletion({ threadId, requestSource: 'user' });
@@ -1430,6 +1489,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               ...(isCuaServer ? { startupSignal: computerUseActivationSignal } : {}),
             });
             connectionRef = connection;
+            activityMcpConnections.add(connection); activityMcp?.register(connection);
             const catalogTimeout = server.timeout?.catalog ?? resolveMcpCatalogTimeoutMs();
             const callTimeout = server.timeout?.call ?? resolveMcpCallToolTimeoutMs();
             const schemas = (await connection.client.listTools(
@@ -1437,9 +1497,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               { timeout: catalogTimeout, ...(isCuaServer ? { signal: computerUseActivationSignal } : {}) },
             )).tools as McpToolSchema[];
             const callToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => {
-              const result = await callMcpToolWithSignal(connection.client,
+              const context = options?.executionContext;
+              const observer = context && activityMcp ? await activityMcp.observer(context.taskId, context.toolInvocationId ?? randomUUID(), connection) : undefined;
+              const result = await callMcpToolWithTasks(connection,
                 { name, arguments: input },
-                { timeout: callTimeout, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
+                { timeout: callTimeout, signal: options?.signal, declaration: schemas.find(schema => schema.name === name) as import('@modelcontextprotocol/client').Tool | undefined,
+                  observer, detachOnTask: Boolean(observer), ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
               );
               options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result);
@@ -1782,6 +1845,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     // Use timestamp + random suffix to ensure unique taskId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     onPersistedEvent: async input => {
+      if (input.event.type === 'task_terminal' && multiAgentService && hostDeliveryAuthority) {
+        try { await multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority, taskId: input.taskId }); }
+        catch (error) { console.warn('[conversation-activity] run reconciliation failed:', error instanceof Error ? error.message : 'activity_run_pending'); }
+      }
       if (artifactWorkspaceService) {
         try {
           await artifactWorkspaceService.handlePersistedTaskEvent(input);
@@ -1803,6 +1870,13 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     await multiAgentReady;
     await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user');
   };
+  const prepareActivityViewerThread = async (threadId: string, actor: ActivityActor): Promise<void> => {
+    if (actor?.requestSource !== 'user' || actor.actorId !== `desktop-user:${multiAgentProfileId}`) throw new Error('activity_actor_forbidden');
+    await multiAgentReady;
+    // Reuse the same trusted user identity admission as the Agents read API.
+    // Existing historical bindings are validated by activity service, never rebound.
+    if (!multiAgentStore?.getThread(threadId)) await prepareMultiAgentThread(threadId);
+  };
   const localTaskHost = {
     prepareTask: async (input: TaskCreateInput) => {
       let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
@@ -1815,7 +1889,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         prepared = await host.prepareTask(input);
       }
       if (currentExecutionLane() === 'foreground') {
-        conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+        await conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
         conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
       }
       return prepared;
@@ -1843,11 +1917,82 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   // Goal construction only installs its owner; recovery can now await its real
   // receipt before the same ready Promise opens any local task admission.
   const multiAgentReady = multiAgentService?.initialize(host) ?? Promise.resolve();
+  const installActivityGroupSubscription = () => {
+    if (!multiAgentStore || unsubscribeActivityGroups) return;
+    unsubscribeActivityGroups = multiAgentStore.subscribe(event => {
+        const group = multiAgentStore.requireGroup(event.groupId);
+        void (async () => {
+          await activityAttachment;
+          for (const run of multiAgentStore.getActivityRuns(event.groupId)) {
+            const members = multiAgentStore.getActivityMembers(run.runId);
+            if (!members.some(member => member.agentId !== `root_${event.groupId}`)) continue;
+            const operationId = `agent-run:${run.runId}`;
+            if (activityStore!.getWatch(operationId)) continue;
+            await activityService!.prepareAssociation({ threadId: group.threadId, operationId, creationIdempotencyKey: operationId }, { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
+            await activityService!.bindWork({ operationId, watchId: operationId, source: 'agent_group', logicalSourceId: 'agent-group-local', sourceDataEpoch: event.groupId, workId: event.groupId, runId: run.runId });
+          }
+          await activitySources!.refreshGroup(event.groupId, true);
+        })().catch(error => console.warn('[conversation-activity] agent event failed:', error instanceof Error ? error.message : 'activity_group_unavailable'));
+      });
+  };
+  if (activityEnabled && multiAgentStore) {
+    try {
+      activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { now: options.now });
+      activityService = new ConversationActivityService({ store: activityStore, profileId: multiAgentProfileId,
+        notify: options.notifyConversationActivity,
+        actorId: `desktop-user:${multiAgentProfileId}`, getThread: threadId => { const thread = multiAgentStore.getThread(threadId); return thread ? {
+          profileId: thread.profileId, threadId: thread.threadId, workspaceId: thread.workspaceId, deleteState: thread.deleteState ?? 'none',
+        } : null; },
+        canObserveWork: async watch => {
+          if (watch.source === 'task_host') {
+            const snapshot = (await resolveScopedTaskHost(watch.workId, host).recoverTask(watch.workId)).snapshot;
+            return snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
+          }
+          if (watch.source === 'agent_group') return multiAgentStore.requireGroup(watch.workId).threadId === watch.origin.threadId;
+          if (watch.source === 'mcp') return activityMcp?.canObserve(watch) ?? false;
+          if (watch.source === 'kswarm') {
+            if (!activityRoomClient) return false;
+            // Fetch only routing identity before Room authorization. A project
+            // detail response can contain private summaries and artifact paths.
+            const identity = await readActivityIdentity(watch.workId);
+            const roomId = identity.roomId;
+            if (!identity.ok || identity.sourceDataEpoch !== watch.sourceDataEpoch) return false;
+            if (!roomId) return false;
+            const snapshot = await activityRoomClient.getRoomSnapshot(roomId);
+            return isRecord(snapshot) && snapshot.ok !== false && isRecord(snapshot.room);
+          }
+          return false;
+        }, onError: error => console.warn('[conversation-activity]', error instanceof Error ? error.message : 'activity_delivery_failed'),
+      });
+      activitySources = new ConversationActivitySources({ store: activityStore, service: activityService,
+        taskHost: taskId => resolveScopedTaskHost(taskId, host), readProject: readActivityProject,
+        readGroup: (groupId, after) => multiAgentStore.readEvents(groupId, after),
+        groupMembers: runId => multiAgentStore.getActivityMembers(runId),
+        onError: error => console.warn('[conversation-activity-source]', error instanceof Error ? error.message : 'activity_source_failed') });
+      activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+        originThread: async taskId => {
+          const parent = activityStore!.listWatches().find(watch => watch.source === 'task_host' && watch.workId === taskId);
+          if (parent) return parent.origin.threadId;
+          const snapshot = await host.inspectTask(taskId);
+          return snapshot?.context?.threadId ?? null;
+        }, onError: error => console.warn('[conversation-activity-mcp]', error instanceof Error ? error.message : 'activity_mcp_unavailable') });
+      for (const connection of activityMcpConnections) activityMcp.register(connection);
+      installActivityGroupSubscription();
+      activityService.start();
+    } catch (error) {
+      activityService?.dispose(); activityStore?.close(); activityService = undefined; activityStore = undefined;
+      console.warn('[conversation-activity] unavailable:', error instanceof Error ? error.message : 'initialization_failed');
+    }
+  }
+
   let multiAgentStartupReady = !multiAgentService;
   if (multiAgentService) hostDeliveryAuthority = multiAgentService.bindHostDeliveryOwner(host);
   // Keep initialization failure observable by every admission path, without an
   // unhandled rejection when the window has not submitted its first task yet.
-  void multiAgentReady.then(() => { multiAgentStartupReady = true; }, () => {});
+    void multiAgentReady.then(() => {
+      multiAgentStartupReady = true;
+      if (multiAgentService && hostDeliveryAuthority) void multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority }).catch(error => console.warn('[conversation-activity] recovery pending:', error instanceof Error ? error.message : 'activity_run_pending'));
+    }, () => {});
   // Ready callers must enter Goal synchronously so its original permission
   // revision is captured before any queued revoke/regrant can run.
   const afterLocalRecovery = <T>(action: () => Promise<T>): Promise<T> => (
@@ -2522,9 +2667,21 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     }
   };
 
+  const authorizeLocalTaskActor = async (taskId: string, actor: NativeActor): Promise<void> => {
+    if (actor?.requestSource !== 'user' || actor.actorId !== `desktop-user:${multiAgentProfileId}`) throw new Error('task_actor_forbidden');
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(taskId)) throw new Error('invalid_task_id');
+    await multiAgentReady;
+    const snapshot = await snapshotStore.recoverTask(taskId);
+    const threadId = snapshot?.context?.threadId;
+    const thread = threadId ? multiAgentStore?.getThread(threadId) : null;
+    if (thread && (thread.profileId !== multiAgentProfileId || (thread.deleteState ?? 'none') !== 'none')) throw new Error('task_scope_forbidden');
+  };
+
   return {
     multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
     async disposeMultiAgent(): Promise<void> {
+      activityMcp?.dispose();
+      unsubscribeActivityGroups?.(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
       await codexTasks.dispose();
       unsubscribeMultiAgentGoal?.();
       await multiAgentApprovals?.dispose();
@@ -3237,14 +3394,87 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     /** Main-only binding; never exposed through preload or a model tool. */
     bindConversationRoomCreator: (creator: (input:Record<string,unknown>,context:{requestSource:'user';signal?:AbortSignal})=>Promise<unknown>) => conversationRooms.bindCreator(creator),
-    bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => conversationProjects.bindRoomClient(client),
+    bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => {
+      activityRoomClient = client; conversationProjects.bindRoomClient(client);
+      void multiAgentReady.then(async () => { await conversationProjects.recoverActivityBindings(); for (const watch of activityStore?.listWatches() ?? []) await activitySources?.startWatch(watch.watchId); }).catch(error => console.warn('[conversation-activity] restore failed:', error));
+    },
+    async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
+      if (!activityEnabled || !multiAgentStore) return;
+      if (activityAttachment) return activityAttachment;
+      activityAttachment = (async () => {
+        await multiAgentReady;
+        // Stop all in-process writers and source owners before acquiring the
+        // daemon lock. Native executors keep their original ownership.
+        activityMcp?.dispose(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
+        activityStore = undefined;
+        const client = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: options.dataRoot,
+          profileId: multiAgentProfileId, actorId: `desktop-user:${multiAgentProfileId}`,
+          identity: { kind: 'desktop', path: join(options.dataRoot, 'multi-agent', 'groups.sqlite') }, ...sourceConfig });
+        options.kswarmService.bindActivityOwner?.(client);
+        activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { readOnly: true });
+        activityService = new ConversationActivityAttachedService(client, `desktop-user:${multiAgentProfileId}`);
+        activitySources = new ConversationActivityAttachedSources(client);
+        activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+          externalObserver: connection => connection.activityEndpoint?.config.type !== 'stdio',
+          endpointReady: async connection => {
+            const endpoint = connection.activityEndpoint;
+            if (!endpoint || !connection.tasks) throw new Error('activity_mcp_endpoint_unverified');
+            await client.request('mcpRegister', { endpointId: connection.tasks.endpointId, name: endpoint.name,
+              ...(endpoint.config.type !== 'stdio' ? { config: endpoint.config, ...(endpoint.cwd ? { cwd: endpoint.cwd } : {}) } : {}) });
+          },
+          originThread: async taskId => {
+            const parent = activityStore!.listWatches().find(watch => watch.source === 'task_host' && watch.workId === taskId);
+            return parent?.origin.threadId ?? (await host.inspectTask(taskId))?.context?.threadId ?? null;
+          }, onError: error => console.warn('[conversation-activity-mcp]', error instanceof Error ? error.message : 'activity_mcp_unavailable') });
+        for (const connection of activityMcpConnections) activityMcp.register(connection);
+        installActivityGroupSubscription();
+      })();
+      return activityAttachment;
+    },
+    conversationActivity: activityEnabled && multiAgentStore ? {
+      mcpInputs: async (watchId: string, actor: ActivityActor) => { await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
+      mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
+      mcpCancel: async (watchId: string, actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
+      unread: (actor: ActivityActor) => activityService!.unreadThreads(actor),
+      read: (threadId: string, through: number, actor: ActivityActor) => activityService!.markRead(threadId, through, actor),
+      overview: (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => activityService!.subscribeOverview(actor, callback),
+      getWork: (watchId: string, actor: ActivityActor) => activityService!.getWork(watchId, actor),
+      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
+      subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
+      reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
+      stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
+      projectChanged: (projectId: string) => activitySources!.refreshProject(projectId, true),
+      projectConnectionChanged: (status: 'connected' | 'disconnected' | 'reconnecting') => activitySources!.projectConnectionChanged(status),
+    } : null,
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
-    createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'>) =>
-      withExecutionLane('background', () => afterLocalRecovery(() => goalCoordinator.admitUserTask({
+    createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'> & {
+      scheduledOrigin?: { actionId: string; runId: string; createdByTaskId?: string };
+    }) => withExecutionLane('background', () => afterLocalRecovery(async () => {
+      const origin = input.scheduledOrigin;
+      const creator = origin?.createdByTaskId ? await snapshotStore.recoverTask(origin.createdByTaskId) : null;
+      const threadId = creator?.context?.threadId;
+      const binding = threadId ? multiAgentStore?.getThread(threadId) : null;
+      const operationId = origin ? `scheduled:${origin.actionId}:${origin.runId}` : undefined;
+      if (activityService && operationId && threadId && binding?.profileId === multiAgentProfileId && (binding.deleteState ?? 'none') === 'none') {
+        await activityService.prepareAssociation({ threadId, operationId, creationIdempotencyKey: operationId },
+          { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
+      }
+      const task = await goalCoordinator.admitUserTask({
         prompt: input.prompt, materials: input.materials, permissionMode: input.permissionMode,
         watchdogMs: input.watchdogMs, maxToolLoopIterations: input.maxToolLoopIterations,
         context: localChatContext(),
-      }))),
+      });
+      if (activityService && activitySources && activityStore?.getAssociation(operationId ?? '')) {
+        const snapshot = await snapshotStore.recoverTask(task.taskId);
+        if (snapshot) {
+          const watchId = `task:${task.taskId}`;
+          await activityService.bindWork({ operationId: operationId!, watchId, source: 'task_host', logicalSourceId: 'task-host-local',
+            sourceDataEpoch: snapshot.sessionId, workId: task.taskId, runId: origin!.runId, actualExecutionThreadId: snapshot.context?.threadId });
+          await activitySources.startWatch(watchId);
+        }
+      }
+      return task;
+    })),
     getGoal: (threadId: string) => goalCoordinator.getGoal(threadId),
     createGoal: (input: { threadId: string } & GoalInput & GoalAttachmentRequest) => {
       const requestId = parseGoalRequestId(input.requestId);
@@ -3282,9 +3512,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     runKSwarmAssignPo,
     runKSwarmReviewSubmission,
     runKSwarmPlanApproved,
-    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTask(taskId,sinceIndex),
-    answerQuestion: (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => codexTasks.owns(input.taskId)?codexTasks.answer(input,nativeActor):resolveScopedTaskHost(input.taskId, host).answerQuestion(input),
-    cancelTask: (taskId:string, reasonOrActor?:string|NativeActor) => codexTasks.owns(taskId)?codexTasks.cancel(taskId,typeof reasonOrActor==='string'?undefined:reasonOrActor):resolveScopedTaskHost(taskId, host).cancelTask(taskId,typeof reasonOrActor==='string'?reasonOrActor:undefined),
+    authorizeTaskRead: authorizeLocalTaskActor,
+    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number; signal?: AbortSignal }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTask(taskId,sinceIndex),
+    answerQuestion: async (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => {
+      if (codexTasks.owns(input.taskId)) return codexTasks.answer(input, nativeActor);
+      if (nativeActor) await authorizeLocalTaskActor(input.taskId, nativeActor);
+      return resolveScopedTaskHost(input.taskId, host).answerQuestion(input);
+    },
+    cancelTask: async (taskId:string, reasonOrActor?:string|NativeActor) => {
+      if (codexTasks.owns(taskId)) return codexTasks.cancel(taskId, typeof reasonOrActor === 'string' ? undefined : reasonOrActor);
+      if (reasonOrActor && typeof reasonOrActor !== 'string') await authorizeLocalTaskActor(taskId, reasonOrActor);
+      return resolveScopedTaskHost(taskId, host).cancelTask(taskId, typeof reasonOrActor === 'string' ? reasonOrActor : undefined);
+    },
     async getActiveTask(): Promise<{ taskId: string } | null> {
       for (const ref of await host.getActiveTasks()) {
         if (!codexTasks.owns(ref.taskId) && resolveScopedTaskHost(ref.taskId, host) !== host) continue;

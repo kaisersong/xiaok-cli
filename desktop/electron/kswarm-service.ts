@@ -1,3 +1,5 @@
+import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
+import type { ConversationActivityOwnerClient } from '../../src/runtime/conversation-activity/owner-client.js';
 /**
  * KSwarm Service Manager
  *
@@ -611,6 +613,8 @@ export function shouldAdoptExistingKSwarmService(input: {
 }
 
 export interface KSwarmService {
+  activityOwnerConfig?(): Promise<Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>>;
+  bindActivityOwner?(client: ConversationActivityOwnerClient): void;
   start(): Promise<void>;
   stop(): Promise<void>;
   restart(): Promise<void>;
@@ -626,6 +630,7 @@ export interface KSwarmService {
 }
 
 export interface CreateKSwarmServiceOptions {
+  activityOwnerPending?: boolean;
   spawnProcess?: typeof spawn;
   findPortOwner?: typeof findPidOnPort;
   killStalePortOwner?: typeof killStaleServiceOnPort;
@@ -701,7 +706,18 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   assertRoomWorkspaceStartupProtocol();
   const spawnProcess = options.spawnProcess ?? spawn;
   const findPortOwner = options.findPortOwner ?? findPidOnPort;
-  const killStalePortOwner = options.killStalePortOwner ?? killStaleServiceOnPort;
+  let activityOwner: ConversationActivityOwnerClient | undefined;
+  let activityDelegated = options.activityOwnerPending === true;
+  const killStalePortOwner = async (port: number): Promise<boolean> => {
+    if (activityDelegated || activityOwner) {
+      // A UI process never kills a managed or unknown listener. If the owner
+      // cannot be authenticated, this remains a refusal, never a takeover.
+      const pid = await findPortOwner(port);
+      if (pid && activityOwner) await activityOwner.request('sourceProtected', { pid });
+      return false;
+    }
+    return (options.killStalePortOwner ?? killStaleServiceOnPort)(port);
+  };
   let child: ChildProcess | null = null;
   let brokerChild: ChildProcess | null = null;
   let running = false;
@@ -879,7 +895,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
         healthFailureCount = 0;
         stopHealthCheck();
         notifyListeners();
-        await killOwnedServer();
+        try {
+          if (activityOwner) await activityOwner.request('sourceEnsure', { name: 'kswarm', ownerEpoch: activityOwner.ownerEpoch });
+          else await killOwnedServer();
+        } catch (error) { lastError = error instanceof Error ? error.message : 'activity_source_unavailable'; notifyListeners(); }
         if (!stopping) scheduleRestart();
       }
     }, HEALTH_INTERVAL_MS);
@@ -1027,6 +1046,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function ensureBroker(): Promise<boolean> {
+    if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
     // Check if broker is already running
     if (await brokerHealthCheck()) {
       // A stale token can belong to an external installation. Authentication
@@ -1059,6 +1079,12 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       logKSwarmServiceLine('broker', 'lifecycle', 'owned broker stopped after stale authentication; restarting with persisted token');
     } else if (stopping) {
       return false;
+    }
+
+    if (activityDelegated || activityOwner) {
+      if (!activityOwner) throw new Error('activity_owner_initializing');
+      await activityOwner.request('sourceEnsure', { name: 'broker', ownerEpoch: activityOwner.ownerEpoch });
+      return brokerHealthCheck();
     }
 
     const brokerLaunch = resolveBrokerLaunchSpec();
@@ -1120,6 +1146,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function spawnServer(): Promise<void> {
+    if (activityDelegated && !activityOwner) throw new Error('activity_owner_initializing');
     if (child) return;
     const existingHealth = await fetchHealthJsonFromUrls(KSWARM_HEALTH_URLS);
     if (stopping) return;
@@ -1225,6 +1252,13 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       startHealthCheck();
       notifyListeners();
       return;
+    }
+
+    if (activityDelegated || activityOwner) {
+      if (!activityOwner) throw new Error('activity_owner_initializing');
+      await activityOwner.request('sourceEnsure', { name: 'kswarm', ownerEpoch: activityOwner.ownerEpoch });
+      const ready = await healthCheck(); running = ready; lastError = ready ? null : 'activity_source_unavailable';
+      if (ready) startHealthCheck(); notifyListeners(); return;
     }
 
     if (!serverPath) {
@@ -1435,8 +1469,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     stopPromise = (async () => {
       stopHealthCheck();
       clearRestartTimer();
-      await killOwnedServer();
-      await stopOwnedBroker();
+      if (!activityDelegated && !activityOwner) { await killOwnedServer(); await stopOwnedBroker(); }
       running = false;
       healthFailureCount = 0;
       notifyListeners();
@@ -1447,6 +1480,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function killOwnedServer(): Promise<void> {
+    if (activityDelegated || activityOwner) throw new Error('activity_source_stop_delegated');
     const ownedChild = child;
     if (!ownedChild) return;
     suppressedServerExits.add(ownedChild);
@@ -1463,6 +1497,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function restart(): Promise<void> {
+    if (activityOwner) {
+      await activityOwner.request('sourceRestart', { name: 'kswarm', ownerEpoch: activityOwner.ownerEpoch });
+      running = false; stopping = false; await spawnServerOnce(); return;
+    }
     await stop();
     const inFlightStart = startingPromise;
     if (inFlightStart) {
@@ -1477,6 +1515,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   }
 
   async function stopOwnedBroker(): Promise<void> {
+    if (activityDelegated || activityOwner) throw new Error('activity_source_stop_delegated');
     if (!brokerChild) return;
     const ownedBroker = brokerChild;
     const exitPromise = new Promise<void>(resolve => {
@@ -1562,5 +1601,31 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     notifyListeners();
   }
 
-  return { start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, getIntentBrokerRoomToken, request };
+  return {
+    async activityOwnerConfig() {
+      const serverPath = resolveServicePath('kswarm', 'src/server/index.js');
+      const brokerLaunch = resolveBrokerLaunchSpec();
+      if (!serverPath || !brokerLaunch) throw new Error('activity_source_entry_unavailable');
+      assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
+      assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
+      mkdirSync(brokerLaunch.cwd, { recursive: true });
+      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: process.env, cwd: brokerLaunch.cwd, port: BROKER_PORT,
+        repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
+      const brokerRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
+      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...process.env, KSWARM_PORT: String(KSWARM_PORT),
+        BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken } });
+      const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string' && item[1] !== process.env[item[0]]));
+      const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
+      return { kswarm: { url: `http://127.0.0.1:${KSWARM_PORT}`, mutationToken: desktopMutationToken,
+        brokerUrl: `http://127.0.0.1:${BROKER_PORT}`, roomToken: desktopRoomToken }, managedSources: [
+        { name: 'broker' as const, executable: brokerRuntime.command, entryPath: brokerLaunch.entryPath, args: brokerLaunch.nodeArgs,
+          cwd: brokerLaunch.cwd, env: strings(brokerRuntime.env), healthUrl: `http://127.0.0.1:${BROKER_PORT}/health`, expectedHealth: expected(brokerLaunch.entryPath) },
+        { name: 'kswarm' as const, executable: ksEnv.command, entryPath: serverPath, cwd: dirname(dirname(dirname(serverPath))),
+          env: strings(ksEnv.env), healthUrl: `http://127.0.0.1:${KSWARM_PORT}/health`, expectedHealth: expected(serverPath) },
+      ] };
+    },
+    bindActivityOwner(client: ConversationActivityOwnerClient) {
+      if (child || brokerChild || startingPromise) throw new Error('activity_source_handoff_required');
+      activityOwner = client; activityDelegated = true;
+    }, start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, getIntentBrokerRoomToken, request };
 }

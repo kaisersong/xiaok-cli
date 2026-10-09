@@ -2989,6 +2989,15 @@ export interface LocaleStrings {
   scheduledLinkedLoop: string;
 
   // chatView
+  conversationActivity: {
+    submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
+    title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
+    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string;
+    report: (state: string, time: string) => string;
+    unread: (count: number) => string;
+    sources: Record<'kswarm' | 'task_host' | 'agent_group' | 'mcp', string>;
+    states: Record<'accepted' | 'queued' | 'running' | 'blocked' | 'input_required' | 'completed' | 'failed' | 'cancelled', string>;
+  };
   chatView: {
     executionSyncing: string;
     executionDisconnected: string;

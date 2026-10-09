@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { KSwarmService } from './kswarm-service.js';
 
@@ -8,7 +8,9 @@ type Source = 'user' | 'agent' | 'scheduler';
 type RecordValue = Record<string, unknown>;
 interface UserRequest { prompt: string; permissionMode?: string; threadId?: string }
 interface Operation {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
+  originThreadId?: string;
+  activityOperationId?: string;
   taskId: string;
   prompt: string;
   startPolicy: 'plan_only' | 'activate_and_dispatch_after_plan';
@@ -50,6 +52,10 @@ export class ConversationProjectService {
   constructor(private readonly options: {
     dataRoot: string;
     kswarmService: Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
+    activityHooks?: {
+      prepare(input: { threadId: string; operationId: string; creationIdempotencyKey: string }): Promise<void>;
+      created(input: { threadId: string; operationId: string; projectId: string; roomId?: string; project: RecordValue }): Promise<RecordValue>;
+    };
   }) {
     this.directory = join(options.dataRoot, 'conversation-projects');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
@@ -65,28 +71,68 @@ export class ConversationProjectService {
   bindPreparedTask(input: {
     taskId: string; prompt: string; permissionMode?: string;
     executionScope?: { kind: string; origin?: string };
-  }, context: { requestSource: Source }): boolean {
+  }, context: { requestSource: Source }): boolean | Promise<boolean> {
     const admitted = this.admission.getStore();
     if (context.requestSource !== 'user' || !admitted || admitted.prompt !== input.prompt
       || admitted.permissionMode === 'plan' || input.permissionMode === 'plan'
       || input.executionScope && (input.executionScope.kind !== 'goal_turn' || input.executionScope.origin !== 'user')
       || !requestsCreation(admitted.prompt)) return false;
     const prior = this.read(input.taskId);
-    if (prior) return prior.prompt === input.prompt;
+    if (prior) {
+      if (prior.originThreadId && admitted.threadId && prior.originThreadId !== admitted.threadId) throw new Error('conversation_project_origin_conflict');
+      if (prior.prompt !== input.prompt) return false;
+      return this.options.activityHooks && prior.originThreadId && prior.activityOperationId
+        ? this.options.activityHooks.prepare({ threadId: prior.originThreadId, operationId: prior.activityOperationId, creationIdempotencyKey: prior.clientRequestKey }).then(() => true)
+        : true;
+    }
     const startPolicy = /只(?:要|出)?(?:计划|规划)|先只?规划|不要(?:开始)?执行|暂不执行|先不(?:执行|启动)|不要启动|等我确认|让我审批/.test(input.prompt)
       ? 'plan_only' : 'activate_and_dispatch_after_plan';
-    this.save({ schemaVersion: 1, taskId: input.taskId, prompt: input.prompt, startPolicy,
-      clientRequestKey: `conversation-project:${createHash('sha256').update(input.taskId).digest('hex')}` });
-    return true;
+    const key = `conversation-project:${createHash('sha256').update(input.taskId).digest('hex')}`;
+    const operation: Operation = { schemaVersion: 2, taskId: input.taskId, prompt: input.prompt, startPolicy,
+      clientRequestKey: key, ...(admitted.threadId ? { originThreadId: admitted.threadId, activityOperationId: key } : {}) };
+    // Journal the trusted creation intent first. If the independent activity
+    // database commit is interrupted, startup can reconstruct that association
+    // without inventing origin evidence or replaying source creation.
+    this.save(operation);
+    return this.options.activityHooks && admitted.threadId
+      ? this.options.activityHooks.prepare({ threadId: admitted.threadId, operationId: key, creationIdempotencyKey: key }).then(() => true)
+      : true;
   }
 
   isAuthorized(taskId: string): boolean { return Boolean(this.read(taskId)); }
+
+  /** Recover observation receipts, never replay project creation or dispatch. */
+  async recoverActivityBindings(): Promise<void> {
+    if (!this.options.activityHooks) return;
+    let projects: unknown[] | undefined;
+    for (const name of readdirSync(this.directory)) {
+      if (!name.endsWith('.json')) continue;
+      const operation = this.read(name.slice(0, -5));
+      if (!operation?.originThreadId || !operation.activityOperationId) continue;
+      await this.options.activityHooks.prepare({ threadId: operation.originThreadId, operationId: operation.activityOperationId, creationIdempotencyKey: operation.clientRequestKey });
+      if (operation.result) {
+        await this.observeReceipt(operation, operation.result);
+      } else if (operation.proposal && operation.roomId && operation.sourceMessageId) {
+        // The source may have committed before the process could persist its response.
+        // A lookup is safe on restart; creation/dispatch is never replayed here.
+        if (!projects) {
+          const known = await this.request('/projects');
+          projects = Array.isArray(known.projects) ? known.projects : [];
+        }
+        const project = projects.find(value => record(value) && value.clientRequestKey === operation.clientRequestKey);
+        if (record(project) && project.primaryRoomId === operation.roomId) {
+          await this.receipt(operation, { ok: true, project, reused: true });
+        }
+      }
+    }
+  }
+
 
   async create(proposal: RecordValue, context: { requestSource: Source; taskId: string; signal?: AbortSignal }): Promise<RecordValue> {
     context.signal?.throwIfAborted();
     const operation = this.read(context.taskId);
     if (!operation || !['user', 'agent'].includes(context.requestSource)) return { ok: false, error: 'conversation_project_user_authorization_required' };
-    if (operation.result) return { ...operation.result, reused: true };
+    if (operation.result) return this.observeReceipt(operation, { ...operation.result, reused: true });
     const pending = this.inflight.get(context.taskId);
     if (pending) return pending;
     const run = this.execute(operation, proposal, context.signal).finally(() => this.inflight.delete(context.taskId));
@@ -102,7 +148,7 @@ export class ConversationProjectService {
     if (!filename || !existsSync(filename)) return undefined;
     try {
       const value = JSON.parse(readFileSync(filename, 'utf8')) as Operation;
-      return value.schemaVersion === 1 && value.taskId === taskId && requestsCreation(value.prompt) ? value : undefined;
+      return [1, 2].includes(value.schemaVersion) && value.taskId === taskId && requestsCreation(value.prompt) ? value : undefined;
     } catch { return undefined; }
   }
   private save(operation: Operation): void {
@@ -129,13 +175,28 @@ export class ConversationProjectService {
     return { sessionId: 'desktop-main-user', requestSource: 'user' as const,
       actor: { kind: 'user' as const, userId: 'user.local' }, allowedLogicalAgentIds: [], issuedAt: new Date().toISOString() };
   }
-  private receipt(operation: Operation, result: RecordValue): RecordValue {
+  private async receipt(operation: Operation, result: RecordValue): Promise<RecordValue> {
     const project = record(result.project) ? result.project : undefined;
     if (!text(project?.id)) throw new Error('conversation_project_creation_missing_id');
     const receipt = { ...result, ok: true, created: true, projectId: text(project?.id), roomId: operation.roomId };
     operation.result = receipt;
     this.save(operation);
-    return receipt;
+    return this.observeReceipt(operation, receipt);
+  }
+
+  private async observeReceipt(operation: Operation, receipt: RecordValue): Promise<RecordValue> {
+    if (!this.options.activityHooks || !operation.originThreadId || !operation.activityOperationId) return receipt;
+    try {
+      const project = record(receipt.project) ? receipt.project : {};
+      const activity = await this.options.activityHooks.created({ threadId: operation.originThreadId,
+        operationId: operation.activityOperationId, projectId: text(receipt.projectId) || text(project.id), roomId: operation.roomId, project });
+      const result = { ...receipt, ...activity, activityStatus: 'active' };
+      operation.result = result; this.save(operation); return result;
+    } catch (error) {
+      // The source commit is already real. Observation failure never reruns it.
+      const result = { ...receipt, activityStatus: 'pending', activityError: error instanceof Error ? error.message : 'activity_binding_unavailable' };
+      operation.result = result; this.save(operation); return result;
+    }
   }
 
   private async execute(operation: Operation, input: RecordValue, signal?: AbortSignal): Promise<RecordValue> {

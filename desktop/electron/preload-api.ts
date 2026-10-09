@@ -1,3 +1,4 @@
+import type { ConversationActivity, WorkWatch, WorkProjection, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
 import type {OpenFileResult, ReadFileResult, SaveFileInput, SaveFileResult} from '../shared/file-ipc-contract.js';
 import type { IpcRenderer } from 'electron';
 import type { RoomWorkspaceApi } from '../shared/room-workspace-contract.js';
@@ -78,6 +79,17 @@ export const PRELOAD_API_KEYS = [
   'createTask',
   'createTaskWithFiles',
   'subscribeTask',
+  'getConversationActivities',
+  'getConversationActivityUnread',
+  'markConversationActivitiesRead',
+  'subscribeConversationActivityOverview',
+  'subscribeConversationActivities',
+  'getWorkActivity',
+  'getMcpTaskInputs',
+  'answerMcpTaskInput',
+  'cancelMcpWork',
+  'updateWorkReporting',
+  'stopWorkWatch',
   'getMultiAgentSnapshot',
   'listMultiAgentGroups',
   'listMultiAgents',
@@ -360,6 +372,8 @@ export const FULL_PRELOAD_KEYS: readonly string[] = [
 // `desktop:subscribeTask` to register the subscription on main side; we still
 // classify it as event subscription because its primary surface is a stream.
 export const EVENT_SUBSCRIPTION_KEYS = [
+  'subscribeConversationActivityOverview',
+  'subscribeConversationActivities',
   'subscribeTask',
   'subscribeMultiAgents',
   'subscribeLocalExecutionAuthorization',
@@ -401,6 +415,15 @@ export const INVOKE_API_KEYS: readonly string[] = FULL_PRELOAD_KEYS.filter(
 // name. Tests cross-check this against the live preload implementation and the
 // main-process handler registry to catch drift.
 export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
+  getConversationActivities: 'desktop:activity:list',
+  getConversationActivityUnread: 'desktop:activity:unread',
+  markConversationActivitiesRead: 'desktop:activity:read',
+  getWorkActivity: 'desktop:activity:work',
+  getMcpTaskInputs: 'desktop:activity:mcpInputs',
+  answerMcpTaskInput: 'desktop:activity:mcpAnswer',
+  cancelMcpWork: 'desktop:activity:mcpCancel',
+  updateWorkReporting: 'desktop:activity:reporting',
+  stopWorkWatch: 'desktop:activity:stop',
   getMultiAgentSnapshot: 'desktop:getMultiAgentSnapshot',
   listMultiAgentGroups: 'desktop:listMultiAgentGroups',
   listMultiAgents: 'desktop:listMultiAgents',
@@ -686,6 +709,12 @@ export const INVOKE_CHANNEL_BY_KEY: Readonly<Record<string, string>> = {
 // them, but kept under explicit watch — adding to this list should be a
 // deliberate decision (and ideally short-lived).
 export const KNOWN_UNROUTED_HANDLERS: readonly string[] = [
+  // Invoked by subscribeConversationActivities' disposer, not separate renderer methods.
+  'desktop:activity:subscribe',
+  'desktop:activity:overview',
+  'desktop:activity:unsubscribe',
+  // Task subscription cleanup is invoked only by the stream disposer.
+  'desktop:unsubscribeTask',
   // Artifact editing handlers (ipc.ts:465-493) — predate the preload bridge
   // and are not currently called from renderer. Track them here until they're
   // either exposed or removed.
@@ -1344,6 +1373,17 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   setGoalUserQueuePending(input: { threadId: string; pending: boolean }): Promise<void>;
   onGoalChanged(handler: (input: DesktopGoalChangedEvent) => void): () => void;
   onGoalTaskPrepared(handler: (input: DesktopGoalTaskPrepared) => void): () => void;
+  getConversationActivityUnread(): Promise<Array<{ threadId: string; count: number }>>;
+  markConversationActivitiesRead(input: { threadId: string; throughLocalSeq: number }): Promise<void>;
+  subscribeConversationActivityOverview(handler: (change: { threadId: string; watchId?: string }) => void): () => void;
+  getConversationActivities(input: { threadId: string; afterLocalSeq?: number; limit?: number }): Promise<ConversationActivity[]>;
+  subscribeConversationActivities(threadId: string, handler: (change: { threadId: string; watchId?: string }) => void): () => void;
+  getWorkActivity(watchId: string): Promise<{ watch: WorkWatch; projection: WorkProjection }>;
+  getMcpTaskInputs(watchId: string): Promise<McpInputForm[]>;
+  answerMcpTaskInput(input: { watchId: string; inputId: string; expectedDigest: string; action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }): Promise<void>;
+  cancelMcpWork(watchId: string): Promise<{ requested: true }>;
+  updateWorkReporting(input: { watchId: string; preference: ReportingPreference; expectedPolicyRevision: number }): Promise<WorkWatch>;
+  stopWorkWatch(input: { watchId: string; expectedPolicyRevision: number }): Promise<WorkWatch>;
   subscribeTask(taskId: string, handler: (event: DesktopTaskEvent) => void, sinceIndex?: number): () => void;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string): Promise<void>;
@@ -1491,7 +1531,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   approveTimedActionAuto(actionId: string): Promise<unknown | null>;
   revokeTimedActionAuto(actionId: string): Promise<unknown | null>;
   clearScheduledTaskRunHistory(actionId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
-  onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
+  onScheduledTaskDue(handler: (event: { taskId: string; runtimeTaskId?: string; completed?: boolean; dispatchStatus?: 'success' | 'failed' | 'skipped'; runtimeState?: 'accepted' | 'not_started'; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string }) => void): () => void;
   listMemories(): Promise<unknown[]>;
   createMemory(input: { content: string; tags: string[]; source?: string }): Promise<unknown>;
   updateMemory(input: { id: string; content?: string; tags?: string[] }): Promise<unknown>;
@@ -1744,15 +1784,41 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
       ipcRenderer.on('desktop:goal:taskPrepared', listener);
       return () => ipcRenderer.off('desktop:goal:taskPrepared', listener);
     },
+    getConversationActivityUnread: () => ipcRenderer.invoke('desktop:activity:unread') as Promise<Array<{ threadId: string; count: number }>>,
+    markConversationActivitiesRead: input => ipcRenderer.invoke('desktop:activity:read', input) as Promise<void>,
+    subscribeConversationActivityOverview(handler) {
+      const subscriptionId = `overview-${Date.now()}-${Math.random()}`;
+      const listener = (_event: unknown, payload: unknown) => { const data = payload as { threadId?: unknown; watchId?: unknown } | null; if (typeof data?.threadId === 'string') handler({ threadId: data.threadId, ...(typeof data.watchId === 'string' ? { watchId: data.watchId } : {}) }); };
+      ipcRenderer.on('desktop:activity:changed', listener);
+      void ipcRenderer.invoke('desktop:activity:overview', { subscriptionId }).catch(() => undefined);
+      return () => { ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
+    },
+    getConversationActivities: input => ipcRenderer.invoke('desktop:activity:list', input) as Promise<ConversationActivity[]>,
+    getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }) as Promise<{ watch: WorkWatch; projection: WorkProjection }>,
+    getMcpTaskInputs: watchId => ipcRenderer.invoke('desktop:activity:mcpInputs', { watchId }) as Promise<McpInputForm[]>,
+    answerMcpTaskInput: input => ipcRenderer.invoke('desktop:activity:mcpAnswer', input) as Promise<void>,
+    cancelMcpWork: watchId => ipcRenderer.invoke('desktop:activity:mcpCancel', { watchId }) as Promise<{ requested: true }>,
+    updateWorkReporting: input => ipcRenderer.invoke('desktop:activity:reporting', input) as Promise<WorkWatch>,
+    stopWorkWatch: input => ipcRenderer.invoke('desktop:activity:stop', input) as Promise<WorkWatch>,
+    subscribeConversationActivities(threadId, handler) {
+      const subscriptionId = `activity-${Date.now()}-${Math.random()}`;
+      const listener = (_event: unknown, payload: unknown) => { const data = payload as { threadId?: unknown; watchId?: unknown } | null; if (data?.threadId === threadId) handler({ threadId, ...(typeof data.watchId === 'string' ? { watchId: data.watchId } : {}) }); };
+      ipcRenderer.on('desktop:activity:changed', listener);
+      let live = true;
+      void ipcRenderer.invoke('desktop:activity:subscribe', { threadId, subscriptionId }).then(() => { if (live) handler({ threadId }); }).catch(() => undefined);
+      return () => { live = false; ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
+    },
     subscribeTask(taskId, handler, sinceIndex) {
+      const subscriptionId = `task-${Date.now()}-${Math.random()}`;
       const channel = `desktop:taskEvent:${taskId}`;
       const listener = (_event: unknown, payload: unknown) => {
         handler(payload as DesktopTaskEvent);
       };
       ipcRenderer.on(channel, listener);
-      void ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex } : { taskId });
+      const registration = ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex, subscriptionId } : { taskId, subscriptionId }).catch(() => undefined);
       return () => {
         ipcRenderer.off(channel, listener);
+        void registration.then(() => ipcRenderer.invoke('desktop:unsubscribeTask', { taskId, subscriptionId })).catch(() => undefined);
       };
     },
     answerQuestion: (input) => ipcRenderer.invoke('desktop:answerQuestion', input) as Promise<void>,
@@ -2020,7 +2086,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     onScheduledTaskDue(handler) {
       const channel = 'desktop:scheduledTaskDue';
       const listener = (_event: unknown, payload: unknown) => {
-        handler(payload as { taskId: string; runtimeTaskId?: string; completed?: boolean; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string });
+        handler(payload as { taskId: string; runtimeTaskId?: string; completed?: boolean; dispatchStatus?: 'success' | 'failed' | 'skipped'; runtimeState?: 'accepted' | 'not_started'; success?: boolean; title?: string; lastRunAt?: number; nextRunAt?: number; error?: string });
       };
       ipcRenderer.on(channel, listener);
       return () => {

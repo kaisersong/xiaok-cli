@@ -19,6 +19,7 @@ import { createGoalTools } from '../ai/tools/goal.js';
 import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput, type DebugEvent, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
+import { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -401,6 +402,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const subAgentNotices = new SubAgentNoticeQueue();
   let flushSubAgentNotices = (): void => {};
   let interactiveNotificationsReady = false;
+  let cliActivities: CliConversationActivities | undefined;
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
@@ -1106,6 +1108,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
   });
   const buildCleanupSteps = (): Array<() => void | Promise<void>> => [
+    () => cliActivities?.close(),
     () => registryFactory.dispose(),
     () => transcriptLogger.close(),
     () => platform.dispose(),
@@ -1195,6 +1198,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     skillEval: currentSkillEvalState,
     skillExecution: currentSkillExecutionState,
   });
+
+  if (!opts.print && isTTY() && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0') {
+    try { cliActivities = await CliConversationActivities.attach({ cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform, changed: () => flushSubAgentNotices(),
+      onError: error => log.debug('cli_activity_unavailable', String(error)) }); }
+    catch (error) { log.debug('cli_activity_owner_unavailable', String(error)); }
+  }
 
   // 触发 SessionStart hook
   void lifecycleHooks.runHooks('SessionStart', {
@@ -2162,9 +2171,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   flushSubAgentNotices = (): void => {
-    subAgentNotices.flush(interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
+    const canWrite = interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
       && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
-      && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
+      && !scrollRegion.isContentStreaming();
+    subAgentNotices.flush(canWrite, writeOrchestrationBlock);
+    cliActivities?.flush(canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready', writeOrchestrationBlock);
   };
 
   const persistSession = async (options: {
@@ -3300,7 +3311,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_stop', (event) => {
-    if (subAgentNotices.hasPending) {
+    if (subAgentNotices.hasPending || cliActivities?.hasPending) {
       endStreamingPhaseForInterrupt();
       flushSubAgentNotices();
     }

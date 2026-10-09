@@ -118,9 +118,18 @@ export interface SalvageSummary {
   reason?: string;
 }
 
+/** Stable cursor for a committed event; connection generations are not identities. */
+export interface TaskEventRecord {
+  taskId: string;
+  eventIndex: number;
+  sourceDataEpoch: string;
+  event: DesktopTaskEvent;
+}
+
 export type DesktopTaskEvent =
   | { type: 'execution_health'; state: import('../execution-health.js').ExecutionHealthState }
   | { type: 'task_started'; taskId: string }
+  | { type: 'task_execution_started'; taskId: string }
   | { type: 'task_terminal'; status: Extract<TaskSnapshotStatus, 'completed' | 'failed' | 'cancelled'> }
   | { type: 'understanding_updated'; understanding: TaskUnderstanding }
   | { type: 'plan_updated'; plan: PlanStep[] }
@@ -249,7 +258,8 @@ export interface TaskRuntimeHost {
   prepareTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   startTask(taskId: string): Promise<void>;
   createTask(input: TaskCreateInput): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
-  subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent>;
+  subscribeTask(taskId: string, options?: { sinceIndex?: number; signal?: AbortSignal }): AsyncIterable<DesktopTaskEvent>;
+  subscribeTaskRecords?(taskId: string, options?: { sinceIndex?: number; signal?: AbortSignal }): AsyncIterable<TaskEventRecord>;
   answerQuestion(input: { taskId: string; answer: UserAnswer }): Promise<void>;
   cancelTask(taskId: string, reason?: string): Promise<void>;
   getActiveTasks(): Promise<ActiveTaskRef[]>;

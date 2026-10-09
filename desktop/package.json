@@ -30,6 +30,7 @@
     "@anthropic-ai/sdk": "^0.121.0",
     "@firecrawl/anydoc": "0.1.8",
     "@modelcontextprotocol/client": "2.3.0",
+    "@modelcontextprotocol/ext-tasks": "0.2.2",
     "@tanstack/react-query": "^5.100.10",
     "ajv": "8.20.0",
     "better-sqlite3": "^13.0.3",

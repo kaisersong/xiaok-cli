@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { readNativeSessionIdentity } from './identity.js';
 import { getConfigDir } from '../../../utils/config.js';
 import { assertKimiK3DurableResumeSupported, toDurableSessionSnapshot, } from './store.js';
 import { cloneSessionIntentLedger, rekeySessionIntentLedger, } from '../../../runtime/intent-delegation/types.js';
@@ -21,9 +22,11 @@ export class FileSessionStore {
     async save(snapshot) {
         this.ensureRoot();
         const durableSnapshot = toDurableSessionSnapshot(snapshot);
+        const { sessionId, cwd, intentDelegation, ...rest } = durableSnapshot;
         const document = {
             schemaVersion: SESSION_SCHEMA_VERSION,
-            ...durableSnapshot,
+            sessionId, cwd, intentDelegation,
+            ...rest,
         };
         this.atomicWrite(this.getFilePath(snapshot.sessionId), JSON.stringify(document, null, 2));
         this.atomicWrite(join(this.rootDir, 'last_session'), snapshot.sessionId);
@@ -48,6 +51,12 @@ export class FileSessionStore {
     }
     async load(sessionId) {
         return this.readSnapshot(sessionId);
+    }
+    readIdentity(sessionId) {
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId))
+            return null;
+        const identity = readNativeSessionIdentity(this.getFilePath(sessionId));
+        return identity?.sessionId === sessionId ? identity : null;
     }
     async list() {
         if (!existsSync(this.rootDir)) {

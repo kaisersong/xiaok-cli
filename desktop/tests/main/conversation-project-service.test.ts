@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ import { resolveAgentExecution } from '../../../../kswarm/src/core/agent-executi
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function fixture() {
+function fixture(extra: Record<string, unknown> = {}) {
   const dataRoot = mkdtempSync(join(tmpdir(), 'conversation-project-'));
   roots.push(dataRoot);
   const agents: any[] = [
@@ -37,21 +37,83 @@ function fixture() {
     getRoomSnapshot: vi.fn(async () => ({ ok: true, room: { roomId: 'room-real', revision: 2 } })),
   };
   const gateway = { request, getDesktopMutationToken: () => 'host-token' };
-  const service = new ConversationProjectService({ dataRoot, kswarmService: gateway as never });
+  const service = new ConversationProjectService({ ...extra, dataRoot, kswarmService: gateway as never });
   service.bindRoomClient(roomClient);
   const proposal = {
     kind: 'project_proposal', name: '真实调研项目', goal: '交付 HTML 报告', requirements: 'Markdown 不算交付完成',
     planningGuidance: '生成 HTML 报告', poAgent: 'xiaok-po', members: ['xiaok-worker'], memberCount: 3, memberNames: [],
     executionMode: 'auto', startPolicy: 'activate_and_dispatch_after_plan',
   };
-  function authorize(prompt = '创建一个项目，完成调研并交付 HTML 报告', taskId = 'task_user', permissionMode?: 'auto' | 'plan') {
-    return service.withUserRequest({ prompt, permissionMode }, { requestSource: 'user' }, () =>
+  function authorize(prompt = '创建一个项目，完成调研并交付 HTML 报告', taskId = 'task_user', permissionMode?: 'auto' | 'plan', threadId?: string) {
+    return service.withUserRequest({ prompt, permissionMode, threadId }, { requestSource: 'user' }, () =>
       service.bindPreparedTask({ taskId, prompt, permissionMode }, { requestSource: 'user' }));
   }
   return { service, gateway, dataRoot, roomClient, request, projects, agents, proposal, authorize };
 }
 
 describe('main-owned conversation project creation', () => {
+  it('journals the trusted original thread before project creation and attaches its observation receipt', async () => {
+    const calls: string[] = [];
+    const prepare = vi.fn(async (input: any) => { calls.push('prepare'); expect(input.threadId).toBe('thread-original'); });
+    const created = vi.fn(async (input: any) => { calls.push('created'); expect(input.threadId).toBe('thread-original'); return { activityWatchId: 'watch-real' }; });
+    const f = fixture({ activityHooks: { prepare, created } });
+    await f.authorize(undefined, undefined, 'auto', 'thread-original');
+    const operation = JSON.parse(readFileSync(join(f.dataRoot, 'conversation-projects', 'task_user.json'), 'utf8'));
+    expect(operation).toMatchObject({ schemaVersion: 2, originThreadId: 'thread-original' });
+    expect(calls).toEqual(['prepare']);
+    const result = await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'task_user' });
+    expect(result).toMatchObject({ ok: true, activityWatchId: 'watch-real', activityStatus: 'active' });
+    expect(calls).toEqual(['prepare', 'created']);
+  });
+  it('has a recoverable origin journal before committing the separate activity association', async () => {
+    let dataRoot = '';
+    let fail = true;
+    const prepare = vi.fn(async () => {
+      expect(JSON.parse(readFileSync(join(dataRoot, 'conversation-projects', 'task_user.json'), 'utf8')).originThreadId).toBe('thread-original');
+      if (fail) throw new Error('association commit fault');
+    });
+    const hooks = { prepare, created: vi.fn(async () => ({})) };
+    const f = fixture({ activityHooks: hooks }); dataRoot = f.dataRoot;
+    await expect(f.authorize(undefined, undefined, 'auto', 'thread-original')).rejects.toThrow('association commit fault');
+    expect(f.projects).toEqual([]);
+    fail = false;
+    const recovered = new ConversationProjectService({ dataRoot, kswarmService: f.gateway as never, activityHooks: hooks });
+    await recovered.recoverActivityBindings();
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(f.request).not.toHaveBeenCalled(); expect(hooks.created).not.toHaveBeenCalled();
+  });
+
+  it('keeps a committed project successful when follow-up binding fails and retries only the binding', async () => {
+    let fail = true;
+    const created = vi.fn(async () => { if (fail) throw new Error('binding fault'); return { activityWatchId: 'repaired' }; });
+    const f = fixture({ activityHooks: { prepare: async () => {}, created } });
+    await f.authorize(undefined, undefined, 'auto', 'thread-original');
+    const first = await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'task_user' });
+    expect(first).toMatchObject({ ok: true, activityStatus: 'pending' });
+    fail = false;
+    const second = await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'task_user' });
+    expect(second).toMatchObject({ ok: true, activityStatus: 'active', activityWatchId: 'repaired' });
+    expect(f.projects).toHaveLength(1);
+  });
+
+  it('reconciles a source commit without a local response receipt on startup using read-only lookup', async () => {
+    const created = vi.fn(async () => ({ activityWatchId: 'recovered' }));
+    const hooks = { prepare: async () => {}, created };
+    const f = fixture({ activityHooks: hooks });
+    await f.authorize(undefined, undefined, 'auto', 'thread-original');
+    await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'task_user' });
+    const filename = join(f.dataRoot, 'conversation-projects', 'task_user.json');
+    const pending = JSON.parse(readFileSync(filename, 'utf8'));
+    delete pending.result; writeFileSync(filename, JSON.stringify(pending));
+    f.request.mockClear(); created.mockClear();
+    const recovered = new ConversationProjectService({ dataRoot: f.dataRoot, kswarmService: f.gateway as never, activityHooks: hooks });
+    await recovered.recoverActivityBindings();
+    expect(created).toHaveBeenCalledOnce();
+    expect(f.request.mock.calls.map(([path, init]) => [path, init?.method ?? 'GET'])).toEqual([['/projects', 'GET']]);
+    expect(JSON.parse(readFileSync(filename, 'utf8')).result).toMatchObject({ projectId: 'proj-real', activityStatus: 'active' });
+    expect(f.projects).toHaveLength(1);
+  });
+
   it('creates a real Room-first project, fills worker count, records user provenance, and starts by default', async () => {
     const f = fixture(); f.authorize();
     const result = await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'task_user' });

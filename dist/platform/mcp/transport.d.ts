@@ -6,6 +6,8 @@
  */
 import { Client, type ClientOptions, type ProtocolEra } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { type TaskEnabledSession } from '@modelcontextprotocol/ext-tasks/client';
+import { McpTaskRequestCoordinator } from './task-request-coordinator.js';
 import { type ControlledCloseBudget, type ForceKillGuard } from './controlled-stdio-transport.js';
 import type { McpServerConfig, McpProtocolPolicy } from './types.js';
 export declare class InPlaceStdioClientTransport extends StdioClientTransport {
@@ -55,6 +57,15 @@ export interface McpCloseHandle {
  */
 export interface McpClientConnection {
     client: Client;
+    /** Native verified endpoint configuration; never supplied through tool JSON. */
+    activityEndpoint?: {
+        name: string;
+        config: McpServerConfig;
+        cwd?: string;
+    };
+    tasks?: TaskEnabledSession;
+    listenTaskEvents?: McpTaskRequestCoordinator['listenTasks'];
+    observeTaskStatus?: McpTaskRequestCoordinator['observeTaskStatus'];
     protocolEra: ProtocolEra;
     getStderrTail(): string;
     /** stdio child pid captured at connect time, null for network transports. */

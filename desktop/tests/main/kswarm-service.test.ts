@@ -1569,3 +1569,23 @@ describe('kswarm room auth secrets persistence', () => {
     }
   });
 });
+
+describe('activity-owner delegated manager boundaries', () => {
+  it('fences bootstrap before any Desktop spawn or stale-PID recovery and preserves sources on quit', async () => {
+    const root = mkdtempSync(join(tmpdir(),'kswarm-delegated-')); vi.stubEnv('XIAOK_CONFIG_DIR',root);
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch',fetchMock);
+    const killer = vi.fn(); const service = createKSwarmService({ activityOwnerPending:true, spawnProcess:spawnMock as never, killStalePortOwner:killer });
+    try { await expect(service.start()).rejects.toThrow('activity_owner_initializing'); await service.stop(); expect(fetchMock).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled(); expect(killer).not.toHaveBeenCalled(); }
+    finally { rmSync(root,{recursive:true,force:true}); }
+  });
+  it('asks the supervisor to recover an unavailable bound source and never falls through to Desktop spawning', async () => {
+    const root=mkdtempSync(join(tmpdir(),'kswarm-delegated-recover-')); vi.stubEnv('XIAOK_CONFIG_DIR',root);
+    const entry=join(root,'server.js'); writeFileSync(entry,'// owned test entry'); vi.stubEnv('KSWARM_SERVER_PATH',entry);
+    let healthy=false; vi.stubGlobal('fetch',vi.fn(async(input:string|URL|Request)=>new Response('{}',{status:String(input).includes(':4318/')||healthy?200:503})));
+    const request=vi.fn(async(method:string)=>{if(method==='sourceEnsure') healthy=true;});
+    const service=createKSwarmService({activityOwnerPending:true,spawnProcess:spawnMock as never,findPortOwner:async()=>null});
+    service.bindActivityOwner!({ownerEpoch:'owner',request} as never);
+    try{await service.start();expect(request).toHaveBeenCalledWith('sourceEnsure',{name:'kswarm',ownerEpoch:'owner'});expect(service.getStatus().running).toBe(true);expect(spawnMock).not.toHaveBeenCalled();await service.stop();}
+    finally{await service.stop();rmSync(root,{recursive:true,force:true});}
+  });
+});
