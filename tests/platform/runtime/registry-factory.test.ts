@@ -136,9 +136,28 @@ describe('registry-factory sandbox auto mode', () => {
 
     expect(vi.mocked(buildToolList)).toHaveBeenCalledWith(
       undefined,
-      { cwd: '/test/cwd', allowOutsideCwd: true },
+      { cwd: '/test/cwd', allowOutsideCwd: true, outsideCwdGuard: expect.any(Function) },
       expect.any(Array),
     );
+  });
+
+  it('routes outside-cwd tool paths through the sandbox policy check', () => {
+    const checkPath = vi.fn(() => ({ allowed: false, reason: 'path is outside allowlist' }));
+    const platform = makeMockPlatform();
+    (platform as unknown as { sandboxPolicy: Record<string, unknown> }).sandboxPolicy.checkPath = checkPath;
+    const factory = createPlatformRegistryFactory({
+      platform,
+      source: 'chat',
+      sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: new PermissionManager({ mode: 'default' }),
+      buildSystemPrompt: async () => 'prompt',
+    });
+
+    factory.createRegistry('/test/cwd');
+    const toolOptions = vi.mocked(buildToolList).mock.calls.at(-1)?.[1] as { outsideCwdGuard?: (p: string) => { allowed: boolean } };
+    expect(toolOptions.outsideCwdGuard?.('/elsewhere/file.md')).toEqual({ allowed: false, reason: 'path is outside allowlist' });
+    expect(checkPath).toHaveBeenCalledWith('/elsewhere/file.md');
   });
 
   it('delegates sandbox denials outside auto mode', async () => {
