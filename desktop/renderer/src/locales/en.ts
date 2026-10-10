@@ -3105,6 +3105,7 @@ export const en: LocaleStrings = {
 
   // chatView
   conversationActivity: {
+    expand: 'Expand work details', collapse: 'Collapse work details', summaryDetails: 'View full update', workCount: (count) => `${count} work items`,
     submitInput: 'Submit', declineInput: 'Decline', cancelWork: 'Cancel work', cancelRequested: 'Cancellation requested; awaiting confirmation', unsupportedInput: 'This input must be handled by the original service.',
     projectClosed: 'Closed (delivery unconfirmed)',
     historyGap: 'Some historical updates were compacted or expired; current state is confirmed by the source',

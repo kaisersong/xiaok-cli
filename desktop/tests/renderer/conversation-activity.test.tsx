@@ -4,10 +4,11 @@ import { MemoryRouter } from 'react-router-dom';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ConversationActivityPanel } from '../../renderer/src/components/ConversationActivityPanel';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), reporting: vi.fn(), stop: vi.fn(), subscribe: vi.fn(() => vi.fn()) }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), work: vi.fn(), reporting: vi.fn(), stop: vi.fn(), inputs: vi.fn(), subscribe: vi.fn((_thread: string, _callback: () => void) => vi.fn()) }));
 vi.mock('../../renderer/src/shared/desktop', () => ({ getDesktopApi: () => ({
   getConversationActivities: mocks.list, getWorkActivity: mocks.work, updateWorkReporting: mocks.reporting,
   stopWorkWatch: mocks.stop, subscribeConversationActivities: mocks.subscribe,
+  getMcpTaskInputs: mocks.inputs,
 }) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -17,13 +18,54 @@ const watch = { watchId: 'watch', workId: 'project', source: 'kswarm', status: '
 function mount() {
   return render(<MemoryRouter><LocaleProvider><ConversationActivityPanel threadId="thread" /></LocaleProvider></MemoryRouter>);
 }
+async function expand() {
+  const toggle = await screen.findByTestId('activity-toggle');
+  fireEvent.click(toggle);
+}
 describe('conversation work feedback', () => {
+  it('reveals required plugin input and keeps its outcome visible after it is handled', async () => {
+    let changed: (() => void) | undefined;
+    mocks.subscribe.mockImplementation((_thread, callback) => { changed = callback; return vi.fn(); });
+    mocks.list.mockResolvedValue([{ watchId: 'watch', localSeq: 1, kind: 'input_required', at: 1000, projection }]);
+    const plugin = { ...watch, source: 'mcp' };
+    mocks.work.mockResolvedValue({ watch: plugin, projection: { ...projection, executionState: 'input_required', summary: '选择报告格式' } });
+    mocks.inputs.mockResolvedValue([{ inputId: 'input', expectedDigest: 'digest', prompt: '选择报告格式', fields: [] }]);
+    mount();
+    await waitFor(() => expect(screen.getByTestId('activity-toggle')).toHaveAttribute('aria-expanded', 'true'));
+    expect(await screen.findByRole('button', { name: /提交|Submit/ })).toBeVisible();
+    mocks.work.mockResolvedValue({ watch: plugin, projection: { ...projection, executionState: 'cancelled', summary: '已取消' } });
+    changed?.();
+    await waitFor(() => expect(screen.getByTestId('activity-work-watch')).toHaveTextContent('已取消'));
+    expect(screen.getByTestId('activity-toggle')).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('activity-toggle')).not.toBeDisabled();
+  });
+  it('keeps long completed reports collapsed and updates one fixed summary in place', async () => {
+    let changed: (() => void) | undefined;
+    mocks.subscribe.mockImplementation((_thread: string, callback: () => void) => { changed = callback; return vi.fn(); });
+    mocks.list.mockResolvedValue([{ watchId: 'watch', localSeq: 1, kind: 'report', at: 1000, projection }]);
+    const summary = '# 巡检报告\n' + '历史汇报正文。'.repeat(1000);
+    mocks.work.mockResolvedValue({ watch, projection: { ...projection, executionState: 'completed', summary } });
+    mount();
+    const toggle = await screen.findByTestId('activity-toggle');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('activity-work-watch')).not.toBeInTheDocument();
+    expect(screen.queryByText(summary)).not.toBeInTheDocument();
+    mocks.work.mockResolvedValue({ watch, projection: { ...projection, executionState: 'running', summary: '当前工作正在推进' } });
+    changed?.();
+    await waitFor(() => expect(toggle).toHaveTextContent('当前工作正在推进'));
+    expect(screen.getAllByTestId('activity-toggle')).toHaveLength(1);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expand();
+    expect(screen.getByTestId('activity-details')).toHaveClass('max-h-64', 'overflow-y-auto');
+    expect(screen.getAllByTestId('activity-work-watch')).toHaveLength(1);
+  });
   it('loads the next activity page so later work cards are not silently hidden', async () => {
     mocks.list.mockImplementation(async (input: { afterLocalSeq?: number }) => input.afterLocalSeq
       ? [{ activityId: 'later', localSeq: 201, watchId: 'later-watch', threadId: 'thread', kind: 'accepted', at: 1000, projection }]
       : Array.from({ length: 200 }, (_, index) => ({ activityId: `id-${index}`, localSeq: index + 1, watchId: 'watch', threadId: 'thread', kind: 'progress', at: 1000, projection })));
     mocks.work.mockImplementation(async (id: string) => ({ watch: { ...watch, watchId: id }, projection: { ...projection, watchId: id } }));
     mount();
+    await expand();
     await waitFor(() => expect(screen.getByTestId('activity-work-later-watch')).toBeVisible());
   });
   it('shows a loading error even before the first card can be read', async () => {
@@ -48,6 +90,7 @@ describe('conversation work feedback', () => {
     mocks.list.mockResolvedValue([1, 2].map(localSeq => ({ activityId: `id-${localSeq}`, localSeq, watchId: 'watch', threadId: 'thread', kind: 'progress', at: 1000, projection })));
     mocks.work.mockResolvedValue({ watch, projection });
     const { container } = mount();
+    await expand();
     await waitFor(() => expect(screen.getAllByTestId('activity-work-watch')).toHaveLength(1));
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeVisible();
@@ -62,6 +105,7 @@ describe('conversation work feedback', () => {
     });
     mocks.stop.mockResolvedValue({ ...watch, status: 'stopped', policyRevision: 2 });
     mount();
+    await expand();
     await waitFor(() => expect(screen.getByTestId('activity-work-watch')).toBeVisible());
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'critical_only' } });
     await waitFor(() => expect(mocks.reporting).toHaveBeenCalledWith({ watchId: 'watch', preference: 'critical_only', expectedPolicyRevision: 0 }));

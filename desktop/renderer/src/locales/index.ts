@@ -2990,6 +2990,7 @@ export interface LocaleStrings {
 
   // chatView
   conversationActivity: {
+    expand: string; collapse: string; summaryDetails: string; workCount: (count: number) => string;
     submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
     title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
     frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string; ownerUnavailable: string;

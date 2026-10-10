@@ -3085,6 +3085,7 @@ export const zh: LocaleStrings = {
 
   // chatView
   conversationActivity: {
+    expand: '展开跟进详情', collapse: '收起跟进详情', summaryDetails: '查看完整内容', workCount: (count) => `${count} 项工作`,
     submitInput: '提交', declineInput: '拒绝提供', cancelWork: '取消工作', cancelRequested: '已请求取消，等待来源确认', unsupportedInput: '此类输入需通过原服务处理。',
     projectClosed: '已关闭（未确认交付）',
     historyGap: '部分历史进展已合并或过期；当前状态按来源确认',
