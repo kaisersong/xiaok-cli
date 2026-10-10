@@ -11,6 +11,8 @@ export class ConversationActivityOwnerClient {
     connecting;
     buffer = '';
     disposed = false;
+    disconnectListeners = new Set();
+    onDisconnect(listener) { this.disconnectListeners.add(listener); return () => { this.disconnectListeners.delete(listener); }; }
     pending = new Map();
     subscriptions = new Map();
     constructor(dataRoot, role, instanceId) {
@@ -31,6 +33,8 @@ export class ConversationActivityOwnerClient {
             this.socket = socket;
             socket.setEncoding('utf8');
             let admitted = false;
+            let epoch;
+            let notified = false;
             const timeout = setTimeout(() => { socket.destroy(); reject(new Error('activity_owner_handshake_timeout')); }, 5000);
             socket.once('connect', () => socket.write(JSON.stringify({ type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, role: this.role, token: credentials[this.role], ...(this.instanceId ? { instanceId: this.instanceId } : {}) }) + '\n'));
             socket.on('data', (chunk) => {
@@ -63,6 +67,7 @@ export class ConversationActivityOwnerClient {
                         admitted = true;
                         clearTimeout(timeout);
                         this.ownerEpoch = message.ownerEpoch;
+                        epoch = message.ownerEpoch;
                         resolve();
                         // Replaying subscriptions is read-only. Mutations are never replayed.
                         queueMicrotask(() => {
@@ -113,7 +118,15 @@ export class ConversationActivityOwnerClient {
                     reject(error ?? new Error('activity_owner_connection_lost'));
             };
             socket.on('error', error => { closed(error); socket.destroy(); });
-            socket.on('close', () => closed());
+            socket.on('close', () => { closed(); if (admitted && epoch && !notified && !this.disposed) {
+                notified = true;
+                for (const listener of this.disconnectListeners) {
+                    try {
+                        listener(epoch);
+                    }
+                    catch { }
+                }
+            } });
         }).finally(() => { if (this.connecting === pending)
             this.connecting = undefined; });
         this.connecting = pending;
@@ -164,6 +177,7 @@ export class ConversationActivityOwnerClient {
         return () => { this.subscriptions.delete(subscriptionId); if (!this.disposed)
             void this.request('unsubscribe', { subscriptionId }).catch(() => { }); };
     }
+    close() { this.dispose(); }
     dispose() { if (this.disposed)
-        return; this.disposed = true; this.subscriptions.clear(); this.socket?.destroy(); }
+        return; this.disposed = true; this.disconnectListeners.clear(); this.subscriptions.clear(); this.socket?.destroy(); }
 }

@@ -133,7 +133,7 @@
     "onnxruntime-node@1.26.0": true
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.14.0"
   },
   "files": [
     "dist",

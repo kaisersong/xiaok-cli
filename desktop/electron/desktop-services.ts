@@ -901,12 +901,20 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const activityMcpConnections = new Set<McpClientConnection>();
   let unsubscribeActivityGroups: (() => void) | undefined;
   let activityAttachment: Promise<void> | undefined;
+  /** Set while the last attach attempt failed. A failed attempt is never cached: the next
+   * attachConversationActivityOwner() call starts a fresh one. Consumers see one stable,
+   * user-safe code instead of the owner's internal error (e.g. a config digest mismatch). */
+  let activityAttachFailure: unknown;
+  const awaitActivityAttachment = async (): Promise<void> => {
+    if (activityAttachment) { try { await activityAttachment; } catch { /* surfaced below as one stable code */ } }
+    if (activityAttachFailure !== undefined) throw new Error('activity_owner_unavailable');
+  };
   let activityRoomClient: ConversationProjectRoomClient | undefined;
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
     ...(activityEnabled ? { activityHooks: {
       prepare: async input => {
-        await activityAttachment;
+        await awaitActivityAttachment();
         if (!activityService) throw new Error('activity_unavailable');
         await activityService.prepareAssociation(input, { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
       },
@@ -1923,7 +1931,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     unsubscribeActivityGroups = multiAgentStore.subscribe(event => {
         const group = multiAgentStore.requireGroup(event.groupId);
         void (async () => {
-          await activityAttachment;
+          await awaitActivityAttachment();
           for (const run of multiAgentStore.getActivityRuns(event.groupId)) {
             const members = multiAgentStore.getActivityMembers(run.runId);
             if (!members.some(member => member.agentId !== `root_${event.groupId}`)) continue;
@@ -3403,7 +3411,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
       if (!activityEnabled || !multiAgentStore) return;
       if (activityAttachment) return activityAttachment;
-      activityAttachment = (async () => {
+      const attempt: Promise<void> = (async () => {
         await multiAgentReady;
         // Stop all in-process writers and source owners before acquiring the
         // daemon lock. Native executors keep their original ownership.
@@ -3431,18 +3439,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         for (const connection of activityMcpConnections) activityMcp.register(connection);
         installActivityGroupSubscription();
       })();
-      return activityAttachment;
+      activityAttachment = attempt;
+      attempt.then(() => { activityAttachFailure = undefined; }, error => {
+        // Do not cache the failure: allow a later retry. The in-process writers were disposed
+        // before the owner was contacted, so drop them rather than keep dead handles.
+        if (activityAttachment === attempt) activityAttachment = undefined;
+        activityAttachFailure = error ?? new Error('activity_owner_unavailable');
+        activityMcp = undefined; activitySources = undefined; activityService = undefined; activityStore = undefined;
+        console.warn('[conversation-activity] owner attach failed:', error instanceof Error ? error.message : 'activity_owner_attach_failed');
+      });
+      return attempt;
     },
     conversationActivity: activityEnabled && multiAgentStore ? {
       mcpInputs: async (watchId: string, actor: ActivityActor) => { await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
-      mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
-      mcpCancel: async (watchId: string, actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
+      mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
+      mcpCancel: async (watchId: string, actor: ActivityActor) => { await awaitActivityAttachment(); await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
       unread: (actor: ActivityActor) => activityService!.unreadThreads(actor),
       read: (threadId: string, through: number, actor: ActivityActor) => activityService!.markRead(threadId, through, actor),
       overview: (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => activityService!.subscribeOverview(actor, callback),
       getWork: (watchId: string, actor: ActivityActor) => activityService!.getWork(watchId, actor),
-      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
-      subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
+      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
+      subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
       reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
       stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
       projectChanged: (projectId: string) => activitySources!.refreshProject(projectId, true),

@@ -15,7 +15,7 @@ import { createGoalTools } from '../ai/tools/goal.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
-import { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
+import { attachCliConversationActivitiesWithinBudget, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -71,6 +71,7 @@ import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer
 import { openTranscriptPager, spawnPagerProcess } from '../ui/transcript-pager.js';
 import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
+import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
 import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
@@ -274,6 +275,7 @@ async function runChat(initialInput, opts) {
     let flushSubAgentNotices = () => { };
     let interactiveNotificationsReady = false;
     let cliActivities;
+    let cleanedUp = false;
     const transcriptBuffer = new TranscriptBuffer({
         onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
     });
@@ -936,7 +938,7 @@ async function runChat(initialInput, opts) {
         },
     });
     const buildCleanupSteps = () => [
-        () => cliActivities?.close(),
+        () => { cleanedUp = true; return cliActivities?.close(); },
         () => registryFactory.dispose(),
         () => transcriptLogger.close(),
         () => platform.dispose(),
@@ -1019,15 +1021,29 @@ async function runChat(initialInput, opts) {
         skillEval: currentSkillEvalState,
         skillExecution: currentSkillExecutionState,
     });
-    if (!opts.print && isTTY() && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0') {
-        try {
-            cliActivities = await CliConversationActivities.attach({ cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform, changed: () => flushSubAgentNotices(),
-                onError: error => log.debug('cli_activity_unavailable', String(error)) });
-        }
-        catch (error) {
-            log.debug('cli_activity_owner_unavailable', String(error));
-        }
-    }
+    const activityStartupNotices = createActivityStartupNotices({
+        configDir: getConfigDir(),
+        onDebug: (event, detail) => log.debug(event, detail),
+    });
+    cliActivities = await attachCliConversationActivitiesWithinBudget({
+        startupNotices: activityStartupNotices,
+        print: Boolean(opts.print),
+        isTTY: isTTY(),
+        conversationActivity: process.env.XIAOK_CONVERSATION_ACTIVITY,
+        attachOptions: { cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform,
+            changed: () => flushSubAgentNotices(),
+            onError: error => log.debug('cli_activity_unavailable', String(error)) },
+        onDebug: (event, detail) => log.debug(event, detail),
+    }, {
+        onLate: instance => {
+            if (cleanedUp) {
+                void instance.close();
+                return;
+            }
+            cliActivities = instance;
+        },
+        onSettled: () => flushSubAgentNotices(),
+    });
     // 触发 SessionStart hook
     void lifecycleHooks.runHooks('SessionStart', {
         source: opts.continue || opts.resume || opts.takeover ? 'resume' : 'startup',
@@ -1823,7 +1839,7 @@ async function runChat(initialInput, opts) {
     };
     const writeOrchestrationBlock = (block) => {
         if (!block) {
-            return;
+            return false;
         }
         endStreamingPhaseForInterrupt();
         if (scrollRegion.isActive()) {
@@ -1836,21 +1852,31 @@ async function runChat(initialInput, opts) {
             }
             catch (error) {
                 suspendInteractiveUi('write_orchestration_block', error);
+                return false;
             }
             mdRenderer.beginNewSegment();
             resetStreamingSegment();
-            return;
+            return true;
         }
         process.stdout.write(separatedBlock);
         mdRenderer.beginNewSegment();
         resetStreamingSegment();
+        return true;
     };
     flushSubAgentNotices = () => {
         const canWrite = interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
             && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
             && !scrollRegion.isContentStreaming();
         subAgentNotices.flush(canWrite, writeOrchestrationBlock);
-        cliActivities?.flush(canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready', writeOrchestrationBlock);
+        const activityCanWrite = canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready';
+        cliActivities?.flush(activityCanWrite, writeOrchestrationBlock);
+        if (activityCanWrite) {
+            const notice = activityStartupNotices.take();
+            if (notice) {
+                if (writeOrchestrationBlock(notice.text))
+                    notice.markShown();
+            }
+        }
     };
     const persistSession = async (options = {}) => {
         if (options.refreshIntentLedger ?? true) {
@@ -3837,6 +3863,11 @@ export function registerChatCommands(program) {
         .option('--skill-debug', '显示 skill 执行详情（stage、context 检查、耗时）')
         .argument('[input]', '单次任务描述（省略则进入交互模式）')
         .action(async (input, opts) => {
+        if (shouldBlockChatOnOldNode({ platform: process.platform, version: process.version, print: Boolean(opts.print), json: Boolean(opts.json) })) {
+            process.stderr.write(oldNodeMessage(process.version) + '\n');
+            process.exitCode = 1;
+            return;
+        }
         setCrashContext({ command: 'chat', args: process.argv.slice(2), cwd: process.cwd() });
         try {
             await runChat(input, opts);

@@ -37,6 +37,7 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
+import { createOnceNotice, startKSwarmWithActivityOwner } from './activity-owner-startup.js';
 import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
@@ -696,13 +697,14 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
-  kswarmStartPromise = (async () => {
-    if (process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' && kswarmService.activityOwnerConfig) {
-      const sourceConfig = await kswarmService.activityOwnerConfig();
-      await services.attachConversationActivityOwner(sourceConfig);
-    }
-    await kswarmService.start();
-  })().catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
+  const activityOwnerNoticeOnce = createOnceNotice(text => {
+    void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
+  });
+  kswarmStartPromise = startKSwarmWithActivityOwner({
+    kswarmService, activityEnabled: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
+    attachConversationActivityOwner: config => services.attachConversationActivityOwner(config),
+    log: message => console.error(message),
+  }, activityOwnerNoticeOnce).then(() => undefined).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
   const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
     if (event.type === 'project_activity' && typeof event.projectId === 'string') void services.conversationActivity?.projectChanged(event.projectId);

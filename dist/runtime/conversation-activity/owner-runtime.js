@@ -1,3 +1,4 @@
+import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -13,12 +14,15 @@ import { ActivitySourceSupervisor } from './source-supervisor.js';
 export function activityOwnerConfigDigest(config) {
     const canonical = (value) => Array.isArray(value) ? value.map(canonical)
         : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)])) : value;
-    return createHash('sha256').update(JSON.stringify(canonical(config))).digest('hex');
+    // Environment is launch input, not the identity of a running owner.
+    const digestConfig = { ...config, managedSources: config.managedSources?.map(({ env: _env, ...source }) => source) };
+    return createHash('sha256').update(JSON.stringify(canonical(digestConfig))).digest('hex');
 }
 /** Private configuration is supplied by the verified native bootstrap owner. */
-export async function startConversationActivityOwner(config) {
+export async function startConversationActivityOwner(config, options = {}) {
     if (config.schemaVersion !== 1)
         throw new Error('activity_owner_config_unsupported');
+    createPrivateActivityDirectory(config.dataRoot);
     const identity = new ActivityNativeIdentityRepository({ ...config.identity, profileId: config.profileId });
     const tasks = new ActivityTaskSnapshotReader(join(config.dataRoot, 'tasks'));
     const groups = config.identity.kind === 'desktop' ? new ActivityNativeGroupReader(config.identity.path) : undefined;
@@ -34,6 +38,7 @@ export async function startConversationActivityOwner(config) {
     };
     const ks = config.kswarm;
     const host = new ConversationActivityOwnerHost({ dataRoot: config.dataRoot, profileId: config.profileId, actorId: config.actorId, configDigest: activityOwnerConfigDigest(config),
+        idle: options.idle,
         disconnected: clientId => mcp.disconnected(clientId),
         mcpRequest: async (method, params, clientId) => {
             if (method === 'mcpRegister')
@@ -130,12 +135,20 @@ export async function startConversationActivityOwner(config) {
             clearTimeout(reconnect); socket?.close(); await mcp.close(); sources.dispose(); tasks.close(); groups?.close(); identity.close(); await host.stop(); } };
 }
 export async function serveConversationActivityOwner(configFile) {
+    process.umask(0o077);
     const state = statSync(configFile);
     if (state.size > 256 * 1024 || process.platform !== 'win32' && (state.uid !== process.getuid?.() || (state.mode & 0o077) !== 0))
         throw new Error('activity_owner_config_not_private');
     const config = JSON.parse(readFileSync(configFile, 'utf8'));
-    const runtime = await startConversationActivityOwner(config);
-    const stop = () => { void runtime.stop().then(() => process.exit(0), () => process.exit(1)); };
+    let runtime;
+    let stopping = false;
+    const stop = () => {
+        if (stopping)
+            return;
+        stopping = true;
+        void runtime.stop().then(() => process.exit(0), () => process.exit(1));
+    };
+    runtime = await startConversationActivityOwner(config, { idle: stop });
     process.once('SIGTERM', stop);
     process.once('SIGINT', stop);
 }
