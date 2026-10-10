@@ -44,7 +44,7 @@ describe.skipIf(process.platform === 'win32')('private storage', () => {
     const moduleUrl = (name: string) => pathToFileURL(join(process.cwd(), '.test-dist/src/runtime/conversation-activity', name + '.js')).href;
     try {
       const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
-        import { existsSync, statSync } from 'node:fs';
+        import { statSync } from 'node:fs';
         import { join } from 'node:path';
         import { strict as assert } from 'node:assert';
         import { createPrivateActivityDirectory } from ${JSON.stringify(moduleUrl('storage-permissions'))};
@@ -57,8 +57,8 @@ describe.skipIf(process.platform === 'win32')('private storage', () => {
         for (const dir of [root, join(root, '..'), join(root, '../..')]) assert.equal(statSync(dir).mode & 0o777, 0o700);
         const address = activityOwnerAddress(root); createActivityOwnerCredentials(address);
         assert.equal(statSync(address.credentialsPath).mode & 0o777, 0o600);
-        const notices = createActivityStartupNotices({ configDir: root }); assert.equal(notices.take(), undefined);
-        assert.equal(existsSync(join(root, 'conversation-activity', 'first-start-notice-shown')), false);
+        const notices = createActivityStartupNotices({ configDir: root }); notices.queueStarted(); notices.take().markShown();
+        assert.equal(statSync(join(root, 'conversation-activity', 'first-start-notice-shown')).mode & 0o777, 0o600);
         const file = join(root, 'conversation-activity.sqlite');
         for (let round = 0; round < 2; round++) {
           const store = new ConversationActivityStore(file);

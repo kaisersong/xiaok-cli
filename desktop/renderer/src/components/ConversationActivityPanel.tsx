@@ -38,12 +38,13 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
   const navigate = useNavigate();
   const [works, setWorks] = useState<WorkView[]>([]);
   const [error, setError] = useState<false | 'generic' | 'owner'>(false);
+  const [reports, setReports] = useState<ConversationActivity[]>([]);
   const [expanded, setExpanded] = useState(false);
   const loadRef = useRef<(() => Promise<void>) | undefined>(undefined);
   useEffect(() => {
     const api = getDesktopApi();
     let live = true, revision = 0;
-    setWorks([]); setExpanded(false); setError(false);
+    setWorks([]); setReports([]); setExpanded(false); setError(false);
     if (!api?.getConversationActivities || !api?.getWorkActivity) return;
     const load = async () => {
       const request = ++revision;
@@ -62,7 +63,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
         const ids = [...new Set(activities.map(item => item.watchId))];
         const views = await Promise.all(ids.map(id => api.getWorkActivity(id)));
         if (live && request === revision) {
-          setWorks(views); setError(false);
+          setWorks(views); setReports(activities.filter(item => item.kind === 'report')); setError(false);
           const throughLocalSeq = activities.at(-1)?.localSeq;
           if (throughLocalSeq !== undefined) void api.markConversationActivitiesRead?.({ threadId, throughLocalSeq }).catch(() => undefined);
         }
@@ -93,6 +94,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
   if (!works.length) return error ? <p role="status" className="text-xs text-[var(--c-text-muted)]">{error === 'owner' ? labels.ownerUnavailable : labels.error}</p> : null;
   const ordered = [...works].sort((a, b) => priority(b) - priority(a)
     || (b.projection.lastProgressAt ?? b.projection.lastHeartbeatAt ?? 0) - (a.projection.lastProgressAt ?? a.projection.lastHeartbeatAt ?? 0));
+  const latestReports = new Map(reports.map(item => [item.watchId, item]));
   const focused = ordered[0];
   const showDetails = expanded || needsInput;
   const state = ({ watch, projection }: WorkView) => projection.errorCode === 'activity_source_forbidden' ? labels.unavailable
@@ -100,6 +102,14 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
     : watch.source === 'kswarm' && projection.executionState === 'cancelled' ? labels.projectClosed
     : projection.businessOutcome === 'error' ? labels.states.failed : labels.states[projection.executionState];
   const time = (value: number | null) => value === null ? labels.noProgress : new Date(value).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US');
+  const ago = (value: number) => {
+    const seconds = Math.max(0, Math.round((Date.now() - value) / 1000));
+    const rtf = new Intl.RelativeTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', { numeric: 'auto' });
+    if (seconds < 60) return rtf.format(0, 'second');
+    if (seconds < 3600) return rtf.format(-Math.floor(seconds / 60), 'minute');
+    if (seconds < 86400) return rtf.format(-Math.floor(seconds / 3600), 'hour');
+    return rtf.format(-Math.floor(seconds / 86400), 'day');
+  };
   return (
     <section aria-label={labels.title} className="w-full overflow-hidden rounded-xl border border-[var(--c-border)] bg-[var(--c-bg-card)]" data-testid="conversation-activity">
       <button type="button" data-testid="activity-toggle" aria-expanded={showDetails} disabled={needsInput}
@@ -119,6 +129,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
         const { watch, projection } = view;
         const stopped = watch.status === 'stopped';
         const forbidden = projection.errorCode === 'activity_source_forbidden';
+        const report = latestReports.get(watch.watchId);
         const terminal = ['completed', 'failed', 'cancelled'].includes(projection.executionState);
         return (
           <article key={watch.watchId} data-testid={`activity-work-${watch.watchId}`} className="rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-3 text-sm">
@@ -129,6 +140,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
               {watch.source === 'kswarm' && <button type="button" className="ml-auto text-xs text-[var(--c-accent)]" onClick={() => navigate(`/projects/${encodeURIComponent(watch.workId)}`)}>{labels.details}</button>}
             </div>
             {preview(projection.summary) && <WorkSummary summary={projection.summary!} label={labels.summaryDetails} />}
+            <p className="mt-2 text-xs text-[var(--c-text-secondary)]" data-testid="activity-last-report">{report ? labels.report(labels.states[report.projection.executionState], ago(report.at)) : labels.noReport}</p>
             {projection.errorCode === 'activity_history_gap' && <p className="mt-2 text-xs text-[var(--c-text-muted)]">{labels.historyGap}</p>}
             {watch.source === 'mcp' && !forbidden && !stopped && !terminal && <McpWorkControls watchId={watch.watchId} needsInput={projection.executionState === 'input_required'} revision={projection.revision} />}
             <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--c-text-muted)]">
