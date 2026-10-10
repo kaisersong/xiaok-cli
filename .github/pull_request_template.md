@@ -12,3 +12,4 @@
 - [ ] 已按 `AGENTS.md` 运行与改动相关的检查（`npm run hygiene:check`；改代码后 `npm run governance:check`）。
 - [ ] 有没有经验要进台账（mydocs/xiaok-cli/quality/lessons-ledger.md）？有 → 已提交或已挂链接；没有 → 写明原因：
 - [ ] 改了测试矩阵或发版门槛没有？改了 → 已同步 PRD / 发布清单 / CI；没改 → 勾选并写「未改」：
+- [ ] PR 描述或评审里写了「现在没有行为 / 不生效 / 不存在」类结论吗？有 → 已附自己读到的 文件:行号 或运行结果；转引他人的已标「转引、未核实」。
