@@ -7,7 +7,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 export const ACTIVITY_OWNER_PROTOCOL = 1;
-export const ACTIVITY_OWNER_GENERATION = 2;
+/** Bump whenever activityOwnerConfigDigest (or anything else a client compares) changes, so older owners take the retire path instead of surfacing activity_owner_config_mismatch.
+ *  1 = unversioned (1.5.11); 2 = #23; 3 = digest ignores managedSources[*].env (#26). */
+export const ACTIVITY_OWNER_GENERATION = 3;
 export const ACTIVITY_REQUEST_BYTES = 256 * 1024;
 export const ACTIVITY_RESPONSE_BYTES = 4 * 1024 * 1024;
 export type ActivityClientRole = 'user' | 'producer';

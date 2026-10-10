@@ -30,6 +30,20 @@ describe('conversation work feedback', () => {
     mocks.list.mockRejectedValueOnce(new Error('read failed')); mount();
     await waitFor(() => expect(screen.getByRole('status')).toBeVisible());
   });
+  it('maps a failed owner attach to fixed copy and never renders the internal code', async () => {
+    mocks.list.mockRejectedValue(new Error("Error invoking remote method 'desktop:activity:list': Error: activity_owner_unavailable"));
+    const { container } = mount();
+    await waitFor(() => expect(screen.getByRole('status')).toBeVisible());
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/xiaoK 的后台组件和当前版本不一致，部分功能暂时无法启动。请退出所有 xiaok 窗口后重新打开。|background component does not match this version/);
+    expect(text).not.toMatch(/activity_owner|unavailable|mismatch|Error invoking/);
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+  it('keeps the generic message for ordinary read failures', async () => {
+    mocks.list.mockRejectedValue(new Error('read failed')); const { container } = mount();
+    await waitFor(() => expect(screen.getByRole('status')).toBeVisible());
+    expect(container.textContent).not.toMatch(/后台组件|background component/);
+  });
   it('shows one card for repeated observations and escapes source-provided text', async () => {
     mocks.list.mockResolvedValue([1, 2].map(localSeq => ({ activityId: `id-${localSeq}`, localSeq, watchId: 'watch', threadId: 'thread', kind: 'progress', at: 1000, projection })));
     mocks.work.mockResolvedValue({ watch, projection });
