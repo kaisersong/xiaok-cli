@@ -1,8 +1,3 @@
-import { chmodPrivateActivityFile } from './storage-permissions.js';
-import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
-import { createPrivateActivityDirectory } from './storage-permissions.js';
-import { statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { CliConversationActivities } from './cli.js';
 
 type AttachOptions = Parameters<typeof CliConversationActivities.attach>[0];
@@ -40,7 +35,6 @@ export async function attachCliConversationActivities(
       onLegacyOwner: outcome => { options.attachOptions.onLegacyOwner?.(outcome); if (outcome === 'replaced') options.startupNotices?.queueLegacyReplaced(); else options.startupNotices?.queueLegacyPending(); },
       onOwnerReplaced: () => { options.attachOptions.onOwnerReplaced?.(); options.startupNotices?.queueOwnerReplaced(); options.attachOptions.changed(); },
     });
-    if (instance) options.startupNotices?.queueStarted();
     return instance;
   } catch (error) {
     if (error instanceof Error && error.message === 'activity_storage_not_private') {
@@ -115,7 +109,6 @@ export interface ActivityStartupNotices {
   queueUnavailable(): void;
   queueStorageNotPrivate(): void;
   queueOwnerUnavailable(): void;
-  queueStarted(): void;
   take(): ActivityStartupNotice | undefined;
 }
 
@@ -124,8 +117,6 @@ export function createActivityStartupNotices(options: {
   version?: string;
   onDebug?(event: string, detail: string): void;
 }): ActivityStartupNotices {
-  const directory = join(options.configDir, 'conversation-activity');
-  const marker = join(directory, ACTIVITY_STORAGE_NAMES.notice);
   let pending: ActivityStartupNotice | undefined;
   const updates: ActivityStartupNotice[] = [];
   const seen = new Set<string>();
@@ -134,10 +125,6 @@ export function createActivityStartupNotices(options: {
     if (degraded || seen.has(key)) return;
     seen.add(key); updates.push({ text: ACTIVITY_OWNER_NOTICES[key], markShown() {} });
   };
-  let queued = false;
-  const debug = (error: unknown): void => {
-    options.onDebug?.('cli_activity_startup_notice_unavailable', String(error));
-  };
   return {
     queueOwnerReplaced() { queueUpdate('replaced'); },
     queueLegacyReplaced() { queueUpdate('legacyReplaced'); },
@@ -145,44 +132,19 @@ export function createActivityStartupNotices(options: {
     queueOwnerUnavailable() {
       if (degraded) return;
       degraded = true; updates.length = 0;
-      queued = true;
       pending = { text: '异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。', markShown() {} };
     },
     queueStorageNotPrivate() {
       if (degraded) return;
       degraded = true; updates.length = 0;
-      queued = true;
       pending = { text: '异步任务跟进已停用：无法把 ~/.xiaok/conversation-activity 设为仅本人可访问，请检查该目录的所有者和权限。', markShown() {} };
     },
     queueUnavailable() {
       if (degraded) return;
       degraded = true; updates.length = 0;
-      queued = true;
       pending = {
         text: nodeSupportsActivity(options.version ?? process.version) ? '异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。' : `异步任务跟进在当前 Node 版本（${options.version ?? process.version}）不可用，其他功能不受影响。升级到 Node ${CONVERSATION_ACTIVITY_MIN_NODE} 或更新版本后会自动启用。`,
         markShown() {},
-      };
-    },
-    queueStarted() {
-      if (queued) return;
-      queued = true;
-      try {
-        statSync(marker);
-        return;
-      } catch (error) {
-        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) debug(error);
-      }
-      pending = {
-        text: '已在后台启动任务跟进，设 XIAOK_CONVERSATION_ACTIVITY=0 可关闭。',
-        markShown() {
-          try {
-            createPrivateActivityDirectory(directory);
-            writeFileSync(marker, '', { mode: 0o600, flag: 'wx' });
-            chmodPrivateActivityFile(marker);
-          } catch (error) {
-            if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) debug(error);
-          }
-        },
       };
     },
     take() {
