@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, appendFileSync, writeFileSync, existsSync, watchFile, unwatchFile } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -7,7 +7,9 @@ const desktop = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const compiled = join(desktop, 'dist', 'main', 'desktop', 'electron');
 const root = process.env.XIAOK_MULTI_AGENT_E2E_ROOT;
 if (!root || !process.env.XIAOK_E2E_USER_DATA || !process.env.XIAOK_CONFIG_DIR) throw new Error('isolated E2E paths are required');
-mkdirSync(process.env.XIAOK_E2E_USER_DATA, { recursive: true }); app.setPath('userData', process.env.XIAOK_E2E_USER_DATA);
+mkdirSync(process.env.XIAOK_E2E_USER_DATA, { recursive: true });
+writeFileSync(join(root, 'e2e-process.json'), JSON.stringify({ pid: process.pid }), { mode: 0o600 });
+app.setPath('userData', process.env.XIAOK_E2E_USER_DATA);
 // Fail before construction when an older build would ignore the isolated KB path.
 if (!readFileSync(join(compiled, 'desktop-services.js'), 'utf8').includes('options.knowledgeDbPath')) throw new Error('rebuild Desktop main: isolated KB path is absent');
 const load = name => import(pathToFileURL(join(compiled, `${name}.js`)).href);
@@ -18,6 +20,8 @@ const { DesktopApplicationWindowOwner } = await load('desktop-application-window
 const { registerKSwarmProxy } = await load('kswarm-ipc-proxy');
 const { KSwarmStreamBridge } = await load('kswarm-stream-bridge');
 const rendererFile = join(desktop, 'dist', 'renderer', 'index.html');
+const showWindows = process.env.XIAOK_E2E_BACKGROUND !== '1';
+const activityWindows = new Set(); let secondary;
 let window; let services; let quitting = false;
 let releaseCleanup = () => {};
 let holdContent = false;
@@ -52,12 +56,15 @@ ipcMain.handle = (channel, listener) => registerHandler(channel, async (event, .
 });
 process.on('uncaughtException', error => { log('uncaught', String(error), error.stack); app.exit(1); });
 process.on('unhandledRejection', error => { log('unhandled', String(error)); });
+const activityKswarmUrl = process.env.XIAOK_ACTIVITY_E2E_KSWARM_URL;
 const kswarm = { start: async () => {}, stop: async () => {}, restart: async () => {}, onStatusChange: () => () => {},
   getStatus: () => ({ running: false, port: 0, pid: null, restartCount: 0, lastError: null }), getDesktopMutationToken: () => 'fixture',
-  getIntentBrokerRoomToken: () => 'fixture', request: async () => new Response('{}', { status: 503 }) };
+  getIntentBrokerRoomToken: () => 'fixture', request: async (path, init) => activityKswarmUrl
+    ? fetch(new URL(path, activityKswarmUrl), init) : new Response('{}', { status: 503 }) };
 
 async function createView() {
-  window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: true, width: 1440, height: 940 });
+  window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: showWindows, width: 1440, height: 940 });
+  activityWindows.add(window);
   window.webContents.on('console-message', (_event, level, message) => log('renderer', level, message));
   window.on('closed', () => { window = undefined; });
   await window.loadFile(rendererFile); return window;
@@ -68,17 +75,31 @@ const owner = new DesktopApplicationWindowOwner({ current: () => window && !wind
       pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService: kswarm });
     await services.saveModelConfig({ providerId: 'e2e-local', modelName: 'e2e-model', protocol: 'openai_legacy', baseUrl: process.env.XIAOK_MULTI_AGENT_E2E_PROVIDER, apiKey: 'e2e-fixture-only' });
     await services.multiAgent.ready;
+    if (process.env.XIAOK_ACTIVITY_E2E_OWNER === 'daemon') {
+      await services.attachConversationActivityOwner({ kswarm: { url: activityKswarmUrl, mutationToken: 'fixture', brokerUrl: process.env.XIAOK_ACTIVITY_E2E_BROKER_URL, roomToken: 'fixture' } });
+    }
     // The unrelated KSwarm port stays disconnected in this isolated fixture;
     // register its real semantic proxy so AppLayout does not see missing IPC.
-    const bridge = new KSwarmStreamBridge('ws://127.0.0.1:0/ws');
+    const bridge = new KSwarmStreamBridge(activityKswarmUrl ? activityKswarmUrl.replace(/^http/, 'ws') + '/ws' : 'ws://127.0.0.1:0/ws');
     registerKSwarmProxy(ipcMain, bridge, kswarm); disposers.push(() => bridge.dispose());
+    if (activityKswarmUrl) {
+      const { createCollaborationRoomBrokerClient } = await load('collaboration-room-broker-client');
+      services.bindConversationProjectRoomClient(createCollaborationRoomBrokerClient({ token: 'fixture',
+        fetchImpl: (url, init) => fetch(String(url).replace(/^http:\/\/(?:127\.0\.0\.1|localhost):4318/, process.env.XIAOK_ACTIVITY_E2E_BROKER_URL), init) }));
+      disposers.push(bridge.observeEvents(event => {
+        if (event.type === 'project_activity') void services.conversationActivity.projectChanged(event.projectId);
+      }));
+      disposers.push(bridge.observeConnection(status => { void services.conversationActivity.projectConnectionChanged(status); }));
+      bridge.start();
+    }
     // Register against the actual window before renderer startup can invoke IPC.
-    window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: true, width: 1440, height: 940 });
+    window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: showWindows, width: 1440, height: 940 });
+    activityWindows.add(window);
     window.webContents.on('console-message', (_event, level, message) => log('renderer', level, message));
     window.on('closed', () => { window = undefined; });
     await registerDesktopIpc(ipcMain, window, services, { getMainWindow: () => window, registerLifetimeDisposer: dispose => disposers.push(dispose),
-      multiAgentAuthorize: event => window && !window.isDestroyed() && event.sender === window.webContents
-        && event.senderFrame === window.webContents.mainFrame && isTrustedDesktopRendererUrl(window.webContents.mainFrame.url, { rendererFile })
+      multiAgentAuthorize: event => activityWindows.has(BrowserWindow.fromWebContents(event.sender)) && !event.sender.isDestroyed()
+        && event.senderFrame === event.sender.mainFrame && isTrustedDesktopRendererUrl(event.sender.mainFrame.url, { rendererFile })
         ? { actorId: `desktop-user:${services.multiAgent.profileId}` } : null });
     // GeneralPane also uses these two read-only handlers registered directly
     // by production main.ts, not by registerDesktopIpc. Delegate to the actual
@@ -106,6 +127,18 @@ globalThis.multiAgentE2E = {
   },
   releaseCleanup: () => releaseCleanup(),
 };
+// Isolated test control invokes the same native window/application owners.
+// No production IPC, source fact, credential or task state is fabricated.
+const controlFile = join(root, 'e2e-control.json'); let lastControl = existsSync(controlFile) ? readFileSync(controlFile, 'utf8') : '';
+watchFile(controlFile, { interval: 50, persistent: false }, () => {
+  try { const raw = readFileSync(controlFile, 'utf8'); if (raw === lastControl) return; lastControl = raw;
+    const value = JSON.parse(raw);
+    if (value.action === 'reopen') void globalThis.multiAgentE2E.reopen();
+    if (value.action === 'second') { secondary = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled,'preload.cjs')), show:showWindows,width:1440,height:940 }); activityWindows.add(secondary); void secondary.loadFile(rendererFile); }
+    if (value.action === 'close-second') { if (secondary) { activityWindows.delete(secondary); secondary.destroy(); secondary = undefined; } }
+    if (value.action === 'quit') { unwatchFile(controlFile); app.quit(); }
+  } catch {}
+});
 // Match the macOS application owner: closing its last view does not quit the
 // application or cancel work. The test explicitly closes its app in finally.
 app.on('window-all-closed', () => {});

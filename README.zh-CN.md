@@ -126,7 +126,7 @@ CLI 记忆区分 `user`、`feedback`、`project`、`reference`。Desktop 还提�
 
 ### 环境要求
 
-- **CLI**：Node.js **22 或更高版本**。
+- **CLI**：Node.js **22.14 或更高版本**。
 - **完整源码栈**：Node.js **22.22 或更高版本**，满足 KSwarm 的 engine 要求。
 - **已发布 Desktop 安装包**：macOS Apple Silicon 与 Windows x64。正常使用安装版无需单独安装 Node.js。
 - Computer Use 需要 macOS 及对应辅助功能/屏幕权限。模型和外部服务凭据按实际使用能力配置。

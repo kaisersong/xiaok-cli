@@ -487,7 +487,7 @@ describe('chat terminal layout', () => {
     const progressStart = source.indexOf('function writeProgressTranscriptNote(');
     const progressEnd = source.indexOf('const maybeWriteThinkingOnlyToolNotice = (): void => {', progressStart);
     const progressSource = source.slice(progressStart, progressEnd);
-    const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): void => {');
+    const orchestrationStart = source.indexOf('const writeOrchestrationBlock = (block: string): boolean => {');
     const orchestrationEnd = source.indexOf('persistSession = async', orchestrationStart);
     const orchestrationSource = source.slice(orchestrationStart, orchestrationEnd);
 

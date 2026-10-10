@@ -3,6 +3,8 @@ export interface WorkspaceToolOptions {
     cwd?: string;
     allowOutsideCwd?: boolean;
     artifactRoot?: string;
+    /** Host-owned exact read-only references; never accepted from model input. */
+    readOnlyPaths?: string[];
 }
 export declare function createReadTool(options?: WorkspaceToolOptions): Tool;
 export declare const readTool: Tool;

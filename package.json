@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.5.10",
+  "version": "1.5.12",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -83,15 +83,18 @@
     "architecture:check": "node scripts/governance/check.mjs architecture",
     "architecture:baseline": "node scripts/governance/check.mjs architecture --update-baseline",
     "governance:check": "npm run lint && npm run architecture:check",
+    "test:env-isolation": "node scripts/check-test-env-isolation.mjs",
     "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs",
     "pack:cli": "node scripts/pack-cli.mjs",
     "verify:cli-install": "node scripts/verify-cli-install.mjs",
-    "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs"
+    "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs",
+    "test:desktop-service-contract": "node --test tests/package/desktop-service-contract.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
     "@huggingface/tokenizers": "^0.1.3",
     "@modelcontextprotocol/client": "2.3.0",
+    "@modelcontextprotocol/ext-tasks": "0.2.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "8.20.0",
     "beautiful-mermaid": "^1.1.3",
@@ -116,10 +119,10 @@
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "oxlint": "1.86.0",
+    "tar": "7.5.22",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.6",
-    "tar": "7.5.22"
+    "vitest": "^3.2.6"
   },
   "allowScripts": {
     "node-pty@1.1.0": true,
@@ -130,7 +133,7 @@
     "onnxruntime-node@1.26.0": true
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.14.0"
   },
   "files": [
     "dist",

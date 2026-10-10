@@ -1,3 +1,4 @@
+import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
@@ -653,6 +654,7 @@ export function ChatShell() {
         const partialText = streamRef.current.trim();
         const reason = sanitizeUserFacingErrorMessage(msg, t.chatShell.taskCreateFailed, {
           providerAuth: t.chatShell.modelAuthFailed,
+          modelKeyMissing: t.chatShell.modelKeyMissing,
           providerService: t.chatShell.modelServiceFailed,
               modelConnectionFailed: t.chatShell.modelConnectionFailed,
           modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
@@ -1026,6 +1028,7 @@ export function ChatShell() {
           if (rawMessage !== lastErrorMessage) {
             const reason = sanitizeUserFacingErrorMessage(rawMessage, t.chatShell.taskCreateFailed, {
               providerAuth: t.chatShell.modelAuthFailed,
+              modelKeyMissing: t.chatShell.modelKeyMissing,
               providerService: t.chatShell.modelServiceFailed,
               modelConnectionFailed: t.chatShell.modelConnectionFailed,
               modelUsageLimitReached: t.chatShell.modelUsageLimitReached,
@@ -1794,6 +1797,7 @@ export function ChatShell() {
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ChatView
+        activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}

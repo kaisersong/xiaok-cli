@@ -68,6 +68,28 @@ describe('KSwarmStreamBridge', () => {
     expect(bridge.getConnectionStatus()).toBe('disconnected');
   });
 
+  it('fences old socket callbacks after reconnection and notifies the main-owned observer', async () => {
+    const sockets: any[] = [];
+    class Socket {
+      static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+      readyState = 0; onopen?: () => void; onclose?: () => void; onmessage?: (event: { data: string }) => void;
+      close() { this.readyState = 3; this.onclose?.(); }
+      constructor(_url: string) { sockets.push(this); }
+    }
+    globalThis.WebSocket = Socket as unknown as typeof WebSocket;
+    const bridge = new KSwarmStreamBridge('ws://fixture');
+    const events = vi.fn(), status = vi.fn();
+    bridge.observeEvents(events); bridge.observeConnection(status); bridge.start();
+    sockets[0].readyState = 1; sockets[0].onopen();
+    sockets[0].close(); await vi.advanceTimersByTimeAsync(3000);
+    sockets[1].readyState = 1; sockets[1].onopen();
+    sockets[0].onmessage({ data: JSON.stringify({ type: 'project_activity', projectId: 'old' }) });
+    sockets[0].onclose();
+    expect(events).not.toHaveBeenCalled();
+    expect(bridge.getConnectionStatus()).toBe('connected');
+    expect(status).toHaveBeenLastCalledWith('connected'); bridge.dispose();
+  });
+
   it('does not recursively close when an error fires while closing the socket', () => {
     const sockets: Array<{
       readyState: number;

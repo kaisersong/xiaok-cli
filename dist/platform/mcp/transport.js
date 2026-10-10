@@ -9,6 +9,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client, SSEClientTransport, StreamableHTTPClientTransport, } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { createTaskSessionFromClient, createTaskSessionEndpointId } from '@modelcontextprotocol/ext-tasks/client';
+import { deferMcpTaskInput } from './task-input.js';
+import { McpTaskRequestCoordinator } from './task-request-coordinator.js';
 import { ControlledStdioClientTransport, } from './controlled-stdio-transport.js';
 import { WebSocket } from 'ws';
 const MCP_STDERR_TAIL = Symbol('mcpStderrTail');
@@ -116,6 +119,9 @@ export async function createMcpClientConnection(serverName, config, options = {}
     const startupTimeoutMs = config.timeout?.startup ?? resolveMcpStartupTimeoutMs();
     const createdTransport = await createTransport(config, options);
     const client = createMcpSdkClient(startupTimeoutMs, config.protocol, options.clientName);
+    let negotiatedVersion;
+    const setVersion = createdTransport.transport.setProtocolVersion?.bind(createdTransport.transport);
+    createdTransport.transport.setProtocolVersion = version => { negotiatedVersion = version; setVersion?.(version); };
     try {
         await client.connect(createdTransport.transport, {
             timeout: startupTimeoutMs,
@@ -150,7 +156,17 @@ export async function createMcpClientConnection(serverName, config, options = {}
     const childPid = createdTransport.getChildPid();
     let disposed = false;
     let closing = null;
+    const taskCoordinator = new McpTaskRequestCoordinator(createdTransport.transport);
+    const endpointId = await createTaskSessionEndpointId('xiaok-mcp', { serverName, config });
+    const taskOptions = { endpointId, maxInputRounds: 32, onInputRequest: deferMcpTaskInput };
+    const tasks = protocolEra === 'modern'
+        ? createTaskSessionFromClient(client, { ...taskOptions, rawDispatch: taskCoordinator.dispatch,
+            v2RequestFraming: { protocolVersion: negotiatedVersion ?? '2026-07-28',
+                clientInfo: { name: options.clientName ?? 'xiaok-cli', version: resolveMcpClientVersion() }, clientCapabilities: {} } })
+        : createTaskSessionFromClient(client, taskOptions);
     const closeFully = async () => {
+        await tasks.close();
+        taskCoordinator.dispose();
         createdTransport.disposeObservability();
         await client.close().catch(() => undefined);
         if (childPid !== null) {
@@ -159,11 +175,17 @@ export async function createMcpClientConnection(serverName, config, options = {}
     };
     return {
         client,
+        activityEndpoint: { name: serverName, config: structuredClone(config), cwd: options.cwd },
+        tasks,
+        listenTaskEvents: taskCoordinator.listenTasks.bind(taskCoordinator),
+        observeTaskStatus: taskCoordinator.observeTaskStatus.bind(taskCoordinator),
         protocolEra,
         getStderrTail: createdTransport.getStderrTail,
         getChildPid: () => childPid,
         close: () => {
             disposed = true;
+            void tasks.close().catch(() => undefined);
+            taskCoordinator.dispose();
             closing ??= closeFully();
             return closing;
         },

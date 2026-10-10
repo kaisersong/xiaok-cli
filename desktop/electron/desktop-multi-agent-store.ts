@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { agentRunState, type AgentActivityRun, type AgentActivityMember } from '../../src/runtime/conversation-activity/agent-runs.js';
 import type {
   DesktopAgentSnapshot, DesktopMultiAgentGroup, MultiAgentContent, MultiAgentContentPage,
   MultiAgentDrainedBatch, MultiAgentDurableEvent, MultiAgentEventKind, MultiAgentManagedResource,
@@ -11,7 +12,9 @@ import type {
 } from '../shared/multi-agent-types.js';
 
 const MAX_CONTENT_BYTES = 2 * 1024 * 1024;
-const TABLES = ['groups', 'agents', 'events', 'messages', 'contents', 'operations', 'root_turns', 'managed_resources'] as const;
+const TABLES = ['groups', 'agents', 'events', 'messages', 'contents', 'operations', 'root_turns', 'managed_resources', 'activity_runs', 'activity_members'] as const;
+const ACTIVITY_RUN_SCHEMA = `CREATE TABLE IF NOT EXISTS activity_runs(run_id TEXT PRIMARY KEY,group_id TEXT NOT NULL REFERENCES groups(group_id),data_json TEXT NOT NULL,logical_bytes INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS activity_members(run_id TEXT NOT NULL REFERENCES activity_runs(run_id),member_id TEXT NOT NULL,group_id TEXT NOT NULL REFERENCES groups(group_id),data_json TEXT NOT NULL,logical_bytes INTEGER NOT NULL,PRIMARY KEY(run_id,member_id));`;
 type Table = typeof TABLES[number];
 type SqlValue = string | number | null;
 interface JsonRow { data_json: string; logical_bytes: number }
@@ -198,7 +201,7 @@ export class DesktopMultiAgentStore {
     this.db = new DatabaseSync(dbPath);
     try {
       const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-      if (![0, 1, 2, 3].includes(version.user_version)) throw new Error(`unsupported multi-agent schema version ${version.user_version}`);
+      if (![0, 1, 2, 3, 4].includes(version.user_version)) throw new Error(`unsupported multi-agent schema version ${version.user_version}`);
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=0;');
       this.applySchema(version.user_version);
     } catch (error) { this.db.close(); this.closed = true; throw error; }
@@ -395,7 +398,7 @@ export class DesktopMultiAgentStore {
       const thread = this.getThread(threadId), receipt = thread?.deletionReceipt;
       if (thread?.deleteState !== 'delete_pending' || receipt?.operationId !== operationId) throw new Error('stale thread deletion operation');
       if (this.threadHasUnreleasedResources(threadId)) throw new Error('thread deletion cleanup pending');
-      for (const table of ['events', 'messages', 'operations', 'root_turns', 'managed_resources', 'contents', 'agents', 'groups'] as const) {
+      for (const table of ['activity_members', 'activity_runs', 'events', 'messages', 'operations', 'root_turns', 'managed_resources', 'contents', 'agents', 'groups'] as const) {
         this.db.prepare(`DELETE FROM ${table} WHERE group_id IN (SELECT group_id FROM groups WHERE thread_id=?)`).run(threadId);
       }
       const data = encodeMultiAgentRow({ ...receipt, result: { operationId, state: 'completed', resourcesReleased: true } });
@@ -556,7 +559,7 @@ export class DesktopMultiAgentStore {
     return this.transaction(() => {
       const group = this.requireGroup(groupId);
       const event: MultiAgentDurableEvent = { schemaVersion: 1, channel: 'durable', ...input, groupId, seq: group.lastSeq + 1, eventId: randomUUID(), timestamp: this.now() };
-      const control = input.kind === 'status' || input.kind === 'cleanup' || input.kind === 'delivery' || Boolean(approval && approval.status !== 'pending');
+      const control = input.kind === 'status' || input.kind === 'cleanup' || input.kind === 'delivery' || input.kind === 'activity_run' || Boolean(approval && approval.status !== 'pending');
       if (Buffer.byteLength(encodeMultiAgentRow(event)) > (control ? 4 * 1024 : 64 * 1024)) throw new Error('multi-agent event exceeds wire limit');
       this.write('events', groupId, { group_id: groupId, seq: event.seq }, { event_id: event.eventId, agent_id: event.agentId }, event, control);
       this.putGroup({ ...group, lastSeq: event.seq }, control);
@@ -569,6 +572,81 @@ export class DesktopMultiAgentStore {
     const rows = this.db.prepare('SELECT data_json,logical_bytes FROM events WHERE group_id=? AND seq>? ORDER BY seq LIMIT ?')
       .all(groupId, Math.max(0, afterSeq), this.limit(limit, 100)) as unknown as JsonRow[];
     return rows.map(row => this.parse(row));
+  }
+
+  createActivityRun(input: Pick<AgentActivityRun, 'runId' | 'groupId' | 'kind' | 'originId' | 'rootTaskId'>): AgentActivityRun {
+    return this.transaction(() => {
+      this.assertWritable(input.groupId);
+      const group = this.requireGroup(input.groupId);
+      for (const value of [input.runId,input.originId]) boundedString(value);
+      const previous = this.getActivityRun(input.runId);
+      if (previous) {
+        if (previous.groupId !== input.groupId || previous.originId !== input.originId || previous.kind !== input.kind || previous.rootTaskId !== input.rootTaskId) throw new Error('activity_run_conflict');
+        return previous;
+      }
+      const run: AgentActivityRun = { ...input, threadId: group.threadId, bootId: this.bootId, state: 'accepted', acceptedAt: this.now(), startSequence: group.lastSeq };
+      this.write('activity_runs', run.groupId, { run_id: run.runId }, { group_id: run.groupId }, run, false);
+      this.appendEvent(run.groupId, { kind: 'activity_run', agentId: `root_${run.groupId}`, payload: { run } });
+      return run;
+    });
+  }
+  getActivityRun(runId: string): AgentActivityRun | null { return this.readOne('activity_runs', 'run_id', runId); }
+  getActivityRuns(groupId: string): AgentActivityRun[] { return this.readGroupRows('activity_runs', groupId); }
+  *pendingActivityRuns(): Generator<AgentActivityRun> {
+    let cursor = '';
+    for (;;) {
+      const rows = this.db.prepare("SELECT data_json,logical_bytes FROM activity_runs WHERE run_id>? AND json_extract(data_json,'$.terminalEventId') IS NULL ORDER BY run_id LIMIT 100").all(cursor) as unknown as JsonRow[];
+      if (!rows.length) return;
+      for (const row of rows) { const run = this.parse<AgentActivityRun>(row); cursor = run.runId; yield run; }
+    }
+  }
+  getActivityMembers(runId: string): AgentActivityMember[] {
+    return (this.db.prepare('SELECT data_json,logical_bytes FROM activity_members WHERE run_id=? ORDER BY rowid').all(runId) as unknown as JsonRow[]).map(row => this.parse(row));
+  }
+  putActivityMember(member: AgentActivityMember): void {
+    this.transaction(() => {
+      const run = this.getActivityRun(member.runId);
+      if (!run || run.groupId !== member.groupId || run.terminalEventId) throw new Error('activity_run_not_open');
+      this.assertWritable(member.groupId, member.physicalSettled);
+      for (const value of [member.memberId,member.agentId,member.operationId]) boundedString(value);
+      const previous = this.getActivityMembers(member.runId).find(item => item.memberId === member.memberId);
+      if (previous && (previous.operationId !== member.operationId || previous.agentId !== member.agentId || previous.turnId && member.turnId !== previous.turnId)) throw new Error('activity_member_conflict');
+      if (previous?.physicalSettled && !member.physicalSettled) throw new Error('activity_member_already_settled');
+      this.write('activity_members', member.groupId, { run_id: member.runId, member_id: member.memberId }, { group_id: member.groupId }, member, member.physicalSettled);
+    });
+  }
+  confirmActivityRootTerminal(runId: string, proof: NonNullable<AgentActivityRun['rootTerminal']>): void {
+    this.transaction(() => {
+      const run = this.getActivityRun(runId);
+      if (!run || run.kind !== 'root' || run.rootTaskId !== proof.taskId) throw new Error('activity_root_proof_mismatch');
+      if (run.rootTerminal && encodeMultiAgentRow(run.rootTerminal) !== encodeMultiAgentRow(proof)) throw new Error('activity_root_proof_conflict');
+      if (run.rootTerminal && !run.sourceUnavailable) return;
+      const { sourceUnavailable: _unavailable, ...confirmed } = run;
+      this.write('activity_runs', run.groupId, { run_id: runId }, { group_id: run.groupId }, { ...confirmed, rootTerminal: proof }, true);
+    });
+  }
+  markActivityRunUnknown(runId: string, code: string): void {
+    this.transaction(() => {
+      const run = this.getActivityRun(runId);
+      if (!run || run.terminalEventId || run.sourceUnavailable === code) return;
+      boundedString(code);
+      this.write('activity_runs', run.groupId, { run_id: runId }, { group_id: run.groupId }, { ...run, sourceUnavailable: code }, true);
+      this.finalizeActivityRun(runId);
+    });
+  }
+  finalizeActivityRun(runId: string): AgentActivityRun | null {
+    return this.transaction(() => {
+      const run = this.getActivityRun(runId);
+      if (!run || run.terminalEventId) return run;
+      const state = agentRunState(run, this.getActivityMembers(runId));
+      const next = { ...run, state };
+      if (state !== run.state || ['completed','failed','cancelled'].includes(state)) {
+        const event = this.appendEvent(run.groupId, { kind: 'activity_run', agentId: `root_${run.groupId}`, payload: { run: next } });
+        if (['completed','failed','cancelled'].includes(state)) next.terminalEventId = event.eventId;
+      }
+      this.write('activity_runs', run.groupId, { run_id: runId }, { group_id: run.groupId }, next, true);
+      return next;
+    });
   }
 
   sendMessage(groupId: string, input: { sender: MultiAgentSender; receiverId: string; text: string; kind?: MultiAgentMessage['kind']; contentId?: string; truncated?: boolean }, settlement = false): MultiAgentMessage {
@@ -979,9 +1057,9 @@ export class DesktopMultiAgentStore {
       CREATE INDEX IF NOT EXISTS root_turns_boot ON root_turns(boot_id);
       CREATE INDEX IF NOT EXISTS groups_page ON groups(thread_id,created_at,group_id);
     `;
-    if (version === 3) { this.validateSchema(3, base); return; }
+    if (version === 4) { this.validateSchema(4, base + ACTIVITY_RUN_SCHEMA); return; }
     this.transaction(() => {
-      if (version === 0) this.db.exec(base); else this.validateSchema(version as 1 | 2, base);
+      if (version === 0) this.db.exec(base); else this.validateSchema(version as 1 | 2 | 3, base);
       if (version < 2) {
         const columns = new Set((this.db.prepare('PRAGMA table_info(thread_bindings)').all() as unknown as Array<{ name: string }>).map(column => column.name));
         for (const column of THREAD_DELETION_COLUMNS) if (!columns.has(column.split(' ')[0])) this.db.exec(`ALTER TABLE thread_bindings ADD COLUMN ${column}`);
@@ -990,12 +1068,13 @@ export class DesktopMultiAgentStore {
         this.db.exec(APPROVAL_INDEX_SQL);
       }
       this.db.exec(PRESENTATION_RESERVATION_INDEX_SQL);
-      this.db.exec('PRAGMA user_version=3');
-      this.validateSchema(3, base);
+      this.db.exec(ACTIVITY_RUN_SCHEMA);
+      this.db.exec('PRAGMA user_version=4');
+      this.validateSchema(4, base + ACTIVITY_RUN_SCHEMA);
     });
   }
 
-  private validateSchema(version: 1 | 2 | 3, base: string): void {
+  private validateSchema(version: 1 | 2 | 3 | 4, base: string): void {
     const definitions = base.split(';').map(sql => sql.trim()).filter(Boolean);
     if (version >= 2) definitions.push(WORKSPACE_AUTHORIZATION_SQL, APPROVAL_INDEX_SQL);
     for (let expected of definitions) {

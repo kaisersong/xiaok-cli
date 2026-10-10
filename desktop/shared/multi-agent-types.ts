@@ -146,7 +146,7 @@ export interface DesktopMailboxPort {
   }>;
 }
 
-export type MultiAgentEventKind = 'status' | 'message_sent' | 'message_consumed' | 'output' | 'result' | 'usage' | 'cleanup' | 'artifact' | 'tool_finished' | 'delivery' | 'approval';
+export type MultiAgentEventKind = 'status' | 'message_sent' | 'message_consumed' | 'output' | 'result' | 'usage' | 'cleanup' | 'artifact' | 'tool_finished' | 'delivery' | 'approval' | 'activity_run';
 export interface MultiAgentDurableEvent {
   schemaVersion: 1;
   channel: 'durable';
