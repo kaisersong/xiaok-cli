@@ -912,6 +912,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   let activityRoomClient: ConversationProjectRoomClient | undefined;
   const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
   const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
+    readPreviousUserTask: (threadId, taskId) => snapshotStore.readPreviousUserTask(threadId, taskId),
     ...(activityEnabled ? { activityHooks: {
       prepare: async input => {
         await awaitActivityAttachment();
@@ -6893,7 +6894,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后建立真实 Xiaok 项目，默认规划完成后自动激活并派发，不要求用户创建或操作协作空间，无需再次确认或手工点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
+      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后建立真实 Xiaok 项目，默认规划完成后自动激活并派发，不要求用户创建或操作协作空间，无需再次确认或手工点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。用户顶层要求设计工作流并交付报告时属于创建并执行请求，先获得真实 projectId 后提交工作流，不需要再次确认。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -7107,6 +7108,7 @@ function normalizeCreateProjectKeyPart(value: unknown): string {
 function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requirements?: string }): string {
   const text = `${input.goal || ''}\n${input.requirements || ''}`;
   const formatRequests = text
+    .replace(/\.report\.md\b/gi, '')
     .replace(/markdown\s*(?:不算(?:交付)?(?:完成)?|不是(?:最终)?交付物|不是(?:最终)?报告)/gi, '')
     .replace(/(?:不要|不接受|不得|严禁|不能(?:只)?(?:用)?|不允许|not\s+|no\s+)\s*(?:普通)?\s*markdown/gi, '');
   const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(formatRequests);

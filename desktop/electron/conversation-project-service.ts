@@ -10,7 +10,8 @@ type Source = 'user' | 'agent' | 'scheduler';
 type RecordValue = Record<string, unknown>;
 interface UserRequest { prompt: string; permissionMode?: string; threadId?: string }
 interface Operation {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
+  confirmedFromTaskId?: string;
   originThreadId?: string;
   activityOperationId?: string;
   taskId: string;
@@ -37,11 +38,37 @@ function text(value: unknown): string { return typeof value === 'string' ? value
 // Conservative admission of a top-level user command. Quoted material,
 // questions, diagnosis, and negated requests do not create a durable project.
 function requestsCreation(prompt: string): boolean {
+  // Delivery-oriented workflow requests are executable work, while pure
+  // design/preview requests do not grant durable project creation authority.
+  if (/^(?:(?:请(?:你)?|帮我)\s*)?设计.{0,20}工作流/u.test(prompt.trim())
+    && /交付[^\n。；]{0,80}报告/u.test(prompt)
+    && !/[?？]|只(?:设计|输出|生成|要|规划)|(?:不要|不用|不需要|别|不|暂不|先不).{0,12}(?:执行|启动|创建|建立)/u.test(prompt)) return true;
   const clause = prompt.trim().split(/[，。；\n]/, 1)[0] ?? '';
   if (/(?:不要|别|不需要|不用|先不|暂不).{0,8}(?:创建|新建|建立|建项目)/.test(clause)) return false;
   if (/(?:项目(?:的)?(?:流程|方法|步骤)|项目.{0,8}(?:是什么|如何|怎么|了吗|是否))/u.test(clause)) return false;
   return /^(?:(?:请(?:你)?|帮我|麻烦(?:你)?|我要|我想(?:要)?|我希望|我要求|现在|直接|先|在xiaok里)\s*)*(?:创建|新建|建立|建).{0,40}项目/u.test(clause)
     || /^(?:please\s+)?(?:create|set up|make)\s+(?:a\s+|an\s+)?(?:xiaok\s+)?project\b/i.test(clause);
+}
+
+function confirmsCreation(prompt: string): boolean {
+  return /^(?:同意|确认|可以|好的|开始吧|执行吧|yes|confirm)(?:[。！!\s]*$|[，,]\s*(?:报告)?主题(?:是|为|[：:]))/i.test(prompt.trim())
+    && !/[?？]|不同意|(?:不要|不用|不需要|别|不|先不|暂不).{0,12}(?:创建|新建|建立|启动|执行)|只(?:规划|计划)/u.test(prompt);
+}
+
+function hasPendingCreation(snapshot: TaskSnapshot | null, threadId: string): boolean {
+  if (!snapshot || snapshot.context?.threadId !== threadId || snapshot.status !== 'completed'
+    || !/^(?:请|帮我)?\s*设计.{0,20}工作流/u.test(snapshot.prompt)
+    || !/是否确认.{0,30}创建.{0,12}启动.{0,8}项目[?？]/u.test(snapshot.result?.summary ?? '')) return false;
+  let proposal = false;
+  for (const event of snapshot.events) {
+    if (event.type !== 'canvas_tool_result' || event.toolName !== 'create_project' || !event.ok) continue;
+    try {
+      const result = JSON.parse(event.response);
+      if (result.projectId || result.project?.id) return false;
+      if (result.ok === true && result.proposal?.kind === 'project_proposal') proposal = true;
+    } catch { return false; }
+  }
+  return proposal;
 }
 
 /** Main owns authorization and side-effect receipts; model input cannot grant access. */
@@ -54,6 +81,7 @@ export class ConversationProjectService {
   constructor(private readonly options: {
     dataRoot: string;
     kswarmService: Pick<KSwarmService, 'request' | 'getDesktopMutationToken'>;
+    readPreviousUserTask?: (threadId: string, taskId: string) => Promise<TaskSnapshot | null>;
     activityHooks?: {
       prepare(input: { threadId: string; operationId: string; creationIdempotencyKey: string }): Promise<void>;
       created(input: { threadId: string; operationId: string; projectId: string; roomId?: string; project: RecordValue }): Promise<RecordValue>;
@@ -77,8 +105,19 @@ export class ConversationProjectService {
     const admitted = this.admission.getStore();
     if (context.requestSource !== 'user' || !admitted || admitted.prompt !== input.prompt
       || admitted.permissionMode === 'plan' || input.permissionMode === 'plan'
-      || input.executionScope && (input.executionScope.kind !== 'goal_turn' || input.executionScope.origin !== 'user')
-      || !requestsCreation(admitted.prompt)) return false;
+      || input.executionScope && (input.executionScope.kind !== 'goal_turn' || input.executionScope.origin !== 'user')) return false;
+    if (!requestsCreation(admitted.prompt)) {
+      if (!admitted.threadId || !confirmsCreation(admitted.prompt) || !this.options.readPreviousUserTask) return false;
+      return this.options.readPreviousUserTask(admitted.threadId, input.taskId).then(previous => {
+        if (!hasPendingCreation(previous, admitted.threadId!)) return false;
+        // Journal only the confirmation validated against main-owned history.
+        return this.bindAuthorizedTask(input, admitted, previous!.taskId);
+      });
+    }
+    return this.bindAuthorizedTask(input, admitted);
+  }
+
+  private bindAuthorizedTask(input: { taskId: string; prompt: string }, admitted: UserRequest, confirmedFromTaskId?: string): boolean | Promise<boolean> {
     const prior = this.read(input.taskId);
     if (prior) {
       if (prior.originThreadId && admitted.threadId && prior.originThreadId !== admitted.threadId) throw new Error('conversation_project_origin_conflict');
@@ -90,7 +129,7 @@ export class ConversationProjectService {
     const startPolicy = /只(?:要|出)?(?:计划|规划)|先只?规划|不要(?:开始)?执行|暂不执行|先不(?:执行|启动)|不要启动|等我确认|让我审批/.test(input.prompt)
       ? 'plan_only' : 'activate_and_dispatch_after_plan';
     const key = `conversation-project:${createHash('sha256').update(input.taskId).digest('hex')}`;
-    const operation: Operation = { schemaVersion: 2, taskId: input.taskId, prompt: input.prompt, startPolicy,
+    const operation: Operation = { schemaVersion: confirmedFromTaskId ? 3 : 2, ...(confirmedFromTaskId ? { confirmedFromTaskId } : {}), taskId: input.taskId, prompt: input.prompt, startPolicy,
       clientRequestKey: key, ...(admitted.threadId ? { originThreadId: admitted.threadId, activityOperationId: key } : {}) };
     // Journal the trusted creation intent first. If the independent activity
     // database commit is interrupted, startup can reconstruct that association
@@ -167,7 +206,9 @@ export class ConversationProjectService {
     if (!filename || !existsSync(filename)) return undefined;
     try {
       const value = JSON.parse(readFileSync(filename, 'utf8')) as Operation;
-      return [1, 2].includes(value.schemaVersion) && value.taskId === taskId && requestsCreation(value.prompt) ? value : undefined;
+      const admitted = requestsCreation(value.prompt) || value.schemaVersion === 3 && text(value.originThreadId)
+        && text(value.confirmedFromTaskId) && confirmsCreation(value.prompt);
+      return [1, 2, 3].includes(value.schemaVersion) && value.taskId === taskId && admitted ? value : undefined;
     } catch { return undefined; }
   }
   private save(operation: Operation): void {

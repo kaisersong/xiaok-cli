@@ -80,6 +80,12 @@ function completedProjectCheckNode(id = 'node-project_snapshot_review-1') {
 }
 
 describe('KSwarm dynamic workflow script tool', () => {
+  it('distinguishes a missing project from missing project parameters', async () => {
+    const { service } = createMockService([jsonResponse({ projects: [] })]);
+    const tool = createKSwarmRunDynamicWorkflowScriptTool(service);
+    expect(JSON.parse(await tool.execute({ projectName: 'missing', script: workflowScript }))).toMatchObject({ ok: false, error: 'project_not_found' });
+    expect(JSON.parse(await tool.execute({ script: workflowScript }))).toMatchObject({ ok: false, error: 'projectId_or_projectName_required' });
+  });
   it('documents the executable script DSL in the tool schema for conversational agents', () => {
     const { service } = createMockService([]);
     const tool = createKSwarmRunDynamicWorkflowScriptTool(service);

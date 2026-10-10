@@ -17,6 +17,22 @@ describe('FileTaskSnapshotStore', () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
+  it('reads only the latest previous user task in the same thread after restart', async () => {
+    const store = new FileTaskSnapshotStore(rootDir);
+    for (const [taskId, createdAt, threadId] of [['design', 1, 'thread'], ['question', 2, 'thread'], ['foreign', 3, 'other'], ['current', 4, 'thread']] as const) {
+      await store.save({ ...createSnapshot(taskId, 'completed'), createdAt, context: { threadId, taskIds: [], loadedTaskIds: [], skipped: [] } });
+    }
+    const restarted = new FileTaskSnapshotStore(rootDir);
+    expect(await restarted.readPreviousUserTask('thread', 'current')).toMatchObject({ taskId: 'question' });
+    expect(await restarted.readPreviousUserTask('other', 'current')).toBeNull();
+    expect(await restarted.readPreviousUserTask('thread', 'unknown')).toBeNull();
+    await store.save({ ...createSnapshot('background', 'completed'), createdAt: 3, context: { threadId: 'thread', taskIds: [], loadedTaskIds: [], skipped: [] },
+      executionScope: { kind: 'goal_turn', origin: 'continuation' } } as never);
+    expect(await restarted.readPreviousUserTask('thread', 'current')).toMatchObject({ taskId: 'question' });
+    await store.save({ ...createSnapshot('simultaneous', 'completed'), createdAt: 4, context: { threadId: 'thread', taskIds: [], loadedTaskIds: [], skipped: [] } });
+    expect(await restarted.readPreviousUserTask('thread', 'current')).toBeNull();
+  });
+
   it('checks terminal thread history without depending on the active index or loading every task into the runtime cache', async () => {
     const store = new FileTaskSnapshotStore(rootDir);
     await store.save({ ...createSnapshot('task_history', 'completed'), context: { threadId: 'legacy-thread', taskIds: [] } });

@@ -86,6 +86,41 @@ export class FileTaskSnapshotStore {
         }
         return false;
     }
+    /** Main-only confirmation history; caller-supplied task lists are never authority. */
+    async readPreviousUserTask(threadId, currentTaskId) {
+        const current = await this.recoverTask(currentTaskId);
+        if (!current || current.context?.threadId !== threadId)
+            return null;
+        let latest = null;
+        let directory;
+        try {
+            directory = await opendir(this.snapshotDir());
+        }
+        catch (error) {
+            if (error.code === 'ENOENT')
+                return null;
+            throw error;
+        }
+        for await (const entry of directory) {
+            if (!entry.name.endsWith('.json'))
+                continue;
+            if (!entry.isFile() || entry.isSymbolicLink())
+                throw new Error('task_history_owner_unknown');
+            const snapshot = parseCheckpoint(await readFile(join(this.snapshotDir(), entry.name), 'utf8')).snapshot;
+            if (snapshot.taskId === currentTaskId || snapshot.context?.threadId !== threadId
+                || snapshot.executionScope && (snapshot.executionScope.kind !== 'goal_turn' || snapshot.executionScope.origin !== 'user'))
+                continue;
+            if (snapshot.createdAt === current.createdAt)
+                return null;
+            if (snapshot.createdAt > current.createdAt)
+                continue;
+            if (!latest || snapshot.createdAt > latest.createdAt)
+                latest = snapshot;
+            else if (snapshot.createdAt === latest.createdAt)
+                return null;
+        }
+        return latest ? this.recoverTask(latest.taskId) : null;
+    }
     async clearActiveTask(taskId) {
         await this.updateIndex(index => {
             const ids = new Set(index.activeTaskIds);
