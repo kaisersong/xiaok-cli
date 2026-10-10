@@ -1,3 +1,4 @@
+import { buildSidecarEnv } from './sidecar-env.js';
 import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 export { hasDynamicWorkflowSupport, hasWorkflowPatternCapabilities } from '../shared/kswarm-health-contract.js';
 import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
@@ -282,7 +283,7 @@ export function buildIntentBrokerServiceEnv(options: {
   desktopRoomToken?: string;
   kswarmRoomToken?: string;
 }): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...(options.baseEnv ?? process.env), PORT: String(options.port) };
+  const env: NodeJS.ProcessEnv = { ...(options.baseEnv ?? {}), PORT: String(options.port) };
   if (options.desktopRoomToken) env.INTENT_BROKER_DESKTOP_TOKEN = options.desktopRoomToken;
   if (options.kswarmRoomToken) env.INTENT_BROKER_KSWARM_TOKEN = options.kswarmRoomToken;
   const repoRoot = options.repoRoot || options.cwd;
@@ -1077,7 +1078,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     }
 
     const brokerEnv = buildIntentBrokerServiceEnv({
-      baseEnv: process.env,
+      baseEnv: buildSidecarEnv(process.env),
       cwd: brokerLaunch.cwd,
       port: BROKER_PORT,
       repoRoot: brokerLaunch.repoRoot,
@@ -1274,7 +1275,7 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
 
     const nodeRuntime = resolveBackgroundNodeRuntime({
       env: {
-        ...process.env,
+        ...buildSidecarEnv(process.env),
         KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`,
         KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken,
@@ -1607,12 +1608,12 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
       assertRoomWorkspaceSidecarProtocol(serverPath, 'kswarm');
       assertRoomWorkspaceSidecarProtocol(brokerLaunch.entryPath, 'intent-broker');
       mkdirSync(brokerLaunch.cwd, { recursive: true });
-      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: process.env, cwd: brokerLaunch.cwd, port: BROKER_PORT,
+      const brokerEnv = buildIntentBrokerServiceEnv({ baseEnv: buildSidecarEnv(process.env), cwd: brokerLaunch.cwd, port: BROKER_PORT,
         repoRoot: brokerLaunch.repoRoot, desktopRoomToken, kswarmRoomToken });
       const brokerRuntime = resolveBackgroundNodeRuntime({ env: brokerEnv });
-      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...process.env, KSWARM_PORT: String(KSWARM_PORT),
+      const ksEnv = resolveBackgroundNodeRuntime({ env: { ...buildSidecarEnv(process.env), KSWARM_PORT: String(KSWARM_PORT),
         BROKER_URL: `http://127.0.0.1:${BROKER_PORT}`, KSWARM_DESKTOP_MUTATION_TOKEN: desktopMutationToken, INTENT_BROKER_KSWARM_TOKEN: kswarmRoomToken } });
-      const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string' && item[1] !== process.env[item[0]]));
+      const strings = (env: NodeJS.ProcessEnv) => Object.fromEntries(Object.entries(env).filter((item): item is [string,string] => typeof item[1] === 'string'));
       const expected = (entry: string) => ({ ok: true, 'service.entryPath': resolve(entry), 'service.entryHash': createHash('sha256').update(readFileSync(entry)).digest('hex') });
       return { kswarm: { url: `http://127.0.0.1:${KSWARM_PORT}`, mutationToken: desktopMutationToken,
         brokerUrl: `http://127.0.0.1:${BROKER_PORT}`, roomToken: desktopRoomToken }, managedSources: [

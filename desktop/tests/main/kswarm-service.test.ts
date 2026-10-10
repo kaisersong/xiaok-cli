@@ -1630,3 +1630,46 @@ describe('activity-owner delegated manager boundaries', () => {
     finally{await service.stop();rmSync(root,{recursive:true,force:true});}
   });
 });
+
+describe('sidecar environment launch boundaries', () => {
+  it('filters both direct spawns and passes complete owner environments', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sidecar-env-'));
+    const broker = join(root, 'broker.js'), ks = join(root, 'ks.js');
+    writeFileSync(broker, '// broker'); writeFileSync(ks, '// kswarm');
+    for (const [key, value] of Object.entries({ XIAOK_CONFIG_DIR: root, BROKER_SERVER_PATH: broker, KSWARM_SERVER_PATH: ks,
+      XIAOK_CONVERSATION_ACTIVITY: '0', GH_TOKEN: 'fake-gh', ANTHROPIC_API_KEY: 'fake-key',
+      KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh' })) vi.stubEnv(key, value);
+    const electron = Object.getOwnPropertyDescriptor(process.versions, 'electron');
+    Object.defineProperty(process.versions, 'electron', { value: 'test', configurable: true });
+    const launched = new Set<string>();
+    spawnMock.mockImplementation((_cmd, args) => { launched.add(args.includes(broker) ? 'broker' : 'kswarm'); return new FakeKSwarmChild(51000 + launched.size); });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input)), name = url.port === '4318' ? 'broker' : 'kswarm';
+      return new Response(JSON.stringify({ ok: true, features: ['dynamic_workflows'], agents: [], service: { entryPath: name === 'broker' ? broker : ks } }),
+        { status: url.pathname === '/health' && !launched.has(name) ? 503 : 200 });
+    }));
+    const service = createKSwarmService({ spawnProcess: spawnMock as never, findPortOwner: async () => null });
+    const check = (env: NodeJS.ProcessEnv, name: string) => {
+      expect(env).toMatchObject({ KSWARM_FOO: 'config', INTENT_BROKER_BAR: 'config', HTTP_PROXY: 'http://proxy', SSH_AUTH_SOCK: '/ssh', ELECTRON_RUN_AS_NODE: '1' });
+      for (const key of ['GH_TOKEN', 'ANTHROPIC_API_KEY', 'BROKER_SERVER_PATH']) expect(env).not.toHaveProperty(key);
+      expect(env.INTENT_BROKER_KSWARM_TOKEN).toEqual(expect.any(String));
+      if (name === 'broker') { expect(env.PORT).toBe('4318'); expect(env.INTENT_BROKER_DESKTOP_TOKEN).toBe(service.getIntentBrokerRoomToken()); }
+      else { expect(env.BROKER_URL).toBe('http://127.0.0.1:4318'); expect(env.KSWARM_PORT).toBe('4400'); expect(env.KSWARM_DESKTOP_MUTATION_TOKEN).toBe(service.getDesktopMutationToken()); }
+    };
+    try {
+      await service.start(); expect(spawnMock).toHaveBeenCalledTimes(2);
+      for (const [, args, options] of spawnMock.mock.calls) check(options.env, args.includes(broker) ? 'broker' : 'kswarm');
+      const config = await service.activityOwnerConfig!();
+      expect(config.managedSources).toHaveLength(2);
+      for (const source of config.managedSources!) check(source.env, source.name);
+    } finally {
+      await service.stop();
+      if (electron) Object.defineProperty(process.versions, 'electron', electron); else Reflect.deleteProperty(process.versions, 'electron');
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('defaults broker base environment to empty', () => {
+    vi.stubEnv('GH_TOKEN', 'fake');
+    expect(buildIntentBrokerServiceEnv({ cwd: '/runtime', port: 4318 })).toEqual({ PORT: '4318' });
+  });
+});
