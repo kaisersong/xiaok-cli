@@ -3745,7 +3745,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         runtimeFacade: runtimeFacade!,
         runtimeHooks,
         approvalStore: embeddedApprovalStore,
-        onPromptOverride: async () => true,
         transport,
         selectedChannel,
         yzjConfig,
