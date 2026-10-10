@@ -10,6 +10,8 @@ export declare class ConversationActivityOwnerClient {
     private connecting?;
     private buffer;
     private disposed;
+    private readonly disconnectListeners;
+    onDisconnect(listener: (ownerEpoch: string) => void): () => void;
     private readonly pending;
     private readonly subscriptions;
     constructor(dataRoot: string, role: ActivityClientRole, instanceId?: string | undefined);
@@ -17,5 +19,6 @@ export declare class ConversationActivityOwnerClient {
     request<T>(method: string, params?: Record<string, unknown>): Promise<T>;
     subscribe(threadId: string, handler: (change: ActivityChange) => void): Promise<() => void>;
     subscribeOverview(handler: (change: ActivityChange) => void): Promise<() => void>;
+    close(): void;
     dispose(): void;
 }

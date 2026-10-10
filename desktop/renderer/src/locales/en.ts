@@ -3105,12 +3105,13 @@ export const en: LocaleStrings = {
 
   // chatView
   conversationActivity: {
+    expand: 'Expand work details', collapse: 'Collapse work details', summaryDetails: 'View full update', workCount: (count) => `${count} work items`,
     submitInput: 'Submit', declineInput: 'Decline', cancelWork: 'Cancel work', cancelRequested: 'Cancellation requested; awaiting confirmation', unsupportedInput: 'This input must be handled by the original service.',
     projectClosed: 'Closed (delivery unconfirmed)',
     historyGap: 'Some historical updates were compacted or expired; current state is confirmed by the source',
     lastProgress: 'Last progress',
     title: 'Work updates', stopped: 'Following stopped', unavailable: 'Status unconfirmed', details: 'View project', lastUpdate: 'Last synced', nextReport: 'Next report',
-    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.',
+    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.', ownerUnavailable: "xiaoK's background component does not match this version, so some features cannot start yet. Quit all xiaok windows and open it again.",
     unread: (count) => `${count} unread work updates`,
     report: (state, time) => `Status report ${time}: ${state}.`,
     sources: { kswarm: 'Project', task_host: 'Background task', agent_group: 'Agent collaboration', mcp: 'Plugin task' },
@@ -3225,6 +3226,8 @@ export const en: LocaleStrings = {
     goalAttachmentQuerying: "Task attachment is unconfirmed. Checking its saved state without restarting it.",
     goalAttachmentUnknown: "Task attachment is unconfirmed and execution may have started. Do not resubmit; reopen the conversation to view saved state.",
     taskExecutionFailed: (reason) => `Task failed: ${reason}`,
+    // 待设计师确认：缺少模型 Key 的保守文案。
+    modelKeyMissing: "No model API key was found, so the task can't start. Open Settings → Models and add your API key.",
     modelAuthFailed: "Model authentication failed. The API key is invalid or expired. Reconfigure the provider in Settings.",
     modelServiceFailed: "The model service request failed. Check the model configuration or try again later.",
     modelConnectionFailed: "The model connection was interrupted and could not recover. Conversation and completed actions were saved. Reply below to continue, or switch models and try again.",

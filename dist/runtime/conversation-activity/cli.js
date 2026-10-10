@@ -1,9 +1,11 @@
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { getConfigDir } from '../../utils/config.js';
 import { ConversationActivityStore } from './store.js';
 import { ensureConversationActivityOwner } from './owner-launcher.js';
 import { ConversationActivityAttachedService } from './owner-service.js';
+import { ConversationActivityOwnerClient } from './owner-client.js';
 import { ConversationActivityService } from './service.js';
 import { ConversationMcpActivities } from './mcp.js';
 const NOTICE_KINDS = new Set(['report', 'artifact_available', 'input_required', 'blocked', 'completed', 'failed', 'cancelled']);
@@ -19,6 +21,7 @@ export class CliConversationActivities {
     actor = { requestSource: 'user', actorId: 'cli-user' };
     pending = new Map();
     unsubscribe;
+    stopDisconnect;
     refreshPending;
     through = 0;
     disposed = false;
@@ -27,7 +30,7 @@ export class CliConversationActivities {
     static async attach(options) {
         const root = join(getConfigDir(), 'conversation-activity', createHash('sha256').update(resolve(options.cwd)).digest('hex').slice(0, 24));
         const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
-        const ownerClient = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: root, profileId, actorId: 'cli-user', identity: { kind: 'cli', path: options.identityPath, workspaceRoot: options.cwd } }, { instanceId: options.instanceId });
+        const ownerClient = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: root, profileId, actorId: 'cli-user', identity: { kind: 'cli', path: options.identityPath, workspaceRoot: options.cwd } }, { instanceId: options.instanceId, onLegacyOwner: options.onLegacyOwner });
         try {
             return new CliConversationActivities({ ...options, ownerClient, dataRoot: root });
         }
@@ -41,7 +44,13 @@ export class CliConversationActivities {
         const root = options.dataRoot ?? join(options.cwd, '.xiaok', 'state');
         const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
         this.profileId = profileId;
-        this.store = new ConversationActivityStore(join(root, 'conversation-activity.sqlite'), { readOnly: Boolean(options.ownerClient) });
+        this.stopDisconnect = options.ownerClient?.onDisconnect(epoch => {
+            void probeReplacementOwner(root, epoch, () => this.disposed).then(replaced => {
+                if (replaced && !this.disposed)
+                    options.onOwnerReplaced?.();
+            });
+        });
+        this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
         this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
         this.service = options.ownerClient ? new ConversationActivityAttachedService(options.ownerClient, this.actor.actorId) : new ConversationActivityService({ store: this.store, profileId, actorId: this.actor.actorId,
             getThread: threadId => threadId === options.sessionId ? { threadId, profileId, workspaceId: root, deleteState: 'none' } : null,
@@ -126,10 +135,35 @@ export class CliConversationActivities {
         if (this.disposed)
             return;
         this.disposed = true;
+        this.stopDisconnect?.();
         this.unsubscribe?.();
         this.mcp.dispose();
         this.service.dispose();
         this.store.close();
         this.pending.clear();
     }
+}
+/** A short, read-only attachment provides positive evidence of replacement. */
+export async function probeReplacementOwner(dataRoot, disconnectedEpoch, cancelled = () => false) {
+    const deadline = Date.now() + 1500;
+    while (!cancelled() && Date.now() < deadline) {
+        const client = new ConversationActivityOwnerClient(dataRoot, 'producer');
+        let timer;
+        try {
+            const status = await Promise.race([
+                client.request('status'),
+                new Promise(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); }),
+            ]);
+            if (status?.ownerEpoch && status.ready !== false)
+                return status.ownerEpoch !== disconnectedEpoch;
+        }
+        catch { }
+        finally {
+            clearTimeout(timer);
+            client.dispose();
+        }
+        if (!cancelled() && Date.now() < deadline)
+            await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+    }
+    return false;
 }

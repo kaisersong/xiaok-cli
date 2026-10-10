@@ -19,6 +19,19 @@ describe('shouldSuppressWarning', () => {
       .toBe(false);
   });
 
+  it('suppresses only SQLite ExperimentalWarning messages', () => {
+    const message = 'SQLite is an experimental feature and might change at any time';
+    expect(shouldSuppressWarning(message, ['ExperimentalWarning'])).toBe(true);
+    expect(shouldSuppressWarning(Object.assign(new Error(message), { name: 'ExperimentalWarning' }))).toBe(true);
+    expect(shouldSuppressWarning('Fetch API is an experimental feature', ['ExperimentalWarning'])).toBe(false);
+    expect(shouldSuppressWarning(Object.assign(new Error('Fetch API is an experimental feature'), { name: 'ExperimentalWarning' }))).toBe(false);
+    expect(shouldSuppressWarning(message)).toBe(false);
+    expect(shouldSuppressWarning(message, ['Warning'])).toBe(false);
+    expect(shouldSuppressWarning(message, ['DeprecationWarning', 'DEP0180'])).toBe(false);
+    expect(shouldSuppressWarning('prefix: ' + message, ['ExperimentalWarning'])).toBe(false);
+    expect(shouldSuppressWarning(Object.assign(new Error('The `punycode` module is deprecated.'), { code: 'DEP0040' }))).toBe(true);
+  });
+
   it('boots the CLI through a late-loaded main module so warning filtering installs first', () => {
     const source = readFileSync(join(process.cwd(), 'src', 'index.ts'), 'utf8');
 

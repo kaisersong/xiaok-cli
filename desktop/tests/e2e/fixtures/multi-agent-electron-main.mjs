@@ -20,6 +20,7 @@ const { DesktopApplicationWindowOwner } = await load('desktop-application-window
 const { registerKSwarmProxy } = await load('kswarm-ipc-proxy');
 const { KSwarmStreamBridge } = await load('kswarm-stream-bridge');
 const rendererFile = join(desktop, 'dist', 'renderer', 'index.html');
+const showWindows = process.env.XIAOK_E2E_BACKGROUND !== '1';
 const activityWindows = new Set(); let secondary;
 let window; let services; let quitting = false;
 let releaseCleanup = () => {};
@@ -62,7 +63,7 @@ const kswarm = { start: async () => {}, stop: async () => {}, restart: async () 
     ? fetch(new URL(path, activityKswarmUrl), init) : new Response('{}', { status: 503 }) };
 
 async function createView() {
-  window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: true, width: 1440, height: 940 });
+  window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: showWindows, width: 1440, height: 940 });
   activityWindows.add(window);
   window.webContents.on('console-message', (_event, level, message) => log('renderer', level, message));
   window.on('closed', () => { window = undefined; });
@@ -92,7 +93,7 @@ const owner = new DesktopApplicationWindowOwner({ current: () => window && !wind
       bridge.start();
     }
     // Register against the actual window before renderer startup can invoke IPC.
-    window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: true, width: 1440, height: 940 });
+    window = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled, 'preload.cjs')), show: showWindows, width: 1440, height: 940 });
     activityWindows.add(window);
     window.webContents.on('console-message', (_event, level, message) => log('renderer', level, message));
     window.on('closed', () => { window = undefined; });
@@ -133,7 +134,7 @@ watchFile(controlFile, { interval: 50, persistent: false }, () => {
   try { const raw = readFileSync(controlFile, 'utf8'); if (raw === lastControl) return; lastControl = raw;
     const value = JSON.parse(raw);
     if (value.action === 'reopen') void globalThis.multiAgentE2E.reopen();
-    if (value.action === 'second') { secondary = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled,'preload.cjs')), show:true,width:1440,height:940 }); activityWindows.add(secondary); void secondary.loadFile(rendererFile); }
+    if (value.action === 'second') { secondary = new BrowserWindow({ ...buildBrowserWindowOptions(join(compiled,'preload.cjs')), show:showWindows,width:1440,height:940 }); activityWindows.add(secondary); void secondary.loadFile(rendererFile); }
     if (value.action === 'close-second') { if (secondary) { activityWindows.delete(secondary); secondary.destroy(); secondary = undefined; } }
     if (value.action === 'quit') { unwatchFile(controlFile); app.quit(); }
   } catch {}

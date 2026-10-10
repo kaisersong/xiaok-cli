@@ -3,6 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConversationProjectService } from '../../electron/conversation-project-service.js';
+import { FileTaskSnapshotStore } from '../../../src/runtime/task-host/snapshot-store.js';
+import { buildProjectCardMessageFromToolResult } from '../../renderer/src/components/chatToolResultMessages.js';
+import { formatTaskToolResultResponse } from '../../../src/runtime/task-host/tool-result-response.js';
 import { resolveAgentExecution } from '../../../../kswarm/src/core/agent-execution.js';
 
 const roots: string[] = [];
@@ -52,6 +55,70 @@ function fixture(extra: Record<string, unknown> = {}) {
 }
 
 describe('main-owned conversation project creation', () => {
+  it('creates and starts the report workflow requested in a single user turn', async () => {
+    const f = fixture();
+    expect(await f.authorize('设计一个工作流：资料收集、撰写、评审后交付xiaok介绍报告')).toBe(true);
+    expect(await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'task_user' })).toMatchObject({ projectId: 'proj-real', planningStart: { sent: true } });
+    expect(f.projects[0].requestedStartPolicy).toBe('activate_and_dispatch_after_plan');
+  });
+
+  it.each(['设计一个工作流，只设计不执行，交付介绍报告', '设计一个工作流：只输出脚本，不执行，交付报告', '设计工作流的方法是什么？交付报告', '请总结：设计一个工作流并交付报告', '设计一个工作流：资料收集与撰写'])('denies design-only or non-user delivery commands: %s', async prompt => {
+    const f = fixture();
+    expect(await f.authorize(prompt)).toBe(false);
+    expect(f.service.isAuthorized('task_user')).toBe(false);
+  });
+  function pendingSnapshot(overrides: Record<string, unknown> = {}) {
+    return { taskId: 'design', status: 'completed', prompt: '设计一个工作流：资料收集、撰写、评审后交付报告',
+      context: { threadId: 'thread-confirm' },
+      events: [{ type: 'canvas_tool_result', toolName: 'create_project', ok: true,
+        response: JSON.stringify({ ok: true, proposal: { kind: 'project_proposal' } }) }],
+      result: { summary: '是否确认按此设计创建并启动项目？回复确认和主题后，我会建立正式项目并把脚本提交执行。' }, ...overrides };
+  }
+
+  it('accepts the real two-turn confirmation from persisted history and reuses its durable creation receipt', async () => {
+    const historyRoot = mkdtempSync(join(tmpdir(), 'confirmation-history-')); roots.push(historyRoot);
+    const writer = new FileTaskSnapshotStore(historyRoot);
+    await writer.save({ ...pendingSnapshot(), sessionId: 'prior-session', materials: [], createdAt: 1, updatedAt: 1 } as never);
+    await writer.save({ taskId: 'confirmed', sessionId: 'confirmed-session', prompt: '同意，主题是xiaok介绍', status: 'understanding',
+      context: { threadId: 'thread-confirm', taskIds: [], loadedTaskIds: [], skipped: [] }, materials: [], events: [], createdAt: 2, updatedAt: 2 } as never);
+    const reader = new FileTaskSnapshotStore(historyRoot);
+    const readPreviousUserTask = vi.fn((threadId, taskId) => reader.readPreviousUserTask(threadId, taskId));
+    const f = fixture({ readPreviousUserTask });
+    expect(await f.authorize('同意，主题是xiaok介绍', 'confirmed', 'auto', 'thread-confirm')).toBe(true);
+    const receipt = await f.service.create(f.proposal, { requestSource: 'agent', taskId: 'confirmed' });
+    expect(receipt).toMatchObject({ ok: true, projectId: 'proj-real' });
+    expect(buildProjectCardMessageFromToolResult(formatTaskToolResultResponse('create_project', JSON.stringify(receipt)))?.projectData).toMatchObject({ projectId: 'proj-real' });
+    expect(f.projects).toHaveLength(1);
+    expect(f.projects[0].requestedStartPolicy).toBe('activate_and_dispatch_after_plan');
+    expect(readPreviousUserTask).toHaveBeenCalledWith('thread-confirm', 'confirmed');
+    const restarted = new ConversationProjectService({ dataRoot: f.dataRoot, kswarmService: f.gateway as never });
+    expect(await restarted.create(f.proposal, { requestSource: 'agent', taskId: 'confirmed' })).toMatchObject({ projectId: 'proj-real' });
+    expect(f.projects).toHaveLength(1);
+  });
+
+  it.each(['同意吗？', '不同意', '同意，但不要创建项目', '同意，但不用创建项目', '同意，先说说风险', '请总结：同意', '同意，先不要执行'])(
+    'denies ambiguous or negated confirmation: %s', async prompt => {
+      const f = fixture({ readPreviousUserTask: async () => pendingSnapshot() });
+      expect(await f.authorize(prompt, 'confirmed', 'auto', 'thread-confirm')).toBe(false);
+      expect(f.service.isAuthorized('confirmed')).toBe(false);
+    });
+
+  it.each([
+    { context: { threadId: 'another-thread' } }, { status: 'running' },
+    { prompt: '请总结文档：设计一个工作流' }, { events: [] },
+    { result: { summary: '同意吗？' } },
+    { events: [{ type: 'canvas_tool_result', toolName: 'create_project', ok: true, response: JSON.stringify({ ok: true, projectId: 'existing' }) }] },
+  ])('denies confirmation without a matching pending request: %j', async overrides => {
+    const f = fixture({ readPreviousUserTask: async () => pendingSnapshot(overrides) });
+    expect(await f.authorize('同意，主题是xiaok介绍', 'confirmed', 'auto', 'thread-confirm')).toBe(false);
+    expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it('denies standalone and plan-mode confirmations', async () => {
+    const f = fixture({ readPreviousUserTask: async () => pendingSnapshot() });
+    expect(await f.authorize('同意')).toBe(false);
+    expect(await f.authorize('同意', 'confirmed', 'plan', 'thread-confirm')).toBe(false);
+  });
   it('journals the trusted original thread before project creation and attaches its observation receipt', async () => {
     const calls: string[] = [];
     const prepare = vi.fn(async (input: any) => { calls.push('prepare'); expect(input.threadId).toBe('thread-original'); });

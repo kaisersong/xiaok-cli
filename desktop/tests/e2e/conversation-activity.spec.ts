@@ -55,6 +55,7 @@ test('project activity returns to its real conversation without changing a draft
       NODE_ENV: 'test', XIAOK_CONFIG_DIR: join(root, 'config'), XIAOK_E2E_USER_DATA: join(root, 'profile'), XIAOK_MULTI_AGENT_E2E_ROOT: root,
       XIAOK_MULTI_AGENT_E2E_PROVIDER: `http://127.0.0.1:${(model.address() as net.AddressInfo).port}/v1`,
       XIAOK_ACTIVITY_E2E_OWNER: 'daemon', XIAOK_ACTIVITY_E2E_KSWARM_URL: sourceUrl, XIAOK_ACTIVITY_E2E_BROKER_URL: brokerUrl,
+      XIAOK_E2E_BACKGROUND: '1',
       XIAOK_DISABLE_GLOBAL_PLUGINS: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' } };
     app = await electron.launch(launchOptions); record({ phase: 'app-launched' });
     let page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
@@ -77,6 +78,11 @@ test('project activity returns to its real conversation without changing a draft
     const composer = () => page.locator('.chat-right-main textarea');
     await expect(composer()).toBeVisible(); await composer().fill('创建一个项目，用于跟进工作进展'); await composer().press('Enter');
     await expect(page.getByTestId('conversation-activity')).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByTestId('activity-toggle')).toHaveAttribute('aria-expanded', 'false');
+    await page.screenshot({ path: join(root, 'compact-work-updates.png') });
+    await page.getByTestId('activity-toggle').click();
+    await expect(page.getByTestId('activity-details')).toBeVisible();
+    expect((await page.getByTestId('activity-details').boundingBox())!.height).toBeLessThanOrEqual(256);
     const activities = () => page.evaluate(() => window.xiaokDesktop.getConversationActivities({ threadId: 'activity-thread', limit: 200 }));
     const initial = await activities();
     const watchId = initial[0].watchId;
@@ -125,11 +131,14 @@ test('project activity returns to its real conversation without changing a draft
       await receive('Other thread completion evidence');
       await expect.poll(() => page.evaluate(() => window.xiaokDesktop.getConversationActivityUnread())).toContainEqual(expect.objectContaining({ threadId: 'activity-thread' }));
       await expect(page.getByTestId(`activity-work-${watchId}`)).toHaveCount(0); await expect(composer()).toHaveValue('另一会话草稿');
-      await page.evaluate(() => { location.hash = '#/t/activity-thread'; }); await expect(page.getByTestId(`activity-work-${watchId}`)).toBeVisible();
+      await page.evaluate(() => { location.hash = '#/t/activity-thread'; });
+      await expect(page.getByTestId('activity-toggle')).toHaveAttribute('aria-expanded', 'false');
+      await page.getByTestId('activity-toggle').click(); await expect(page.getByTestId(`activity-work-${watchId}`)).toBeVisible();
       await expect.poll(() => page.evaluate(() => window.xiaokDesktop.getConversationActivityUnread())).not.toContainEqual(expect.objectContaining({ threadId: 'activity-thread' }));
       await composer().fill(draft); await composer().focus(); record({ phase: 'other-thread-unread-and-return' });
       writeFileSync(join(root,'e2e-control.json'),JSON.stringify({action:'second',nonce:Date.now()}));
       const second=await app!.context().waitForEvent('page');await second.waitForLoadState('domcontentloaded');await second.evaluate(()=>{location.hash='#/t/activity-thread';});
+      await second.getByTestId('activity-toggle').click();
       await expect(second.getByTestId(`activity-work-${native.watchId}`)).toBeVisible();
       await receive('TWO_VIEW_ONE_FACT');await expect(page.getByTestId(`activity-work-${native.watchId}`)).toContainText('TWO_VIEW_ONE_FACT');await expect(second.getByTestId(`activity-work-${native.watchId}`)).toContainText('TWO_VIEW_ONE_FACT');
       const twoViewDb=new DatabaseSync(join(root,'data','conversation-activity.sqlite'),{readOnly:true});
@@ -178,6 +187,7 @@ test('project activity returns to its real conversation without changing a draft
     await page.waitForEvent('close');
     page = await app.firstWindow(); await page.waitForLoadState('domcontentloaded');
     await page.evaluate(() => { location.hash = '#/t/activity-thread'; });
+    await page.getByTestId('activity-toggle').click();
     await expect(page.getByTestId(`activity-work-${watchId}`)).toBeVisible();
     const beforeExit = (await page.evaluate(id => window.xiaokDesktop.getWorkActivity(id), watchId)).projection.sourceSequence;
     writeFileSync(join(root, 'e2e-control.json'), JSON.stringify({ action: 'quit', nonce: Date.now() }));
@@ -195,6 +205,7 @@ test('project activity returns to its real conversation without changing a draft
     await page.evaluate(() => { location.hash = '#/t/activity-thread'; });
     expect(closed.ok).toBe(true);
     await expect.poll(async () => (await page.evaluate(id => window.xiaokDesktop.getWorkActivity(id), watchId)).projection.executionState).toBe('cancelled');
+    await page.getByTestId('activity-toggle').click();
     await expect(page.getByTestId(`activity-work-${watchId}`)).toContainText('已关闭');
     expect(modelCalls).toBe(afterCreationCalls); expect(errors).toEqual([]);
     await page.screenshot({ path: join(root, 'completed.png') });

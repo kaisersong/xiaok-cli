@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createServer, createConnection, type Server, type Socket } from 'node:net';
 import { existsSync, lstatSync, unlinkSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,8 +9,19 @@ import { taskId } from '@modelcontextprotocol/ext-tasks/core';
 import { ConversationActivityStore } from './store.js';
 import { ConversationActivityService, type ActivityThreadIdentity } from './service.js';
 import type { WorkWatch } from './types.js';
-import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL,
+import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_OWNER_GENERATION,
   ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES, type ActivityClientRole } from './owner-protocol.js';
+
+/** Default grace period after the last client/request/watch change. */
+export const ACTIVITY_OWNER_IDLE_MS = 20 * 60_000;
+/** Bound observation without an authenticated client, including active watches. */
+export const ACTIVITY_OWNER_MAX_UNATTENDED_MS = 24 * 60 * 60_000;
+/** Polling bounds shutdown latency without keeping the process alive. */
+const ACTIVITY_OWNER_IDLE_CHECK_MS = 1000;
+export function activityOwnerTimeout(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return /^\d+$/.test(value ?? '') && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 const key = z.string().min(1).max(256);
 const USER_METHODS = new Set(['status','list','work','unread','read','reporting','stop','subscribe','overview','unsubscribe','mcpInputs','mcpAnswer','mcpCancel']);
@@ -25,7 +38,32 @@ export class ConversationActivityOwnerHost {
   private pending = 0;
   private stopped = false;
   private readonly actor;
+  private readonly now: () => number;
+  private lastActivity: number;
+  private unattendedSince: number;
+  private watchState = '';
+  private idleEmitted = false;
+  private idleTimer?: ReturnType<typeof setInterval>;
+  private readonly idleMs: number;
+  private readonly unattendedMs: number;
+
+  checkIdle(): void {
+    if (this.stopped || this.idleEmitted || !this.options.idle || this.options.ready?.() === false) return;
+    const now = this.now();
+    const watches = this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) }));
+    const state = JSON.stringify(watches);
+    if (this.watchState && state !== this.watchState) this.lastActivity = now;
+    this.watchState = state;
+    if ([...this.clients].some(client => client.active && client.role)) { this.unattendedSince = now; this.lastActivity = now; return; }
+    if (this.pending) return;
+    const unfinished = watches.some(({ watch, projection }) => watch.status === 'active' && !['completed','failed','cancelled'].includes(projection?.executionState ?? ''));
+    if ((!unfinished && now - this.lastActivity >= this.idleMs) || now - this.unattendedSince >= this.unattendedMs) {
+      this.idleEmitted = true; this.options.idle();
+    }
+  }
   constructor(private readonly options: { dataRoot: string; profileId: string; actorId: string;
+    now?(): number; idle?(): void; env?: NodeJS.ProcessEnv;
+    setInterval?: typeof setInterval; clearInterval?: typeof clearInterval;
     configDigest?: string; ready?(): boolean;
     mcpRequest?(method: string, params: Record<string, unknown>, clientId: string): Promise<unknown>;
     disconnected?(clientId: string): Promise<void>;
@@ -36,8 +74,12 @@ export class ConversationActivityOwnerHost {
     notify?: ConstructorParameters<typeof ConversationActivityService>[0]['notify'];
     stopWatch?(watchId: string): void; watchBound?(watchId: string): Promise<void> | void;
     sourceHint?(source: string, workId: string): Promise<void> | void; onError?(error: unknown): void }) {
+    this.now = options.now ?? Date.now;
+    this.lastActivity = this.unattendedSince = this.now();
+    this.idleMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_IDLE_MS, ACTIVITY_OWNER_IDLE_MS);
+    this.unattendedMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_MAX_UNATTENDED_MS, ACTIVITY_OWNER_MAX_UNATTENDED_MS);
     this.address = activityOwnerAddress(options.dataRoot);
-    this.store = new ConversationActivityStore(join(this.address.dataRoot, 'conversation-activity.sqlite'));
+    this.store = new ConversationActivityStore(join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.database));
     this.actor = { requestSource: 'user' as const, actorId: options.actorId };
     this.service = new ConversationActivityService({ ...options, store: this.store });
   }
@@ -76,20 +118,22 @@ export class ConversationActivityOwnerHost {
             let message: unknown;
             try { message = JSON.parse(line); } catch { socket.destroy(); return; }
             if (!client.role) {
-              try { client.role = authenticateActivityClient(credentials, message); client.instanceId = (message as { instanceId?: string }).instanceId; clearTimeout(handshake);
+              try { client.role = authenticateActivityClient(credentials, message); client.instanceId = (message as { instanceId?: string }).instanceId; clearTimeout(handshake); this.lastActivity = this.unattendedSince = this.now();
                 this.send(client, { type: 'hello', protocol: ACTIVITY_OWNER_PROTOCOL, rootHash: this.address.rootHash, ownerEpoch: this.ownerEpoch }); }
               catch { socket.destroy(); return; }
             } else void this.request(client, message);
           }
         });
-        socket.on('close', () => { clearTimeout(handshake); client.active = false; this.clients.delete(client); for (const stop of client.subscriptions.values()) stop(); client.subscriptions.clear(); void this.options.disconnected?.(client.id).catch(error => this.options.onError?.(error)); });
+        socket.on('close', () => { if (client.role) { this.lastActivity = this.now(); if (![...this.clients].some(other => other !== client && other.active && other.role)) this.unattendedSince = this.now(); } clearTimeout(handshake); client.active = false; this.clients.delete(client); for (const stop of client.subscriptions.values()) stop(); client.subscriptions.clear(); void this.options.disconnected?.(client.id).catch(error => this.options.onError?.(error)); });
         socket.on('error', () => socket.destroy());
       });
       await new Promise<void>((resolve, reject) => { this.server!.once('error', reject); this.server!.listen(this.address.socketPath, () => { this.server!.off('error', reject); resolve(); }); });
-      const statusFile = join(this.address.dataRoot, 'activity-owner.status.json');
+      const statusFile = join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.status);
       writeFileSync(`${statusFile}.${process.pid}.tmp`, JSON.stringify({ ownerEpoch: this.ownerEpoch, pid: process.pid, rootHash: this.address.rootHash }), { mode: 0o600 });
-      renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
+      chmodPrivateActivityFile(`${statusFile}.${process.pid}.tmp`); renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
       this.service.start();
+      this.watchState = JSON.stringify(this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) })));
+      if (this.options.idle) { this.idleTimer = (this.options.setInterval ?? setInterval)(() => this.checkIdle(), ACTIVITY_OWNER_IDLE_CHECK_MS); this.idleTimer.unref(); }
     } catch (error) { await this.stop(); throw error; }
   }
 
@@ -104,13 +148,13 @@ export class ConversationActivityOwnerHost {
     const parsed = z.object({ type: z.literal('request'), id: key, method: key, params: z.record(z.string(), z.unknown()) }).strict().safeParse(raw);
     if (!parsed.success || client.pending >= 64 || this.pending >= 256) { client.socket.destroy(); return; }
     const { id, method, params } = parsed.data;
-    client.pending++; this.pending++;
+    client.pending++; this.pending++; this.lastActivity = this.now();
     try {
       if (client.role === 'user' && !USER_METHODS.has(method)) throw new Error('activity_method_forbidden');
       const result = await this.dispatch(client, method, params);
       if (client.active) this.send(client, { type: 'result', id, result });
     } catch (error) { this.send(client, { type: 'error', id, code: error instanceof Error ? error.message.slice(0, 256) : 'activity_request_failed' }); }
-    finally { client.pending--; this.pending--; }
+    finally { client.pending--; this.pending--; this.lastActivity = this.now(); }
   }
   private async dispatch(client: Client, method: string, params: Record<string, unknown>): Promise<unknown> {
     const service = this.service, actor = this.actor;
@@ -120,7 +164,7 @@ export class ConversationActivityOwnerHost {
       return () => client.active && !this.stopped && this.options.authorizeProducer(watch.origin.threadId, client.instanceId);
     };
     switch (method) {
-      case 'status': z.object({}).strict().parse(params); return { ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
+      case 'status': z.object({}).strict().parse(params); return { generation: ACTIVITY_OWNER_GENERATION, ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
       case 'list': { const input = z.object({ threadId: key, afterLocalSeq: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }).strict().parse(params); return service.listActivities(input.threadId, actor, input); }
       case 'work': return service.getWork(z.object({ watchId: key }).strict().parse(params).watchId, actor);
       case 'unread': z.object({}).strict().parse(params); return service.unreadThreads(actor);
@@ -192,7 +236,8 @@ export class ConversationActivityOwnerHost {
   }
 
   async stop(): Promise<void> {
-    if (this.stopped) return; this.stopped = true; this.service.dispose();
+    if (this.stopped) return; this.stopped = true;
+    if (this.idleTimer) (this.options.clearInterval ?? clearInterval)(this.idleTimer); this.service.dispose();
     for (const client of this.clients) client.socket.destroy();
     if (this.server) await new Promise<void>(resolve => this.server!.close(() => resolve()));
     this.store.close();
