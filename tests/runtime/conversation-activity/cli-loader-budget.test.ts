@@ -24,7 +24,7 @@ it('returns at 2000ms and delivers a late instance without a timeout notice', as
   const instance = {} as CliConversationActivities; s.resolve(instance);
   await vi.advanceTimersByTimeAsync(0);
   expect(s.onLate).toHaveBeenCalledExactlyOnceWith(instance); expect(s.onSettled).toHaveBeenCalledOnce();
-  expect(s.notices.take()).toBeUndefined();
+  expect(s.notices.take()?.text).toBe('已开启后台任务跟进：长任务在后台运行时，xiaok 会告诉你进展。不需要的话，设置 XIAOK_CONVERSATION_ACTIVITY=0 即可关闭。');
 });
 it('returns an instance within budget without late callbacks', async () => {
   const s = setup(); const instance = {} as CliConversationActivities;

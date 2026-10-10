@@ -3093,7 +3093,7 @@ export const zh: LocaleStrings = {
     title: '工作跟进', stopped: '已停止跟进', unavailable: '状态暂不可确认', details: '查看项目', lastUpdate: '最近同步', nextReport: '下次汇报',
     frequency: '汇报频率', normal: '每五分钟及关键变化', criticalOnly: '只报关键变化', quiet: '静默', stop: '停止跟进', stopHint: '只停止汇报，不取消工作', noProgress: '暂无', error: '跟进更新失败，请稍后重试。', ownerUnavailable: 'xiaoK 的后台组件和当前版本不一致，部分功能暂时无法启动。请退出所有 xiaok 窗口后重新打开。',
     unread: (count) => `${count} 条未读工作更新`,
-    report: (state, time) => `状态汇报 ${time}：${state}。`,
+    report: (state, ago) => `最近汇报：${state} · ${ago}`, noReport: '还没有汇报',
     sources: { kswarm: '项目', task_host: '后台任务', agent_group: 'Agent 协作', mcp: '插件任务' },
     states: { accepted: '已创建', queued: '等待执行', running: '执行中', blocked: '已阻塞', input_required: '等待处理', completed: '已完成', failed: '执行失败', cancelled: '已取消' },
   },

@@ -3113,7 +3113,7 @@ export const en: LocaleStrings = {
     title: 'Work updates', stopped: 'Following stopped', unavailable: 'Status unconfirmed', details: 'View project', lastUpdate: 'Last synced', nextReport: 'Next report',
     frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.', ownerUnavailable: "xiaoK's background component does not match this version, so some features cannot start yet. Quit all xiaok windows and open it again.",
     unread: (count) => `${count} unread work updates`,
-    report: (state, time) => `Status report ${time}: ${state}.`,
+    report: (state, ago) => `Latest report: ${state} · ${ago}`, noReport: 'No report yet',
     sources: { kswarm: 'Project', task_host: 'Background task', agent_group: 'Agent collaboration', mcp: 'Plugin task' },
     states: { accepted: 'Accepted', queued: 'Queued', running: 'Running', blocked: 'Blocked', input_required: 'Action required', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' },
   },

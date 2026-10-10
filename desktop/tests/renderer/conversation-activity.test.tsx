@@ -59,6 +59,21 @@ describe('conversation work feedback', () => {
     expect(screen.getByTestId('activity-details')).toHaveClass('max-h-64', 'overflow-y-auto');
     expect(screen.getAllByTestId('activity-work-watch')).toHaveLength(1);
   });
+  it('shows the latest report with a relative time under each expanded work item, and says so when none exists', async () => {
+    const at = Date.now() - 3 * 60_000;
+    mocks.list.mockResolvedValue([{ watchId: 'watch', localSeq: 1, kind: 'report', at, projection },
+      { watchId: 'quiet', localSeq: 2, kind: 'accepted', at, projection }]);
+    mocks.work.mockImplementation(async (id: string) => ({ watch: { ...watch, watchId: id }, projection: { ...projection, watchId: id, executionState: 'completed' } }));
+    mount();
+    expect(await screen.findByTestId('activity-toggle')).toBeVisible();
+    expect(screen.queryByTestId('activity-last-report')).not.toBeInTheDocument();
+    await expand();
+    const lines = screen.getAllByTestId('activity-last-report').map(node => node.textContent);
+    expect(lines).toContain('还没有汇报');
+    const reported = lines.find(line => line?.startsWith('最近汇报：'));
+    expect(reported).toMatch(/^最近汇报：.+ · 3\s*分钟前$/);
+    expect(reported).not.toMatch(/completed|executionState|_/);
+  });
   it('loads the next activity page so later work cards are not silently hidden', async () => {
     mocks.list.mockImplementation(async (input: { afterLocalSeq?: number }) => input.afterLocalSeq
       ? [{ activityId: 'later', localSeq: 201, watchId: 'later-watch', threadId: 'thread', kind: 'accepted', at: 1000, projection }]
