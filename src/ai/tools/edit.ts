@@ -100,7 +100,7 @@ export function createEditTool(options: WorkspaceToolOptions = {}): Tool {
         new_string: string
       }
 
-      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd)
+      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard)
       let content: string
       try {
         content = readFileSync(resolvedPath, 'utf-8')
