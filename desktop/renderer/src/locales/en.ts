@@ -3110,7 +3110,7 @@ export const en: LocaleStrings = {
     historyGap: 'Some historical updates were compacted or expired; current state is confirmed by the source',
     lastProgress: 'Last progress',
     title: 'Work updates', stopped: 'Following stopped', unavailable: 'Status unconfirmed', details: 'View project', lastUpdate: 'Last synced', nextReport: 'Next report',
-    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.',
+    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.', ownerUnavailable: "xiaoK's background component does not match this version, so some features cannot start yet. Quit all xiaok windows and open it again.",
     unread: (count) => `${count} unread work updates`,
     report: (state, time) => `Status report ${time}: ${state}.`,
     sources: { kswarm: 'Project', task_host: 'Background task', agent_group: 'Agent collaboration', mcp: 'Plugin task' },

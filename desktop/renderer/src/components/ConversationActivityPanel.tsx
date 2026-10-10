@@ -5,6 +5,9 @@ import { getDesktopApi } from '../shared/desktop';
 import { McpWorkControls } from './McpWorkControls';
 import type { WorkProjection, WorkWatch, ReportingPreference, ConversationActivity } from '../../../shared/conversation-activity-types.js';
 
+/** The desktop main process reports a failed owner attach with one stable code; show fixed copy, never the code. */
+const isOwnerUnavailable = (error: unknown) => error instanceof Error && error.message.includes('activity_owner_unavailable');
+
 type WorkView = { watch: WorkWatch; projection: WorkProjection };
 
 /** A presentation of main-owned activity. No model turn or business polling lives here. */
@@ -12,7 +15,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
   const { t, locale } = useLocale();
   const navigate = useNavigate();
   const [works, setWorks] = useState<WorkView[]>([]);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<false | 'generic' | 'owner'>(false);
   const [reports, setReports] = useState<ConversationActivity[]>([]);
   const loadRef = useRef<(() => Promise<void>) | undefined>(undefined);
   useEffect(() => {
@@ -41,7 +44,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
           const throughLocalSeq = activities.at(-1)?.localSeq;
           if (throughLocalSeq !== undefined) void api.markConversationActivitiesRead?.({ threadId, throughLocalSeq }).catch(() => undefined);
         }
-      } catch { if (live && request === revision) setError(true); }
+      } catch (cause) { if (live && request === revision) setError(isOwnerUnavailable(cause) ? 'owner' : 'generic'); }
     };
     loadRef.current = load;
     // Register before the initial read, so a fast completion cannot disappear.
@@ -59,10 +62,10 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
       if (!watch?.watchId) throw new Error('activity_invalid_reply');
       setWorks(current => current.map(item => item.watch.watchId === watch.watchId ? { ...item, watch } : item));
       await loadRef.current?.();
-    } catch { setError(true); }
+    } catch (cause) { setError(isOwnerUnavailable(cause) ? 'owner' : 'generic'); }
   };
   const labels = t.conversationActivity;
-  if (!works.length) return error ? <p role="status" className="text-xs text-[var(--c-text-muted)]">{labels.error}</p> : null;
+  if (!works.length) return error ? <p role="status" className="text-xs text-[var(--c-text-muted)]">{error === 'owner' ? labels.ownerUnavailable : labels.error}</p> : null;
   const latestReports = new Map(reports.map(item => [item.watchId, item]));
   const time = (value: number | null) => value === null ? labels.noProgress : new Date(value).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US');
   return (
@@ -102,7 +105,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
           </article>
         );
       })}
-      {error && <p role="status" className="text-xs text-[var(--c-text-muted)]">{labels.error}</p>}
+      {error && <p role="status" className="text-xs text-[var(--c-text-muted)]">{error === 'owner' ? labels.ownerUnavailable : labels.error}</p>}
     </section>
   );
 }
