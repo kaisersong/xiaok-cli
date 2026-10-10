@@ -83,6 +83,7 @@
     "architecture:check": "node scripts/governance/check.mjs architecture",
     "architecture:baseline": "node scripts/governance/check.mjs architecture --update-baseline",
     "governance:check": "npm run lint && npm run architecture:check",
+    "test:env-isolation": "node scripts/check-test-env-isolation.mjs",
     "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs",
     "pack:cli": "node scripts/pack-cli.mjs",
     "verify:cli-install": "node scripts/verify-cli-install.mjs",
