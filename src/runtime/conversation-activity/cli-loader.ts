@@ -41,8 +41,46 @@ export async function attachCliConversationActivities(
     if (error instanceof Error && error.message === 'activity_storage_not_private') {
       options.onDebug?.('cli_activity_storage_not_private', error.message);
       options.startupNotices?.queueStorageNotPrivate();
-    } else options.onDebug?.('cli_activity_owner_unavailable', String(error));
+    } else {
+      options.onDebug?.('cli_activity_owner_unavailable', String(error));
+      options.startupNotices?.queueOwnerUnavailable();
+    }
     return undefined;
+  }
+}
+
+
+export const ACTIVITY_STARTUP_WAIT_MS = 2000;
+
+export async function attachCliConversationActivitiesWithinBudget(
+  options: LoaderOptions,
+  budget: {
+    waitMs?: number;
+    onLate?(instance: CliConversationActivities): void;
+    onSettled?(): void;
+  } = {},
+  deps?: LoaderDependencies,
+): Promise<CliConversationActivities | undefined> {
+  const pending = attachCliConversationActivities(options, deps);
+  const timedOut = Symbol('activity_startup_timeout');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      pending,
+      new Promise<typeof timedOut>(resolve => {
+        timer = setTimeout(() => resolve(timedOut), budget.waitMs ?? ACTIVITY_STARTUP_WAIT_MS);
+        timer.unref?.();
+      }),
+    ]);
+    if (result !== timedOut) return result;
+    options.onDebug?.('cli_activity_startup_deferred', '');
+    void pending.then(instance => {
+      try { if (instance) budget.onLate?.(instance); }
+      finally { budget.onSettled?.(); }
+    });
+    return undefined;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -57,6 +95,7 @@ interface ActivityStartupNotice {
 interface ActivityStartupNotices {
   queueUnavailable(): void;
   queueStorageNotPrivate(): void;
+  queueOwnerUnavailable(): void;
   queueStarted(): void;
   take(): ActivityStartupNotice | undefined;
 }
@@ -74,6 +113,11 @@ export function createActivityStartupNotices(options: {
     options.onDebug?.('cli_activity_startup_notice_unavailable', String(error));
   };
   return {
+    queueOwnerUnavailable() {
+      if (queued) return;
+      queued = true;
+      pending = { text: '异步任务跟进暂不可用，其他功能不受影响。', markShown() {} };
+    },
     queueStorageNotPrivate() {
       if (queued) return;
       queued = true;

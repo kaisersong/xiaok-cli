@@ -20,7 +20,7 @@ import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput,
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
 import type { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
-import { attachCliConversationActivities, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
+import { attachCliConversationActivitiesWithinBudget, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -404,6 +404,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   let flushSubAgentNotices = (): void => {};
   let interactiveNotificationsReady = false;
   let cliActivities: CliConversationActivities | undefined;
+  let cleanedUp = false;
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
@@ -1109,7 +1110,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     },
   });
   const buildCleanupSteps = (): Array<() => void | Promise<void>> => [
-    () => cliActivities?.close(),
+    () => { cleanedUp = true; return cliActivities?.close(); },
     () => registryFactory.dispose(),
     () => transcriptLogger.close(),
     () => platform.dispose(),
@@ -1204,7 +1205,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     configDir: getConfigDir(),
     onDebug: (event, detail) => log.debug(event, detail),
   });
-  cliActivities = await attachCliConversationActivities({
+  cliActivities = await attachCliConversationActivitiesWithinBudget({
     startupNotices: activityStartupNotices,
     print: Boolean(opts.print),
     isTTY: isTTY(),
@@ -1213,6 +1214,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       changed: () => flushSubAgentNotices(),
       onError: error => log.debug('cli_activity_unavailable', String(error)) },
     onDebug: (event, detail) => log.debug(event, detail),
+  }, {
+    onLate: instance => {
+      if (cleanedUp) { void instance.close(); return; }
+      cliActivities = instance;
+    },
+    onSettled: () => flushSubAgentNotices(),
   });
 
   // 触发 SessionStart hook

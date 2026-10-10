@@ -26,9 +26,42 @@ export async function attachCliConversationActivities(options, deps = { importCl
             options.onDebug?.('cli_activity_storage_not_private', error.message);
             options.startupNotices?.queueStorageNotPrivate();
         }
-        else
+        else {
             options.onDebug?.('cli_activity_owner_unavailable', String(error));
+            options.startupNotices?.queueOwnerUnavailable();
+        }
         return undefined;
+    }
+}
+export const ACTIVITY_STARTUP_WAIT_MS = 2000;
+export async function attachCliConversationActivitiesWithinBudget(options, budget = {}, deps) {
+    const pending = attachCliConversationActivities(options, deps);
+    const timedOut = Symbol('activity_startup_timeout');
+    let timer;
+    try {
+        const result = await Promise.race([
+            pending,
+            new Promise(resolve => {
+                timer = setTimeout(() => resolve(timedOut), budget.waitMs ?? ACTIVITY_STARTUP_WAIT_MS);
+                timer.unref?.();
+            }),
+        ]);
+        if (result !== timedOut)
+            return result;
+        options.onDebug?.('cli_activity_startup_deferred', '');
+        void pending.then(instance => {
+            try {
+                if (instance)
+                    budget.onLate?.(instance);
+            }
+            finally {
+                budget.onSettled?.();
+            }
+        });
+        return undefined;
+    }
+    finally {
+        clearTimeout(timer);
     }
 }
 export const CONVERSATION_ACTIVITY_MIN_NODE = '22.14.0';
@@ -41,6 +74,12 @@ export function createActivityStartupNotices(options) {
         options.onDebug?.('cli_activity_startup_notice_unavailable', String(error));
     };
     return {
+        queueOwnerUnavailable() {
+            if (queued)
+                return;
+            queued = true;
+            pending = { text: '异步任务跟进暂不可用，其他功能不受影响。', markShown() { } };
+        },
         queueStorageNotPrivate() {
             if (queued)
                 return;

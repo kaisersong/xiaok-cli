@@ -47,12 +47,16 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
     });
   } finally { closeSync(logFile); }
   let spawnError: unknown; child.once('error', error => { spawnError = error; });
+  let exitedAt: number | undefined;
+  child.once('exit', () => { exitedAt = Date.now(); });
   child.unref();
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
   let lastError: unknown;
   while (Date.now() < deadline) {
     if (spawnError) throw spawnError;
     try { return await attach(); } catch (error) { lastError = error; }
+    if (spawnError) throw spawnError;
+    if (exitedAt !== undefined && Date.now() - exitedAt >= 500) throw new Error('activity_owner_exited');
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw lastError instanceof Error ? lastError : new Error('activity_owner_start_timeout');

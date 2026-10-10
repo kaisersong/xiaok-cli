@@ -63,6 +63,8 @@ export async function ensureConversationActivityOwner(config, options = {}) {
     }
     let spawnError;
     child.once('error', error => { spawnError = error; });
+    let exitedAt;
+    child.once('exit', () => { exitedAt = Date.now(); });
     child.unref();
     const deadline = Date.now() + (options.timeoutMs ?? 30_000);
     let lastError;
@@ -75,6 +77,10 @@ export async function ensureConversationActivityOwner(config, options = {}) {
         catch (error) {
             lastError = error;
         }
+        if (spawnError)
+            throw spawnError;
+        if (exitedAt !== undefined && Date.now() - exitedAt >= 500)
+            throw new Error('activity_owner_exited');
         await new Promise(resolve => setTimeout(resolve, 50));
     }
     throw lastError instanceof Error ? lastError : new Error('activity_owner_start_timeout');

@@ -66,11 +66,11 @@ describe('activity startup notices', () => {
     expect((await load('', gate)).take()).toBeUndefined();
   });
 
-  it('owner failure queues nothing', async () => {
+  it('owner failure queues a degradation notice', async () => {
     const notices = await load('', {}, vi.fn().mockResolvedValue({
       CliConversationActivities: { attach: vi.fn().mockRejectedValue(new Error('owner unavailable')) },
     }));
-    expect(notices.take()).toBeUndefined();
+    expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。');
   });
 
   it('persists only after terminal output and suppresses subsequent sessions', async () => {

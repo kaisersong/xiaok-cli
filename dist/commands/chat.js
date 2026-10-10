@@ -15,7 +15,7 @@ import { createGoalTools } from '../ai/tools/goal.js';
 import { formatDebugOutput, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
-import { attachCliConversationActivities, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
+import { attachCliConversationActivitiesWithinBudget, createActivityStartupNotices } from '../runtime/conversation-activity/cli-loader.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -274,6 +274,7 @@ async function runChat(initialInput, opts) {
     let flushSubAgentNotices = () => { };
     let interactiveNotificationsReady = false;
     let cliActivities;
+    let cleanedUp = false;
     const transcriptBuffer = new TranscriptBuffer({
         onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
     });
@@ -936,7 +937,7 @@ async function runChat(initialInput, opts) {
         },
     });
     const buildCleanupSteps = () => [
-        () => cliActivities?.close(),
+        () => { cleanedUp = true; return cliActivities?.close(); },
         () => registryFactory.dispose(),
         () => transcriptLogger.close(),
         () => platform.dispose(),
@@ -1023,7 +1024,7 @@ async function runChat(initialInput, opts) {
         configDir: getConfigDir(),
         onDebug: (event, detail) => log.debug(event, detail),
     });
-    cliActivities = await attachCliConversationActivities({
+    cliActivities = await attachCliConversationActivitiesWithinBudget({
         startupNotices: activityStartupNotices,
         print: Boolean(opts.print),
         isTTY: isTTY(),
@@ -1032,6 +1033,15 @@ async function runChat(initialInput, opts) {
             changed: () => flushSubAgentNotices(),
             onError: error => log.debug('cli_activity_unavailable', String(error)) },
         onDebug: (event, detail) => log.debug(event, detail),
+    }, {
+        onLate: instance => {
+            if (cleanedUp) {
+                void instance.close();
+                return;
+            }
+            cliActivities = instance;
+        },
+        onSettled: () => flushSubAgentNotices(),
     });
     // 触发 SessionStart hook
     void lifecycleHooks.runHooks('SessionStart', {

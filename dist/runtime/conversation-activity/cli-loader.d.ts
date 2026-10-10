@@ -14,6 +14,12 @@ interface LoaderDependencies {
     }>;
 }
 export declare function attachCliConversationActivities(options: LoaderOptions, deps?: LoaderDependencies): Promise<CliConversationActivities | undefined>;
+export declare const ACTIVITY_STARTUP_WAIT_MS = 2000;
+export declare function attachCliConversationActivitiesWithinBudget(options: LoaderOptions, budget?: {
+    waitMs?: number;
+    onLate?(instance: CliConversationActivities): void;
+    onSettled?(): void;
+}, deps?: LoaderDependencies): Promise<CliConversationActivities | undefined>;
 export declare const CONVERSATION_ACTIVITY_MIN_NODE = "22.14.0";
 interface ActivityStartupNotice {
     text: string;
@@ -23,6 +29,7 @@ interface ActivityStartupNotice {
 interface ActivityStartupNotices {
     queueUnavailable(): void;
     queueStorageNotPrivate(): void;
+    queueOwnerUnavailable(): void;
     queueStarted(): void;
     take(): ActivityStartupNotice | undefined;
 }
