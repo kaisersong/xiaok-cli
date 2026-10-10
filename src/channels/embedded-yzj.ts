@@ -11,13 +11,15 @@ import type { YZJNamedChannel } from '../types.js';
 import type { RuntimeFacade } from '../ai/runtime/runtime-facade.js';
 import type { RuntimeHooks } from '../runtime/hooks.js';
 import type { StreamChunk } from '../types.js';
+import { buildPermissionRequest } from '../ui/permission-prompt.js';
 import { createServer, type Server } from 'node:http';
 
 export interface EmbeddedYZJChannelOptions {
   runtimeFacade: RuntimeFacade;
   runtimeHooks: RuntimeHooks;
   approvalStore: ApprovalStore;
-  onPromptOverride: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
+  /** channel 侧确认的等待时长，超时按拒绝处理；默认沿用 ApprovalStore 的 5 分钟。 */
+  approvalTimeoutMs?: number;
   transport: Pick<YZJTransport, 'deliver'>;
   selectedChannel: YZJNamedChannel;
   yzjConfig: YZJResolvedConfig;
@@ -29,6 +31,13 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
   private readonly options: EmbeddedYZJChannelOptions;
   private wsClient: YZJWebSocketClient | null = null;
   private httpServer: Server | null = null;
+  /**
+   * 正在执行的、由 channel 消息发起的 turn 的发起人。只有恰好一个 channel turn 在跑时，
+   * 确认才推送给它的发起人；多个并发时无法归属，channel 侧不参与，交给终端决定。
+   */
+  private readonly activeTurnTargets = new Set<ChannelReplyTarget>();
+  /** 本 channel 发出的确认请求 → 允许回复它的用户 openid。 */
+  private readonly approvalOwners = new Map<string, string | undefined>();
 
   constructor(options: EmbeddedYZJChannelOptions) {
     this.options = options;
@@ -89,36 +98,12 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
 
     const command = parseYZJCommand(msg.content);
 
-    if (command.kind === 'approve') {
-      approvalStore.resolve(command.approvalId, 'approve');
-      return;
-    }
-
-    if (command.kind === 'deny') {
-      approvalStore.resolve(command.approvalId, 'deny');
-      return;
-    }
-
-    // 普通文本 → 运行 turn，收集 text chunks，推送回复
-    const textParts: string[] = [];
-    const onChunk = (chunk: StreamChunk) => {
-      if (chunk.type === 'text') {
-        textParts.push(chunk.delta);
+    if (command.kind === 'approve' || command.kind === 'deny') {
+      if (!this.isAllowedApprover(command.approvalId, msg.operatorOpenid)) {
+        process.stderr.write(`[yzjchannel] ignored ${command.kind} for ${command.approvalId}: unknown approval or not the requester\n`);
+        return;
       }
-    };
-
-    try {
-      await runtimeFacade.runTurn(
-        { sessionId, cwd, source: 'yzj', input: msg.content },
-        onChunk,
-      );
-    } catch (err) {
-      process.stderr.write(`[yzjchannel] runTurn error: ${String(err)}\n`);
-      return;
-    }
-
-    const reply = textParts.join('');
-    if (!reply.trim()) {
+      approvalStore.resolve(command.approvalId, command.kind);
       return;
     }
 
@@ -131,6 +116,32 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
         replySummary: msg.content.slice(0, 100),
       },
     };
+
+    // 普通文本 → 运行 turn，收集 text chunks，推送回复
+    const textParts: string[] = [];
+    const onChunk = (chunk: StreamChunk) => {
+      if (chunk.type === 'text') {
+        textParts.push(chunk.delta);
+      }
+    };
+
+    this.activeTurnTargets.add(replyTarget);
+    try {
+      await runtimeFacade.runTurn(
+        { sessionId, cwd, source: 'yzj', input: msg.content },
+        onChunk,
+      );
+    } catch (err) {
+      process.stderr.write(`[yzjchannel] runTurn error: ${String(err)}\n`);
+      return;
+    } finally {
+      this.activeTurnTargets.delete(replyTarget);
+    }
+
+    const reply = textParts.join('');
+    if (!reply.trim()) {
+      return;
+    }
 
     const outbound: OutboundChannelMessage = {
       channel: 'yzj',
@@ -165,17 +176,92 @@ export class EmbeddedYZJChannel implements EmbeddedChannel {
     await this.options.transport.deliver(outbound);
   }
 
+  /**
+   * 合并终端确认与 channel 确认：任何一侧给出明确决定即生效，绝不自动批准。
+   * - 终端确认照常弹出；
+   * - 当前 turn 由 channel 消息发起时，同时把确认请求推送给发起人，只有他显式 /approve 才算批准；
+   * - channel 侧超时、推送失败或其他错误一律按拒绝处理；
+   * - 终端发起的 turn 不推送到 channel，由终端确认决定。
+   */
   makeOnPrompt(
     tuiOnPrompt: (toolName: string, input: Record<string, unknown>) => Promise<boolean>,
   ): (toolName: string, input: Record<string, unknown>) => Promise<boolean> {
     return async (toolName: string, input: Record<string, unknown>) => {
-      // Promise.race 取最先 resolve 的结果；另一侧 Promise 会继续运行至自然结束（副作用可重入）
-      const result = await Promise.race([
-        tuiOnPrompt(toolName, input),
-        this.options.onPromptOverride(toolName, input),
-      ]);
-      return result;
+      const channelRequest = this.requestChannelApproval(toolName, input);
+      try {
+        return await new Promise<boolean>((resolve) => {
+          Promise.resolve().then(() => tuiOnPrompt(toolName, input)).then(
+            (decision) => resolve(decision === true),
+            () => resolve(false),
+          );
+          channelRequest.decision.then(
+            (decision) => {
+              if (decision !== undefined) resolve(decision);
+            },
+            () => resolve(false),
+          );
+        });
+      } finally {
+        channelRequest.cancel();
+      }
     };
+  }
+
+  /**
+   * 向 channel 用户发起一次确认。decision：true=显式批准，false=拒绝/超时/出错，
+   * undefined=当前不是 channel 发起的 turn（不参与决定）。
+   */
+  private requestChannelApproval(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): { decision: Promise<boolean | undefined>; cancel: () => void } {
+    const replyTarget = this.activeTurnTargets.size === 1
+      ? [...this.activeTurnTargets][0]!
+      : null;
+    if (!replyTarget || !replyTarget.userId) {
+      return { decision: Promise.resolve(undefined), cancel: () => {} };
+    }
+
+    const { approvalStore, sessionId, approvalTimeoutMs } = this.options;
+    let approvalId: string | undefined;
+    const cancel = () => {
+      if (!approvalId) return;
+      this.approvalOwners.delete(approvalId);
+      if (approvalStore.get(approvalId)) {
+        approvalStore.expire(approvalId);
+      }
+    };
+
+    const decision = (async (): Promise<boolean> => {
+      try {
+        const summary = buildPermissionRequest(toolName, input).summary;
+        const approval = approvalStore.create({
+          sessionId,
+          turnId: replyTarget.messageId ?? sessionId,
+          toolName,
+          summary,
+          ...(approvalTimeoutMs !== undefined ? { timeoutMs: approvalTimeoutMs } : {}),
+        });
+        approvalId = approval.approvalId;
+        this.approvalOwners.set(approval.approvalId, replyTarget.userId);
+        const waiting = approvalStore.waitForDecision(approval.approvalId);
+        await this.pushApprovalRequest(approval.approvalId, summary, replyTarget);
+        const result = await waiting;
+        return result === 'approve';
+      } catch (err) {
+        process.stderr.write(`[yzjchannel] approval request failed, denying: ${String(err)}\n`);
+        cancel();
+        return false;
+      }
+    })();
+
+    return { decision, cancel };
+  }
+
+  /** 只接受本 channel 发出的、且由发起人本人回复的 /approve、/deny；其余一律忽略。 */
+  private isAllowedApprover(approvalId: string, operatorOpenid: string): boolean {
+    const owner = this.approvalOwners.get(approvalId);
+    return owner !== undefined && owner === operatorOpenid;
   }
 
   // 测试用公开方法
