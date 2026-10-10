@@ -24,6 +24,7 @@ export interface YZJResponse {
 }
 
 export interface YZJResolvedConfig {
+  allowedSenders?: string[];
   webhookUrl: string;
   inboundMode: YZJInboundMode;
   webhookPath: string;
