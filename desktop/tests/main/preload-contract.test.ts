@@ -1,3 +1,4 @@
+import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
 import { registerRoomWorkspaceIpc } from '../../electron/room-workspace-ipc.js';
@@ -73,6 +74,17 @@ describe('preload API contract', () => {
       'createTask',
       'createTaskWithFiles',
       'subscribeTask',
+      'getConversationActivities',
+      'getConversationActivityUnread',
+      'markConversationActivitiesRead',
+      'subscribeConversationActivityOverview',
+      'subscribeConversationActivities',
+      'getWorkActivity',
+      'getMcpTaskInputs',
+      'answerMcpTaskInput',
+      'cancelMcpWork',
+      'updateWorkReporting',
+      'stopWorkWatch',
       'getMultiAgentSnapshot',
       'listMultiAgentGroups',
       'listMultiAgents',
@@ -977,6 +989,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'/g;

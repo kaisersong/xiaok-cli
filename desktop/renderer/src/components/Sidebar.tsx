@@ -69,6 +69,23 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
   const routerLocation = useLocation();
   const { threads, removeThread, updateTitle, setThreadGtdBucket } = useThreadList();
   const [searchQuery, setSearchQuery] = useState('');
+  const [activityUnread, setActivityUnread] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const desktop = getDesktopApi();
+    if (!desktop?.getConversationActivityUnread) return;
+    let active = true, revision = 0;
+    const refresh = async () => {
+      const current = ++revision;
+      try {
+        const rows = await desktop.getConversationActivityUnread();
+        if (active && revision === current) setActivityUnread(Object.fromEntries(rows.map(row => [row.threadId, row.count])));
+      } catch { /* Existing navigation remains usable when activity is unavailable. */ }
+    };
+    const stop = desktop.subscribeConversationActivityOverview?.(() => { void refresh(); });
+    void refresh();
+    return () => { active = false; stop?.(); };
+  }, []);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -226,6 +243,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
       log.info('deleteThread', id);
       await api.deleteThread(id);
       removeThread(id);
+      if (routerLocation.pathname === `/t/${encodeURIComponent(id)}`) navigate('/');
       log.info('deleteThread ok');
     } catch (error) { setDeleteError(threadDeletionError(error, t)); }
     finally { deletingThreads.current.delete(id); }
@@ -435,6 +453,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                               <SidebarThreadListItem
                                 key={thread.id}
                                 thread={thread}
+                                activityUnreadCount={activityUnread[thread.id] ?? 0}
                                 title={thread.title || t.untitled}
                                 isSelected={isSelected}
                                 isEditing={editingId === thread.id}
@@ -464,6 +483,7 @@ export function SidebarComponent({ onOpenSettings }: SidebarProps) {
                 <SidebarThreadListItem
                   key={thread.id}
                   thread={thread}
+                                activityUnreadCount={activityUnread[thread.id] ?? 0}
                   title={thread.title || t.untitled}
                   isSelected={isSelected}
                   isEditing={editingId === thread.id}
@@ -721,6 +741,7 @@ function SidebarScheduledTaskListItem({
 
 function SidebarThreadListItem({
   thread,
+  activityUnreadCount = 0,
   title,
   isSelected,
   isEditing,
@@ -736,6 +757,7 @@ function SidebarThreadListItem({
   onMoveToBucket,
 }: {
   thread: ThreadResponse;
+  activityUnreadCount?: number;
   title: string;
   isSelected: boolean;
   isEditing: boolean;
@@ -824,6 +846,8 @@ function SidebarThreadListItem({
         ) : (
           <span className="flex-1 truncate">{title}</span>
         )}
+        {activityUnreadCount > 0 && <span aria-label={t.conversationActivity.unread(activityUnreadCount)} className="ml-1 rounded bg-[var(--c-accent)]/15 px-1 text-xs text-[var(--c-accent)]">{activityUnreadCount}</span>}
+
         {gtdEnabled && onMoveToBucket && !isEditing && (
           <div ref={bucketMenuRef} className="relative ml-1 hidden shrink-0 group-hover:block">
             <button

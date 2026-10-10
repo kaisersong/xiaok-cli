@@ -126,7 +126,7 @@ The CLI can ask about material delegation choices when interactive input is avai
 
 ### Requirements
 
-- **CLI:** Node.js **22 or later**.
+- **CLI:** Node.js **22.14 or later**.
 - **Full source stack:** Node.js **22.22 or later** to satisfy KSwarm's engine requirement.
 - **Published Desktop packages:** macOS Apple Silicon and Windows x64. The installed app includes its host runtime; it does not need a separately installed Node.js for normal use.
 - Computer Use requires macOS and the relevant accessibility/screen permissions. Model and external-service credentials depend on the capabilities you use.

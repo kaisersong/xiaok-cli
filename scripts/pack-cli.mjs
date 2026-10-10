@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -65,7 +65,9 @@ export async function bundleNativeSource({ root, stage, npmCli }) {
 
     // Keep each dependency's own layout: different versions may share a name.
     const copyClosure = async (name, from, target) => {
-      const source = await findPackage(name, from);
+      // A worktree may link installed packages. Copy the package contents so
+      // nested dependencies never traverse a link back into the source tree.
+      const source = await realpath(await findPackage(name, from));
       const metadata = await readJson(join(source, 'package.json'));
       const out = join(target, 'node_modules', name);
       await assertSourceOnly(source);

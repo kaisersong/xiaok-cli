@@ -274,3 +274,10 @@ it('preserves plan for missing approval and applies the actual auto safety polic
   expect(await permissions.check('bash', { command: 'rm -rf /tmp/scheduled-user-data' })).toBe('prompt');
   expect(await permissions.check('read', { file_path: '/Users/example/.ssh/id_rsa' })).toBe('deny');
 });
+
+it('carries the main-owned scheduled run identity and originating task separately from the prompt', async () => {
+  const createTask = vi.fn(async () => ({ taskId: 'runtime-task' }));
+  const executor = createAgentTaskExecutor({ createTask });
+  await executor.execute({ ...baseAction, createdByTaskId: 'origin-task', lockedRunId: 'run-42' }, baseContext);
+  expect(createTask.mock.calls[0][0]).toMatchObject({ scheduledOrigin: { actionId: baseAction.id, runId: 'run-42', createdByTaskId: 'origin-task' } });
+});

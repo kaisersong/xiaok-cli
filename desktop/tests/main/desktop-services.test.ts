@@ -2575,15 +2575,16 @@ describe('desktop services', () => {
 
     expect(result).toEqual({ ok: true });
     expect(requests.map(item => `${item.method} ${item.path}`)).toEqual([
+      'GET /projects/proj-1', // current project-scoped read authorization preflight
       'POST /projects/proj-1/tasks/task-1/review',
       'GET /projects/proj-1',
       'POST /projects/proj-1/synthesize',
     ]);
-    expect(requests[0].body).toMatchObject({
+    expect(requests[1].body).toMatchObject({
       fromAgent: 'xiaok-po',
       review: { passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false },
     });
-    expect(requests[2].body).toMatchObject({
+    expect(requests[3].body).toMatchObject({
       fromAgent: 'xiaok-po',
       synthesis: '# 项目小结\n\n项目已完成，交付物可用。',
     });
@@ -2646,15 +2647,16 @@ describe('desktop services', () => {
 
     expect(result).toEqual({ ok: true });
     expect(requests.map(item => `${item.method} ${item.path}`)).toEqual([
+      'GET /projects/proj-1', // current project-scoped read authorization preflight
       'POST /projects/proj-1/tasks/task-1/review',
       'GET /projects/proj-1',
       'POST /projects/proj-1/synthesize',
     ]);
-    expect(requests[0].body).toMatchObject({
+    expect(requests[1].body).toMatchObject({
       fromAgent: 'xiaok-po',
       review: { passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false },
     });
-    expect(requests[2].body).toMatchObject({
+    expect(requests[3].body).toMatchObject({
       fromAgent: 'xiaok-po',
       synthesis: '# 项目小结\n\n项目已完成，交付物可用。',
     });
@@ -2693,7 +2695,8 @@ describe('desktop services', () => {
     let aborted = false;
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'), now: () => 300,
-      kswarmService: mockKSwarmService(),
+      kswarmService: { ...mockKSwarmService(), request: async () => Response.json({
+        project: { id: 'proj-timeout', status: 'active', name: 'Timeout project' }, tasks: [] }) },
       runner: async ({ signal }) => {
         started = true;
         await new Promise<void>(resolve => signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true }));

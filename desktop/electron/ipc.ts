@@ -1,3 +1,4 @@
+import { registerConversationActivityIpc } from './conversation-activity-ipc.js';
 import {z, type ZodSchema} from 'zod';
 import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
 import {absoluteFilePath, filePathInput, saveFileInput, openFileResult, readFileResult, saveFileResult} from './file-ipc-schemas.js';
@@ -759,6 +760,11 @@ export async function registerDesktopIpc(
     registrar: ipcMain, channel, input, output, riskTags, sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 1, handler,
   });
   const primaryWindow = () => options.getMainWindow?.() ?? window;
+  const taskActor = (event: IpcMainInvokeEvent) => {
+    const actor = options.multiAgentAuthorize?.(event);
+    if (!actor) throw new Error('task_actor_forbidden');
+    return { ...actor, requestSource: 'user' as const };
+  };
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
   });
@@ -1078,24 +1084,30 @@ export async function registerDesktopIpc(
     });
   });
   ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'answerQuestion', { taskId: input?.taskId });
-    const r = await services.answerQuestion(input, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    const r = await services.answerQuestion(input, actor);
     log('info', 'answerQuestion ok');
     return r;
   });
   ipcMain.handle('desktop:cancelTask', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'cancelTask', { taskId: input?.taskId });
-    await services.cancelTask(input.taskId, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    await services.cancelTask(input.taskId, actor);
     log('info', 'cancelTask ok');
   });
-  ipcMain.handle('desktop:getActiveTask', async () => {
+  ipcMain.handle('desktop:getActiveTask', async (_event) => {
+    const actor = taskActor(_event);
     const r = await services.getActiveTask();
+    if (r) await services.authorizeTaskRead(r.taskId, actor);
     log('debug', 'getActiveTask', { taskId: r?.taskId ?? null });
     return r;
   });
   ipcMain.handle('desktop:recoverTask', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'recoverTask', { taskId: input?.taskId });
     const r = await services.recoverTask(input.taskId, typeof input.legacyPrompt === 'string' ? input.legacyPrompt : undefined);
+    await services.authorizeTaskRead(r.snapshot.taskId, actor);
     log('info', 'recoverTask ok', { status: r?.snapshot?.status });
     return r;
   });
@@ -1159,8 +1171,22 @@ export async function registerDesktopIpc(
       return { canceled: true, filePath, content: '', error: String(e) };
     }
   });
+  const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null);
+  options.registerLifetimeDisposer?.(disposeActivity);
   const activeTaskSubs = new Map<string, AbortController>();
+  const activeTaskSubIds = new Map<string, string>();
+  options.registerLifetimeDisposer?.(() => { for (const controller of activeTaskSubs.values()) controller.abort(); activeTaskSubs.clear(); activeTaskSubIds.clear(); });
+  ipcMain.handle('desktop:unsubscribeTask', async (_event, input) => {
+    taskActor(_event);
+    const key = `${(_event?.sender ?? primaryWindow().webContents).id}:${input.taskId}`;
+    if (typeof input.subscriptionId === 'string' && activeTaskSubIds.get(key) === input.subscriptionId) {
+      activeTaskSubs.get(key)?.abort(); activeTaskSubs.delete(key); activeTaskSubIds.delete(key);
+    }
+  });
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+    if (input.sinceIndex !== undefined && (!Number.isSafeInteger(input.sinceIndex) || input.sinceIndex < 0)) throw new Error('invalid_task_event_cursor');
+    if (input.subscriptionId !== undefined && (typeof input.subscriptionId !== 'string' || !input.subscriptionId.length || input.subscriptionId.length > 256)) throw new Error('invalid_task_subscription_id');
     const taskId = input.taskId as string;
     const target = _event?.sender ?? primaryWindow().webContents;
     const subscriptionKey = `${target.id}:${taskId}`;
@@ -1176,18 +1202,20 @@ export async function registerDesktopIpc(
 
     const controller = new AbortController();
     activeTaskSubs.set(subscriptionKey, controller);
+    activeTaskSubIds.set(subscriptionKey, input.subscriptionId ?? 'legacy');
     const onDestroyed = () => controller.abort();
     target.once?.('destroyed', onDestroyed);
 
     void (async () => {
       try {
         const stream = sinceIndex !== undefined
-          ? services.subscribeTask(taskId, { sinceIndex })
-          : services.subscribeTask(taskId);
+          ? services.subscribeTask(taskId, { sinceIndex, signal: controller.signal })
+          : services.subscribeTask(taskId, { signal: controller.signal });
         for await (const event of stream) {
           if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
+          await services.authorizeTaskRead(taskId, actor);
           target.send(`desktop:taskEvent:${taskId}`, event);
         }
         log('info', 'subscribeTask stream ended', { taskId });
@@ -1199,6 +1227,7 @@ export async function registerDesktopIpc(
         target.removeListener?.('destroyed', onDestroyed);
         if (activeTaskSubs.get(subscriptionKey) === controller) {
           activeTaskSubs.delete(subscriptionKey);
+          activeTaskSubIds.delete(subscriptionKey);
         }
       }
     })();

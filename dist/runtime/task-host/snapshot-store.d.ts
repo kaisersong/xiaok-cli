@@ -28,6 +28,8 @@ export declare class FileTaskSnapshotStore {
     recoverTask(taskId: string, options?: TaskSnapshotReadOptions): Promise<TaskSnapshot | null>;
     /** Read-only legacy ownership check, including terminal tasks absent from the active index. */
     hasThreadHistory(threadId: string): Promise<boolean>;
+    /** Main-only confirmation history; caller-supplied task lists are never authority. */
+    readPreviousUserTask(threadId: string, currentTaskId: string): Promise<TaskSnapshot | null>;
     clearActiveTask(taskId: string): Promise<void>;
     private saveSerial;
     private loadSnapshotState;

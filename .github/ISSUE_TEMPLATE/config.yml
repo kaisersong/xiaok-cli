@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题（请私下提交）
+    url: https://github.com/kaisersong/xiaok-cli/security/advisories/new
+    about: 安全问题请在这里私下提交，不要发公开 Issue
+  - name: 新手常见问题（FAQ）
+    url: https://github.com/kaisersong/xiaok-cli/blob/master/README.zh-CN.md
+    about: 安装、登录、配置模型 Key 的常见问题，先看这里通常最快

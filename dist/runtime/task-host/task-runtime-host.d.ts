@@ -3,7 +3,7 @@ import { type DeliverableGateFunction } from './deliverable-gate.js';
 import type { HostDeliveryRecord, HostDeliveryReport, HostDeliveryRecoveryAuthority, HostDeliveryRecoveryInvocation } from './delivery-types.js';
 import type { MaterialRegistry } from './material-registry.js';
 import type { FileTaskSnapshotStore } from './snapshot-store.js';
-import type { DesktopTaskEvent, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskExecutionScope, TaskRuntimeHost, TaskSnapshot, TaskMultiAgentPreparation, TaskUnderstanding, UserAnswer } from './types.js';
+import type { DesktopTaskEvent, TaskEventRecord, MaterialRecord, TaskContextSkip, TaskCreateInput, TaskExecutionScope, TaskRuntimeHost, TaskSnapshot, TaskMultiAgentPreparation, TaskUnderstanding, UserAnswer } from './types.js';
 export interface HistoryMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -155,7 +155,12 @@ export declare class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     }>;
     subscribeTask(taskId: string, options?: {
         sinceIndex?: number;
+        signal?: AbortSignal;
     }): AsyncIterable<DesktopTaskEvent>;
+    subscribeTaskRecords(taskId: string, options?: {
+        sinceIndex?: number;
+        signal?: AbortSignal;
+    }): AsyncIterable<TaskEventRecord>;
     answerQuestion(input: {
         taskId: string;
         answer: UserAnswer;

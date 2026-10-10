@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { sanitizeUserFacingErrorMessage } from '../../renderer/src/lib/error-display'
+import { isModelKeyMissingError, sanitizeUserFacingErrorMessage } from '../../renderer/src/lib/error-display'
+
+import { zh } from '../../renderer/src/locales/zh'
+import { en } from '../../renderer/src/locales/en'
 
 const rawProviderAuthError = 'Error: 401 {"error":{"type":"authentication_error","message":"The API Key appears to be invalid or may have expired. Please verify your credentials and try again."},"type":"error"}'
 
@@ -138,3 +141,56 @@ describe('connection failures have an actionable localized explanation', () => {
     expect(sanitizeUserFacingErrorMessage('401 authentication_error: terminated', 'fallback', { providerAuth: 'Fix API key', modelConnectionFailed: 'Retry network' })).toBe('Fix API key');
   });
 });
+
+
+describe('missing model configuration', () => {
+  it.each([
+    'Error: OpenAI provider requires apiKey',
+    'Error: Anthropic provider requires apiKey',
+    'Error: LLM config must include a "provider" field ...',
+    'No API key configured',
+    'Missing model API key',
+    'No model provider configured',
+    'Model provider is missing',
+    'API_KEY is not configured',
+    'OPENAI PROVIDER REQUIRES APIKEY',
+    '401: OpenAI provider requires apiKey',
+  ])('replaces %s with the explanation, action and settings entry', raw => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(isModelKeyMissingError(raw)).toBe(true)
+      const message = sanitizeUserFacingErrorMessage(raw, 'fallback', { providerAuth: 'Auth failure' })
+      expect(message).toBe(zh.chatShell.modelKeyMissing)
+      expect(message).toContain('没有找到模型 API Key，任务没法开始。')
+      expect(message).toContain('添加你的 API Key')
+      expect(message).toContain(`设置 → ${zh.desktopSettings.navModel}`)
+      expect(message).not.toMatch(/apiKey|provider|Error:/)
+      expect(log).toHaveBeenCalledWith('[error-display] missing model configuration (raw):', raw)
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it('uses the English locale and its actual settings navigation label', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(sanitizeUserFacingErrorMessage(new Error('Anthropic provider requires apiKey'), 'fallback', {
+        modelKeyMissing: en.chatShell.modelKeyMissing,
+      })).toBe(`No model API key was found, so the task can't start. Open Settings → ${en.desktopSettings.navModel} and add your API key.`)
+    } finally {
+      log.mockRestore()
+    }
+  })
+
+  it.each(['401 Unauthorized: API key rejected', 'Invalid API key'])('preserves authentication handling for %s', raw => {
+    expect(isModelKeyMissingError(raw)).toBe(false)
+    expect(sanitizeUserFacingErrorMessage(raw, 'fallback', {
+      providerAuth: 'Auth failure', modelKeyMissing: 'Missing key',
+    })).toBe('Auth failure')
+  })
+
+  it.each(['Error: File not found', 'No model output found', 'Missing API response', 'Model provider returned no results'])('preserves ordinary errors: %s', raw => {
+    expect(isModelKeyMissingError(raw)).toBe(false)
+    expect(sanitizeUserFacingErrorMessage(raw)).toBe(raw.replace(/^Error: /, ''))
+  })
+})

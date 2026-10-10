@@ -29,6 +29,7 @@ export interface AgentTaskExecutorOptions {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     permissionMode?: 'plan' | 'auto' | 'default';
+    scheduledOrigin?: { actionId: string; runId: string; createdByTaskId?: string };
   }) => Promise<{ taskId: string }>;
 }
 
@@ -130,6 +131,7 @@ export function createAgentTaskExecutor(options: AgentTaskExecutorOptions): Time
         prompt,
         materials: [],
         permissionMode: planMode ? 'plan' : action.userApprovedAuto ? 'auto' : 'default',
+        scheduledOrigin: { actionId: action.id, runId: action.lockedRunId ?? `${action.id}:${context.scheduledDueAt}`, createdByTaskId: action.createdByTaskId },
       });
       return { runtimeTaskId: result.taskId };
     },

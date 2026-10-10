@@ -339,13 +339,18 @@ export function formatSubmittedInput(text) {
     const lines = text
         .split(/\r?\n/)
         .flatMap((line) => wrapDisplayLine(line, textWidth));
-    return [bgDarkGray(' '.repeat(safeWidth))]
+    // Padding spaces become transcript content during terminal reflow. Paint
+    // the remainder with EL while the background is set, as the live footer does.
+    const backgroundLine = (line) => colorsEnabled
+        ? bgDarkGray(`${line}\x1b[K`)
+        : padToDisplayWidth(line, safeWidth);
+    return [backgroundLine('')]
         .concat(lines
         .map((line, index) => {
         const prefix = index === 0 ? firstLinePrefix : continuationPrefix;
-        return bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth));
+        return backgroundLine(`${prefix}${line}`);
     }))
-        .concat(bgDarkGray(' '.repeat(safeWidth)))
+        .concat(backgroundLine(''))
         .join('\n') + '\n';
 }
 export function formatProgressNote(text) {

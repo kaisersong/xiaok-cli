@@ -189,15 +189,41 @@ contextBridge.exposeInMainWorld('xiaokDesktop', {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.off(channel, listener);
   },
+    getConversationActivityUnread: () => ipcRenderer.invoke('desktop:activity:unread'),
+    markConversationActivitiesRead: input => ipcRenderer.invoke('desktop:activity:read', input),
+    subscribeConversationActivityOverview(handler) {
+      const subscriptionId = `overview-${Date.now()}-${Math.random()}`;
+      const listener = (_event, payload) => { const data = payload; if (typeof data?.threadId === 'string') handler({ threadId: data.threadId, ...(typeof data.watchId === 'string' ? { watchId: data.watchId } : {}) }); };
+      ipcRenderer.on('desktop:activity:changed', listener);
+      void ipcRenderer.invoke('desktop:activity:overview', { subscriptionId }).catch(() => undefined);
+      return () => { ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
+    },
+    getConversationActivities: input => ipcRenderer.invoke('desktop:activity:list', input),
+    getWorkActivity: watchId => ipcRenderer.invoke('desktop:activity:work', { watchId }),
+    getMcpTaskInputs: watchId => ipcRenderer.invoke('desktop:activity:mcpInputs', { watchId }),
+    answerMcpTaskInput: input => ipcRenderer.invoke('desktop:activity:mcpAnswer', input),
+    cancelMcpWork: watchId => ipcRenderer.invoke('desktop:activity:mcpCancel', { watchId }),
+    updateWorkReporting: input => ipcRenderer.invoke('desktop:activity:reporting', input),
+    stopWorkWatch: input => ipcRenderer.invoke('desktop:activity:stop', input),
+    subscribeConversationActivities(threadId, handler) {
+      const subscriptionId = `activity-${Date.now()}-${Math.random()}`;
+      const listener = (_event, data) => { if (data?.threadId === threadId) handler(data); };
+      ipcRenderer.on('desktop:activity:changed', listener);
+      let live = true;
+      void ipcRenderer.invoke('desktop:activity:subscribe', { threadId, subscriptionId }).then(() => { if (live) handler({ threadId }); }).catch(() => undefined);
+      return () => { live = false; ipcRenderer.off('desktop:activity:changed', listener); void ipcRenderer.invoke('desktop:activity:unsubscribe', { subscriptionId }).catch(() => undefined); };
+    },
   subscribeTask(taskId, handler, sinceIndex) {
+    const subscriptionId = `task-${Date.now()}-${Math.random()}`;
     const channel = `desktop:taskEvent:${taskId}`;
     const listener = (_event, payload) => {
       handler(payload);
     };
     ipcRenderer.on(channel, listener);
-    void ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex } : { taskId });
+    const registration = ipcRenderer.invoke('desktop:subscribeTask', typeof sinceIndex === 'number' ? { taskId, sinceIndex, subscriptionId } : { taskId, subscriptionId }).catch(() => undefined);
     return () => {
       ipcRenderer.off(channel, listener);
+      void registration.then(() => ipcRenderer.invoke('desktop:unsubscribeTask', { taskId, subscriptionId })).catch(() => undefined);
     };
   },
   answerQuestion: (input) => ipcRenderer.invoke('desktop:answerQuestion', input),

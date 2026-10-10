@@ -1,5 +1,5 @@
-import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'fs';
-import { extname } from 'path';
+import { readFileSync, existsSync, openSync, readSync, closeSync, fstatSync, realpathSync } from 'fs';
+import { extname, resolve } from 'path';
 import { assertWorkspacePath } from '../permissions/workspace.js';
 import { truncateText } from './truncation.js';
 import { extractMaterialText } from '../../runtime/materials/text-extractor.js';
@@ -65,6 +65,12 @@ function classifyReadContent(path, header) {
 export function createReadTool(options = {}) {
     const cwd = options.cwd ?? process.cwd();
     const allowOutsideCwd = options.allowOutsideCwd ?? false;
+    const readOnlyPaths = new Set((options.readOnlyPaths ?? []).flatMap(file => { try {
+        return [realpathSync(file)];
+    }
+    catch {
+        return [];
+    } }));
     return {
         permission: 'safe',
         definition: {
@@ -84,7 +90,20 @@ export function createReadTool(options = {}) {
         async execute(input, context) {
             context?.signal?.throwIfAborted();
             const { file_path, offset = 1, limit, max_chars = MODEL_OUTPUT_CAP } = input;
-            const resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
+            let resolvedPath;
+            try {
+                resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
+            }
+            catch (error) {
+                let reference;
+                try {
+                    reference = realpathSync(resolve(file_path));
+                }
+                catch { /* Preserve the original denial. */ }
+                if (!reference || !readOnlyPaths.has(reference))
+                    throw error;
+                resolvedPath = reference;
+            }
             if (!existsSync(resolvedPath))
                 return `Error: 文件不存在: ${resolvedPath}`;
             if (isSensitiveFilePath(resolvedPath)) {

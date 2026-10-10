@@ -39,6 +39,8 @@ export interface DesktopMultiAgentUserControl {
   access: DesktopMultiAgentUserAccess; requestSource: Source; groupId: string; agentId: string; operationId: string; expectedTurn: number;
 }
 export interface DesktopAgentExecutionContext {
+  readonly activityRunId?: string;
+  readonly activityMemberId?: string;
   actor: DesktopAgentActor; groupId: string; agentId: string; turnId: string; turn: number;
   rootEpoch: number; cwd: string; effectiveDeadline: number; signal: AbortSignal;
   readonly permissionRevision: number;
@@ -83,6 +85,8 @@ interface LiveChild {
   cwd?: string;
 }
 interface PendingFollowup {
+  readonly activityRunId?: string;
+  readonly activityMemberId?: string;
   lane: ExecutionLane;
   acceptedEpoch?: number;
   operationId: string; callerId: string; message: string; expectedTurn: number;
@@ -173,6 +177,8 @@ export class DesktopMultiAgentService {
   private disposal?: Promise<void>;
   private runtimeBlockedReason?: string;
   private readonly grace: number;
+  private activityReconcileTimer?: ReturnType<typeof setInterval>;
+  private activityReconcilePending?: Promise<void>;
 
   constructor(private readonly options: DesktopMultiAgentServiceOptions) {
     this.grace = options.closeGraceMs ?? 500;
@@ -591,6 +597,7 @@ export class DesktopMultiAgentService {
           this.options.store.appendEvent(context.groupId, { kind: 'status', agentId: context.agentId, turnId: context.turnId, payload: { agent } });
           this.options.store.putOperation({ groupId: context.groupId, operationId, command: 'run_started', requestHash: this.requestHash(operationId, { turnId: context.turnId }),
             applyState: 'applied', result: { state: 'completed' } });
+          this.updateActivityMember(context, 'running', false);
         });
       } catch (error) { this.freezeGroup(state.group, 'multi_agent_presentation_persistence_failed'); throw error; }
     });
@@ -1379,7 +1386,13 @@ export class DesktopMultiAgentService {
           const sent = this.options.store.sendMessage(group.id, { sender: { kind: 'user', actorId: scope.actorId }, receiverId: target.id, text: message! });
           return { operationId: input.operationId, state: 'applied', targetAgentId: target.id, messageId: sent.messageId };
         }
-        if (command === 'followup') return { operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn: child!.context.turn + child!.followups.length + 1 };
+        if (command === 'followup') {
+          const runId = `user:${group.id}:${input.operationId}`;
+          this.options.store.createActivityRun({ runId, groupId: group.id, kind: 'user_followup', originId: input.operationId });
+          this.options.store.putActivityMember({ runId, groupId: group.id, memberId: input.operationId, operationId: input.operationId,
+            agentId: target.id, state: 'accepted', physicalSettled: false });
+          return { operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn: child!.context.turn + child!.followups.length + 1 };
+        }
         if (command === 'close') return { operationId: input.operationId, state: target.resourcesReleased ? 'completed' : 'cleanup_pending', targetAgentId: target.id,
           resourcesReleased: target.resourcesReleased, cleanupPending: !target.resourcesReleased };
         return { operationId: input.operationId, state: 'applied', targetAgentId: target.id };
@@ -1390,6 +1403,7 @@ export class DesktopMultiAgentService {
         child!.followups.push({ operationId: input.operationId, callerId: `root_${group.id}`, requestSource: 'user', message: message!,
           lane: group.lease && !group.lease.released ? group.lease.lane : 'foreground',
           sourceTaskId: child!.context.sourceTaskId,
+          activityRunId: `user:${group.id}:${input.operationId}`, activityMemberId: input.operationId,
           expectedTurn: result.expectedTurn!, forceNewEpoch: true, controller: new AbortController() });
         this.enqueueNextFollowup(group, child!);
       } else if (command === 'interrupt' && child) {
@@ -1445,7 +1459,74 @@ export class DesktopMultiAgentService {
     const authority = Object.freeze({ ownerId: randomUUID() });
     this.hostDeliveryOwners.set(authority, { host, bootId: this.options.store.bootId, active: true });
     this.hostDeliveryAuthority = authority;
+    this.activityReconcileTimer = setInterval(() => {
+      void this.reconcileActivityRuns({ requestSource: 'scheduler', authority }).catch(() => { /* Durable runs remain pending; retry reads never dispatch work. */ });
+    }, 30_000);
+    this.activityReconcileTimer.unref?.();
     return authority;
+  }
+
+  /** Reconcile from committed host snapshots; the hook is only a wake hint. */
+  reconcileActivityRuns(input: { requestSource: Source; authority: DesktopHostDeliveryAuthority; taskId?: string }): Promise<void> {
+    const owner = this.requireHostDeliveryOwner(input.requestSource, input.authority);
+    if (!input.taskId && this.activityReconcilePending) return this.activityReconcilePending;
+    const pending = (async () => {
+      for (const run of this.options.store.pendingActivityRuns()) {
+        if (this.disposed) return;
+        if (input.taskId && run.rootTaskId !== input.taskId) continue;
+        const live = this.groups.get(run.groupId);
+        const queueOwner = this.resourceCommands.get(run.groupId) ?? { commands: live?.commands ?? new MultiAgentCommandSequencer(), users: 0 };
+        queueOwner.users++; this.resourceCommands.set(run.groupId, queueOwner);
+        try {
+          const snapshot = run.rootTaskId ? await owner.host.inspectTask(run.rootTaskId) : null;
+          await queueOwner.commands.run(() => {
+          this.requireHostDeliveryOwner(input.requestSource, input.authority);
+          const current = this.options.store.getActivityRun(run.runId);
+          if (!current || current.terminalEventId) return;
+          this.options.store.transaction(() => {
+            if (run.bootId !== this.options.store.bootId) {
+              this.options.store.assertResourceOwnerSettled(run.bootId);
+              for (const member of this.options.store.getActivityMembers(run.runId)) {
+                if (!member.physicalSettled) this.options.store.putActivityMember({ ...member, state: 'settled', physicalSettled: true, outcome: 'cancelled' });
+              }
+            }
+            if (snapshot && ['completed', 'failed', 'cancelled'].includes(snapshot.status)) {
+              const binding = this.options.store.getRootBinding(snapshot.taskId);
+              if (!binding || binding.groupId !== run.groupId || binding.rootTurnId !== run.originId
+                || !isDeepStrictEqual(snapshot.multiAgentPreparation, this.marker(binding))) throw new Error('activity_root_identity_mismatch');
+              let eventIndex = snapshot.events.length - 1;
+              while (eventIndex >= 0 && snapshot.events[eventIndex].type !== 'task_terminal') eventIndex--;
+              const event = snapshot.events[eventIndex];
+              if (event?.type === 'task_terminal' && event.status === snapshot.status) {
+                this.options.store.confirmActivityRootTerminal(run.runId, {
+                  taskId: snapshot.taskId, sessionId: snapshot.sessionId, eventIndex, outcome: event.status,
+                });
+                // A preparation abandoned before activation has no runRoot
+                // finally block. Confirm that both execution owners are idle.
+                if (binding.phase === 'abandoned' && !live?.root && !owner.host.inFlightTaskIds().includes(snapshot.taskId)) {
+                  const member = this.options.store.getActivityMembers(run.runId).find(item => item.memberId === binding.rootTurnId);
+                  if (member && !member.physicalSettled) this.options.store.putActivityMember({ ...member, state: 'settled', physicalSettled: true, outcome: event.status });
+                }
+              }
+            }
+            this.options.store.finalizeActivityRun(run.runId);
+          });
+        }); } catch (error) {
+          // A corrupt/missing proof for one run must not starve every later run.
+          // Keep its outcome unknown; never dispatch or synthesize a terminal.
+          try { await queueOwner.commands.run(() => this.options.store.markActivityRunUnknown(run.runId,
+            error instanceof Error && error.message === 'activity_root_identity_mismatch' ? 'host_identity_mismatch' : 'host_proof_unavailable')); }
+          catch { /* Preserve previous durable truth on storage failure. */ }
+        } finally {
+          if (--queueOwner.users === 0 && this.resourceCommands.get(run.groupId) === queueOwner) this.resourceCommands.delete(run.groupId);
+        }
+      }
+    })();
+    if (!input.taskId) {
+      this.activityReconcilePending = pending;
+      void pending.finally(() => { if (this.activityReconcilePending === pending) this.activityReconcilePending = undefined; }).catch(() => {});
+    }
+    return pending;
   }
 
   /** Only the fixed host adapter may project delivery. User/agent tools cannot
@@ -1683,6 +1764,10 @@ export class DesktopMultiAgentService {
       store.transaction(() => {
         store.putGroup({ ...latest, nextRootEpoch: binding.rootEpoch });
         store.putRootBinding(binding);
+        const runId = `root:${binding.sourceTaskId}`;
+        store.createActivityRun({ runId, groupId: group.id, kind: 'root', originId: binding.rootTurnId, rootTaskId: binding.sourceTaskId });
+        store.putActivityMember({ runId, groupId: group.id, memberId: binding.rootTurnId, operationId: binding.rootTurnId,
+          agentId: `root_${group.id}`, turnId: binding.rootTurnId, state: 'accepted', physicalSettled: false });
         const previous = this.requireAgent(group.id, `root_${group.id}`);
         const rootAgent = store.putAgent(group.id, { ...previous, status: 'pending', turn: binding.rootEpoch, turnId: binding.rootTurnId,
           hostDeliveryStatus: undefined, guardFailure: undefined, hostDeliveryCleanupPending: undefined,
@@ -1733,6 +1818,12 @@ export class DesktopMultiAgentService {
         try {
           const rootAgent = this.requireAgent(group.id, `root_${group.id}`);
           store.putAgent(group.id, { ...rootAgent, resourcesReleased: true, cleanupPending: false, activationState: 'settled' }, true);
+          store.transaction(() => {
+            const runId = `root:${preparation.binding.sourceTaskId}`;
+            const member = store.getActivityMembers(runId).find(item => item.memberId === preparation.binding.rootTurnId);
+            if (member && !member.physicalSettled) store.putActivityMember({ ...member, state: 'settled', physicalSettled: true, outcome: 'cancelled' });
+            store.markActivityRunUnknown(runId, 'preparation_abandoned');
+          });
           group.root = undefined;
         } catch { this.freezeGroup(group, 'multi_agent_preparation_compensation_failed'); }
       });
@@ -1840,11 +1931,13 @@ export class DesktopMultiAgentService {
         this.assertWritable(group);
         if (group.root !== root) throw new Error('stale root preparation');
         this.installLease(group, root.ticket!);
-        const context = this.createContext(group, `root_${group.id}`, root.binding.rootTurnId, root.binding.rootEpoch, root.ticket!, root.controller.signal);
+        const context = this.createContext(group, `root_${group.id}`, root.binding.rootTurnId, root.binding.rootEpoch, root.ticket!, root.controller.signal,
+          { sourceTaskId: root.binding.sourceTaskId, activityRunId: `root:${root.binding.sourceTaskId}`, activityMemberId: root.binding.rootTurnId });
         root.context = context;
         root.binding = { ...root.binding, phase: 'active', status: 'running' };
         this.options.store.transaction(() => {
           this.options.store.putRootBinding(root.binding);
+          this.updateActivityMember(context, 'running', false);
           this.options.store.putGroup({ ...this.options.store.requireGroup(group.id), currentRootEpoch: root.binding.rootEpoch });
           const previous = this.requireAgent(group.id, context.agentId);
           const agent = this.options.store.putAgent(group.id, { ...previous, status: 'running', turn: context.turn, turnId: context.turnId, sourceTaskId: input.taskId,
@@ -1877,6 +1970,7 @@ export class DesktopMultiAgentService {
             const previous = this.requireAgent(group.id, context.agentId);
             this.options.store.putAgent(group.id, { ...previous, executionActive: false, runtimeResident: false, sessionResident: false, resourcesReleased: true,
               cleanupPending: false, stopState: 'none', activationState: 'settled' }, true);
+            this.updateActivityMember(context, 'settled', true, previous.status === 'completed' ? 'completed' : previous.status === 'failed' ? 'failed' : 'cancelled');
           }
           if (group.root === root) group.root = undefined;
           this.wake(group);
@@ -1937,7 +2031,8 @@ export class DesktopMultiAgentService {
             };
           } });
         const controller = new AbortController();
-        const context = this.createContext(group, prepared.agentId, randomUUID(), prepared.expectedTurn, ticket, controller.signal);
+        const context = this.createContext(group, prepared.agentId, randomUUID(), prepared.expectedTurn, ticket, controller.signal,
+          { sourceTaskId: state.context.sourceTaskId, activityRunId: state.context.activityRunId, activityMemberId: input.operationId });
         child = { id: prepared.agentId, parentId: state.context.agentId, context, prepared, sessionResident: false, stopRequested: false, controller, followups: [] };
         group.children.set(child.id, child); this.slots.add(child.id);
         const result: MultiAgentControlResult = { operationId: input.operationId, state: 'applied', targetAgentId: child.id, expectedTurn: prepared.expectedTurn };
@@ -1945,6 +2040,7 @@ export class DesktopMultiAgentService {
         this.options.store.transaction(() => {
           this.persistCoreSnapshot(group, prepared!.snapshot);
           this.options.store.putOperation({ groupId: group.id, operationId: input.operationId, command: 'spawn', requestHash, applyState: 'applied', result: { ...result } });
+          this.updateActivityMember(context, 'accepted', false);
         });
         phase = 'activate'; child.execution = group.core.activatePreparedTurn(prepared, { signal: context.signal });
         this.observeSettlement(group, child);
@@ -2009,14 +2105,18 @@ export class DesktopMultiAgentService {
       const existing = this.persistenceIO(state.group, () => this.options.store.getOperation(state.group.id, input.operationId));
       if (child.followups.length >= 4 && !existing) throw new Error('multi_agent_followup_queue_full');
       const expectedTurn = child.context.turn + child.followups.length + 1;
-      const result = this.mutate(state.group, input, 'followup', { target: target.id, message: input.message }, () => child.followups.some(pending => pending.requestSource === 'user')
-        ? { operationId: input.operationId, state: 'completed', outcome: 'rejected', targetAgentId: target.id, error: 'multi_agent_followup_user_barrier' }
-        : { operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn });
+      const result = this.mutate(state.group, input, 'followup', { target: target.id, message: input.message }, () => {
+        if (child.followups.some(pending => pending.requestSource === 'user')) return { operationId: input.operationId, state: 'completed', outcome: 'rejected', targetAgentId: target.id, error: 'multi_agent_followup_user_barrier' };
+        if (state.context.activityRunId) this.options.store.putActivityMember({ runId: state.context.activityRunId, groupId: state.group.id,
+          memberId: input.operationId, operationId: input.operationId, agentId: target.id, state: 'accepted', physicalSettled: false });
+        return { operationId: input.operationId, state: 'queued_next_admission', targetAgentId: target.id, expectedTurn };
+      });
       if (existing || result.outcome === 'rejected') return result;
       clearTimeout(child.ttl);
       child.followups.push({ operationId: input.operationId, callerId: state.context.agentId, message: input.message, expectedTurn,
         lane: state.context.memberTicket.lane,
         sourceTaskId: state.context.sourceTaskId,
+        activityRunId: state.context.activityRunId, activityMemberId: input.operationId,
         acceptedEpoch: state.context.memberTicket.epoch,
         forceNewEpoch: false, controller: new AbortController(), requestSource: 'agent' });
       this.enqueueNextFollowup(state.group, child);
@@ -2190,6 +2290,11 @@ export class DesktopMultiAgentService {
               expectedTurn: item.expectedTurn, reason: truncateMultiAgentText(reason.message, 512).text }),
           }, true) : undefined;
           this.options.store.putOperation({ ...operation, result: { ...operation.result, state: 'completed', outcome: 'cancelled', messageId: message?.messageId } }, true);
+          if (item.activityRunId && item.activityMemberId) {
+            this.options.store.putActivityMember({ runId: item.activityRunId, groupId: group.id, memberId: item.activityMemberId,
+              operationId: item.activityMemberId, agentId: child.id, state: 'settled', physicalSettled: true, outcome: 'cancelled' });
+            this.options.store.finalizeActivityRun(item.activityRunId);
+          }
         });
       } catch {
         writeFailed = true;
@@ -2213,6 +2318,7 @@ export class DesktopMultiAgentService {
   }
 
   private async disposeOwned(): Promise<void> {
+    if (this.activityReconcileTimer) clearInterval(this.activityReconcileTimer);
     this.unsubscribeStore(); this.listeners.clear(); this.authorizationListeners.clear();
     this.dormant.clear();
     this.pendingResets.clear();
@@ -2277,7 +2383,7 @@ export class DesktopMultiAgentService {
   }
 
   private createContext(group: LiveGroup, agentId: string, turnId: string, turn: number, memberTicket: ExecutionLease, signal?: AbortSignal,
-    provenance?: { sourceTaskId: string | undefined }): DesktopAgentExecutionContext {
+    provenance?: { sourceTaskId: string | undefined; activityRunId?: string; activityMemberId?: string }): DesktopAgentExecutionContext {
     const actor = Object.freeze({ groupId: group.id, agentId, turnId });
     const combined = AbortSignal.any([group.lifetime.signal, group.leaseController!.signal, ...(signal ? [signal] : [])]);
     const context: DesktopAgentExecutionContext = { actor, groupId: group.id, agentId, turnId, turn,
@@ -2285,6 +2391,8 @@ export class DesktopMultiAgentService {
       // A queued turn's accepted origin is independent of whichever root is now
       // active or prepared. Explicit unknown provenance must remain unknown.
       sourceTaskId: provenance ? provenance.sourceTaskId : group.root?.binding.sourceTaskId ?? this.options.store.getAgent(group.id, agentId)?.sourceTaskId,
+      activityRunId: provenance?.activityRunId,
+      activityMemberId: provenance?.activityMemberId,
       rootEpoch: group.root?.binding.rootEpoch ?? this.options.store.requireGroup(group.id).currentRootEpoch,
       memberTicket, signal: combined, effectiveDeadline: memberTicket.deadlineAt ?? Number.POSITIVE_INFINITY,
       cwd: group.children.get(agentId)?.cwd ?? this.options.store.getThread(this.options.store.requireGroup(group.id).threadId)!.cwd,
@@ -2384,6 +2492,7 @@ export class DesktopMultiAgentService {
       if (!this.disposed && !group.deactivating) {
         const snapshot = group.core.listAgents({ requestSource: 'user', callerId: 'main' }).find(agent => agent.id === child.id)!;
         this.persistCoreSnapshot(group, snapshot);
+        this.updateActivityMember(child.context, 'settled', true, snapshot.status === 'completed' ? 'completed' : snapshot.status === 'failed' ? 'failed' : 'cancelled');
         if (child.followups.length && !snapshot.cleanupError && snapshot.status !== 'closed') this.enqueueNextFollowup(group, child);
         else if (!snapshot.resourcesReleased) {
           child.ttl = setTimeout(() => { void this.closeIdleChild(group, child); }, 15 * 60_000);
@@ -2393,6 +2502,17 @@ export class DesktopMultiAgentService {
       this.wake(group);
       this.maybeDormant(group);
     })).catch(() => this.freezeGroup(group, 'multi_agent_persistence_failed'));
+  }
+
+  private updateActivityMember(context: DesktopAgentExecutionContext, state: 'accepted' | 'running' | 'settled', physicalSettled: boolean,
+    outcome?: 'completed' | 'failed' | 'cancelled'): void {
+    if (!context.activityRunId || !context.activityMemberId) return;
+    const store = this.options.store;
+    store.transaction(() => {
+      store.putActivityMember({ groupId: context.groupId, runId: context.activityRunId!, memberId: context.activityMemberId!,
+        operationId: context.activityMemberId!, agentId: context.agentId, turnId: context.turnId, state, physicalSettled, ...(outcome ? { outcome } : {}) });
+      store.finalizeActivityRun(context.activityRunId!);
+    });
   }
 
   private async closeIdleChild(group: LiveGroup, child: LiveChild): Promise<void> {
@@ -2428,7 +2548,7 @@ export class DesktopMultiAgentService {
           if (prepared.expectedTurn !== pending.expectedTurn) throw new Error('followup turn mismatch');
           child.controller = new AbortController();
           child.context = this.createContext(group, child.id, randomUUID(), prepared.expectedTurn, ticket, child.controller.signal,
-            { sourceTaskId: pending.sourceTaskId });
+            { sourceTaskId: pending.sourceTaskId, activityRunId: pending.activityRunId, activityMemberId: pending.activityMemberId });
           child.prepared = prepared; child.stopRequested = false;
           this.options.store.transaction(() => {
             this.persistCoreSnapshot(group, prepared!.snapshot);

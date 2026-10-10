@@ -88,7 +88,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
       name: 'run_dynamic_workflow_script',
       description: [
         '为一个 KSwarm 项目运行动态 workflow 脚本。适用于用户要求通过对话创建并启动 workflow，而不是只做普通 direct/swarm 执行。',
-        '对话确认场景先传 previewOnly: true，只返回 workflow 预览；用户确认后再调用一次启动。',
+        '用户明确只要设计/预览或要求先确认时，才能传 previewOnly: true；用户要求工作流交付报告或已经确认执行时，使用真实 projectId 直接启动，不再预览或要求确认。严禁把保存 JS 文件当作已启动、已排队，严禁在没有 workflowRunId 时承诺稍后自动提交。',
         '断线或后台任务丢失后的恢复场景传 resumeWorkflowRunId，会在同一个 workflowRun 上复用已完成 primitive 并继续执行。',
         '脚本是命令式 JavaScript DSL，不是 JSON schema。不要使用 agents/nodes/steps/tasks 声明式字段。',
         "必须以 export const meta = {...} 开头；然后用 phase('阶段名')、await agent('任务提示', { label: '节点名' })、parallel/pipeline 编排。",
@@ -146,7 +146,7 @@ export function createKSwarmRunDynamicWorkflowScriptTool(kswarmService: KSwarmSe
 
       try {
         const projectId = await resolveProjectId(kswarmService, input);
-        if (!projectId) return validationFailure({ error: 'projectId_or_projectName_required' });
+        if (!projectId) return validationFailure({ error: readString(input.projectName) ? 'project_not_found' : 'projectId_or_projectName_required' });
 
         // For resume, fetch the durable run first so we can recover the persisted
         // script source (when no script was supplied) and bind the script hash.
@@ -316,7 +316,7 @@ export function createKSwarmGetDynamicWorkflowStatusTool(kswarmService: KSwarmSe
     async execute(input) {
       try {
         const projectId = await resolveProjectId(kswarmService, input);
-        if (!projectId) return validationFailure({ error: 'projectId_or_projectName_required' });
+        if (!projectId) return validationFailure({ error: readString(input.projectName) ? 'project_not_found' : 'projectId_or_projectName_required' });
         const workflowRunId = typeof input.workflowRunId === 'string' && input.workflowRunId.trim()
           ? input.workflowRunId.trim()
           : '';

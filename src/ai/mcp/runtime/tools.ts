@@ -55,8 +55,8 @@ export function buildMcpRuntimeTools(
         if (active && !signal?.aborted) context.executionProgress?.progress();
       } : undefined;
       try {
-        const result = await (signal || onProgress
-          ? client.callTool(schema.name, input, { ...(signal ? { signal } : {}), ...(onProgress ? { onProgress } : {}) })
+        const result = await (signal || onProgress || context
+          ? client.callTool(schema.name, input, { ...(signal ? { signal } : {}), ...(onProgress ? { onProgress } : {}), ...(context ? { executionContext: context } : {}) })
           : client.callTool(schema.name, input));
         signal?.throwIfAborted();
         return result;

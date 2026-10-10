@@ -1,3 +1,4 @@
+import { scheduledRunPresentation } from './scheduled-run-presentation.js';
 import {prepareCollaborationRoomDefaults} from './collaboration-room-defaults.js';
 import { resolveKSwarmProjectWorkerCapacity } from './kswarm-execution-clock.js';
 import { app, BrowserWindow, ipcMain, session, shell, nativeImage, Menu, powerMonitor, screen } from 'electron';
@@ -36,6 +37,7 @@ import {
 } from './window-lifecycle.js';
 import { setupMenuBar, destroyMenuBar } from './menubar.js';
 import { setupAutoUpdater, checkForUpdates, createUpdaterHandoff, completeUpdaterHandoff, getUpdateStatus } from './updater.js';
+import { createOnceNotice, startKSwarmWithActivityOwner } from './activity-owner-startup.js';
 import { createKSwarmService, resolveKSwarmServiceLogRoot } from './kswarm-service.js';
 import {
   deployBundledPluginFiles,
@@ -607,10 +609,8 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     return meetingRecorderController!.close();
   });
   // KSwarm service — manages kswarm server as a child process
-  const kswarmService = createKSwarmService();
-  const kswarmStartPromise = kswarmService.start().catch((err) => {
-    console.error('[main] Failed to start kswarm service:', err);
-  });
+  const kswarmService = createKSwarmService({ activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' });
+  let kswarmStartPromise: Promise<void>;
   shutdownAwareIpc.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
   shutdownAwareIpc.handle('desktop:kswarm:start', () => kswarmService.start());
   shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop());
@@ -672,6 +672,16 @@ async function createInitialWindow(): Promise<BrowserWindow> {
   const services = createDesktopServices({
     dataRoot,
     kswarmService,
+    notifyConversationActivity: async activity => {
+      const terminal = ['completed', 'failed', 'cancelled'].includes(activity.projection.executionState);
+      const failed = activity.projection.businessOutcome === 'error' || activity.projection.executionState === 'failed';
+      const result = await createElectronDesktopNotificationPort().show({
+        title: terminal ? failed ? 'xiaok 工作执行失败' : 'xiaok 工作状态已更新' : 'xiaok 工作需要你处理',
+        body: '会话中有新的工作进展，请打开原会话查看。',
+        onClick: () => { mainWindow?.show(); mainWindow?.focus(); },
+      });
+      return result.ok ? 'shown' : result.skipped ? 'suppressed' : 'failed';
+    },
     restoreHistoricalLaunchWorkspaces: true,
     computerUseAppIdentity,
     computerUseBundledPluginDir: process.platform === 'win32' ? (() => { const root = resolveBundledPluginsDir(); return root ? join(root, 'cua-computer-use') : undefined; })() : undefined,
@@ -687,7 +697,23 @@ async function createInitialWindow(): Promise<BrowserWindow> {
     executionCoordinator,
     getManagedPythonCommand: () => managedPythonCommand,
   });
+  const activityOwnerNoticeOnce = createOnceNotice(text => {
+    void createElectronDesktopNotificationPort().show({ title: 'xiaok', body: text, onClick: () => { mainWindow?.show(); mainWindow?.focus(); } });
+  });
+  kswarmStartPromise = startKSwarmWithActivityOwner({
+    kswarmService, activityEnabled: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0',
+    attachConversationActivityOwner: config => services.attachConversationActivityOwner(config),
+    log: message => console.error(message),
+  }, activityOwnerNoticeOnce).then(() => undefined).catch(error => { console.error('[main] Service bootstrap refused:', error instanceof Error ? error.message : 'service_bootstrap_failed'); });
   registerLifetimeDisposerStep('multi-agent-runtime', () => services.disposeMultiAgent());
+  const stopActivityProjectEvents = kswarmStreamBridge.observeEvents(event => {
+    if (event.type === 'project_activity' && typeof event.projectId === 'string') void services.conversationActivity?.projectChanged(event.projectId);
+  });
+  registerLifetimeDisposerStep('activity-project-events', async () => stopActivityProjectEvents());
+  const stopActivityProjectConnection = kswarmStreamBridge.observeConnection(status => {
+    void services.conversationActivity?.projectConnectionChanged(status).catch(error => console.warn('[conversation-activity] source connection failed:', error instanceof Error ? error.message : 'connection_failed'));
+  });
+  registerLifetimeDisposerStep('activity-project-connection', async () => stopActivityProjectConnection());
   let loopStoreRef: import('./loop-store.js').LoopStore | undefined;
   const mobileIdentity = loadOrCreateMobileIdentity(dataRoot);
   const mobileBonjourAdvertiser = createMobileBonjourAdvertiser();
@@ -1470,7 +1496,7 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       window.webContents.send('desktop:scheduledTaskDue', {
         taskId: event.action.id,
         runtimeTaskId: event.runtimeTaskId,
-        completed: true,
+        ...scheduledRunPresentation(event),
         success,
         title,
         lastRunAt: event.action.lastDueAt ?? event.finishedAt,
@@ -1480,10 +1506,10 @@ async function createInitialWindow(): Promise<BrowserWindow> {
       try {
         const notificationPort = createElectronDesktopNotificationPort();
         const notificationTitle = success
-          ? `定时任务已完成：${title}`
+          ? `定时任务已派发：${title}`
           : `定时任务失败：${title}`;
         const notificationBody = success
-          ? '点击查看运行结果。'
+          ? '任务已派发，实际完成后会更新运行结果。'
           : (event.error ? `失败原因：${event.error}` : '点击查看失败详情。');
         void notificationPort.show({
           title: notificationTitle,

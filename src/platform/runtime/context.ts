@@ -1,7 +1,9 @@
 import { execFile } from 'child_process';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import type { Tool } from '../../types.js';
+import type { Tool, ToolExecutionContext } from '../../types.js';
+import type { McpClientConnection } from '../mcp/transport.js';
+import { callMcpToolWithTasks, type McpTaskObserver } from '../mcp/tasks.js';
 import { loadCustomAgents, type CustomAgentDef } from '../../ai/agents/loader.js';
 import { buildMcpRuntimeTools } from '../../ai/mcp/runtime/tools.js';
 import { createComputerUseTool } from '../../ai/tools/computer-use.js';
@@ -53,6 +55,7 @@ export interface LspClientLike {
 }
 
 export interface PlatformRuntimeContext {
+  setMcpActivityHooks(hooks: { connected(connection: McpClientConnection): void; observer(context: ToolExecutionContext, connection: McpClientConnection): Promise<McpTaskObserver | undefined> }): void;
   pluginRuntime: PlatformPluginRuntimeState;
   customAgents: CustomAgentDef[];
   lspManager: ReturnType<typeof createLspManager>;
@@ -108,6 +111,8 @@ export async function createPlatformRuntimeContext(
   options: CreatePlatformRuntimeContextOptions,
 ): Promise<PlatformRuntimeContext> {
   const pluginRuntime = await loadPlatformPluginRuntime(options.cwd, options.builtinCommands);
+  const activityConnections = new Set<McpClientConnection>();
+  let activityHooks: Parameters<PlatformRuntimeContext['setMcpActivityHooks']>[0] | undefined;
   const customAgents = await loadCustomAgents(undefined, options.cwd, pluginRuntime.agentDirs);
   const lspManager = createLspManager();
   const capabilityRegistry = new CapabilityRegistry();
@@ -222,6 +227,13 @@ export async function createPlatformRuntimeContext(
     classificationRegistry,
     runtimePlatform,
     publishMcpTools,
+    { connected: connection => {
+        activityConnections.add(connection);
+        const close = connection.client.onclose;
+        connection.client.onclose = () => { try { close?.(); } finally { activityConnections.delete(connection); } };
+        activityHooks?.connected(connection);
+      },
+      observer: (context, connection) => activityHooks?.observer(context, connection) ?? Promise.resolve(undefined) },
   ).then((tools) => {
     publishMcpTools(tools);
     healthStore.set(options.cwd, health.snapshot());
@@ -236,6 +248,7 @@ export async function createPlatformRuntimeContext(
   });
 
   return {
+    setMcpActivityHooks(hooks) { activityHooks = hooks; for (const connection of activityConnections) hooks.connected(connection); },
     pluginRuntime,
     customAgents,
     lspManager,
@@ -257,6 +270,7 @@ export async function createPlatformRuntimeContext(
     createReminderApi,
     health,
     async dispose() {
+      activityHooks = undefined; activityConnections.clear();
       publishMcpTools([]);
       disposed = true;
       const backgroundShutdowns = await Promise.allSettled([...backgroundRunners].map((runner) => runner.dispose()));
@@ -368,6 +382,7 @@ async function connectWorkspaceMcpServers(
   classificationRegistry: readonly McpClassificationEntry[] = BUILT_IN_MCP_CLASSIFICATIONS,
   platform: NodeJS.Platform = process.platform,
   onToolsChanged?: (tools: Tool[]) => void,
+  activity?: Parameters<PlatformRuntimeContext['setMcpActivityHooks']>[0],
 ): Promise<Tool[]> {
   const tools: Tool[] = [];
   const globalCatalogTimeoutMs = resolveMcpCatalogTimeoutMs();
@@ -448,6 +463,7 @@ async function connectWorkspaceMcpServers(
       }
       connection = connectResult.connection;
       const activeConnection = connection;
+      activity?.connected(activeConnection);
       const catalogTimeoutMs = server.timeout?.catalog ?? globalCatalogTimeoutMs;
       const callToolTimeoutMs = server.timeout?.call ?? globalCallToolTimeoutMs;
       let serverTools: Tool[] = [];
@@ -480,9 +496,11 @@ async function connectWorkspaceMcpServers(
             callTool: async (name, input, options) => {
               options?.signal?.throwIfAborted();
               if (!connected) throw new Error(`MCP server is disconnected: ${server.name}`);
-              const result = await callMcpToolWithSignal(activeConnection.client,
+              const observer = options?.executionContext ? await activity?.observer(options.executionContext, activeConnection) : undefined;
+              const result = await callMcpToolWithTasks(activeConnection,
                 { name, arguments: input },
-                { timeout: callToolTimeoutMs, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
+                { timeout: callToolTimeoutMs, signal: options?.signal, observer, detachOnTask: Boolean(observer),
+                  declaration: schemas.find(schema => schema.name === name), ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
               );
               options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result).text;
