@@ -5,7 +5,7 @@ import { getConfigDir } from '../../utils/config.js';
 import { ConversationActivityStore } from './store.js';
 import { ensureConversationActivityOwner } from './owner-launcher.js';
 import { ConversationActivityAttachedService } from './owner-service.js';
-import type { ConversationActivityOwnerClient } from './owner-client.js';
+import { ConversationActivityOwnerClient } from './owner-client.js';
 import { ConversationActivityService, type ConversationActivityApi } from './service.js';
 import { ConversationMcpActivities } from './mcp.js';
 import type { ConversationActivity } from './types.js';
@@ -24,21 +24,27 @@ export class CliConversationActivities {
   private readonly actor = { requestSource: 'user' as const, actorId: 'cli-user' };
   private readonly pending = new Map<string, ConversationActivity>();
   private unsubscribe?: () => void;
+  private stopDisconnect?: () => void;
   private refreshPending?: Promise<void>;
   private through = 0;
   private disposed = false;
   private pendingPresentation: Promise<unknown> = Promise.resolve();
   private readonly profileId: string;
-  static async attach(options: { cwd: string; sessionId: string; instanceId: string; identityPath: string; platform: PlatformRuntimeContext; changed(): void; onError?(error: unknown): void }) {
+  static async attach(options: { cwd: string; sessionId: string; instanceId: string; identityPath: string; platform: PlatformRuntimeContext; changed(): void; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; onOwnerReplaced?(): void; onError?(error: unknown): void }) {
     const root = join(getConfigDir(), 'conversation-activity', createHash('sha256').update(resolve(options.cwd)).digest('hex').slice(0,24));
     const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
-    const ownerClient = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: root, profileId, actorId: 'cli-user', identity: { kind: 'cli', path: options.identityPath, workspaceRoot: options.cwd } }, { instanceId: options.instanceId });
+    const ownerClient = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: root, profileId, actorId: 'cli-user', identity: { kind: 'cli', path: options.identityPath, workspaceRoot: options.cwd } }, { instanceId: options.instanceId, onLegacyOwner: options.onLegacyOwner });
     try { return new CliConversationActivities({ ...options, ownerClient, dataRoot: root }); } catch (error) { ownerClient.dispose(); throw error; }
   }
-  constructor(private readonly options: { cwd: string; sessionId: string; platform: PlatformRuntimeContext; changed(): void; onError?(error: unknown): void; ownerClient?: ConversationActivityOwnerClient; dataRoot?: string }) {
+  constructor(private readonly options: { cwd: string; sessionId: string; platform: PlatformRuntimeContext; changed(): void; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; onOwnerReplaced?(): void; onError?(error: unknown): void; ownerClient?: ConversationActivityOwnerClient; dataRoot?: string }) {
     const root = options.dataRoot ?? join(options.cwd, '.xiaok', 'state');
     const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
     this.profileId = profileId;
+    this.stopDisconnect = options.ownerClient?.onDisconnect(epoch => {
+      void probeReplacementOwner(root, epoch, () => this.disposed).then(replaced => {
+        if (replaced && !this.disposed) options.onOwnerReplaced?.();
+      });
+    });
     this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
     this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
     this.service = options.ownerClient ? new ConversationActivityAttachedService(options.ownerClient, this.actor.actorId) : new ConversationActivityService({ store: this.store, profileId, actorId: this.actor.actorId,
@@ -105,6 +111,24 @@ export class CliConversationActivities {
 
   dispose(): void {
     if (this.disposed) return;
-    this.disposed = true; this.unsubscribe?.(); this.mcp.dispose(); this.service.dispose(); this.store.close(); this.pending.clear();
+    this.disposed = true; this.stopDisconnect?.(); this.unsubscribe?.(); this.mcp.dispose(); this.service.dispose(); this.store.close(); this.pending.clear();
   }
+}
+
+/** A short, read-only attachment provides positive evidence of replacement. */
+export async function probeReplacementOwner(dataRoot: string, disconnectedEpoch: string, cancelled: () => boolean = () => false): Promise<boolean> {
+  const deadline = Date.now() + 1500;
+  while (!cancelled() && Date.now() < deadline) {
+    const client = new ConversationActivityOwnerClient(dataRoot, 'producer');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const status = await Promise.race([
+        client.request<{ ownerEpoch?: string; ready?: boolean }>('status'),
+        new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())); }),
+      ]);
+      if (status?.ownerEpoch && status.ready !== false) return status.ownerEpoch !== disconnectedEpoch;
+    } catch {} finally { clearTimeout(timer); client.dispose(); }
+    if (!cancelled() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+  }
+  return false;
 }

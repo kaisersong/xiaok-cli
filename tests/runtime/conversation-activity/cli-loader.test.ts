@@ -30,7 +30,7 @@ describe('attachCliConversationActivities', () => {
     const importCli = vi.fn().mockResolvedValue({ CliConversationActivities: { attach } });
     expect(await attachCliConversationActivities(options, { importCli })).toBe(result);
     expect(importCli).toHaveBeenCalledTimes(1);
-    expect(attach).toHaveBeenCalledExactlyOnceWith(attachOptions);
+    expect(attach).toHaveBeenCalledExactlyOnceWith({ ...attachOptions, onLegacyOwner: expect.any(Function), onOwnerReplaced: expect.any(Function) });
   });
 
   it('preserves owner failure logging', async () => {
@@ -99,3 +99,44 @@ describe('activity startup notices', () => {
 });
 
 it.each(['v22.14.0', 'v22.15.0', 'v24.0.0'])('uses generic unavailable notice on %s', version => { const notices = createActivityStartupNotices({ configDir: '', version }); notices.queueUnavailable(); expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。'); });
+
+it('queues each update notice once alongside first-start notice', () => {
+  const notices = createActivityStartupNotices({ configDir: '/tmp/issue-23-notice-missing' });
+  notices.queueLegacyPending(); notices.queueLegacyPending(); notices.queueStarted();
+  expect(notices.take()?.text).toContain('还有未完成的任务');
+  expect(notices.take()?.text).toContain('已在后台启动');
+  notices.queueLegacyPending(); expect(notices.take()).toBeUndefined();
+  notices.queueOwnerReplaced(); notices.queueOwnerReplaced();
+  expect(notices.take()?.text).toBe('后台任务跟进已更新，请重新打开终端以继续跟进');
+  expect(notices.take()).toBeUndefined();
+});
+it.each(['queueLegacyReplaced', 'queueLegacyPending', 'queueOwnerReplaced'] as const)('degradation suppresses %s in either order', method => {
+  for (const first of [true, false]) {
+    const notices = createActivityStartupNotices({ configDir: '' });
+    if (first) notices[method](); notices.queueOwnerUnavailable(); if (!first) notices[method]();
+    expect(notices.take()?.text).toContain('暂不可用'); expect(notices.take()).toBeUndefined();
+  }
+});
+
+it.each(['replaced', 'reused_pending'] as const)('connects legacy callback %s to idle notice queue', async outcome => {
+  const notices = createActivityStartupNotices({ configDir: '' }); const changed = vi.fn();
+  const attach = vi.fn(async (input: Parameters<typeof CliConversationActivities.attach>[0]) => {
+    input.onLegacyOwner?.(outcome); return {} as CliConversationActivities;
+  });
+  await attachCliConversationActivities({ ...options, attachOptions: { ...attachOptions, changed }, startupNotices: notices }, { importCli: async () => ({ CliConversationActivities: { attach } }) });
+  expect(notices.take()?.text).toContain(outcome === 'replaced' ? '旧版终端不会再跟进' : '还有未完成的任务');
+});
+it('queues replacement callback once and suppresses legacy callback after failed attachment', async () => {
+  const notices = createActivityStartupNotices({ configDir: '' }); const changed = vi.fn();
+  let callback: (() => void) | undefined;
+  const attach = vi.fn(async (input: Parameters<typeof CliConversationActivities.attach>[0]) => {
+    callback = input.onOwnerReplaced; input.onLegacyOwner?.('replaced'); throw new Error('failed');
+  });
+  await attachCliConversationActivities({ ...options, attachOptions: { ...attachOptions, changed }, startupNotices: notices }, { importCli: async () => ({ CliConversationActivities: { attach } }) });
+  callback?.(); callback?.(); expect(notices.take()?.text).toContain('暂不可用'); expect(notices.take()).toBeUndefined();
+  const success = createActivityStartupNotices({ configDir: '' });
+  const attachSuccess = vi.fn(async (input: Parameters<typeof CliConversationActivities.attach>[0]) => { callback = input.onOwnerReplaced; return {} as CliConversationActivities; });
+  await attachCliConversationActivities({ ...options, attachOptions: { ...attachOptions, changed }, startupNotices: success }, { importCli: async () => ({ CliConversationActivities: { attach: attachSuccess } }) });
+  callback?.(); callback?.(); expect(success.take()?.text).toBe('后台任务跟进已更新，请重新打开终端以继续跟进');
+  expect(success.take()?.text).toContain('已在后台启动'); expect(success.take()).toBeUndefined();
+});

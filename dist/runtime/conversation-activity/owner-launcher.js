@@ -33,9 +33,13 @@ export async function ensureConversationActivityOwner(config, options = {}) {
             if (status.profileId !== config.profileId)
                 throw new Error('activity_owner_profile_mismatch');
             if (typeof status.generation !== 'number' || status.generation < ACTIVITY_OWNER_GENERATION) {
-                if (await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status)) {
+                const outcome = await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status);
+                if (outcome === 'retired') {
+                    options.onLegacyOwner?.('replaced');
                     throw new Error('activity_owner_retired');
                 }
+                if (outcome === 'kept_pending')
+                    options.onLegacyOwner?.('reused_pending');
                 return client;
             }
             if (status.configDigest !== expectedDigest)

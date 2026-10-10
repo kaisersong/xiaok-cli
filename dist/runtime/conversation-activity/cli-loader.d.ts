@@ -26,7 +26,15 @@ interface ActivityStartupNotice {
     /** Call only after the notice has actually been written to the terminal. */
     markShown(): void;
 }
-interface ActivityStartupNotices {
+export declare const ACTIVITY_OWNER_NOTICES: {
+    readonly replaced: "后台任务跟进已更新，请重新打开终端以继续跟进";
+    readonly legacyReplaced: "后台任务跟进已更新。更新前已打开的旧版终端不会再跟进，请重新打开。";
+    readonly legacyPending: "后台任务跟进还有未完成的任务，暂时仍由旧版后台进程处理。任务结束后再次打开 xiaok 会自动更新；也可以重启或注销后更新。";
+};
+export interface ActivityStartupNotices {
+    queueOwnerReplaced(): void;
+    queueLegacyReplaced(): void;
+    queueLegacyPending(): void;
     queueUnavailable(): void;
     queueStorageNotPrivate(): void;
     queueOwnerUnavailable(): void;

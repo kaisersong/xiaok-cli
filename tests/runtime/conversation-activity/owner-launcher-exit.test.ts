@@ -54,7 +54,7 @@ it.each([undefined, 1, '2'])('retires outdated generation %s before validating d
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
   vi.spyOn(ConversationActivityOwnerClient.prototype, 'request').mockResolvedValueOnce({ profileId: 'fake', generation, configDigest: 'old' } as any)
     .mockResolvedValue({ profileId: 'fake', generation: 2, configDigest: activityOwnerConfigDigest(config) } as any);
-  const retire = vi.fn(async () => true);
+  const retire = vi.fn(async () => 'retired' as const);
   const fakeSpawn = vi.fn(() => Object.assign(new EventEmitter(), { unref: vi.fn() }));
   const client = await ensureConversationActivityOwner(config, { retire, spawn: fakeSpawn as unknown as typeof spawn });
   expect(retire).toHaveBeenCalledTimes(1); expect(fakeSpawn).toHaveBeenCalledTimes(1); client.dispose();
@@ -62,14 +62,14 @@ it.each([undefined, 1, '2'])('retires outdated generation %s before validating d
 it.each([undefined, 2, 3])('reuses owner when retirement fails or generation is current/future: %s', async generation => {
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
   vi.spyOn(ConversationActivityOwnerClient.prototype, 'request').mockResolvedValue({ profileId: 'fake', generation, configDigest: generation ? activityOwnerConfigDigest(config) : 'old' } as any);
-  const retire = vi.fn(async () => false), fakeSpawn = vi.fn();
+  const retire = vi.fn(async () => 'kept_unverified' as const), fakeSpawn = vi.fn();
   const client = await ensureConversationActivityOwner(config, { retire, spawn: fakeSpawn as unknown as typeof spawn });
   expect(retire).toHaveBeenCalledTimes(generation ? 0 : 1); expect(fakeSpawn).not.toHaveBeenCalled(); client.dispose();
 });
 it('rejects foreign profile without retirement', async () => {
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
   vi.spyOn(ConversationActivityOwnerClient.prototype, 'request').mockResolvedValue({ profileId: 'foreign' } as any);
-  const retire = vi.fn(async () => true);
+  const retire = vi.fn(async () => 'retired' as const);
   await expect(ensureConversationActivityOwner(config, { retire })).rejects.toThrow('activity_owner_profile_mismatch'); expect(retire).not.toHaveBeenCalled();
 });
 it('concurrent retirement spawns one winner and attaches loser during exit grace', async () => {
@@ -86,7 +86,7 @@ it('concurrent retirement spawns one winner and attaches loser during exit grace
     else queueMicrotask(() => child.emit('exit', 1));
     return child;
   });
-  const retire = vi.fn(async () => true);
+  const retire = vi.fn(async () => 'retired' as const);
   const pending = Promise.all([ensureConversationActivityOwner(config, { retire, spawn: fakeSpawn as unknown as typeof spawn }), ensureConversationActivityOwner(config, { retire, spawn: fakeSpawn as unknown as typeof spawn })]);
   await vi.advanceTimersByTimeAsync(200);
   const clients = await pending; expect(effectiveOwners).toBe(1); expect(fakeSpawn).toHaveBeenCalledTimes(2); expect(retire).toHaveBeenCalledTimes(2);
@@ -95,6 +95,15 @@ it('concurrent retirement spawns one winner and attaches loser during exit grace
 it.each([2, 3])('keeps config digest validation for generation %s', async generation => {
   const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
   vi.spyOn(ConversationActivityOwnerClient.prototype, 'request').mockResolvedValue({ profileId: 'fake', generation, configDigest: 'foreign' } as any);
-  const retire = vi.fn(async () => true);
+  const retire = vi.fn(async () => 'retired' as const);
   await expect(ensureConversationActivityOwner(config, { retire })).rejects.toThrow('activity_owner_config_mismatch'); expect(retire).not.toHaveBeenCalled();
+});
+
+it.each(['kept_pending', 'kept_unknown', 'retired'] as const)('reports legacy outcome %s', async outcome => {
+  const config: ActivityOwnerConfig = { schemaVersion: 1, dataRoot: root, profileId: 'fake', actorId: 'fake', identity: { kind: 'cli', path: root } };
+  vi.spyOn(ConversationActivityOwnerClient.prototype, 'request').mockResolvedValueOnce({ profileId: 'fake' } as any).mockResolvedValue({ profileId: 'fake', generation: 2, configDigest: activityOwnerConfigDigest(config) } as any);
+  const onLegacyOwner = vi.fn(), fakeSpawn = vi.fn(() => Object.assign(new EventEmitter(), { unref: vi.fn() }));
+  const client = await ensureConversationActivityOwner(config, { retire: async () => outcome, onLegacyOwner, spawn: fakeSpawn as unknown as typeof spawn });
+  expect(fakeSpawn).toHaveBeenCalledTimes(outcome === 'retired' ? 1 : 0);
+  expect(onLegacyOwner.mock.calls).toEqual(outcome === 'kept_unknown' ? [] : [[outcome === 'retired' ? 'replaced' : 'reused_pending']]); client.dispose();
 });

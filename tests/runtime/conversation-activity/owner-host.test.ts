@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +30,15 @@ describe('real authenticated owner socket and single writer', () => {
     expect(await second.request('list', { threadId: 'thread' })).toEqual(one);
     expect(one.filter(row => row.kind === 'completed')).toHaveLength(1);
     f.user.dispose(); expect(await second.request('status')).toMatchObject({ ownerEpoch: f.host.ownerEpoch, generation: 2 });
+  });
+  it('reports authenticated unexpected disconnect once with its epoch, but not close/dispose', async () => {
+    const f = await fixture(); const lost = vi.fn(), closed = vi.fn(), disposed = vi.fn();
+    f.producer.onDisconnect(lost); f.user.onDisconnect(disposed);
+    const third = new ConversationActivityOwnerClient(f.root, 'user'); cleanup.push(() => third.dispose()); third.onDisconnect(closed);
+    await Promise.all([f.producer.request('status'), f.user.request('status'), third.request('status')]);
+    third.close(); f.user.dispose(); await f.host.stop();
+    await vi.waitFor(() => expect(lost).toHaveBeenCalledExactlyOnceWith(f.host.ownerEpoch));
+    expect(closed).not.toHaveBeenCalled(); expect(disposed).not.toHaveBeenCalled();
   });
   it('rejects cross-thread producer association before allocating any intent', async () => {
     const f = await fixture();

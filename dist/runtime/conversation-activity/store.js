@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
@@ -45,11 +46,21 @@ export class ConversationActivityStore {
         file = existsSync(file) ? realpathSync(file) : join(realpathSync(dirname(resolve(file))), basename(file));
         this.file = file;
         if (this.readOnly) {
-            this.db = new DatabaseSync(file, { readOnly: true });
-            const version = this.db.prepare('PRAGMA user_version').get().user_version;
-            if (version !== 4) {
+            // SQLite may create missing WAL sidecars even for a read-only connection.
+            // An offline database needs immutable mode; a live WAL requires both existing
+            // sidecars so this reader never creates files in the owner's storage.
+            const hasWal = existsSync(`${file}-wal`);
+            if (hasWal && !existsSync(`${file}-shm`))
+                throw new Error('conversation_activity_readonly_sidecars_missing');
+            this.db = new DatabaseSync(hasWal ? file : `${pathToFileURL(file).href}?immutable=1`, { readOnly: true });
+            try {
+                const version = this.db.prepare('PRAGMA user_version').get().user_version;
+                if (version !== 4)
+                    throw new Error('conversation_activity_schema_unsupported');
+            }
+            catch (error) {
                 this.db.close();
-                throw new Error('conversation_activity_schema_unsupported');
+                throw error;
             }
             return;
         }

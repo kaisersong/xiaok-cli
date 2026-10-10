@@ -13,5 +13,6 @@ export declare function ensureConversationActivityOwner(config: ActivityOwnerCon
     entryPath?: string;
     timeoutMs?: number;
     spawn?: typeof spawn;
+    onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void;
     retire?: typeof retireOutdatedOwner;
 }): Promise<ConversationActivityOwnerClient>;

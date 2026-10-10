@@ -23,7 +23,7 @@ export function buildActivityOwnerEnv(parent: NodeJS.ProcessEnv, platform = proc
 
 /** Native callers attach instead of competing for a writer. An outdated owner
  * may be retired after identity checks; RPC mutations are never retried. */
-export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: typeof spawn; retire?: typeof retireOutdatedOwner } = {}): Promise<ConversationActivityOwnerClient> {
+export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: typeof spawn; onLegacyOwner?(outcome: 'replaced' | 'reused_pending'): void; retire?: typeof retireOutdatedOwner } = {}): Promise<ConversationActivityOwnerClient> {
   const address = activityOwnerAddress(config.dataRoot);
   const normalized = { ...config, dataRoot: address.dataRoot };
   const expectedDigest = activityOwnerConfigDigest(normalized);
@@ -33,9 +33,12 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
       const status = await client.request<ActivityOwnerRetirementStatus & { profileId: string; generation?: unknown; configDigest?: string; ready?: boolean }>('status');
       if (status.profileId !== config.profileId) throw new Error('activity_owner_profile_mismatch');
       if (typeof status.generation !== 'number' || status.generation < ACTIVITY_OWNER_GENERATION) {
-        if (await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status)) {
+        const outcome = await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status);
+        if (outcome === 'retired') {
+          options.onLegacyOwner?.('replaced');
           throw new Error('activity_owner_retired');
         }
+        if (outcome === 'kept_pending') options.onLegacyOwner?.('reused_pending');
         return client;
       }
       if (status.configDigest !== expectedDigest) throw new Error('activity_owner_config_mismatch');
