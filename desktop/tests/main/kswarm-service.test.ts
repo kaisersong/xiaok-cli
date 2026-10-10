@@ -1619,6 +1619,47 @@ describe('activity-owner delegated manager boundaries', () => {
     try { await expect(service.start()).rejects.toThrow('activity_owner_initializing'); await service.stop(); expect(fetchMock).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled(); expect(killer).not.toHaveBeenCalled(); }
     finally { rmSync(root,{recursive:true,force:true}); }
   });
+  it('releases delegation after a failed owner attach: start() no longer waits for the owner, adopts a healthy source and never kills a listener', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kswarm-released-adopt-')); vi.stubEnv('XIAOK_CONFIG_DIR', root);
+    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(String(input).includes(':4400/health')
+      ? { ok: true, features: ['dynamic_workflows'], service: { entryPath: entry } } : { ok: true, agents: [] }), { status: 200 })));
+    const killer = vi.fn(), findOwner = vi.fn(async () => 12345);
+    const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, findPortOwner: findOwner, killStalePortOwner: killer });
+    try {
+      await expect(service.start()).rejects.toThrow('activity_owner_initializing');
+      service.releaseActivityOwnerDelegation!();
+      await service.start();
+      expect(service.getStatus().running).toBe(true);
+      expect(killer).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled();
+    } finally { await service.stop(); rmSync(root, { recursive: true, force: true }); }
+  });
+  it('after a failed owner attach refuses to kill an unhealthy listener it cannot attribute (it may belong to a live owner)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kswarm-released-refuse-')); vi.stubEnv('XIAOK_CONFIG_DIR', root);
+    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })));
+    const killer = vi.fn(async () => true);
+    const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, findPortOwner: async () => 4242, killStalePortOwner: killer });
+    try {
+      service.releaseActivityOwnerDelegation!();
+      await service.start();
+      expect(service.getStatus().running).toBe(false);
+      expect(killer).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled();
+    } finally { await service.stop(); rmSync(root, { recursive: true, force: true }); }
+  });
+  it('does not release delegation once an owner is bound', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kswarm-released-bound-')); vi.stubEnv('XIAOK_CONFIG_DIR', root);
+    const request = vi.fn(async () => {});
+    const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never });
+    try {
+      service.bindActivityOwner!({ ownerEpoch: 'owner', request } as never);
+      service.releaseActivityOwnerDelegation!();
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })));
+      await service.start().catch(() => undefined);
+      expect(request).toHaveBeenCalledWith('sourceEnsure', { name: 'kswarm', ownerEpoch: 'owner' });
+      expect(spawnMock).not.toHaveBeenCalled();
+    } finally { await service.stop(); rmSync(root, { recursive: true, force: true }); }
+  });
   it('asks the supervisor to recover an unavailable bound source and never falls through to Desktop spawning', async () => {
     const root=mkdtempSync(join(tmpdir(),'kswarm-delegated-recover-')); vi.stubEnv('XIAOK_CONFIG_DIR',root);
     const entry=join(root,'server.js'); writeFileSync(entry,'// owned test entry'); vi.stubEnv('KSWARM_SERVER_PATH',entry);

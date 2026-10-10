@@ -599,6 +599,9 @@ export function shouldAdoptExistingKSwarmService(input: {
 export interface KSwarmService {
   activityOwnerConfig?(): Promise<Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>>;
   bindActivityOwner?(client: ConversationActivityOwnerClient): void;
+  /** The activity owner could not be attached: stop waiting for it and let start() manage the
+   * sources locally. Never takes over a listener it does not own (adopts a healthy one, refuses to kill). */
+  releaseActivityOwnerDelegation?(): void;
   start(): Promise<void>;
   stop(): Promise<void>;
   restart(): Promise<void>;
@@ -692,7 +695,10 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
   const findPortOwner = options.findPortOwner ?? findPidOnPort;
   let activityOwner: ConversationActivityOwnerClient | undefined;
   let activityDelegated = options.activityOwnerPending === true;
+  let activityFallback = false;
   const killStalePortOwner = async (port: number): Promise<boolean> => {
+    // Without the owner this process cannot tell a stale listener from a live owner's managed source.
+    if (activityFallback) return false;
     if (activityDelegated || activityOwner) {
       // A UI process never kills a managed or unknown listener. If the owner
       // cannot be authenticated, this remains a refusal, never a takeover.
@@ -1626,5 +1632,9 @@ export function createKSwarmService(options: CreateKSwarmServiceOptions = {}): K
     bindActivityOwner(client: ConversationActivityOwnerClient) {
       if (child || brokerChild || startingPromise) throw new Error('activity_source_handoff_required');
       activityOwner = client; activityDelegated = true;
+    },
+    releaseActivityOwnerDelegation() {
+      if (activityOwner) return;
+      activityDelegated = false; activityFallback = true;
     }, start, stop, restart, getStatus, getServiceStatus, getHealthDiagnosticInput, restartRelatedService, onStatusChange, getDesktopMutationToken, getIntentBrokerRoomToken, request };
 }
