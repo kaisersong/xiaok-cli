@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { ConversationActivityOwnerClient } from './owner-client.js';
-import { activityOwnerAddress } from './owner-protocol.js';
+import { retireOutdatedOwner, type ActivityOwnerRetirementStatus } from './owner-retire.js';
+import { ACTIVITY_OWNER_GENERATION, activityOwnerAddress } from './owner-protocol.js';
 import type { ActivityOwnerConfig } from './owner-runtime.js';
 import { activityOwnerConfigDigest } from './owner-runtime.js';
 
@@ -20,17 +21,23 @@ export function buildActivityOwnerEnv(parent: NodeJS.ProcessEnv, platform = proc
   return Object.fromEntries(Object.entries(parent).filter(([name, value]) => value !== undefined && (allowed.has(name) || name.startsWith('LC_') || name.startsWith('XIAOK_') && !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name)))) as Record<string, string>;
 }
 
-/** Native callers attach instead of competing for a writer. No RPC mutation
- * is retried; startup probes are read-only and do not unlink an active socket. */
-export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: typeof spawn } = {}): Promise<ConversationActivityOwnerClient> {
+/** Native callers attach instead of competing for a writer. An outdated owner
+ * may be retired after identity checks; RPC mutations are never retried. */
+export async function ensureConversationActivityOwner(config: ActivityOwnerConfig, options: { instanceId?: string; executable?: string; entryPath?: string; timeoutMs?: number; spawn?: typeof spawn; retire?: typeof retireOutdatedOwner } = {}): Promise<ConversationActivityOwnerClient> {
   const address = activityOwnerAddress(config.dataRoot);
   const normalized = { ...config, dataRoot: address.dataRoot };
   const expectedDigest = activityOwnerConfigDigest(normalized);
   const attach = async () => {
     const client = new ConversationActivityOwnerClient(address.dataRoot, 'producer', options.instanceId);
     try {
-      const status = await client.request<{ profileId: string; configDigest?: string; ready?: boolean }>('status');
+      const status = await client.request<ActivityOwnerRetirementStatus & { profileId: string; generation?: unknown; configDigest?: string; ready?: boolean }>('status');
       if (status.profileId !== config.profileId) throw new Error('activity_owner_profile_mismatch');
+      if (typeof status.generation !== 'number' || status.generation < ACTIVITY_OWNER_GENERATION) {
+        if (await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status)) {
+          throw new Error('activity_owner_retired');
+        }
+        return client;
+      }
       if (status.configDigest !== expectedDigest) throw new Error('activity_owner_config_mismatch');
       if (status.ready === false) throw new Error('activity_owner_initializing');
       return client;

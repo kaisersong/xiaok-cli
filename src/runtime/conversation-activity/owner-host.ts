@@ -9,7 +9,7 @@ import { taskId } from '@modelcontextprotocol/ext-tasks/core';
 import { ConversationActivityStore } from './store.js';
 import { ConversationActivityService, type ActivityThreadIdentity } from './service.js';
 import type { WorkWatch } from './types.js';
-import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL,
+import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_OWNER_GENERATION,
   ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES, type ActivityClientRole } from './owner-protocol.js';
 
 /** Default grace period after the last client/request/watch change. */
@@ -164,7 +164,7 @@ export class ConversationActivityOwnerHost {
       return () => client.active && !this.stopped && this.options.authorizeProducer(watch.origin.threadId, client.instanceId);
     };
     switch (method) {
-      case 'status': z.object({}).strict().parse(params); return { ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
+      case 'status': z.object({}).strict().parse(params); return { generation: ACTIVITY_OWNER_GENERATION, ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
       case 'list': { const input = z.object({ threadId: key, afterLocalSeq: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }).strict().parse(params); return service.listActivities(input.threadId, actor, input); }
       case 'work': return service.getWork(z.object({ watchId: key }).strict().parse(params).watchId, actor);
       case 'unread': z.object({}).strict().parse(params); return service.unreadThreads(actor);

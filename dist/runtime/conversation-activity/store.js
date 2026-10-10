@@ -1,4 +1,4 @@
-import { createPrivateActivityDirectory } from './storage-permissions.js';
+import { chmodPrivateActivityFile, createPrivateActivityDirectory } from './storage-permissions.js';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, realpathSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { dirname, resolve, join, basename } from 'node:path';
@@ -20,6 +20,17 @@ export class ConversationActivityStore {
     now;
     maxSourceEvents;
     closed = false;
+    file;
+    secureSidecars() {
+        if (this.readOnly)
+            return;
+        for (const base of [this.file, `${this.file}.owner.sqlite`])
+            for (const suffix of ['', '-wal', '-shm', '-journal']) {
+                const path = base + suffix;
+                if (existsSync(path))
+                    chmodPrivateActivityFile(path);
+            }
+    }
     constructor(file, options = {}) {
         this.readOnly = options.readOnly ?? false;
         this.now = options.now ?? Date.now;
@@ -32,6 +43,7 @@ export class ConversationActivityStore {
         if (!this.readOnly)
             createPrivateActivityDirectory(dirname(file));
         file = existsSync(file) ? realpathSync(file) : join(realpathSync(dirname(resolve(file))), basename(file));
+        this.file = file;
         if (this.readOnly) {
             this.db = new DatabaseSync(file, { readOnly: true });
             const version = this.db.prepare('PRAGMA user_version').get().user_version;
@@ -57,6 +69,7 @@ export class ConversationActivityStore {
             // A separate rollback-journal database supplies an OS-managed exclusive lock.
             // It is held for this owner's lifetime and released by process exit, never mtime.
             this.owner.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; BEGIN EXCLUSIVE');
+            this.secureSidecars();
         }
         catch {
             this.owner.close();
@@ -104,6 +117,7 @@ export class ConversationActivityStore {
         COMMIT;
       `);
             this.db.prepare(`INSERT OR IGNORE INTO source_event_retention SELECT event_key,COALESCE(json_extract(content_json,'$.occurredAt'),?),json_extract(content_json,'$.kind') FROM source_events`).run(this.now());
+            this.secureSidecars();
         }
         catch (error) {
             opened?.close();
@@ -125,6 +139,9 @@ export class ConversationActivityStore {
         catch (error) {
             this.db.exec('ROLLBACK');
             throw error;
+        }
+        finally {
+            this.secureSidecars();
         }
     }
     prepareAssociation(input) {

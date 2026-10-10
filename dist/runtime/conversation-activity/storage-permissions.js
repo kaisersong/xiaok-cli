@@ -1,5 +1,31 @@
 import { chmodSync, lstatSync, readdirSync, mkdirSync } from 'node:fs';
-import { basename, dirname, resolve, parse } from 'node:path';
+import { basename, dirname, resolve, parse, join } from 'node:path';
+export const ACTIVITY_STORAGE_NAMES = {
+    database: 'conversation-activity.sqlite', ownerPrefix: 'activity-owner.',
+    config: 'activity-owner.config.json', log: 'activity-owner.log', status: 'activity-owner.status.json', credentials: 'activity-owner.credentials.json',
+    supervision: 'activity-source-supervision.json', kswarmLog: 'activity-kswarm.log', brokerLog: 'activity-broker.log',
+    endpoints: 'activity-mcp-endpoints.json', notice: 'first-start-notice-shown', snapshots: 'snapshots',
+};
+export function activityStorageLayout(root) {
+    return basename(dirname(resolve(root))) === 'conversation-activity' ? 'dedicated' : 'shared';
+}
+export function isActivityStorageEntry(name) {
+    return name === ACTIVITY_STORAGE_NAMES.snapshots || Object.entries(ACTIVITY_STORAGE_NAMES)
+        .some(([key, prefix]) => key !== 'snapshots' && name.startsWith(prefix));
+}
+export function chmodPrivateActivityFile(path) {
+    if (process.platform === 'win32')
+        return;
+    try {
+        const state = lstatSync(path);
+        if (!state.isFile() || state.isSymbolicLink() || state.uid !== process.getuid?.())
+            throw new Error();
+        chmodSync(path, 0o600);
+    }
+    catch {
+        throw new Error('activity_storage_not_private');
+    }
+}
 /** Bounds work on untrusted or unexpectedly large legacy storage trees. */
 const MAX_STORAGE_ENTRIES = 100_000;
 /** Tighten legacy storage before any persistent write; never follow links. */
@@ -12,7 +38,8 @@ export function secureActivityStorage(root, options = {}) {
         // activity tree itself must be real, owned directories and files.
         root = resolve(root);
         const parent = dirname(root);
-        const paths = basename(parent) === 'conversation-activity' ? [parent, root] : [root];
+        const dedicated = activityStorageLayout(root) === 'dedicated';
+        const paths = dedicated ? [parent, root] : readdirSync(root).filter(isActivityStorageEntry).map(name => join(root, name));
         const verified = [];
         let count = 0;
         while (paths.length) {
@@ -22,8 +49,10 @@ export function secureActivityStorage(root, options = {}) {
             const state = lstatSync(path);
             if (state.isSymbolicLink() || state.uid !== process.getuid?.())
                 throw new Error();
-            if (state.isSocket())
+            if (state.isSocket() && dedicated)
                 continue;
+            if (!dedicated && state.isDirectory() && dirname(path) === root && basename(path) !== ACTIVITY_STORAGE_NAMES.snapshots)
+                throw new Error();
             if (!state.isDirectory() && !state.isFile())
                 throw new Error();
             const mode = state.isDirectory() ? 0o700 : 0o600;
@@ -51,9 +80,13 @@ export function createPrivateActivityDirectory(root) {
             // Refuse to create through a link inside the activity tree. Links above the
             // nearest `conversation-activity` directory are the user's own layout.
             const target = resolve(root);
-            const segments = target.split(/[\\/]/);
-            const index = segments.lastIndexOf('conversation-activity');
-            const floor = index >= 0 ? segments.slice(0, index + 1).join('/') || '/' : target;
+            let floor = target;
+            for (let path = target; path !== parse(path).root; path = dirname(path)) {
+                if (basename(path) === 'conversation-activity') {
+                    floor = path;
+                    break;
+                }
+            }
             for (let ancestor = target; ancestor.length >= floor.length && ancestor !== parse(ancestor).root; ancestor = dirname(ancestor)) {
                 try {
                     if (lstatSync(ancestor).isSymbolicLink())
@@ -67,7 +100,31 @@ export function createPrivateActivityDirectory(root) {
                     break;
             }
         }
-        mkdirSync(root, { recursive: true, mode: 0o700 });
+        const missing = [];
+        for (let path = resolve(root);; path = dirname(path)) {
+            try {
+                lstatSync(path);
+                break;
+            }
+            catch (error) {
+                if (error.code !== 'ENOENT')
+                    throw error;
+            }
+            missing.push(path);
+        }
+        for (const path of missing.reverse()) {
+            try {
+                mkdirSync(path, { mode: 0o700 });
+            }
+            catch (error) {
+                if (error.code !== 'EEXIST')
+                    throw error;
+                else
+                    continue;
+            }
+            if (process.platform !== 'win32')
+                chmodSync(path, 0o700);
+        }
         secureActivityStorage(root);
     }
     catch {

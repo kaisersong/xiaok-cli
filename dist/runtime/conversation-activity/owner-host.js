@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createServer, createConnection } from 'node:net';
 import { existsSync, lstatSync, unlinkSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -6,7 +8,7 @@ import { z } from 'zod';
 import { taskId } from '@modelcontextprotocol/ext-tasks/core';
 import { ConversationActivityStore } from './store.js';
 import { ConversationActivityService } from './service.js';
-import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES } from './owner-protocol.js';
+import { activityOwnerAddress, createActivityOwnerCredentials, authenticateActivityClient, ACTIVITY_OWNER_PROTOCOL, ACTIVITY_OWNER_GENERATION, ACTIVITY_REQUEST_BYTES, ACTIVITY_RESPONSE_BYTES } from './owner-protocol.js';
 /** Default grace period after the last client/request/watch change. */
 export const ACTIVITY_OWNER_IDLE_MS = 20 * 60_000;
 /** Bound observation without an authenticated client, including active watches. */
@@ -68,7 +70,7 @@ export class ConversationActivityOwnerHost {
         this.idleMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_IDLE_MS, ACTIVITY_OWNER_IDLE_MS);
         this.unattendedMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_MAX_UNATTENDED_MS, ACTIVITY_OWNER_MAX_UNATTENDED_MS);
         this.address = activityOwnerAddress(options.dataRoot);
-        this.store = new ConversationActivityStore(join(this.address.dataRoot, 'conversation-activity.sqlite'));
+        this.store = new ConversationActivityStore(join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.database));
         this.actor = { requestSource: 'user', actorId: options.actorId };
         this.service = new ConversationActivityService({ ...options, store: this.store });
     }
@@ -157,8 +159,9 @@ export class ConversationActivityOwnerHost {
                 socket.on('error', () => socket.destroy());
             });
             await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.address.socketPath, () => { this.server.off('error', reject); resolve(); }); });
-            const statusFile = join(this.address.dataRoot, 'activity-owner.status.json');
+            const statusFile = join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.status);
             writeFileSync(`${statusFile}.${process.pid}.tmp`, JSON.stringify({ ownerEpoch: this.ownerEpoch, pid: process.pid, rootHash: this.address.rootHash }), { mode: 0o600 });
+            chmodPrivateActivityFile(`${statusFile}.${process.pid}.tmp`);
             renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
             this.service.start();
             this.watchState = JSON.stringify(this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) })));
@@ -221,7 +224,7 @@ export class ConversationActivityOwnerHost {
         switch (method) {
             case 'status':
                 z.object({}).strict().parse(params);
-                return { ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
+                return { generation: ACTIVITY_OWNER_GENERATION, ownerEpoch: this.ownerEpoch, rootHash: this.address.rootHash, profileId: this.options.profileId, pid: process.pid, configDigest: this.options.configDigest, ready: this.options.ready?.() ?? true };
             case 'list': {
                 const input = z.object({ threadId: key, afterLocalSeq: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200).optional() }).strict().parse(params);
                 return service.listActivities(input.threadId, actor, input);

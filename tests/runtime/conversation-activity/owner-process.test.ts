@@ -54,3 +54,32 @@ describe('independent activity process lifecycle', () => {
     }
   }, 15_000);
 });
+
+it.skipIf(!['linux', 'darwin'].includes(process.platform))('replaces a real authenticated legacy-generation owner', async () => {
+  const { spawn } = await import('node:child_process');
+  const root = mkdtempSync(join(tmpdir(), 'activity-legacy-'));
+  const config = { schemaVersion: 1 as const, dataRoot: root, profileId: 'profile', actorId: 'user', identity: { kind: 'cli' as const, path: root } };
+  const configPath = join(root, 'activity-owner.config.json');
+  writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+  const child = spawn(process.execPath, [join(process.cwd(), '.test-dist/tests/runtime/conversation-activity/fixtures/legacy-owner-entry.js'), configPath], { stdio: 'pipe' });
+  let stderr = ''; child.stderr.on('data', data => { stderr += data.toString(); });
+  const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
+  let legacy: ConversationActivityOwnerClient | undefined, replacement: ConversationActivityOwnerClient | undefined, nextPid: number | undefined;
+  try {
+    await vi.waitFor(async () => {
+      legacy?.dispose(); legacy = new ConversationActivityOwnerClient(root, 'producer');
+      const status = await legacy.request<any>('status');
+      expect(status.pid).toBe(child.pid); expect(status.generation).toBeUndefined(); expect(status.ready).toBe(true);
+    }, { timeout: 10_000 });
+    replacement = await ensureConversationActivityOwner(config, { entryPath: join(process.cwd(), '.test-dist/src/runtime/conversation-activity/owner-entry.js'), timeoutMs: 10_000 });
+    const status = await replacement.request<any>('status'); nextPid = status.pid;
+    expect(status.generation).toBe(2); expect(nextPid).not.toBe(child.pid);
+    await exited; expect(child.exitCode).toBe(0);
+  } catch (error) { console.error(stderr); throw error; }
+  finally {
+    legacy?.dispose(); replacement?.dispose();
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    if (nextPid) { process.kill(nextPid, 'SIGTERM'); await vi.waitFor(() => expect(() => process.kill(nextPid!, 0)).toThrow(), { timeout: 5000 }); }
+    await exited; rmSync(root, { recursive: true, force: true });
+  }
+}, 25_000);

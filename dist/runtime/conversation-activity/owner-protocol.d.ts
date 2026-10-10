@@ -1,4 +1,5 @@
 export declare const ACTIVITY_OWNER_PROTOCOL = 1;
+export declare const ACTIVITY_OWNER_GENERATION = 2;
 export declare const ACTIVITY_REQUEST_BYTES: number;
 export declare const ACTIVITY_RESPONSE_BYTES: number;
 export type ActivityClientRole = 'user' | 'producer';

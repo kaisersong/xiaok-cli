@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import './owner-entry.js';
 import { spawn } from 'node:child_process';
 import { writeFileSync, renameSync, openSync, closeSync } from 'node:fs';
@@ -5,7 +7,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { ConversationActivityOwnerClient } from './owner-client.js';
-import { activityOwnerAddress } from './owner-protocol.js';
+import { retireOutdatedOwner } from './owner-retire.js';
+import { ACTIVITY_OWNER_GENERATION, activityOwnerAddress } from './owner-protocol.js';
 import { activityOwnerConfigDigest } from './owner-runtime.js';
 /** Only operational environment is inherited by the long-lived owner. */
 export function buildActivityOwnerEnv(parent, platform = process.platform) {
@@ -17,8 +20,8 @@ export function buildActivityOwnerEnv(parent, platform = process.platform) {
             allowed.add(name);
     return Object.fromEntries(Object.entries(parent).filter(([name, value]) => value !== undefined && (allowed.has(name) || name.startsWith('LC_') || name.startsWith('XIAOK_') && !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(name))));
 }
-/** Native callers attach instead of competing for a writer. No RPC mutation
- * is retried; startup probes are read-only and do not unlink an active socket. */
+/** Native callers attach instead of competing for a writer. An outdated owner
+ * may be retired after identity checks; RPC mutations are never retried. */
 export async function ensureConversationActivityOwner(config, options = {}) {
     const address = activityOwnerAddress(config.dataRoot);
     const normalized = { ...config, dataRoot: address.dataRoot };
@@ -29,6 +32,12 @@ export async function ensureConversationActivityOwner(config, options = {}) {
             const status = await client.request('status');
             if (status.profileId !== config.profileId)
                 throw new Error('activity_owner_profile_mismatch');
+            if (typeof status.generation !== 'number' || status.generation < ACTIVITY_OWNER_GENERATION) {
+                if (await (options.retire ?? retireOutdatedOwner)(address.dataRoot, status)) {
+                    throw new Error('activity_owner_retired');
+                }
+                return client;
+            }
             if (status.configDigest !== expectedDigest)
                 throw new Error('activity_owner_config_mismatch');
             if (status.ready === false)
@@ -47,11 +56,13 @@ export async function ensureConversationActivityOwner(config, options = {}) {
         if (error instanceof Error && ['activity_owner_profile_mismatch', 'activity_owner_config_mismatch'].includes(error.message))
             throw error;
     }
-    const configFile = join(address.dataRoot, 'activity-owner.config.json');
+    const configFile = join(address.dataRoot, ACTIVITY_STORAGE_NAMES.config);
     const temporary = `${configFile}.${randomUUID()}.tmp`;
     writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 });
+    chmodPrivateActivityFile(temporary);
     renameSync(temporary, configFile);
-    const logFile = openSync(join(address.dataRoot, 'activity-owner.log'), 'a', 0o600);
+    const logFile = openSync(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log), 'a', 0o600);
+    chmodPrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
     let child;
     try {
         child = (options.spawn ?? spawn)(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {

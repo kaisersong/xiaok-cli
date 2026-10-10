@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 export const ACTIVITY_OWNER_PROTOCOL = 1;
+export const ACTIVITY_OWNER_GENERATION = 2;
 export const ACTIVITY_REQUEST_BYTES = 256 * 1024;
 export const ACTIVITY_RESPONSE_BYTES = 4 * 1024 * 1024;
 export type ActivityClientRole = 'user' | 'producer';
