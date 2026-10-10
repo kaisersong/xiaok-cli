@@ -14,6 +14,7 @@ export default {
       '.test-dist/tests/scripts/check-repo-hygiene.test.js',
       '.test-dist/tests/scripts/new-worktree.test.js',
     ],
+    setupFiles: ['./.test-dist/tests/support/setup-host-env.js'],
     fileParallelism: false,
     pool: 'threads',
   },
