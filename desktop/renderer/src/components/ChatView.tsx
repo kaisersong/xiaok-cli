@@ -263,6 +263,7 @@ export interface ArtifactOpenOptions {
 interface ChatViewProps {
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
+  activityContent?: ReactNode;
   pendingApprovalCount?: number;
   thread: ThreadRecord;
   messages: ChatMessage[];
@@ -288,7 +289,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent, pendingApprovalCount = 0,
+  thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -661,6 +662,7 @@ export function ChatView({
           background: 'linear-gradient(to bottom, transparent 0%, var(--c-bg-page) 24px)',
         }}
       >
+        {activityContent}
         <ChatInput
           value={prompt}
           onChange={onPromptChange}

@@ -14,6 +14,10 @@ export function shouldSuppressWarning(warning, args = []) {
     const code = warning instanceof Error && 'code' in warning && typeof warning.code === 'string'
         ? warning.code
         : normalizeWarningCode(args);
+    const experimental = args[0] === 'ExperimentalWarning'
+        || (warning instanceof Error && warning.name === 'ExperimentalWarning');
+    if (experimental && message.startsWith('SQLite is an experimental feature'))
+        return true;
     return code === 'DEP0040' && message.includes('`punycode` module is deprecated');
 }
 export function installWarningFilter() {

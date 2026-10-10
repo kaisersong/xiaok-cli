@@ -84,6 +84,66 @@ describe('InProcessTaskRuntimeHost', () => {
     await vi.waitFor(()=>expect(host.isExecutingForTest('health_task')).toBe(false));
   });
 
+  it('distinguishes a prepared task from the actual runner starting', async () => {
+    const host = createHost(async () => undefined);
+    await host.prepareTask({ prompt: 'prepare only', materials: [] });
+    expect((await host.recoverTask('task_1')).snapshot.events.map(event => event.type)).not.toContain('task_execution_started');
+    await host.startTask('task_1'); await host.drain();
+    expect((await host.recoverTask('task_1')).snapshot.events.filter(event => event.type as string === 'task_execution_started')).toHaveLength(1);
+  });
+
+  it('emits committed monotonic records and keeps their epoch after reloading the host', async () => {
+    const host = createHost(async () => undefined);
+    await host.createTask({ prompt: 'records', materials: [] });
+    await host.drain();
+    const first = [];
+    for await (const record of host.subscribeTaskRecords('task_1')) first.push(record);
+    expect(first.map(record => record.eventIndex)).toEqual(first.map((_, index) => index));
+    expect(new Set(first.map(record => record.sourceDataEpoch))).toEqual(new Set(['sess_1']));
+    const restarted = createHost(async () => undefined);
+    const replay = [];
+    for await (const record of restarted.subscribeTaskRecords('task_1', { sinceIndex: 1 })) replay.push(record);
+    expect(replay).toEqual(first.slice(1));
+  });
+
+  it('aborts an idle record subscription and releases its live listener', async () => {
+    const host = createHost(async () => undefined);
+    await host.prepareTask({ prompt: 'idle', materials: [] });
+    const count = (await host.recoverTask('task_1')).snapshot.events.length;
+    const controller = new AbortController();
+    const iterator = host.subscribeTaskRecords('task_1', { sinceIndex: count, signal: controller.signal })[Symbol.asyncIterator]();
+    const waiting = iterator.next();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    controller.abort(new Error('reader closed'));
+    await expect(waiting).rejects.toThrow('reader closed');
+    await host.startTask('task_1'); await host.drain();
+  });
+
+  it('retains an event arriving while the subscriber is replaying history', async () => {
+    let emit!: Parameters<TaskRunner>[0]['emitRuntimeEvent'];
+    let finish!: () => void;
+    const host = createHost(async input => {
+      emit = input.emitRuntimeEvent;
+      await new Promise<void>(resolve => { finish = resolve; });
+    });
+    await host.createTask({ prompt: 'observe', materials: [] });
+    await waitFor(() => Boolean(emit));
+    const history = (await host.recoverTask('task_1')).snapshot.events.length;
+    const iterator = host.subscribeTask('task_1')[Symbol.asyncIterator]();
+    await iterator.next();
+    await emit({ type: 'breadcrumb_emitted', sessionId: 'sess_1', turnId: 'turn', intentId: 'intent', stepId: 'phase', status: 'running', message: 'during replay' });
+    finish();
+    await host.drain();
+    const tail: DesktopTaskEvent[] = [];
+    for (let i = 0; i < history + 8; i++) {
+      const item = await Promise.race([iterator.next(), new Promise<null>(resolve => setTimeout(() => resolve(null), 50))]);
+      if (!item || item.done) break;
+      tail.push(item.value);
+    }
+    expect(tail).toContainEqual(expect.objectContaining({ type: 'progress', message: 'during replay' }));
+    expect(tail).toContainEqual(expect.objectContaining({ type: 'task_terminal', status: 'completed' }));
+  });
+
   it('creates understanding, starts running immediately, and replays events for late subscribers', async () => {
     const runner = vi.fn<TaskRunner>(async () => undefined);
     const host = createHost(runner);
@@ -349,6 +409,7 @@ describe('InProcessTaskRuntimeHost', () => {
     const subscription = host.subscribeTask('task_1')[Symbol.asyncIterator]();
     await subscription.next();
     await subscription.next();
+    expect((await subscription.next()).value?.type).toBe('task_execution_started');
 
     await waitFor(() => Boolean(emitProgress));
     const liveEventPromise = subscription.next();
@@ -421,49 +482,12 @@ describe('InProcessTaskRuntimeHost', () => {
     await subscription.return?.();
   });
 
-  it('treats an out-of-range sinceIndex as start-of-live (no history replay)', async () => {
-    let emitProgress: ((message: string) => void) | undefined;
-    let finishRunner: (() => void) | undefined;
-    const runner: TaskRunner = async ({ emitRuntimeEvent }) => {
-      emitProgress = (message) => {
-        emitRuntimeEvent({
-          type: 'breadcrumb_emitted',
-          sessionId: 'sess_1',
-          turnId: 'turn_1',
-          intentId: 'intent_1',
-          stepId: 'step_1',
-          status: 'running',
-          message,
-        });
-      };
-      await new Promise<void>((resolve) => {
-        finishRunner = resolve;
-      });
-    };
-    const host = createHost(runner);
-    await host.createTask({
-      prompt: '生成 A 客户方案 PPT',
-      materials: [{ materialId: material.materialId }],
-    });
-    await waitFor(() => Boolean(emitProgress));
-
-    const subscription = host.subscribeTask('task_1', { sinceIndex: 9999 })[Symbol.asyncIterator]();
-    const liveEventPromise = subscription.next();
-    emitProgress?.('越界也只发增量');
-
-    await expect(liveEventPromise).resolves.toEqual({
-      done: false,
-      value: {
-        type: 'progress',
-        eventId: 'turn_1:step_1:breadcrumb',
-        message: '越界也只发增量',
-        stage: 'running',
-      },
-    });
-
-    finishRunner?.();
-    await waitFor(async () => (await host.recoverTask('task_1')).snapshot.status === 'completed');
-    await subscription.return?.();
+  it('rejects an impossible cursor instead of silently skipping history', async () => {
+    const host = createHost(async () => undefined);
+    await host.createTask({ prompt: 'cursor', materials: [] });
+    await host.drain();
+    const iterator = host.subscribeTask('task_1', { sinceIndex: 9999 })[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toThrow('task_event_cursor_gap');
   });
 
   it('replays full history when sinceIndex is omitted (backward compatible)', async () => {

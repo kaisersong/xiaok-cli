@@ -272,46 +272,73 @@ export class InProcessTaskRuntimeHost {
         return prepared;
     }
     async *subscribeTask(taskId, options) {
-        const snapshot = await this.requireSnapshot(taskId);
-        // events is append-only (only grown via [...events, event]), so a numeric
-        // index is a stable replay cursor. Clamp into [0, length] to make negative or
-        // out-of-range cursors safe (out-of-range = skip all history, only live).
-        const requested = options?.sinceIndex ?? 0;
-        const start = Math.max(0, Math.min(requested, snapshot.events.length));
-        for (let i = start; i < snapshot.events.length; i++) {
-            yield snapshot.events[i];
-        }
-        if (TERMINAL_STATUSES.has(snapshot.status)) {
-            return;
-        }
+        for await (const record of this.subscribeTaskRecords(taskId, options))
+            yield record.event;
+    }
+    async *subscribeTaskRecords(taskId, options = {}) {
+        const start = options.sinceIndex ?? 0;
+        if (!Number.isSafeInteger(start) || start < 0)
+            throw new Error('invalid_task_event_cursor');
+        options.signal?.throwIfAborted();
         const queue = [];
-        let wake = null;
+        let wake;
         let closed = false;
+        let fault;
+        let snapshot;
         const subscription = {
-            push(event) {
-                queue.push(event);
+            push(record) {
+                if (closed)
+                    return;
+                if (queue.length >= 1024) {
+                    fault = new Error('task_event_subscriber_backpressure');
+                    closed = true;
+                }
+                else
+                    queue.push(record);
                 wake?.();
-                wake = null;
+                wake = undefined;
             },
-            close() {
-                closed = true;
-                wake?.();
-                wake = null;
-            },
+            close() { closed = true; wake?.(); wake = undefined; },
         };
-        this.addSubscriber(taskId, subscription);
+        const abort = () => subscription.close();
         try {
-            while (!closed || queue.length > 0) {
-                if (queue.length === 0) {
-                    await new Promise((resolve) => {
-                        wake = resolve;
-                    });
+            // Append and snapshot/live handoff share the same per-task linearization.
+            await this.enqueueMutation(taskId, async () => {
+                snapshot = await this.requireSnapshot(taskId);
+                if (start > snapshot.events.length)
+                    throw new Error('task_event_cursor_gap');
+                if (TERMINAL_STATUSES.has(snapshot.status))
+                    closed = true;
+                else
+                    this.addSubscriber(taskId, subscription);
+            });
+            options.signal?.addEventListener('abort', abort, { once: true });
+            options.signal?.throwIfAborted();
+            let nextIndex = start;
+            for (; nextIndex < snapshot.events.length; nextIndex++) {
+                options.signal?.throwIfAborted();
+                yield { taskId, eventIndex: nextIndex, sourceDataEpoch: snapshot.sessionId, event: snapshot.events[nextIndex] };
+            }
+            while (!closed || queue.length) {
+                options.signal?.throwIfAborted();
+                if (!queue.length) {
+                    await new Promise(resolve => { wake = resolve; });
                     continue;
                 }
-                yield queue.shift();
+                const record = queue.shift();
+                if (record.eventIndex < nextIndex)
+                    continue;
+                if (record.eventIndex !== nextIndex)
+                    throw new Error('task_event_cursor_gap');
+                nextIndex++;
+                yield record;
             }
+            options.signal?.throwIfAborted();
+            if (fault)
+                throw fault;
         }
         finally {
+            options.signal?.removeEventListener('abort', abort);
             this.removeSubscriber(taskId, subscription);
         }
     }
@@ -488,7 +515,7 @@ export class InProcessTaskRuntimeHost {
                 this.retainTerminalReceipt(persisted);
             else
                 this.schedulePersistedEvent(persisted);
-            this.pushLiveEvent(current.taskId, event);
+            this.pushLiveEvent(current.taskId, event, eventIndex, current.sessionId);
             receipt.published++;
         }
         return current;
@@ -702,7 +729,8 @@ export class InProcessTaskRuntimeHost {
             authorize(snapshot);
             await track(this.saveSnapshot(next, snapshot));
             persisted = { taskId, eventIndex: next.events.length - 1, event, snapshot: next };
-            this.pushLiveEvent(taskId, event);
+            for (let index = snapshot.events.length; index < next.events.length; index++)
+                this.pushLiveEvent(taskId, next.events[index], index, next.sessionId);
         }));
         await track(this.options.snapshotStore.clearActiveTask(taskId));
         this.closeSubscribers(taskId);
@@ -735,7 +763,11 @@ export class InProcessTaskRuntimeHost {
             if (TERMINAL_STATUSES.has(current.status) || this.cancellationSettlements.has(taskId))
                 return;
             this.activeExecutions.set(taskId, execution);
-            await this.saveSnapshot({ ...current, status: 'running', updatedAt: this.now() }, current);
+            const event = { type: 'task_execution_started', taskId };
+            const next = { ...current, status: 'running', events: [...current.events, event], updatedAt: this.now() };
+            await this.saveSnapshot(next, current);
+            this.pushLiveEvent(taskId, event, next.events.length - 1, next.sessionId);
+            this.schedulePersistedEvent({ taskId, eventIndex: next.events.length - 1, event, snapshot: next });
             started = true;
         });
         if (!started)
@@ -1088,8 +1120,8 @@ export class InProcessTaskRuntimeHost {
             }
             this.lastCommittedSnapshots.set(taskId, next);
             persisted = { taskId, eventIndex: next.events.length - 1, event: terminal, snapshot: next };
-            for (const event of next.events.slice(snapshot.events.length))
-                this.pushLiveEvent(taskId, event);
+            for (let index = snapshot.events.length; index < next.events.length; index++)
+                this.pushLiveEvent(taskId, next.events[index], index, next.sessionId);
         }));
         if (persisted)
             this.pendingTerminalPersistedEvents.set(taskId, persisted);
@@ -1391,7 +1423,7 @@ export class InProcessTaskRuntimeHost {
                 event,
                 snapshot: next,
             };
-            this.pushLiveEvent(taskId, event);
+            this.pushLiveEvent(taskId, event, next.events.length - 1, next.sessionId);
             if (options?.batch?.receipt)
                 options.batch.receipt.published = 1;
         });
@@ -1427,7 +1459,7 @@ export class InProcessTaskRuntimeHost {
                     event: terminalEvent,
                     snapshot: next,
                 };
-                this.pushLiveEvent(taskId, terminalEvent);
+                this.pushLiveEvent(taskId, terminalEvent, next.events.length - 1, next.sessionId);
             }
         });
         if (persisted) {
@@ -1532,9 +1564,9 @@ export class InProcessTaskRuntimeHost {
             this.subscribers.delete(taskId);
         }
     }
-    pushLiveEvent(taskId, event) {
+    pushLiveEvent(taskId, event, eventIndex, sourceDataEpoch) {
         for (const subscriber of this.subscribers.get(taskId) ?? []) {
-            subscriber.push(event);
+            subscriber.push({ taskId, eventIndex, sourceDataEpoch, event });
         }
     }
     closeSubscribers(taskId) {

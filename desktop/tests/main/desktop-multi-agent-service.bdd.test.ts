@@ -91,6 +91,79 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     return { root, store, service, coordinator, host, start };
   }
 
+  it('activity completion requires native host proof and physical child settlement, without waiting for warm-session TTL', async () => {
+    const entered = deferred<void>(), release = deferred<string>(); let groupId = '', childId = '';
+    const f = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+      groupId = context.groupId;
+      childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'activity-child', taskName: 'activity', message: 'work' })).targetAgentId!;
+      await entered.promise;
+    });
+    const authority = f.service.bindHostDeliveryOwner(f.host);
+    try {
+      const taskId = await f.start(); await f.host.drain();
+      const runId = `root:${taskId}`;
+      await f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority, taskId });
+      expect(f.store.getActivityRun(runId)?.terminalEventId).toBeUndefined();
+      expect(f.store.getActivityRun(runId)?.rootTerminal?.outcome).toBe('completed');
+      expect(() => f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority: { ...authority }, taskId })).toThrow(/owner/);
+      release.resolve('done');
+      await vi.waitFor(() => expect(f.store.getActivityRun(runId)?.state).toBe('completed'));
+      expect(f.store.getAgent(groupId, childId)).toMatchObject({ executionActive: false, sessionResident: true, resourcesReleased: false });
+      const eventId = f.store.getActivityRun(runId)?.terminalEventId;
+      await f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority, taskId });
+      expect(f.store.readEvents(groupId, 0, 100).filter(event => event.kind === 'activity_run' && event.eventId === eventId)).toHaveLength(1);
+    } finally { release.resolve('cleanup'); }
+  });
+
+  it('namespaces user followup run identity by its native group across a confirmed group reset', async () => {
+    const groups: string[] = [], children: string[] = [];
+    const f = await setup(async () => ({ run: async () => 'child result', suspend: async () => {}, dispose: async () => {} }), async context => {
+      groups.push(context.groupId);
+      children.push((await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'repeat-spawn', taskName: 'repeat', message: 'work' })).targetAgentId!);
+    });
+    const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
+    await f.start(); await f.host.drain();
+    await vi.waitFor(() => expect(f.store.getAgent(groups[0], children[0])?.executionActive).toBe(false));
+    const follow = (index: number) => f.service.userFollowup({ access, requestSource: 'user', groupId: groups[index], agentId: children[index], expectedTurn: 1, operationId: 'repeat-user-operation', message: 'next' });
+    await follow(0);
+    await vi.waitFor(() => expect(f.store.getAgent(groups[0], children[0])?.turn).toBe(2));
+    await vi.waitFor(() => expect(f.store.getAgent(groups[0], children[0])?.executionActive).toBe(false));
+    await f.service.resetGroup({ access, requestSource: 'user', operationId: 'reset-repeat', expectedGroupId: groups[0], confirmTerminate: true });
+    await vi.waitFor(() => expect(f.store.activeGroup('t1')?.groupId).not.toBe(groups[0]));
+    await f.start(); await f.host.drain();
+    await vi.waitFor(() => expect(f.store.getAgent(groups[1], children[1])?.executionActive).toBe(false));
+    await expect(follow(1)).resolves.toMatchObject({ state: 'queued_next_admission' });
+    expect(f.store.requireGroup(groups[1]).mutationBlockedReason).toBeFalsy();
+    expect(f.store.getActivityRuns(groups[0]).find(run => run.kind === 'user_followup')?.runId).not.toBe(f.store.getActivityRuns(groups[1]).find(run => run.kind === 'user_followup')?.runId);
+  });
+
+  it('isolates a malformed host proof so other committed runs reconcile successfully', async () => {
+    const f = await setup(async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
+    const ids = [await f.start()]; await f.host.drain(); ids.push(await f.start()); await f.host.drain(); ids.sort();
+    const inspect = f.host.inspectTask.bind(f.host);
+    const fault = vi.spyOn(f.host, 'inspectTask').mockImplementation(async taskId => {
+      const snapshot = await inspect(taskId);
+      return taskId === ids[0] && snapshot ? { ...snapshot, multiAgentPreparation: { ...snapshot.multiAgentPreparation!, rootTurnId: 'mismatched' } } : snapshot;
+    });
+    try {
+      await expect(f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority: f.service.bindHostDeliveryOwner(f.host) })).resolves.toBeUndefined();
+      expect(f.store.getActivityRun(`root:${ids[0]}`)?.state).toBe('unknown');
+      expect(f.store.getActivityRun(`root:${ids[1]}`)?.state).toBe('completed');
+    } finally { fault.mockRestore(); }
+  });
+
+  it('settles an abandoned preparation without inventing a host terminal when no host snapshot was created', async () => {
+    const f = await setup(async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
+    const fault = vi.spyOn(f.host, 'prepareTask').mockRejectedValueOnce(new Error('prepare failed before snapshot'));
+    try { await expect(f.start()).rejects.toThrow('prepare failed before snapshot'); }
+    finally { fault.mockRestore(); }
+    const group = f.store.activeGroup('t1')!;
+    const run = f.store.getActivityRuns(group.groupId)[0];
+    expect(run).toMatchObject({ state: 'unknown', sourceUnavailable: 'preparation_abandoned' });
+    expect(run.terminalEventId).toBeUndefined();
+    expect(f.store.getActivityMembers(run.runId).every(member => member.physicalSettled)).toBe(true);
+  });
+
   it('U1 Given a root-only thread and a foreign child, Then the real snapshot and first-root notification deny history while explicit audit reads remain available', async () => {
     const createSession = vi.fn(); const f = await setup(createSession, async () => {});
     f.service.registerThread({ threadId: 'foreign', profileId: 'other-profile', workspaceId: 'other-workspace', cwd: f.root });
@@ -1207,6 +1280,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       release.resolve('first');
       await vi.waitFor(() => expect(f.coordinator.snapshot().active).toBe(0));
       expect(sources).toEqual(includeA ? [a, a, b] : [a, b]);
+      const aMembers = f.store.getActivityMembers(`root:${a}`);
+      const bMembers = f.store.getActivityMembers(`root:${b}`);
+      expect(aMembers.map(member => member.operationId)).toContain('callers-spawn');
+      expect(aMembers.some(member => member.operationId === 'caller-1')).toBe(includeA);
+      expect(aMembers.some(member => member.operationId === 'caller-2')).toBe(false);
+      expect(bMembers.map(member => member.operationId)).toContain('caller-2');
+      expect([...aMembers, ...bMembers].every(member => member.physicalSettled)).toBe(true);
       expect(f.store.getAgent(groupId, childId)?.sourceTaskId).toBe(b);
       expect(f.store.readEvents(groupId).filter(event => event.kind === 'artifact').map(event => event.payload.sourceTaskId)).toEqual(includeA ? [a, b] : [b]);
     } finally { release.resolve('cleanup'); }

@@ -18,6 +18,7 @@ import type {
   ArtifactKind,
   ArtifactSummary,
   DesktopTaskEvent,
+  TaskEventRecord,
   MaterialRecord,
   MaterialRole,
   NeedsUserQuestion,
@@ -115,7 +116,7 @@ export interface InProcessTaskRuntimeHostOptions {
 }
 
 interface LiveSubscription {
-  push(event: DesktopTaskEvent): void;
+  push(event: TaskEventRecord): void;
   close(): void;
 }
 
@@ -467,48 +468,59 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     return prepared;
   }
 
-  async *subscribeTask(taskId: string, options?: { sinceIndex?: number }): AsyncIterable<DesktopTaskEvent> {
-    const snapshot = await this.requireSnapshot(taskId);
-    // events is append-only (only grown via [...events, event]), so a numeric
-    // index is a stable replay cursor. Clamp into [0, length] to make negative or
-    // out-of-range cursors safe (out-of-range = skip all history, only live).
-    const requested = options?.sinceIndex ?? 0;
-    const start = Math.max(0, Math.min(requested, snapshot.events.length));
-    for (let i = start; i < snapshot.events.length; i++) {
-      yield snapshot.events[i];
-    }
+  async *subscribeTask(taskId: string, options?: { sinceIndex?: number; signal?: AbortSignal }): AsyncIterable<DesktopTaskEvent> {
+    for await (const record of this.subscribeTaskRecords(taskId, options)) yield record.event;
+  }
 
-    if (TERMINAL_STATUSES.has(snapshot.status)) {
-      return;
-    }
-
-    const queue: DesktopTaskEvent[] = [];
-    let wake: (() => void) | null = null;
+  async *subscribeTaskRecords(taskId: string, options: { sinceIndex?: number; signal?: AbortSignal } = {}): AsyncIterable<TaskEventRecord> {
+    const start = options.sinceIndex ?? 0;
+    if (!Number.isSafeInteger(start) || start < 0) throw new Error('invalid_task_event_cursor');
+    options.signal?.throwIfAborted();
+    const queue: TaskEventRecord[] = [];
+    let wake: (() => void) | undefined;
     let closed = false;
+    let fault: Error | undefined;
+    let snapshot!: TaskSnapshot;
     const subscription: LiveSubscription = {
-      push(event) {
-        queue.push(event);
-        wake?.();
-        wake = null;
+      push(record) {
+        if (closed) return;
+        if (queue.length >= 1024) {
+          fault = new Error('task_event_subscriber_backpressure');
+          closed = true;
+        } else queue.push(record);
+        wake?.(); wake = undefined;
       },
-      close() {
-        closed = true;
-        wake?.();
-        wake = null;
-      },
+      close() { closed = true; wake?.(); wake = undefined; },
     };
-    this.addSubscriber(taskId, subscription);
+    const abort = () => subscription.close();
     try {
-      while (!closed || queue.length > 0) {
-        if (queue.length === 0) {
-          await new Promise<void>((resolve) => {
-            wake = resolve;
-          });
-          continue;
-        }
-        yield queue.shift()!;
+      // Append and snapshot/live handoff share the same per-task linearization.
+      await this.enqueueMutation(taskId, async () => {
+        snapshot = await this.requireSnapshot(taskId);
+        if (start > snapshot.events.length) throw new Error('task_event_cursor_gap');
+        if (TERMINAL_STATUSES.has(snapshot.status)) closed = true;
+        else this.addSubscriber(taskId, subscription);
+      });
+      options.signal?.addEventListener('abort', abort, { once: true });
+      options.signal?.throwIfAborted();
+      let nextIndex = start;
+      for (; nextIndex < snapshot.events.length; nextIndex++) {
+        options.signal?.throwIfAborted();
+        yield { taskId, eventIndex: nextIndex, sourceDataEpoch: snapshot.sessionId, event: snapshot.events[nextIndex]! };
       }
+      while (!closed || queue.length) {
+        options.signal?.throwIfAborted();
+        if (!queue.length) { await new Promise<void>(resolve => { wake = resolve; }); continue; }
+        const record = queue.shift()!;
+        if (record.eventIndex < nextIndex) continue;
+        if (record.eventIndex !== nextIndex) throw new Error('task_event_cursor_gap');
+        nextIndex++;
+        yield record;
+      }
+      options.signal?.throwIfAborted();
+      if (fault) throw fault;
     } finally {
+      options.signal?.removeEventListener('abort', abort);
       this.removeSubscriber(taskId, subscription);
     }
   }
@@ -653,7 +665,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       const persisted = { taskId: current.taskId, eventIndex, event, snapshot: current };
       if (event.type === 'task_terminal') this.retainTerminalReceipt(persisted);
       else this.schedulePersistedEvent(persisted);
-      this.pushLiveEvent(current.taskId, event);
+      this.pushLiveEvent(current.taskId, event, eventIndex, current.sessionId);
       receipt.published++;
     }
     return current;
@@ -856,7 +868,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       authorize(snapshot);
       await track(this.saveSnapshot(next, snapshot));
       persisted = { taskId, eventIndex: next.events.length - 1, event, snapshot: next };
-      this.pushLiveEvent(taskId, event);
+      for (let index = snapshot.events.length; index < next.events.length; index++) this.pushLiveEvent(taskId, next.events[index]!, index, next.sessionId);
     }));
     await track(this.options.snapshotStore.clearActiveTask(taskId));
     this.closeSubscribers(taskId);
@@ -890,7 +902,11 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       assertTaskSource(captureTaskSource(snapshot), current);
       if (TERMINAL_STATUSES.has(current.status) || this.cancellationSettlements.has(taskId)) return;
       this.activeExecutions.set(taskId, execution);
-      await this.saveSnapshot({ ...current, status: 'running', updatedAt: this.now() }, current);
+      const event: DesktopTaskEvent = { type: 'task_execution_started', taskId };
+      const next: TaskSnapshot = { ...current, status: 'running', events: [...current.events, event], updatedAt: this.now() };
+      await this.saveSnapshot(next, current);
+      this.pushLiveEvent(taskId, event, next.events.length - 1, next.sessionId);
+      this.schedulePersistedEvent({ taskId, eventIndex: next.events.length - 1, event, snapshot: next });
       started = true;
     });
     if (!started) return;
@@ -1218,7 +1234,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
       }
       this.lastCommittedSnapshots.set(taskId, next);
       persisted = { taskId, eventIndex: next.events.length - 1, event: terminal, snapshot: next };
-      for (const event of next.events.slice(snapshot.events.length)) this.pushLiveEvent(taskId, event);
+      for (let index = snapshot.events.length; index < next.events.length; index++) this.pushLiveEvent(taskId, next.events[index]!, index, next.sessionId);
     }));
     if (persisted) this.pendingTerminalPersistedEvents.set(taskId, persisted);
     this.closeSubscribers(taskId);
@@ -1520,7 +1536,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
         event,
         snapshot: next,
       };
-      this.pushLiveEvent(taskId, event);
+      this.pushLiveEvent(taskId, event, next.events.length - 1, next.sessionId);
       if (options?.batch?.receipt) options.batch.receipt.published = 1;
     });
     if (persisted) this.schedulePersistedEvent(persisted);
@@ -1558,7 +1574,7 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
           event: terminalEvent,
           snapshot: next,
         };
-        this.pushLiveEvent(taskId, terminalEvent);
+        this.pushLiveEvent(taskId, terminalEvent, next.events.length - 1, next.sessionId);
       }
     });
     if (persisted) {
@@ -1668,9 +1684,9 @@ export class InProcessTaskRuntimeHost implements TaskRuntimeHost {
     }
   }
 
-  private pushLiveEvent(taskId: string, event: DesktopTaskEvent): void {
+  private pushLiveEvent(taskId: string, event: DesktopTaskEvent, eventIndex: number, sourceDataEpoch: string): void {
     for (const subscriber of this.subscribers.get(taskId) ?? []) {
-      subscriber.push(event);
+      subscriber.push({ taskId, eventIndex, sourceDataEpoch, event });
     }
   }
 

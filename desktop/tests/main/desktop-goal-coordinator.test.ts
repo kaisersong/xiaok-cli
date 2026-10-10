@@ -95,6 +95,9 @@ describe('DesktopGoalCoordinator', () => {
     expect(prepared).toHaveLength(2);
     expect(host.started).toEqual([created.preparedTask.taskId]);
     expect(host.prepared[1]?.input.executionScope).toMatchObject({ origin: 'continuation' });
+    await Promise.all([coordinator.handlePersistedTaskEvent(persistedTerminal(created.preparedTask.taskId, created.preparedTask.executionScope, 'completed')), coordinator.handlePersistedTaskEvent(persistedTerminal(created.preparedTask.taskId, created.preparedTask.executionScope, 'completed'))]);
+    expect(host.prepared).toHaveLength(2); expect(host.started).toEqual([created.preparedTask.taskId]);
+
   });
 
   it('lets a queued user preempt an already-started continuation without double-running', async () => {
