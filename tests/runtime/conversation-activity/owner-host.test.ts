@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConversationActivityOwnerHost } from '../../../src/runtime/conversation-activity/owner-host.js';
 import { ConversationActivityOwnerClient } from '../../../src/runtime/conversation-activity/owner-client.js';
+import { ACTIVITY_OWNER_GENERATION } from '../../../src/runtime/conversation-activity/owner-protocol.js';
 
 describe('real authenticated owner socket and single writer', () => {
   const cleanup: Array<() => void | Promise<void>> = [];
@@ -29,7 +30,7 @@ describe('real authenticated owner socket and single writer', () => {
     const second = new ConversationActivityOwnerClient(f.root, 'user'); cleanup.push(() => second.dispose());
     expect(await second.request('list', { threadId: 'thread' })).toEqual(one);
     expect(one.filter(row => row.kind === 'completed')).toHaveLength(1);
-    f.user.dispose(); expect(await second.request('status')).toMatchObject({ ownerEpoch: f.host.ownerEpoch, generation: 2 });
+    f.user.dispose(); expect(await second.request('status')).toMatchObject({ ownerEpoch: f.host.ownerEpoch, generation: ACTIVITY_OWNER_GENERATION });
   });
   it('reports authenticated unexpected disconnect once with its epoch, but not close/dispose', async () => {
     const f = await fixture(); const lost = vi.fn(), closed = vi.fn(), disposed = vi.fn();
