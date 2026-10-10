@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { CliConversationActivities } from '../../../src/runtime/conversation-activity/cli.js';
-import { attachCliConversationActivities, createActivityStartupNotices } from '../../../src/runtime/conversation-activity/cli-loader.js';
+import { ACTIVITY_OWNER_NOTICES, attachCliConversationActivities, createActivityStartupNotices } from '../../../src/runtime/conversation-activity/cli-loader.js';
 
 const attachOptions = {} as Parameters<typeof CliConversationActivities.attach>[0];
 const options = { print: false, isTTY: true, conversationActivity: undefined, attachOptions };
@@ -103,7 +103,7 @@ it.each(['v22.14.0', 'v22.15.0', 'v24.0.0'])('uses generic unavailable notice on
 it('queues each update notice once alongside first-start notice', () => {
   const notices = createActivityStartupNotices({ configDir: '/tmp/issue-23-notice-missing' });
   notices.queueLegacyPending(); notices.queueLegacyPending(); notices.queueStarted();
-  expect(notices.take()?.text).toContain('还有未完成的任务');
+  expect(notices.take()?.text).toBe('有未完成的后台任务，任务结束后再次打开 xiaok 会自动更新。');
   expect(notices.take()?.text).toContain('已在后台启动');
   notices.queueLegacyPending(); expect(notices.take()).toBeUndefined();
   notices.queueOwnerReplaced(); notices.queueOwnerReplaced();
@@ -124,7 +124,12 @@ it.each(['replaced', 'reused_pending'] as const)('connects legacy callback %s to
     input.onLegacyOwner?.(outcome); return {} as CliConversationActivities;
   });
   await attachCliConversationActivities({ ...options, attachOptions: { ...attachOptions, changed }, startupNotices: notices }, { importCli: async () => ({ CliConversationActivities: { attach } }) });
-  expect(notices.take()?.text).toContain(outcome === 'replaced' ? '旧版终端不会再跟进' : '还有未完成的任务');
+  expect(notices.take()?.text).toBe(outcome === 'replaced'
+    ? '后台任务跟进已更新。更新前已打开的旧版终端不会再跟进，请重新打开终端。'
+    : '有未完成的后台任务，任务结束后再次打开 xiaok 会自动更新。');
+});
+it('owner notice constants contain no restart or logout wording', () => {
+  expect(Object.values(ACTIVITY_OWNER_NOTICES).every(text => !/重启|注销/.test(text))).toBe(true);
 });
 it('queues replacement callback once and suppresses legacy callback after failed attachment', async () => {
   const notices = createActivityStartupNotices({ configDir: '' }); const changed = vi.fn();
