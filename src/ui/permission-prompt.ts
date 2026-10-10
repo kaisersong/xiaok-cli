@@ -1,3 +1,4 @@
+import { requiresCommandConfirmation, getCommandWriteTargets } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
@@ -6,7 +7,7 @@ import { getUiCopy, type UiLocale } from './locale.js';
 import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
 import type { PermissionMode } from '../ai/permissions/manager.js';
-import { requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
+import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
 
 interface PromptOption {
   label: string;
@@ -95,7 +96,16 @@ function compactRuleForOption(rule: string, maxLength = 72): string {
   return `${prefix}${inner.slice(0, headLength)}...${inner.slice(-tailLength)}${suffix}`;
 }
 
-export function buildPermissionPromptOptions(rule: string): PromptOption[] {
+function isMandatoryReview(toolName: string, input: Record<string, unknown>): boolean {
+  return toolName === 'bash' && typeof input.command === 'string'
+    && (classifyBashCommand(input.command).level !== 'safe' || requiresCommandConfirmation(input.command) || getCommandWriteTargets(input.command).length > 0);
+}
+
+export function buildPermissionPromptOptions(rule: string, toolName = '', input: Record<string, unknown> = {}): PromptOption[] {
+  if (isMandatoryReview(toolName, input)) return [
+    { label: '允许一次', choice: { action: 'allow_once' } },
+    { label: '拒绝', choice: { action: 'deny' } },
+  ];
   const displayRule = compactRuleForOption(rule);
   return [
     { label: '允许一次', choice: { action: 'allow_once' } },
@@ -129,7 +139,12 @@ export function formatPermissionPromptLines(
     lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
   }
 
-  if (typeof input.command === 'string') {
+  if (toolName === 'bash' && typeof input.command === 'string') {
+    if (isMandatoryReview(toolName, input)) lines.push(dim(copy.mandatoryReview));
+    for (const path of getCommandWriteTargets(input.command)) lines.push(dim(copy.writeTarget(escapeProjectRuleDisplay(path))));
+  }
+
+  if (typeof input.command === 'string' && !isMandatoryReview(toolName, input)) {
     const rule = deriveRule(toolName, input);
     if (rule.endsWith(' *)')) lines.push(dim(copy.commandApprovalScope(rule)));
   }
@@ -169,7 +184,7 @@ export async function showPermissionPrompt(
     ),
   );
 
-  const promptOptions = buildPermissionPromptOptions(rule);
+  const promptOptions = buildPermissionPromptOptions(rule, toolName, input);
 
   // 非 TTY 环境下默认拒绝
   if (!stdin.isTTY) {
@@ -274,9 +289,7 @@ export async function showPermissionPrompt(
       if (resolved) return;
       resolved = true;
       clearAll();
-      stdin.removeListener('data', onData);
-      stdin.setRawMode(false);
-      stdin.pause();
+      stopPermissionInput(onData);
 
       const summary = formatPermissionDecisionSummary(choice);
       if (summary) {
@@ -358,8 +371,62 @@ export async function showPermissionPrompt(
     };
 
     renderAll();
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.on('data', onData);
+    startPermissionInput(onData);
   });
+}
+
+/** Escape repository text without changing its stored identity. */
+export function escapeProjectRuleDisplay(rule: string): string {
+  return rule.replace(/[\x00-\x1f\x7f-\x9f]|\p{Cf}/gu, char => {
+    const hex = char.codePointAt(0)!.toString(16).padStart(4, '0');
+    return /\p{Cf}/u.test(char) ? `\\u{${hex}}` : `\\u${hex}`;
+  });
+}
+
+function describeProjectRule(rule: string): string {
+  const match = /^([^()]+)\(([\s\S]*)\)$/.exec(rule);
+  const tool = match?.[1] ?? rule;
+  const pattern = match?.[2] ?? '*';
+  if (tool === 'bash') {
+    if (pattern === '*') return '以后运行任何命令都不再询问';
+    if (pattern.endsWith(' *')) return `以后运行以 \`${pattern.slice(0, -2)}\` 开头的命令不再询问`;
+    return `以后运行 \`${pattern}\` 不再询问`;
+  }
+  const actions: Record<string, string> = { write: '写入', edit: '修改', read: '读取' };
+  if (Object.hasOwn(actions, tool)) return `以后${actions[tool]} \`${pattern}\` 不再询问`;
+  return `以后使用 ${tool} 匹配 \`${pattern}\` 时不再询问`;
+}
+
+/** Use the permission input handoff before the REPL starts; Enter defaults to refusal. */
+export async function promptProjectRuleAdoption(rule: string, index = 1, total = 1): Promise<boolean> {
+  if (!stdin.isTTY || !stdout.isTTY) return false;
+  stdout.write(`(${index}/${total}) ${escapeProjectRuleDisplay(describeProjectRule(rule))}\n${escapeProjectRuleDisplay(rule)} [y/N] `);
+  return new Promise(resolve => {
+    const finish = (adopt: boolean) => {
+      stopPermissionInput(onData, onEnd);
+      stdout.write('\n');
+      resolve(adopt);
+    };
+    const onData = (data: Buffer | string) => {
+      const key = data.toString();
+      if (/^[yY]$/.test(key)) finish(true);
+      else if (/^[nN\r\n]$/.test(key) || key === '\x03' || key === '\x1b') finish(false);
+    };
+    const onEnd = () => finish(false);
+    startPermissionInput(onData, onEnd);
+  });
+}
+
+/** Shared raw input ownership and handoff for permission prompts. */
+function startPermissionInput(onData: (data: Buffer) => void, onEnd?: () => void): void {
+  stdin.on('data', onData);
+  if (onEnd) stdin.once('end', onEnd);
+  stdin.setRawMode(true);
+  stdin.resume();
+}
+function stopPermissionInput(onData: (data: Buffer) => void, onEnd?: () => void): void {
+  stdin.removeListener('data', onData);
+  if (onEnd) stdin.removeListener('end', onEnd);
+  stdin.setRawMode(false);
+  stdin.pause();
 }
