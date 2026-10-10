@@ -91,6 +91,23 @@ describe('durable conversation activity', () => {
     expect(store.getProjection('watch')?.executionState).toBe('accepted');
     expect(() => store.listActivities('profile', 'thread', { limit: 999 })).toThrow('invalid_activity_page');
   });
+  it('keeps a stored critical_only preference through ingest, unrelated saves, stop and reopen (legacy value is never rewritten)', () => {
+    bind();
+    store.updateReporting('profile', 'watch', 'critical_only', 0);
+    store.ingest('watch', event(1, 'input_required'));
+    store.ingest('watch', event(2, 'completed'));
+    expect(store.getWatch('watch')?.preference).toBe('critical_only');
+    expect(store.getWatch('watch')?.policyRevision).toBe(1);
+    store.setFreshness('watch', 'fresh');
+    expect(store.getWatch('watch')?.preference).toBe('critical_only');
+    expect(store.getWatch('watch')?.policyRevision).toBe(1);
+    const stopped = store.stopWatch('profile', 'watch', 1);
+    expect(stopped.preference).toBe('critical_only');
+    expect(stopped.status).toBe('stopped');
+    store.close();
+    store = new ConversationActivityStore(join(root, 'activity.sqlite'), { now: () => now });
+    expect(store.getWatch('watch')?.preference).toBe('critical_only');
+  });
   it('keeps critical activity and unread facts when reporting preference is quiet', () => {
     bind(); store.updateReporting('profile', 'watch', 'quiet', 0);
     store.ingest('watch', event(1, 'input_required'));

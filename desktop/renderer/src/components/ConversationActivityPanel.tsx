@@ -94,7 +94,7 @@ export function ConversationActivityPanel({ threadId }: { threadId: string }) {
             {!stopped && <div className="mt-2 flex items-center gap-3">
               <select aria-label={labels.frequency} value={watch.preference} onChange={event => { void update(view, event.target.value as ReportingPreference); }} className="rounded border border-[var(--c-border)] bg-[var(--c-bg-page)] px-2 py-1 text-xs">
                 <option value="normal">{labels.normal}</option>
-                <option value="critical_only">{labels.criticalOnly}</option>
+                {watch.preference === 'critical_only' && <option value="critical_only" disabled>{labels.criticalOnly}</option>}
                 <option value="quiet">{labels.quiet}</option>
               </select>
               <button type="button" title={labels.stopHint} onClick={() => { void update(view); }} className="text-xs text-[var(--c-text-secondary)]">{labels.stop}</button>
