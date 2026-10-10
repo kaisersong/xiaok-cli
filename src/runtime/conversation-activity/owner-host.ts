@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createServer, createConnection, type Server, type Socket } from 'node:net';
 import { existsSync, lstatSync, unlinkSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -77,7 +79,7 @@ export class ConversationActivityOwnerHost {
     this.idleMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_IDLE_MS, ACTIVITY_OWNER_IDLE_MS);
     this.unattendedMs = activityOwnerTimeout((options.env ?? process.env).XIAOK_ACTIVITY_OWNER_MAX_UNATTENDED_MS, ACTIVITY_OWNER_MAX_UNATTENDED_MS);
     this.address = activityOwnerAddress(options.dataRoot);
-    this.store = new ConversationActivityStore(join(this.address.dataRoot, 'conversation-activity.sqlite'));
+    this.store = new ConversationActivityStore(join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.database));
     this.actor = { requestSource: 'user' as const, actorId: options.actorId };
     this.service = new ConversationActivityService({ ...options, store: this.store });
   }
@@ -126,9 +128,9 @@ export class ConversationActivityOwnerHost {
         socket.on('error', () => socket.destroy());
       });
       await new Promise<void>((resolve, reject) => { this.server!.once('error', reject); this.server!.listen(this.address.socketPath, () => { this.server!.off('error', reject); resolve(); }); });
-      const statusFile = join(this.address.dataRoot, 'activity-owner.status.json');
+      const statusFile = join(this.address.dataRoot, ACTIVITY_STORAGE_NAMES.status);
       writeFileSync(`${statusFile}.${process.pid}.tmp`, JSON.stringify({ ownerEpoch: this.ownerEpoch, pid: process.pid, rootHash: this.address.rootHash }), { mode: 0o600 });
-      renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
+      chmodPrivateActivityFile(`${statusFile}.${process.pid}.tmp`); renameSync(`${statusFile}.${process.pid}.tmp`, statusFile);
       this.service.start();
       this.watchState = JSON.stringify(this.store.listWatches().map(watch => ({ watch, projection: this.store.getProjection(watch.watchId) })));
       if (this.options.idle) { this.idleTimer = (this.options.setInterval ?? setInterval)(() => this.checkIdle(), ACTIVITY_OWNER_IDLE_CHECK_MS); this.idleTimer.unref(); }

@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import './owner-entry.js';
 import { spawn } from 'node:child_process';
 import { writeFileSync, renameSync, openSync, closeSync } from 'node:fs';
@@ -36,10 +38,11 @@ export async function ensureConversationActivityOwner(config: ActivityOwnerConfi
   };
   try { return await attach(); }
   catch (error) { if (error instanceof Error && ['activity_owner_profile_mismatch','activity_owner_config_mismatch'].includes(error.message)) throw error; }
-  const configFile = join(address.dataRoot, 'activity-owner.config.json');
+  const configFile = join(address.dataRoot, ACTIVITY_STORAGE_NAMES.config);
   const temporary = `${configFile}.${randomUUID()}.tmp`;
-  writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 }); renameSync(temporary, configFile);
-  const logFile = openSync(join(address.dataRoot, 'activity-owner.log'), 'a', 0o600);
+  writeFileSync(temporary, JSON.stringify(normalized), { mode: 0o600 }); chmodPrivateActivityFile(temporary); renameSync(temporary, configFile);
+  const logFile = openSync(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log), 'a', 0o600);
+  chmodPrivateActivityFile(join(address.dataRoot, ACTIVITY_STORAGE_NAMES.log));
   let child: ReturnType<typeof spawn>;
   try {
     child = (options.spawn ?? spawn)(options.executable ?? process.execPath, [options.entryPath ?? fileURLToPath(new URL('./owner-entry.js', import.meta.url)), configFile], {

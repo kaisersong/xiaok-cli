@@ -1,6 +1,8 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdirSync, realpathSync, readFileSync, openSync, writeFileSync, closeSync, statSync, fsyncSync, linkSync, unlinkSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, realpathSync, readFileSync, openSync, writeFileSync, closeSync, statSync, fsyncSync, linkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -18,11 +20,12 @@ export function activityOwnerAddress(dataRoot: string): ActivityOwnerAddress {
   const rootHash = createHash('sha256').update(`${uid}:${dataRoot}`).digest('hex');
   const socketDir = join(tmpdir(), `xa-${uid}-${rootHash.slice(0, 12)}`);
   if (process.platform !== 'win32') {
-    mkdirSync(socketDir, { recursive: true, mode: 0o700 });
-    const state = statSync(socketDir);
-    if (state.uid !== uid || (state.mode & 0o077) !== 0) throw new Error('activity_socket_directory_not_private');
+    try { mkdirSync(socketDir, { mode: 0o700 }); chmodSync(socketDir, 0o700); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    const state = lstatSync(socketDir);
+    if (!state.isDirectory() || state.isSymbolicLink() || state.uid !== uid || (state.mode & 0o077) !== 0) throw new Error('activity_socket_directory_not_private');
   }
-  return { dataRoot, rootHash, credentialsPath: join(dataRoot, 'activity-owner.credentials.json'),
+  return { dataRoot, rootHash, credentialsPath: join(dataRoot, ACTIVITY_STORAGE_NAMES.credentials),
     socketPath: process.platform === 'win32' ? `\\\\.\\pipe\\xiaok-activity-${rootHash.slice(0, 24)}` : join(socketDir, 's') };
 }
 
@@ -41,7 +44,7 @@ export function createActivityOwnerCredentials(address: ActivityOwnerAddress): A
   const fd = openSync(temporary, 'wx', 0o600);
   const value: ActivityOwnerCredentials = { version: 1, rootHash: address.rootHash, user: randomBytes(32).toString('hex'), producer: randomBytes(32).toString('hex') };
   try {
-    writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd);
+    chmodPrivateActivityFile(temporary); writeFileSync(fd, JSON.stringify(value)); fsyncSync(fd);
   } finally { closeSync(fd); }
   try { linkSync(temporary, address.credentialsPath); return value; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return readActivityOwnerCredentials(address); throw error; }

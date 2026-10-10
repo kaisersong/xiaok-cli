@@ -1,3 +1,4 @@
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { getConfigDir } from '../../utils/config.js';
@@ -38,7 +39,7 @@ export class CliConversationActivities {
     const root = options.dataRoot ?? join(options.cwd, '.xiaok', 'state');
     const profileId = `cli:${createHash('sha256').update(root).digest('hex').slice(0, 24)}`;
     this.profileId = profileId;
-    this.store = new ConversationActivityStore(join(root, 'conversation-activity.sqlite'), { readOnly: Boolean(options.ownerClient) });
+    this.store = new ConversationActivityStore(join(root, ACTIVITY_STORAGE_NAMES.database), { readOnly: Boolean(options.ownerClient) });
     this.through = this.store.getPresentationCursor(profileId, options.sessionId, 'cli');
     this.service = options.ownerClient ? new ConversationActivityAttachedService(options.ownerClient, this.actor.actorId) : new ConversationActivityService({ store: this.store, profileId, actorId: this.actor.actorId,
       getThread: threadId => threadId === options.sessionId ? { threadId, profileId, workspaceId: root, deleteState: 'none' } : null,

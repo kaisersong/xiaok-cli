@@ -37,7 +37,7 @@ it.each([false, true])('queues ordinary owner failure (deferred=%s)', async defe
   if (deferred) { await vi.advanceTimersByTimeAsync(2000); expect(await s.promise).toBeUndefined(); }
   s.reject(new Error('owner failed')); await vi.advanceTimersByTimeAsync(0);
   expect(await s.promise).toBeUndefined();
-  expect(s.notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。');
+  expect(s.notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。');
   s.notices.queueOwnerUnavailable(); expect(s.notices.take()).toBeUndefined();
   expect(s.onLate).not.toHaveBeenCalled(); expect(s.onSettled).toHaveBeenCalledTimes(deferred ? 1 : 0);
 });

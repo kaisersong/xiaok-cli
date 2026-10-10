@@ -70,7 +70,7 @@ describe('activity startup notices', () => {
     const notices = await load('', {}, vi.fn().mockResolvedValue({
       CliConversationActivities: { attach: vi.fn().mockRejectedValue(new Error('owner unavailable')) },
     }));
-    expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。');
+    expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。');
   });
 
   it('persists only after terminal output and suppresses subsequent sessions', async () => {
@@ -97,3 +97,5 @@ describe('activity startup notices', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
+
+it.each(['v22.14.0', 'v22.15.0', 'v24.0.0'])('uses generic unavailable notice on %s', version => { const notices = createActivityStartupNotices({ configDir: '', version }); notices.queueUnavailable(); expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。'); });

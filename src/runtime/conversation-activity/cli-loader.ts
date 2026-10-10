@@ -1,3 +1,5 @@
+import { chmodPrivateActivityFile } from './storage-permissions.js';
+import { ACTIVITY_STORAGE_NAMES } from './storage-permissions.js';
 import { createPrivateActivityDirectory } from './storage-permissions.js';
 import { statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -87,6 +89,11 @@ export async function attachCliConversationActivitiesWithinBudget(
 
 export const CONVERSATION_ACTIVITY_MIN_NODE = '22.14.0';
 
+function nodeSupportsActivity(version: string): boolean {
+  const [major = 0, minor = 0, patch = 0] = version.replace(/^v/, '').split('.').map(Number);
+  return major > 22 || major === 22 && (minor > 14 || minor === 14 && patch >= 0);
+}
+
 interface ActivityStartupNotice {
   text: string;
   /** Call only after the notice has actually been written to the terminal. */
@@ -106,7 +113,7 @@ export function createActivityStartupNotices(options: {
   onDebug?(event: string, detail: string): void;
 }): ActivityStartupNotices {
   const directory = join(options.configDir, 'conversation-activity');
-  const marker = join(directory, 'first-start-notice-shown');
+  const marker = join(directory, ACTIVITY_STORAGE_NAMES.notice);
   let pending: ActivityStartupNotice | undefined;
   let queued = false;
   const debug = (error: unknown): void => {
@@ -116,7 +123,7 @@ export function createActivityStartupNotices(options: {
     queueOwnerUnavailable() {
       if (queued) return;
       queued = true;
-      pending = { text: '异步任务跟进暂不可用，其他功能不受影响。', markShown() {} };
+      pending = { text: '异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。', markShown() {} };
     },
     queueStorageNotPrivate() {
       if (queued) return;
@@ -127,7 +134,7 @@ export function createActivityStartupNotices(options: {
       if (queued) return;
       queued = true;
       pending = {
-        text: `异步任务跟进在当前 Node 版本（${options.version ?? process.version}）不可用，其他功能不受影响。升级到 Node ${CONVERSATION_ACTIVITY_MIN_NODE} 或更新版本后会自动启用。`,
+        text: nodeSupportsActivity(options.version ?? process.version) ? '异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。' : `异步任务跟进在当前 Node 版本（${options.version ?? process.version}）不可用，其他功能不受影响。升级到 Node ${CONVERSATION_ACTIVITY_MIN_NODE} 或更新版本后会自动启用。`,
         markShown() {},
       };
     },
@@ -146,6 +153,7 @@ export function createActivityStartupNotices(options: {
           try {
             createPrivateActivityDirectory(directory);
             writeFileSync(marker, '', { mode: 0o600, flag: 'wx' });
+            chmodPrivateActivityFile(marker);
           } catch (error) {
             if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) debug(error);
           }
