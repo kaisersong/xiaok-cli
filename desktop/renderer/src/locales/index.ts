@@ -3107,6 +3107,7 @@ export interface LocaleStrings {
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
     taskExecutionFailed: (reason: string) => string;
+    modelKeyMissing: string;
     modelAuthFailed: string;
     modelServiceFailed: string;
     modelConnectionFailed: string;

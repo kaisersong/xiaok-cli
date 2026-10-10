@@ -3205,6 +3205,8 @@ export const zh: LocaleStrings = {
     goalAttachmentQuerying: "任务附着结果尚未确认，正在只读核对。",
     goalAttachmentUnknown: "任务附着结果尚未确认；可能已经开始，请勿重复提交。可重新打开会话查看已保存状态。",
     taskExecutionFailed: (reason) => `任务执行失败：${reason}`,
+    // 待设计师确认：缺少模型 Key 的保守文案。
+    modelKeyMissing: "没有找到模型 API Key，任务没法开始。请到 设置 → 模型设置 里添加你的 API Key。",
     modelAuthFailed: "模型服务认证失败：API Key 无效或已过期，请在设置中重新配置对应模型提供商的 API Key。",
     modelServiceFailed: "模型服务请求失败，请检查模型配置或稍后重试。",
     modelConnectionFailed: "模型连接中断，未能完成自动恢复。已保留对话与完成的执行记录；请在下方回复继续，或切换模型后重试。",
