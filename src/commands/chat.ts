@@ -100,6 +100,7 @@ import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer
 import { openTranscriptPager, spawnPagerProcess, type TranscriptPagerStatus } from '../ui/transcript-pager.js';
 import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
+import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
 import { createTerminalOutputRouter } from './terminal-output-router.js';
 import { createInstallSkillTool } from '../ai/tools/install-skill.js';
@@ -4339,6 +4340,11 @@ export function registerChatCommands(program: Command): void {
     .option('--skill-debug', '显示 skill 执行详情（stage、context 检查、耗时）')
     .argument('[input]', '单次任务描述（省略则进入交互模式）')
     .action(async (input: string | undefined, opts: ChatOptions) => {
+      if (shouldBlockChatOnOldNode({ platform: process.platform, version: process.version, print: Boolean(opts.print), json: Boolean(opts.json) })) {
+        process.stderr.write(oldNodeMessage(process.version) + '\n');
+        process.exitCode = 1;
+        return;
+      }
       setCrashContext({ command: 'chat', args: process.argv.slice(2), cwd: process.cwd() });
       try {
         await runChat(input, opts);
