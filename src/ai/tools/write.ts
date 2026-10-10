@@ -24,7 +24,7 @@ export function createWriteTool(options: WorkspaceToolOptions = {}): Tool {
     },
     async execute(input, context) {
       const { file_path, content } = input as { file_path: string; content: string };
-      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd);
+      const resolvedPath = assertWorkspacePath(file_path, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard);
       mkdirSync(dirname(resolvedPath), { recursive: true });
       const tmp = join(dirname(resolvedPath), `.xiaok-tmp-${Date.now()}`);
       writeFileSync(tmp, content, 'utf-8');

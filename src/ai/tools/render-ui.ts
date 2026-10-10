@@ -119,7 +119,7 @@ export function createRenderUiTool(options: WorkspaceToolOptions = {}): Tool {
       const explicitOutputPath = typeof input.output_path === 'string' ? input.output_path.trim() : '';
       const requestedPath = explicitOutputPath || join(artifactRoot, defaultFilename);
       const outputPath = explicitOutputPath
-        ? assertWorkspacePath(requestedPath, cwd, 'write', allowOutsideCwd)
+        ? assertWorkspacePath(requestedPath, cwd, 'write', allowOutsideCwd, options.outsideCwdGuard)
         : requestedPath;
       if (!outputPath.endsWith('.a2ui.json')) {
         throw new Error('output_path 必须以 .a2ui.json 结尾');

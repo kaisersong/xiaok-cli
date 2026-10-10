@@ -1,3 +1,4 @@
+import { shouldPromptProjectRuleAdoption, promptPendingProjectRules } from './project-rule-adoption.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
@@ -930,10 +931,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   ];
 
   const initialPromptSnapshot = await buildPromptSnapshot();
+  if (shouldPromptProjectRuleAdoption({ auto: autoMode, json: opts.json, print: opts.print, stdinIsTTY: process.stdin.isTTY, stdoutIsTTY: process.stdout.isTTY })) {
+    await promptPendingProjectRules(cwd);
+  }
   const persistedPermissionSettings = await loadSettings(cwd);
   const persistedPermissionRules = mergeRules(persistedPermissionSettings);
 
   const permissionManager = new PermissionManager({
+    cwd,
     mode: autoMode ? 'auto' : 'default',
     allowRules: persistedPermissionRules.allowRules,
     denyRules: persistedPermissionRules.denyRules,
@@ -3745,7 +3750,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         runtimeFacade: runtimeFacade!,
         runtimeHooks,
         approvalStore: embeddedApprovalStore,
-        onPromptOverride: async () => true,
         transport,
         selectedChannel,
         yzjConfig,

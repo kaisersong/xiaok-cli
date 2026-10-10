@@ -1,11 +1,13 @@
+import { posix, win32 } from 'node:path';
 export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
-import { PermissionPolicyEngine, matches } from './policy-engine.js';
+import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 
 export interface PermissionManagerOptions {
   mode: PermissionMode;
+  cwd?: string;
   allowRules?: string[];
   denyRules?: string[];
 }
@@ -16,11 +18,13 @@ function readBashCommand(input: Record<string, unknown>): string {
 
 export class PermissionManager {
   private mode: PermissionMode;
+  private readonly cwd: string;
   private allowRules: string[];
   private denyRules: string[];
 
   constructor(options: PermissionManagerOptions) {
     this.mode = options.mode;
+    this.cwd = options.cwd ?? process.cwd();
     this.allowRules = options.allowRules ?? [];
     this.denyRules = options.denyRules ?? [];
   }
@@ -76,6 +80,22 @@ export class PermissionManager {
       }
     }
 
+    if (toolName === 'bash') {
+      const command = readBashCommand(input);
+      const conservative = this.mode !== 'auto' || hasMatchingCommandAllowRule(this.allowRules, command);
+      if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command)) return 'prompt';
+      if (conservative) {
+        const targets = getCommandWriteTargets(command);
+        const hasWorkdir = Object.hasOwn(input, 'workdir');
+        if (targets.length && hasWorkdir && typeof input.workdir !== 'string') return 'prompt';
+        const api = /^[a-z]:|^\\\\|^\/\//i.test(this.cwd) ? win32 : posix;
+        const effectiveDir = typeof input.workdir === 'string' ? api.resolve(this.cwd, input.workdir) : this.cwd;
+        if (targets.length && hasWorkdir && isOutsideWorkspace(input.workdir as string, this.cwd)) return 'prompt';
+        if (targets.some(target => isOutsideWorkspace(target, this.cwd, effectiveDir))) return 'prompt';
+        if (targets.length && this.mode !== 'auto') return 'prompt';
+      }
+    }
+
     if (isSensitiveToolInvocation(toolName, input) && evaluation.action !== 'allow') {
       return 'deny';
     }
@@ -105,35 +125,15 @@ export class PermissionManager {
 
     return 'prompt';
   }
+}
 
-  private matches(rules: string[], toolName: string, input: Record<string, unknown>): boolean {
-    return matches(rules, toolName, input);
-  }
-
-  private buildRuleRegex(pattern: string): RegExp {
-    if (pattern.endsWith(' *')) {
-      const prefix = pattern.slice(0, -2);
-      return new RegExp(`^${prefix.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}(?: [\\s\\S]*)?$`);
-    }
-
-    return new RegExp(
-      `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')}$`,
-    );
-  }
-
-  private getRuleTarget(input: Record<string, unknown>): string {
-    if (typeof input.command === 'string') {
-      return input.command;
-    }
-
-    if (typeof input.file_path === 'string') {
-      return input.file_path;
-    }
-
-    if (typeof input.path === 'string') {
-      return input.path;
-    }
-
-    return '';
-  }
+/** Resolve lexical paths conservatively across POSIX, drive and UNC forms. */
+function isOutsideWorkspace(target: string, cwd: string, effectiveDir = cwd): boolean {
+  if (/^[~]|[$`]/.test(target)) return true;
+  const windows = /^[a-z]:|^\\\\|^\/\//i;
+  const api = windows.test(cwd) ? win32 : posix;
+  if (windows.test(target) && api !== win32) return true;
+  if (api === win32 && posix.isAbsolute(target) && !windows.test(target)) return true;
+  const relative = api.relative(api.resolve(cwd), api.resolve(effectiveDir, target));
+  return relative === '..' || relative.startsWith(`..${api.sep}`) || api.isAbsolute(relative);
 }

@@ -46,6 +46,8 @@ const TOOL_LABELS: Record<UiLocale, Record<string, string>> = {
 const UI_COPY = {
   'zh-CN': {
     approvalTitle: 'xiaok 想要执行以下操作',
+    mandatoryReview: '这个操作有风险，每次都会询问',
+    writeTarget: (path: string) => `写入文件：${path}`,
     autoApprovalReason: (reason: string) => `确认原因: auto 模式仍需确认：${AUTO_APPROVAL_REASONS_ZH[reason] ?? reason}`,
     currentCommandLabel: '本次执行命令',
     commandApprovalScope: (rule: string) => `始终允许的范围: ${rule}（* 表示任意参数，参数变化无需重复确认）`,
@@ -70,6 +72,8 @@ const UI_COPY = {
   },
   en: {
     approvalTitle: 'xiaok wants to run',
+    mandatoryReview: 'This operation carries risk and requires approval every time',
+    writeTarget: (path: string) => `Write file: ${path}`,
     autoApprovalReason: (reason: string) => `Approval reason: auto mode still confirms data-loss commands: ${reason}`,
     currentCommandLabel: 'Command to run now',
     commandApprovalScope: (rule: string) => `Always-allow scope: ${rule} (* means any arguments; argument changes need no new approval)`,

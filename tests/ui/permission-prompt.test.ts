@@ -174,13 +174,13 @@ describe('permission-prompt', () => {
           } else if (renderer) {
             renderer.renderInput({ prompt: '> ', input: '', cursor: 0, overlayLines: [] });
           }
-          const pending = showPermissionPrompt('bash', { command: 'rm -rf ./build' }, { renderer });
+          const pending = showPermissionPrompt('bash', { command: 'git status' }, { renderer });
           const screen = harness.screen.text();
           for (let number = 1; number <= 5; number += 1) expect(screen).toContain(`${number}. `);
           expect(screen).toContain('数字直选');
           harness.send(String(index + 1));
           await expect(pending).resolves.toMatchObject({ action: actions[index] });
-          if (index > 0 && index < 4) await expect(pending).resolves.toHaveProperty('rule', 'bash(rm *)');
+          if (index > 0 && index < 4) await expect(pending).resolves.toHaveProperty('rule', 'bash(git *)');
           expect(harness.screen.text()).not.toContain('xiaok 想要执行以下操作');
         } finally { harness.restore(); }
       }
@@ -208,7 +208,7 @@ describe('permission-prompt', () => {
           renderer, ...{ permissionMode: 'auto' as const },
         });
         const screen = harness.screen.text();
-        harness.send('5');
+        harness.send('2');
         await expect(pending).resolves.toEqual({ action: 'deny' });
         expect(screen).toContain('确认原因: auto 模式仍需确认：递归强制删除');
       } finally { harness.restore(); }
@@ -220,7 +220,7 @@ describe('permission-prompt', () => {
       const harness = createTtyHarness();
       try {
         const pending = showPermissionPrompt('bash', { command }, { ...{ permissionMode: mode } });
-        const screen = harness.screen.text(); harness.send('5'); await pending;
+        const screen = harness.screen.text(); harness.send('\x1b'); await pending;
         expect(screen).not.toContain('确认原因:');
       } finally { harness.restore(); }
     });

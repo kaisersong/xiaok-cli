@@ -48,7 +48,7 @@ describe('PermissionManager', () => {
     await expect(pm.check('bash', { command: 'pwd -L' })).resolves.toBe('allow');
   });
 
-  it('matches remembered python rules for multi-line bash commands', async () => {
+  it('requires review for interpreter execution and multiline commands', async () => {
     const pm = new PermissionManager({
       mode: 'default',
       allowRules: ['bash(python3 *)'],
@@ -56,11 +56,11 @@ describe('PermissionManager', () => {
 
     await expect(pm.check('bash', {
       command: 'python3 -c "\\nimport subprocess\\nprint(1)\\n"',
-    })).resolves.toBe('allow');
+    })).resolves.toBe('prompt');
 
     await expect(pm.check('bash', {
       command: "python3 - <<'PY'\nprint(1)\nPY",
-    })).resolves.toBe('allow');
+    })).resolves.toBe('prompt');
   });
 
   it('supports session deny rules with higher priority than allow rules', async () => {
@@ -92,10 +92,10 @@ describe('PermissionManager', () => {
 
     await expect(pm.check('bash', { command: 'kill -9 12345' })).resolves.toBe('allow');
     await expect(pm.check('bash', { command: 'chmod -R u+rw ./cache' })).resolves.toBe('allow');
-    await expect(pm.check('bash', { command: 'chown -R song ./cache' })).resolves.toBe('allow');
+    await expect(pm.check('bash', { command: 'chown -R fictional ./cache' })).resolves.toBe('allow');
   });
 
-  it('auto mode prompts for deletion and data-loss bash commands unless explicitly allowed', async () => {
+  it('auto mode prompts for deletion and data-loss bash commands even with remembered approval', async () => {
     const pm = new PermissionManager({ mode: 'auto' });
 
     await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('prompt');
@@ -106,13 +106,13 @@ describe('PermissionManager', () => {
     await expect(pm.check('bash', { command: 'psql -c "DROP TABLE users"' })).resolves.toBe('prompt');
   });
 
-  it('auto mode honors explicit allow rules for warn-level bash commands', async () => {
+  it('auto mode keeps recursive deletion subject to confirmation', async () => {
     const pm = new PermissionManager({
       mode: 'auto',
       allowRules: ['bash(rm -rf ./build *)'],
     });
 
-    await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('allow');
+    await expect(pm.check('bash', { command: 'rm -rf ./build' })).resolves.toBe('prompt');
   });
 
   it('auto mode denies block-level bash commands before prompt fallback', async () => {

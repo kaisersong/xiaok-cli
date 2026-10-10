@@ -318,6 +318,7 @@ async function runYZJServe(options: YZJServeOptions): Promise<void> {
           const persistedPermissionSettings = await loadSettings(cwd);
           const persistedPermissionRules = mergeRules(persistedPermissionSettings);
           const permissionManager = new PermissionManager({
+            cwd,
             mode: 'default',
             allowRules: persistedPermissionRules.allowRules,
             denyRules: persistedPermissionRules.denyRules,

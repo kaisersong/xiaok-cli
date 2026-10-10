@@ -49,7 +49,7 @@ function loadReportIntentFixture(name: (typeof reportIntentFixtureNames)[number]
 
 const denseSlowCommand = process.platform === 'win32'
   ? 'ping -n 7 127.0.0.1'
-  : 'node -e "setTimeout(() => {}, 6000)"';
+  : 'sleep 6';
 
 const denseCommandSequence = [
   'printf "cat /Users/song/.xiaok/skills/kai-report-creator/SKILL.md"',
@@ -2072,6 +2072,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_EXTERNAL_FILE_A = externalFileA;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4395,6 +4398,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_CONFIG_DIR = configDir;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4521,6 +4527,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(60, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4655,6 +4664,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_CONFIG_DIR = configDir;
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -4758,6 +4770,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(60, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -5306,6 +5321,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
@@ -5551,6 +5569,9 @@ describe('chat interactive runtime', () => {
     process.env.XIAOK_TEST_PROJECT_FILE_C = projectFiles[2];
     cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
 
+    // Explicit local approval keeps these rendering fixtures independent of startup consent.
+    const { listPendingProjectRules, adoptProjectRule } = await import('../../src/ai/permissions/settings.js');
+    for (const rule of await listPendingProjectRules(projectDir)) await adoptProjectRule(projectDir, rule);
     const { registerChatCommands } = await import('../../src/commands/chat.js');
     const harness = createTtyHarness(120, 24);
     const sigintListeners = process.listeners('SIGINT');
