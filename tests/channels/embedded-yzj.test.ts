@@ -1,6 +1,8 @@
+import { confirmChatPermission } from '../../src/commands/chat-permission.js';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runWithTurnOrigin } from '../../src/channels/turn-origin.js';
 import { EmbeddedYZJChannel } from '../../src/channels/embedded-yzj.js';
 import { InMemoryApprovalStore } from '../../src/channels/approval-store.js';
 import { createRuntimeHooks } from '../../src/runtime/hooks.js';
@@ -11,7 +13,7 @@ import type { StreamChunk } from '../../src/types.js';
 
 function makeConfig(): YZJResolvedConfig {
   return {
-    webhookUrl: 'https://example.com/webhook',
+    webhookUrl: 'https://example.invalid/ws',
     inboundMode: 'websocket',
     webhookPath: '/yzj/webhook',
     webhookPort: 3001,
@@ -58,11 +60,12 @@ describe('EmbeddedYZJChannel', () => {
       runtimeHooks: hooks,
       approvalStore,
       ...(extra.approvalTimeoutMs !== undefined ? { approvalTimeoutMs: extra.approvalTimeoutMs } : {}),
+      allowedSenders: ['user_1', 'user_2'],
       transport: transport as any,
       selectedChannel: makeChannel(robotId),
       yzjConfig: makeConfig(),
       sessionId: 'sess_test',
-      cwd: '/tmp',
+      cwd: '/ws',
     });
     return { ch, transport };
   }
@@ -222,11 +225,16 @@ describe('EmbeddedYZJChannel', () => {
       const { ch } = makeChannel_('robot_1', facade, extra);
       const turn = ch.handleInboundForTest(inbound('please do it'));
       await flush();
+      const makeOnPrompt = ch.makeOnPrompt.bind(ch);
+      ch.makeOnPrompt = (tui) => (name, input) => runWithTurnOrigin(
+        { source: 'yzj', initiator: 'user_1', channelTurnId: 'msg_in' },
+        () => makeOnPrompt(tui)(name, input),
+      );
       return { ch, done: async () => { finish(); await turn; } };
     }
 
     it('chat.ts no longer wires an always-true onPromptOverride and still routes prompts through makeOnPrompt', () => {
-      const src = readFileSync(join(__dirname, '../../src/commands/chat.ts'), 'utf-8');
+      const src = readFileSync(join(process.cwd(), 'src/commands/chat.ts'), 'utf-8');
       expect(src).not.toMatch(/onPromptOverride:\s*async\s*\(\)\s*=>\s*true/);
       expect(src).not.toMatch(/onPromptOverride/);
       expect(src).toMatch(/makeOnPrompt\(tuiDecide\)/);
@@ -241,6 +249,61 @@ describe('EmbeddedYZJChannel', () => {
       expect(tui).toHaveBeenCalledOnce();
       expect(approvalStore.listPending()).toHaveLength(0);
       expect(sent).toHaveLength(0);
+    });
+
+    it('explicit chat origin never participates even while a channel turn is active', async () => {
+      const { facade, finish } = gatedFacade();
+      const { ch } = makeChannel_('robot_1', facade);
+      const turn = ch.handleInboundForTest(inbound('hello'));
+      await flush();
+      await expect(runWithTurnOrigin({ source: 'chat' }, () => ch.makeOnPrompt(async () => true)('web_fetch', { url: 'https://example.invalid/' }))).resolves.toBe(true);
+      expect(sent).toHaveLength(0);
+      expect(approvalStore.listPending()).toHaveLength(0);
+      finish(); await turn;
+    });
+
+    it('matches the turn ID when the same sender has overlapping turns', async () => {
+      const { facade, finish } = gatedFacade();
+      const { ch, transport } = makeChannel_('robot_1', facade);
+      const turns = [ch.handleInboundForTest(inbound('first', 'turn_a')), ch.handleInboundForTest(inbound('second', 'turn_b'))];
+      await flush();
+      const decision = runWithTurnOrigin({ source: 'yzj', initiator: 'user_1', channelTurnId: 'turn_b' }, () => ch.makeOnPrompt(pendingForever)('read', { path: '/ws' }));
+      await flush();
+      expect((transport.deliver.mock.calls[0]![0] as any).target.messageId).toBe('turn_b');
+      const [pending] = approvalStore.listPending();
+      await ch.handleInboundForTest(inbound(`/approve ${pending!.approvalId}`));
+      await expect(decision).resolves.toBe(true);
+      finish(); await Promise.all(turns);
+    });
+
+    it('missing initiator does not participate in channel confirmation', async () => {
+      const { facade, finish } = gatedFacade();
+      const { ch } = makeChannel_('robot_1', facade);
+      const turn = ch.handleInboundForTest(inbound('hello'));
+      await flush();
+      await expect(runWithTurnOrigin({ source: 'yzj' }, () => ch.makeOnPrompt(async () => false)('read', { path: '/ws' }))).resolves.toBe(false);
+      expect(sent).toHaveLength(0);
+      finish(); await turn;
+    });
+
+    it('passes initiator and channel turn ID into the runtime', async () => {
+      const facade = makeFacade([]);
+      const { ch } = makeChannel_('robot_1', facade);
+      await ch.handleInboundForTest(inbound('hello', 'turn_42'));
+      expect(facade.runTurn).toHaveBeenCalledWith(expect.objectContaining({ source: 'yzj', initiator: 'user_1', channelTurnId: 'turn_42' }), expect.any(Function));
+    });
+
+    it('denied senders cannot start turns or resolve approvals and receive one fixed reply', async () => {
+      const facade = makeFacade([]);
+      const { ch } = makeChannel_('robot_1', facade);
+      const pending = approvalStore.create({ sessionId: 's', turnId: 't', summary: 'read' });
+      try {
+        await ch.handleInboundForTest(inbound('private body', 'denied_1', 'outsider'));
+        await ch.handleInboundForTest(inbound(`/approve ${pending.approvalId}`, 'denied_2', 'outsider'));
+        expect(facade.runTurn).not.toHaveBeenCalled();
+        expect(approvalStore.get(pending.approvalId)).toBeDefined();
+        expect(sent).toEqual([{ text: '你没有权限使用这个助手。' }]);
+      } finally { approvalStore.expire(pending.approvalId); }
     });
 
     it('terminal approval is still honoured', async () => {
@@ -267,6 +330,7 @@ describe('EmbeddedYZJChannel', () => {
       expect(settled).toBe(false);
       expect(tui).toHaveBeenCalledOnce();
       expect(approvalStore.listPending()).toHaveLength(1);
+      for (const p of approvalStore.listPending()) approvalStore.expire(p.approvalId);
       await done();
     });
 
@@ -355,7 +419,7 @@ describe('EmbeddedYZJChannel', () => {
       const [p1] = approvalStore.listPending();
       await ch.handleInboundForTest(inbound(`/deny ${p1!.approvalId}`, 'msg_d'));
       await expect(first).resolves.toBe(false);
-      const second = onPrompt('write', { file_path: '/tmp/x' });
+      const second = onPrompt('write', { file_path: '/ws/x' });
       await flush();
       const [p2] = approvalStore.listPending();
       expect(p2!.approvalId).not.toBe(p1!.approvalId);
@@ -373,11 +437,11 @@ describe('EmbeddedYZJChannel', () => {
       await done();
     });
 
-    it('denies when the confirmation cannot be delivered to the channel', async () => {
+    it('keeps the terminal decision when the confirmation cannot be delivered', async () => {
       const { ch, done } = await channelTurn({ deliverError: true });
       const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       try {
-        await expect(ch.makeOnPrompt(pendingForever)('bash', { command: 'ls' })).resolves.toBe(false);
+        await expect(ch.makeOnPrompt(async () => { await flush(); return true; })('bash', { command: 'ls' })).resolves.toBe(true);
       } finally {
         stderr.mockRestore();
       }
@@ -390,6 +454,49 @@ describe('EmbeddedYZJChannel', () => {
       await expect(ch.makeOnPrompt(async () => { throw new Error('tty gone'); })('bash', { command: 'ls' })).resolves.toBe(false);
     });
 
+
+    it('withdraws the terminal before a channel decision can write rules and includes the URL', async () => {
+      const { ch, done } = await channelTurn();
+      const addRule = vi.fn();
+      let signal!: AbortSignal;
+      const decision = confirmChatPermission('web_fetch', { url: 'https://example.invalid/page' }, {
+        prompt: async (_name, _input, abortSignal) => {
+          signal = abortSignal!;
+          await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+          return { action: 'allow_project', rule: 'web_fetch' };
+        },
+        race: tui => ch.makeOnPrompt(tui)('web_fetch', { url: 'https://example.invalid/page' }),
+        addAllowRule: addRule,
+        addSessionRule: addRule,
+      });
+      await flush();
+      expect(sent[0]!.text).toContain('web_fetch: https://example.invalid/page');
+      const [pending] = approvalStore.listPending();
+      await ch.handleInboundForTest(inbound(`/approve ${pending!.approvalId}`));
+      await expect(decision).resolves.toBe(true);
+      expect(signal.aborted).toBe(true);
+      expect(addRule).not.toHaveBeenCalled();
+      await done();
+    });
+
+    it('leaves a hanging delivery after its deadline and lets the terminal decide', async () => {
+      const { ch, done } = await channelTurn();
+      const transport = (ch as any).options.transport;
+      transport.deliver.mockImplementation(() => new Promise(() => {}));
+      vi.useFakeTimers();
+      try {
+        let answer!: (value: boolean) => void;
+        let settled = false;
+        const decision = ch.makeOnPrompt(() => new Promise<boolean>(resolve => { answer = resolve; }))('web_fetch', { url: 'https://example.invalid/' });
+        void decision.then(() => { settled = true; });
+        await vi.advanceTimersByTimeAsync(10_001);
+        expect(settled).toBe(false);
+        expect(approvalStore.listPending()).toHaveLength(0);
+        answer(true);
+        await expect(decision).resolves.toBe(true);
+      } finally { vi.useRealTimers(); await done(); }
+    });
+
     it('closes the pending channel confirmation once the terminal answers first', async () => {
       const { ch, done } = await channelTurn();
       let answer!: (v: boolean) => void;
@@ -400,6 +507,8 @@ describe('EmbeddedYZJChannel', () => {
       answer(false);
       await expect(decision).resolves.toBe(false);
       expect(approvalStore.get(pending!.approvalId)).toBeUndefined();
+      await ch.handleInboundForTest(inbound(`/approve ${pending!.approvalId}`, 'late'));
+      expect(approvalStore.listPending()).toHaveLength(0);
       await done();
     });
 

@@ -114,6 +114,7 @@ export class YZJTransport implements ChannelDeliveryTransport {
       for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         const response = await fetch(this.options.webhookUrl, {
           method: 'POST',
+          signal: AbortSignal.timeout(8_000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
