@@ -7,7 +7,7 @@
 1. clone `kaisersong/xiaok-cli` 并 checkout `checkpoint/unfinished-handoff-20261011`。不要直接使用 master 代替。
 2. 同级 clone `kaisersong/kswarm`、`kaisersong/intent-broker`、`kaisersong/kai-xiaok-plugins`。本次冻结 HEAD 分别为 `16c3ed14c5493a82d000d69d34e4b1c933187433`、`a959b871257c846e68a3896f1cff6fcb2fe82cdf`、`6082d5c2a5502d427b024405a0aa7a7561de0405`；先核实际远端可获取。
 3. clone `kaisersong/mydocs` 并 checkout `checkpoint/xiaok-unfinished-handoff-20261011`，阅读 `xiaok-cli/quality/lessons-ledger.md`、原始 `design/2026-10-06-unfinished-development-agent-handoff.md`、`design/2026-10-10-unfinished-development-live-handoff.md` 和本文件。xiaok-cli 的 docs 是 symlink，恢复到该文档目录或替换为新机正确的 symlink。
-4. xiaok-cli GitHub prerelease `unfinished-checkpoint-20261011` 的 evidence tar.gz 是历史原始结果/driver/审查票的精简迁移包。下载并校验同名 `.sha256`，解压到 xiaok-cli repo 根，使 `.artifacts/unfinished-closure-20261001/` 存在。不含 node_modules、完整编译图、原生二进制、安装目录、真实凭证或全部8.7GB缓存；缺少的构建必须在新机重新生成，不能拿摘要假装当前实测。压缩包 manifest 记录选择/省略边界。
+4. 源码检查点分支的 `handoff/evidence/` 中两份 tar.gz 是历史结果/driver/审查票的精简迁移包。clone 后先校验同名 `.sha256`，再依次解压基础包和 shutdown supplement 到 xiaok-cli repo 根，使 `.artifacts/unfinished-closure-20261001/` 存在。不含 node_modules、完整编译图、原生二进制、安装目录、真实凭证或全部8.7GB缓存；缺少的构建必须在新机重新生成，不能拿摘要假装当前实测。压缩包 manifest 记录选择/省略边界。
 5. `npm ci`，再 `cd desktop && npm ci`；按 package engines/node/native依赖要求设置新机。不要运行 npm link 污染全局。开工先 hygiene:check，保留失败与原人口/时限/baseline。
 
 ## 源码状态与下一步
@@ -38,3 +38,14 @@ CPU lease/lock、PIDs、本机路径、manifest安装身份/SSH/原生SDK不迁�
 ## 关机冻结补充
 
 Catalog最新 `checkpoint-r20.json`：相关6files76项=75PASS/1FAIL/0pending；失败是旧Loop schema扫描断言，新增Catalog3并未完整CODE，PluginsSettings单独type与新test6 lint未验证。r44 fullrenderer图未包含该独立组件，不可借此称本叶全型绿。所有owner已停止开发；Updater29个已记录进程均回收、Catalog自有后台进程0、审查runner0，CPU lease不存在。证据包的历史凭证pattern命中文件被省略，manifest列明；原生安装身份、凭证、node_modules以及完整编译缓存不迁移。
+
+## 解压命令
+
+```sh
+cd xiaok-cli
+(cd handoff/evidence && shasum -a 256 -c xiaok-unfinished-evidence-20261011.tar.gz.sha256 && shasum -a 256 -c xiaok-unfinished-shutdown-supplement-20261011.tar.gz.sha256)
+tar -xzf handoff/evidence/xiaok-unfinished-evidence-20261011.tar.gz
+tar -xzf handoff/evidence/xiaok-unfinished-shutdown-supplement-20261011.tar.gz
+```
+
+GitHub Release 大包上传超时，已改为直接放入本检查点分支的精简4.6MB历史证据包；不依赖Release下载。其manifest明确只迁移986份小结果/审查票/当前两组记录，旧机8.7GB完整缓存仍保留，缺失的raw日志不能拿摘要补证，应按新机epoch重新验证。
