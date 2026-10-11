@@ -22,7 +22,7 @@ describe('MeetingService permissions', () => {
   });
 
   it('rejects agent attempts to persist user-owned meeting recordings', async () => {
-    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 });
+    const collection = store.createCollection({ name: 'Meetings', embeddingModelId: 'm', embeddingDim: 384 }, 'user');
     const service = createMeetingService({
       store,
       transcriber: { transcribeFile: async () => ({ text: '', segments: [] }) },

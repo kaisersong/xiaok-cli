@@ -177,7 +177,26 @@ let meetingRecorderController: MeetingRecorderWindowController | null = null;
  * mutation allowlist can miss an entry point.
  */
 const desktopShutdownGate = new DesktopShutdownGate();
-const shutdownAwareIpc = new ShutdownAwareIpcMain(ipcMain, desktopShutdownGate);
+const shutdownAwareIpc = new ShutdownAwareIpcMain(ipcMain, desktopShutdownGate, authorizeDesktopInvoke);
+
+function authorizeDesktopInvoke(event: Electron.IpcMainInvokeEvent): void {
+  try {
+    const sender = event.sender;
+    if (!sender || sender.isDestroyed()) throw new Error('desktop_user_sender_forbidden');
+    const ownedMain = mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents;
+    if (!ownedMain && meetingRecorderController?.ownsWebContents(sender) !== true) {
+      throw new Error('desktop_user_sender_forbidden');
+    }
+    const frame = event.senderFrame;
+    if (!frame || frame !== sender.mainFrame || !isTrustedDesktopRendererUrl(frame.url, {
+      rendererFile: join(__dirname, '../../../renderer/index.html'),
+      devServer: process.env['XIAOK_DESKTOP_DEV_SERVER'],
+    })) throw new Error('desktop_user_sender_forbidden');
+  } catch {
+    // Teardown failures are unavailable caller facts, never an admission grant.
+    throw new Error('desktop_user_sender_forbidden');
+  }
+}
 
 /**
  * Design v58 §4: created synchronously before any service or gateway, never

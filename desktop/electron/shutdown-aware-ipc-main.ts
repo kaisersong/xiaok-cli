@@ -144,6 +144,7 @@ export class ShutdownAwareIpcMain implements IpcHandleRegistrar {
   constructor(
     private readonly rawIpcMain: RawIpcMainLike,
     private readonly gate: DesktopShutdownGate,
+    private readonly admitInvoke?: (event: IpcMainInvokeEvent) => void,
   ) {}
 
   /** Every registered channel, used by the contract test to prove coverage. */
@@ -159,6 +160,9 @@ export class ShutdownAwareIpcMain implements IpcHandleRegistrar {
     this.rawIpcMain.handle(channel, (async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
       const token = this.gate.acquire('ipc', channel);
       try {
+        if (this.admitInvoke && this.admitInvoke(event) !== undefined) {
+          throw new Error('desktop_invoke_authority_invalid');
+        }
         return await listener(event, ...args);
       } finally {
         token.release();
