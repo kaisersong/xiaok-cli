@@ -2926,6 +2926,10 @@ export interface LocaleStrings {
   };
 
   // automations page
+  automationsReadFailed: string;
+  automationsMutationUnknown: string;
+  automationsStateUnknown: string;
+  automationsReadRetry: string;
   automationsTitle: string;
   automationsSubtitle: string;
   automationsOverview: string;

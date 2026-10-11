@@ -3039,6 +3039,10 @@ export const en: LocaleStrings = {
   },
 
   // automations page
+  automationsReadFailed: 'Unable to read automation status. Retry.',
+  automationsMutationUnknown: 'Background auto-run update outcome is unknown. Refresh to confirm.',
+  automationsStateUnknown: 'Background auto-run status unknown',
+  automationsReadRetry: 'Refresh automation status',
   automationsTitle: "Automations",
   automationsSubtitle: "Manage schedules, loops, and runtime diagnostics in one place.",
   automationsOverview: "Overview",

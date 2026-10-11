@@ -1,3 +1,4 @@
+import type { AutomationConfigDto, AutomationOverviewDto } from '../shared/automation-config-ipc-contract.js';
 import type { MobileRelaySignInResult } from '../shared/mobile-signin-ipc-contract.js';
 import type { RelatedServiceIdDto, RelatedServiceStatusDto, ServiceStatusSnapshotDto } from '../shared/service-control-ipc-contract.js';
 import type { MobilePairingInfoDto, MobileRelayStatusDto } from '../shared/mobile-readonly-ipc-contract.js';
@@ -1345,10 +1346,10 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   clearLoopRunHistory(loopId: string, statuses?: string[]): Promise<{ ok: boolean; removed: number }>;
   createLoopSchedule(input: ScheduledLoopCreateDto): Promise<ScheduledActionDto>;
   getLoopScheduleBindings(): Promise<ScheduledBindingDto[]>;
-  getAutomationOverviewSnapshot(): Promise<unknown>;
+  getAutomationOverviewSnapshot(): Promise<AutomationOverviewDto>;
   getAutomationRunHistory(): Promise<AutomationRunHistoryDto[]>;
-  getAutomationsConfig(): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
-  setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<{ globalBackgroundAutoRunEnabled: boolean }>;
+  getAutomationsConfig(): Promise<AutomationConfigDto>;
+  setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<AutomationConfigDto>;
   openLoopOutputDirectory(loopId: string): Promise<LoopOutputActionResultView>;
   readLoopOutputPreview(loopId: string): Promise<LoopOutputPreviewView>;
   readLoopTaskResult(loopId: string): Promise<LoopTaskResultView>;
@@ -1893,10 +1894,10 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     clearLoopRunHistory: (loopId, statuses) => ipcRenderer.invoke('desktop:loops:clearRunHistory', loopId, statuses) as Promise<{ ok: boolean; removed: number }>,
     createLoopSchedule: (input) => ipcRenderer.invoke('desktop:loops:createSchedule', input) as Promise<ScheduledActionDto>,
     getLoopScheduleBindings: () => ipcRenderer.invoke('desktop:loops:getScheduleBindings') as Promise<ScheduledBindingDto[]>,
-    getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<unknown>,
+    getAutomationOverviewSnapshot: () => ipcRenderer.invoke('desktop:automations:getOverviewSnapshot') as Promise<AutomationOverviewDto>,
     getAutomationRunHistory: () => ipcRenderer.invoke('desktop:automations:getRunHistory') as Promise<AutomationRunHistoryDto[]>,
-    getAutomationsConfig: () => ipcRenderer.invoke('desktop:automations:getConfig') as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
-    setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<{ globalBackgroundAutoRunEnabled: boolean }>,
+    getAutomationsConfig: () => ipcRenderer.invoke('desktop:automations:getConfig') as Promise<AutomationConfigDto>,
+    setGlobalBackgroundAutoRun: (input) => ipcRenderer.invoke('desktop:automations:setGlobalBackgroundAutoRun', input) as Promise<AutomationConfigDto>,
     openLoopOutputDirectory: (loopId) => ipcRenderer.invoke('desktop:loops:openOutputDirectory', loopId) as Promise<LoopOutputActionResultView>,
     readLoopOutputPreview: (loopId) => ipcRenderer.invoke('desktop:loops:readOutputPreview', loopId) as Promise<LoopOutputPreviewView>,
     listLoopPublishedArtifacts: (loopId,page) => ipcRenderer.invoke('desktop:loops:listPublishedArtifacts',loopId,page) as Promise<LoopPublishedArtifactsView>,

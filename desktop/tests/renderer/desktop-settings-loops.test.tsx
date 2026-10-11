@@ -417,7 +417,7 @@ describe('Automations Loops page', () => {
     expect(mocks.runLoopNow).not.toHaveBeenCalled();
   });
   it('loop typed boundary displays uncertain clear outcome and preserves overview without another mutation',async()=>{
-    mocks.getAutomationOverviewSnapshot.mockResolvedValue({generatedAt:10,globalBackgroundAutoRunEnabled:true,totals:{loops:1,userLoops:1,schedules:0,activeSchedules:0,diagnostics:0,recentFailures:1},recentFailures:[{id:'old-failure',source:'loop_run',ownerId:'user-loop-1',loopId:'user-loop-1',title:'Preserved failure',status:'failed',message:'Original failure facts',occurredAt:1}]});
+    mocks.getAutomationOverviewSnapshot.mockResolvedValue({generatedAt:10,sourceVersions:{loopStore:0,timedActionStore:0},globalBackgroundAutoRunEnabled:true,totals:{loops:1,userLoops:1,schedules:0,activeSchedules:0,diagnostics:0,recentFailures:1},recentFailures:[{id:'old-failure',source:'loop_run',ownerId:'user-loop-1',loopId:'user-loop-1',title:'Preserved failure',status:'failed',message:'Original failure facts',occurredAt:1}]});
     mocks.clearLoopRunHistory.mockRejectedValueOnce(Error('loop_operation_unknown'));
     const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
     try{renderSettings('/automations/overview');await screen.findByText('Original failure facts');fireEvent.click(screen.getByRole('button',{name:'清除此记录'}));

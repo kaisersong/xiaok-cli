@@ -39,9 +39,10 @@ describe('welcome home source contract', () => {
 
   it('keeps the approved responsive whitespace without adding a page scroll owner', () => {
     const welcomePage = readFileSync(resolve(COMPONENT_ROOT, 'WelcomePage.tsx'), 'utf8');
+    expect(welcomePage).toContain('<ConversationFirstHome');
     const outerClasses = staticClassTokens(
       welcomePage,
-      /return \(\s*<div className="([^"]+)">\s*<ConversationFirstHome/,
+      /return \(\s*<div className="([^"]+)">/,
     );
     const homeClasses = staticClassTokens(
       welcomePage,

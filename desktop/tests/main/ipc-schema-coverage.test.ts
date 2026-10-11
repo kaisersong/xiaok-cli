@@ -1,3 +1,4 @@
+import { registerAutomationConfigIpc } from '../../electron/automation-config-typed-ipc.js';
 import { registerMobileSignInIpc } from '../../electron/mobile-signin-typed-ipc.js';
 import { registerServiceControlIpc } from '../../electron/service-control-typed-ipc.js';
 import { registerMobileReadonlyIpc } from '../../electron/mobile-readonly-typed-ipc.js';
@@ -16,6 +17,7 @@ const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron'
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 const currentViewChannels:string[]=[];
 registerMobileSignInIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerAutomationConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerServiceControlIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerMobileReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});

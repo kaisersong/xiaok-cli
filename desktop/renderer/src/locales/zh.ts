@@ -3019,6 +3019,10 @@ export const zh: LocaleStrings = {
   },
 
   // automations page
+  automationsReadFailed: '无法读取自动化状态。请重试。',
+  automationsMutationUnknown: '后台自动运行设置结果未知。请刷新后确认。',
+  automationsStateUnknown: '后台自动运行状态未知',
+  automationsReadRetry: '刷新自动化状态',
   automationsTitle: "自动化",
   automationsSubtitle: "集中管理计划、循环和运行诊断。",
   automationsOverview: "总览",

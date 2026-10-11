@@ -245,43 +245,10 @@ export type LoopScheduleBindingView = ScheduledBindingDto;
 
 export type TimedActionView = ScheduledActionDto;
 
-export interface AutomationsConfigView {
-  globalBackgroundAutoRunEnabled: boolean;
-}
-
-export type AutomationRecentFailureSourceView = 'loop_run' | 'timed_action_run';
-
-export interface AutomationRecentFailureItemView {
-  id: string;
-  source: AutomationRecentFailureSourceView;
-  ownerId: string;
-  title: string;
-  status: string;
-  message?: string;
-  occurredAt: number;
-  loopId?: string;
-  loopOrigin?: 'built_in' | 'user_template';
-  actionId?: string;
-  actionAvailableInSchedules?: boolean;
-}
-
-export interface AutomationOverviewSnapshotView {
-  generatedAt: number;
-  sourceVersions: {
-    loopStore: number;
-    timedActionStore: number;
-  };
-  globalBackgroundAutoRunEnabled: boolean;
-  totals: {
-    loops: number;
-    userLoops: number;
-    schedules: number;
-    activeSchedules: number;
-    diagnostics: number;
-    recentFailures: number;
-  };
-  recentFailures: AutomationRecentFailureItemView[];
-}
+export type AutomationsConfigView = import('../../../shared/automation-config-ipc-contract.js').AutomationConfigDto;
+export type AutomationOverviewSnapshotView = import('../../../shared/automation-config-ipc-contract.js').AutomationOverviewDto;
+export type AutomationRecentFailureItemView = AutomationOverviewSnapshotView['recentFailures'][number];
+export type AutomationRecentFailureSourceView = AutomationRecentFailureItemView['source'];
 
 export type AutomationRunHistoryItemView = import('../../../shared/loop-current-view-ipc-contract.js').AutomationRunHistoryDto;
 

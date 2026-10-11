@@ -1,3 +1,4 @@
+import { AUTOMATION_CONFIG_SCHEMA, AUTOMATION_OVERVIEW_SCHEMA } from '../../../shared/automation-config-ipc-contract';
 import type { MobileRelaySignInResult } from '../../../shared/mobile-signin-ipc-contract';
 import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
 import type { ProxyHttpBody } from './types';
@@ -512,7 +513,9 @@ export const api = {
   },
 
   async getAutomationOverviewSnapshot(): Promise<AutomationOverviewSnapshotView> {
-    return await window.xiaokDesktop.getAutomationOverviewSnapshot() as AutomationOverviewSnapshotView;
+    const result = AUTOMATION_OVERVIEW_SCHEMA.safeParse(await window.xiaokDesktop.getAutomationOverviewSnapshot());
+    if (!result.success) throw Error('automation_config_operation_unknown');
+    return result.data;
   },
 
   async getAutomationRunHistory(): Promise<AutomationRunHistoryItemView[]> {
@@ -520,11 +523,15 @@ export const api = {
   },
 
   async getAutomationsConfig(): Promise<AutomationsConfigView> {
-    return await window.xiaokDesktop.getAutomationsConfig() as AutomationsConfigView;
+    const result = AUTOMATION_CONFIG_SCHEMA.safeParse(await window.xiaokDesktop.getAutomationsConfig());
+    if (!result.success) throw Error('automation_config_operation_unknown');
+    return result.data;
   },
 
   async setGlobalBackgroundAutoRun(input: { enabled: boolean }): Promise<AutomationsConfigView> {
-    return await window.xiaokDesktop.setGlobalBackgroundAutoRun(input) as AutomationsConfigView;
+    const result = AUTOMATION_CONFIG_SCHEMA.safeParse(await window.xiaokDesktop.setGlobalBackgroundAutoRun(input));
+    if (!result.success) throw Error('automation_config_operation_unknown');
+    return result.data;
   },
 
   async openLoopOutputDirectory(loopId: string): Promise<LoopOutputActionResultView> {

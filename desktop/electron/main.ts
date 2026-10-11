@@ -1,3 +1,5 @@
+import { createAutomationConfigOwner } from './automation-config-owner.js';
+import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
 import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
@@ -694,7 +696,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
   });
 
-  const { getConfigDir, loadConfig, saveConfig } = await import('../../src/utils/config.js');
+  const { getConfigDir, loadConfig, updateGlobalBackgroundAutoRun } = await import('../../src/utils/config.js');
   const dataRoot = getConfigDir('desktop');
   const executionCoordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: resolveKSwarmProjectWorkerCapacity((await loadConfig()).kswarm?.maxConcurrentTasks) });
   let managedPythonCommand: string | undefined;
@@ -1071,21 +1073,16 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   registerUpdaterIpc(shutdownAwareIpc, updaterProducers, isMainWindowSender);
 
   let globalBackgroundAutoRunEnabled = (await loadConfig()).automations?.globalBackgroundAutoRunEnabled !== false;
-  const automationsConfigSnapshot = () => ({ globalBackgroundAutoRunEnabled });
-  shutdownAwareIpc.handle('desktop:automations:getConfig', () => automationsConfigSnapshot());
-  shutdownAwareIpc.handle('desktop:automations:setGlobalBackgroundAutoRun', async (_event, input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.enabled !== 'boolean') {
-      throw new Error('enabled must be a boolean');
-    }
-    const config = await loadConfig();
-    globalBackgroundAutoRunEnabled = input.enabled;
-    config.automations = {
-      ...(config.automations ?? {}),
-      globalBackgroundAutoRunEnabled,
-    };
-    await saveConfig(config);
-    return automationsConfigSnapshot();
+  const automationConfigOwner = createAutomationConfigOwner({
+    getEnabled: () => globalBackgroundAutoRunEnabled,
+    onCommitted: enabled => { globalBackgroundAutoRunEnabled = enabled; },
+    persist: (enabled, source) => updateGlobalBackgroundAutoRun(enabled, source),
   });
+  const automationConfigProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:automations:getConfig', () => automationConfigOwner.getConfig()],
+    ['desktop:automations:setGlobalBackgroundAutoRun', (_event, input) => automationConfigOwner.setEnabled(input, 'user')],
+  ]);
+  registerAutomationConfigIpc(shutdownAwareIpc, automationConfigProducers);
 
   // Unified timed action daemon: notification reminders and automatic AI tasks share one scheduler.
   const timedActionStore = new TimedActionStore(join(dataRoot, 'timed-actions.sqlite'));
@@ -1428,7 +1425,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     },
   });
   debugMain('createWindow:ipc-registered');
-  shutdownAwareIpc.handle('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
+  automationConfigProducers.set('desktop:automations:getOverviewSnapshot', () => buildAutomationOverviewSnapshot({
     loopStore: loopRuntime.loopStore,
     timedActionStore,
     globalBackgroundAutoRunEnabled,
