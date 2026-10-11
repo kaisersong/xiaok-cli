@@ -102,7 +102,7 @@ describe('StatusBar', () => {
 
       statusBar.render();
 
-      expect(stdoutOutput).toContain('50%');
+      expect(stdoutOutput).toContain('25%');
     });
 
     it('shows estimated cost beside token percentage when pricing is known', () => {
@@ -112,7 +112,7 @@ describe('StatusBar', () => {
 
       statusBar.render();
 
-      expect(stdoutOutput).toContain('4%');
+      expect(stdoutOutput).toContain('3%');
       expect(stdoutOutput).toContain('$0.05');
     });
 
@@ -122,7 +122,21 @@ describe('StatusBar', () => {
 
       statusBar.render();
 
-      expect(stdoutOutput).toContain('100%');
+      expect(stdoutOutput).toContain('95%');
+    });
+
+    it('uses the measured prompt occupancy rather than billed output tokens', () => {
+      statusBar.updateModel('deepseek-v4.1-flash-expires-on-0910', 1_000_000);
+      statusBar.update({inputTokens: 161938, outputTokens: 1027});
+      expect(statusBar.getStatusLine()).toContain('16%');
+      statusBar.update({inputTokens: 161938, outputTokens: 900000});
+      expect(statusBar.getStatusLine()).toContain('16%');
+    });
+
+    it('does not hide an actual over-budget prompt behind a 100 percent clamp', () => {
+      statusBar.updateModel('custom', 128000);
+      statusBar.update({inputTokens:161938,outputTokens:0});
+      expect(statusBar.getStatusLine()).toContain('127%');
     });
 
     it('should update model name', () => {

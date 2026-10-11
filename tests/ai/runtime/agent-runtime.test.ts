@@ -815,6 +815,34 @@ describe('AgentRuntime', () => {
     expect(session.getCompactions()).toHaveLength(0);
   });
 
+  it('compacts from measured prompt tokens when the character estimate is below threshold', async () => {
+    const session = new AgentSessionState();
+    session.appendUserText('old request '.repeat(40));
+    session.appendAssistantBlocks([{type: 'text', text: 'old answer '.repeat(40)}]);
+    session.updateUsage({inputTokens: 950, outputTokens: 3000});
+    let compactCalls = 0;
+    const adapter: ModelAdapter = {
+      getModelName: () => 'mock',
+      stream: (_messages, _tools, prompt) => {
+        if (prompt.includes('TEXT ONLY')) compactCalls++;
+        return mockStream([{type:'text',delta: compactCalls ? 'summary' : 'answer'},{type:'done'}]);
+      },
+    };
+    const runtime = new AgentRuntime({adapter,registry:createRegistryMock() as never,session,
+      controller:new AgentRunController(),systemPrompt:'system',contextLimit:1000});
+    const events: string[] = [];
+    let refreshedInput = 0;
+    await runtime.run('current request', event => {
+      events.push(event.type);
+      if (event.type === 'usage_updated') refreshedInput = event.usage.inputTokens;
+    });
+    expect(compactCalls).toBe(1);
+    expect(events).toContain('compact_triggered');
+    expect(events).toContain('usage_updated');
+    expect(refreshedInput).toBeGreaterThan(0);
+    expect(refreshedInput).toBeLessThan(850);
+  });
+
   it('replans compaction after tool history grows beyond a no-prefix revision', async () => {
     const session = new AgentSessionState();
     session.appendUserText('a'.repeat(10_000));

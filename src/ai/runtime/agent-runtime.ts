@@ -23,7 +23,7 @@ import {
 import { resolveRegisteredStrictKimiK3Profile, requiresKimiK3HistoryMigration } from './model-harness-identity.js';
 import { AgentSessionState } from './session.js';
 import { InvocationToolImages } from './tool-image-channel.js';
-import { estimateRequestOverheadTokens, estimateTokens, shouldCompact, truncateToolResult } from './usage.js';
+import { estimateRequestOverheadTokens, estimateTokens, getContextTokens, shouldCompact, truncateToolResult } from './usage.js';
 import { CompactRunner } from './compact-runner.js';
 import { executePortableCompaction } from './portable-compaction-executor.js';
 import type { MemoryStore } from '../memory/store.js';
@@ -215,8 +215,11 @@ export class AgentRuntime {
         if (
           !autoCompactionBlocked
           && shouldCompact(
-            estimateTokens(this.session.getMessages())
-              + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
+            Math.max(
+              estimateTokens(this.session.getMessages())
+                + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
+              getContextTokens(this.session.getUsage()),
+            ),
             this.contextLimit,
             this.compactThreshold,
           )
@@ -263,6 +266,15 @@ export class AgentRuntime {
                 runId: run.runId,
                 summary: outcome.record.summary,
                 compactionId: outcome.record.id,
+              });
+              onEvent({
+                type: 'usage_updated',
+                runId: run.runId,
+                usage: {
+                  ...this.session.getUsage(),
+                  inputTokens: estimateTokens(this.session.getMessages())
+                    + estimateRequestOverheadTokens(this.systemPrompt, this.registry.getToolDefinitions()),
+                },
               });
               try {
                 await this.injectMemoryAfterCompact();

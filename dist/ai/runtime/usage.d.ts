@@ -26,6 +26,8 @@ export declare function estimateTokens(messages: Message[]): number;
  * 口径与 estimateTokens 一致（chars/4），因此两者可直接相加。
  */
 export declare function estimateRequestOverheadTokens(systemPrompt: string, tools: ToolDefinition[]): number;
+/** Occupancy of the most recent request; completion/reasoning tokens are billing, not input. */
+export declare function getContextTokens(usage: Pick<UsageStats, 'inputTokens'>): number;
 export declare function shouldCompact(estimatedTokens: number, contextLimit: number, threshold?: number): boolean;
 export declare function mergeUsage(base: UsageStats, next: UsageStats): UsageStats;
 export declare function computeCost(usage: UsageStats, model: string): number;

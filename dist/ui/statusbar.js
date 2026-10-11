@@ -2,7 +2,7 @@ import { dim, boldCyan, dimCyan } from "./render.js";
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { computeCost } from '../ai/runtime/usage.js';
+import { computeCost, getContextTokens } from '../ai/runtime/usage.js';
 const DEFAULT_FIELDS = ["model", "mode", "tokens", "session"];
 const VALID_FIELDS = new Set(DEFAULT_FIELDS);
 const LIVE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -144,7 +144,7 @@ export class StatusBar {
                 parts.push(this.mode);
             }
             if (field === "tokens" && this.contextLimit > 0) {
-                const total = this.usage.inputTokens + this.usage.outputTokens;
+                const total = getContextTokens(this.usage);
                 const pct = Math.round((total / this.contextLimit) * 100);
                 const tokenParts = [`${pct}%`];
                 const cost = computeCost(this.usage, this.model);
