@@ -34,3 +34,7 @@ CPU lease/lock、PIDs、本机路径、manifest安装身份/SSH/原生SDK不迁�
 
 给新机Codex：
 > 从 checkpoint/unfinished-handoff-20261011 接手，先读本交接及mydocs台账，保原人口/时限/失败证据/foreign WIP。优先关掉Updater明确BLOCK与Catalog正式CODE，然后继续原298剩余与所有父验收。所有组件通过也不能直接报告全完成。用户要求继续做完，普通操作无需重复确认。
+
+## 关机冻结补充
+
+Catalog最新 `checkpoint-r20.json`：相关6files76项=75PASS/1FAIL/0pending；失败是旧Loop schema扫描断言，新增Catalog3并未完整CODE，PluginsSettings单独type与新test6 lint未验证。r44 fullrenderer图未包含该独立组件，不可借此称本叶全型绿。所有owner已停止开发；Updater29个已记录进程均回收、Catalog自有后台进程0、审查runner0，CPU lease不存在。证据包的历史凭证pattern命中文件被省略，manifest列明；原生安装身份、凭证、node_modules以及完整编译缓存不迁移。
