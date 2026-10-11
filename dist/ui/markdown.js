@@ -1,4 +1,4 @@
-import { accentAmber, accentBlue, accentGreen, accentPurple, boldAccentAmber, boldAccentBlue, dim, green, magenta, getTheme, } from "./render.js";
+import { accentAmber, accentBlue, accentGreen, accentPurple, boldAccentAmber, boldAccentBlue, dim, green, } from "./render.js";
 import { highlightLine } from "./highlight.js";
 import { getDisplayWidth, isFullWidthCodePoint, stripAnsi } from "./text-metrics.js";
 import { renderMermaidASCII } from "beautiful-mermaid";
@@ -205,7 +205,6 @@ export class MarkdownRenderer {
         this.consecutiveBlankLines = 0;
     }
     formatLine(line) {
-        const theme = getTheme();
         // Code block fences
         if (line.trimStart().startsWith("```")) {
             if (this.inCodeBlock) {
@@ -225,7 +224,7 @@ export class MarkdownRenderer {
                     }
                 }
                 this.codeLang = "";
-                return theme === "default" ? `${BODY_GUTTER}${dim("╰─")}` : BODY_GUTTER;
+                return BODY_GUTTER;
             }
             this.inCodeBlock = true;
             const lang = line.trimStart().slice(3).trim();
@@ -234,9 +233,8 @@ export class MarkdownRenderer {
                 this.mermaidBuffer = [];
                 return "";
             }
-            return theme === "default"
-                ? `${BODY_GUTTER}${dim(`╭─ ${lang ? magenta(lang) : ""}`)}`
-                : BODY_GUTTER;
+            // Fence rows stay blank so terminal selection copies only code content.
+            return BODY_GUTTER;
         }
         // Inside mermaid block — buffer lines, output nothing until closing fence
         if (this.inCodeBlock && this.codeLang === "mermaid") {
@@ -246,9 +244,7 @@ export class MarkdownRenderer {
         // Inside code block
         if (this.inCodeBlock) {
             const highlighted = this.codeLang ? highlightLine(line, this.codeLang) : green(line);
-            return theme === "default"
-                ? `${BODY_GUTTER}${dim("│")} ${highlighted}`
-                : `${BODY_GUTTER}${highlighted}`;
+            return `${BODY_GUTTER}${highlighted}`;
         }
         // Headings
         const headerMatch = line.match(/^(#{1,6})\s+(.*)/);

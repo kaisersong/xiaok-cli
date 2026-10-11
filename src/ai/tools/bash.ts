@@ -80,7 +80,7 @@ export const bashTool: Tool = {
       return `Error: 命令被安全策略拦截: ${risk.reason}`;
     }
 
-    if (/\bsudo\b/.test(command)) return 'Error: sudo 需要主 CLI 的本地交互终端；请交由主会话执行，或在终端使用 !sudo 命令。';
+    if (/\bsudo\b/.test(command)) return 'Error: sudo 需要主 CLI 的本地交互终端；请交由主会话执行，或在 xiaok 交互输入框使用 !sudo 命令；在系统终端直接执行 sudo 命令（不加 !）。';
 
     return new Promise((resolve, reject) => {
       const shell = process.platform === 'win32' ? 'cmd' : 'sh';

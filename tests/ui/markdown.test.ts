@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MarkdownRenderer } from '../../src/ui/markdown.js';
-import { setColorsEnabled } from '../../src/ui/render.js';
+import { getTheme, setTheme, setColorsEnabled } from '../../src/ui/render.js';
+import { stripAnsi } from '../../src/ui/text-metrics.js';
 
 describe('MarkdownRenderer', () => {
   let output = '';
@@ -186,15 +187,44 @@ describe('MarkdownRenderer', () => {
       expect(output).toContain('not valid mermaid at all');
     });
 
-    it('renders non-mermaid code blocks normally with fence decorations', () => {
+    it('renders non-mermaid code blocks without copyable fence decorations', () => {
       const renderer = new MarkdownRenderer();
 
       renderer.write('```ts\nconst x = 1;\n```\n');
 
-      // Should have fence decorations (not mermaid path)
-      expect(output).toContain('╭─');
-      expect(output).toContain('╰─');
+      expect(stripAnsi(output)).toBe('\nconst x = 1;\n\n');
       expect(output).not.toContain('graph');
+    });
+  });
+
+  describe('copyable code blocks', () => {
+    it.each(['default', 'minimal', 'plain'] as const)('preserves shell content under the %s theme', theme => {
+      const previousTheme = getTheme();
+      try {
+        setTheme(theme);
+        const renderer = new MarkdownRenderer();
+        const command = "printf '%s\\n' 'COPY_OK' | cat >/dev/null 2>&1";
+        renderer.write('```bash\n' + command + '\n```\n');
+        expect(stripAnsi(output)).toBe('\n' + command + '\n\n');
+      } finally {
+        setTheme(previousTheme);
+      }
+    });
+
+    it('preserves indentation, blank lines and literal rails in an unlabelled streamed block', () => {
+      const renderer = new MarkdownRenderer();
+      const body = "  printf '│ | ╭─ ╰─'\n\n    echo end";
+      for (const char of '```\n' + body + '\n```') renderer.write(char);
+      renderer.flush();
+      expect(output).toBe('\n' + body + '\n');
+    });
+
+    it('keeps syntax highlighting without adding visible text', () => {
+      setColorsEnabled(true);
+      const renderer = new MarkdownRenderer();
+      renderer.write('```ts\nconst x = 1;\n```\n');
+      expect(output).toContain('\x1b[');
+      expect(stripAnsi(output)).toBe('\nconst x = 1;\n\n');
     });
   });
 
