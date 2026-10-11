@@ -3819,24 +3819,49 @@ function GeneralPane() {
   const [concurrencyConfigError, setConcurrencyConfigError] = useState<'' | 'load' | 'unknown' | 'save'>('');
   const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
   const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
-  const [serviceStatusError, setServiceStatusError] = useState('');
+  const [serviceReadUnavailable, setServiceReadUnavailable] = useState(false);
+  const [serviceActionUnknown, setServiceActionUnknown] = useState(false);
+  const serviceReadLifetime = useRef<{ active: boolean; busy: boolean; queued: boolean } | null>(null);
+  const serviceActionLifetime = useRef<{ active: boolean; busy: boolean } | null>(null);
   const [restartingService, setRestartingService] = useState<DesktopRelatedServiceId | null>(null);
   const [displayName, setDisplayName] = useState(() => localStorage.getItem('xiaok_display_name') || '');
   const [avatarUrl, setAvatarUrl] = useState(() => localStorage.getItem('xiaok_avatar_url') || '');
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
 
-  const loadServiceStatus = useCallback(async (silent = false) => {
-    if (!silent) setServiceStatusLoading(true);
-    setServiceStatusError('');
-    try {
-      setServiceStatus(await api.getServiceStatus());
-    } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : t.desktopSettings.serviceStatusLoadError);
-    } finally {
-      if (!silent) setServiceStatusLoading(false);
+  const loadServiceStatus = useCallback(async (mode: 'initial' | 'poll' | 'manual' = 'manual'): Promise<void> => {
+    const lifetime = serviceReadLifetime.current;
+    if (!lifetime?.active) return;
+    if (lifetime.busy) {
+      if (mode === 'manual') { lifetime.queued = true; setServiceStatusLoading(true); }
+      return;
     }
-  }, [t]);
+    lifetime.busy = true;
+    if (mode !== 'poll') setServiceStatusLoading(true);
+    try {
+      do {
+        lifetime.queued = false;
+        try {
+          const snapshot = await api.getServiceStatus();
+          if (lifetime.active) { setServiceStatus(snapshot); setServiceReadUnavailable(false); }
+        } catch {
+          if (lifetime.active) setServiceReadUnavailable(true);
+        }
+      } while (lifetime.active && lifetime.queued);
+    } finally {
+      lifetime.busy = false;
+      if (lifetime.active) setServiceStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const lifetime = { active: true, busy: false };
+    serviceActionLifetime.current = lifetime;
+    return () => {
+      lifetime.active = false;
+      if (serviceActionLifetime.current === lifetime) serviceActionLifetime.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -3850,12 +3875,17 @@ function GeneralPane() {
   }, []);
 
   useEffect(() => {
-    void loadServiceStatus();
-    const timer = window.setInterval(() => {
-      void loadServiceStatus(true);
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [loadServiceStatus]);
+    const lifetime = { active: true, busy: false, queued: false };
+    serviceReadLifetime.current = lifetime;
+    void loadServiceStatus('initial');
+    const timer = window.setInterval(() => { void loadServiceStatus('poll'); }, 10_000);
+    return () => {
+      lifetime.active = false;
+      lifetime.queued = false;
+      if (serviceReadLifetime.current === lifetime) serviceReadLifetime.current = null;
+      window.clearInterval(timer);
+    };
+  }, [loadServiceStatus, t.desktopSettings.serviceStatusLoadError]);
 
   const handleSkillDebugToggle = async (enabled: boolean) => {
     const sequence = ++skillConfigSequence.current;
@@ -3902,15 +3932,19 @@ function GeneralPane() {
   };
 
   const handleRestartService = async (serviceId: DesktopRelatedServiceId) => {
+    const lifetime = serviceActionLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
     setRestartingService(serviceId);
-    setServiceStatusError('');
+    setServiceActionUnknown(false);
     try {
       await api.restartRelatedService(serviceId);
-      await loadServiceStatus(true);
-    } catch (error) {
-      setServiceStatusError(error instanceof Error ? error.message : t.desktopSettings.serviceRestartFailed);
+      if (lifetime.active) await loadServiceStatus('manual');
+    } catch {
+      if (lifetime.active) setServiceActionUnknown(true);
     } finally {
-      setRestartingService(null);
+      lifetime.busy = false;
+      if (lifetime.active) setRestartingService(null);
     }
   };
 
@@ -4062,14 +4096,20 @@ function GeneralPane() {
                 key={service.id}
                 service={service}
                 restarting={restartingService === service.id}
+                disabled={restartingService !== null}
                 onRestart={handleRestartService}
               />
             ))}
-            {serviceStatusError ? (
-              <div className="rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
-                {serviceStatusError}
+            {serviceReadUnavailable || serviceActionUnknown ? (
+              <div role="alert" className="rounded-md border border-[var(--c-status-error-text)]/20 bg-[var(--c-status-error-bg,#fef2f2)] px-3 py-2 text-xs text-[var(--c-status-error-text)]">
+                {serviceReadUnavailable && <div>{t.desktopSettings.serviceStatusLoadError}</div>}
+                {serviceActionUnknown && <div>{t.desktopSettings.serviceRestartUnknown}</div>}
               </div>
             ) : null}
+            <button type="button" onClick={() => void loadServiceStatus('manual')} className={`${btnSecondary} self-start`}>
+              {serviceStatusLoading ? <Loader2 size={13} className="mr-1 inline animate-spin" aria-hidden="true" /> : null}
+              {t.desktopSettings.serviceStatusReadRetry}
+            </button>
           </div>
         </Card>
       </Section>
@@ -4155,10 +4195,12 @@ function GeneralPane() {
 function ServiceStatusRow({
   service,
   restarting,
+  disabled,
   onRestart,
 }: {
   service: DesktopRelatedServiceStatus;
   restarting: boolean;
+  disabled: boolean;
   onRestart: (serviceId: DesktopRelatedServiceId) => void;
 }) {
   const { t } = useLocale();
@@ -4192,7 +4234,7 @@ function ServiceStatusRow({
         aria-label={`restart-service-${service.id}`}
         title={`${service.label} ${t.desktopSettings.serviceRestart}`}
         onClick={() => onRestart(service.id)}
-        disabled={restarting}
+        disabled={disabled || restarting}
         className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--c-border)] px-2.5 text-xs text-[var(--c-text-secondary)] transition-colors hover:bg-[var(--c-bg-deep)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {restarting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}

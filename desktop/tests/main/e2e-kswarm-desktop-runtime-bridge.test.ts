@@ -151,7 +151,7 @@ function createKSwarmHttpService(baseUrl: string, mutationToken: string): KSwarm
         'x-kswarm-mutation-token': mutationToken,
       },
     }),
-  };
+  } as unknown as KSwarmService;
 }
 
 function emitReceipt(input: { sessionId: string; emitRuntimeEvent: (event: any) => void }, note: string): void {

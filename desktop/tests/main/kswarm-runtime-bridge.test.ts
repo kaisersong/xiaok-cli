@@ -266,7 +266,7 @@ describe('kswarm runtime bridge', () => {
     const client = createKSwarmRuntimeBridgeBrokerClient({ participantId: 'xiaok-worker',
       bridge: { reportsExecutionStart: true, handleTaskHandoff: async input => { start = input.onExecutionStarted!; await waiting; return { ok: true }; } },
       taskHeartbeatIntervalMs: 10,
-      fetchImpl: (async (_url, init) => { posts.push({ body: JSON.parse(String(init?.body ?? '{}')) }); return Response.json({ ok: true, deliveredCount: 1 }); }) as never,
+      fetchImpl: (async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => { posts.push({ body: JSON.parse(String(init?.body ?? '{}')) }); return Response.json({ ok: true, deliveredCount: 1 }); }) as never,
       WebSocketImpl: FakeWebSocket,
     });
     await client.start();
@@ -1120,7 +1120,7 @@ function createFakeWebSocket() {
     static instances: FakeWebSocket[] = [];
     url: string;
     onopen: (() => void) | null = null;
-    onmessage: ((event: { data: string }) => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
     onclose: (() => void) | null = null;
     onerror: (() => void) | null = null;
 

@@ -1,3 +1,4 @@
+import type { RelatedServiceIdDto, RelatedServiceStatusDto, ServiceStatusSnapshotDto } from '../shared/service-control-ipc-contract.js';
 import type { MobilePairingInfoDto, MobileRelayStatusDto } from '../shared/mobile-readonly-ipc-contract.js';
 import type { PluginMcpServerDto, PluginDependencyStatusDto, AvailablePluginDto } from '../shared/plugin-catalog-ipc-contract.js';
 import type { UpdateIpcStatusDto, UpdateInstallDto } from '../shared/updater-ipc-contract.js';
@@ -934,24 +935,9 @@ export interface KSwarmServiceStatus {
   lastError: string | null;
 }
 
-export type DesktopRelatedServiceId = 'kswarm' | 'intent-broker' | 'runtime-bridge';
-
-export interface DesktopRelatedServiceStatus {
-  id: DesktopRelatedServiceId;
-  label: string;
-  running: boolean;
-  reachable: boolean;
-  port: number;
-  pid: number | null;
-  restartCount?: number;
-  lastError: string | null;
-  detail?: string;
-}
-
-export interface DesktopServiceStatusSnapshot {
-  checkedAt: number;
-  services: DesktopRelatedServiceStatus[];
-}
+export type DesktopRelatedServiceId = RelatedServiceIdDto;
+export type DesktopRelatedServiceStatus = RelatedServiceStatusDto;
+export type DesktopServiceStatusSnapshot = ServiceStatusSnapshotDto;
 
 export type ConnectorsLoadStatus = 'ok' | 'missing' | 'parse_failed';
 

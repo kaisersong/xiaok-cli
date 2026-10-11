@@ -192,7 +192,7 @@ describe('actual KSwarm service instance permanent drain', () => {
 
   it('registers the actual service close immediately in Main and retains ordinary stop IPC', () => {
     const source = readFileSync(join(import.meta.dirname, '../../electron/main.ts'), 'utf8');
-    expect(source).toMatch(/const kswarmService = createDesktopKSwarmService\(desktopShutdownCoordinator, desktopFinalLifetimeSteps\);\s*if \(!kswarmService\) return window;/);
+    expect(source).toMatch(/const kswarmService = createDesktopKSwarmService\(desktopShutdownCoordinator, desktopFinalLifetimeSteps, \{ activityOwnerPending: process\.env\.XIAOK_CONVERSATION_ACTIVITY !== '0' \}\);\s*if \(!kswarmService\) return window;/);
     expect(source).toContain("shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop())");
     expect(source).not.toContain('await kswarmService.stop().catch');
     expect(source.match(/\bcreateDesktopKSwarmService\(/g)).toHaveLength(1);
@@ -377,7 +377,13 @@ describe('actual KSwarm service instance permanent drain', () => {
       if (String(input).includes(':4400/health')) { healthChecks++; if (healthChecks === 5) { entered.release(); await hold.promise; } return new Response('{}', { status: 503 }); }
       return original(input);
     });
-    const server = f.children.find(c => c.kind === 'server')!.child; server.kill.mockImplementationOnce(() => { throw Error('health stop failed'); });
+    const server = f.children.find(c => c.kind === 'server')!.child; const backgroundFailure = Error('owned background health rejection');
+    server.kill.mockImplementationOnce(() => {
+      // The current SDK catches an ordinary stop error. Make the same SDK
+      // catch encounter an opaque message accessor failure so its admitted
+      // background work genuinely rejects, retaining the original failure path.
+      throw Object.defineProperty(Error('health stop failed'), 'message', { get() { throw backgroundFailure; } });
+    });
     await vi.advanceTimersByTimeAsync(30_000); await entered.promise;
     const closing = close(f.service); const failed = expect(closing).rejects.toThrow(/unconfirmed/); hold.release();
     await vi.advanceTimersByTimeAsync(0); expect(f.children.every(c => c.child.kill.mock.calls.length > 0)).toBe(true);

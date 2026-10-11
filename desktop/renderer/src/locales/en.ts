@@ -1364,6 +1364,8 @@ export const en: LocaleStrings = {
     // general pane - service status
     serviceStatusTitle: "Service Status",
     serviceStatusChecking: "Checking",
+    serviceStatusReadRetry: "Read service status again",
+    serviceRestartUnknown: "The restart outcome is unknown. Read the current service status; restart will not be retried automatically.",
     serviceStatusLoadError: "Failed to load service status",
     serviceRestartFailed: "Failed to restart service",
     serviceStatusRunning: "Running",

@@ -1315,6 +1315,8 @@ export const zh: LocaleStrings = {
     // general pane - service status
     serviceStatusTitle: "服务状态",
     serviceStatusChecking: "检查中",
+    serviceStatusReadRetry: "重新读取服务状态",
+    serviceRestartUnknown: "重启操作的结果尚不确定。请读取当前服务状态；不会自动重试重启。",
     serviceStatusLoadError: "服务状态读取失败",
     serviceRestartFailed: "服务重启失败",
     serviceStatusRunning: "运行中",

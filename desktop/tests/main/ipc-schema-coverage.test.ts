@@ -1,3 +1,4 @@
+import { registerServiceControlIpc } from '../../electron/service-control-typed-ipc.js';
 import { registerMobileReadonlyIpc } from '../../electron/mobile-readonly-typed-ipc.js';
 import { registerScheduledTimedActionIpc } from '../../electron/scheduled-timed-action-typed-ipc.js';
 import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
@@ -13,6 +14,7 @@ import { join } from 'node:path';
 const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'main.ts'), 'utf8');
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 const currentViewChannels:string[]=[];
+registerServiceControlIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerMobileReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerScheduledTimedActionIpc({handle:channel=>{currentViewChannels.push(channel);}});

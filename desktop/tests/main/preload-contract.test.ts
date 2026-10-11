@@ -1,3 +1,4 @@
+import { registerServiceControlIpc } from '../../electron/service-control-typed-ipc.js';
 import { registerMobileReadonlyIpc } from '../../electron/mobile-readonly-typed-ipc.js';
 import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
 import { registerUpdaterIpc } from '../../electron/updater-typed-ipc.js';
@@ -1061,6 +1062,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerUpdaterIpc({ handle: channel => { channels.add(channel); } }, new Map(), () => false);
   registerPluginCatalogIpc({ handle: channel => { channels.add(channel); } });
   registerMobileReadonlyIpc({ handle: channel => { channels.add(channel); } });
+  registerServiceControlIpc({ handle: channel => { channels.add(channel); } });
   registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);

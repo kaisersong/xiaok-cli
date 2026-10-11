@@ -1,3 +1,5 @@
+import { createDesktopServiceControl } from './desktop-service-control.js';
+import { registerServiceControlIpc } from './service-control-typed-ipc.js';
 import { registerMobileReadonlyIpc, captureMobileRelayStatus } from './mobile-readonly-typed-ipc.js';
 import { registerUpdaterIpc } from './updater-typed-ipc.js';
 import { registerRecorderWindowIpc } from './recorder-window-typed-ipc.js';
@@ -658,32 +660,20 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   shutdownAwareIpc.handle('desktop:kswarm:restart', () => kswarmService.restart());
   shutdownAwareIpc.handle('desktop:kswarm:resumeWorkflowRun', (_event, input) =>
     resumeOneScriptWorkflow(kswarmService, input?.projectId, input?.workflowRunId));
-  let restartRuntimeBridgeService: () => Promise<void> = async () => {};
-  shutdownAwareIpc.handle('desktop:services:getStatus', async () => {
-    const snapshot = await kswarmService.getServiceStatus();
-    return {
-      ...snapshot,
-      services: [
-        ...snapshot.services,
-        {
-          id: 'runtime-bridge',
-          label: 'Runtime Bridge',
-          running: runtimeBridgeStarted,
-          reachable: runtimeBridgeStarted,
-          port: 0,
-          pid: null,
-          restartCount: 0,
-          lastError: null,
-          detail: runtimeBridgeStarted ? `${runtimeBridgeClients.length} client(s) registered` : 'not started',
-        },
-      ],
-    };
+  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
+  let runtimeBridgeStarted = false;
+  let restartRuntimeBridgeService: () => Promise<void> = async () => { throw Error('service_runtime_unavailable'); };
+  const serviceControl = createDesktopServiceControl({
+    getSdkSnapshot: () => kswarmService.getServiceStatus(),
+    restartSdk: serviceId => kswarmService.restartRelatedService(serviceId),
+    getRuntimeBridgeFacts: () => ({ started: runtimeBridgeStarted, clients: runtimeBridgeClients.length }),
+    getRuntimeBridgeRestart: () => restartRuntimeBridgeService,
   });
-  shutdownAwareIpc.handle('desktop:services:restart', (_event, serviceId) => (
-    serviceId === 'runtime-bridge'
-      ? restartRuntimeBridgeService()
-      : kswarmService.restartRelatedService(serviceId)
-  ));
+  const serviceControlProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:services:getStatus', () => serviceControl.getStatus()],
+    ['desktop:services:restart', (_event, serviceId) => serviceControl.restart(serviceId, 'user')],
+  ]);
+  registerServiceControlIpc(shutdownAwareIpc, serviceControlProducers);
   kswarmService.onStatusChange((status) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('desktop:kswarm:statusChange', status);
   });
@@ -1449,8 +1439,6 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   // Register MCP plugin tools (connects to MCP servers declared in the plugins dir)
   let mcpDispose: (() => Promise<void>) | undefined;
-  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
-  let runtimeBridgeStarted = false;
   let runtimeBridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   const stopRuntimeBridge = () => {
     if (runtimeBridgeFallbackTimer) {

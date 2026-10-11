@@ -1244,6 +1244,8 @@ export interface LocaleStrings {
     // general pane - service status
     serviceStatusTitle: string;
     serviceStatusChecking: string;
+    serviceStatusReadRetry: string;
+    serviceRestartUnknown: string;
     serviceStatusLoadError: string;
     serviceRestartFailed: string;
     serviceStatusRunning: string;
