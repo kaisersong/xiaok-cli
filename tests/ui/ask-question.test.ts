@@ -30,6 +30,28 @@ describe('ask-question', () => {
     });
   });
 
+  it('separates the direct question menu from prior output without accumulating gaps', async () => {
+    const harness = createTtyHarness(100, 24);
+    process.stdout.write('PREVIOUS_TOOL_OUTPUT\n');
+    const pending = askQuestion({ question: 'PROMPT_SPACING_QUESTION', options: [{label: 'Yes'}, {label: 'No'}] });
+    try {
+      const lines = harness.screen.lines();
+      const previous = lines.findIndex(line => line.includes('PREVIOUS_TOOL_OUTPUT'));
+      const question = lines.findIndex(line => line.includes('PROMPT_SPACING_QUESTION'));
+      expect(question).toBe(previous + 2);
+      expect(lines[previous + 1].trim()).toBe('');
+      harness.send('\x1b[B');
+      expect(harness.screen.lines().findIndex(line => line.includes('PROMPT_SPACING_QUESTION'))).toBe(question);
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({labels: ['No']});
+      expect(harness.screen.text()).toContain('PREVIOUS_TOOL_OUTPUT');
+    } finally {
+      harness.send('\x1b');
+      await pending;
+      harness.restore();
+    }
+  });
+
   describe('key handling', () => {
 
     it('shows option numbers and submits the corresponding single choice without Enter', async () => {

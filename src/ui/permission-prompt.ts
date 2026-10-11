@@ -200,6 +200,7 @@ export async function showPermissionPrompt(
   return new Promise((resolve) => {
     let resolved = false;
     let renderWithRenderer = useRenderer;
+    let directPromptStarted = false;
     transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
 
     const degradeRenderer = (context: string, _error: unknown) => {
@@ -243,6 +244,10 @@ export async function showPermissionPrompt(
         }
       }
 
+      if (!directPromptStarted) {
+        stdout.write('\n');
+        directPromptStarted = true;
+      }
       for (const line of lines) {
         stdout.write(line + '\n');
       }

@@ -129,6 +129,7 @@ export async function showPermissionPrompt(toolName, input, config) {
     return new Promise((resolve) => {
         let resolved = false;
         let renderWithRenderer = useRenderer;
+        let directPromptStarted = false;
         transcriptLogger?.record({ type: 'permission_prompt_open', toolName, timestamp: Date.now() });
         const degradeRenderer = (context, _error) => {
             renderWithRenderer = false;
@@ -164,6 +165,10 @@ export async function showPermissionPrompt(toolName, input, config) {
                 catch (error) {
                     degradeRenderer('permission_prompt_renderer', error);
                 }
+            }
+            if (!directPromptStarted) {
+                stdout.write('\n');
+                directPromptStarted = true;
             }
             for (const line of lines) {
                 stdout.write(line + '\n');

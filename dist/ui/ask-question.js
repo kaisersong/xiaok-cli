@@ -157,6 +157,7 @@ export async function askQuestion(params) {
         const checked = new Set();
         let renderedRowCount = 0;
         let externallyRendered = false;
+        let directPromptStarted = false;
         let settled = false;
         function clearFrame() {
             if (externallyRendered) {
@@ -195,6 +196,10 @@ export async function askQuestion(params) {
                 }
             }
             externallyRendered = false;
+            if (!directPromptStarted) {
+                stdout.write('\n');
+                directPromptStarted = true;
+            }
             // Write lines without trailing newline — cursor stays on last line
             stdout.write(frameLines.join('\n'));
         }

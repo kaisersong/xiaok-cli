@@ -476,6 +476,9 @@ describe('permission-prompt', () => {
       expect(openScreen).toContain('tool-row-2');
       expect(openScreen).toContain('xiaok 想要执行以下操作');
       expect(openScreen).toContain('命令: git status --short');
+      const openLines = harness.screen.lines();
+      const titleRow = openLines.findIndex(line => line.includes('xiaok 想要执行以下操作'));
+      expect(openLines[titleRow - 1].trim()).toBe('');
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_once' });
@@ -522,6 +525,28 @@ describe('permission-prompt', () => {
       expect(closedScreen).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
+    });
+
+    it('separates the direct permission menu from prior output once across navigation', async () => {
+      const harness = createTtyHarness(120, 24);
+      process.stdout.write('PREVIOUS_TOOL_OUTPUT\n');
+      const pending = showPermissionPrompt('edit', { file_path: '/tmp/example.sh' });
+      try {
+        const lines = harness.screen.lines();
+        const previous = lines.findIndex(line => line.includes('PREVIOUS_TOOL_OUTPUT'));
+        const title = lines.findIndex(line => line.includes('xiaok 想要执行以下操作'));
+        expect(title).toBe(previous + 2);
+        expect(lines[previous + 1].trim()).toBe('');
+        harness.send('\x1b[B');
+        expect(harness.screen.lines().findIndex(line => line.includes('xiaok 想要执行以下操作'))).toBe(title);
+        harness.send('\r');
+        await pending;
+        expect(harness.screen.text()).toContain('PREVIOUS_TOOL_OUTPUT');
+      } finally {
+        harness.send('\x1b');
+        await pending;
+        harness.restore();
+      }
     });
 
     it('does not damage surrounding transcript lines when the non-renderer menu closes', async () => {

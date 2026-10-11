@@ -209,6 +209,7 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
     const checked = new Set<number>();
     let renderedRowCount = 0;
     let externallyRendered = false;
+    let directPromptStarted = false;
     let settled = false;
 
     function clearFrame() {
@@ -249,6 +250,10 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
         }
       }
       externallyRendered = false;
+      if (!directPromptStarted) {
+        stdout.write('\n');
+        directPromptStarted = true;
+      }
       // Write lines without trailing newline — cursor stays on last line
       stdout.write(frameLines.join('\n'));
     }
