@@ -55,6 +55,21 @@ function pickString(value: unknown): string | undefined {
 }
 
 /**
+ * API keys are pasted by hand and occasionally arrive with copy artifacts:
+ * a provider label prefix ("tavily tvly-…"), wrapping quotes, or stray
+ * whitespace. Strip those before use; a clean key is returned unchanged.
+ * The label is only removed when directly followed by whitespace or a colon,
+ * so keys that merely contain the label are never mangled.
+ */
+function sanitizeApiKey(value: unknown, providerLabel: string): string | undefined {
+  const raw = pickString(value);
+  if (!raw) return undefined;
+  const unquoted = raw.replace(/^['"]+|['"]+$/g, '').trim();
+  const stripped = unquoted.replace(new RegExp(`^${providerLabel}[\\s:]+`, 'i'), '').trim();
+  return stripped.length ? stripped : undefined;
+}
+
+/**
  * Normalize an arbitrary input into a ConnectorsConfig.
  * Unknown providers fall back to defaults; unknown fields are dropped.
  * Empty strings are coerced to undefined.
@@ -77,15 +92,15 @@ export function normalizeConnectorsConfig(input: unknown): ConnectorsConfig {
   return {
     search: {
       provider: searchProvider,
-      tavilyApiKey: pickString(search.tavilyApiKey),
-      braveApiKey: pickString(search.braveApiKey),
-      firecrawlApiKey: pickString(search.firecrawlApiKey),
+      tavilyApiKey: sanitizeApiKey(search.tavilyApiKey, 'tavily'),
+      braveApiKey: sanitizeApiKey(search.braveApiKey, 'brave'),
+      firecrawlApiKey: sanitizeApiKey(search.firecrawlApiKey, 'firecrawl'),
       searxngBaseUrl: pickString(search.searxngBaseUrl),
     },
     fetch: {
       provider: fetchProvider,
-      jinaApiKey: pickString(fetch.jinaApiKey),
-      firecrawlApiKey: pickString(fetch.firecrawlApiKey),
+      jinaApiKey: sanitizeApiKey(fetch.jinaApiKey, 'jina'),
+      firecrawlApiKey: sanitizeApiKey(fetch.firecrawlApiKey, 'firecrawl'),
       firecrawlBaseUrl: pickString(fetch.firecrawlBaseUrl),
     },
   };
@@ -115,11 +130,11 @@ export function resolveCliConnectorsConfig(
   if (envSearchProvider && SEARCH_PROVIDER_NAMES.includes(envSearchProvider)) {
     normalized.search.provider = envSearchProvider;
   }
-  const tavilyKey = pickString(env.TAVILY_API_KEY);
+  const tavilyKey = sanitizeApiKey(env.TAVILY_API_KEY, 'tavily');
   if (tavilyKey) normalized.search.tavilyApiKey = tavilyKey;
-  const braveKey = pickString(env.BRAVE_API_KEY);
+  const braveKey = sanitizeApiKey(env.BRAVE_API_KEY, 'brave');
   if (braveKey) normalized.search.braveApiKey = braveKey;
-  const firecrawlKey = pickString(env.FIRECRAWL_API_KEY);
+  const firecrawlKey = sanitizeApiKey(env.FIRECRAWL_API_KEY, 'firecrawl');
   if (firecrawlKey) {
     normalized.search.firecrawlApiKey = firecrawlKey;
     normalized.fetch.firecrawlApiKey = firecrawlKey;
@@ -129,7 +144,7 @@ export function resolveCliConnectorsConfig(
   if (envFetchProvider && FETCH_PROVIDER_NAMES.includes(envFetchProvider)) {
     normalized.fetch.provider = envFetchProvider;
   }
-  const jinaKey = pickString(env.JINA_API_KEY);
+  const jinaKey = sanitizeApiKey(env.JINA_API_KEY, 'jina');
   if (jinaKey) normalized.fetch.jinaApiKey = jinaKey;
 
   return normalized;

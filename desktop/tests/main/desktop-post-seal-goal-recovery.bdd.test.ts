@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from 'vitest';
+import type {} from '../support/profile-account-context.js';
 import { spawn } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, realpathSync, rmSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { compileProtectionWorkerEntry } from '../fixtures/desktop-protection-worker-entry.js';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DesktopGoalCoordinator } from '../../electron/desktop-goal-coordinator.js';
@@ -44,9 +45,9 @@ const fixtures: Array<{ close(): Promise<void> }> = [];
 const roots: string[] = [];
 
 async function crashSeed(turnLimit: number): Promise<Seed> {
-  const root = mkdtempSync(join(tmpdir(), 'xiaok-post-seal-goal-seed-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'xiaok-post-seal-goal-seed-')));
   const mode = turnLimit === 1 ? 'goal-snapshot-last-turn' : 'goal-snapshot';
-  const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, mode], {
+  const child = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', fileURLToPath(new URL('../fixtures/desktop-post-seal-owner.ts', import.meta.url)), root, mode, inject('profileTestAccountRoot'), userInfo().homedir], {
     cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -79,7 +80,7 @@ async function crashSeed(turnLimit: number): Promise<Seed> {
 }
 
 async function failRecoveryInRealOwner(root: string, taskId: string): Promise<unknown> {
-  const child = spawn(process.execPath, ['--import', 'tsx', '--import', fileURLToPath(new URL('../fixtures/desktop-goal-recovery-native-prelude.mjs', import.meta.url)), fileURLToPath(new URL('../fixtures/desktop-post-seal-goal-recovery-owner.ts', import.meta.url)), root, taskId], {
+  const child = spawn(process.execPath, ['--import', fileURLToPath(new URL('../fixtures/desktop-recovery-test-account-preload.mjs', import.meta.url)), '--import', 'tsx', '--import', fileURLToPath(new URL('../fixtures/desktop-goal-recovery-native-prelude.mjs', import.meta.url)), fileURLToPath(new URL('../fixtures/desktop-post-seal-goal-recovery-owner.ts', import.meta.url)), root, taskId, inject('profileTestAccountRoot'), userInfo().homedir], {
     cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', XIAOK_TEST_RECOVERY_PROTECTION_ENTRY: protectionEntry.output, XIAOK_TEST_RECOVERY_PROTECTION_SOURCE_SHA: protectionEntry.sourceSha, XIAOK_TEST_RECOVERY_PROTECTION_ENTRY_SHA: protectionEntry.emittedSha, XIAOK_TEST_RECOVERY_PROTECTION_BUNDLE_SHA: digestFile(join(protectionEntry.output, '..', 'protected-observation-store.js')) },
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -121,7 +122,7 @@ function open(seed: Seed, options: {
   root?: string; authorize?: boolean;
   onReceipt?: (input: RecoveryReceipt, fixture: ConsumerFixture) => Promise<void>;
 } = {}) {
-  const root = options.root ?? mkdtempSync(join(tmpdir(), 'xiaok-post-seal-goal-bdd-'));
+  const root = realpathSync(options.root ?? mkdtempSync(join(tmpdir(), 'xiaok-post-seal-goal-bdd-')));
   if (!options.root) { roots.push(root); cpSync(seed.root, root, { recursive: true }); }
   const store = new DesktopMultiAgentStore(join(root, 'groups.sqlite'));
   const goalStore = new SqliteGoalStore(join(root, 'goals.sqlite'));

@@ -1,3 +1,4 @@
+import { modelConfigErrorMessage } from '../../lib/model-config-error';
 import { ProjectAgentModelSelect } from './ProjectAgentModelSelect';
 /**
  * CreateAgentModal — 2-step wizard to create a new kswarm agent.
@@ -43,6 +44,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const [runtimes, setRuntimes] = useState<RuntimeOption[]>([]);
   const [desktopModelId, setDesktopModelId] = useState('');
   const [instructions, setInstructions] = useState('');
+  const [creationError, setCreationError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const isXiaok = runtimeType === 'xiaok';
@@ -57,7 +59,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
 
   const reset = () => {
     setStep(1); setAgentType('worker'); setName(''); setRuntimeType('xiaok');
-    setInstructions(''); setDesktopModelId('');
+    setInstructions(''); setDesktopModelId(''); setCreationError('');
   };
 
   const handleClose = () => { reset(); onClose(); };
@@ -65,6 +67,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
   const handleCreate = async () => {
     if (!name.trim()) return;
     setLoading(true);
+    setCreationError('');
     const roles = AGENT_TYPES.find(t => t.id === agentType)!.roles;
     try {
       const result = isXiaok
@@ -84,9 +87,11 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
         handleClose();
       } else {
         console.error('[CreateAgent] createAgent returned null');
+        setCreationError(t.desktopSettings.modelConfigUnavailable);
       }
     } catch (err) {
       console.error('[CreateAgent] failed:', err);
+      setCreationError(modelConfigErrorMessage(err, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? t.desktopSettings.modelConfigUnavailable);
     } finally {
       setLoading(false);
     }
@@ -123,6 +128,7 @@ export function CreateAgentModal({ open, onClose }: CreateAgentModalProps) {
           </button>
         </div>
 
+        {creationError ? <div role="alert" className="mb-3 text-xs text-[var(--c-status-error-text)]">{creationError}</div> : null}
         {step === 1 ? (
           <div className="flex flex-col gap-3">
             {AGENT_TYPES.map(type => {

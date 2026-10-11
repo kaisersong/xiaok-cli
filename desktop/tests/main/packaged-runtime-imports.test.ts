@@ -43,6 +43,17 @@ describe('actual packaged runtime imports', () => {
     expect(() => verify(options)).toThrow(/ajv.*production dependency/);
   });
 
+  it('rejects a missing local production module before Desktop launch', async () => {
+    const options = await fixture("import './memory/configuration.js';");
+    expect(() => verify(options)).toThrow(/missing packaged local module.*configuration/);
+  });
+
+  it('resolves relative re-exports inside the archive', async () => {
+    write('dist/main/memory/configuration.js', 'export const ready = true;');
+    const options = await fixture("export { ready } from './memory/configuration.js';");
+    expect(verify(options).specifiers).toEqual([]);
+  });
+
   it('rejects a declared package missing from the ASAR', async () => {
     const options = await fixture("import 'cross-spawn';", { 'cross-spawn': '7.0.6' });
     expect(() => verify(options)).toThrow(/cross-spawn/);
@@ -114,7 +125,8 @@ describe('actual packaged runtime imports', () => {
     expect(() => verify(options)).toThrow(/production dependency/);
   });
 
-  it('excludes Node/Electron builtins, relative imports, comments, strings and optional dynamic imports', async () => {
+  it('checks local static imports while excluding builtins, comments, strings and optional dynamic imports', async () => {
+    write('dist/main/local.js', 'export const ready = true;');
     const options = await fixture(`import 'electron'; import 'fs'; import 'node:fs/promises'; import './local.js';
       // import 'missing-comment';
       const example = "import 'missing-string'";

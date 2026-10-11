@@ -17,6 +17,26 @@ const workflowLabels: WorkflowLabels = {
 };
 
 describe('ChatShell project card detection', () => {
+  it('restores a project card from the durable conversation creation receipt', () => {
+    const msg = buildProjectCardMessageFromToolResult(JSON.stringify({
+      ok: true, created: true, projectId: 'proj-real', roomId: 'room-real',
+      project: { id: 'proj-real', name: '研究项目', goal: '交付报告', status: 'planning', createdAt: 123, members: ['a', 'b', 'c'], executionMode: 'auto' },
+    }));
+    expect(msg).toMatchObject({ id: 'msg-project-proj-real', role: 'project_card', projectData: {
+      projectId: 'proj-real', name: '研究项目', goal: '交付报告', status: 'planning', createdAt: 123, memberCount: 3, executionMode: 'auto',
+    } });
+  });
+
+  it.each([
+    { ok: false, created: true, project: { id: 'p', name: 'N' } },
+    { ok: true, project: { id: 'p', name: 'N' } },
+    { ok: true, created: true, project: { name: 'N' } },
+    { ok: true, created: true, projectId: 'other', project: { id: 'p', name: 'N' } },
+    { ok: true, proposal: { kind: 'project_proposal', name: 'N' } },
+  ])('ignores unconfirmed or inconsistent project facts %j', response => {
+    expect(buildProjectCardMessageFromToolResult(JSON.stringify(response))).toBeNull();
+  });
+
   it('detects create_project canvas_tool_result and produces project_card message', () => {
     const event = {
       type: 'canvas_tool_result',

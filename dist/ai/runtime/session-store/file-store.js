@@ -6,7 +6,7 @@ import { captureIntentPublicationRequest, captureIntentPublicationRetry, intentP
 import { assertCapturedMessageSchema } from '../provider-private-projection.js';
 import { parseCapturedSourceJson, capturedFields, capturedIdentity, capturedInteger, freezeCapturedData } from '../../../runtime/verification/captured-source-json.js';
 import { parseIntentHostSubject } from '../../../runtime/verification/intent-host-subject.js';
-import { captureIntentNativeRequest, applyIntentNativeMutation, parseIntentNativeContracts, assertNoIntentNativeJournal, freezeIntentNativeLedger } from '../../../runtime/intent-delegation/native-contract-journal.js';
+import { captureIntentNativeRequest, applyIntentNativeMutation, intentNativeLedgerHash, parseIntentNativeContracts, assertNoIntentNativeJournal, freezeIntentNativeLedger } from '../../../runtime/intent-delegation/native-contract-journal.js';
 import { intentProducerRouteVector, assertIntentProducerRoutesCurrent, captureIntentProducerRequest, applyIntentProducerAction, intentProducerLedgerHash } from '../../../runtime/intent-delegation/producer-facts.js';
 import { captureIntentSnapshot, captureIntentExecutionRequest, appendIntentExecutionTerminal, assertIntentSessionCommit } from '../../../runtime/intent-delegation/intent-commit-boundary.js';
 import { holdCompoundDeletionCensus, readCompoundDeletionBytes, createCompoundDeletionBudget } from './compound-deletion-census.js';
@@ -16,7 +16,7 @@ import { acquireSaveLock } from './mutation-lock.js';
 import { isDeepStrictEqual } from 'node:util';
 import { captureMigrationMarker, migrationMarkerFromInput, computeSessionSnapshotHash, freezeMigrationSnapshot } from './migration.js';
 import { validateSemanticCompactionLedger } from '../../../runtime/sol-pi/semantic-compaction-ledger.js';
-import { assertSessionExecutionLease, acquireSessionStoreExecutionGuard } from './execution-authority.js';
+import { assertSessionExecutionLease, assertSessionExecutionContext, acquireSessionStoreExecutionGuard } from './execution-authority.js';
 import { SessionCommitNotifications, assertSynchronousSessionHook, computeSessionHistoryDigest, prepareSessionStoreCommit } from './store.js';
 import { mergeProtectedObservationClosures } from '../protected-observation-closure.js';
 import { existsSync, unlinkSync, mkdirSync, readFileSync, readdirSync, opendirSync, lstatSync, } from 'node:fs';
@@ -54,6 +54,89 @@ export function isConfirmedFileSessionPrecommitRejection(store, method, promise)
     const fact = confirmedPrecommitRejections.get(promise);
     return fact?.store === store && fact.method === method;
 }
+/** Full field-presence check for the ordinary intent structures. Clone helpers
+ * intentionally retain extension fields, so roundtrip equality alone is insufficient. */
+function assertOrdinaryIntentFields(ledger) {
+    const fields = (value, required, optional = '') => capturedFields(value, required.split(' '), optional ? optional.split(' ') : []);
+    const strings = (value) => { if (!Array.isArray(value) || value.some(item => typeof item !== 'string'))
+        throw Error('ordinary_intent_strings'); };
+    const text = (value) => { if (typeof value !== 'string')
+        throw Error('ordinary_intent_text'); };
+    const step = (value) => {
+        fields(value, 'stepId key order role skillName dependsOn status riskTier');
+        for (const key of ['stepId', 'key', 'role', 'status', 'riskTier'])
+            text(value[key]);
+        if (value.skillName !== null)
+            text(value.skillName);
+        strings(value.dependsOn);
+        capturedInteger(value.order);
+    };
+    fields(ledger.ownership, 'state updatedAt', 'ownerInstanceId previousOwnerInstanceId');
+    text(ledger.ownership.state);
+    capturedInteger(ledger.ownership.updatedAt);
+    for (const key of ['ownerInstanceId', 'previousOwnerInstanceId'])
+        if (Object.hasOwn(ledger.ownership, key))
+            capturedIdentity(ledger.ownership[key]);
+    capturedInteger(ledger.updatedAt);
+    capturedIdentity(ledger.instanceId);
+    if (!Array.isArray(ledger.intents) || !Array.isArray(ledger.breadcrumbs))
+        throw Error('ordinary_intent_arrays');
+    for (const record of [...ledger.intents, ...(ledger.latestPlan ? [ledger.latestPlan] : [])]) {
+        fields(record, 'intentId instanceId sessionId rawIntent normalizedIntent intentType deliverable finalDeliverable explicitConstraints delegationBoundary riskTier intentMode segmentationConfidence templateId stages activeStageId steps activeStepId overallStatus attemptCount createdAt updatedAt', 'providedSourcePaths artifacts latestBreadcrumb latestReceipt blockedReason salvageSummary');
+        for (const key of ['intentId', 'instanceId', 'sessionId', 'rawIntent', 'normalizedIntent', 'intentType', 'deliverable', 'finalDeliverable', 'riskTier', 'intentMode', 'segmentationConfidence', 'templateId', 'activeStageId', 'activeStepId', 'overallStatus', 'latestBreadcrumb', 'latestReceipt', 'blockedReason'])
+            if (Object.hasOwn(record, key))
+                text(record[key]);
+        for (const key of ['explicitConstraints', 'delegationBoundary', 'providedSourcePaths', 'salvageSummary'])
+            if (Object.hasOwn(record, key))
+                strings(record[key]);
+        capturedInteger(record.attemptCount, 1);
+        capturedInteger(record.createdAt);
+        capturedInteger(record.updatedAt, record.createdAt);
+        if (!Array.isArray(record.stages) || !Array.isArray(record.steps) || record.artifacts !== undefined && !Array.isArray(record.artifacts))
+            throw Error('ordinary_intent_arrays');
+        record.steps.forEach(step);
+        for (const stage of record.stages) {
+            fields(stage, 'stageId order label intentType deliverable templateId riskTier dependsOnStageIds steps status activeStepId structuralValidation semanticValidation needsFreshContextHandoff', 'latestArtifactId');
+            for (const key of ['stageId', 'label', 'intentType', 'deliverable', 'templateId', 'riskTier', 'status', 'activeStepId', 'structuralValidation', 'semanticValidation', 'latestArtifactId'])
+                if (Object.hasOwn(stage, key))
+                    text(stage[key]);
+            capturedInteger(stage.order);
+            strings(stage.dependsOnStageIds);
+            if (typeof stage.needsFreshContextHandoff !== 'boolean' || !Array.isArray(stage.steps))
+                throw Error('ordinary_intent_stage');
+            stage.steps.forEach(step);
+        }
+        for (const artifact of record.artifacts ?? []) {
+            fields(artifact, 'artifactId stageId kind storage label structuralValidation semanticValidation createdAt', 'path inlineValue summary');
+            for (const key of ['artifactId', 'stageId', 'kind', 'storage', 'label', 'structuralValidation', 'semanticValidation', 'path', 'inlineValue', 'summary'])
+                if (Object.hasOwn(artifact, key))
+                    text(artifact[key]);
+            capturedInteger(artifact.createdAt);
+        }
+    }
+    for (const entry of ledger.breadcrumbs) {
+        fields(entry, 'intentId stepId status message createdAt');
+        for (const key of ['intentId', 'stepId', 'status', 'message'])
+            text(entry[key]);
+        capturedInteger(entry.createdAt);
+    }
+    if (ledger.receipt !== null) {
+        fields(ledger.receipt, 'intentId stepId note createdAt');
+        text(ledger.receipt.intentId);
+        text(ledger.receipt.stepId);
+        text(ledger.receipt.note);
+        capturedInteger(ledger.receipt.createdAt);
+    }
+    if (ledger.salvage !== null) {
+        fields(ledger.salvage, 'intentId summary createdAt', 'reason');
+        text(ledger.salvage.intentId);
+        strings(ledger.salvage.summary);
+        capturedInteger(ledger.salvage.createdAt);
+        if (Object.hasOwn(ledger.salvage, 'reason'))
+            text(ledger.salvage.reason);
+    }
+}
+const ordinaryReleasePermits = new WeakMap();
 export class FileSessionStore {
     rootDir;
     atomicWrite;
@@ -227,12 +310,133 @@ export class FileSessionStore {
             throw Error('intent_native_missing');
         return row;
     }
+    /** Host-only Windows exit service. Never registered as an agent tool or IPC. */
+    async releaseOrdinarySessionOwnership(raw) {
+        if (!raw || typeof raw !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(raw)))
+            throw Error('ordinary_release_shape');
+        const descriptors = Object.getOwnPropertyDescriptors(raw);
+        if (Reflect.ownKeys(raw).some(key => typeof key !== 'string') || Object.values(descriptors).some(value => !('value' in value)))
+            throw Error('ordinary_release_accessor');
+        const request = Object.fromEntries(Object.entries(descriptors).map(([key, value]) => [key, value.value]));
+        capturedFields(request, ['sessionId', 'instanceId', 'expectedLedgerHash', 'requestSource', 'now', 'hostContext']);
+        if (request.requestSource !== 'user')
+            throw Error('ordinary_release_source');
+        assertSessionExecutionContext(request.hostContext, { requestSource: 'user', ownerId: request.instanceId, scopeId: 'cli-session-exit' });
+        // Original native request parser still owns identifiers, time and CAS shape.
+        const permit = Object.freeze({});
+        const { input } = captureIntentNativeRequest('ownership', { sessionId: request.sessionId, instanceId: request.instanceId,
+            expectedLedgerHash: request.expectedLedgerHash, requestSource: 'user', now: request.now, action: 'release', confirmHighRisk: false, lease: permit });
+        if (input.nativeAction !== 'ownership')
+            throw Error('ordinary_release_action');
+        if (process.platform !== 'win32')
+            return false;
+        assertOrdinarySourceWriterRoute();
+        const source = this.readOrdinaryReleaseSource(input.sessionId);
+        if (!source)
+            return false;
+        this.assertOrdinaryReleaseOwner(source.snapshot, input);
+        ordinaryReleasePermits.set(permit, { store: this, context: request.hostContext, input, sourceBytes: source.bytes, entered: false });
+        try {
+            await this.transitionIntentSessionOwnership({ sessionId: input.sessionId, instanceId: input.instanceId, expectedLedgerHash: input.expectedLedgerHash, action: input.action, confirmHighRisk: input.confirmHighRisk, requestSource: input.requestSource, now: input.now, lease: permit });
+            return true;
+        }
+        finally {
+            ordinaryReleasePermits.delete(permit);
+        }
+    }
+    assertOrdinaryReleaseOwner(snapshot, input) {
+        const ledger = snapshot.intentDelegation;
+        if (!ledger || ledger.instanceId !== input.instanceId || ledger.ownership.ownerInstanceId !== input.instanceId
+            || !['owned', 'resume', 'takeover'].includes(ledger.ownership.state) || intentNativeLedgerHash(ledger) !== input.expectedLedgerHash
+            || input.now < Math.max(snapshot.updatedAt, ledger.updatedAt))
+            throw Error('ordinary_release_owner_or_cas');
+    }
+    readOrdinaryReleaseSource(sessionId) {
+        const file = this.getFilePath(sessionId), stat = statIfPresent(file);
+        if (!stat)
+            throw Error('ordinary_release_session_missing');
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16 * 1024 * 1024 || lstatSync(this.rootDir).isSymbolicLink())
+            throw Error('ordinary_release_source_path');
+        if (this.readSessionMigration(sessionId) || this.readDeletionJournal(sessionId)
+            || readSessionAliases(this.rootDir).some(row => row.targetSessionId === sessionId))
+            return null;
+        const bytes = readFileSync(file, 'utf8');
+        try {
+            const document = parseCapturedSourceJson(bytes);
+            if (['executionProtected', 'protectedObservationClosure', 'compoundOperations', 'semanticCompaction'].some(key => Object.hasOwn(document, key)))
+                return null;
+            for (const key of ['compactions', 'memoryRefs', 'approvalRefs', 'backgroundJobRefs']) {
+                if (!Array.isArray(document[key]) || document[key].length)
+                    return null;
+            }
+            const ledger = document.intentDelegation;
+            if (!ledger)
+                return null;
+            capturedFields(ledger, ['sessionId', 'instanceId', 'latestPlan', 'intents', 'breadcrumbs', 'receipt', 'salvage', 'ownership', 'updatedAt'], ['activeIntentId']);
+            const hasNativeHistory = (value) => {
+                if (!value || typeof value !== 'object')
+                    return false;
+                return Object.entries(value).some(([key, child]) => ['executionTerminals', 'producerReports', 'nativeContracts', 'producerActions', 'publicationCandidates', 'verificationExecutions'].includes(key) || hasNativeHistory(child));
+            };
+            if (hasNativeHistory(ledger))
+                return null;
+            assertOrdinaryIntentFields(ledger);
+            if (Object.hasOwn(document, 'model') && typeof document.model !== 'string')
+                return null;
+            readCapturedSessionDocument(bytes, sessionId);
+            const snapshot = parseFileSessionSnapshot(bytes, sessionId, true);
+            // Refuse any legacy source requiring normalization; release cannot lose data.
+            if (!isDeepStrictEqual(document, JSON.parse(JSON.stringify({ schemaVersion: SESSION_SCHEMA_VERSION, ...snapshot }))))
+                return null;
+            return { bytes, snapshot };
+        }
+        catch {
+            return null;
+        } // Unknown/malformed histories must use the strong path.
+    }
+    assertCommitExecutionLease(terminal, lease, target) {
+        const record = ordinaryReleasePermits.get(lease);
+        if (!record) {
+            assertSessionExecutionLease(lease, target);
+            return;
+        }
+        if (record.store !== this || process.platform !== 'win32' || target.root !== this.rootDir
+            || target.sessionIdentity !== record.input.sessionId || target.requestSource !== 'user'
+            || !terminal || !('nativeAction' in terminal) || !isDeepStrictEqual(terminal, { ...record.input, nativeAction: 'ownership' }))
+            throw Error('invalid_ordinary_release_permit');
+        assertSessionExecutionContext(record.context, { requestSource: 'user', ownerId: record.input.instanceId, scopeId: 'cli-session-exit' });
+        assertOrdinarySourceWriterRoute();
+    }
+    assertOrdinaryReleaseDelta(previous, next, record) {
+        this.assertOrdinaryReleaseOwner(previous, record.input);
+        if (!isDeepStrictEqual(next.intentDelegation?.ownership, { state: 'released', previousOwnerInstanceId: record.input.instanceId, updatedAt: record.input.now }))
+            throw Error('ordinary_release_delta');
+        const restored = JSON.parse(JSON.stringify(next));
+        for (const key of ['updatedAt', 'storeRevision', 'historyDigest']) {
+            if (Object.hasOwn(previous, key))
+                restored[key] = previous[key];
+            else
+                delete restored[key];
+        }
+        if (!restored.intentDelegation || !previous.intentDelegation)
+            throw Error('ordinary_release_delta');
+        for (const key of ['ownership', 'instanceId', 'updatedAt'])
+            restored.intentDelegation[key] = previous.intentDelegation[key];
+        if (!isDeepStrictEqual(restored, JSON.parse(JSON.stringify(previous))))
+            throw Error('ordinary_release_delta');
+    }
     async transitionIntentSessionOwnership(raw) {
         const { input, lease } = captureIntentNativeRequest('ownership', raw);
         this.commitNativeIntent(input, lease);
     }
     commitNativeIntent(input, lease) {
-        assertSessionExecutionLease(lease, { root: this.rootDir, sessionIdentity: input.sessionId, requestSource: input.requestSource, ...(input.nativeAction !== 'advance' || input.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) });
+        this.assertCommitExecutionLease(input, lease, { root: this.rootDir, sessionIdentity: input.sessionId, requestSource: input.requestSource, ...(input.nativeAction !== 'advance' || input.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) });
+        const ordinary = ordinaryReleasePermits.get(lease);
+        if (ordinary) {
+            if (ordinary.entered)
+                throw Error('ordinary_release_replay');
+            ordinary.entered = true;
+        }
         const snapshot = this.readSnapshot(input.sessionId);
         if (!snapshot)
             throw Error('intent_native_session');
@@ -293,10 +497,19 @@ export class FileSessionStore {
         const releaseLock = this.acquireWriterMutationLock(lockPath, rootLockHeld);
         let releaseExecution = () => { };
         try {
-            releaseExecution = acquireSessionStoreExecutionGuard(this.rootDir, snapshot.sessionId, cas?.lease ?? executionLease, true);
+            const ordinary = executionLease && ordinaryReleasePermits.get(executionLease);
+            if (ordinary)
+                this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: snapshot.sessionId, requestSource: 'user' });
+            releaseExecution = acquireSessionStoreExecutionGuard(this.rootDir, snapshot.sessionId, cas?.lease ?? (ordinary ? undefined : executionLease), true);
             if (this.readDeletionJournal(snapshot.sessionId))
                 throw new Error('session_deleted');
             const previous = this.readSnapshot(snapshot.sessionId, terminal !== undefined && ('nativeAction' in terminal || 'publicationAction' in terminal));
+            if (ordinary) {
+                const source = this.readOrdinaryReleaseSource(snapshot.sessionId);
+                if (!source || source.bytes !== ordinary.sourceBytes || !previous)
+                    throw Error('ordinary_release_source_changed');
+                this.assertOrdinaryReleaseOwner(previous, ordinary.input);
+            }
             const publicationCandidateId = terminal && 'publicationAction' in terminal ? intentPublicationMutationCandidateId(previous?.intentDelegation, terminal) : undefined;
             const publicationRoute = terminal && 'publicationAction' in terminal ? intentPublicationRouteVector(previous?.intentDelegation, publicationCandidateId) : undefined;
             const producerRoutes = terminal && !('nativeAction' in terminal) && !('publicationAction' in terminal) && 'action' in terminal ? intentProducerRouteVector(previous?.intentDelegation) : undefined;
@@ -304,20 +517,20 @@ export class FileSessionStore {
                 if (!previous)
                     throw Error('intent_execution_session');
                 if ('publicationAction' in terminal) {
-                    assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...((terminal.publicationAction === 'observe' || terminal.publicationAction === 'receiver' && (terminal.action.kind === 'observe' || terminal.action.kind === 'retire') || terminal.publicationAction === 'verification' && (terminal.verificationAction === 'observe-enrollment' || terminal.verificationAction === 'operation' && terminal.action.kind === 'observe')) ? { allowedKinds: ['direct-mutation', 'recovery'] } : { kind: 'direct-mutation' }) });
+                    this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...((terminal.publicationAction === 'observe' || terminal.publicationAction === 'receiver' && (terminal.action.kind === 'observe' || terminal.action.kind === 'retire') || terminal.publicationAction === 'verification' && (terminal.verificationAction === 'observe-enrollment' || terminal.verificationAction === 'operation' && terminal.action.kind === 'observe')) ? { allowedKinds: ['direct-mutation', 'recovery'] } : { kind: 'direct-mutation' }) });
                     snapshot = applyIntentPublicationMutation(previous, terminal);
                 }
                 else if ('nativeAction' in terminal) {
-                    assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...(terminal.nativeAction !== 'advance' || terminal.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) });
+                    this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...(terminal.nativeAction !== 'advance' || terminal.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) });
                     snapshot = applyIntentNativeMutation(previous, terminal);
                 }
                 else if ('action' in terminal) {
-                    assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, kind: 'direct-mutation' });
+                    this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, kind: 'direct-mutation' });
                     snapshot = applyIntentProducerAction(previous, terminal, producerRoutes);
                 }
                 else {
                     const existing = previous.intentDelegation?.intents.find(i => i.intentId === terminal.intentId)?.executionTerminals?.find(e => e.kind === terminal.kind && e.identity === terminal.identity && e.status === terminal.status && e.recordedAt === terminal.recordedAt);
-                    assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...(existing ? {} : { kind: 'direct-mutation' }) });
+                    this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...(existing ? {} : { kind: 'direct-mutation' }) });
                     snapshot = appendIntentExecutionTerminal(previous, terminal);
                 }
             }
@@ -329,7 +542,7 @@ export class FileSessionStore {
                     assertIntentPublicationRoute(previous?.intentDelegation, publicationRoute, publicationCandidateId);
                 if (producerRoutes !== undefined)
                     assertIntentProducerRoutesCurrent(previous?.intentDelegation, producerRoutes);
-                assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource });
+                this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource });
                 const actual = this.readSnapshot(snapshot.sessionId, terminal !== undefined && ('nativeAction' in terminal || 'publicationAction' in terminal));
                 if (!actual || intentProducerLedgerHash(actual.intentDelegation) !== intentProducerLedgerHash(previous.intentDelegation) || actual.storeRevision !== previous.storeRevision || actual.historyDigest !== previous.historyDigest)
                     throw Error('intent_fact_changed');
@@ -377,9 +590,15 @@ export class FileSessionStore {
             if (publicationRoute !== undefined)
                 assertIntentPublicationRoute(previous?.intentDelegation, publicationRoute, publicationCandidateId);
             if (terminal)
-                assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...('publicationAction' in terminal ? ((terminal.publicationAction === 'observe' || terminal.publicationAction === 'receiver' && (terminal.action.kind === 'observe' || terminal.action.kind === 'retire') || terminal.publicationAction === 'verification' && (terminal.verificationAction === 'observe-enrollment' || terminal.verificationAction === 'operation' && terminal.action.kind === 'observe')) ? { allowedKinds: ['direct-mutation', 'recovery'] } : { kind: 'direct-mutation' }) : 'nativeAction' in terminal ? (terminal.nativeAction !== 'advance' || terminal.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) : 'action' in terminal ? { kind: 'direct-mutation' } : {}) });
+                this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...('publicationAction' in terminal ? ((terminal.publicationAction === 'observe' || terminal.publicationAction === 'receiver' && (terminal.action.kind === 'observe' || terminal.action.kind === 'retire') || terminal.publicationAction === 'verification' && (terminal.verificationAction === 'observe-enrollment' || terminal.verificationAction === 'operation' && terminal.action.kind === 'observe')) ? { allowedKinds: ['direct-mutation', 'recovery'] } : { kind: 'direct-mutation' }) : 'nativeAction' in terminal ? (terminal.nativeAction !== 'advance' || terminal.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) : 'action' in terminal ? { kind: 'direct-mutation' } : {}) });
             if (terminal && !isDeepStrictEqual(this.readSnapshot(snapshot.sessionId, terminal !== undefined && ('nativeAction' in terminal || 'publicationAction' in terminal))?.intentDelegation, previous?.intentDelegation))
                 throw Error('intent_commit_original_changed');
+            if (ordinary) {
+                this.assertOrdinaryReleaseDelta(previous, durableSnapshot, ordinary);
+                const source = this.readOrdinaryReleaseSource(snapshot.sessionId);
+                if (!source || source.bytes !== ordinary.sourceBytes)
+                    throw Error('ordinary_release_source_changed');
+            }
             assertOrdinarySourceWriterRoute();
             assertSynchronousWrite(this.atomicWrite(this.getFilePath(snapshot.sessionId), JSON.stringify(document, null, 2), durability));
             assertSynchronousWrite(this.atomicWrite(join(this.rootDir, 'last_session'), snapshot.sessionId, durability));
@@ -388,9 +607,14 @@ export class FileSessionStore {
             if (publicationRoute !== undefined)
                 assertIntentPublicationRoute(previous?.intentDelegation, publicationRoute, publicationCandidateId);
             if (terminal) {
-                assertSessionExecutionLease(executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...('publicationAction' in terminal ? ((terminal.publicationAction === 'observe' || terminal.publicationAction === 'receiver' && (terminal.action.kind === 'observe' || terminal.action.kind === 'retire') || terminal.publicationAction === 'verification' && (terminal.verificationAction === 'observe-enrollment' || terminal.verificationAction === 'operation' && terminal.action.kind === 'observe')) ? { allowedKinds: ['direct-mutation', 'recovery'] } : { kind: 'direct-mutation' }) : 'nativeAction' in terminal ? (terminal.nativeAction !== 'advance' || terminal.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) : 'action' in terminal ? { kind: 'direct-mutation' } : {}) });
+                this.assertCommitExecutionLease(terminal, executionLease, { root: this.rootDir, sessionIdentity: terminal.sessionId, requestSource: terminal.requestSource, ...('publicationAction' in terminal ? ((terminal.publicationAction === 'observe' || terminal.publicationAction === 'receiver' && (terminal.action.kind === 'observe' || terminal.action.kind === 'retire') || terminal.publicationAction === 'verification' && (terminal.verificationAction === 'observe-enrollment' || terminal.verificationAction === 'operation' && terminal.action.kind === 'observe')) ? { allowedKinds: ['direct-mutation', 'recovery'] } : { kind: 'direct-mutation' }) : 'nativeAction' in terminal ? (terminal.nativeAction !== 'advance' || terminal.phase === 'enrolling' ? { kind: 'direct-mutation' } : { allowedKinds: ['direct-mutation', 'recovery'] }) : 'action' in terminal ? { kind: 'direct-mutation' } : {}) });
                 if (intentProducerLedgerHash(this.readSnapshot(snapshot.sessionId, terminal !== undefined && ('nativeAction' in terminal || 'publicationAction' in terminal))?.intentDelegation) !== intentProducerLedgerHash(durableSnapshot.intentDelegation))
                     throw Error('intent_producer_readback');
+            }
+            if (ordinary) {
+                const source = this.readOrdinaryReleaseSource(snapshot.sessionId);
+                if (!source || !isDeepStrictEqual(JSON.parse(source.bytes), JSON.parse(JSON.stringify(document))))
+                    throw Error('ordinary_release_readback');
             }
             this.commitNotifications.publish(durableSnapshot);
             return { storeRevision: durableSnapshot.storeRevision, historyDigest: durableSnapshot.historyDigest };

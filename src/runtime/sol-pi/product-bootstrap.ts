@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, lstatSync, realpathSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, lstatSync, realpathSync, readdirSync, existsSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { homedir, version as osVersion } from 'node:os';
 import { join, resolve, isAbsolute, normalize, dirname } from 'node:path';
 import { resolveRuntimeModelBinding } from '../../ai/providers/control-plane.js';
@@ -15,6 +15,7 @@ import {reserveSessionAliasBytes} from '../../ai/runtime/session-store/aliases.j
 import {assertCompoundHostStorage,inspectCompoundHostSources,type CompoundHostStorage} from './compound-host-storage.js';
 import {openCompoundExecutionDomain} from './compound-execution-domain.js';
 import { validateOrdinaryChildrenPolicy, type OrdinaryChildrenPolicy } from './delegation-policy.js';
+import {isRegisteredRecipeManifest,selectRecipeManifestPath} from './recipe-environment-registration.js';
 
 export interface ProductObservationPolicy { readonly opaqueProductObservationPolicy: never }
 interface Policy {
@@ -29,8 +30,6 @@ interface Policy {
 interface PermissionRevisionPort { getRevision(): number; onRevisionChanged(listener: (revision: number) => void): () => void }
 const policies = new WeakMap<object, Policy>();
 const ENVIRONMENT_ID = 'deepseek-recipe-0.1.1';
-const MANIFEST_BYTES = '50117314e0001bac768e500792d951f9b80fef8b97204a7dc6cd857a9a2713dd';
-const MANIFEST_SEMANTIC = 'a0e31c572efb0fbf2723ac56a6c65caf22efd931ac60458a7d38c1e255b21417';
 const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 function deny(reason: string): never { throw new Error(`SOL_PI_PRODUCT_${reason}`); }
 function keys(value: unknown, allowed: string[]): asserts value is Record<string, unknown> {
@@ -106,16 +105,21 @@ export function describeProductObservationPolicy(approved: ProductObservationPol
     bashSources: Object.freeze(policy.bashSources.map(source => Object.freeze({ ...source }))),
     localPersistence: policy.localPersistence, allowUnclassifiedText: policy.allowUnclassifiedText, allowModelDisclosure: policy.allowModelDisclosure });
 }
-function trustedEnvironment(root: string): { environment: DeepSeekRecipeEnvironment; manifest: DeepSeekRecipeManifest } {
+function trustedEnvironment(root: string): { environment: DeepSeekRecipeEnvironment; manifest: DeepSeekRecipeManifest; assertCurrent():void; close():void } {
   const registered = join(homedir(), '.cache', 'xiaok', 'sol-pi', ENVIRONMENT_ID);
   if (resolve(root) !== registered || realpathSync(root) !== registered) deny('ENVIRONMENT_NOT_REGISTERED');
-  for (const file of [root, join(root, 'environment.json'), join(root, 'manifest.json')]) {
+  for (const file of [root, join(root, 'environment.json')]) {
     const stat = lstatSync(file); if (stat.isSymbolicLink() || stat.uid !== process.getuid?.() || stat.mode & 0o022) deny('ENVIRONMENT_PERMISSIONS');
   }
-  const manifestFile = readJsonFile(join(root, 'manifest.json'), 2 * 1024 * 1024);
-  if (digest(manifestFile.bytes) !== MANIFEST_BYTES) deny('ENVIRONMENT_MANIFEST');
+  const selected=selectRecipeManifestPath(root),selectedStat=lstatSync(selected);
+  if(selectedStat.isSymbolicLink()||selectedStat.uid!==process.getuid?.()||selectedStat.mode&0o022)deny('ENVIRONMENT_PERMISSIONS');
+  const rootFd=openSync(root,constants.O_RDONLY|constants.O_DIRECTORY|constants.O_NOFOLLOW);
+  try {
+  const rootIdentity=fstatSync(rootFd);
+  const manifestFile = readJsonFile(selected, 2 * 1024 * 1024);
+  const selectedDigest=digest(manifestFile.bytes);
   const manifest = manifestFile.parsed as DeepSeekRecipeManifest;
-  if (manifest.sha256 !== MANIFEST_SEMANTIC || manifest.platform !== `${process.platform}-${process.arch}` || manifest.osVersion !== osVersion()) deny('ENVIRONMENT_MANIFEST');
+  if (!isRegisteredRecipeManifest(selectedDigest,manifest.sha256) || manifest.platform !== `${process.platform}-${process.arch}` || manifest.osVersion !== osVersion()) deny('ENVIRONMENT_MANIFEST');
   const environment = readJsonFile(join(root, 'environment.json'), 65536).parsed;
   keys(environment, ['pythonExecutable', 'sitePackages', 'tokenizerPath', 'wheelPath']);
   for (const key of ['pythonExecutable', 'sitePackages', 'tokenizerPath', 'wheelPath'] as const) if (environment[key] !== manifest[key]) deny('ENVIRONMENT_BINDING');
@@ -126,7 +130,20 @@ function trustedEnvironment(root: string): { environment: DeepSeekRecipeEnvironm
   for (const entry of manifest.directories) if (lstatSync(entry.path).isSymbolicLink() || JSON.stringify(readdirSync(entry.path).sort()) !== JSON.stringify(entry.names)) deny('ENVIRONMENT_DRIFT');
   for (const entry of manifest.links) if (realpathSync(entry.path) !== entry.target) deny('ENVIRONMENT_DRIFT');
   for (const path of manifest.absentPaths) if (existsSync(path)) deny('ENVIRONMENT_DRIFT');
-  return { environment: environment as unknown as DeepSeekRecipeEnvironment, manifest };
+  const assertCurrent=()=>{
+    const held=fstatSync(rootFd),actual=lstatSync(root);
+    if(!held.isDirectory()||!actual.isDirectory()||actual.isSymbolicLink()||realpathSync(root)!==registered
+      ||held.dev!==rootIdentity.dev||held.ino!==rootIdentity.ino||held.uid!==rootIdentity.uid||held.mode!==rootIdentity.mode
+      ||actual.dev!==held.dev||actual.ino!==held.ino||actual.uid!==held.uid||actual.mode!==held.mode
+      ||held.uid!==process.getuid?.()||held.mode&0o022)deny('ENVIRONMENT_CHANGED');
+    if(selectRecipeManifestPath(root)!==selected)deny('ENVIRONMENT_CHANGED');
+    const stat=lstatSync(selected);
+    if(stat.isSymbolicLink()||stat.uid!==process.getuid?.()||stat.mode&0o022
+      ||digest(readJsonFile(selected,2*1024*1024).bytes)!==selectedDigest)deny('ENVIRONMENT_CHANGED');
+  };
+  assertCurrent();
+  return { environment: environment as unknown as DeepSeekRecipeEnvironment, manifest,assertCurrent,close(){closeSync(rootFd);} };
+  }catch(error){closeSync(rootFd);throw error;}
 }
 function reserveAllCounters(profileRoot: string, sessionKey?: string, admitNewOwner=true): {bytes:number;owners:string} {
   const parent = join(profileRoot, 'counters'); const directories = new Set<string>();
@@ -174,7 +191,10 @@ export async function createProductObservationOwner(input: {
   const secretPattern = secrets.length ? new RegExp(secrets.map(secret => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g') : undefined;
   const redactor = { version: `known-literal-v1:${randomUUID()}`, redact: (value: string) => secretPattern ? value.replace(secretPattern, '[REDACTED]') : value };
   const verified = trustedEnvironment(input.environmentRoot);
+  try {
+  verified.assertCurrent();
   const counterCapability = freezeDeepSeekRecipeCounter({ ...verified.environment, environmentManifest: verified.manifest });
+  verified.assertCurrent();
   const destination = { ...policy.destination, model: policy.model };
   const capacityProfile = resolveProductionCapacityProfile({ destination: destination.url, model: destination.model, protocol: 'openai_legacy', profileId: 'generic-openai', counter: counterCapability });
   if (!capacityProfile) deny('CAPACITY_NOT_READY');
@@ -268,6 +288,7 @@ export async function createProductObservationOwner(input: {
     }
     if (Date.now() >= policy.expiresAt) { revoke(); deny('POLICY_EXPIRED'); }
     if(revoked || input.permissionManager.getRevision()!==revision){revoke();deny('PERMISSION_CHANGED');}
+    verified.assertCurrent();
     expiryTimer = setTimeout(() => {
       try { revoke(); } catch { liveOwner.dispose(); }
     }, policy.expiresAt - Date.now());
@@ -326,6 +347,7 @@ export async function createProductObservationOwner(input: {
         close();
       } });
   } catch (error) { clearTimeout(expiryTimer); try { unsubscribe?.(); owner?.dispose(); await semanticCompactionOwner?.dispose();executionAuthority?.dispose();unsubscribeExecution?.(); } finally { try { disclosureLedger?.dispose(); counter?.dispose(); } finally { try{service.dispose();}finally{receiptStore.close();} } } throw error; }
+  }finally{verified.close();}
 }
 
 /** Host deletion/startup event; never opens grants or resumes an observation owner. */

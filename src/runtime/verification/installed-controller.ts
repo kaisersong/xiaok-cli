@@ -41,12 +41,13 @@ import {createApprovedVerificationOperations} from './approved-verification-oper
 import {createApprovedRecipeArtifactReader} from './approved-artifact-reader.js';
 import {createInstalledProfileIndexPublisher} from './installed-migration-publisher.js';
 import {startPublicController} from './controller-public-daemon.js';
+import {createInstalledMetadataTargetPreparation} from './installed-metadata-target-prepare.js';
 import {readControllerSocketAuditPeer} from './socket-peer.js';
 const failedLifetimes=new Set<ReturnType<typeof createInstalledControllerLifetime>>();
 const unresolvedShutdownErrors=new WeakSet<object>();
 /** Read-only error classification; only an actual root close failure can enter this set. */
 export function isInstalledControllerShutdownUnresolved(error:unknown):boolean{return typeof error==='object'&&error!==null&&unresolvedShutdownErrors.has(error);}
-type InstalledAssemblyState={lifetime:ReturnType<typeof createInstalledControllerLifetime>;admission:AbortSignal;closed:boolean;receiver?:ReturnType<typeof createInstalledReceiverRegistration>;stack?:Awaited<ReturnType<typeof createInstalledExecutionStack>>;completion?:ReturnType<typeof createVerificationCompletionComposition>;caps?:ReturnType<typeof createApprovedSourceCapabilities>;sources?:ReturnType<typeof createApprovedProtectedSourceReader>;artifacts?:ReturnType<typeof createApprovedRecipeArtifactReader>;engineBinding?:string;verification?:ReturnType<typeof createApprovedVerificationOperations>;archive?:ReturnType<typeof createUserArchiveOperations>};
+type InstalledAssemblyState={metadataPreparation?:ReturnType<typeof createInstalledMetadataTargetPreparation>;lifetime:ReturnType<typeof createInstalledControllerLifetime>;admission:AbortSignal;closed:boolean;receiver?:ReturnType<typeof createInstalledReceiverRegistration>;stack?:Awaited<ReturnType<typeof createInstalledExecutionStack>>;completion?:ReturnType<typeof createVerificationCompletionComposition>;caps?:ReturnType<typeof createApprovedSourceCapabilities>;sources?:ReturnType<typeof createApprovedProtectedSourceReader>;artifacts?:ReturnType<typeof createApprovedRecipeArtifactReader>;engineBinding?:string;verification?:ReturnType<typeof createApprovedVerificationOperations>;archive?:ReturnType<typeof createUserArchiveOperations>};
 const installedAssemblies=new WeakMap<object,InstalledAssemblyState>();
 type InstalledCapacityLayer='installed-owner'|'shared'|'ledger'|'authority-budget'|'blob-budget';
 type InstalledCapacityAuthorityState={assembly:InstalledAssemblyState;stackConstruction?:object;layers:Map<InstalledCapacityLayer,{phase:'constructing'|'ready'|'failed'|'closed';component?:object}>};
@@ -104,6 +105,9 @@ export function assertInstalledBlackboxExecution(token:object,database:Database,
 export function assertInstalledVerificationCurrent(token:object):void{const state=assemblyState(token);state.stack.privateHost.qualification.assertCurrent();}
 export function readInstalledVerificationClock(token:object){const state=assemblyState(token);return state.stack.privateHost.broker.clock();}
 export async function ensureInstalledVerificationQualification(token:object,signal:AbortSignal):Promise<void>{const state=assemblyState(token);state.admission.throwIfAborted();signal.throwIfAborted();await state.stack.privateHost.qualification.ensureCurrent(signal);assertInstalledVerificationCurrent(token);state.admission.throwIfAborted();signal.throwIfAborted();if(json(state.stack.privateHost.qualification.currentFacts().engineBinding)!==state.engineBinding)throw Error('installed_controller_engine_changed');}
+export function prepareInstalledMetadataTarget(assembly:object,owner:object,token:object,closure:object,signal:AbortSignal):Promise<object>{
+ if(arguments.length!==5)return Promise.reject(Error('metadata_prepare_arguments'));const state=assemblyState(assembly);state.admission.throwIfAborted();if(!state.metadataPreparation)throw Error('metadata_prepare_unavailable');return state.metadataPreparation.prepare(owner,token,closure,AbortSignal.any([state.admission,signal]));
+}
 export function recordInstalledVerificationResult(token:object,result:{expected:QuiescenceExpectation;output:object;receipt:PhysicalQuiescenceReceipt}):void{const state=assemblyState(token),stack=state.stack.privateHost;stack.transcripts.record({ownerKey:stack.execution.privateHost.raw.readOwnerKey(result.expected),...result});}
 export function registerInstalledVerificationOutput(token:object,result:{expected:QuiescenceExpectation;output:object;receipt:PhysicalQuiescenceReceipt}):void{const state=assemblyState(token);state.artifacts.registerActualOutput(result);}
 
@@ -127,7 +131,7 @@ export async function startInstalledVerificationController(){
   let resolve!:(value:void)=>void,reject!:(error:unknown)=>void;closing=new Promise<void>((yes,no)=>{resolve=yes;reject=no;});
   // Publish the original attempt before abort listeners or any actual drain may reenter.
   admission.abort(Error('installed_controller_closing'));
-  void closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending)throw Error('installed_stack_construction_unknown');},()=>server?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close()],finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose()],closeLifetime:()=>{lifetime.close();assemblyFacts.closed=true;},retainLifetime:()=>{failedLifetimes.add(lifetime);}}).then(resolve,error=>{const failure=typeof error==='object'&&error!==null?error:new AggregateError([error],'installed_controller_shutdown_unknown');unresolvedShutdownErrors.add(failure);reject(failure);});
+  void closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending)throw Error('installed_stack_construction_unknown');},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close()],finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose()],closeLifetime:()=>{lifetime.close();assemblyFacts.closed=true;},retainLifetime:()=>{failedLifetimes.add(lifetime);}}).then(resolve,error=>{const failure=typeof error==='object'&&error!==null?error:new AggregateError([error],'installed_controller_shutdown_unknown');unresolvedShutdownErrors.add(failure);reject(failure);});
   return closing;
  }
  try{
@@ -168,6 +172,8 @@ export async function startInstalledVerificationController(){
   const archiveRouting=createArchiveOperationRouting(archive,signal=>renew(signal));
   const routing=createControllerOperationRouting({assertCurrent:()=>{admission.signal.throwIfAborted();lifetime.assertCurrent();},renew:signal=>renew(signal),verification:operations,publication,completion:completion.public,execution:stack.publicPort});
   const applicationRouting=createControllerApplicationRouting({application:need(application),assertCurrent:()=>{admission.signal.throwIfAborted();lifetime.assertCurrent();},renew:signal=>renew(signal)});
+  assemblyFacts.metadataPreparation=createInstalledMetadataTargetPreparation(lifetime,capacityAuthorityToken);
+  assemblyFacts.metadataPreparation.initialize();
   // The namespace is ready only here; no early requests can reach late-bound ports.
   server=await startPublicController({socketPath:join(lifetime.base,'public','controller.sock'),authorityId:lifetime.manifest.authorityId,serviceEpoch:lifetime.serviceEpoch,privateKey:lifetime.privateKey,allowedUserIds:lifetime.manifest.allowedUserIds,
    acceptPeer(socket){lifetime.assertCurrent();const peer=readControllerSocketAuditPeer(socket,lifetime.peerHelper);return {uid:peer.uid,gid:peer.gid,auditSessionId:peer.auditSessionId};},
@@ -179,7 +185,7 @@ export async function startInstalledVerificationController(){
   // failures must never let GC release its actual OS owner lock.
   failedLifetimes.add(lifetime);
   try{
-   await closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending)throw Error('installed_stack_construction_unknown');},()=>server?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close()],
+   await closeInstalledControllerComponents({components:[()=>{if(stackConstructionPending)throw Error('installed_stack_construction_unknown');},()=>server?.close(),()=>assemblyFacts.metadataPreparation?.close(),()=>maintenance?.close(),()=>archive?.close(),()=>application?.close(),()=>publication?.close(),()=>receiverTransport?.close(),()=>operations?.close(),()=>stack?.close()],
     finalizers:[()=>sources?.close(),()=>caps?.close(),()=>artifacts?.close(),()=>completion?.close(),()=>receiver?.close(),()=>sharedCapacity?.close(),()=>rootBroker?.dispose()],
     closeLifetime(){},retainLifetime(){/* Already strongly retained before cleanup. */}});
   }catch(cleanupError){throw new AggregateError([error,cleanupError],'installed_controller_startup_cleanup_unknown',{cause:error});}

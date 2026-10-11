@@ -5,6 +5,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { requireKbRequestSource, captureKbMutationInput, assertKbPendingSourceOwner, assertKbAuthorityMetadataUnchanged } from './kb-mutation-authority.js';
+import { KB_CREATE_COLLECTION_SCHEMA, KB_STORE_ADD_SOURCE_SCHEMA, KB_PARSE_RESULT_INPUT_SCHEMA, KB_CHUNK_INPUT_SCHEMA, KB_CREATE_MEETING_INPUT_SCHEMA, KB_UPDATE_MEETING_INPUT_SCHEMA } from '../shared/knowledge-ipc-contract.js';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -148,7 +151,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
 
   const now = () => Date.now();
 
-  function createCollection(input: CreateCollectionInput): Collection {
+  function createCollection(input: CreateCollectionInput, requestSource?: RequestSource): Collection {
+    requireKbRequestSource(requestSource, ['user', 'agent']);
+    input = captureKbMutationInput(input, KB_CREATE_COLLECTION_SCHEMA);
     const id = randomUUID();
     const ts = now();
     db.prepare(`
@@ -167,7 +172,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return (db.prepare('SELECT * FROM collections ORDER BY created_at ASC').all() as Record<string, unknown>[]).map(mapCollection);
   }
 
-  function renameCollection(id: string, name: string, description?: string): Collection | undefined {
+  function renameCollection(id: string, name: string, description?: string, requestSource?: RequestSource): Collection | undefined {
+    requireKbRequestSource(requestSource, ['user']);
+    [id, name, description] = captureKbMutationInput<[string, string, string | undefined]>([id, name, description], z.tuple([z.string(), z.string(), z.string().optional()]));
     const ts = now();
     if (description !== undefined) {
       db.prepare('UPDATE collections SET name = @name, description = @desc, updated_at = @ts WHERE id = @id').run({ id, name, desc: description, ts });
@@ -177,7 +184,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return getCollection(id);
   }
 
-  function deleteCollection(id: string): void {
+  function deleteCollection(id: string, requestSource?: RequestSource): void {
+    requireKbRequestSource(requestSource, ['user']);
+    id = captureKbMutationInput(id, z.string());
     db.prepare('DELETE FROM collections WHERE id = ?').run(id);
   }
 
@@ -185,6 +194,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     if (requestSource !== 'user' && requestSource !== 'agent' && requestSource !== 'scheduler') {
       throw new Error('A valid request source is required to add a Knowledge source');
     }
+    requireKbRequestSource(requestSource, ['user', 'agent']);
+    input = captureKbMutationInput(input, KB_STORE_ADD_SOURCE_SCHEMA);
+    if (requestSource === 'agent' && input.kind === 'meeting') throw Error('knowledge_agent_meeting_forbidden');
     if (requestSource === 'agent' && input.parseStatus && input.parseStatus !== 'pending') {
       throw new Error('Agent-created Knowledge sources must start in the pending state');
     }
@@ -194,6 +206,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     }
     if (hasStableIdentity && requestSource !== 'user') {
       throw new Error('kb_stable_source_user_only');
+    }
+    if (!hasStableIdentity && input.metadata && ['clientRequestKey', 'assistantContentDigest'].some(key => Object.hasOwn(input.metadata!, key))) {
+      throw new Error('kb_stable_source_identity_metadata_forbidden');
     }
     const assistantContentDigest = hasStableIdentity ? computeKbSourceContentDigest(input) : undefined;
     if (hasStableIdentity) {
@@ -285,7 +300,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       if (source.parseStatus !== 'parsed') {
         if (source.parseStatus !== 'pending' || source.chunkCount !== 0 || listChunks(source.id).length !== 0 || source.sha256) throw Error('assistant_knowledge_target_conflict');
         if (db.prepare('UPDATE sources SET sha256=?,byte_size=? WHERE id=?').run(hash,Buffer.byteLength(content),source.id).changes !== 1) throw Error('assistant_knowledge_write_not_durable');
-        insertChunks(source.id,chunks);
+        insertChunks(source.id,chunks,'user');
         updateSourceParseResult(source.id,{parseStatus:'parsed',metadata:{engine:'builtin-text'}},'user');
       }
       const result = durable();db.exec('COMMIT');return result;
@@ -322,6 +337,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     sha256: string,
     requestSource: RequestSource,
   ): { source: Source; created: boolean } {
+    requireKbRequestSource(requestSource);
+    [sourceId, sha256] = captureKbMutationInput([sourceId, sha256], z.tuple([z.string(), z.string()]));
+    return withMutationTransaction(() => {
     if (!/^[a-f0-9]{64}$/.test(sha256)) {
       throw new Error('A valid content hash is required to claim a Knowledge source');
     }
@@ -348,7 +366,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     };
     const removeProvisionalSource = () => {
       const current = getSource(sourceId);
-      if (!current || current.chunkCount !== 0 || (current.parseStatus !== 'pending' && current.parseStatus !== 'parsing')) {
+      if (!current || current.chunkCount !== 0 || (current.parseStatus !== 'pending' && current.parseStatus !== 'parsing')
+        || !Object.is(current.metadata.createdBy, source.metadata.createdBy)
+        || requestSource !== 'scheduler' && current.metadata.createdBy !== requestSource) {
         throw new Error('Only an empty pending source can be removed after a duplicate claim');
       }
       db.prepare('DELETE FROM sources WHERE id = ?').run(sourceId);
@@ -370,17 +390,22 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       removeProvisionalSource();
       return { source: concurrent, created: false };
     }
+    });
   }
 
   function listSources(collectionId: string): Source[] {
     return (db.prepare('SELECT * FROM sources WHERE collection_id = ? ORDER BY created_at ASC').all(collectionId) as Record<string, unknown>[]).map(mapSource);
   }
 
-  function deleteSource(id: string): void {
+  function deleteSource(id: string, requestSource?: RequestSource): void {
+    requireKbRequestSource(requestSource, ['user']);
+    id = captureKbMutationInput(id, z.string());
     db.prepare('DELETE FROM sources WHERE id = ?').run(id);
   }
 
-  function retrySource(id: string): Source | undefined {
+  function retrySource(id: string, requestSource?: RequestSource): Source | undefined {
+    requireKbRequestSource(requestSource, ['user']);
+    id = captureKbMutationInput(id, z.string());
     const ts = now();
     db.prepare("UPDATE sources SET parse_status = 'pending', parse_error = '', parse_attempts = 0, updated_at = @ts WHERE id = @id").run({ id, ts });
     return getSource(id);
@@ -391,6 +416,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     input: UpdateSourceParseResultInput,
     requestSource: RequestSource,
   ): Source {
+    requireKbRequestSource(requestSource);
+    id = captureKbMutationInput(id, z.string());
+    return withMutationTransaction(() => {
     const source = getSource(id);
     if (!source) throw new Error(`Source not found: ${id}`);
     if (source.parseStatus !== 'pending' && source.parseStatus !== 'parsing') {
@@ -400,6 +428,8 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     if (requestSource !== 'scheduler' && createdBy !== requestSource) {
       throw new Error(`Request source ${requestSource} is not allowed to update this source`);
     }
+    input = captureKbMutationInput(input, KB_PARSE_RESULT_INPUT_SCHEMA);
+    assertKbAuthorityMetadataUnchanged(source, input.metadata);
     if (input.parseStatus === 'parsed' && source.kind !== 'meeting' && !source.sha256) {
       throw new Error('A content hash is required before a Knowledge source can become parsed');
     }
@@ -425,6 +455,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       ts,
     });
     return getSource(id)!;
+    });
   }
 
   function getSourceEmbeddingProgress(sourceId: string): SourceEmbeddingProgress {
@@ -438,9 +469,17 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return row ?? { embedded: 0, total: 0, failed: 0 };
   }
 
-  function insertChunks(sourceId: string, inputs: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string; metadata?: Record<string, unknown> }>): Chunk[] {
+  function insertChunks(sourceId: string, inputs: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string; metadata?: Record<string, unknown> }>, requestSource?: RequestSource): Chunk[] {
+    const actor = requireKbRequestSource(requestSource);
+    sourceId = captureKbMutationInput(sourceId, z.string());
+    return withMutationTransaction(() => {
     const src = getSource(sourceId);
     if (!src) throw new Error('Source not found');
+    if (actor !== 'user') {
+      assertKbPendingSourceOwner(src, actor);
+      if (actor === 'agent' && src.kind === 'meeting') throw Error('knowledge_agent_meeting_forbidden');
+    }
+    inputs = captureKbMutationInput(inputs, z.array(KB_CHUNK_INPUT_SCHEMA));
     const ts = now();
     const stmt = db.prepare(`
       INSERT INTO chunks (id, source_id, collection_id, idx, text, segmented_text, char_start, char_end, page_index, slide_index, sheet_name, cell_range, embedding_status, embedding_error, embedding_attempts, metadata_json, created_at)
@@ -467,6 +506,7 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       });
     }
     return ids.map(id => getChunk(id)!);
+    });
   }
 
   function getChunk(id: string): Chunk | undefined {
@@ -478,12 +518,22 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return (db.prepare('SELECT * FROM chunks WHERE source_id = ? ORDER BY idx ASC').all(sourceId) as Record<string, unknown>[]).map(mapChunk);
   }
 
-  function markChunkEmbedded(chunkId: string): void {
+  function markChunkEmbedded(chunkId: string, requestSource?: RequestSource): void {
+    const actor = requireKbRequestSource(requestSource, ['user', 'scheduler']);
+    chunkId = captureKbMutationInput(chunkId, z.string());
+    withMutationTransaction(() => {
+    assertSchedulerChunkState(chunkId, actor);
     db.prepare("UPDATE chunks SET embedding_status = 'embedded', embedding_error = '' WHERE id = ?").run(chunkId);
+    });
   }
 
-  function markChunkFailed(chunkId: string, error: string): void {
+  function markChunkFailed(chunkId: string, error: string, requestSource?: RequestSource): void {
+    const actor = requireKbRequestSource(requestSource, ['user', 'scheduler']);
+    [chunkId, error] = captureKbMutationInput([chunkId, error], z.tuple([z.string(), z.string()]));
+    withMutationTransaction(() => {
+    assertSchedulerChunkState(chunkId, actor);
     db.prepare("UPDATE chunks SET embedding_status = 'failed', embedding_error = @error, embedding_attempts = embedding_attempts + 1 WHERE id = @id").run({ id: chunkId, error });
+    });
   }
 
   function getCollectionState(collectionId: string): CollectionState | undefined {
@@ -535,7 +585,9 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return outline;
   }
 
-  function createMeeting(input: CreateMeetingInput): MeetingRecord {
+  function createMeeting(input: CreateMeetingInput, requestSource?: RequestSource): MeetingRecord {
+    requireKbRequestSource(requestSource, ['user']);
+    input = captureKbMutationInput(input, KB_CREATE_MEETING_INPUT_SCHEMA);
     const id = input.id ?? randomUUID();
     const ts = now();
     db.prepare(`
@@ -575,9 +627,19 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
     return (db.prepare('SELECT * FROM meetings ORDER BY started_at ASC').all() as Record<string, unknown>[]).map(mapMeeting);
   }
 
-  function updateMeeting(id: string, input: UpdateMeetingInput): MeetingRecord | undefined {
+  function updateMeeting(id: string, input: UpdateMeetingInput, requestSource?: RequestSource): MeetingRecord | undefined {
+    const actor = requireKbRequestSource(requestSource, ['user', 'scheduler']);
+    id = captureKbMutationInput(id, z.string());
+    return withMutationTransaction(() => {
     const current = getMeeting(id);
     if (!current) return undefined;
+    input = captureKbMutationInput(input, KB_UPDATE_MEETING_INPUT_SCHEMA);
+    if (actor === 'scheduler') {
+      const allowed = ['recording', 'paused', 'stopping'].includes(current.status) ? ['interrupted']
+        : current.status === 'summarizing' ? ['transcribed']
+          : current.status === 'transcribing' ? ['interrupted', 'failed'] : [];
+      if (Object.keys(input).some(key => key !== 'status' && key !== 'failureReason') || !input.status || !allowed.includes(input.status)) throw Error('knowledge_meeting_recovery_forbidden');
+    }
     const ts = now();
     db.prepare(`
       UPDATE meetings SET
@@ -606,6 +668,20 @@ export function createKbStoreSqlite(dbPath: string): KbStore {
       updatedAt: ts,
     });
     return getMeeting(id);
+    });
+  }
+
+  function withMutationTransaction<T>(run: () => T): T {
+    if (db.isTransaction) return run();
+    db.exec('BEGIN IMMEDIATE');
+    try { const value = run(); db.exec('COMMIT'); return value; }
+    catch (error) { if (db.isTransaction) { try { db.exec('ROLLBACK'); } catch (rollbackError) { console.error('[KB] mutation rollback failed', rollbackError); } } throw error; }
+  }
+
+  function assertSchedulerChunkState(chunkId: string, requestSource: RequestSource): void {
+    if (requestSource !== 'scheduler') return;
+    const chunk = getChunk(chunkId);
+    if (!chunk || !['pending', 'embedding', 'failed'].includes(chunk.embeddingStatus)) throw Error('knowledge_chunk_scheduler_forbidden');
   }
 
   function close(): void {

@@ -1,14 +1,34 @@
-import { createHash } from 'node:crypto';
+import { createHash as initialCreateHash, Hash as InitialHash } from 'node:crypto';
+import { types } from 'node:util';
+// Trusted fixed-package startup references. No caller reader, callback or grant.
+const nativeCreateHash = initialCreateHash, nativeHashUpdate = InitialHash.prototype.update, nativeHashDigest = InitialHash.prototype.digest;
+const NativeError = Error, NativeWeakSet = WeakSet, NativeSet = Set;
+const nativeProxy = types.isProxy, nativePrototype = Object.getPrototypeOf, objectPrototype = Object.prototype;
+const nativeDescriptors = Object.getOwnPropertyDescriptors, nativeOwn = Object.hasOwn, nativeKeys = Object.keys;
+const nativeOwnKeys = Reflect.ownKeys, nativeApply = Reflect.apply, nativeDefine = Object.defineProperty, nativeFreeze = Object.freeze;
+const nativeArray = Array.isArray, nativeSort = Array.prototype.sort, nativeIncludes = Array.prototype.includes;
+const nativeJson = JSON.stringify, nativeFinite = Number.isFinite, nativeInteger = Number.isSafeInteger, nativeByteLength = Buffer.byteLength;
+const nativeWeakHas = WeakSet.prototype.has, nativeWeakAdd = WeakSet.prototype.add, nativeWeakDelete = WeakSet.prototype.delete;
+const nativeSetHas = Set.prototype.has, nativeSetAdd = Set.prototype.add, nativeRegexTest = RegExp.prototype.test;
+const hashPattern = /^[a-f0-9]{64}$/, controlPattern = /[\x00-\x1f\x7f]/;
+const ownerKinds = nativeFreeze(['task', 'intent', 'goal', 'loop', 'project']);
+function fail(message) { throw new NativeError(message); }
+function includes(values, value) { return nativeApply(nativeIncludes, values, [value]); }
+function defineData(target, key, value) {
+    nativeDefine(target, key, { __proto__: null, value, enumerable: true, writable: true, configurable: true });
+}
 /** A direct identifier can never alias an inherited identity, regardless of its text. */
 export function verificationDependencyKey(value) {
-    return canonicalVerificationJson(value.kind === 'inherited'
-        ? ['inherited', value.originOwner, value.originalObligationId] : ['direct', value.obligationId]);
+    const input = record(value);
+    return canonicalVerificationJson(ownValue(input, 'kind') === 'inherited'
+        ? ['inherited', ownValue(input, 'originOwner'), ownValue(input, 'originalObligationId')]
+        : ['direct', ownValue(input, 'obligationId')]);
 }
 export function compareVerificationDependencies(a, b) {
     const x = verificationDependencyKey(a), y = verificationDependencyKey(b);
     return x < y ? -1 : x > y ? 1 : 0;
 }
-export const VERIFICATION_BUDGET = Object.freeze({
+export const VERIFICATION_BUDGET = nativeFreeze({
     profileBytes: 2048 * 1024 ** 2, controlDatabaseBytes: 128 * 1024 ** 2,
     rollbackAndTemporaryBytes: 144 * 1024 ** 2, outboxPayloadBytes: 32 * 1024 ** 2,
     auxiliaryBytes: 16 * 1024 ** 2, maximumCounterOwners: 64, counterOwnerBytes: 4 * 1024 ** 2,
@@ -28,68 +48,151 @@ const tupleFields = {
     receiverInstanceEpoch: 'integer', reservationId: 'id', nonce: 'id', notBefore: 'integer', validUntil: 'integer',
     clockDomainId: 'id', clockQualificationEpoch: 'integer',
 };
+// Native descriptor metadata has own data fields. Never consult an inherited
+// `value`, execute a Proxy trap, or ask an input for map/species/toJSON behavior.
+function dataDescriptors(input, allowArray = false) {
+    if (input === null || typeof input !== 'object' || nativeProxy(input))
+        fail('verification_invalid_record');
+    if (nativeArray(input)) {
+        if (!allowArray)
+            fail('verification_invalid_record');
+    }
+    else {
+        const proto = nativePrototype(input);
+        if (proto !== objectPrototype && proto !== null)
+            fail('verification_invalid_record');
+    }
+    const descriptors = nativeDescriptors(input), keys = nativeOwnKeys(descriptors);
+    for (let i = 0; i < keys.length; i++)
+        if (!nativeOwn(descriptors[keys[i]], 'value'))
+            fail('verification_accessor_denied');
+    return descriptors;
+}
+function ownValue(input, key) { return nativeOwn(input, key) ? input[key] : undefined; }
 function record(input) {
-    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(input)))
-        if (!('value' in descriptor))
-            throw Error('verification_accessor_denied');
-    return input;
+    const descriptors = dataDescriptors(input), keys = nativeKeys(input), result = {};
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        defineData(result, key, descriptors[key].value);
+    }
+    return result;
 }
 function fields(input, expected, extra = []) {
-    const keys = Object.keys(input);
-    if (keys.length !== Object.keys(expected).length + extra.length || keys.some(k => !Object.hasOwn(expected, k) && !extra.includes(k)))
-        throw Error('verification_tuple_fields');
-    for (const [key, kind] of Object.entries(expected)) {
-        const value = input[key];
+    const keys = nativeKeys(input), expectedKeys = nativeKeys(expected);
+    if (keys.length !== expectedKeys.length + extra.length)
+        fail('verification_tuple_fields');
+    for (let i = 0; i < keys.length; i++)
+        if (!nativeOwn(expected, keys[i]) && !includes(extra, keys[i]))
+            fail('verification_tuple_fields');
+    for (let i = 0; i < expectedKeys.length; i++) {
+        const key = expectedKeys[i], kind = expected[key], value = ownValue(input, key);
         if (kind === 'integer') {
-            if (!Number.isSafeInteger(value) || value < 0)
-                throw Error('verification_invalid_integer');
+            if (!nativeInteger(value) || value < 0)
+                fail('verification_invalid_integer');
         }
-        else if (typeof value !== 'string' || (kind === 'hash' ? !/^[a-f0-9]{64}$/.test(value) : !value.length || Buffer.byteLength(value) > 160 || /[\x00-\x1f\x7f]/.test(value)))
-            throw Error('verification_invalid_string');
+        else if (typeof value !== 'string' || (kind === 'hash'
+            ? !nativeApply(nativeRegexTest, hashPattern, [value])
+            : !value.length || nativeByteLength(value) > 160 || nativeApply(nativeRegexTest, controlPattern, [value])))
+            fail('verification_invalid_string');
     }
 }
+nativeFreeze(dependencyFields);
+nativeFreeze(tupleFields);
+const maximumObligations = VERIFICATION_BUDGET.maximumObligationsPerOwner, maximumRpcBytes = VERIFICATION_BUDGET.rpcBytes;
 export function parseVerificationTuple(input) {
     const value = record(input);
     fields(value, tupleFields, ['obligations']);
-    if (value.schemaVersion !== 1 || value.receiverProtocolVersion !== 1 || !['task', 'intent', 'goal', 'loop', 'project'].includes(value.ownerKind))
-        throw Error('verification_protocol_version');
+    if (value.schemaVersion !== 1 || value.receiverProtocolVersion !== 1 || !includes(ownerKinds, value.ownerKind))
+        fail('verification_protocol_version');
     if (value.validUntil <= value.notBefore)
-        throw Error('verification_invalid_window');
-    if (!Array.isArray(value.obligations) || !value.obligations.length || value.obligations.length > VERIFICATION_BUDGET.maximumObligationsPerOwner)
-        throw Error('verification_obligation_count');
-    const obligations = value.obligations.map(raw => {
-        const item = record(raw);
-        if (item.kind === 'inherited') {
+        fail('verification_invalid_window');
+    const raw = ownValue(value, 'obligations');
+    if (raw === null || typeof raw !== 'object' || nativeProxy(raw))
+        fail('verification_invalid_record');
+    if (!nativeArray(raw))
+        fail('verification_obligation_count');
+    const descriptors = dataDescriptors(raw, true), length = descriptors.length.value;
+    if (!length || length > maximumObligations)
+        fail('verification_obligation_count');
+    const obligations = [];
+    for (let i = 0; i < length; i++) {
+        const key = `${i}`;
+        if (!nativeOwn(descriptors, key))
+            fail('verification_invalid_record');
+        const item = record(descriptors[key].value);
+        if (ownValue(item, 'kind') === 'inherited') {
             fields(item, { ...dependencyFields, kind: 'id', originalObligationId: 'id' }, ['originOwner']);
-            const origin = record(item.originOwner);
+            const origin = record(ownValue(item, 'originOwner'));
             fields(origin, { profileId: 'id', ownerKind: 'id', ownerId: 'id' });
-            if (!['task', 'intent', 'goal', 'loop', 'project'].includes(origin.ownerKind) || origin.profileId !== value.profileId || item.originalObligationId !== item.obligationId || origin.ownerKind === value.ownerKind && origin.ownerId === value.ownerId)
-                throw Error('verification_dependency_origin');
-            return Object.freeze({ ...item, originOwner: Object.freeze({ ...origin }) });
+            if (!includes(ownerKinds, origin.ownerKind) || origin.profileId !== value.profileId || item.originalObligationId !== item.obligationId
+                || origin.ownerKind === value.ownerKind && origin.ownerId === value.ownerId)
+                fail('verification_dependency_origin');
+            defineData(item, 'originOwner', nativeFreeze(origin));
         }
-        fields(item, dependencyFields);
-        return Object.freeze({ ...item });
-    });
-    obligations.sort(compareVerificationDependencies);
-    if (new Set(obligations.map(verificationDependencyKey)).size !== obligations.length)
-        throw Error('verification_duplicate_obligation');
-    const result = Object.freeze({ ...value, obligations: Object.freeze(obligations) });
-    if (Buffer.byteLength(canonicalVerificationJson(result)) > VERIFICATION_BUDGET.rpcBytes)
-        throw Error('verification_rpc_limit');
+        else
+            fields(item, dependencyFields);
+        defineData(obligations, i, nativeFreeze(item));
+    }
+    nativeApply(nativeSort, obligations, [compareVerificationDependencies]);
+    const identities = new NativeSet();
+    for (let i = 0; i < obligations.length; i++) {
+        const key = verificationDependencyKey(obligations[i]);
+        if (nativeApply(nativeSetHas, identities, [key]))
+            fail('verification_duplicate_obligation');
+        nativeApply(nativeSetAdd, identities, [key]);
+    }
+    defineData(value, 'obligations', nativeFreeze(obligations));
+    const result = nativeFreeze(value);
+    if (nativeByteLength(canonicalVerificationJson(result)) > maximumRpcBytes)
+        fail('verification_rpc_limit');
     return result;
 }
 export function canonicalVerificationJson(value) {
-    if (value === null || typeof value === 'boolean' || typeof value === 'string')
-        return JSON.stringify(value);
-    if (typeof value === 'number' && Number.isFinite(value))
-        return JSON.stringify(value);
-    if (Array.isArray(value))
-        return '[' + value.map(canonicalVerificationJson).join(',') + ']';
-    const object = record(value);
-    return '{' + Object.keys(object).sort().map(key => JSON.stringify(key) + ':' + canonicalVerificationJson(object[key])).join(',') + '}';
+    const ancestors = new NativeWeakSet();
+    function visit(input) {
+        if (input === null || typeof input === 'boolean' || typeof input === 'string')
+            return nativeJson(input);
+        if (typeof input === 'number' && nativeFinite(input))
+            return nativeJson(input);
+        const descriptors = dataDescriptors(input, true), object = input;
+        if (nativeApply(nativeWeakHas, ancestors, [object]))
+            fail('verification_invalid_record');
+        nativeApply(nativeWeakAdd, ancestors, [object]);
+        try {
+            if (nativeArray(object)) {
+                const length = descriptors.length.value;
+                let result = '[';
+                for (let i = 0; i < length; i++) {
+                    const key = `${i}`;
+                    if (!nativeOwn(descriptors, key))
+                        fail('verification_invalid_record');
+                    if (i)
+                        result += ',';
+                    result += visit(descriptors[key].value);
+                }
+                return result + ']';
+            }
+            const keys = nativeKeys(object);
+            nativeApply(nativeSort, keys, []);
+            let result = '{';
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                if (i)
+                    result += ',';
+                result += nativeJson(key) + ':' + visit(descriptors[key].value);
+            }
+            return result + '}';
+        }
+        finally {
+            nativeApply(nativeWeakDelete, ancestors, [object]);
+        }
+    }
+    return visit(value);
 }
 export function hashVerificationTuple(value) {
-    return createHash('sha256').update(canonicalVerificationJson(parseVerificationTuple(value))).digest('hex');
+    const hash = nativeCreateHash('sha256');
+    nativeApply(nativeHashUpdate, hash, [canonicalVerificationJson(parseVerificationTuple(value))]);
+    return nativeApply(nativeHashDigest, hash, ['hex']);
 }
 const transitions = {
     attempt: { prepared: ['running', 'unknown', 'cancelled_before_dispatch'], running: ['termination_pending', 'unknown', 'terminal'], termination_pending: ['unknown', 'terminal'], unknown: ['terminal'], terminal: ['superseded'] },
@@ -103,6 +206,6 @@ const transitions = {
 };
 /** Structural edge check only; service must also enforce source, facts, tuple and revision. */
 export function assertVerificationTransition(kind, from, to) {
-    if (!Object.hasOwn(transitions, kind) || !Object.hasOwn(transitions[kind], from) || !transitions[kind][from].includes(to))
-        throw Error('verification_illegal_transition');
+    if (typeof kind !== 'string' || typeof from !== 'string' || typeof to !== 'string' || !nativeOwn(transitions, kind) || !nativeOwn(transitions[kind], from) || !includes(transitions[kind][from], to))
+        fail('verification_illegal_transition');
 }

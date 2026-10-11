@@ -20,6 +20,8 @@ vi.mock('../../renderer/src/api', () => ({
     createTaskWithFiles: mockCreateTaskWithFiles,
     getThread: mockGetThread,
     recoverTask: mockRecoverTask,
+    getObservationTaskStatus: vi.fn().mockResolvedValue({ mode: 'off' }),
+    getObservationPreconditions: vi.fn().mockResolvedValue({ ready: false }),
     subscribeTask: mockSubscribeTask,
     updateThreadTaskId: mockUpdateThreadTaskId,
     updateThreadTitle: mockUpdateThreadTitle,
@@ -133,6 +135,43 @@ afterEach(() => {
 });
 
 describe('ChatShell draft prompt navigation state', () => {
+  it.each(['用户手工标题', null])('preserves first user topic when followup completes (title=%s)', async title => {
+    mockGetThread.mockResolvedValue({ id: 'thread-title', title, status: 'running', mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task-followup', taskIds: ['task-first', 'task-followup'] });
+    mockRecoverTask.mockImplementation(async id => ({ snapshot: { taskId: id, sessionId: id, status: id === 'task-first' ? 'completed' : 'running', prompt: id === 'task-first' ? '创建项目分析金蝶自研模型' : '确认就是Qwen3.8 27B', materials: [], events: [], createdAt: 1, updatedAt: 2 } }));
+    let handler: any;
+    mockSubscribeTask.mockImplementation((_id, next) => { handler = next; return () => {}; });
+    mockUpdateThreadTitle.mockResolvedValue(undefined);
+    const view = render(<MemoryRouter initialEntries={['/t/thread-title']}><LocaleProvider><Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes></LocaleProvider></MemoryRouter>);
+    await waitFor(() => expect(handler).toBeTypeOf('function'));
+    await act(async () => handler({ type: 'result', result: { summary: '收到，已核实并落实到项目里。', artifacts: [{ artifactId: 'proof', kind: 'text', title: 'proof.md', filePath: '/tmp/proof.md' }] } }));
+    if (title) expect(mockUpdateThreadTitle).not.toHaveBeenCalled();
+    else expect(mockUpdateThreadTitle).toHaveBeenCalledWith('thread-title', '创建项目分析金蝶自研模型');
+    expect(mockUpdateThreadTitle).not.toHaveBeenCalledWith('thread-title', expect.stringContaining('收到'));
+    view.unmount();
+  });
+  it('labels the real identity of recovered legacy content without starting a new project', async () => {
+    mockGetThread.mockResolvedValue({ id: 'thread-legacy', title: '创建项目, 让10个智能体搞定本月国外主要AI产品动态分析', status: 'idle',
+      mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task_missing', taskIds: ['task_missing'] });
+    mockRecoverTask.mockResolvedValue({ recoveredFromTaskId: 'task_old', snapshot: { taskId: 'task_old', sessionId: 'sess_old', status: 'completed', prompt: '原始创建请求',
+      events: [{ type: 'assistant_delta', delta: '真实项目已经创建 proj-original' }], materials: [], createdAt: 1, updatedAt: 2 } });
+    render(<MemoryRouter initialEntries={['/t/thread-legacy']}><LocaleProvider>
+      <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+    </LocaleProvider></MemoryRouter>);
+    expect(await screen.findByText(/唯一同标题的成功历史记录（task_old）/)).toBeInTheDocument();
+    expect(await screen.findByText(/真实项目已经创建 proj-original/)).toBeInTheDocument();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+  it('shows an explicit notice instead of silently opening an empty missing history', async () => {
+    mockGetThread.mockResolvedValue({ id: 'thread-missing', title: '历史项目会话', status: 'idle',
+      mode: 'work', createdAt: 1, updatedAt: 2, currentTaskId: 'task_missing', taskIds: ['task_missing'] });
+    mockRecoverTask.mockRejectedValue(new Error('task not found: task_missing'));
+    render(<MemoryRouter initialEntries={['/t/thread-missing']}><LocaleProvider>
+      <Routes><Route path="/t/:taskId" element={<ChatShell />} /></Routes>
+    </LocaleProvider></MemoryRouter>);
+    expect(await screen.findByText(/历史任务记录暂时无法读取/)).toBeInTheDocument();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
   it('hides the Goal task panel while Artifact canvas owns the right side and restores it after close', async () => {
     window.xiaokDesktop = {
       getGoal: vi.fn().mockResolvedValue({

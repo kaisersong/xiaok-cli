@@ -1,6 +1,8 @@
-import {isDeepStrictEqual} from 'node:util';
+import {isDeepStrictEqual as initialIsDeepStrictEqual} from 'node:util';
+const isDeepStrictEqual=initialIsDeepStrictEqual;
 
 import type {Database,Statement} from 'better-sqlite3';
+import {assertNativeSqliteArrayConstruction} from './native-sqlite-construction-intrinsics.js';
 import {canonicalVerificationJson as json} from './protocol.js';
 import {freezeCapturedData} from './captured-source-json.js';
 import {capturedSqliteEncoding,encodeCapturedSqliteCell,type CapturedSqliteCell,type CapturedSqliteEncoding} from './source-sqlite-cell.js';
@@ -13,15 +15,20 @@ const asciiName=(name:string)=>name.replace(/[A-Z]/g,character=>character.toLowe
 /** Fixed native producer namespaces cannot resolve to virtual modules or computed data. */
 export function assertNativeSqliteProducerTableKinds(database:Database):void{
  if(arguments.length!==1)throw Error('native_sqlite_census_query');
+ assertNativeSqliteArrayConstruction();
  const modules=database.pragma('module_list') as Array<{name:string}>;
+ assertNativeSqliteArrayConstruction();
  if(modules.some(row=>typeof row.name==='string'&&producerTables.has(asciiName(row.name))))throw Error('native_sqlite_census_schema');
  const tables=database.pragma('main.table_list') as Array<{schema:string;name:string;type:string}>;
+ assertNativeSqliteArrayConstruction();
  if(tables.some(row=>row.schema==='main'&&typeof row.name==='string'&&producerTables.has(asciiName(row.name))&&row.type!=='table'))throw Error('native_sqlite_census_schema');
 }
 /** Call after the producer kind guard, before a semantic SELECT. Missing tables remain absent. */
 export function assertNativeSqliteStoredProducerColumns(database:Database,table:string):void{
  if(arguments.length!==2||!producerTables.has(table))throw Error('native_sqlite_census_query');
+ assertNativeSqliteArrayConstruction();
  const columns=database.prepare('PRAGMA main.table_xinfo('+quote(table)+')').all() as Array<{hidden:number}>;
+ assertNativeSqliteArrayConstruction();
  if(columns.some(column=>column.hidden!==0))throw Error('native_sqlite_census_schema');
 }
 type ScopedQuery=keyof typeof scopedQueries;
@@ -65,7 +72,9 @@ function rows(database:Database,encoding:CapturedSqliteEncoding,columns:readonly
  assertAnchor();
  const projection=columns.flatMap(name=>[quote(name),'typeof('+quote(name)+')','CAST('+quote(name)+' AS BLOB)']).concat(scalar?[scalar,'typeof('+scalar+')','CAST('+scalar+' AS BLOB)']:[]).join(',');
  const statement=prepare(database,'SELECT '+projection+' FROM '+from+(order?' ORDER BY '+order:''),statements);
+ assertNativeSqliteArrayConstruction();
  const values=statement.raw(true).safeIntegers(true).all(...(anchor?[anchor.table,anchor.table,anchor.table,...parameters]:parameters)) as unknown[][];
+ assertNativeSqliteArrayConstruction();
  if(anchor){for(const value of values){const i=columns.length*3,actual=encodeCapturedSqliteCell(value[i+1],value[i],value[i+2],encoding);if(json(actual)!==json(anchor.sql))throw Error('native_sqlite_census_changed');}assertAnchor();}
 
  return values.map(value=>{const cellRow:Cells=Object.fromEntries(columns.map((name,i)=>[name,encodeCapturedSqliteCell(value[i*3+1],value[i*3],value[i*3+2],encoding)]));return {cells:cellRow,semantic:Object.fromEntries(Object.entries(cellRow).map(([name,cell])=>[name,semantic(cell)]))};});
@@ -141,16 +150,19 @@ function census(context:Context,query:InventoryTable|ScopedQuery,argument?:strin
 export function readNativeSqliteCensus(database:Database,query:InventoryTable|ScopedQuery,argument?:string){
  const scoped=Object.hasOwn(scopedQueries,query)?scopedQueries[query as ScopedQuery]:undefined;
  if(!scoped&&!inventoryTables.includes(query as InventoryTable)||scoped&&typeof argument!=='string'||!scoped&&argument!==undefined)throw Error('native_sqlite_census_query');
+ assertNativeSqliteArrayConstruction();
  const context=createContext(database),result=census(context,query,argument);finish(context);return result;
 }
 /** Fixed population, with one context for this synchronous transaction only. */
 export function readNativeEnrollmentCensus(database:Database){
  if(arguments.length!==1)throw Error('native_sqlite_census_query');
+ assertNativeSqliteArrayConstruction();
  const run=()=>{const context=createContext(database),result=inventoryTables.map(table=>census(context,table));finish(context);return Object.freeze(result);};
  return database.inTransaction?run():database.transaction(run)();
 }
 export function readNativeKSwarmCensus(database:Database,ownerKey:string,profileId:string){
  if(arguments.length!==3||typeof ownerKey!=='string'||typeof profileId!=='string')throw Error('native_sqlite_census_query');
+ assertNativeSqliteArrayConstruction();
  const run=()=>{const context=createContext(database),queries=['owner','obligations','dependencies','registered','profile','invocations','receipts','subject','storageFeature'] as const;const result=Object.fromEntries(queries.map(query=>[query,census(context,query,query==='storageFeature'?'kswarm-owner':query==='profile'?profileId:ownerKey)]));finish(context);return Object.freeze(result);};
  return database.inTransaction?run():database.transaction(run)();
 }

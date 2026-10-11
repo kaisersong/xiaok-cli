@@ -1,0 +1,13 @@
+import { z } from 'zod';
+const scenario = z.enum(['planning', 'execution', 'review', 'delivery']);
+const fields = { id: z.string(), content: z.string(), source: z.enum(['manual', 'memory']), kind: z.enum(['knowledge', 'rule']).optional(), enabled: z.boolean(), createdAt: z.number().finite(), updatedAt: z.number().finite() };
+export const PRINCIPLE_SAVE_INPUT_SCHEMA = z.object({ ...fields, scenarios: z.array(z.string()) }).strict();
+export const PROJECT_PRINCIPLE_SCHEMA = z.object({ ...fields, scenarios: z.array(scenario) }).strict();
+export const PRINCIPLE_LIST_RESULT_SCHEMA = z.array(PROJECT_PRINCIPLE_SCHEMA);
+export const PRINCIPLES_INPUT_SCHEMAS = Object.freeze({ listPrinciples: z.tuple([]), savePrinciple: z.tuple([PRINCIPLE_SAVE_INPUT_SCHEMA]), deletePrinciple: z.tuple([z.string()]) });
+export const PRINCIPLES_OUTPUT_SCHEMAS = Object.freeze({ listPrinciples: PRINCIPLE_LIST_RESULT_SCHEMA, savePrinciple: z.object({ success: z.boolean(), error: z.string().optional() }).strict(), deletePrinciple: z.object({ success: z.boolean() }).strict() });
+export type PrinciplesMethod = keyof typeof PRINCIPLES_INPUT_SCHEMAS;
+export type ProjectPrincipleDto = z.infer<typeof PROJECT_PRINCIPLE_SCHEMA>;
+export type PrincipleSaveInput = z.infer<typeof PRINCIPLE_SAVE_INPUT_SCHEMA>;
+export type PrincipleSaveResult = z.infer<typeof PRINCIPLES_OUTPUT_SCHEMAS.savePrinciple>;
+export type PrincipleDeleteResult = z.infer<typeof PRINCIPLES_OUTPUT_SCHEMAS.deletePrinciple>;

@@ -56,7 +56,7 @@ describe('BDD: actual createDesktopServices local task entrypoint', () => {
   }
 
   it.each(['running', 'completed'] as const)('U2 Given report_progress with all steps %s, Then the existing Task surface receives the real progress event and completion guidance stays in model context', async status => {
-    const { services } = setup(); await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' });
+    const { services } = setup(); await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }, undefined, 'user');
     let calls = 0; let modelResult = '';
     vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (messages) {
       yield { type: 'thinking', delta: '', reasoningProvenance: { captureVersion: 1, source: 'reasoning_content', fieldPresence: 'present' } };
@@ -79,7 +79,7 @@ describe('BDD: actual createDesktopServices local task entrypoint', () => {
   });
 
   it('A1/A18/A31 Given the default Desktop factory, When createTask requests delegation, Then the real default provider loop spawns a Desktop child, exchanges messages and exposes its main-owned snapshot', async () => {
-    const { root, services } = setup(); await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' });
+    const { root, services } = setup(); await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }, undefined, 'user');
     const initialBoundary = services.multiAgent!; await initialBoundary.ready;
     initialBoundary.service.registerThread({ threadId: 'thread', profileId: initialBoundary.profileId, workspaceId: initialBoundary.workspaceId, cwd: root });
     const initialAccess = initialBoundary.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 'thread', profileId: initialBoundary.profileId, workspaceId: initialBoundary.workspaceId });

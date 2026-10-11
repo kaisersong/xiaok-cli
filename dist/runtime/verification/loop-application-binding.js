@@ -1,4 +1,4 @@
-import { captureApplicationData } from './application-value-data.js';
+import { captureApplicationData, readApplicationOwnDataField } from './application-value-data.js';
 import { createHash } from 'node:crypto';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { parseLoopHostSubject } from './loop-host-subject.js';
@@ -79,10 +79,13 @@ function anomalies(raw, scanner) {
     }
 }
 function candidateBody(input, subject, contract) {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || !('kind' in input))
+    if (!input || typeof input !== 'object' || Array.isArray(input))
+        throw Error('loop_application_body');
+    const kindField = readApplicationOwnDataField(input, 'kind', 'loop_application_body');
+    if (kindField.kind !== 'data')
         throw Error('loop_application_body');
     const raw = input;
-    if (raw.kind === 'builtin-diagnostic') {
+    if (kindField.value === 'builtin-diagnostic') {
         shape(raw, ['kind', 'scanner', 'observedAt', 'summary', 'nextActionKind', 'nextActionSummary', 'diagnostic', 'artifacts']);
         if (contract.kind !== 'builtin-diagnostic' || contract.scanner !== raw.scanner || subject.loopId !== raw.scanner || (subject.stage !== null && subject.stage.stageKind !== 'scan'))
             throw Error('loop_application_body_binding');
@@ -109,7 +112,7 @@ function candidateBody(input, subject, contract) {
         }
         anomalies(d.anomalies, raw.scanner);
     }
-    else if (raw.kind === 'user-template-execute') {
+    else if (kindField.value === 'user-template-execute') {
         shape(raw, ['kind', 'taskId', 'executeStageId', 'summary', 'evidenceIds', 'artifacts']);
         if (contract.kind !== 'user-template' || subject.stage === null || subject.stage.stageKind !== 'execute' || subject.stage.stageId !== raw.executeStageId)
             throw Error('loop_application_body_binding');
@@ -117,7 +120,7 @@ function candidateBody(input, subject, contract) {
         text(raw.summary, true);
         strings(raw.evidenceIds);
     }
-    else if (raw.kind === 'user-template') {
+    else if (kindField.value === 'user-template') {
         shape(raw, ['kind', 'taskId', 'executeStageId', 'verifyStageId', 'summary', 'evidenceIds', 'artifacts']);
         if (contract.kind !== 'user-template' || subject.stage !== null && (subject.stage.stageKind !== 'verify' || subject.stage.stageId !== raw.verifyStageId))
             throw Error('loop_application_body_binding');
@@ -127,7 +130,7 @@ function candidateBody(input, subject, contract) {
         text(raw.summary, true);
         strings(raw.evidenceIds);
     }
-    else if (raw.kind === 'assistant-evening') {
+    else if (kindField.value === 'assistant-evening') {
         shape(raw, ['kind', 'summary', 'candidates', 'artifacts']);
         if (contract.kind !== 'assistant' || contract.assistantKind !== 'evening' || subject.stage !== null || subject.loopId !== 'personal-assistant-evening-reflection')
             throw Error('loop_application_body_binding');
@@ -155,7 +158,7 @@ function candidateBody(input, subject, contract) {
             evidenceRefs(c.evidenceRefs);
         }
     }
-    else if (raw.kind === 'assistant-morning') {
+    else if (kindField.value === 'assistant-morning') {
         shape(raw, ['kind', 'recommendations', 'artifacts']);
         if (contract.kind !== 'assistant' || contract.assistantKind !== 'morning' || subject.stage !== null || subject.loopId !== 'personal-assistant-morning-briefing')
             throw Error('loop_application_body_binding');
@@ -175,27 +178,36 @@ function candidateBody(input, subject, contract) {
     return raw;
 }
 function candidate(raw) {
-    shape(raw, CANDIDATE_FIELDS);
-    if (raw.version !== 1 || raw.kind !== 'loop')
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        throw Error('loop_application_shape');
+    const rawRecord = raw;
+    // Preserve the historical whole-candidate shape gate before inspecting trigger data.
+    const inputKeys = Reflect.ownKeys(raw);
+    if (inputKeys.some(k => typeof k !== 'string') || Object.keys(raw).sort().join(',') !== [...CANDIDATE_FIELDS].sort().join(','))
+        throw Error('loop_application_shape');
+    if (rawRecord.version !== 1 || rawRecord.kind !== 'loop')
         throw Error('loop_application_kind');
-    raw.subject = parseLoopHostSubject(raw.subject);
-    id(raw.candidateId);
-    integer(raw.candidateRevision, 1);
-    text(raw.originalTriggerJson);
+    rawRecord.subject = parseLoopHostSubject(rawRecord.subject);
+    id(rawRecord.candidateId);
+    integer(rawRecord.candidateRevision, 1);
+    text(rawRecord.originalTriggerJson);
     let trigger;
     try {
-        trigger = JSON.parse(raw.originalTriggerJson);
+        trigger = JSON.parse(rawRecord.originalTriggerJson);
     }
     catch {
         throw Error('loop_application_trigger');
     }
-    if (!trigger || typeof trigger !== 'object' || Array.isArray(trigger) || !('kind' in trigger) || typeof trigger.kind !== 'string' || !trigger.kind || json(trigger) !== raw.originalTriggerJson)
+    if (!trigger || typeof trigger !== 'object' || Array.isArray(trigger))
         throw Error('loop_application_trigger');
-    if (raw.logicalRunKey !== null)
-        text(raw.logicalRunKey);
-    raw.contract = parseLoopBusinessContract(raw.contract);
-    raw.body = candidateBody(raw.body, raw.subject, raw.contract);
-    return raw;
+    const triggerKind = readApplicationOwnDataField(trigger, 'kind', 'loop_application_trigger');
+    if (triggerKind.kind !== 'data' || typeof triggerKind.value !== 'string' || !triggerKind.value || json(trigger) !== rawRecord.originalTriggerJson)
+        throw Error('loop_application_trigger');
+    if (rawRecord.logicalRunKey !== null)
+        text(rawRecord.logicalRunKey);
+    rawRecord.contract = parseLoopBusinessContract(rawRecord.contract);
+    rawRecord.body = candidateBody(rawRecord.body, rawRecord.subject, rawRecord.contract);
+    return rawRecord;
 }
 /** Strict body value for a captured real subject and original business contract.
  * This creates no candidate identity, registration, or publication authority. */
@@ -210,6 +222,25 @@ function candidateHashes(value) {
 /** Pure immutable proposal only. The actual LoopStore capture, native approval,
  * registered subject and receiver publication remain separate requirements. */
 export function createLoopApplicationBinding(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        throw Error('loop_application_shape');
+    const triggerField = readApplicationOwnDataField(raw, 'originalTriggerJson', 'loop_application_shape');
+    if (triggerField.kind !== 'data' || typeof triggerField.value !== 'string')
+        throw Error('loop_application_shape');
+    if (Buffer.byteLength(triggerField.value) > 65536)
+        throw Error('loop_application_limit');
+    let originalTrigger;
+    try {
+        originalTrigger = JSON.parse(triggerField.value);
+    }
+    catch {
+        throw Error('loop_application_trigger');
+    }
+    if (!originalTrigger || typeof originalTrigger !== 'object' || Array.isArray(originalTrigger))
+        throw Error('loop_application_trigger');
+    const triggerKind = readApplicationOwnDataField(originalTrigger, 'kind', 'loop_application_trigger');
+    if (triggerKind.kind !== 'data' || typeof triggerKind.value !== 'string' || !triggerKind.value)
+        throw Error('loop_application_trigger');
     const value = candidate(capture(raw));
     return parseLoopApplicationBinding({ ...value, ...candidateHashes(value) });
 }

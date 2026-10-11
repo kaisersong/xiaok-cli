@@ -37,8 +37,12 @@ export function createInstalledRootBrokerClient(){
  function request(method:string,payload:unknown){const bytes=Buffer.from(canonicalVerificationJson({version:1,method,payload}));if(bytes.length>1024**2)throw Error('broker_request_budget');return bytes;}
  async function call(method:string,payload:unknown,signal?:AbortSignal,timeoutMs=125000){current();const bytes=request(method,payload),active=signal?AbortSignal.any([signal,lifetime.signal]):lifetime.signal;const response=await callControllerIpc(socketPath,bytes,{signal:active,timeoutMs});current();return JSON.parse(response.toString('utf8'));}
  const sourceApprovals=new WeakMap<object,ReturnType<typeof parseProfileSourceReview>>();
- const sourceCaptures=new WeakMap<object,{handle:string;review:ReturnType<typeof parseProfileSourceReview>;manifestHash:string;manifestBytes:number;capturedBytes:number;manifest?:Readonly<ProfileCaptureTransfer>;loading?:Promise<Readonly<ProfileCaptureTransfer>>}>();
- function sourceCapture(handle:object){current();const capture=sourceCaptures.get(handle);if(!capture)throw Error('broker_source_capture_brand');return capture;}
+ const releasedSourceCaptures=new WeakSet<object>();
+ const sourceCaptures=new WeakMap<object,{handle:string;review:ReturnType<typeof parseProfileSourceReview>;manifestHash:string;manifestBytes:number;capturedBytes:number;state?:'closing'|'unknown';physical?:'starting'|'loading'|'releasing'|'unknown';lastError?:unknown;manifest?:Readonly<ProfileCaptureTransfer>;loading?:Promise<Readonly<ProfileCaptureTransfer>>}>();
+ function sourceCapture(handle:object,cleanup=false){current();const capture=sourceCaptures.get(handle);if(!capture)throw Error('broker_source_capture_brand');if(!cleanup&&(capture.state||capture.physical==='unknown'))throw Error('broker_source_capture_unknown');return capture;}
+ async function releaseSourceCapture(handle:object,signal?:AbortSignal,timeoutMs=125000){const value=sourceCapture(handle,true);if(value.state==='closing')throw Error('broker_source_capture_concurrent');value.state='closing';try{const response=await call('sources.release',{handle:value.handle},signal,timeoutMs);if(canonicalVerificationJson(response)!=='{}')throw Error('broker_source_release');sourceCaptures.delete(handle);releasedSourceCaptures.add(handle);}catch(error){value.state='unknown';value.lastError=error;throw error;}}
+ async function releaseObservationBuffer(handle:object,capture:ReturnType<typeof sourceCapture>,id:string){const response=await call('sources.physical.release',{handle:capture.handle,observationId:id},undefined,5000);if(canonicalVerificationJson(response)!=='{}')throw Error('broker_source_observation_release');sourceCapture(handle);}
+ const physicalFacts=new WeakMap<object,{handle:object;files:readonly Readonly<{sourceId:string;suffix:string;device:string;inode:string;byteLength:string;sha256:string}>[]}>();
  function sourceBytes(value:unknown,key:'offset'|'pageNo',position:number,maximum:number){const response=value as Record<string,unknown>;if(!response||Object.keys(response).sort().join(',')!==['bytes',key].sort().join(',')||response[key]!==position||typeof response.bytes!=='string')throw Error('broker_source_page');const bytes=Buffer.from(response.bytes,'base64');if(bytes.length>maximum||bytes.toString('base64')!==response.bytes)throw Error('broker_source_page');return bytes;}
  const client=Object.freeze({
   async authorizeProfileSources(input:{requestSource:'user'|'agent'|'scheduler';review:unknown},signal?:AbortSignal):Promise<Readonly<ProfileSourceApprovalReceipt>>{
@@ -53,7 +57,73 @@ export function createInstalledRootBrokerClient(){
   async readProfileFile(handle:object,sourceId:string,entryIndex:number,offset:number,length:number,signal?:AbortSignal){const value=sourceCapture(handle);if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<1||length>256*1024||!Number.isSafeInteger(entryIndex)||entryIndex<0||!value.review.sourceSet.sources.some(s=>s.sourceId===sourceId&&s.kind!=='sqlite-db'))throw Error('broker_source_range');const bytes=sourceBytes(await call('sources.file',{handle:value.handle,sourceId,entryIndex,offset,length},signal),'offset',offset,length);sourceCapture(handle);return bytes;},
   async readProfileSqlitePage(handle:object,sourceId:string,pageNo:number,signal?:AbortSignal){const value=sourceCapture(handle);if(!Number.isSafeInteger(pageNo)||pageNo<1||!value.review.sourceSet.sources.some(s=>s.sourceId===sourceId&&s.kind==='sqlite-db'))throw Error('broker_source_range');const bytes=sourceBytes(await call('sources.page',{handle:value.handle,sourceId,pageNo},signal),'pageNo',pageNo,65536);sourceCapture(handle);return bytes;},
   async checkProfileCapture(handle:object,signal?:AbortSignal){const value=sourceCapture(handle),response=await call('sources.check',{handle:value.handle},signal);if(canonicalVerificationJson(response)!=='{}')throw Error('broker_source_check');sourceCapture(handle);},
-  async releaseProfileCapture(handle:object,signal?:AbortSignal){const value=sourceCapture(handle);sourceCaptures.delete(handle);const response=await call('sources.release',{handle:value.handle},signal);if(canonicalVerificationJson(response)!=='{}')throw Error('broker_source_release');},
+  isProfileCaptureReleased(handle:object){if(releasedSourceCaptures.has(handle))return true;if(sourceCaptures.has(handle))return false;throw Error('broker_source_capture_brand');},
+  async releaseProfileCapture(handle:object,signal?:AbortSignal){return releaseSourceCapture(handle,signal);},
+  async observeProfilePhysicalSqliteFiles(handle: object, signal?: AbortSignal) { const value = sourceCapture(handle); if (value.physical)
+          throw Error('broker_source_observation_active'); value.physical = 'starting'; let id: string | undefined, error: unknown, token: object | undefined; try {
+          const manifest = await client.loadProfileCaptureManifest(handle, signal), expected = manifest.databases.flatMap(row => row.capture.physicalFiles.map(f => ({ sourceId: row.sourceId, ...f })));
+          const descriptor = await call('sources.physical.start', { handle: value.handle }, signal);
+          if (!descriptor || Object.keys(descriptor).sort().join(',') !== 'inventoryHash,manifestHash,observationBytes,observationHash,observationId,reviewHash' || typeof descriptor.observationId !== 'string' || !/^[a-f0-9-]{36}$/.test(descriptor.observationId) || descriptor.manifestHash !== value.manifestHash || descriptor.inventoryHash !== value.review.inventoryHash || descriptor.reviewHash !== createHash('sha256').update(profileSourceReviewBytes(value.review)).digest('hex') || typeof descriptor.observationHash !== 'string' || !/^[a-f0-9]{64}$/.test(descriptor.observationHash) || !Number.isSafeInteger(descriptor.observationBytes) || descriptor.observationBytes < 1 || descriptor.observationBytes > 128 * 1024 ** 2)
+              throw Error('broker_source_observation');
+          id = descriptor.observationId;
+          value.physical = 'loading';
+          const bytes = Buffer.alloc(descriptor.observationBytes);
+          try {
+              for (let offset = 0; offset < bytes.length; offset += 256 * 1024) {
+                  const length = Math.min(256 * 1024, bytes.length - offset), part = sourceBytes(await call('sources.physical.page', { handle: value.handle, observationId: id, offset, length }, signal), 'offset', offset, length);
+                  sourceCapture(handle);
+                  if (part.length !== length)
+                      throw Error('broker_source_observation_page');
+                  part.copy(bytes, offset);
+                  part.fill(0);
+              }
+              if (createHash('sha256').update(bytes).digest('hex') !== descriptor.observationHash)
+                  throw Error('broker_source_observation_hash');
+              const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+              if (!Buffer.from(canonicalVerificationJson(body)).equals(bytes) || !body || Object.keys(body).sort().join(',') !== 'files,inventoryHash,manifestHash,reviewHash,version' || body.version !== 1 || body.manifestHash !== descriptor.manifestHash || body.reviewHash !== descriptor.reviewHash || body.inventoryHash !== descriptor.inventoryHash || !Array.isArray(body.files) || body.files.length !== expected.length)
+                  throw Error('broker_source_observation_body');
+              const files = body.files.map((row: any, index: number) => { if (!row || Object.keys(row).sort().join(',') !== 'byteLength,device,inode,sha256,sourceId,suffix' || typeof row.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(row.sha256))
+                  throw Error('broker_source_observation_mapping'); const { sha256, ...identity } = row; if (canonicalVerificationJson(identity) !== canonicalVerificationJson(expected[index]))
+                  throw Error('broker_source_observation_mapping'); return Object.freeze({ ...row }); });
+              await client.checkProfileCapture(handle, signal);
+              sourceCapture(handle);
+              token = Object.freeze({});
+              physicalFacts.set(token, { handle, files: Object.freeze(files) });
+          }
+          finally {
+              bytes.fill(0);
+          }
+      }
+      catch (cause) {
+          error = cause;
+      }
+      finally {
+          try {
+              if (id) {
+                  value.physical = 'releasing';
+                  await releaseObservationBuffer(handle, value, id);
+                  value.physical = undefined;
+              }
+              else {
+                  value.physical = 'unknown';
+                  await releaseSourceCapture(handle, undefined, 5000);
+              }
+          }
+          catch (cleanupError) {
+              value.physical = 'unknown';
+              try {
+                  if (id)
+                      await releaseSourceCapture(handle, undefined, 5000);
+              }
+              catch (closeError) {
+                  cleanupError = new AggregateError([cleanupError, closeError], 'broker_source_capture_unknown');
+              }
+              error = error === undefined ? cleanupError : new AggregateError([error, cleanupError], 'broker_source_observation_cleanup');
+          }
+      } if (error !== undefined)
+          throw error; return token!; },
+      readProfilePhysicalSqliteFiles(token: object) { current(); const value = physicalFacts.get(token); if (!value)
+          throw Error('broker_source_observation_brand'); sourceCapture(value.handle); return value.files; },
   async authorizePublicationOperation(raw:unknown,signal?:AbortSignal){const review=parsePublicationOperationReview(raw),{tuple,...metadata}=review;current();const active=signal?AbortSignal.any([signal,lifetime.signal]):lifetime.signal;const response=await callControllerIpc(socketPath,Buffer.from(canonicalVerificationJson(tuple)),{signal:active,timeoutMs:5000});current();const registered=JSON.parse(response.toString('utf8'));if(!registered||Object.keys(registered).sort().join(',')!=='fullTupleHash,ticket'||typeof registered.ticket!=='string'||!/^[a-f0-9]{64}$/.test(registered.ticket)||registered.fullTupleHash!==hashVerificationTuple(tuple))throw Error('broker_publication_registration');return call('publication.authorize',{metadata,ticket:registered.ticket,fullTupleHash:registered.fullTupleHash},signal) as ReturnType<typeof authorizePublicationOperation>;},
   async authorizeApplicationBinding(input:{requestSource:'user'|'agent'|'scheduler';review:unknown},signal?:AbortSignal){const requestSource=input.requestSource,raw=input.review;if(requestSource!=='user')throw Error('application_authorization_source');const review=parseApplicationBindingReview(raw),bytes=applicationBindingReviewBytes(review);if(bytes.length>65536){const reviewHash=createHash('sha256').update(bytes).digest('hex'),registered=await call('application.registerReview',{review},signal);if(!registered||Object.keys(registered).sort().join(',')!=='reviewHash,ticket'||typeof registered.ticket!=='string'||!/^[a-f0-9]{64}$/.test(registered.ticket)||registered.reviewHash!==reviewHash)throw Error('broker_application_registration');try{return await call('application.authorize',{requestSource,ticket:registered.ticket,reviewHash},signal) as {uid:number;auditSessionId:number;reviewHash:string};}finally{try{await call('application.releaseReview',{ticket:registered.ticket,reviewHash},undefined,5000);}catch{/* Lost connectivity leaves only bounded, expiring data; it is never approval. */}}}return call('application.authorize',{requestSource,review},signal) as Promise<{uid:number;auditSessionId:number;reviewHash:string}>;},
   async authorizeArchiveOperation(input:{requestSource:'user'|'agent'|'scheduler';review:unknown},signal?:AbortSignal){const requestSource=input.requestSource,raw=input.review;if(requestSource!=='user')throw Error('archive_authorization_source');const review=parseArchiveOperationReview(raw);return call('archive.authorize',{requestSource,review},signal) as Promise<{uid:number;auditSessionId:number;reviewHash:string}>;},

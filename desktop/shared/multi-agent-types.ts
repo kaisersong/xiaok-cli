@@ -61,6 +61,8 @@ export interface MultiAgentApprovalDecisionInput {
 }
 
 export interface DesktopAgentSnapshot {
+  executionHealth?: 'running' | 'waiting' | 'recovering' | 'cleanup_pending';
+  preparedReservation?: boolean;
   id: string;
   parentId: string | null;
   taskName: string;
@@ -148,7 +150,7 @@ export interface DesktopMailboxPort {
   }>;
 }
 
-export type MultiAgentEventKind = 'status' | 'message_sent' | 'message_consumed' | 'output' | 'result' | 'usage' | 'cleanup' | 'artifact' | 'tool_finished' | 'delivery' | 'approval';
+export type MultiAgentEventKind = 'status' | 'message_sent' | 'message_consumed' | 'output' | 'result' | 'usage' | 'cleanup' | 'artifact' | 'tool_finished' | 'delivery' | 'approval' | 'activity_run';
 export interface MultiAgentDurableEvent {
   schemaVersion: 1;
   channel: 'durable';
@@ -217,6 +219,11 @@ export interface MultiAgentResourceInput {
   threadId: string; groupId: string; resourceId: string; action: 'keep' | 'retryCleanup'; operationId: string;
 }
 export interface MultiAgentControlResult {
+  phase?: string;
+  actorId?: string;
+  cancellationError?: string;
+  resourceId?: string;
+  action?: 'keep' | 'retryCleanup';
   operationId: string;
   state: 'applied' | 'queued_next_admission' | 'cleanup_pending' | 'completed' | 'unknown';
   targetAgentId?: string;

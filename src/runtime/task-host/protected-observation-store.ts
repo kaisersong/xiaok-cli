@@ -1,3 +1,4 @@
+import {desktopObservationSessionId,assertInitializedSnapshot,readDesktopTaskProtection} from './protected-observation-reader.js';
 import { assertCompoundHostStorage, type CompoundHostStorage } from '../sol-pi/compound-host-storage.js';
 import { getCompoundExecutionDomainBinding, type openCompoundExecutionDomain } from '../sol-pi/compound-execution-domain.js';
 import { getConfigDir } from '../../utils/config.js';
@@ -15,10 +16,7 @@ import { AgentSessionState, type AgentSessionSnapshot } from '../../ai/runtime/s
 import { FileSessionStore, isConfirmedFileSessionPrecommitRejection } from '../../ai/runtime/session-store/file-store.js';
 import { mergeProtectedObservationClosures, type ProtectedObservationClosure } from '../../ai/runtime/protected-observation-closure.js';
 
-export function desktopObservationSessionId(taskId: string): string {
-  if (!taskId || typeof taskId !== 'string') throw new Error('SOL_PI_DESKTOP_TASK_ID_INVALID');
-  return `desktop-observation-${createHash('sha256').update(taskId).digest('hex')}`;
-}
+export {desktopObservationSessionId} from './protected-observation-reader.js';
 /** Main-owned session sidecar. No delete/clear API: stale task journals cannot erase protection or execution ledgers. */
 export interface DesktopExecutionPersistence {
   readonly root: string;
@@ -29,11 +27,7 @@ export interface DesktopExecutionPersistence {
   registerManagedAlias?(admission:ManagedCompoundAdmission,domain:ReturnType<typeof openCompoundExecutionDomain>,lease:SessionExecutionLease):Promise<void>;
   initialize(snapshot: PersistedSessionSnapshot, lease: SessionExecutionLease): Promise<void>;
 }
-function assertInitializedSnapshot(snapshot: PersistedSessionSnapshot): void {
-  if (snapshot.executionProtected !== true || !Number.isSafeInteger(snapshot.storeRevision) || snapshot.storeRevision! < 1
-    || snapshot.historyDigest !== computeSessionHistoryDigest(snapshot)) throw Error('SOL_PI_DESKTOP_INITIALIZATION_REQUIRED');
-  toDurableSessionSnapshot(snapshot);
-}
+
 interface ExecutionPersistenceTracking {
   run<T>(work: () => Promise<T>): Promise<T>;
   write<T>(work: () => Promise<T>, confirmedRejection?: (originalPromise: Promise<T>) => boolean): Promise<T>;
@@ -97,13 +91,8 @@ export class DesktopTaskObservationStore {
   async loadSessionSnapshot(taskId:string):Promise<PersistedSessionSnapshot|null>{
     return this.alias(taskId)?.snapshot??await this.sessions.load(desktopObservationSessionId(taskId));
   }
-  async readProtection(taskId: string): Promise<{closure?: ProtectedObservationClosure; executionProtected?: true}> {
-    try {
-      const snapshot = this.alias(taskId)?.snapshot ?? await this.sessions.load(desktopObservationSessionId(taskId));
-      if (snapshot && (!snapshot.protectedObservationClosure || snapshot.executionProtected !== undefined)) assertInitializedSnapshot(snapshot);
-      return { closure: mergeProtectedObservationClosures(undefined, snapshot?.protectedObservationClosure),
-        ...(snapshot?.executionProtected ? { executionProtected: true as const } : {}) };
-    } catch (cause) { throw Object.assign(new Error('SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE', { cause }), { code: 'SOL_PI_PROTECTED_HISTORY_STORE_UNAVAILABLE' }); }
+  readProtection(taskId: string): Promise<{closure?: ProtectedObservationClosure; executionProtected?: true}> {
+    return readDesktopTaskProtection(taskId,{loadAlias:id=>this.alias(id),loadSession:id=>this.sessions.load(id)});
   }
   async read(taskId: string): Promise<ProtectedObservationClosure | undefined> { return (await this.readProtection(taskId)).closure; }
   readProtectionSync(taskId: string): {closure?: ProtectedObservationClosure; executionProtected?: true} {

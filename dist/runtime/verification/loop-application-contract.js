@@ -1,6 +1,9 @@
 import { parseLoopContractV1 } from '../loop/contract.js';
 import { createHash } from 'node:crypto';
 import { canonicalVerificationJson as json } from './protocol.js';
+import { readApplicationOwnDataField } from './application-value-data.js';
+import { captureApplicationData } from './application-value-data.js';
+function boundedCapture(raw) { return captureApplicationData(raw, { maximumBytes: 65536, maximumNodes: 65536, invalid: 'loop_contract_shape', limit: 'loop_contract_limit' }); }
 function freeze(value) {
     if (value && typeof value === 'object') {
         Object.values(value).forEach(freeze);
@@ -12,7 +15,7 @@ function freeze(value) {
  * access or verification proof; legacy weak criteria stay weak. The ordinary
  * Desktop path continues to use the same underlying parser without this gate. */
 export function parseStrictLoopContractV1(raw) {
-    const encoded = json(raw);
+    const encoded = json(boundedCapture(raw));
     if (Buffer.byteLength(encoded) > 65536)
         throw Error('loop_contract_limit');
     const captured = JSON.parse(encoded);
@@ -37,21 +40,24 @@ function text(value, allowEmpty = false) {
  * and native approval are separate authorities. This parser never invents them.
  * The final native review also checks its whole ASCII-safe envelope size. */
 export function parseLoopBusinessContract(raw) {
-    const encoded = json(raw);
+    const encoded = json(boundedCapture(raw));
     if (Buffer.byteLength(encoded) > 65536)
         throw Error('loop_contract_limit');
     const captured = JSON.parse(encoded);
-    if (!captured || typeof captured !== 'object' || Array.isArray(captured) || !('kind' in captured))
+    if (!captured || typeof captured !== 'object' || Array.isArray(captured))
+        throw Error('loop_contract_shape');
+    const kind = readApplicationOwnDataField(captured, 'kind', 'loop_contract_shape');
+    if (kind.kind !== 'data')
         throw Error('loop_contract_shape');
     const value = captured;
-    if (value.kind === 'builtin-diagnostic') {
+    if (kind.value === 'builtin-diagnostic') {
         shape(value, ['version', 'kind', 'scanner', 'objective', 'completionCriterion']);
         if (!LOOP_DIAGNOSTIC_SCANNERS.includes(value.scanner))
             throw Error('loop_contract_scanner');
         text(value.objective);
         text(value.completionCriterion);
     }
-    else if (value.kind === 'user-template') {
+    else if (kind.value === 'user-template') {
         shape(value, ['version', 'kind', 'templateKind', 'prompt', 'outputDirectory', 'outputFileName', 'loopContract']);
         if (value.templateKind !== 'markdown_file' && value.templateKind !== 'task_completion')
             throw Error('loop_contract_template');
@@ -60,7 +66,7 @@ export function parseLoopBusinessContract(raw) {
         text(value.outputFileName, true);
         value.loopContract = parseStrictLoopContractV1(value.loopContract);
     }
-    else if (value.kind === 'assistant') {
+    else if (kind.value === 'assistant') {
         shape(value, ['version', 'kind', 'assistantKind', 'profileId', 'locale', 'timeZone', 'dataScopes', 'objective', 'completionCriterion']);
         if (!['evening', 'morning'].includes(value.assistantKind) || value.profileId !== 'default-personal-assistant'
             || !['zh', 'en'].includes(value.locale))

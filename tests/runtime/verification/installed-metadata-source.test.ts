@@ -198,7 +198,7 @@ it('fails closed on actual malformed native TEXT bytes without replacing or drop
 });
 
 it('uses one current fixed schema context in the actual native source getter without omitting original frames',()=>{
- const f=fixture();let spy:ReturnType<typeof vi.spyOn>|undefined;try{seedSessions(f);const source=createInstalledControllerMetadataSource(native.lifetime),before=nativeSessionFacts(native.lifetime,source),prepare=f.database.prepare.bind(f.database);let masters=0;spy=vi.spyOn(f.database,'prepare').mockImplementation((sql:any)=>{if(sql.includes('FROM main.sqlite_master')&&!sql.includes('WHERE'))masters++;return prepare(sql);});const after=nativeSessionFacts(native.lifetime,source);expect(after).toEqual(before);expect(masters).toBeLessThanOrEqual(2);}finally{spy?.mockRestore();f.close();}
+ const f=fixture();let spy:{mockRestore():void}|undefined;try{seedSessions(f);const source=createInstalledControllerMetadataSource(native.lifetime),before=nativeSessionFacts(native.lifetime,source),prepare=f.database.prepare.bind(f.database);let masters=0;spy=vi.spyOn(f.database,'prepare').mockImplementation((sql:any)=>{if(sql.includes('FROM main.sqlite_master')&&!sql.includes('WHERE'))masters++;return prepare(sql);});const after=nativeSessionFacts(native.lifetime,source);expect(after).toEqual(before);expect(masters).toBeLessThanOrEqual(2);}finally{spy?.mockRestore();f.close();}
 });
 
 it('retains the exact original native fixture digest through serialization repair',()=>{
@@ -217,4 +217,19 @@ it('namespace: attached mapping cannot replace a missing main mapping',()=>{
 });
 it('namespace: storage feature writes stay in main and TEMP cannot hide a damaged main feature',()=>{
  const f=fixture();try{prepareStorageOwnerSchema(f.database);f.database.exec('CREATE TEMP TABLE verification_storage_features(feature TEXT,minimum_schema INTEGER)');f.database.transaction(()=>recordKSwarmStorageFeature(f.database))();expect(f.database.prepare('SELECT * FROM main.verification_storage_features').all()).toEqual([{feature:'kswarm-owner',minimum_schema:2}]);expect(f.database.prepare('SELECT * FROM temp.verification_storage_features').all()).toEqual([]);f.database.exec("INSERT INTO temp.verification_storage_features VALUES('kswarm-owner',2);UPDATE main.verification_storage_features SET minimum_schema=1");expect(()=>assertStorageOwnerSchema(f.database,{version:3,completionOwnerSchema:2} as any)).toThrow('kswarm_storage_schema');expect(()=>f.database.transaction(()=>recordKSwarmStorageFeature(f.database))()).toThrow('kswarm_storage_schema');}finally{f.close();}
+});
+
+it.each(['account','owner','receipt'] as const)('does not brand later hard %s corruption as mapping not ready after an earlier valid pending profile',mode=>{
+ const f=fixture();try{seedSessions(f);native.lifetime.manifest.allowedUserIds=[500,501];f.database.prepare('INSERT INTO verification_profiles VALUES(?,?,?,?)').run(500,'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','pending-first','pending');
+ if(mode==='account')f.database.prepare('UPDATE verification_profiles SET account_id=? WHERE uid=501').run('invalid-account');
+ if(mode==='owner')f.database.prepare('UPDATE verification_registered_owners SET owner_key=?').run(json({profileId:'p',ownerKind:'invalid-kind',ownerId:'o'}));
+ if(mode==='receipt')f.database.prepare('UPDATE owner_enrollment_invocation_receipts SET logical_owner_key=?').run('wrong-logical-owner');
+ const source=createInstalledControllerMetadataSource(native.lifetime);let error:unknown;try{readInstalledMetadataSource(source,f.database,'authority');}catch(value){error=value;}expect(error).toBeInstanceOf(Error);expect(nativeMetadata.isInstalledMetadataMappingNotReady(error,f.database,'authority')).toBe(false);
+ }finally{f.close();}
+});
+it.each(['valid','corrupt-receipt'] as const)('validates original committed-zero pending owner population before not-ready classification: %s',mode=>{
+ const f=fixture();try{seedSessions(f);native.lifetime.manifest.allowedUserIds=[501];f.database.exec("UPDATE verification_registered_owners SET state='pending';UPDATE verification_registered_invocations SET state='pending';UPDATE owner_enrollment_intents SET committed=0");
+ if(mode==='valid')f.database.exec('DELETE FROM owner_enrollment_invocation_receipts');else f.database.prepare('UPDATE owner_enrollment_invocation_receipts SET logical_owner_key=?').run('wrong-logical-owner');
+ const source=createInstalledControllerMetadataSource(native.lifetime);let error:unknown;try{readInstalledMetadataSource(source,f.database,'authority');}catch(value){error=value;}expect(error).toBeInstanceOf(Error);expect(nativeMetadata.isInstalledMetadataMappingNotReady(error,f.database,'authority')).toBe(mode==='valid');
+ }finally{f.close();}
 });

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {toDurableSessionSnapshot,type PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
-import {assertCapturedMessageSchema} from '../../ai/runtime/provider-private-projection.js';
+import {assertCapturedMessageSchema} from '../../ai/runtime/provider-private-data.js';
 import {canonicalVerificationJson as json} from '../verification/protocol.js';
 import type {Message} from '../../types.js';
 export interface IntentStageContext {stageId:string;messageCount:number;messagesHash:string}

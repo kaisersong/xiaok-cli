@@ -1,6 +1,6 @@
 {
   "name": "xiaokcode",
-  "version": "1.5.8",
+  "version": "1.5.11",
   "description": "本地优先的 AI 任务交付工作台 CLI",
   "license": "Apache-2.0",
   "homepage": "https://github.com/kaisersong/xiaok-cli#readme",
@@ -29,8 +29,8 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "postinstall": "node scripts/prepare-cli-pty.mjs",
-    "prepack": "node scripts/verification/copy-windows-absence.mjs cli --require-all",
+    "postinstall": "node scripts/prepare-cli-native.mjs",
+    "prepack": "node scripts/pack-cli.mjs --prepack-check",
     "build": "node scripts/set-build-flavor.mjs normal && node -e \"const fs=require('fs');const t=new Date();const s=t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')+' '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0');fs.writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = '+JSON.stringify(s)+';\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\" && node scripts/verification/copy-windows-absence.mjs cli",
     "build:release": "node scripts/set-build-flavor.mjs normal && node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\" && node scripts/verification/copy-windows-absence.mjs cli --require-all",
     "build:rollback": "node scripts/set-build-flavor.mjs rollback && node -e \"require('fs').writeFileSync('src/build-info.ts','export const BUILD_TIME: string | null = null;\\n')\" && node scripts/clean-cli-build.mjs && tsc && node -e \"const fs=require('fs'); if(process.platform!=='win32' && fs.existsSync('dist/index.js')) fs.chmodSync('dist/index.js', 0o755)\" && node scripts/verification/copy-windows-absence.mjs cli",
@@ -83,12 +83,17 @@
     "architecture:check": "node scripts/governance/check.mjs architecture",
     "architecture:baseline": "node scripts/governance/check.mjs architecture --update-baseline",
     "governance:check": "npm run lint && npm run architecture:check",
-    "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs"
+    "test:governance": "node --test tests/governance/gates.test.mjs tests/governance/hygiene-workspace.test.mjs",
+    "pack:cli": "node scripts/pack-cli.mjs",
+    "verify:cli-install": "node scripts/verify-cli-install.mjs",
+    "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs",
+    "test:desktop-service-contract": "node --test tests/package/desktop-service-contract.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
     "@huggingface/tokenizers": "^0.1.3",
     "@modelcontextprotocol/client": "2.3.0",
+    "@modelcontextprotocol/ext-tasks": "0.2.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "8.20.0",
     "beautiful-mermaid": "^1.1.3",
@@ -133,7 +138,8 @@
   "files": [
     "dist",
     "scripts/prepare-cli-pty.mjs",
-    "data"
+    "data",
+    "scripts/prepare-cli-native.mjs"
   ],
   "overrides": {
     "@mapbox/node-pre-gyp": "^2.0.3"

@@ -1,3 +1,5 @@
+import { recorderWindowErrorMessage } from '../lib/recorder-window-error';
+import { knowledgeErrorMessage } from '../lib/knowledge-error';
 import { useState, useEffect, useCallback, useRef, type DragEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Plus, Download, RotateCcw, Trash2, FileText, Globe, ClipboardPaste, Search, BookOpen, Link, Mic, ChevronRight, Settings2, Minimize2, Maximize2, Pause, Play, LoaderCircle, X, Pencil, Check } from 'lucide-react';
@@ -388,6 +390,11 @@ export function KnowledgePage() {
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
+  const [knowledgeError, setKnowledgeError] = useState('');
+  const [collectionsError, setCollectionsError] = useState('');
+  const [sourcesError, setSourcesError] = useState('');
+  const [searchError, setSearchError] = useState('');
+  const knowledgeFailureMessage = useCallback((error: unknown, reading = false) => knowledgeErrorMessage(error, { projectionUnavailable: t.knowledge.projectionUnavailable, operationUnknown: t.knowledge.operationUnknown, inputInvalid: t.knowledge.inputInvalid }, reading), [t]);
   const [showAddSource, setShowAddSource] = useState(false);
   const [addMode, setAddMode] = useState<'paste' | 'url'>('paste');
   const [pasteText, setPasteText] = useState('');
@@ -402,10 +409,16 @@ export function KnowledgePage() {
   const [showMeetingImport, setShowMeetingImport] = useState(false);
   const [showMeetingRecorder, setShowMeetingRecorder] = useState(false);
   const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingAudioFilePath, setMeetingAudioFilePath] = useState('');
+  const [meetingAudioFilePath, setMeetingAudioFilePathState] = useState('');
+  const meetingAudioFilePathRef = useRef('');
+  const setMeetingAudioFilePath = useCallback((value: string) => { meetingAudioFilePathRef.current = value; setMeetingAudioFilePathState(value); }, []);
   const [meetingTranscript, setMeetingTranscript] = useState('');
-  const [meetingSummaryDraft, setMeetingSummaryDraft] = useState('');
-  const [meetingDraftTranscript, setMeetingDraftTranscript] = useState('');
+  const [meetingSummaryDraft, setMeetingSummaryDraftState] = useState('');
+  const meetingSummaryDraftRef = useRef('');
+  const setMeetingSummaryDraft = useCallback((value: string) => { meetingSummaryDraftRef.current = value; setMeetingSummaryDraftState(value); }, []);
+  const [meetingDraftTranscript, setMeetingDraftTranscriptState] = useState('');
+  const meetingDraftTranscriptRef = useRef('');
+  const setMeetingDraftTranscript = useCallback((value: string) => { meetingDraftTranscriptRef.current = value; setMeetingDraftTranscriptState(value); }, []);
   const [meetingSaving, setMeetingSaving] = useState(false);
   const [meetingRecording, setMeetingRecording] = useState(false);
   const [meetingRecordingPaused, setMeetingRecordingPaused] = useState(false);
@@ -439,6 +452,9 @@ export function KnowledgePage() {
   const meetingPreviewSegmentsRef = useRef<MeetingPreviewSegment[]>([]);
   const meetingRecordingRef = useRef<ActiveMeetingRecording | null>(null);
   const meetingRecorderInitializedRef = useRef(false);
+  const [meetingWindowError, setMeetingWindowError] = useState('');
+  const recorderModeGeneration = useRef(0);
+  const recorderSavedSubmission = useRef<{ collectionId: string; title: string; audioFilePath: string; transcript: string; notified: boolean } | null>(null);
 
   const desktop = getDesktopApi();
 
@@ -676,8 +692,9 @@ export function KnowledgePage() {
     try {
       const result = await desktop.kbListCollections();
       setCollections(result as KbCollection[]);
-    } catch { /* ignore */ }
-  }, [desktop]);
+      setCollectionsError('');
+    } catch (error) { setCollectionsError(knowledgeFailureMessage(error, true)); }
+  }, [desktop, knowledgeFailureMessage]);
 
   const loadMeetingAsrConfig = useCallback(async () => {
     if (!desktop?.meetingGetAsrConfig) return;
@@ -706,8 +723,9 @@ export function KnowledgePage() {
     try {
       const result = await desktop.kbListSources(cid);
       setSources(result as KbSource[]);
-    } catch { /* ignore */ }
-  }, [desktop]);
+      setSourcesError('');
+    } catch (error) { setSourcesError(knowledgeFailureMessage(error, true)); }
+  }, [desktop, knowledgeFailureMessage]);
 
   useEffect(() => {
     setLoading(true);
@@ -765,6 +783,7 @@ export function KnowledgePage() {
 
   const handleCreateCollection = async () => {
     if (!desktop?.kbCreateCollection || !newCollectionName.trim()) return;
+    setKnowledgeError('');
     try {
       const col = await desktop.kbCreateCollection({
         name: newCollectionName.trim(),
@@ -775,21 +794,23 @@ export function KnowledgePage() {
       setShowCreateDialog(false);
       await loadCollections();
       navigate(`/knowledge/${col.id}`);
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleDeleteCollection = async (id: string) => {
     if (!desktop?.kbDeleteCollection) return;
     if (!confirm(t.knowledge.deleteCollectionConfirm)) return;
+    setKnowledgeError('');
     try {
       await desktop.kbDeleteCollection(id);
       if (collectionId === id) navigate('/knowledge');
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleAddPasteSource = async () => {
     if (!desktop?.kbAddSource || !collectionId || !pasteText.trim()) return;
+    setKnowledgeError('');
     try {
       await desktop.kbAddSource({
         collectionId,
@@ -802,11 +823,12 @@ export function KnowledgePage() {
       setShowAddSource(false);
       await loadSources(collectionId);
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleAddUrlSource = async () => {
     if (!desktop?.kbAddSource || !collectionId || !urlInput.trim()) return;
+    setKnowledgeError('');
     try {
       await desktop.kbAddSource({
         collectionId,
@@ -819,16 +841,17 @@ export function KnowledgePage() {
       setShowAddSource(false);
       await loadSources(collectionId);
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleDeleteSource = async (id: string) => {
     if (!desktop?.kbDeleteSource || !collectionId) return;
+    setKnowledgeError('');
     try {
       await desktop.kbDeleteSource(id);
       await loadSources(collectionId);
       await loadCollections();
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const handleOpenSource = async (source: KbSource) => {
@@ -836,6 +859,7 @@ export function KnowledgePage() {
     setSourceContent(null);
     setSourceContentError('');
     setSourceContentLoading(true);
+    setKnowledgeError('');
     try {
       const result = await desktop.kbGetSourceContent({
         sourceId: source.id,
@@ -848,7 +872,7 @@ export function KnowledgePage() {
       }
       setSourceContent(result);
     } catch (error) {
-      setSourceContentError(t.knowledge.sourceOpenFailed(error instanceof Error ? error.message : 'unknown'));
+      setSourceContentError(knowledgeFailureMessage(error, true));
     } finally {
       setSourceContentLoading(false);
     }
@@ -856,6 +880,7 @@ export function KnowledgePage() {
 
   const handlePickFiles = async () => {
     if (!desktop?.kbPickFiles || !desktop?.kbAddSource || !collectionId) return;
+    setKnowledgeError('');
     try {
       const filePaths = await desktop.kbPickFiles();
       for (const fp of filePaths) {
@@ -872,7 +897,7 @@ export function KnowledgePage() {
         await loadSources(collectionId);
         await loadCollections();
       }
-    } catch { /* ignore */ }
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
   };
 
   const cleanupMeetingRecording = () => {
@@ -932,23 +957,40 @@ export function KnowledgePage() {
     setMeetingRecordingSaving(false);
     setMeetingProcessing(false);
     setMeetingElapsedMs(0);
+    ++recorderModeGeneration.current;
     setMeetingRecorderView('workbench');
     setShowMeetingRecorder(true);
   };
 
-  const handleOpenMeetingRecorder = async () => {
-    if (!collectionId || !desktop?.meetingOpenRecorderWindow) return;
+  const runRecorderOperation = async (operation: () => Promise<{ ok: boolean; error?: string }> | undefined, saved = false): Promise<boolean> => {
     try {
-      const result = await desktop.meetingOpenRecorderWindow({ collectionId }) as { ok?: boolean; error?: string };
-      if (result?.ok === false) {
-        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed(result.error ?? 'unknown') });
-      }
+      const result = await operation();
+      if (result?.ok === true) return true;
+      setMeetingWindowError(saved ? t.knowledge.meetingRecorderSavedFollowupFailed : recorderWindowErrorMessage(result?.error, t.knowledge));
     } catch {
-      setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecordFailed('window_open_failed') });
+      setMeetingWindowError(saved ? t.knowledge.meetingRecorderSavedFollowupFailed : t.knowledge.meetingRecorderOperationUnknown);
     }
+    return false;
   };
 
-  const handleCloseMeetingRecorder = () => {
+  const handleOpenMeetingRecorder = async () => {
+    if (!collectionId) return;
+    setMeetingWindowError('');
+    await runRecorderOperation(() => desktop?.meetingOpenRecorderWindow?.({ collectionId }));
+  };
+
+  const handleRecorderMode = async (mode: 'compact' | 'workbench') => {
+    const generation = ++recorderModeGeneration.current;
+    setMeetingWindowError('');
+    const success = await runRecorderOperation(() => desktop?.meetingSetRecorderWindowMode?.({ mode }));
+    if (success && generation === recorderModeGeneration.current) setMeetingRecorderView(mode);
+  };
+
+  const handleCloseMeetingRecorder = async () => {
+    if (isMeetingRecorderWindow) {
+      setMeetingWindowError('');
+      if (!await runRecorderOperation(() => desktop?.meetingCloseRecorderWindow?.())) return;
+    }
     cleanupMeetingRecording();
     replaceMeetingPreviewSegments([]);
     setMeetingSummaryDraft('');
@@ -957,18 +999,14 @@ export function KnowledgePage() {
     setMeetingRecordingSaving(false);
     setMeetingProcessing(false);
     setShowMeetingRecorder(false);
-    if (isMeetingRecorderWindow) {
-      void desktop?.meetingSetRecorderSessionState?.({ state: 'idle' });
-      void desktop?.meetingCloseRecorderWindow?.();
-    }
   };
 
   useEffect(() => {
     if (!isMeetingRecorderWindow || meetingRecorderInitializedRef.current) return;
     meetingRecorderInitializedRef.current = true;
     initializeMeetingRecorder();
-    void desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
-    void desktop?.meetingSetRecorderSessionState?.({ state: 'idle' });
+    void runRecorderOperation(() => desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' }));
+    void runRecorderOperation(() => desktop?.meetingSetRecorderSessionState?.({ state: 'idle' }));
     const unsubscribeClose = desktop?.onMeetingRecorderCloseRequested?.(() => {
       setMeetingMessage({ kind: 'error', text: t.knowledge.meetingRecorderCloseBlocked });
     });
@@ -991,6 +1029,7 @@ export function KnowledgePage() {
   };
 
   const handleStartMeetingRecording = async () => {
+    setMeetingWindowError('');
     if (!desktop?.meetingSaveRecordedAudio) return;
     const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
@@ -1106,9 +1145,10 @@ export function KnowledgePage() {
       setMeetingRecordingPaused(false);
       setMeetingElapsedMs(0);
       if (isMeetingRecorderWindow) {
+        ++recorderModeGeneration.current;
         setMeetingRecorderView('workbench');
-        void desktop.meetingSetRecorderSessionState?.({ state: 'recording' });
-        void desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+        void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'recording' }));
+        void runRecorderOperation(() => desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' }));
       }
       setMeetingMessage(liveTranscriptionError
         ? { kind: 'error', text: t.knowledge.meetingLiveTranscriptionFailed(liveTranscriptionError) }
@@ -1149,6 +1189,7 @@ export function KnowledgePage() {
   };
 
   const handleStopMeetingRecording = async (options: { draftRecording?: boolean } = {}) => {
+    setMeetingWindowError('');
     if (!desktop?.meetingSaveRecordedAudio || !meetingRecordingRef.current) return;
     const active = meetingRecordingRef.current;
     let summaryReady = false;
@@ -1159,9 +1200,10 @@ export function KnowledgePage() {
     setMeetingRecordingSaving(true);
     setMeetingMessage(null);
     if (isMeetingRecorderWindow) {
+      ++recorderModeGeneration.current;
       setMeetingRecorderView('workbench');
-      void desktop.meetingSetRecorderSessionState?.({ state: 'processing' });
-      void desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
+      void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'processing' }));
+      void runRecorderOperation(() => desktop.meetingSetRecorderWindowMode?.({ mode: 'workbench' }));
     }
     stopActiveMeetingRecording(active);
 
@@ -1232,10 +1274,11 @@ export function KnowledgePage() {
         setMeetingMessage({ kind: 'success', text: t.knowledge.meetingDraftReady });
         summaryReady = true;
         if (isMeetingRecorderWindow) {
+          ++recorderModeGeneration.current;
           setMeetingRecorderView('summary');
-          void desktop.meetingSetRecorderSessionState?.({ state: 'summary' });
-          void desktop.meetingSetRecorderWindowMode?.({ mode: 'summary' });
-          void desktop.meetingNotifyRecorderSummaryReady?.({ title: finalTitle });
+          void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'summary' }));
+          void runRecorderOperation(() => desktop.meetingSetRecorderWindowMode?.({ mode: 'summary' }));
+          void runRecorderOperation(() => desktop.meetingNotifyRecorderSummaryReady?.({ title: finalTitle }));
         }
       }
     } catch {
@@ -1244,7 +1287,7 @@ export function KnowledgePage() {
       setMeetingRecordingSaving(false);
       setMeetingProcessing(false);
       if (isMeetingRecorderWindow && !summaryReady) {
-        void desktop.meetingSetRecorderSessionState?.({ state: 'idle' });
+        void runRecorderOperation(() => desktop.meetingSetRecorderSessionState?.({ state: 'idle' }));
       }
     }
   };
@@ -1277,28 +1320,44 @@ export function KnowledgePage() {
     }
   };
 
+  const readRecorderSubmission = () => {
+    const summary = meetingSummaryDraftRef.current.trim();
+    const transcript = meetingDraftTranscriptRef.current.trim();
+    return { collectionId: collectionId ?? '', title: readMeetingRecordingTitle(), audioFilePath: meetingAudioFilePathRef.current,
+      transcript: transcript ? `${summary}\n\n## 逐字转写\n\n${transcript}` : summary };
+  };
+  const sameRecorderSubmission = (left: ReturnType<typeof readRecorderSubmission>, right: ReturnType<typeof readRecorderSubmission>) => (
+    left.collectionId === right.collectionId && left.title === right.title && left.audioFilePath === right.audioFilePath && left.transcript === right.transcript
+  );
   const handleSaveMeetingRecordingDraft = async () => {
-    if (!desktop?.meetingSaveTranscript || !collectionId || !meetingAudioFilePath || !meetingSummaryDraft.trim()) return;
+    if (!desktop?.meetingSaveTranscript || !collectionId || !meetingAudioFilePath || !meetingSummaryDraft.trim() || meetingSaving) return;
     setMeetingSaving(true);
     setMeetingMessage(null);
-    const title = readMeetingRecordingTitle();
-    const summary = meetingSummaryDraft.trim();
-    const transcript = meetingDraftTranscript.trim();
-    const content = transcript ? `${summary}\n\n## 逐字转写\n\n${transcript}` : summary;
+    setMeetingWindowError('');
+    const submission = readRecorderSubmission();
     try {
-      const result = await desktop.meetingSaveTranscript({
-        collectionId,
-        title,
-        audioFilePath: meetingAudioFilePath,
-        transcript: content,
-      }) as { ok?: boolean; error?: string };
-      if (result?.ok === false) {
-        setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError(result.error ?? 'unknown') });
-        return;
+      let saved = recorderSavedSubmission.current;
+      if (!isMeetingRecorderWindow || !saved || !sameRecorderSubmission(saved, submission)) {
+        const result = await desktop.meetingSaveTranscript(submission) as { ok?: boolean; error?: string };
+        if (result?.ok !== true) {
+          setMeetingMessage({ kind: 'error', text: t.knowledge.meetingImportError(result?.error ?? 'unknown') });
+          return;
+        }
+        saved = { ...submission, notified: false };
+        if (isMeetingRecorderWindow) recorderSavedSubmission.current = saved;
       }
       if (isMeetingRecorderWindow) {
-        await desktop.meetingNotifyRecordingSaved?.({ collectionId });
-        await desktop.meetingCloseRecorderWindow?.();
+        if (!sameRecorderSubmission(submission, readRecorderSubmission())) {
+          setMeetingWindowError(t.knowledge.meetingRecorderNewDraftUnsaved); return;
+        }
+        if (!saved.notified) {
+          if (!await runRecorderOperation(() => desktop.meetingNotifyRecordingSaved?.({ collectionId: submission.collectionId }), true)) return;
+          saved.notified = true;
+        }
+        if (!sameRecorderSubmission(submission, readRecorderSubmission())) {
+          setMeetingWindowError(t.knowledge.meetingRecorderNewDraftUnsaved); return;
+        }
+        await runRecorderOperation(() => desktop.meetingCloseRecorderWindow?.(), true);
         return;
       }
       setMeetingSummaryDraft('');
@@ -1324,7 +1383,8 @@ export function KnowledgePage() {
     try {
       const results = await desktop.kbSearch({ collectionId, query: searchQuery.trim(), topK: 20 });
       setSearchResults(results as KbSearchResult[]);
-    } catch { setSearchResults([]); }
+      setSearchError('');
+    } catch (error) { setSearchError(knowledgeFailureMessage(error, true)); }
     setSearching(false);
   };
 
@@ -1332,6 +1392,8 @@ export function KnowledgePage() {
     e.preventDefault();
     setDragOver(false);
     if (!desktop?.kbAddSource || !collectionId) return;
+    setKnowledgeError('');
+    try {
     const files = e.dataTransfer.files;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -1356,7 +1418,9 @@ export function KnowledgePage() {
     }
     await loadSources(collectionId);
     await loadCollections();
-  };
+  
+    } catch (error) { setKnowledgeError(knowledgeFailureMessage(error)); }
+};
 
   const selectedCollection = collections.find(c => c.id === collectionId);
 
@@ -1381,24 +1445,32 @@ export function KnowledgePage() {
         recordingSaving={meetingRecordingSaving}
         processing={meetingProcessing}
         draftSaving={meetingSaving}
-        message={meetingMessage}
+        message={meetingWindowError ? { kind: 'error', text: meetingWindowError } : meetingMessage}
         onStartRecording={() => void handleStartMeetingRecording()}
         onPauseRecording={handlePauseMeetingRecording}
         onResumeRecording={handleResumeMeetingRecording}
         onFinishRecording={() => void handleStopMeetingRecording({ draftRecording: true })}
-        onCompact={() => {
-          setMeetingRecorderView('compact');
-          void desktop?.meetingSetRecorderWindowMode?.({ mode: 'compact' });
-        }}
-        onExpand={() => {
-          setMeetingRecorderView('workbench');
-          void desktop?.meetingSetRecorderWindowMode?.({ mode: 'workbench' });
-        }}
+        onCompact={() => void handleRecorderMode('compact')}
+        onExpand={() => void handleRecorderMode('workbench')}
         onSaveDraft={() => void handleSaveMeetingRecordingDraft()}
-        onCancel={handleCloseMeetingRecorder}
+        onCancel={() => void handleCloseMeetingRecorder()}
       />
     );
   }
+
+  const knowledgeNoticeText = collectionsError || sourcesError || searchError || (!showCreateDialog ? knowledgeError : '') || meetingWindowError;
+  const knowledgeFailureNotice = knowledgeNoticeText ? (
+    <div role="alert" className="m-4 rounded-lg border border-[var(--c-border-subtle)] p-3 text-sm text-[var(--c-status-error-text)]">
+      <p>{knowledgeNoticeText}</p>
+      <button type="button" onClick={() => { void loadCollections(); if (collectionId) void loadSources(collectionId); }} className="mt-2 rounded-md border border-[var(--c-border-subtle)] px-2 py-1 text-xs">{t.knowledge.refreshData}</button>
+    </div>
+  ) : null;
+  if (!loading && collections.length === 0 && collectionsError) return (
+    <div className="flex h-full min-h-0 flex-col">
+      {knowledgeFailureNotice}
+      {showCreateDialog && <CreateCollectionDialog key="knowledge-create" error={knowledgeError} name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -1425,13 +1497,14 @@ export function KnowledgePage() {
         >
           {t.knowledge.createFirstCollection}
         </button>
-        {showCreateDialog && <CreateCollectionDialog name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
+        {showCreateDialog && <CreateCollectionDialog key="knowledge-create" error={knowledgeError} name={newCollectionName} setName={setNewCollectionName} onCreate={handleCreateCollection} onCancel={() => setShowCreateDialog(false)} />}
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--c-bg-page)]">
+      {knowledgeFailureNotice}
       {/* Header */}
       <header className="border-b border-[var(--c-border)] px-6 py-4">
         <div className="flex items-center justify-between">
@@ -1645,7 +1718,7 @@ export function KnowledgePage() {
               )}
 
               {/* Source list */}
-              {sources.length === 0 ? (
+              {sources.length === 0 && !sourcesError ? (
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 text-[var(--c-text-tertiary)]">
                   <FileText size={24} />
                   <p className="text-sm">{t.knowledge.emptyCollection}</p>
@@ -1690,6 +1763,8 @@ export function KnowledgePage() {
       {/* Create collection dialog */}
       {showCreateDialog && (
         <CreateCollectionDialog
+          key="knowledge-create"
+          error={knowledgeError}
           name={newCollectionName}
           setName={setNewCollectionName}
           onCreate={handleCreateCollection}
@@ -2046,6 +2121,7 @@ function MeetingRecorderWindowSurface({
             <Maximize2 size={18} />
           </button>
         </div>
+        {message?.kind === 'error' && <p role="alert" className="text-sm text-red-600">{message.text}</p>}
         <div data-testid="meeting-compact-waveform" className="mt-1">
           <MeetingAudioWaveform audioLevels={audioLevels} active={recording} paused={paused} compact />
         </div>
@@ -2195,7 +2271,7 @@ function MeetingRecorderWindowSurface({
           {t.knowledge.meetingRecordStop}
         </button>
       </footer>
-      {message?.kind === 'error' && <p className="absolute bottom-24 left-12 text-sm text-red-600">{message.text}</p>}
+      {message?.kind === 'error' && <p role="alert" className="absolute bottom-24 left-12 text-sm text-red-600">{message.text}</p>}
     </main>
   );
 }
@@ -3159,11 +3235,12 @@ function LegacyMeetingRecorderDialog({
   );
 }
 
-function CreateCollectionDialog({ name, setName, onCreate, onCancel }: {
+function CreateCollectionDialog({ name, setName, onCreate, onCancel, error }: {
   name: string;
   setName: (v: string) => void;
   onCreate: () => void;
   onCancel: () => void;
+  error?: string;
 }) {
   const { t } = useLocale();
   return (
@@ -3180,6 +3257,7 @@ function CreateCollectionDialog({ name, setName, onCreate, onCancel }: {
           aria-label={t.knowledge.collectionNamePlaceholder}
           className="mb-4 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-bg-page)] px-3 py-2 text-sm outline-none focus:border-[var(--c-accent)]"
         />
+        {error && <p role="alert" className="mb-3 text-xs text-[var(--c-status-error-text)]">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-sm text-[var(--c-text-secondary)]">{t.knowledge.cancel}</button>
           <button type="button" onClick={onCreate} disabled={!name.trim()} className="rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">{t.knowledge.createBtn}</button>

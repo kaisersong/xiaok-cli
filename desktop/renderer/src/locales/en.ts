@@ -89,6 +89,11 @@ export const en: LocaleStrings = {
   collaborationRoomMentionAll: "All agents",
   collaborationRoomsTitle: "Collaboration",
   collaborationRoomsSubtitle: "Discuss with multiple agents and turn messages into projects",
+  collaborationRoomGoalLabel: "Collaboration goal",
+  collaborationRoomGoalPlaceholder: "For example: analyze this month’s AI product updates, collect evidence, and discuss findings",
+  collaborationRoomAiDefaultsHint: "Describe the goal. AI fills the title, description, and local agent members. Advanced settings let you override them.",
+  collaborationRoomAdvanced: "Advanced settings (optional)",
+  collaborationRoomAiCreating: "AI is preparing and creating…",
   collaborationRoomsCreate: "New collaboration room",
   collaborationRoomsEmptyTitle: "No collaboration rooms yet",
   collaborationRoomMore: "More actions",
@@ -1371,6 +1376,12 @@ export const en: LocaleStrings = {
     taskConcurrencyMin: "1 (serial)",
     taskConcurrencyMax: "10 (max parallel)",
     // general pane - stage debug
+    configLoadFailed: "Unable to read settings. Please try again later.",
+    configSaveFailed: "Unable to save settings. Please try again later.",
+    configOperationUnknown: "The save result is unconfirmed. Reopen settings to check it.",
+    modelConfigOperationUnknown: "The model operation result is unconfirmed. Refresh to check it.",
+    modelConfigInputInvalid: "Check the model settings and try again.",
+    modelConfigUnavailable: "Model settings are unavailable. Please try again later.",
     stageDebugTitle: "Stage Debug Output",
     stageDebugDesc: "When enabled, Stage analysis (intent recognition, context check, duration estimate) is shown before each task starts.",
     stageDebugOn: "On",
@@ -1903,6 +1914,10 @@ export const en: LocaleStrings = {
     aboutDownloadedVersion: (version: string) => `v${version} downloaded, click to install`,
     aboutDownloadProgress: (progress: number) => `Download progress ${progress}%`,
     aboutVersionAvailable: (version: string) => `v${version} available`,
+    updaterProjectionUnavailable: "Update status is unavailable. The last confirmed information is preserved.",
+    updaterOperationUnknown: "The update operation could not be confirmed. Check its status before attempting another installation.",
+    updaterInputInvalid: "This window is not authorized for the update operation, or the request is invalid.",
+    updaterRefreshData: "Refresh update status",
     aboutChecking: "Checking...",
     aboutInstallRestart: "Install and restart",
     aboutInstallProgress: "Installing...",
@@ -1993,6 +2008,11 @@ export const en: LocaleStrings = {
     // connectors pane
     connectorSaveFailedNoDesktop: "Save failed: desktop not connected",
     connectorConfigParseError: "Connector config file was malformed and has been backed up. Defaults restored.",
+    connectorProjectionUnavailable: "Connector configuration is unavailable. Refresh to try again.",
+    connectorOperationUnknown: "The connector operation is unconfirmed. Refresh to check its current state.",
+    connectorInputInvalid: "The connector configuration or request is invalid. Check it and try again.",
+    connectorRefreshData: "Refresh connector configuration",
+    connectorStatusDecryptFailed: "Key decryption failed",
     connectorLoadFailed: "Unable to load connector config.",
     networkTools: "Network Tools",
     networkToolsDesc: "Configure the provider used by web_search and web_fetch. Switching automatically falls back to the default provider.",
@@ -2073,6 +2093,10 @@ export const en: LocaleStrings = {
     pluginsInstall: "Install",
     pluginsInstallFailed: "Install failed",
     pluginsRestartHint: "Changes take effect after restart",
+    pluginsCatalogUnavailable: "Plugin catalog is temporarily unavailable",
+    pluginsCatalogRetry: "Read plugin catalog again",
+    pluginsCatalogLoading: "Reading plugin catalog…",
+    pluginsCatalogToolCount: (count: number) => `${count} tools`,
     // LocalMemoryStatsCard
     relativeTimeJustNow: "just now",
     relativeTimeMinutesAgo: (n: number) => `${n}m ago`,
@@ -2467,6 +2491,10 @@ export const en: LocaleStrings = {
   projectsPageOffline: "Offline",
 
   // projects - knowledge and rules tab
+  projectsPrinciplesOperationUnknown: "The principle operation could not be confirmed. Refresh and check before trying again.",
+  projectsPrinciplesInputInvalid: "The principle data format is invalid. Check it and try again.",
+  projectsPrinciplesProjectionUnavailable: "Principles could not be read. Refresh and try again.",
+  projectsPrinciplesRefresh: "Refresh principles",
   projectsPrinciplesTab: "Knowledge & Rules",
   projectsPrinciplesAdd: "Add Knowledge",
   projectsPrinciplesImportMemory: "Import from Memory",
@@ -2721,6 +2749,7 @@ export const en: LocaleStrings = {
 
   // welcome page
   welcome: {
+    brandName: 'XIAOK',
     greetingSuffix: ", let's get work done!",
     inputPlaceholder: "Describe what you need...",
     conversationSubtitle: "Start with a conversation while keeping ongoing work in view.",
@@ -2759,6 +2788,8 @@ export const en: LocaleStrings = {
   },
 
   assistant: {
+    operationUnknown: "The result could not be confirmed. Data may have changed. Refresh the status before continuing.",
+    refreshStatus: "Refresh status",
     title: "Daily assistant",
     morningScheduleName: "Daily assistant morning suggestions",
     eveningScheduleName: "Daily assistant evening review",
@@ -2832,6 +2863,11 @@ export const en: LocaleStrings = {
 
   // knowledge page
   knowledge: {
+    projectionUnavailable: "Knowledge data could not be read. Refresh and try again.",
+    operationUnknown: "The knowledge operation could not be confirmed. Refresh and check before trying again.",
+    inputInvalid: "The knowledge data format is invalid. Check it and try again.",
+    refreshData: "Refresh knowledge data",
+
     loading: "Loading\u2026",
     pageTitle: "Knowledge Base",
     emptyTitle: "Build your local knowledge base",
@@ -2882,6 +2918,10 @@ export const en: LocaleStrings = {
     meetingRecorderFinishEditing: "Finish editing",
     meetingRecorderProcessingTitle: "Generating recording summary",
     meetingRecorderProcessingHint: "Finalizing transcription, punctuation, and summary. Keep this window open.",
+    meetingRecorderInputInvalid: "This recorder window is not authorized for the operation, or its input is invalid.",
+    meetingRecorderOperationUnknown: "The recorder window operation could not be confirmed. Your recording and draft are preserved.",
+    meetingRecorderSavedFollowupFailed: "The recording is saved, but notifying the main window or closing is incomplete. Save again to continue only those window operations.",
+    meetingRecorderNewDraftUnsaved: "The earlier content is saved. Edits made while saving are not saved yet. Save the new content or explicitly close.",
     meetingRecorderCloseBlocked: "Recording or summary processing is still active. Finish it before closing.",
     meetingSettings: "Transcription settings",
     meetingControlPanelTitle: "Recording controls",
@@ -3045,6 +3085,11 @@ export const en: LocaleStrings = {
   automationsConstraintsNewBadge: "New",
 
   // scheduled page
+  scheduledProjectionUnavailable: 'Schedules and reminders could not be read. Refresh to try again.',
+  scheduledOperationUnknown: 'The schedule or reminder result is unconfirmed. Refresh and check.',
+  scheduledInputInvalid: 'The schedule or reminder data is invalid. Check it and try again.',
+  scheduledRefreshData: 'Refresh schedules and reminders',
+  scheduledMutationNotApplied: 'No schedule or reminder was changed. Refresh to check the current state.',
   scheduledTitle: "Scheduled Tasks",
   scheduledSubtitle: "Manage automated tasks that run on a schedule",
   scheduledNew: "New task",
@@ -3113,6 +3158,18 @@ export const en: LocaleStrings = {
   scheduledLinkedLoop: "Linked loop",
 
   // chatView
+  conversationActivity: {
+    submitInput: 'Submit', declineInput: 'Decline', cancelWork: 'Cancel work', cancelRequested: 'Cancellation requested; awaiting confirmation', unsupportedInput: 'This input must be handled by the original service.',
+    projectClosed: 'Closed (delivery unconfirmed)',
+    historyGap: 'Some historical updates were compacted or expired; current state is confirmed by the source',
+    lastProgress: 'Last progress',
+    title: 'Work updates', stopped: 'Following stopped', unavailable: 'Status unconfirmed', details: 'View project', lastUpdate: 'Last synced', nextReport: 'Next report',
+    frequency: 'Reporting frequency', normal: 'Every five minutes and key changes', criticalOnly: 'Key changes only', quiet: 'Quiet', stop: 'Stop following', stopHint: 'Stops updates without cancelling the work', noProgress: 'None yet', error: 'Could not update work activity. Please try again.',
+    unread: (count) => `${count} unread work updates`,
+    report: (state, time) => `Status report ${time}: ${state}.`,
+    sources: { kswarm: 'Project', task_host: 'Background task', agent_group: 'Agent collaboration', mcp: 'Plugin task' },
+    states: { accepted: 'Accepted', queued: 'Queued', running: 'Running', blocked: 'Blocked', input_required: 'Action required', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' },
+  },
   chatView: {
     executionSyncing: 'Synchronizing execution status…',
     executionDisconnected: 'Execution status disconnected. Please reconnect.',
@@ -3234,6 +3291,8 @@ export const en: LocaleStrings = {
   chatShell: {
     attachmentLabel: "Attachments:",
     cuUnavailable: "Computer Use is currently unavailable.",
+    historyUnavailable: (taskIds) => `Historical task records are unavailable (${taskIds}). The conversation remains saved; existing projects and artifacts are preserved and will not restart automatically.`,
+    historyRecovered: (taskId) => `The original task record is unavailable. Below is the only completed legacy record with this exact title (${taskId}). Its original content is shown without rewriting the missing task or restarting the project.`,
     taskCreateFailed: "Failed to create task. Please check model configuration or try again later.",
     goalAttachmentQuerying: "Task attachment is unconfirmed. Checking its saved state without restarting it.",
     goalAttachmentUnknown: "Task attachment is unconfirmed and execution may have started. Do not resubmit; reopen the conversation to view saved state.",
@@ -3463,6 +3522,9 @@ export const en: LocaleStrings = {
   automationsViewLoopDetail: "View loop details",
   automationsViewScheduleDetail: "View schedule",
   automationsClearRecord: "Clear record",
+  loopOperationResultUnknown: "The operation result is unconfirmed. Refresh to check.",
+  loopProjectionUnavailable: "Loop data is temporarily unavailable. Refresh to try again.",
+  loopInputInvalid: "Invalid loop operation parameters. Check them and try again.",
   automationsClearConfirm: (title: string) => `Clear failed/blocked history for "${title}"?`,
 
   // user loop starter templates

@@ -4,7 +4,7 @@ import {executionIdentity} from './loop-verification-execution.js';
 import type {LoopStore} from './loop-store.js';
 import type {TimedActionStore} from './timed-action-store.js';
 import type {LoopRun} from './loop-types.js';
-import type {IpcHandleRegistrar,DesktopShutdownGate} from './shutdown-aware-ipc-main.js';
+import type {DesktopShutdownGate} from './shutdown-aware-ipc-main.js';
 import type {TaskSnapshot} from '../../src/runtime/task-host/types.js';
 import type {LoopCompletionObservation} from '../shared/loop-current-view-types.js';
 export type LoopRunObservationView=LoopRun&{businessState:LoopRun['status']|'publication_pending';completionObservation?:LoopCompletionObservation};
@@ -47,7 +47,4 @@ export function createLoopCurrentViews(options:{loopStore:LoopStore;timedStore:T
 }
 export type LoopCurrentViews=ReturnType<typeof createLoopCurrentViews>;
 
-export function registerLoopCurrentViewIpc(ipc:IpcHandleRegistrar,service:LoopCurrentViews,authorize:(event:unknown)=>boolean):void {
- ipc.handle('desktop:loops:listRuns',(event,...args)=>{if(!authorize(event)||args.length!==1)throw Error('loop_view_ipc_denied');executionIdentity(args[0]);return service.getLoopRuns(args[0]);});
- ipc.handle('desktop:automations:getRunHistory',(event,...args)=>{if(!authorize(event)||args.length!==0)throw Error('loop_view_ipc_denied');return service.getRunHistory();});
-}
+export {registerLoopCurrentViewIpc} from './loop-current-view-ipc.js';

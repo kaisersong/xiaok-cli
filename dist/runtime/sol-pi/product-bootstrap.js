@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, lstatSync, realpathSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, lstatSync, realpathSync, readdirSync, existsSync, openSync, closeSync, fstatSync, constants } from 'node:fs';
 import { homedir, version as osVersion } from 'node:os';
 import { join, resolve, isAbsolute, normalize, dirname } from 'node:path';
 import { resolveRuntimeModelBinding } from '../../ai/providers/control-plane.js';
@@ -12,10 +12,9 @@ import { reserveSessionAliasBytes } from '../../ai/runtime/session-store/aliases
 import { assertCompoundHostStorage, inspectCompoundHostSources } from './compound-host-storage.js';
 import { openCompoundExecutionDomain } from './compound-execution-domain.js';
 import { validateOrdinaryChildrenPolicy } from './delegation-policy.js';
+import { isRegisteredRecipeManifest, selectRecipeManifestPath } from './recipe-environment-registration.js';
 const policies = new WeakMap();
 const ENVIRONMENT_ID = 'deepseek-recipe-0.1.1';
-const MANIFEST_BYTES = '50117314e0001bac768e500792d951f9b80fef8b97204a7dc6cd857a9a2713dd';
-const MANIFEST_SEMANTIC = 'a0e31c572efb0fbf2723ac56a6c65caf22efd931ac60458a7d38c1e255b21417';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 function deny(reason) { throw new Error(`SOL_PI_PRODUCT_${reason}`); }
 function keys(value, allowed) {
@@ -140,38 +139,63 @@ function trustedEnvironment(root) {
     const registered = join(homedir(), '.cache', 'xiaok', 'sol-pi', ENVIRONMENT_ID);
     if (resolve(root) !== registered || realpathSync(root) !== registered)
         deny('ENVIRONMENT_NOT_REGISTERED');
-    for (const file of [root, join(root, 'environment.json'), join(root, 'manifest.json')]) {
+    for (const file of [root, join(root, 'environment.json')]) {
         const stat = lstatSync(file);
         if (stat.isSymbolicLink() || stat.uid !== process.getuid?.() || stat.mode & 0o022)
             deny('ENVIRONMENT_PERMISSIONS');
     }
-    const manifestFile = readJsonFile(join(root, 'manifest.json'), 2 * 1024 * 1024);
-    if (digest(manifestFile.bytes) !== MANIFEST_BYTES)
-        deny('ENVIRONMENT_MANIFEST');
-    const manifest = manifestFile.parsed;
-    if (manifest.sha256 !== MANIFEST_SEMANTIC || manifest.platform !== `${process.platform}-${process.arch}` || manifest.osVersion !== osVersion())
-        deny('ENVIRONMENT_MANIFEST');
-    const environment = readJsonFile(join(root, 'environment.json'), 65536).parsed;
-    keys(environment, ['pythonExecutable', 'sitePackages', 'tokenizerPath', 'wheelPath']);
-    for (const key of ['pythonExecutable', 'sitePackages', 'tokenizerPath', 'wheelPath'])
-        if (environment[key] !== manifest[key])
-            deny('ENVIRONMENT_BINDING');
-    // Trusted external registration must be checked BEFORE the factory can spawn Python.
-    for (const entry of manifest.files) {
-        const stat = lstatSync(entry.path);
-        if (!stat.isFile() || stat.isSymbolicLink() || stat.mode & 0o022 || realpathSync(entry.path) !== entry.path || digest(readFileSync(entry.path)) !== entry.sha256)
-            deny('ENVIRONMENT_DRIFT');
+    const selected = selectRecipeManifestPath(root), selectedStat = lstatSync(selected);
+    if (selectedStat.isSymbolicLink() || selectedStat.uid !== process.getuid?.() || selectedStat.mode & 0o022)
+        deny('ENVIRONMENT_PERMISSIONS');
+    const rootFd = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+        const rootIdentity = fstatSync(rootFd);
+        const manifestFile = readJsonFile(selected, 2 * 1024 * 1024);
+        const selectedDigest = digest(manifestFile.bytes);
+        const manifest = manifestFile.parsed;
+        if (!isRegisteredRecipeManifest(selectedDigest, manifest.sha256) || manifest.platform !== `${process.platform}-${process.arch}` || manifest.osVersion !== osVersion())
+            deny('ENVIRONMENT_MANIFEST');
+        const environment = readJsonFile(join(root, 'environment.json'), 65536).parsed;
+        keys(environment, ['pythonExecutable', 'sitePackages', 'tokenizerPath', 'wheelPath']);
+        for (const key of ['pythonExecutable', 'sitePackages', 'tokenizerPath', 'wheelPath'])
+            if (environment[key] !== manifest[key])
+                deny('ENVIRONMENT_BINDING');
+        // Trusted external registration must be checked BEFORE the factory can spawn Python.
+        for (const entry of manifest.files) {
+            const stat = lstatSync(entry.path);
+            if (!stat.isFile() || stat.isSymbolicLink() || stat.mode & 0o022 || realpathSync(entry.path) !== entry.path || digest(readFileSync(entry.path)) !== entry.sha256)
+                deny('ENVIRONMENT_DRIFT');
+        }
+        for (const entry of manifest.directories)
+            if (lstatSync(entry.path).isSymbolicLink() || JSON.stringify(readdirSync(entry.path).sort()) !== JSON.stringify(entry.names))
+                deny('ENVIRONMENT_DRIFT');
+        for (const entry of manifest.links)
+            if (realpathSync(entry.path) !== entry.target)
+                deny('ENVIRONMENT_DRIFT');
+        for (const path of manifest.absentPaths)
+            if (existsSync(path))
+                deny('ENVIRONMENT_DRIFT');
+        const assertCurrent = () => {
+            const held = fstatSync(rootFd), actual = lstatSync(root);
+            if (!held.isDirectory() || !actual.isDirectory() || actual.isSymbolicLink() || realpathSync(root) !== registered
+                || held.dev !== rootIdentity.dev || held.ino !== rootIdentity.ino || held.uid !== rootIdentity.uid || held.mode !== rootIdentity.mode
+                || actual.dev !== held.dev || actual.ino !== held.ino || actual.uid !== held.uid || actual.mode !== held.mode
+                || held.uid !== process.getuid?.() || held.mode & 0o022)
+                deny('ENVIRONMENT_CHANGED');
+            if (selectRecipeManifestPath(root) !== selected)
+                deny('ENVIRONMENT_CHANGED');
+            const stat = lstatSync(selected);
+            if (stat.isSymbolicLink() || stat.uid !== process.getuid?.() || stat.mode & 0o022
+                || digest(readJsonFile(selected, 2 * 1024 * 1024).bytes) !== selectedDigest)
+                deny('ENVIRONMENT_CHANGED');
+        };
+        assertCurrent();
+        return { environment: environment, manifest, assertCurrent, close() { closeSync(rootFd); } };
     }
-    for (const entry of manifest.directories)
-        if (lstatSync(entry.path).isSymbolicLink() || JSON.stringify(readdirSync(entry.path).sort()) !== JSON.stringify(entry.names))
-            deny('ENVIRONMENT_DRIFT');
-    for (const entry of manifest.links)
-        if (realpathSync(entry.path) !== entry.target)
-            deny('ENVIRONMENT_DRIFT');
-    for (const path of manifest.absentPaths)
-        if (existsSync(path))
-            deny('ENVIRONMENT_DRIFT');
-    return { environment: environment, manifest };
+    catch (error) {
+        closeSync(rootFd);
+        throw error;
+    }
 }
 function reserveAllCounters(profileRoot, sessionKey, admitNewOwner = true) {
     const parent = join(profileRoot, 'counters');
@@ -226,287 +250,295 @@ export async function createProductObservationOwner(input) {
     const secretPattern = secrets.length ? new RegExp(secrets.map(secret => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g') : undefined;
     const redactor = { version: `known-literal-v1:${randomUUID()}`, redact: (value) => secretPattern ? value.replace(secretPattern, '[REDACTED]') : value };
     const verified = trustedEnvironment(input.environmentRoot);
-    const counterCapability = freezeDeepSeekRecipeCounter({ ...verified.environment, environmentManifest: verified.manifest });
-    const destination = { ...policy.destination, model: policy.model };
-    const capacityProfile = resolveProductionCapacityProfile({ destination: destination.url, model: destination.model, protocol: 'openai_legacy', profileId: 'generic-openai', counter: counterCapability });
-    if (!capacityProfile)
-        deny('CAPACITY_NOT_READY');
-    // Native imports follow the platform and host deployment qualification gates.
-    const [{ createObservationService }, { createFullSendCounter }, { createObservationSessionOwner, createObservationReadTool, describeObservationSource, getObservationSessionOwnerHostBinding }, { createProfileDisclosureLedger }, { createDelegatedObservationExecutionPlan }] = await Promise.all([
-        import('./observation-service.js'), import('./full-send-counter.js'), import('./observation-session-owner.js'), import('./profile-disclosure-ledger.js'), import('./delegated-session-owner.js')
-    ]);
-    policyOf(input.policy);
-    if (input.session.getProtectedObservationClosure() || input.session.getMessages().length
-        || input.session.exportSnapshot().sessionId !== initialSessionId || input.session.getObservationRestoreGeneration() !== initialRestoreGeneration)
-        deny('FRESH_SESSION_REQUIRED');
-    const revision = input.permissionManager.getRevision();
-    if (!Number.isSafeInteger(revision) || revision < 0)
-        deny('INVALID_PERMISSION_REVISION');
-    const sessionId = input.session.exportSnapshot().sessionId, generation = randomUUID();
-    if (!sessionId || sessionId === 'transient')
-        deny('PERSISTENT_SESSION_ID_REQUIRED');
-    const sessionKey = digest(sessionId);
-    const { ReferenceDeletionReceiptStore, REFERENCE_LIFECYCLE_RESERVED_BYTES } = await import('./reference-lifecycle.js');
-    const counterInventory = reserveAllCounters(input.profileRoot, sessionKey);
-    const reservedProfileBytes = counterInventory.bytes + REFERENCE_LIFECYCLE_RESERVED_BYTES + reserveCompoundDomainBytes(input.profileRoot, !!policy.compoundExecution) + reserveSessionAliasBytes(join(dirname(input.profileRoot), 'compound-sessions'), !!policy.compoundExecution);
-    const receiptStore = new ReferenceDeletionReceiptStore(input.profileRoot);
-    let service;
     try {
-        service = createObservationService({ profileRoot: input.profileRoot, profileId: 'product-sol-pi-v1', reservedProfileBytes, redactor, resolveReferenceOwner: facts => receiptStore.resolve(facts) });
-    }
-    catch (error) {
-        receiptStore.close();
-        throw error;
-    }
-    let counter;
-    let disclosureLedger;
-    let owner;
-    let unsubscribe;
-    let disposed = false;
-    let expiryTimer;
-    let executionAuthority;
-    let semanticCompactionOwner;
-    let disposal;
-    let compoundDomain;
-    const executionAbort = new AbortController();
-    let unsubscribeExecution;
-    try {
-        // The actual observation service owns its cross-process profile lock now.
-        const lockedInventory = reserveAllCounters(input.profileRoot, sessionKey, false);
-        if (lockedInventory.bytes !== counterInventory.bytes || lockedInventory.owners !== counterInventory.owners)
-            deny('COUNTER_INVENTORY_CHANGED');
-        const claims = { sessionId, ownerAgentId: generation, scopeId: generation, permissionGeneration: revision, surface: 'ordinary-owner' };
-        const user = service.bindCaller({ ...claims, requestSource: 'user' }), caller = service.bindCaller({ ...claims, requestSource: 'agent' });
-        const base = { version: 1, revision: 1, scopeId: generation, expiresAt: policy.expiresAt, localPersistence: true, allowUnclassifiedText: true, allowIncomplete: false, destinations: [destination] };
-        if (policy.readFileScopes.length)
-            service.setArchivePolicy({ caller: user, requestSource: 'user', policy: { ...base, id: `${generation}:read`, sourceAdapterId: 'native.read.v1', sourceDescriptors: [], readFileScopes: policy.readFileScopes } });
-        const hostCwd = realpathSync(input.hostCwd ?? process.cwd());
-        const sourceDescriptors = policy.bashSources.flatMap(source => [source.cwd, ...(source.cwd === hostCwd ? ['.'] : [])].map(workdir => describeObservationSource({ toolName: 'bash', source: { command: source.command, workdir } })));
-        if (sourceDescriptors.length)
-            service.setArchivePolicy({ caller: user, requestSource: 'user', policy: { ...base, id: `${generation}:bash`, sourceAdapterId: 'native.bash.v1', sourceDescriptors } });
-        let revoked = false;
-        const revoke = () => { if (!revoked) {
-            revoked = true;
-            executionAbort.abort(new DOMException('Execution policy revoked', 'AbortError'));
-            void semanticCompactionOwner?.dispose();
-            service.revokeCaller({ caller: user, requestSource: 'user', target: caller });
-        } };
-        unsubscribe = input.permissionManager.onRevisionChanged(revoke);
-        const authorityPort = { ...service.transportPort, validate: (...args) => {
-                if (Date.now() >= policy.expiresAt) {
-                    revoke();
-                    deny('POLICY_EXPIRED');
-                }
-                if (input.permissionManager.getRevision() !== revision) {
-                    revoke();
-                    deny('PERMISSION_CHANGED');
-                }
-                service.transportPort.validate(...args);
+        verified.assertCurrent();
+        const counterCapability = freezeDeepSeekRecipeCounter({ ...verified.environment, environmentManifest: verified.manifest });
+        verified.assertCurrent();
+        const destination = { ...policy.destination, model: policy.model };
+        const capacityProfile = resolveProductionCapacityProfile({ destination: destination.url, model: destination.model, protocol: 'openai_legacy', profileId: 'generic-openai', counter: counterCapability });
+        if (!capacityProfile)
+            deny('CAPACITY_NOT_READY');
+        // Native imports follow the platform and host deployment qualification gates.
+        const [{ createObservationService }, { createFullSendCounter }, { createObservationSessionOwner, createObservationReadTool, describeObservationSource, getObservationSessionOwnerHostBinding }, { createProfileDisclosureLedger }, { createDelegatedObservationExecutionPlan }] = await Promise.all([
+            import('./observation-service.js'), import('./full-send-counter.js'), import('./observation-session-owner.js'), import('./profile-disclosure-ledger.js'), import('./delegated-session-owner.js')
+        ]);
+        policyOf(input.policy);
+        if (input.session.getProtectedObservationClosure() || input.session.getMessages().length
+            || input.session.exportSnapshot().sessionId !== initialSessionId || input.session.getObservationRestoreGeneration() !== initialRestoreGeneration)
+            deny('FRESH_SESSION_REQUIRED');
+        const revision = input.permissionManager.getRevision();
+        if (!Number.isSafeInteger(revision) || revision < 0)
+            deny('INVALID_PERMISSION_REVISION');
+        const sessionId = input.session.exportSnapshot().sessionId, generation = randomUUID();
+        if (!sessionId || sessionId === 'transient')
+            deny('PERSISTENT_SESSION_ID_REQUIRED');
+        const sessionKey = digest(sessionId);
+        const { ReferenceDeletionReceiptStore, REFERENCE_LIFECYCLE_RESERVED_BYTES } = await import('./reference-lifecycle.js');
+        const counterInventory = reserveAllCounters(input.profileRoot, sessionKey);
+        const reservedProfileBytes = counterInventory.bytes + REFERENCE_LIFECYCLE_RESERVED_BYTES + reserveCompoundDomainBytes(input.profileRoot, !!policy.compoundExecution) + reserveSessionAliasBytes(join(dirname(input.profileRoot), 'compound-sessions'), !!policy.compoundExecution);
+        const receiptStore = new ReferenceDeletionReceiptStore(input.profileRoot);
+        let service;
+        try {
+            service = createObservationService({ profileRoot: input.profileRoot, profileId: 'product-sol-pi-v1', reservedProfileBytes, redactor, resolveReferenceOwner: facts => receiptStore.resolve(facts) });
+        }
+        catch (error) {
+            receiptStore.close();
+            throw error;
+        }
+        let counter;
+        let disclosureLedger;
+        let owner;
+        let unsubscribe;
+        let disposed = false;
+        let expiryTimer;
+        let executionAuthority;
+        let semanticCompactionOwner;
+        let disposal;
+        let compoundDomain;
+        const executionAbort = new AbortController();
+        let unsubscribeExecution;
+        try {
+            // The actual observation service owns its cross-process profile lock now.
+            const lockedInventory = reserveAllCounters(input.profileRoot, sessionKey, false);
+            if (lockedInventory.bytes !== counterInventory.bytes || lockedInventory.owners !== counterInventory.owners)
+                deny('COUNTER_INVENTORY_CHANGED');
+            const claims = { sessionId, ownerAgentId: generation, scopeId: generation, permissionGeneration: revision, surface: 'ordinary-owner' };
+            const user = service.bindCaller({ ...claims, requestSource: 'user' }), caller = service.bindCaller({ ...claims, requestSource: 'agent' });
+            const base = { version: 1, revision: 1, scopeId: generation, expiresAt: policy.expiresAt, localPersistence: true, allowUnclassifiedText: true, allowIncomplete: false, destinations: [destination] };
+            if (policy.readFileScopes.length)
+                service.setArchivePolicy({ caller: user, requestSource: 'user', policy: { ...base, id: `${generation}:read`, sourceAdapterId: 'native.read.v1', sourceDescriptors: [], readFileScopes: policy.readFileScopes } });
+            const hostCwd = realpathSync(input.hostCwd ?? process.cwd());
+            const sourceDescriptors = policy.bashSources.flatMap(source => [source.cwd, ...(source.cwd === hostCwd ? ['.'] : [])].map(workdir => describeObservationSource({ toolName: 'bash', source: { command: source.command, workdir } })));
+            if (sourceDescriptors.length)
+                service.setArchivePolicy({ caller: user, requestSource: 'user', policy: { ...base, id: `${generation}:bash`, sourceAdapterId: 'native.bash.v1', sourceDescriptors } });
+            let revoked = false;
+            const revoke = () => { if (!revoked) {
+                revoked = true;
+                executionAbort.abort(new DOMException('Execution policy revoked', 'AbortError'));
+                void semanticCompactionOwner?.dispose();
+                service.revokeCaller({ caller: user, requestSource: 'user', target: caller });
             } };
-        const guardedService = new Proxy(service, { get(target, property) {
-                if (property === 'transportPort')
-                    return authorityPort;
-                if (property === 'begin')
-                    return (capture) => {
-                        const source = JSON.parse(capture.sourceDescriptor);
-                        if (capture.sourceAdapterId === 'native.read.v1') {
-                            if (typeof source.filePath !== 'string')
-                                deny('READ_SOURCE_CHANGED');
-                            const stat = lstatSync(source.filePath);
-                            if (!stat.isFile() || stat.isSymbolicLink() || realpathSync(source.filePath) !== source.filePath)
-                                deny('READ_SOURCE_CHANGED');
-                        }
-                        if (capture.sourceAdapterId === 'native.bash.v1' && source.workdir === '.' && realpathSync(process.cwd()) !== hostCwd)
-                            deny('BASH_CWD_CHANGED');
-                        return target.begin(capture);
-                    };
-                return Reflect.get(target, property);
-            } });
-        counter = createFullSendCounter({ root: join(input.profileRoot, 'counters', sessionKey), sessionId });
-        if (policy.ordinaryChildren)
-            disclosureLedger = createProfileDisclosureLedger({ service: guardedService, counter });
-        const rootCounter = disclosureLedger?.createAccount({ requestSource: 'user', caller, sessionId, destination }) ?? counter;
-        owner = createObservationSessionOwner({ service: guardedService, caller, session: input.session, destination, capacityProfile, fullSendCounter: rootCounter, persist: input.persist });
-        const childPolicy = policy.ordinaryChildren;
-        const childApproval = childPolicy && service.approveDelegation({ requestSource: 'user', caller: user, destination,
-            maxDepth: childPolicy.maxDepth, maxChildren: childPolicy.maxChildren, expiresAt: childPolicy.expiresAt,
-            sourcePolicyIds: [...(childPolicy.nativeTools.includes('read') && policy.readFileScopes.length ? [`${generation}:read`] : []),
-                ...(childPolicy.nativeTools.includes('bash') && sourceDescriptors.length ? [`${generation}:bash`] : [])] });
-        if (input.permissionManager.getRevision() !== revision) {
-            revoke();
-            deny('PERMISSION_CHANGED');
-        }
-        const liveOwner = owner, liveCounter = counter;
-        if (policy.semanticCompaction || policy.compoundExecution) {
-            const { createSessionExecutionAuthority, createSessionExecutionContext } = await import('../../ai/runtime/session-store/execution-authority.js');
-            executionAuthority = createSessionExecutionAuthority({ root: input.executionPersistence.root, sessionIdentity: sessionId,
-                hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: generation, scopeId: generation }) });
-            const { createSemanticCompactionOwner } = await import('./semantic-compaction-owner.js');
-            semanticCompactionOwner = createSemanticCompactionOwner({ policy: input.policy, session: input.session, observationOwner: liveOwner,
-                store: input.executionPersistence.store, authority: executionAuthority, capacityProfile });
-            if (!semanticCompactionOwner)
-                unsubscribeExecution = input.executionPersistence.store.onCommit(snapshot => { if (snapshot.sessionId === sessionId)
-                    input.session.updatePersistenceFacts(snapshot); });
-            if (input.executionPersistence.initialize || input.compoundStorage) {
-                const lease = await executionAuthority.acquire({ invocationId: `initialize:${generation}`, kind: 'recovery' });
-                try {
-                    if (input.compoundStorage)
-                        compoundDomain = openCompoundExecutionDomain({ owner: liveOwner, storeRoot: input.executionPersistence.root, lease,
-                            inventory: inspectCompoundHostSources(input.compoundStorage) });
-                    await input.executionPersistence.initialize?.(input.session.exportSnapshot(), lease);
-                }
-                finally {
-                    await lease.releaseAfterDrain();
-                }
-            }
-        }
-        if (Date.now() >= policy.expiresAt) {
-            revoke();
-            deny('POLICY_EXPIRED');
-        }
-        if (revoked || input.permissionManager.getRevision() !== revision) {
-            revoke();
-            deny('PERMISSION_CHANGED');
-        }
-        expiryTimer = setTimeout(() => {
-            try {
-                revoke();
-            }
-            catch {
-                liveOwner.dispose();
-            }
-        }, policy.expiresAt - Date.now());
-        expiryTimer.unref();
-        return Object.freeze({ owner: liveOwner, semanticCompactionOwner, compoundDomain, executionAuthority, executionSignal: executionAbort.signal, recallTool: createObservationReadTool(liveOwner), summary: Object.freeze({ ordinaryChildren: childPolicy && Object.freeze({ ...childPolicy, nativeTools: Object.freeze([...childPolicy.nativeTools]) }), environmentId: ENVIRONMENT_ID, model: policy.model, destination: Object.freeze(destination), expiresAt: policy.expiresAt, semanticCompaction: policy.semanticCompaction, compoundExecution: policy.compoundExecution && Object.freeze({ ...policy.compoundExecution }), readFileScopes: structuredClone(policy.readFileScopes), exactBashSources: policy.bashSources.length, toolSurface: 'native-only', redactorVersion: redactor.version, storageBudget: service.getStorageBudget() }),
-            createChildExecutionPlan(child) {
-                if (child.surface !== undefined && child.surface !== 'cli' && child.surface !== 'desktop-managed')
-                    deny('CHILD_SURFACE_UNSUPPORTED');
-                if (disposed || revoked || !childPolicy || !childApproval || !disclosureLedger || input.permissionManager.getRevision() !== revision)
-                    deny('CHILDREN_NOT_AUTHORIZED');
-                const parentOwner = child.parentOwner ?? liveOwner;
-                const parent = getObservationSessionOwnerHostBinding(parentOwner);
-                if (parent.service !== guardedService || parentOwner.getMode() !== 'active')
-                    deny('CHILDREN_NOT_AUTHORIZED');
-                parentOwner.assertSession(parent.session);
-                const childSessionId = child.session.exportSnapshot().sessionId;
-                if (!childSessionId || childSessionId === 'transient' || child.session.getMessages().length || child.session.getProtectedObservationClosure())
-                    deny('FRESH_CHILD_REQUIRED');
-                const recipient = service.bindCaller({ sessionId: childSessionId, ownerAgentId: randomUUID(), scopeId: randomUUID(),
-                    permissionGeneration: revision, surface: 'ordinary-owner', requestSource: 'agent' });
-                const capability = service.issueDelegationWithApproval({ requestSource: 'agent', caller: parent.caller, approval: childApproval, recipient,
-                    observationIds: parent.session.getProtectedObservationClosure()?.observations.map(ref => ref.observationId) ?? [], destination, expiresAt: childPolicy.expiresAt });
-                return createDelegatedObservationExecutionPlan({ parentOwner, service: guardedService, capability, recipient, session: child.session,
-                    destination, capacityProfile, disclosureLedger, persist: child.persist, allowedNativeToolNames: [...childPolicy.nativeTools, ...(child.surface === 'desktop-managed'
-                            ? childPolicy.maxDepth > 1 ? MULTI_AGENT_TOOL_NAMES : [...CHILD_COMMUNICATION_TOOL_NAMES]
-                            : childPolicy.maxDepth > 1 ? ['subagent'] : [])],
-                    captureApproval: { approval: childApproval, approver: user }, installChildExecution: child.installChildExecution });
-            },
-            async prepareMessagePublication(message) {
-                const frozen = Object.freeze({ ...message });
-                const check = () => {
-                    if (disposed || revoked || !childPolicy || !childApproval || input.permissionManager.getRevision() !== revision)
-                        deny('CHILDREN_NOT_AUTHORIZED');
-                    if (getObservationSessionOwnerHostBinding(frozen.sourceOwner).service !== guardedService
-                        || getObservationSessionOwnerHostBinding(frozen.recipientOwner).service !== guardedService)
-                        deny('CHILDREN_NOT_AUTHORIZED');
-                };
-                check();
-                const { prepareObservationMessagePublication } = await import('./observation-message-publication.js');
-                check();
-                return prepareObservationMessagePublication({ ...frozen, approval: childApproval, assertCurrent() {
-                        check();
-                        return frozen.assertCurrent();
-                    } });
-            },
-            revoke() { if (!disposed)
-                revoke(); },
-            getStatus() {
-                if (!disposed && Date.now() >= policy.expiresAt) {
-                    try {
+            unsubscribe = input.permissionManager.onRevisionChanged(revoke);
+            const authorityPort = { ...service.transportPort, validate: (...args) => {
+                    if (Date.now() >= policy.expiresAt) {
                         revoke();
+                        deny('POLICY_EXPIRED');
                     }
-                    catch {
-                        liveOwner.dispose();
+                    if (input.permissionManager.getRevision() !== revision) {
+                        revoke();
+                        deny('PERMISSION_CHANGED');
                     }
-                }
-                let ownerMode = 'unavailable';
-                if (!disposed) {
+                    service.transportPort.validate(...args);
+                } };
+            const guardedService = new Proxy(service, { get(target, property) {
+                    if (property === 'transportPort')
+                        return authorityPort;
+                    if (property === 'begin')
+                        return (capture) => {
+                            const source = JSON.parse(capture.sourceDescriptor);
+                            if (capture.sourceAdapterId === 'native.read.v1') {
+                                if (typeof source.filePath !== 'string')
+                                    deny('READ_SOURCE_CHANGED');
+                                const stat = lstatSync(source.filePath);
+                                if (!stat.isFile() || stat.isSymbolicLink() || realpathSync(source.filePath) !== source.filePath)
+                                    deny('READ_SOURCE_CHANGED');
+                            }
+                            if (capture.sourceAdapterId === 'native.bash.v1' && source.workdir === '.' && realpathSync(process.cwd()) !== hostCwd)
+                                deny('BASH_CWD_CHANGED');
+                            return target.begin(capture);
+                        };
+                    return Reflect.get(target, property);
+                } });
+            counter = createFullSendCounter({ root: join(input.profileRoot, 'counters', sessionKey), sessionId });
+            if (policy.ordinaryChildren)
+                disclosureLedger = createProfileDisclosureLedger({ service: guardedService, counter });
+            const rootCounter = disclosureLedger?.createAccount({ requestSource: 'user', caller, sessionId, destination }) ?? counter;
+            owner = createObservationSessionOwner({ service: guardedService, caller, session: input.session, destination, capacityProfile, fullSendCounter: rootCounter, persist: input.persist });
+            const childPolicy = policy.ordinaryChildren;
+            const childApproval = childPolicy && service.approveDelegation({ requestSource: 'user', caller: user, destination,
+                maxDepth: childPolicy.maxDepth, maxChildren: childPolicy.maxChildren, expiresAt: childPolicy.expiresAt,
+                sourcePolicyIds: [...(childPolicy.nativeTools.includes('read') && policy.readFileScopes.length ? [`${generation}:read`] : []),
+                    ...(childPolicy.nativeTools.includes('bash') && sourceDescriptors.length ? [`${generation}:bash`] : [])] });
+            if (input.permissionManager.getRevision() !== revision) {
+                revoke();
+                deny('PERMISSION_CHANGED');
+            }
+            const liveOwner = owner, liveCounter = counter;
+            if (policy.semanticCompaction || policy.compoundExecution) {
+                const { createSessionExecutionAuthority, createSessionExecutionContext } = await import('../../ai/runtime/session-store/execution-authority.js');
+                executionAuthority = createSessionExecutionAuthority({ root: input.executionPersistence.root, sessionIdentity: sessionId,
+                    hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: generation, scopeId: generation }) });
+                const { createSemanticCompactionOwner } = await import('./semantic-compaction-owner.js');
+                semanticCompactionOwner = createSemanticCompactionOwner({ policy: input.policy, session: input.session, observationOwner: liveOwner,
+                    store: input.executionPersistence.store, authority: executionAuthority, capacityProfile });
+                if (!semanticCompactionOwner)
+                    unsubscribeExecution = input.executionPersistence.store.onCommit(snapshot => { if (snapshot.sessionId === sessionId)
+                        input.session.updatePersistenceFacts(snapshot); });
+                if (input.executionPersistence.initialize || input.compoundStorage) {
+                    const lease = await executionAuthority.acquire({ invocationId: `initialize:${generation}`, kind: 'recovery' });
                     try {
-                        ownerMode = liveOwner.getMode();
+                        if (input.compoundStorage)
+                            compoundDomain = openCompoundExecutionDomain({ owner: liveOwner, storeRoot: input.executionPersistence.root, lease,
+                                inventory: inspectCompoundHostSources(input.compoundStorage) });
+                        await input.executionPersistence.initialize?.(input.session.exportSnapshot(), lease);
                     }
-                    catch { /* Independently disposed owner is unavailable. */ }
+                    finally {
+                        await lease.releaseAfterDrain();
+                    }
                 }
-                return Object.freeze({ revoked: disposed || revoked || ownerMode === 'unavailable' || input.permissionManager.getRevision() !== revision, disposed, ownerMode });
-            },
-            dispose() {
-                if (disposed)
-                    return disposal;
-                disposed = true;
-                executionAbort.abort(new DOMException('Execution owner disposed', 'AbortError'));
-                clearTimeout(expiryTimer);
-                unsubscribe?.();
-                liveOwner.dispose();
-                const close = () => { try {
-                    executionAuthority?.dispose();
-                    unsubscribeExecution?.();
+            }
+            if (Date.now() >= policy.expiresAt) {
+                revoke();
+                deny('POLICY_EXPIRED');
+            }
+            if (revoked || input.permissionManager.getRevision() !== revision) {
+                revoke();
+                deny('PERMISSION_CHANGED');
+            }
+            verified.assertCurrent();
+            expiryTimer = setTimeout(() => {
+                try {
+                    revoke();
                 }
-                finally {
-                    try {
-                        service.endSession({ caller: user, requestSource: 'user' });
+                catch {
+                    liveOwner.dispose();
+                }
+            }, policy.expiresAt - Date.now());
+            expiryTimer.unref();
+            return Object.freeze({ owner: liveOwner, semanticCompactionOwner, compoundDomain, executionAuthority, executionSignal: executionAbort.signal, recallTool: createObservationReadTool(liveOwner), summary: Object.freeze({ ordinaryChildren: childPolicy && Object.freeze({ ...childPolicy, nativeTools: Object.freeze([...childPolicy.nativeTools]) }), environmentId: ENVIRONMENT_ID, model: policy.model, destination: Object.freeze(destination), expiresAt: policy.expiresAt, semanticCompaction: policy.semanticCompaction, compoundExecution: policy.compoundExecution && Object.freeze({ ...policy.compoundExecution }), readFileScopes: structuredClone(policy.readFileScopes), exactBashSources: policy.bashSources.length, toolSurface: 'native-only', redactorVersion: redactor.version, storageBudget: service.getStorageBudget() }),
+                createChildExecutionPlan(child) {
+                    if (child.surface !== undefined && child.surface !== 'cli' && child.surface !== 'desktop-managed')
+                        deny('CHILD_SURFACE_UNSUPPORTED');
+                    if (disposed || revoked || !childPolicy || !childApproval || !disclosureLedger || input.permissionManager.getRevision() !== revision)
+                        deny('CHILDREN_NOT_AUTHORIZED');
+                    const parentOwner = child.parentOwner ?? liveOwner;
+                    const parent = getObservationSessionOwnerHostBinding(parentOwner);
+                    if (parent.service !== guardedService || parentOwner.getMode() !== 'active')
+                        deny('CHILDREN_NOT_AUTHORIZED');
+                    parentOwner.assertSession(parent.session);
+                    const childSessionId = child.session.exportSnapshot().sessionId;
+                    if (!childSessionId || childSessionId === 'transient' || child.session.getMessages().length || child.session.getProtectedObservationClosure())
+                        deny('FRESH_CHILD_REQUIRED');
+                    const recipient = service.bindCaller({ sessionId: childSessionId, ownerAgentId: randomUUID(), scopeId: randomUUID(),
+                        permissionGeneration: revision, surface: 'ordinary-owner', requestSource: 'agent' });
+                    const capability = service.issueDelegationWithApproval({ requestSource: 'agent', caller: parent.caller, approval: childApproval, recipient,
+                        observationIds: parent.session.getProtectedObservationClosure()?.observations.map(ref => ref.observationId) ?? [], destination, expiresAt: childPolicy.expiresAt });
+                    return createDelegatedObservationExecutionPlan({ parentOwner, service: guardedService, capability, recipient, session: child.session,
+                        destination, capacityProfile, disclosureLedger, persist: child.persist, allowedNativeToolNames: [...childPolicy.nativeTools, ...(child.surface === 'desktop-managed'
+                                ? childPolicy.maxDepth > 1 ? MULTI_AGENT_TOOL_NAMES : [...CHILD_COMMUNICATION_TOOL_NAMES]
+                                : childPolicy.maxDepth > 1 ? ['subagent'] : [])],
+                        captureApproval: { approval: childApproval, approver: user }, installChildExecution: child.installChildExecution });
+                },
+                async prepareMessagePublication(message) {
+                    const frozen = Object.freeze({ ...message });
+                    const check = () => {
+                        if (disposed || revoked || !childPolicy || !childApproval || input.permissionManager.getRevision() !== revision)
+                            deny('CHILDREN_NOT_AUTHORIZED');
+                        if (getObservationSessionOwnerHostBinding(frozen.sourceOwner).service !== guardedService
+                            || getObservationSessionOwnerHostBinding(frozen.recipientOwner).service !== guardedService)
+                            deny('CHILDREN_NOT_AUTHORIZED');
+                    };
+                    check();
+                    const { prepareObservationMessagePublication } = await import('./observation-message-publication.js');
+                    check();
+                    return prepareObservationMessagePublication({ ...frozen, approval: childApproval, assertCurrent() {
+                            check();
+                            return frozen.assertCurrent();
+                        } });
+                },
+                revoke() { if (!disposed)
+                    revoke(); },
+                getStatus() {
+                    if (!disposed && Date.now() >= policy.expiresAt) {
+                        try {
+                            revoke();
+                        }
+                        catch {
+                            liveOwner.dispose();
+                        }
+                    }
+                    let ownerMode = 'unavailable';
+                    if (!disposed) {
+                        try {
+                            ownerMode = liveOwner.getMode();
+                        }
+                        catch { /* Independently disposed owner is unavailable. */ }
+                    }
+                    return Object.freeze({ revoked: disposed || revoked || ownerMode === 'unavailable' || input.permissionManager.getRevision() !== revision, disposed, ownerMode });
+                },
+                dispose() {
+                    if (disposed)
+                        return disposal;
+                    disposed = true;
+                    executionAbort.abort(new DOMException('Execution owner disposed', 'AbortError'));
+                    clearTimeout(expiryTimer);
+                    unsubscribe?.();
+                    liveOwner.dispose();
+                    const close = () => { try {
+                        executionAuthority?.dispose();
+                        unsubscribeExecution?.();
                     }
                     finally {
                         try {
-                            disclosureLedger?.dispose();
-                            liveCounter.dispose();
+                            service.endSession({ caller: user, requestSource: 'user' });
                         }
                         finally {
                             try {
-                                service.dispose();
+                                disclosureLedger?.dispose();
+                                liveCounter.dispose();
                             }
                             finally {
-                                receiptStore.close();
+                                try {
+                                    service.dispose();
+                                }
+                                finally {
+                                    receiptStore.close();
+                                }
                             }
                         }
+                    } };
+                    if (compoundDomain) {
+                        disposal = (async () => {
+                            await semanticCompactionOwner?.dispose();
+                            await compoundDomain.retire({ authority: executionAuthority });
+                        })().finally(close);
+                        return disposal;
                     }
-                } };
-                if (compoundDomain) {
-                    disposal = (async () => {
-                        await semanticCompactionOwner?.dispose();
-                        await compoundDomain.retire({ authority: executionAuthority });
-                    })().finally(close);
-                    return disposal;
-                }
-                if (semanticCompactionOwner) {
-                    disposal = semanticCompactionOwner.dispose().finally(close);
-                    return disposal;
-                }
-                close();
-            } });
-    }
-    catch (error) {
-        clearTimeout(expiryTimer);
-        try {
-            unsubscribe?.();
-            owner?.dispose();
-            await semanticCompactionOwner?.dispose();
-            executionAuthority?.dispose();
-            unsubscribeExecution?.();
+                    if (semanticCompactionOwner) {
+                        disposal = semanticCompactionOwner.dispose().finally(close);
+                        return disposal;
+                    }
+                    close();
+                } });
         }
-        finally {
+        catch (error) {
+            clearTimeout(expiryTimer);
             try {
-                disclosureLedger?.dispose();
-                counter?.dispose();
+                unsubscribe?.();
+                owner?.dispose();
+                await semanticCompactionOwner?.dispose();
+                executionAuthority?.dispose();
+                unsubscribeExecution?.();
             }
             finally {
                 try {
-                    service.dispose();
+                    disclosureLedger?.dispose();
+                    counter?.dispose();
                 }
                 finally {
-                    receiptStore.close();
+                    try {
+                        service.dispose();
+                    }
+                    finally {
+                        receiptStore.close();
+                    }
                 }
             }
+            throw error;
         }
-        throw error;
+    }
+    finally {
+        verified.close();
     }
 }
 /** Host deletion/startup event; never opens grants or resumes an observation owner. */

@@ -1,10 +1,14 @@
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {homedir} from 'node:os';
+import {relative,isAbsolute} from 'node:path';
 // @vitest-environment node
 import {declaredMainGroupsRows} from '../fixtures/captured-groups-declarations.js';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { DatabaseSync } from 'node:sqlite';
 import { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
 import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 import { DesktopMultiAgentService, type DesktopAgentExecutionContext, type DesktopHostDeliveryAuthority, type DesktopMultiAgentServiceOptions } from '../../electron/desktop-multi-agent-service.js';
@@ -15,6 +19,17 @@ import { MaterialRegistry } from '../../../src/runtime/task-host/material-regist
 import type {TaskRunnerInput} from '../../../src/runtime/task-host/task-runtime-host.js';
 import { compileVerifierEntry } from '../fixtures/desktop-post-seal-verifier-contract.js';
 import {compileProtectionWorkerEntry} from '../fixtures/desktop-protection-worker-entry.js';
+
+// Establish only this run's actual isolated account environment; no real home
+// or worker warmup is permitted for the normal compound producer fixture.
+beforeAll(() => {
+  const nativeMode = inject('nativeObservationAccountMode' as never) as unknown;
+  if (nativeMode === 'real-native-readonly') return; // actual identity/runtime; only task/profile roots below are temporary
+  const accountRoot = inject('profileTestAccountRoot' as never) as unknown as string;
+  const selectedHome = homedir(), suffix = relative(accountRoot, selectedHome);
+  if (!suffix || isAbsolute(suffix) || suffix === '..' || suffix.split(/[\\/]/)[0] === '..') throw Error('fixture_account_home_not_isolated');
+  mkdirSync(join(selectedHome, '.cache', 'xiaok', 'sol-pi', 'deepseek-recipe-0.1.1'), { recursive: true });
+});
 
 // Source-mode Vitest does not emit the fixed .js Worker entry. Map only that
 // URL to the test-owned compiled production entry; execution and exit are native.
@@ -46,6 +61,51 @@ afterAll(() => {
   try { expect(nativeWorker.exits).toBe(nativeWorker.starts); }
   finally { for(const root of [nativeWorker.root,nativeWorker.protectionRoot])if(root)rmSync(root,{recursive:true,force:true,maxRetries:3}); }
 });
+
+
+function sqlLiteral(value: string): string { return `'${value.replaceAll("'", "''")}'`; }
+function installNativeSqlFault(store: DesktopMultiAgentStore, table: 'operations' | 'root_turns', groupId: string, predicate: string, error: string) {
+  const db = (store as unknown as { db: DatabaseSync }).db;
+  const condition = `NEW.group_id=${sqlLiteral(groupId)} AND (${predicate})`;
+  db.exec(`CREATE TEMP TRIGGER deny_service_fault_insert BEFORE INSERT ON ${table} WHEN ${condition}
+    BEGIN SELECT RAISE(ABORT,${sqlLiteral(error)}); END;
+    CREATE TEMP TRIGGER deny_service_fault_update BEFORE UPDATE ON ${table} WHEN ${condition}
+    BEGIN SELECT RAISE(ABORT,${sqlLiteral(error)}); END;`);
+  return { remove: () => db.exec('DROP TRIGGER IF EXISTS temp.deny_service_fault_insert; DROP TRIGGER IF EXISTS temp.deny_service_fault_update;') };
+}
+
+async function hideOwnedRegisteredEnvironmentForNegativeFixture(registerCleanup: (restore: () => void) => void): Promise<void> {
+  const { lstatSync, readFileSync, renameSync, existsSync } = await import('node:fs');
+  const { createHash, randomUUID } = await import('node:crypto');
+  const home = realpathSync(homedir()), accountRoot = dirname(home), temp = realpathSync(tmpdir());
+  if (dirname(accountRoot) !== temp || !/^xiaok-vitest-accounts-[A-Za-z0-9]{6}$/.test(basename(accountRoot))
+    || !/^account-[A-Za-z0-9]{6}$/.test(basename(home))) throw Error('negative_recipe_fixture_account_namespace');
+  const root = join(home, '.cache', 'xiaok', 'sol-pi', 'deepseek-recipe-0.1.1');
+  const rootStat = lstatSync(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || realpathSync(root) !== root || rootStat.uid !== process.getuid?.() || rootStat.mode & 0o022) throw Error('negative_recipe_fixture_root_unsafe');
+  const file = join(root, 'environment.json');
+  let original: import('node:fs').Stats;
+  try { original = lstatSync(file); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (!original.isFile() || original.isSymbolicLink() || original.uid !== process.getuid?.() || original.mode & 0o022 || realpathSync(file) !== file) throw Error('negative_recipe_fixture_file_unsafe');
+  const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex'), sha = digest(file);
+  const backup = join(root, `environment.negative-${randomUUID()}.json`);
+  if (existsSync(backup)) throw Error('negative_recipe_fixture_backup_exists');
+  let moved = false;
+  const assertIdentity = (path: string) => { const actual = lstatSync(path);
+    if (!actual.isFile() || actual.isSymbolicLink() || actual.dev !== original.dev || actual.ino !== original.ino || actual.uid !== original.uid || actual.mode !== original.mode || digest(path) !== sha) throw Error('negative_recipe_fixture_identity_drift'); };
+  // Publish restoration before the first actual mutation. Existing afterEach
+  // drains every cleanup even after business or physical disposal failures.
+  registerCleanup(() => {
+    if (!moved) return;
+    const actualRoot = lstatSync(root);
+    if (actualRoot.dev !== rootStat.dev || actualRoot.ino !== rootStat.ino || actualRoot.isSymbolicLink() || realpathSync(root) !== root || existsSync(file)) throw Error('negative_recipe_fixture_restore_conflict');
+    assertIdentity(backup); renameSync(backup, file); moved = false; assertIdentity(file);
+  });
+  renameSync(file, backup); moved = true; assertIdentity(backup);
+}
 
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
@@ -460,6 +520,14 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await vi.waitFor(()=>{expect(sends,JSON.stringify(f.store.getAgent(groupId,child.id))).toBe(3);expect(f.store.getAgent(groupId,child.id)).toMatchObject({turn:2,status:'completed',executionActive:false});},{timeout:20000});
       expect(await f.service.userFollowup(request)).toMatchObject({state:'applied',expectedTurn:2});
       expect(sends).toBe(3);
+      // Preserve the original compound admission epoch while joining its actual
+      // physically settled followup to the new activity run.
+      const activityRunId = `user:${groupId}:${request.operationId}`;
+      expect(f.store.getActivityRun(activityRunId)?.state).toBe('completed');
+      expect(f.store.getActivityMembers(activityRunId)).toEqual([expect.objectContaining({
+        memberId: request.operationId, agentId: child.id, turnId: f.store.getAgent(groupId, child.id)?.turnId,
+        state: 'settled', physicalSettled: true, outcome: 'completed',
+      })]);
     }
     if(mode==='compound-managed'){
       expect(resourceAdmission).toBeDefined();
@@ -608,6 +676,79 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     });
     await f.start(); await f.host.drain();
     await f.start(); await f.host.drain();
+  });
+
+  it('activity completion requires native host proof and physical child settlement, without waiting for warm-session TTL', async () => {
+    const entered = deferred<void>(), release = deferred<string>(); let groupId = '', childId = '';
+    const f = await setup(async () => ({ run: async () => { entered.resolve(); return release.promise; }, suspend: async () => {}, dispose: async () => {} }), async context => {
+      groupId = context.groupId;
+      childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'activity-child', taskName: 'activity', message: 'work' })).targetAgentId!;
+      await entered.promise;
+    });
+    const authority = f.service.bindHostDeliveryOwner(f.host);
+    try {
+      const taskId = await f.start(); await f.host.drain();
+      const runId = `root:${taskId}`;
+      await f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority, taskId });
+      expect(f.store.getActivityRun(runId)?.terminalEventId).toBeUndefined();
+      expect(f.store.getActivityRun(runId)?.rootTerminal?.outcome).toBe('completed');
+      expect(() => f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority: { ...authority }, taskId })).toThrow(/owner/);
+      release.resolve('done');
+      await vi.waitFor(() => expect(f.store.getActivityRun(runId)?.state).toBe('completed'));
+      expect(f.store.getAgent(groupId, childId)).toMatchObject({ executionActive: false, sessionResident: true, resourcesReleased: false });
+      const eventId = f.store.getActivityRun(runId)?.terminalEventId;
+      await f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority, taskId });
+      expect(f.store.readEvents(groupId, 0, 100).filter(event => event.kind === 'activity_run' && event.eventId === eventId)).toHaveLength(1);
+    } finally { release.resolve('cleanup'); }
+  });
+
+  it('namespaces user followup run identity by its native group across a confirmed group reset', async () => {
+    const groups: string[] = [], children: string[] = [];
+    const f = await setup(async () => ({ run: async () => 'child result', suspend: async () => {}, dispose: async () => {} }), async context => {
+      groups.push(context.groupId);
+      children.push((await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'repeat-spawn', taskName: 'repeat', message: 'work' })).targetAgentId!);
+    });
+    const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
+    await f.start(); await f.host.drain();
+    await vi.waitFor(() => expect(f.store.getAgent(groups[0], children[0])?.executionActive).toBe(false));
+    const follow = (index: number) => f.service.userFollowup({ access, requestSource: 'user', groupId: groups[index], agentId: children[index], expectedTurn: 1, operationId: 'repeat-user-operation', message: 'next' });
+    await follow(0);
+    await vi.waitFor(() => expect(f.store.getAgent(groups[0], children[0])?.turn).toBe(2));
+    await vi.waitFor(() => expect(f.store.getAgent(groups[0], children[0])?.executionActive).toBe(false));
+    await f.service.resetGroup({ access, requestSource: 'user', operationId: 'reset-repeat', expectedGroupId: groups[0], confirmTerminate: true });
+    await vi.waitFor(() => expect(f.store.activeGroup('t1')?.groupId).not.toBe(groups[0]));
+    await f.start(); await f.host.drain();
+    await vi.waitFor(() => expect(f.store.getAgent(groups[1], children[1])?.executionActive).toBe(false));
+    await expect(follow(1)).resolves.toMatchObject({ state: 'queued_next_admission' });
+    expect(f.store.requireGroup(groups[1]).mutationBlockedReason).toBeFalsy();
+    expect(f.store.getActivityRuns(groups[0]).find(run => run.kind === 'user_followup')?.runId).not.toBe(f.store.getActivityRuns(groups[1]).find(run => run.kind === 'user_followup')?.runId);
+  });
+
+  it('isolates a malformed host proof so other committed runs reconcile successfully', async () => {
+    const f = await setup(async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
+    const ids = [await f.start()]; await f.host.drain(); ids.push(await f.start()); await f.host.drain(); ids.sort();
+    const inspect = f.host.inspectTask.bind(f.host);
+    const fault = vi.spyOn(f.host, 'inspectTask').mockImplementation(async taskId => {
+      const snapshot = await inspect(taskId);
+      return taskId === ids[0] && snapshot ? { ...snapshot, multiAgentPreparation: { ...snapshot.multiAgentPreparation!, rootTurnId: 'mismatched' } } : snapshot;
+    });
+    try {
+      await expect(f.service.reconcileActivityRuns({ requestSource: 'scheduler', authority: f.service.bindHostDeliveryOwner(f.host) })).resolves.toBeUndefined();
+      expect(f.store.getActivityRun(`root:${ids[0]}`)?.state).toBe('unknown');
+      expect(f.store.getActivityRun(`root:${ids[1]}`)?.state).toBe('completed');
+    } finally { fault.mockRestore(); }
+  });
+
+  it('settles an abandoned preparation without inventing a host terminal when no host snapshot was created', async () => {
+    const f = await setup(async () => ({ run: async () => '', dispose: async () => {} }), async () => {});
+    const fault = vi.spyOn(f.host, 'prepareTask').mockRejectedValueOnce(new Error('prepare failed before snapshot'));
+    try { await expect(f.start()).rejects.toThrow('prepare failed before snapshot'); }
+    finally { fault.mockRestore(); }
+    const group = f.store.activeGroup('t1')!;
+    const run = f.store.getActivityRuns(group.groupId)[0];
+    expect(run).toMatchObject({ state: 'unknown', sourceUnavailable: 'preparation_abandoned' });
+    expect(run.terminalEventId).toBeUndefined();
+    expect(f.store.getActivityMembers(run.runId).every(member => member.physicalSettled)).toBe(true);
   });
 
   it('U1 Given a root-only thread and a foreign child, Then the real snapshot and first-root notification deny history while explicit audit reads remain available', async () => {
@@ -852,14 +993,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const factory = vi.fn(async () => ({ run: async () => 'done', dispose: async () => {} }));
     let rejected: unknown;
     const fixture = await setup(factory, async context => {
-      const original = fixture.store.putOperation.bind(fixture.store);
-      const fault = vi.spyOn(fixture.store, 'putOperation').mockImplementation((operation, control) => {
-        if (operation.applyState === 'applied' && operation.command === 'spawn') throw new Error('SQLITE_FULL');
-        return original(operation, control);
-      });
-      try { await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-fail', taskName: 'bad', message: 'work' }); }
-      catch (error) { rejected = error; }
-      fault.mockRestore();
+      const fault = installNativeSqlFault(fixture.store, 'operations', context.groupId,
+        "NEW.operation_id='spawn-fail' AND json_extract(NEW.data_json,'$.command')='spawn' AND json_extract(NEW.data_json,'$.applyState')='applied'", 'SQLITE_FULL');
+      try {
+        try { await fixture.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'spawn-fail', taskName: 'bad', message: 'work' }); }
+        catch (error) { rejected = error; }
+      } finally { fault.remove(); }
     });
     await fixture.start(); await fixture.host.drain();
     expect(String(rejected)).toMatch(/SQLITE_FULL|persistence/);
@@ -992,18 +1131,15 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       const child = await fixture.service.spawn({ ...auth, operationId: 'spawn-audit', taskName: 'audit', message: 'work' });
       await entered.promise;
       await fixture.service.followup({ ...auth, operationId: 'queued-audit', target: child.targetAgentId!, message: 'never run' });
-      const original = fixture.store.putOperation.bind(fixture.store);
-      const fault = vi.spyOn(fixture.store, 'putOperation').mockImplementation((operation, control) => {
-        if (operation.operationId === 'queued-audit' && operation.result.outcome === 'cancelled') throw new Error('SQLITE_FULL');
-        return original(operation, control);
-      });
+      const fault = installNativeSqlFault(fixture.store, 'operations', context.groupId,
+        "NEW.operation_id='queued-audit' AND json_extract(NEW.data_json,'$.result.outcome')='cancelled'", 'SQLITE_FULL');
       try {
         let ack: unknown;
         try { ack = await fixture.service[command]({ ...auth, operationId: 'stop-audit', target: child.targetAgentId! }); } catch { /* Inspect physical outcome before the ACK. */ }
         expect(childSignal?.aborted).toBe(true);
         expect(ack).toMatchObject({ state: 'unknown' });
         expect(fixture.store.requireGroup(context.groupId).mutationBlockedReason).toBeTruthy();
-      } finally { fault.mockRestore(); release.resolve('late'); }
+      } finally { fault.remove(); release.resolve('late'); }
     });
     await fixture.start(); await fixture.host.drain();
   });
@@ -1466,17 +1602,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     const f = await setup(vi.fn(), async context => { groupId = context.groupId; rootId = context.agentId; });
     await f.start(); await f.host.drain();
     const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'actual-user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
-    const put = f.store.putOperation.bind(f.store);
-    const fault = vi.spyOn(f.store, 'putOperation').mockImplementation((operation, emergency) => {
-      if (operation.operationId === 'rejected-write') throw new Error('rejected_receipt_write_failed');
-      return put(operation, emergency);
-    });
+    const fault = installNativeSqlFault(f.store, 'operations', groupId, "NEW.operation_id='rejected-write'", 'rejected_receipt_write_failed');
     try {
       await expect(f.service.userSend({ access, requestSource: 'user', groupId, agentId: rootId, expectedTurn: 99, operationId: 'rejected-write', message: 'never send' }))
         .rejects.toThrow('rejected_receipt_write_failed');
       expect(f.store.getOperation(groupId, 'rejected-write')).toBeNull(); expect(f.store.listMessages(groupId, rootId)).toEqual([]);
       expect(f.store.requireGroup(groupId).mutationBlockedReason).toBe('multi_agent_persistence_failed');
-    } finally { fault.mockRestore(); }
+    } finally { fault.remove(); }
   });
 
   it('A15 Given four queued user followups or a closed child, Then excess queue/send requests have durable refusals without hidden work', async () => {
@@ -1745,6 +1877,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       release.resolve('first');
       await vi.waitFor(() => expect(f.coordinator.snapshot().active).toBe(0));
       expect(sources).toEqual(includeA ? [a, a, b] : [a, b]);
+      const aMembers = f.store.getActivityMembers(`root:${a}`);
+      const bMembers = f.store.getActivityMembers(`root:${b}`);
+      expect(aMembers.map(member => member.operationId)).toContain('callers-spawn');
+      expect(aMembers.some(member => member.operationId === 'caller-1')).toBe(includeA);
+      expect(aMembers.some(member => member.operationId === 'caller-2')).toBe(false);
+      expect(bMembers.map(member => member.operationId)).toContain('caller-2');
+      expect([...aMembers, ...bMembers].every(member => member.physicalSettled)).toBe(true);
       expect(f.store.getAgent(groupId, childId)?.sourceTaskId).toBe(b);
       expect(f.store.readEvents(groupId).filter(event => event.kind === 'artifact').map(event => event.payload.sourceTaskId)).toEqual(includeA ? [a, b] : [b]);
     } finally { release.resolve('cleanup'); }
@@ -1757,16 +1896,13 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       groupId = context.groupId;
       childId = (await f.service.spawn({ actor: context.actor, requestSource: 'agent', operationId: 'failure-spawn', taskName: 'failure', message: 'first' })).targetAgentId!;
       await entered.promise;
-      const original = f.store.putOperation.bind(f.store);
-      const fault = vi.spyOn(f.store, 'putOperation').mockImplementation((operation, control) => {
-        if (operation.operationId === 'failure-followup') throw new Error('SQLITE_FULL'); return original(operation, control);
-      });
+      const fault = installNativeSqlFault(f.store, 'operations', groupId, "NEW.operation_id='failure-followup'", 'SQLITE_FULL');
       try {
         const access = f.service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 't1', profileId: 'p1', workspaceId: 'w1' });
         const request = source === 'agent' ? f.service.followup({ actor: context.actor, requestSource: 'agent', operationId: 'failure-followup', target: childId, message: 'never' })
           : f.service.userFollowup({ access, requestSource: 'user', groupId, agentId: childId, expectedTurn: 1, operationId: 'failure-followup', message: 'never' });
         await expect(request).rejects.toThrow('SQLITE_FULL');
-      } finally { fault.mockRestore(); release.resolve('cleanup'); }
+      } finally { fault.remove(); release.resolve('cleanup'); }
     });
     try {
       const taskId = await f.start(); await f.host.drain();
@@ -1907,15 +2043,12 @@ describe('BDD: durable service uses the real shared coordinator', () => {
       await new Promise<void>(resolve => context.signal.addEventListener('abort', () => resolve(), { once: true }));
     });
     const taskId = await fixture.start(); await entered.promise;
-    const original = fixture.store.putRootBinding.bind(fixture.store);
-    const fault = vi.spyOn(fixture.store, 'putRootBinding').mockImplementation((binding, control) => {
-      if (binding.phase === 'abandoned') throw new Error('SQLITE_FULL');
-      return original(binding, control);
-    });
+    const fault = installNativeSqlFault(fixture.store, 'root_turns', rootContext.groupId,
+      `NEW.source_task_id=${sqlLiteral(taskId)} AND json_extract(NEW.data_json,'$.phase')='abandoned'`, 'SQLITE_FULL');
     try {
       await expect(fixture.host.cancelTask(taskId)).rejects.toThrow(/persistence/);
       expect(rootContext.signal.aborted).toBe(true);
-    } finally { fault.mockRestore(); }
+    } finally { fault.remove(); }
     await fixture.host.drain();
   });
 
@@ -1942,4 +2075,89 @@ describe('BDD: durable service uses the real shared coordinator', () => {
     expect(runner).not.toHaveBeenCalled();
     expect(await host.getActiveTasks()).toEqual([{ taskId: ordinary.taskId }]);
   });
+  it.each(['reset', 'dispose', 'renew'] as const)('retains a real protected initialization failure across two root task identities without an ordinary SDK fallback (%s)', async mode => {
+    await hideOwnedRegisteredEnvironmentForNegativeFixture(restore => cleanup.push(restore));
+    const {parseObservationPolicyFile}=await import('../../../src/runtime/sol-pi/product-bootstrap.js');
+    const {DesktopMultiAgentRuntime}=await import('../../electron/desktop-multi-agent-runtime.js');
+    const {OpenAIAdapter}=await import('../../../src/ai/adapters/openai.js');
+    const {createDesktopModelRunnerWithRegistry}=await import('../../electron/desktop-services.js');
+    const {DesktopOwnedToolRegistry}=await import('../../electron/desktop-multi-agent-catalog-bridge.js');
+    const {DesktopToolCatalogBridge}=await import('../../electron/desktop-multi-agent-catalog-bridge.js');
+    const config=await import('../../../src/utils/config.js');
+    const modelConfig=vi.spyOn(config,'loadConfig').mockResolvedValue({schemaVersion:2,defaultProvider:'deepseek',defaultModelId:'current',providers:{deepseek:{type:'custom',protocol:'openai_legacy',baseUrl:'https://api.deepseek.com',apiKey:'fixture-only'}},models:{current:{provider:'deepseek',model:'deepseek-flash',label:'Current'}},defaultMode:'interactive'} as never);
+    cleanup.push(()=>modelConfig.mockRestore());
+    let providerCalls=0,firstFailure:unknown,secondFailure:unknown,turns=0,allowAfterReset=false;
+    const forbiddenProvider=new Error('ordinary provider reached after protected init failure');
+    const stream=vi.spyOn(OpenAIAdapter.prototype,'stream').mockImplementation(async function*(){providerCalls++;if(!allowAfterReset)throw forbiddenProvider;yield {type:'text',delta:'Explicitly reset group completed its ordinary task.'};yield {type:'done'};});cleanup.push(()=>stream.mockRestore());
+    let runner:ReturnType<typeof createDesktopModelRunnerWithRegistry>|undefined, renewOnNextTask=false;
+    const observationTasks=new Map<string,import('../../electron/desktop-observation-owner.js').DesktopObservationTaskActivation>();
+    let firstIssuedScope:ReturnType<DesktopMultiAgentService['captureObservationInitializationScope']>|undefined;
+    const {MultiAgentCoordinator}=await import('../../../src/ai/agents/multi-agent-coordinator.js');const coreDispose=vi.spyOn(MultiAgentCoordinator.prototype,'dispose');cleanup.push(()=>coreDispose.mockRestore());
+    const f=await setup(async()=>{throw Error('no child should be created');},async(context,input)=>{
+      const issuedScope=f.service.captureObservationInitializationScope(context);firstIssuedScope??=issuedScope;
+      expect(()=>f.service.retainFailedObservationInitializationScope({...issuedScope})).toThrow('SOL_PI_DESKTOP_OBSERVATION_SCOPE');
+      expect(()=>f.service.retainFailedObservationInitializationScope({incarnation:Object.freeze({}),rootEpoch:context.rootEpoch})).toThrow('SOL_PI_DESKTOP_OBSERVATION_SCOPE');
+      expect(()=>f.service.captureObservationInitializationScope({...context,actor:{...context.actor}})).toThrow();
+      if(renewOnNextTask){const original=[...observationTasks.values()][0]!;observationTasks.set(input.taskId,{...original,consumed:false,group:undefined,live:undefined,environmentRoot:join(f.root,'unregistered-environment')});renewOnNextTask=false;}
+      if(!runner){
+        const {buildToolList}=await import('../../../src/ai/tools/index.js');const tools=buildToolList(undefined,{cwd:f.root}).filter(tool=>tool.definition.name==='read');
+        const registry=new DesktopOwnedToolRegistry({autoMode:true},tools);cleanup.push(()=>registry.dispose());
+        const catalog=new DesktopToolCatalogBridge({registry,workspaceId:'w1',getService:()=>f.service});cleanup.push(()=>catalog.dispose());
+        const materialRegistry=new MaterialRegistry({workspaceRoot:join(f.root,'materials'),maxBytes:1048576});cleanup.push(()=>materialRegistry.sealAndDrainInstanceMutations());
+        const source=join(realpathSync(f.root),'authorized-source.txt');writeFileSync(source,'authorized temporary source');
+        const policyFile=join(f.root,'missing-environment-policy.json');writeFileSync(policyFile,JSON.stringify({version:1,environmentId:'deepseek-recipe-0.1.1',model:'deepseek-flash',destination:{provider:'deepseek',url:'https://api.deepseek.com/chat/completions'},localPersistence:true,allowUnclassifiedText:true,allowModelDisclosure:true,allowIncomplete:false,expiresAt:Date.now()+120000,readFileScopes:[{filePath:source,startLine:1}],bashSources:[],compoundExecution:{version:1,mode:'mechanism-experiment'},ordinaryChildren:{enabled:true,maxDepth:1,maxChildren:2,expiresAt:Date.now()+120000,nativeTools:['read']}}));
+        const activation={policy:parseObservationPolicyFile(policyFile),profileRoot:join(f.root,'profile'),environmentRoot:join(homedir(),'.cache','xiaok','sol-pi','deepseek-recipe-0.1.1'),onPrompt:async()=>true,consumed:false};
+        const runtime=new DesktopMultiAgentRuntime({service:f.service});observationTasks.set(input.taskId,activation);
+        runner=createDesktopModelRunnerWithRegistry(registry,tools,f.root,{} as never,materialRegistry,{}, {observationTasks,observationGroupHost:{getHost:()=>f.host,observationStore:new FileTaskSnapshotStore(join(f.root,'tasks')).observations},multiAgent:{runtime,service:f.service,catalog,workspaceId:'w1',cwd:f.root}});
+      }
+      try{await runner({...input,permissionMode:'auto'},context);}catch(error){if(++turns===1)firstFailure=error;else secondFailure=error;}
+    },{isolatedConfigRoot:true});
+    await f.start();await f.host.drain();expect(firstFailure).toBeInstanceOf(Error);expect((firstFailure as Error).message).toContain('ENOENT');expect(providerCalls).toBe(0);
+    await f.start();await f.host.drain();expect(turns).toBe(2);expect.soft(secondFailure).toBe(firstFailure);expect.soft(providerCalls).toBe(0);
+    expect(f.store.allAgents(f.store.getThread('t1')!.activeGroupId!).filter(agent=>agent.parentId)).toHaveLength(0);
+    if(mode==='dispose'){
+      const callsBeforeDispose=coreDispose.mock.calls.length;const disposal=f.service.dispose();expect(f.service.dispose()).toBe(disposal);await disposal;expect(providerCalls).toBe(0);expect(coreDispose.mock.calls.length).toBeGreaterThan(callsBeforeDispose);
+      for(const result of coreDispose.mock.results.slice(callsBeforeDispose)){expect(result.type).toBe('return');await result.value;}return;
+    }
+    if(mode==='renew'){
+      renewOnNextTask=true;await f.start();await f.host.drain();const renewedFailure=secondFailure;
+      expect(renewedFailure).not.toBe(firstFailure);expect((renewedFailure as Error).message).toBe('SOL_PI_DESKTOP_FRESH_GROUP_REQUIRED');expect(providerCalls).toBe(0);expect(turns).toBe(3);
+      await f.start();await f.host.drain();expect(secondFailure).toBe(renewedFailure);expect(providerCalls).toBe(0);expect(turns).toBe(4);await f.service.dispose();return;
+    }
+    const oldGroupId=f.store.getThread('t1')!.activeGroupId!;
+    const access=f.service.createUserAccess({requestSource:'user',actorId:'actual-user-reset',threadId:'t1',profileId:'p1',workspaceId:'w1'});
+    await f.service.resetGroup({access,requestSource:'user',operationId:'reset-failed-initialization',expectedGroupId:oldGroupId,confirmTerminate:true});
+    await vi.waitFor(()=>expect(f.store.activeGroup('t1')?.groupId).not.toBe(oldGroupId));
+    f.service.retainFailedObservationInitializationScope(firstIssuedScope!);
+    const callsBeforeResetTask=providerCalls;allowAfterReset=true;await f.start();await f.host.drain();expect(f.store.activeGroup('t1')?.groupId).not.toBe(oldGroupId);expect(providerCalls-callsBeforeResetTask).toBe(1);expect.soft(providerCalls).toBe(1);expect(turns).toBe(2);
+  });
+
+  it('retains actual Core unknown cleanup when its physical-close factual SQLite publication fails', async () => {
+    let groupId='',childId='',rawFailure:unknown,core:import('../../../src/ai/agents/multi-agent-coordinator.js').MultiAgentCoordinator|undefined;
+    const f=await setup(async()=>({run:async()=> 'completed',dispose:async()=>{}}),async context=>{
+      groupId=context.groupId;
+      const result=await f.service.spawn({actor:context.actor,requestSource:'agent',operationId:'physical-publication-child',taskName:'child',message:'work'});
+      childId=result.targetAgentId!;
+      await vi.waitFor(()=>expect(f.store.getAgent(groupId,childId)).toMatchObject({status:'completed',executionActive:false}));
+      const groups=Reflect.get(f.service,'groups') as Map<string,{core:import('../../../src/ai/agents/multi-agent-coordinator.js').MultiAgentCoordinator}>;
+      core=groups.get(groupId)!.core;
+      const db=Reflect.get(f.store,'db') as DatabaseSync;
+      const condition=`NEW.group_id=${sqlLiteral(groupId)} AND NEW.agent_id=${sqlLiteral(childId)} AND json_extract(NEW.data_json,'$.resourcesReleased')=1`;
+      db.exec(`CREATE TEMP TRIGGER deny_physical_publication_insert BEFORE INSERT ON agents WHEN ${condition} BEGIN SELECT RAISE(ABORT,'SQLITE_FULL'); END;
+        CREATE TEMP TRIGGER deny_physical_publication_update BEFORE UPDATE ON agents WHEN ${condition} BEGIN SELECT RAISE(ABORT,'SQLITE_FULL'); END;`);
+      try{
+        await f.service.close({actor:context.actor,requestSource:'agent',operationId:'physical-publication-close',target:childId});
+        const records=Reflect.get(core,'records') as Map<string,{cleanup?:Promise<void>;cleanupFailures?:unknown[]}>;
+        await records.get(childId)!.cleanup;
+        rawFailure=records.get(childId)!.cleanupFailures?.[0];
+        expect(rawFailure).toBeInstanceOf(Error);expect((rawFailure as Error).message).toBe('SQLITE_FULL');
+        await vi.waitFor(()=>expect(f.store.getAgent(groupId,childId)).toMatchObject({resourcesReleased:false,cleanupError:expect.stringContaining('SQLITE_FULL')}));
+      }finally{db.exec('DROP TRIGGER IF EXISTS temp.deny_physical_publication_insert; DROP TRIGGER IF EXISTS temp.deny_physical_publication_update;');}
+    });
+    await f.start();await f.host.drain();await f.service.dispose();
+    let rejected:unknown;try{await core!.waitForDisposedResources();}catch(error){rejected=error;}
+    expect(rejected).toBeInstanceOf(AggregateError);expect((rejected as AggregateError).errors).toContain(rawFailure);
+    expect(f.store.getAgent(groupId,childId)?.resourcesReleased).toBe(false);
+  });
+
 });

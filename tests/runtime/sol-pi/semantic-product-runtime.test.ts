@@ -1,6 +1,9 @@
 import * as summaryScope from '../../../src/runtime/sol-pi/semantic-summary-attempt.js';
 import {installProductCompoundCoordinator} from '../../../src/runtime/sol-pi/product-compound-coordinator.js';
 import { afterEach, expect, it, vi } from 'vitest';
+import {setImmediate as yieldEventLoop} from 'node:timers/promises';
+// Let the real worker process pending IPC between synchronous product cases.
+afterEach(async()=>{await yieldEventLoop();await yieldEventLoop();});
 import { mkdtempSync, realpathSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';

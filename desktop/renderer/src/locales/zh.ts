@@ -89,6 +89,11 @@ export const zh: LocaleStrings = {
   collaborationRoomMentionAll: "所有智能体",
   collaborationRoomsTitle: "协作空间",
   collaborationRoomsSubtitle: "与多个智能体持续讨论，并从消息创建项目",
+  collaborationRoomGoalLabel: "协作目标",
+  collaborationRoomGoalPlaceholder: "例如：让智能体一起分析本月 AI 产品动态，整理证据并讨论结论",
+  collaborationRoomAiDefaultsHint: "描述目标即可，AI 会补齐名称、说明和本地智能体成员。你也可以展开高级设置修改。",
+  collaborationRoomAdvanced: "高级设置（可选）",
+  collaborationRoomAiCreating: "AI 正在准备并创建…",
   collaborationRoomsCreate: "新建协作空间",
   collaborationRoomsEmptyTitle: "还没有协作空间",
   collaborationRoomMore: "更多操作",
@@ -1322,6 +1327,12 @@ export const zh: LocaleStrings = {
     taskConcurrencyMin: "1 (串行)",
     taskConcurrencyMax: "10 (最大并行)",
     // general pane - stage debug
+    configLoadFailed: "暂时无法读取设置，请稍后重试。",
+    configSaveFailed: "保存设置失败，请稍后重试。",
+    configOperationUnknown: "保存结果未确认，请重新打开设置后检查。",
+    modelConfigOperationUnknown: "模型操作结果未确认，请刷新后检查。",
+    modelConfigInputInvalid: "模型设置输入无效，请检查后重试。",
+    modelConfigUnavailable: "模型设置暂时不可用，请稍后重试。",
     stageDebugTitle: "Stage 调试输出",
     stageDebugDesc: "开启后，每次对话都会在任务开始前显示 Stage 分析（意图识别、Context 检查、耗时预估）",
     stageDebugOn: "已开启",
@@ -1887,6 +1898,10 @@ export const zh: LocaleStrings = {
     aboutDownloadedVersion: (version: string) => `v${version} 已下载，点击安装`,
     aboutDownloadProgress: (progress: number) => `下载进度 ${progress}%`,
     aboutVersionAvailable: (version: string) => `v${version} 可用`,
+    updaterProjectionUnavailable: "无法读取更新状态，已保留最后确认的信息。",
+    updaterOperationUnknown: "无法确认更新操作结果，请查看当前状态，勿重复安装。",
+    updaterInputInvalid: "当前窗口无权执行更新操作或请求无效。",
+    updaterRefreshData: "刷新更新状态",
     aboutChecking: "正在检查...",
     aboutInstallRestart: "安装并重启",
     aboutInstallProgress: "安装中...",
@@ -1977,6 +1992,11 @@ export const zh: LocaleStrings = {
     // connectors pane
     connectorSaveFailedNoDesktop: "保存失败：桌面端未连接",
     connectorConfigParseError: "连接器配置文件格式异常已被备份，已恢复为默认值。",
+    connectorProjectionUnavailable: "连接器配置暂时无法读取，请刷新重试。",
+    connectorOperationUnknown: "连接器操作结果尚未确认，请先刷新核对。",
+    connectorInputInvalid: "连接器配置或请求无效，请检查后重试。",
+    connectorRefreshData: "刷新连接器配置",
+    connectorStatusDecryptFailed: "密钥无法解密",
     connectorLoadFailed: "无法加载连接器配置。",
     networkTools: "网络工具",
     networkToolsDesc: "配置 web_search 与 web_fetch 使用的 provider。切换时自动 fallback 到默认 provider。",
@@ -2057,6 +2077,10 @@ export const zh: LocaleStrings = {
     pluginsInstall: "安装",
     pluginsInstallFailed: "安装失败",
     pluginsRestartHint: "更改将在重启后生效",
+    pluginsCatalogUnavailable: "插件目录暂时不可用",
+    pluginsCatalogRetry: "重新读取插件目录",
+    pluginsCatalogLoading: "正在读取插件目录…",
+    pluginsCatalogToolCount: (count: number) => `${count} 个工具`,
     // LocalMemoryStatsCard
     relativeTimeJustNow: "刚刚",
     relativeTimeMinutesAgo: (n: number) => `${n} 分钟前`,
@@ -2447,6 +2471,10 @@ export const zh: LocaleStrings = {
   projectsPageOffline: "离线",
 
   // projects - knowledge and rules tab
+  projectsPrinciplesOperationUnknown: "原则操作结果未确认，请刷新后检查。",
+  projectsPrinciplesInputInvalid: "原则数据格式无效，请检查后重试。",
+  projectsPrinciplesProjectionUnavailable: "原则列表暂时无法读取，请刷新重试。",
+  projectsPrinciplesRefresh: "刷新原则列表",
   projectsPrinciplesTab: "知识与规则",
   projectsPrinciplesAdd: "添加知识",
   projectsPrinciplesImportMemory: "从 Memory 导入",
@@ -2701,6 +2729,7 @@ export const zh: LocaleStrings = {
 
   // welcome page
   welcome: {
+    brandName: 'XIAOK',
     greetingSuffix: "，我们一起来搞定工作吧！",
     inputPlaceholder: "描述你的工作需求...",
     conversationSubtitle: "从对话开始，也能看见正在推进的工作。",
@@ -2739,6 +2768,8 @@ export const zh: LocaleStrings = {
   },
 
   assistant: {
+    operationUnknown: "无法确认操作结果，数据可能已更新。请刷新状态后再继续。",
+    refreshStatus: "刷新状态",
     title: "每日助理",
     morningScheduleName: "每日助理晨间建议",
     eveningScheduleName: "每日助理晚间整理",
@@ -2812,6 +2843,11 @@ export const zh: LocaleStrings = {
 
   // knowledge page
   knowledge: {
+    projectionUnavailable: "知识库数据暂时无法读取，请刷新重试。",
+    operationUnknown: "知识库操作结果未确认，请刷新后检查。",
+    inputInvalid: "知识库数据格式无效，请检查后重试。",
+    refreshData: "刷新知识库数据",
+
     loading: "加载中…",
     pageTitle: "知识库",
     emptyTitle: "建立你的本地知识库",
@@ -2862,6 +2898,10 @@ export const zh: LocaleStrings = {
     meetingRecorderFinishEditing: "完成编辑",
     meetingRecorderProcessingTitle: "正在生成录音总结",
     meetingRecorderProcessingHint: "正在完成最终转写、标点恢复和内容总结，请保持窗口开启。",
+    meetingRecorderInputInvalid: "当前录音窗口无权执行该操作或参数无效。",
+    meetingRecorderOperationUnknown: "无法确认录音窗口操作结果，现有录音与草稿已保留。",
+    meetingRecorderSavedFollowupFailed: "录音内容已保存，但通知主窗口或关闭窗口未完成。再次点击保存仅继续窗口操作。",
+    meetingRecorderNewDraftUnsaved: "旧内容已保存，保存等待期间的新编辑尚未保存。请再次保存新内容或明确关闭。",
     meetingRecorderCloseBlocked: "录音或总结处理尚未完成，请先点击完成。",
     meetingSettings: "转写设置",
     meetingControlPanelTitle: "录音控制",
@@ -3025,6 +3065,11 @@ export const zh: LocaleStrings = {
   automationsConstraintsNewBadge: "新",
 
   // scheduled page
+  scheduledProjectionUnavailable: '计划与提醒数据暂时无法读取，请刷新重试。',
+  scheduledOperationUnknown: '计划或提醒操作结果未确认，请刷新后检查。',
+  scheduledInputInvalid: '计划或提醒数据格式无效，请检查后重试。',
+  scheduledRefreshData: '刷新计划与提醒',
+  scheduledMutationNotApplied: '本次未更改计划或提醒，请刷新核对当前状态。',
   scheduledTitle: "定时任务",
   scheduledSubtitle: "管理按计划自动运行的任务",
   scheduledNew: "新建任务",
@@ -3093,6 +3138,18 @@ export const zh: LocaleStrings = {
   scheduledLinkedLoop: "关联循环",
 
   // chatView
+  conversationActivity: {
+    submitInput: '提交', declineInput: '拒绝提供', cancelWork: '取消工作', cancelRequested: '已请求取消，等待来源确认', unsupportedInput: '此类输入需通过原服务处理。',
+    projectClosed: '已关闭（未确认交付）',
+    historyGap: '部分历史进展已合并或过期；当前状态按来源确认',
+    lastProgress: '最近进展',
+    title: '工作跟进', stopped: '已停止跟进', unavailable: '状态暂不可确认', details: '查看项目', lastUpdate: '最近同步', nextReport: '下次汇报',
+    frequency: '汇报频率', normal: '每五分钟及关键变化', criticalOnly: '只报关键变化', quiet: '静默', stop: '停止跟进', stopHint: '只停止汇报，不取消工作', noProgress: '暂无', error: '跟进更新失败，请稍后重试。',
+    unread: (count) => `${count} 条未读工作更新`,
+    report: (state, time) => `状态汇报 ${time}：${state}。`,
+    sources: { kswarm: '项目', task_host: '后台任务', agent_group: 'Agent 协作', mcp: '插件任务' },
+    states: { accepted: '已创建', queued: '等待执行', running: '执行中', blocked: '已阻塞', input_required: '等待处理', completed: '已完成', failed: '执行失败', cancelled: '已取消' },
+  },
   chatView: {
     executionSyncing: '正在同步执行状态…',
     executionDisconnected: '执行状态连接中断，请重新连接',
@@ -3214,6 +3271,8 @@ export const zh: LocaleStrings = {
   chatShell: {
     attachmentLabel: "附件:",
     cuUnavailable: "Computer Use 当前不可用。",
+    historyUnavailable: (taskIds) => `历史任务记录暂时无法读取（${taskIds}）。会话仍保留；已有项目及产物不会因此删除，也不会自动重跑。`,
+    historyRecovered: (taskId) => `原任务记录不可用，以下显示唯一同标题的成功历史记录（${taskId}）。这是该历史任务的真实内容，未改写原任务或重新启动项目。`,
     taskCreateFailed: "任务创建失败，请检查模型配置或稍后重试。",
     goalAttachmentQuerying: "任务附着结果尚未确认，正在只读核对。",
     goalAttachmentUnknown: "任务附着结果尚未确认；可能已经开始，请勿重复提交。可重新打开会话查看已保存状态。",
@@ -3443,6 +3502,9 @@ export const zh: LocaleStrings = {
   automationsViewLoopDetail: "查看循环详情",
   automationsViewScheduleDetail: "查看定时任务",
   automationsClearRecord: "清除此记录",
+  loopOperationResultUnknown: "操作结果未确认，请刷新后检查。",
+  loopProjectionUnavailable: "暂时无法读取循环数据，请刷新后重试。",
+  loopInputInvalid: "循环操作参数无效，请检查后重试。",
   automationsClearConfirm: (title: string) => `清除「${title}」的失败/阻塞历史记录？`,
 
   // user loop starter templates

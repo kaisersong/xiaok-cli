@@ -45,6 +45,8 @@ export interface UpdaterHandoffAdapter {
    * is the only case that may return the attempt to idle on macOS.
    */
   preflight?(): void;
+  /** Configured Main owner only; generic own adapters retain their existing contract. */
+  authorizeBegin?(context: unknown): void;
   /**
    * Invokes the real updater wrapper exactly once per attempt. Base adapters
    * return the synchronously attributed error, if any; mac adapters return
@@ -64,7 +66,7 @@ export class UpdaterHandoffStateMachine {
   ) {}
 
   snapshot(): HandoffState {
-    return this.state;
+    return { ...this.state };
   }
 
   /** UI-facing projection; `install_handoff_pending` is not an error. */
@@ -80,7 +82,8 @@ export class UpdaterHandoffStateMachine {
   }
 
   /** `desktop:quitAndInstall`. Never writes isQuitting; see §5.5. */
-  begin(): BeginOutcome {
+  begin(context?: unknown): BeginOutcome {
+    this.adapter.authorizeBegin?.(context);
     if (this.state.kind === 'handed_off') return { status: 'already_handed_off' };
     if (this.state.kind === 'pending') return { status: 'already_pending' };
     if (this.state.kind === 'pending_error_sticky') {

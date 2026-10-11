@@ -51,6 +51,8 @@ export interface HookSharedContext {
 export type HookType = 'command' | 'http' | 'prompt';
 
 export interface HookConfigBase {
+  /** Opt in to strictly validated synchronous JSON control output. */
+  outputFormat?: 'json';
   /** Hook type. Defaults to 'command'. */
   type?: HookType;
   /** Which hook events this hook responds to. Omit to match ALL events. */
@@ -137,6 +139,8 @@ export interface HooksRunnerConfig {
 
 export interface HookRunResult {
   ok: boolean;
+  /** Machine-readable rejection for malformed declared control output. */
+  errorCode?: 'hook_invalid_json_output';
   message?: string;
   /** PreToolUse: modified tool input to pass to the tool */
   updatedInput?: Record<string, unknown>;
@@ -256,6 +260,8 @@ function shouldMatch(config: HookConfig, eventName: HookEventName, payload: Reco
 
 function normalizeConfig(raw: HookConfigOrCommand): HookConfig {
   if (typeof raw === 'string') return { type: 'command', command: raw };
+  if (raw.outputFormat !== undefined && raw.outputFormat !== 'json') throw new Error('hook_output_format_invalid');
+  if (raw.outputFormat === 'json' && raw.async) throw new Error('hook_json_async_unsupported');
   const config = !raw.type ? ({ ...raw, type: 'command' } as CommandHookConfig) : raw;
   if (config.events && config.events.length > 0) {
     const filtered = config.events.filter((event) => {
@@ -305,11 +311,40 @@ interface CommandResult {
 function interpretExitCode(
   result: CommandResult,
   eventName: HookEventName,
+  config: HookConfig,
 ): Partial<HookRunResult> {
   // Parse structured JSON from stdout
   const trimmed = result.stdout.trim();
   let parsed: Record<string, unknown> = {};
-  if (trimmed.startsWith('{')) {
+  if (config.outputFormat === 'json') {
+    try {
+      const value: unknown = JSON.parse(trimmed);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid object');
+      parsed = value as Record<string, unknown>;
+      const fields: Array<[string, (field: unknown) => boolean]> = [
+        ['updatedInput', field => field !== null && typeof field === 'object' && !Array.isArray(field)],
+        ['preventContinuation', field => typeof field === 'boolean'],
+        ['additionalContext', field => typeof field === 'string'],
+        ['message', field => typeof field === 'string'],
+        ['reason', field => typeof field === 'string'],
+        ['decision', field => field === 'allow' || field === 'deny'],
+        ['ok', field => typeof field === 'boolean'],
+      ];
+      for (const [key, valid] of fields) {
+        if (Object.hasOwn(parsed, key) && !valid(parsed[key])) throw new Error('invalid field');
+      }
+    } catch {
+      if (BLOCKING_EVENTS.has(eventName)) return {
+        ok: false, preventContinuation: true, decision: 'deny',
+        errorCode: 'hook_invalid_json_output', message: 'hook_invalid_json_output',
+      };
+      return { message: 'hook_invalid_json_output' };
+    }
+    // Prompt control is consumed only after the declared output is validated.
+    if (config.type === 'prompt' && parsed['ok'] === false) {
+      result = { ...result, exitCode: 2, stderr: parsed['reason'] as string | undefined ?? 'Blocked by prompt hook' };
+    }
+  } else if (trimmed.startsWith('{')) {
     try { parsed = JSON.parse(trimmed) as Record<string, unknown>; } catch { /* ignore */ }
   }
 
@@ -445,6 +480,7 @@ async function executePrompt(
   {
     const response = await promptExecutor(fullPrompt, config.model);
     const trimmed = response.trim();
+    if (config.outputFormat === 'json') return { exitCode: 0, stdout: trimmed, stderr: '' };
 
     // Parse LLM response — expect {ok: true} or {ok: false, reason: "..."}
     if (trimmed.startsWith('{')) {
@@ -562,7 +598,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
           result = await ownRaw(executeCommand(hook as CommandHookConfig, timeout, payloadJson, signal, extraEnv));
         }
 
-        const interpreted = interpretExitCode(result, eventName);
+        const interpreted = interpretExitCode(result, eventName, hook);
 
         if (interpreted.ok === false) {
           // Blocking result — return immediately
@@ -571,6 +607,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
             message: interpreted.message,
             preventContinuation: true,
             decision: interpreted.decision,
+            ...(interpreted.errorCode ? { errorCode: interpreted.errorCode } : {}),
           };
         }
 
@@ -623,6 +660,7 @@ export function createHooksRunner(config: HooksRunnerConfig = {}): HooksRunner {
 
     async runPostHooks(toolName, input) {
       const result = await runHooks('PostToolUse', { tool_name: toolName, tool_input: input });
+      if (result.errorCode === 'hook_invalid_json_output') throw new Error(result.errorCode);
       return result.message ? [result.message] : [];
     },
   };

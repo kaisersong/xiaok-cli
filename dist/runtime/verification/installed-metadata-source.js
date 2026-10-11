@@ -1,6 +1,7 @@
 import { readNativeSqliteCensus, readNativeEnrollmentCensus, canonicalNativeCensusPopulation } from './native-sqlite-census.js';
 import { captureOwnerBindingBatch } from './owner-binding-batch-input.js';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual as initialIsDeepStrictEqual } from 'node:util';
+const isDeepStrictEqual = initialIsDeepStrictEqual;
 import { isKSwarmOwnerIdentity } from './kswarm-host-subject.js';
 import { readKSwarmEnrollmentReceipt } from './kswarm-enrollment-store.js';
 import { assertStorageOwnerSchema } from './storage-owner-schema.js';

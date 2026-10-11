@@ -1,3 +1,4 @@
+import { assertNativeSqliteArrayConstruction } from './native-sqlite-construction-intrinsics.js';
 import { readNativeKSwarmCensus } from './native-sqlite-census.js';
 import { assertKSwarmSqlIntegrity } from './kswarm-sql-integrity.js';
 import { parseOwnerEnrollmentRegistration } from './owner-enrollment-review.js';
@@ -126,6 +127,7 @@ export function createKSwarmEnrollmentStore(db, initialize = true) {
         recordKSwarmStorageFeature(db);
     }
     function ready(owner, allowPending = false) {
+        assertNativeSqliteArrayConstruction();
         if (owner.ownerKind !== 'kswarm')
             return;
         assertKSwarmSqlIntegrity(db);
@@ -157,7 +159,7 @@ export function createKSwarmEnrollmentStore(db, initialize = true) {
     }
     return Object.freeze({ assertProposal, stage, commit, ready });
 }
-export function readKSwarmEnrollmentReceipt(database, owner) { return createKSwarmEnrollmentStore(database, false).ready(owner); }
+export function readKSwarmEnrollmentReceipt(database, owner) { assertNativeSqliteArrayConstruction(); return createKSwarmEnrollmentStore(database, false).ready(owner); }
 /** Full original facts around qualified callbacks; never a grant or cached authority. */
 export function readKSwarmEnrollmentSnapshot(database, owner) {
     const receipt = readKSwarmEnrollmentReceipt(database, owner), key = json(owner);

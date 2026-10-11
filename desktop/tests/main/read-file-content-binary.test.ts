@@ -52,6 +52,44 @@ describe('desktop file content IPC binary handling', () => {
     rmSync(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
+  it.each([
+    '青创赛与港澳升学参考报告.html',
+    'report.htm',
+    'report.HTML',
+    'report.svg',
+    'notes.md',
+    'README',
+    'D:\\Reports\\报告.html',
+    '\\\\server\\share\\report.html',
+  ])('preserves the requested filename without forcing Markdown: %s', async (defaultPath) => {
+    const filePath = join(rootDir, 'saved.html');
+    electronMocks.showSaveDialog.mockResolvedValue({ canceled: false, filePath });
+
+    await expect(handlers.get('desktop:showSaveDialog')?.({}, { defaultPath }))
+      .resolves.toEqual({ canceled: false, filePath });
+    const options = electronMocks.showSaveDialog.mock.calls[0]?.[1];
+    expect(options.defaultPath).toBe(defaultPath);
+    expect(options.filters).toBeUndefined();
+  });
+
+  it.each([
+    { name: 'Markdown', extensions: ['md'] },
+    { name: 'PDF', extensions: ['pdf'] },
+    { name: 'HTML', extensions: ['html', 'htm'] },
+  ])('preserves explicit $name export filters', async (filter) => {
+    electronMocks.showSaveDialog.mockResolvedValue({ canceled: false, filePath: join(rootDir, 'saved') });
+    await handlers.get('desktop:showSaveDialog')?.({}, { defaultPath: 'report', filters: [filter] });
+    expect(electronMocks.showSaveDialog).toHaveBeenCalledWith(expect.anything(), {
+      defaultPath: 'report', filters: [filter],
+    });
+  });
+
+  it('returns cancellation without inventing a save path', async () => {
+    electronMocks.showSaveDialog.mockResolvedValue({ canceled: true });
+    await expect(handlers.get('desktop:showSaveDialog')?.({}, { defaultPath: 'report.html' }))
+      .resolves.toEqual({ canceled: true, filePath: '' });
+  });
+
   it('returns PDF files as application/pdf data URLs instead of UTF-8 text', async () => {
     const pdfBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0xff, 0x00, 0xab]);
     const pdfPath = join(rootDir, 'report.pdf');

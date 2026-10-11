@@ -31,11 +31,11 @@ export function computeKbSourceContentDigest(input: Pick<AddSourceInput, 'text'>
 export interface KbStore {
   _db?: unknown;
   // Collection CRUD
-  createCollection(input: CreateCollectionInput): Collection;
+  createCollection(input: CreateCollectionInput, requestSource?: RequestSource): Collection;
   getCollection(id: string): Collection | undefined;
   listCollections(): Collection[];
-  renameCollection(id: string, name: string, description?: string): Collection | undefined;
-  deleteCollection(id: string): void;
+  renameCollection(id: string, name: string, description?: string, requestSource?: RequestSource): Collection | undefined;
+  deleteCollection(id: string, requestSource?: RequestSource): void;
 
   // Source CRUD
   addSource(input: AddSourceInput, requestSource: RequestSource): Source;
@@ -48,22 +48,22 @@ export interface KbStore {
   ): { source: Source; created: boolean };
   getSource(id: string): Source | undefined;
   listSources(collectionId: string): Source[];
-  deleteSource(id: string): void;
-  retrySource(id: string): Source | undefined;
+  deleteSource(id: string, requestSource?: RequestSource): void;
+  retrySource(id: string, requestSource?: RequestSource): Source | undefined;
   updateSourceParseResult(id: string, input: UpdateSourceParseResultInput, requestSource: RequestSource): Source;
   getSourceEmbeddingProgress(sourceId: string): SourceEmbeddingProgress;
 
   // Chunk operations
-  insertChunks(sourceId: string, chunks: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string; metadata?: Record<string, unknown> }>): Chunk[];
+  insertChunks(sourceId: string, chunks: Array<{ idx: number; text: string; charStart: number; charEnd: number; pageIndex?: number; slideIndex?: number; sheetName?: string; cellRange?: string; metadata?: Record<string, unknown> }>, requestSource?: RequestSource): Chunk[];
   listChunks(sourceId: string): Chunk[];
-  markChunkEmbedded(chunkId: string): void;
-  markChunkFailed(chunkId: string, error: string): void;
+  markChunkEmbedded(chunkId: string, requestSource?: RequestSource): void;
+  markChunkFailed(chunkId: string, error: string, requestSource?: RequestSource): void;
 
   // Meeting operations
-  createMeeting(input: CreateMeetingInput): MeetingRecord;
+  createMeeting(input: CreateMeetingInput, requestSource?: RequestSource): MeetingRecord;
   getMeeting(id: string): MeetingRecord | undefined;
   listMeetings(): MeetingRecord[];
-  updateMeeting(id: string, input: UpdateMeetingInput): MeetingRecord | undefined;
+  updateMeeting(id: string, input: UpdateMeetingInput, requestSource?: RequestSource): MeetingRecord | undefined;
 
   // Aggregated views
   getCollectionState(collectionId: string): CollectionState | undefined;

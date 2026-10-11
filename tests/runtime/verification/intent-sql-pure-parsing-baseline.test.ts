@@ -41,9 +41,9 @@ async function fixture(afterQuery?:()=>void,options:Parameters<typeof verifiedOp
 import * as sqlParsing from '../../../src/runtime/verification/intent-sql-parsing-context.js';
 import * as envelopeDecoder from '../../../src/runtime/verification/intent-contract-enrollment.js';
 it('reuses pure SQL contracts across every actual dependency, completion and inspect frame',async()=>{
- const f=await fixture(),original=envelopeDecoder.parseIntentContractEnrollment;let actual=0,active='setup';const records:any[]=[],stack:any[]=[],results:any[]=[];const originalContext=sqlParsing.withIntentSqlParsingContext,originalRead=sqlParsing.readIntentSqlContract;
+ const f=await fixture(),original=envelopeDecoder.parseIntentContractEnrollment;let actual=0,active='setup';const records:any[]=[],stack:any[]=[],results:any[]=[],coverages:any[]=[];const originalContext=sqlParsing.withIntentSqlParsingContext,originalRead=sqlParsing.readIntentSqlContract;
  const contextSpy=vi.spyOn(sqlParsing,'withIntentSqlParsingContext').mockImplementation((db,fn)=>{const frame={active,attempts:0,decodes:0,stack:new Error().stack};records.push(frame);stack.push(frame);try{return originalContext(db,fn);}finally{stack.pop();}});
- const readSpy=vi.spyOn(sqlParsing,'readIntentSqlContract').mockImplementation((db,raw)=>{const caller=new Error().stack?.split('\n').find(line=>line.includes('owner-enrollment-authority.ts'))?.match(/at (\w+)/)?.[1];if(stack.length)stack.at(-1).attempts++;const binding=originalRead(db,raw);results.push({active,caller,subject:binding.subject});return binding;});
+ const readSpy=vi.spyOn(sqlParsing,'readIntentSqlContract').mockImplementation((db,raw)=>{const caller=new Error().stack?.split('\n').find(line=>/\/src\/runtime\/verification\/owner-enrollment-authority\.(?:ts|js):\d+:\d+\)?\s*$/.test(line.replace(/\\/g,'/')))?.match(/at (\w+)/)?.[1];if(stack.length)stack.at(-1).attempts++;const binding=originalRead(db,raw);results.push({active,caller,subject:binding.subject});return binding;});
  const spy=vi.spyOn(envelopeDecoder,'parseIntentContractEnrollment').mockImplementation(raw=>{actual++;if(stack.length)stack.at(-1).decodes++;return original(raw);});
  const assertPath=(total:number,sha:string,frameCount:number,contextAttempts:number,miss:number,distribution:number[][])=>{
   const entries=results.filter(e=>e.active===active),frames=records.filter(e=>e.active===active);
@@ -56,7 +56,16 @@ it('reuses pure SQL contracts across every actual dependency, completion and ins
  const fullFrames=[[0,0],[0,0],[7,1],...Array.from({length:20},()=>[16,1]),...Array.from({length:20},()=>[32,1]),[96,1]];
  const inspector=new InspectorSession();inspector.connect();const post=(method:string,params={})=>new Promise<any>((resolve,reject)=>inspector.post(method as any,params,(error,result)=>error?reject(error):resolve(result)));
  await post('Profiler.enable');await post('Profiler.startPreciseCoverage',{callCount:true,detailed:true});
- const assertAllDecoders=async(expected:number)=>{const value=await post('Profiler.takePreciseCoverage'),count=value.result.filter((script:any)=>script.url.replace(/\\/g,'/').endsWith('/src/runtime/verification/intent-contract-enrollment.ts')).flatMap((script:any)=>script.functions.filter((fn:any)=>fn.functionName==='parseIntentContractEnrollment')).reduce((n:number,fn:any)=>n+fn.ranges[0].count,0);expect(count).toBe(expected);};
+ const assertAllDecoders=async(expected:number)=>{
+  const value=await post('Profiler.takePreciseCoverage');
+  const scripts=value.result.filter((script:any)=>/\/src\/runtime\/verification\/intent-contract-enrollment\.(?:ts|js)$/.test(script.url.replace(/\\/g,'/')));
+  expect(scripts).toHaveLength(1);
+  const functions=scripts[0].functions.filter((fn:any)=>fn.functionName==='parseIntentContractEnrollment');
+  expect(functions).toHaveLength(1);expect(functions[0].ranges.length).toBeGreaterThan(0);
+  const count=functions[0].ranges[0].count;
+  coverages.push({active,script:scripts[0].url,functionCount:functions.length,count,expected});
+  expect(count).toBe(expected);
+ };
 
 
  try{
@@ -64,5 +73,5 @@ it('reuses pure SQL contracts across every actual dependency, completion and ins
   active='completion-last-stage';actual=0;const completion=await f.receiver.publication.observeIntentCompletion({subject:f.subjects[1]},f.f.peer,signal());expect(completion.publications).toHaveLength(2);expect(actual).toBe(83);assertPath(1104,active==='dependencies-parent'?'96c045892e4974fd006128d23bf2ec02d99da9c95b478299014ed1f44ef69615':'359b97c3239c0316d1e390d1ec40d1a8fb9915be9d2dfb73258eadd50c42b0fb',44,1063,42,fullFrames);await assertAllDecoders(645);
   active='setup';const opened=f.f.composition.privateHost.enrollment.openOwner(intentHostSubjectOwner(f.subjects[1]),f.f.peer);await post('Profiler.takePreciseCoverage');active='completion-inspect';actual=0;
   const inspection:any=f.f.composition.public.invoke('completion.inspect',opened,f.f.peer);expect(inspection.currentVerification).toBe('valid');expect(actual).toBe(1);assertPath(32,'f5eee1f76115d2cfad3718f5aaabf65c36910588847365f91fd729e0809890e0',1,32,1,[[32,1]]);await assertAllDecoders(17);
- }finally{await post('Profiler.stopPreciseCoverage');inspector.disconnect();if(process.env.XIAOK_SQL_PARSE_CANDIDATE_OUTPUT)writeFileSync(process.env.XIAOK_SQL_PARSE_CANDIDATE_OUTPUT,JSON.stringify({records,results},null,2));spy.mockRestore();readSpy.mockRestore();contextSpy.mockRestore();await f.close();}
+ }finally{await post('Profiler.stopPreciseCoverage');inspector.disconnect();if(process.env.XIAOK_SQL_PARSE_CANDIDATE_OUTPUT)writeFileSync(process.env.XIAOK_SQL_PARSE_CANDIDATE_OUTPUT,JSON.stringify({records,results,coverages},null,2));spy.mockRestore();readSpy.mockRestore();contextSpy.mockRestore();await f.close();}
 },30000);

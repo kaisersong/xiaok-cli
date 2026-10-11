@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 
+describe('bounded project worker admission', () => {
+  it('admits three project workers and bounds the fourth independently of other lanes', async () => {
+    const c = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
+    const fg = await c.acquireLease({ policy: 'ordinary', lane: 'foreground' });
+    const bg = await c.acquireLease({ policy: 'ordinary', lane: 'background' });
+    const po = await c.acquireLease({ policy: 'ordinary', lane: 'project_control' });
+    const workers = [0, 1, 2].map(() => c.acquireLease({ policy: 'ordinary', lane: 'project_worker' }));
+    workers.forEach(worker => { void worker.catch(() => undefined); });
+    workers.forEach(worker => expect(worker.ticket).toBeDefined());
+    const fourth = c.acquireLease({ policy: 'ordinary', lane: 'project_worker' });
+    void fourth.catch(() => undefined);
+    expect(fourth.ticket).toBeUndefined();
+    expect(c.snapshot()).toEqual({ active: 6, waiting: 1, capacity: 6 });
+    const leases = await Promise.all(workers);
+    leases[0].release(); (await fourth).release();
+    leases[1].release(); leases[2].release(); fg.release(); bg.release(); po.release();
+    expect(c.snapshot().active).toBe(0);
+  });
+});
+
 describe('foreground/background execution isolation', () => {
   it('admits foreground and children while background remains held, without admitting a second background', async () => {
     const c = new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
@@ -56,5 +76,21 @@ describe('foreground/background execution isolation', () => {
     const c = new DesktopExecutionCoordinator();
     await expect(c.acquireLease({ policy: 'ordinary', lane: 'background' })).rejects.toThrow(/lane|capacity/);
     await expect(c.acquireLease({ policy: 'ordinary', lane: 'bad' as any })).rejects.toThrow(/lane/);
+  });
+});
+
+describe('project control admission', () => {
+  it('runs PO control while foreground and a worker are occupied, still bounding the second control', async () => {
+    const c = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const fg = await c.acquireLease({ policy: 'ordinary', lane: 'foreground' });
+    const worker = await c.acquireLease({ policy: 'ordinary', lane: 'background' });
+    const request = c.acquireLease({ policy: 'ordinary', lane: 'project_control' });
+    expect(request.ticket).toBeDefined();
+    const po = await request;
+    const another = c.acquireLease({ policy: 'ordinary', lane: 'project_control' });
+    expect(another.ticket).toBeUndefined();
+    expect(c.snapshot().active).toBe(3);
+    po.release(); (await another).release(); fg.release(); worker.release();
+    expect(c.snapshot().active).toBe(0);
   });
 });

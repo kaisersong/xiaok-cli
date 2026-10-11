@@ -1,3 +1,4 @@
+import { createKSwarmSemanticService } from '../../electron/kswarm-semantic-service.js';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -63,6 +64,29 @@ describe('useKSwarmClient.createProject envelope unwrap', () => {
       projectName: 'Demo',
       poAgent: 'xiaok-po',
     }));
+  });
+
+  it('enqueues the canonical bare project returned by the actual main semantic service', async () => {
+    const service = createKSwarmSemanticService({
+      kswarmService: { getDesktopMutationToken: () => 'fixture-token', request: async () => Response.json({ ok: true,
+        project: { id: 'proj-main', name: 'Canonical', goal: 'Build something', status: 'created', createdAt: 1,
+          poAgent: 'canonical-po', members: ['canonical-worker'], requestedStartPolicy: 'activate_and_dispatch_after_plan' } }) },
+      teamService: {} as never,
+    });
+    createKSwarmProjectMock.mockImplementation(input => service.createKSwarmProject(input));
+    const { result } = renderHook(() => useKSwarmClient());
+    let created: unknown;
+    await act(async () => { created = await result.current.createProject({ name: 'Demo', goal: 'Build something', poAgent: 'requested-po' }); });
+    expect(created).toMatchObject({ id: 'proj-main' });
+    expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'proj-main', poAgent: 'canonical-po', members: ['canonical-worker'], startPolicy: 'activate_and_dispatch_after_plan' }));
+  });
+
+  it('preserves an explicit plan-only policy in the actual queue request', async () => {
+    createKSwarmProjectMock.mockResolvedValue({ id: 'proj-plan-only', name: 'Plan', poAgent: 'xiaok-po', members: [], requestedStartPolicy: 'plan_only' });
+    const { result } = renderHook(() => useKSwarmClient());
+    await act(async () => { await result.current.createProject({ name: 'Plan', goal: 'Only plan', poAgent: 'xiaok-po', startPolicy: 'plan_only' }); });
+    expect(createKSwarmProjectMock).toHaveBeenCalledWith(expect.objectContaining({ startPolicy: 'plan_only' }));
+    expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({ startPolicy: 'plan_only' }));
   });
 
   it('returns null and does not enqueue planning when the project id is missing', async () => {

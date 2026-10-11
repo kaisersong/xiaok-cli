@@ -1,3 +1,4 @@
+import { createDesktopModelPhysicalScope, closeDesktopModelPhysicalScope, waitDesktopModelPhysicalIdle, assertDesktopModelPhysicalIdle } from './desktop-task-stream.js';
 import { consumeDelegatedObservationExecutionPlan, assertDelegatedObservationPaused, suspendDelegatedObservationOwner, resumeDelegatedObservationOwner, type DelegatedObservationExecutionPlan } from '../../src/runtime/sol-pi/delegated-session-owner.js';
 import { bindDesktopDelegatedObservationSession, type DesktopObservationBinding } from './desktop-observation-owner.js';
 import type { DesktopMultiAgentService, DesktopObservationChildPreparation } from './desktop-multi-agent-service.js';
@@ -61,6 +62,8 @@ export interface DesktopManagedAgentSessionOptions {
 
 /** A child has its own messages and per-turn registry, but uses Desktop's loop. */
 export class DesktopManagedAgentSession implements ManagedAgentSession {
+  private readonly modelPhysicalScope = createDesktopModelPhysicalScope(() => { if (this.closed) throw Error('desktop_agent_session_closed'); });
+  private deactivation?: Promise<void>;
   readonly fork: Readonly<Pick<DesktopAgentFork, 'mode' | 'truncated'>>;
   private messages: Message[];
   private readonly lifetime = new AbortController();
@@ -128,6 +131,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
     if (this.options.observationOwner) return Promise.reject(new Error('SOL_PI_DESKTOP_CHILD_OBSERVATION_NOT_READY'));
     if (this.closed) return Promise.reject(new Error('desktop_agent_session_closed'));
     if (this.running) return Promise.reject(new Error('desktop_agent_session_busy'));
+    try { assertDesktopModelPhysicalIdle(this.modelPhysicalScope); } catch (error) { return Promise.reject(error); }
     if (signal?.aborted) return Promise.reject(signal.reason);
     // Install the execution promise before any provider/registry code can run.
     const execute = async (groupSignal?:AbortSignal) => {
@@ -136,6 +140,8 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
       this.lastTurn = context.turn; this.lastTurnId = context.turnId;
       const boundSignal = AbortSignal.any([this.lifetime.signal, context.signal, ...(signal ? [signal] : []),...(groupSignal?[groupSignal]:[])]);
       boundSignal.throwIfAborted();
+      let modelBodyFailure: { error: unknown } | undefined;
+      let modelResult: string | undefined;
       try {
       const initialObservedTurn=!!this.observed?.initialScope;
       if (this.observed?.initialScope) { this.scope = this.observed.initialScope; this.observed.initialScope = undefined; }
@@ -173,6 +179,7 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
         });
       }
         const result = await runDesktopToolLoop({
+          modelPhysicalScope: this.modelPhysicalScope,
           metricsSurface: 'desktop-child', observationBinding: this.observed?.binding,
           beforeManagedTurnSeal:this.observed?async reply=>{this.observed!.child.session.replaceMessages(this.messages);await this.observed!.child.complete(reply);}:undefined,
           adapter: this.options.adapter,
@@ -205,11 +212,19 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
           if(this.closed||this.observed!==observed||this.scope!==runScope)throw Error('SOL_PI_DESKTOP_FINAL_PUBLICATION_STALE');
           observed.child.owner.assertSession(observed.child.session);
         }
-        return result.reply;
-      } finally {
+        modelResult = result.reply;
+      } catch (error) { modelBodyFailure = { error }; }
+      {
+        try { await waitDesktopModelPhysicalIdle(this.modelPhysicalScope); }
+        catch (physicalError) {
+          if (modelBodyFailure && modelBodyFailure.error !== physicalError) throw new AggregateError([modelBodyFailure.error, physicalError], 'desktop_child_business_and_model_cleanup_failed', { cause: modelBodyFailure.error });
+          throw physicalError;
+        }
         try { if (this.observed && this.scope && !this.closed) this.observed.rotation = await suspendDelegatedObservationOwner(this.observed.child.owner, this.scope.registry); }
         finally { this.scope?.dispose(); this.scope = undefined; }
       }
+      if (modelBodyFailure) throw modelBodyFailure.error;
+      return modelResult!;
     };
     const execution=Promise.resolve().then(()=>this.observed&&this.options.runObservedTurn?this.options.runObservedTurn(execute):execute());
     this.running = execution;
@@ -219,25 +234,39 @@ export class DesktopManagedAgentSession implements ManagedAgentSession {
 
   async suspend(): Promise<void> {
     if (this.running) throw new Error('cannot suspend an active Desktop session');
+    await waitDesktopModelPhysicalIdle(this.modelPhysicalScope);
     this.scope?.dispose(); this.scope = undefined;
   }
-  async deactivate(): Promise<void> {
+  deactivate(): Promise<void> {
+    if (this.deactivation) return this.deactivation;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    this.deactivation = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     this.closed = true;
-    this.lifetime.abort(new DOMException('Desktop session disposed', 'AbortError'));
-    this.scope?.dispose(); this.scope = undefined;
+    try {
+      // Both original close promises are published before any abort callback.
+      closeDesktopModelPhysicalScope(this.modelPhysicalScope, new DOMException('Desktop session disposed', 'AbortError')).catch(() => {});
+      this.lifetime.abort(new DOMException('Desktop session disposed', 'AbortError')); resolve();
+    } catch (error) { reject(error); }
+    return this.deactivation;
   }
   dispose(): Promise<void> {
-    return this.disposal ??= (async () => {
-      await this.deactivate();
-      // Deliberately remains pending for an uncooperative provider/tool. The
-      // service owns bounded close acknowledgement and the global blocked gate.
-      await this.running?.catch(() => {});
-      if (this.observed) {
-        try { await this.observed.child.execution?.dispose(); await this.observed.host.drainTransport(); }
-        finally { this.observed.child.owner.dispose(); this.observed.initialScope?.dispose(); }
-      }
-      await this.options.releaseResources?.();
-      this.messages = [];
-    })();
+    if (this.disposal) return this.disposal;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    this.disposal = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    void this.disposeOwned().then(resolve, reject);
+    return this.disposal;
   }
+  private async disposeOwned(): Promise<void> {
+    await this.deactivate();
+    await closeDesktopModelPhysicalScope(this.modelPhysicalScope, this.lifetime.signal.reason);
+    await this.running?.catch(() => {});
+    this.scope?.dispose(); this.scope = undefined;
+    if (this.observed) {
+      try { await this.observed.child.execution?.dispose(); await this.observed.host.drainTransport(); }
+      finally { this.observed.child.owner.dispose(); this.observed.initialScope?.dispose(); }
+    }
+    await this.options.releaseResources?.();
+    this.messages = [];
+  }
+
 }

@@ -300,7 +300,7 @@ describe('kswarm service external adoption', () => {
     })).toBe(false);
   });
 
-  it('requires workflow pattern schema capabilities before treating KSwarm as dynamic-workflow ready', () => {
+  it('keeps existing dynamic workflows usable without claiming optional pattern capabilities', () => {
     expect(hasDynamicWorkflowSupport({
       features: ['dynamic_workflows'],
       workflowCapabilities: {
@@ -312,7 +312,8 @@ describe('kswarm service external adoption', () => {
 
     expect(hasDynamicWorkflowSupport({
       features: ['dynamic_workflows'],
-    })).toBe(false);
+    })).toBe(true);
+    expect(hasWorkflowPatternCapabilities({ features: ['dynamic_workflows'] })).toBe(false);
 
     expect(hasWorkflowPatternCapabilities({
       workflowCapabilities: {
@@ -1256,6 +1257,60 @@ describe('kswarm durable-state fail-stop exit classification', () => {
     rmSync(serviceRoot, { recursive: true, force: true });
   });
 
+  it('authenticates seed mutations without adding credentials to read requests', async () => {
+    const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-seed-auth-'));
+    const serverPath = join(serviceRoot, 'server.js');
+    writeFileSync(serverPath, '', 'utf8');
+    writeFileSync(join(serviceRoot, 'room-workspace-protocol.json'), JSON.stringify({ component: 'kswarm', protocols: { room_workspace_v1: { contextVersion: 1, resultVersion: 1, releaseVersion: 1 } } }));
+    vi.stubEnv('KSWARM_SERVER_PATH', serverPath);
+    const requests: Array<{ path: string; method: string; token: string | null; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const method = init?.method || 'GET';
+      const token = new Headers(init?.headers).get('x-kswarm-mutation-token');
+      if (url.port === '4318') return new Response('{}', { status: 200 });
+      if (url.pathname === '/health') return new Response(JSON.stringify({
+        ok: true, features: ['dynamic_workflows'],
+        workflowCapabilities: { schemaVersion: 'kswarm_workflow_patterns_v1', compiledContract: true, patternPublicView: true },
+        service: { entryPath: serverPath },
+      }), { status: 200 });
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      requests.push({ path: url.pathname, method, token, body });
+      if (method !== 'GET') {
+        const forbidden = ['apiKey', 'baseUrl', 'provider', 'model', 'customEnv', 'runtimePath', 'execution', 'credential', 'secret'];
+        const invalid = forbidden.some(key => Object.hasOwn(body, key)) || (method === 'PUT' && Object.hasOwn(body, 'runtimeType'));
+        return new Response('{}', { status: !token ? 401 : invalid ? 400 : 200 });
+      }
+      if (url.pathname === '/agents') return new Response(JSON.stringify({ agents: [{ id: 'xiaok-po', status: 'online', runtimeType: 'xiaok', name: 'outdated' }] }), { status: 200 });
+      if (url.pathname === '/agents/xiaok-po') return new Response(JSON.stringify({ agent: { id: 'xiaok-po', status: 'online', runtimeType: 'xiaok', name: 'outdated' } }), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+    const service = createKSwarmService({ spawnProcess: spawnMock as unknown as typeof import('node:child_process').spawn, findPortOwner: async () => null });
+    try {
+      await service.start();
+      const mutations = requests.filter(request => request.method !== 'GET');
+      expect(mutations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: '/agents', method: 'POST' }),
+        expect.objectContaining({ path: '/agents/xiaok-po', method: 'PUT' }),
+        expect.objectContaining({ path: '/agents/xiaok-po/restart', method: 'POST' }),
+      ]));
+      expect(mutations.every(request => request.token === service.getDesktopMutationToken())).toBe(true);
+      for (const request of mutations) {
+        for (const field of ['apiKey', 'baseUrl', 'provider', 'model', 'customEnv', 'runtimePath', 'execution', 'credential', 'secret']) {
+          expect(request.body).not.toHaveProperty(field);
+        }
+        if (request.method === 'PUT') {
+          expect(request.body).not.toHaveProperty('runtimeType');
+          expect(request.body).not.toHaveProperty('runtimeHealth');
+        }
+      }
+      expect(requests.filter(request => request.method === 'GET').every(request => request.token === null)).toBe(true);
+    } finally {
+      await service.stop();
+      rmSync(serviceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('does not publish an adopted service after stop wins seed reconciliation', async () => {
     const serviceRoot = mkdtempSync(join(tmpdir(), 'xiaok-kswarm-adopt-stop-'));
     const serverPath = join(serviceRoot, 'server.js');
@@ -1513,5 +1568,65 @@ describe('kswarm room auth secrets persistence', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('activity-owner delegated manager boundaries', () => {
+  it('adopts a healthy managed legacy-workflow source before any Desktop replacement path', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kswarm-managed-contract-'));
+    vi.stubEnv('XIAOK_CONFIG_DIR', root);
+    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      return new Response(JSON.stringify(url.includes(':4400/health')
+        ? { ok: true, features: ['dynamic_workflows'], service: { entryPath: entry } }
+        : { ok: true, agents: [] }), { status: 200 });
+    }));
+    const request = vi.fn(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
+    const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never,
+      findPortOwner: findOwner, killStalePortOwner: killer });
+    service.bindActivityOwner!({ ownerEpoch: 'owner', request } as never);
+    try {
+      await service.start();
+      expect(service.getStatus().running).toBe(true);
+      expect(request).toHaveBeenCalledWith('sourceEnsure', { name: 'kswarm', ownerEpoch: 'owner' });
+      expect(request).not.toHaveBeenCalledWith('sourceProtected', expect.anything());
+      expect(findOwner).not.toHaveBeenCalled(); expect(killer).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled();
+    } finally { await service.stop(); rmSync(root, { recursive: true, force: true }); }
+  });
+  it('reports a managed base capability mismatch without repeated replacement or killing', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kswarm-managed-missing-contract-'));
+    vi.stubEnv('XIAOK_CONFIG_DIR', root);
+    const entry = join(root, 'server.js'); writeFileSync(entry, '// fixture'); vi.stubEnv('KSWARM_SERVER_PATH', entry);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, features: [], service: { entryPath: entry } }), { status: 200 })));
+    const request = vi.fn(async () => {}), killer = vi.fn(), findOwner = vi.fn(async () => 12345);
+    const service = createKSwarmService({ activityOwnerPending: true, spawnProcess: spawnMock as never, findPortOwner: findOwner, killStalePortOwner: killer });
+    service.bindActivityOwner!({ ownerEpoch: 'owner', request } as never);
+    try {
+      for (let i = 0; i < 3; i++) {
+        await service.start();
+        expect(service.getStatus().running).toBe(false);
+        expect(service.getStatus().lastError).toContain('activity_source_contract_mismatch');
+      }
+      expect(request.mock.calls.every(([method]) => method === 'sourceEnsure')).toBe(true);
+      expect(findOwner).not.toHaveBeenCalled(); expect(killer).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled();
+    } finally { await service.stop(); rmSync(root, { recursive: true, force: true }); }
+  });
+  it('fences bootstrap before any Desktop spawn or stale-PID recovery and preserves sources on quit', async () => {
+    const root = mkdtempSync(join(tmpdir(),'kswarm-delegated-')); vi.stubEnv('XIAOK_CONFIG_DIR',root);
+    const fetchMock = vi.fn(); vi.stubGlobal('fetch',fetchMock);
+    const killer = vi.fn(); const service = createKSwarmService({ activityOwnerPending:true, spawnProcess:spawnMock as never, killStalePortOwner:killer });
+    try { await expect(service.start()).rejects.toThrow('activity_owner_initializing'); await service.stop(); expect(fetchMock).not.toHaveBeenCalled(); expect(spawnMock).not.toHaveBeenCalled(); expect(killer).not.toHaveBeenCalled(); }
+    finally { rmSync(root,{recursive:true,force:true}); }
+  });
+  it('asks the supervisor to recover an unavailable bound source and never falls through to Desktop spawning', async () => {
+    const root=mkdtempSync(join(tmpdir(),'kswarm-delegated-recover-')); vi.stubEnv('XIAOK_CONFIG_DIR',root);
+    const entry=join(root,'server.js'); writeFileSync(entry,'// owned test entry'); vi.stubEnv('KSWARM_SERVER_PATH',entry);
+    let healthy=false; vi.stubGlobal('fetch',vi.fn(async(input:string|URL|Request)=>new Response(JSON.stringify({ ok:true, features:['dynamic_workflows'], service:{entryPath:entry} }),{status:String(input).includes(':4318/')||healthy?200:503})));
+    const request=vi.fn(async(method:string)=>{if(method==='sourceEnsure') healthy=true;});
+    const service=createKSwarmService({activityOwnerPending:true,spawnProcess:spawnMock as never,findPortOwner:async()=>null});
+    service.bindActivityOwner!({ownerEpoch:'owner',request} as never);
+    try{await service.start();expect(request).toHaveBeenCalledWith('sourceEnsure',{name:'kswarm',ownerEpoch:'owner'});expect(service.getStatus().running).toBe(true);expect(spawnMock).not.toHaveBeenCalled();await service.stop();}
+    finally{await service.stop();rmSync(root,{recursive:true,force:true});}
   });
 });

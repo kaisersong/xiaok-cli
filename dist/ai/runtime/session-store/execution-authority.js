@@ -13,6 +13,12 @@ export function createSessionExecutionContext(claims) {
     contexts.set(context, Object.freeze({ ...claims }));
     return context;
 }
+/** Read-only host identity check. This does not create an execution lease. */
+export function assertSessionExecutionContext(context, expected) {
+    const claims = contexts.get(context);
+    if (!claims || claims.requestSource !== expected.requestSource || claims.ownerId !== expected.ownerId || claims.scopeId !== expected.scopeId)
+        throw Error('invalid_session_execution_context');
+}
 const leases = new WeakMap();
 const owners = new Map();
 const requireNative = createRequire(import.meta.url);

@@ -6,10 +6,11 @@
  */
 
 import { app } from 'electron';
-import { join, dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { join, dirname, basename } from 'node:path';
 import { existsSync, cpSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, renameSync, writeFileSync } from 'node:fs';
 import { getConfigDir } from '../../src/utils/config.js';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { detectPythonCompatibilityTag, ensureSlideRendererPythonReady, isCompatibleSlideRendererWheelhouse } from './python-runtime.js';
@@ -30,22 +31,6 @@ function semverGte(a: string, b: string): boolean {
     if ((pa[i] || 0) < (pb[i] || 0)) return false;
   }
   return true; // equal
-}
-
-/** Detect python3 command for current platform */
-function detectPython(): string | null {
-  const candidates = process.platform === 'win32'
-    ? ['python', 'py']
-    : ['python3', 'python'];
-  for (const cmd of candidates) {
-    try {
-      execFileSync(cmd, ['--version'], { stdio: 'ignore' });
-      return cmd;
-    } catch {
-      // not found, try next
-    }
-  }
-  return null;
 }
 
 export function resolveBundledPluginsDir(): string | null {
@@ -111,6 +96,43 @@ export async function ensureManagedPythonVenv(options: ManagedPythonVenvOptions)
     return true;
   } catch {
     return false;
+  }
+}
+
+export async function ensureHealthyManagedPythonVenv(
+  options: Omit<ManagedPythonVenvOptions, 'pythonCmd'> & { candidates: string[] },
+): Promise<boolean> {
+  const exec = options.exec ?? execFileAsync;
+  const usable = async (command: string) => {
+    const tag = await detectPythonCompatibilityTag(command, exec);
+    // The bundled MCP SDK requires Python >= 3.10.
+    return tag !== null && Number(tag.slice(2)) >= 310;
+  };
+  if (existsSync(options.venvPython) && await usable(options.venvPython)) return true;
+
+  let pythonCmd: string | undefined;
+  for (const candidate of options.candidates) {
+    if (await usable(candidate)) { pythonCmd = candidate; break; }
+  }
+  if (!pythonCmd) return false;
+
+  mkdirSync(dirname(options.venvDir), { recursive: true });
+  const backup = existsSync(options.venvDir)
+    ? join(dirname(options.venvDir), `.${basename(options.venvDir)}.backup-${randomUUID()}`)
+    : undefined;
+  if (backup) renameSync(options.venvDir, backup);
+  let ready = false;
+  try {
+    ready = await ensureManagedPythonVenv({ ...options, pythonCmd, exec })
+      && await usable(options.venvPython);
+    return ready;
+  } finally {
+    // Build at the final path: moving a completed venv breaks its entrypoints.
+    // Failed recreation must never discard the user's original environment.
+    if (!ready) {
+      rmSync(options.venvDir, { recursive: true, force: true });
+      if (backup) renameSync(backup, options.venvDir);
+    }
   }
 }
 
@@ -346,21 +368,17 @@ export async function prepareBundledPluginPythonRuntime(
   // Prefer an existing managed venv even when the launched app cannot see a
   // global Python on PATH; Explorer-launched Windows apps often inherit a
   // different PATH than the user's terminal.
-  const pythonCmd = detectPython();
   const venvDir = getConfigDir(join('runtime', 'python-env'));
   const venvPython = process.platform === 'win32'
     ? join(venvDir, 'Scripts', 'python.exe')
     : join(venvDir, 'bin', 'python3');
-  const hasManagedVenv = existsSync(venvPython);
-  result.pythonAvailable = !!pythonCmd || hasManagedVenv;
-
-  if (!hasManagedVenv && pythonCmd) {
-    mkdirSync(getConfigDir('runtime'), { recursive: true });
-    const created = await ensureManagedPythonVenv({ pythonCmd, venvDir, venvPython });
-    if (!created) {
-      return result;
-    }
-  }
+  const bundledPython = join(bundledDir, 'kai-slide-creator', 'bundled-python',
+    `${process.platform}-${process.arch}`, 'python',
+    ...(process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3']));
+  const candidates = [bundledPython, ...(process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python'])];
+  const healthy = await ensureHealthyManagedPythonVenv({ venvDir, venvPython, candidates });
+  result.pythonAvailable = healthy;
+  if (!healthy) return result;
 
   if (existsSync(venvPython)) {
     const pythonTag = await detectPythonCompatibilityTag(venvPython);

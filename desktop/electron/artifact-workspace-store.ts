@@ -1,3 +1,4 @@
+import {createKnownDirectoryWriterFence} from '../../src/runtime/verification/known-directory-writer-fence.js';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -194,6 +195,13 @@ export interface ArtifactWorkspaceStoreOptions {
   createId?: (prefix: string) => string;
 }
 
+type KnownArtifactSqliteWriter={fence?:ReturnType<typeof createKnownDirectoryWriterFence>;originalTransactionDepth:number;initializing:boolean};
+const knownArtifactSqliteWriters=new WeakMap<object,KnownArtifactSqliteWriter>();
+function assertKnownArtifactSqliteWriter(owner:object,tail?:'transaction-tail'|'initialization-tail'):KnownArtifactSqliteWriter {
+  const writer=knownArtifactSqliteWriters.get(owner);if(!writer)throw Error('known_writer_fence_owner');
+  if(tail==='transaction-tail'&&writer.originalTransactionDepth>0||tail==='initialization-tail'&&writer.initializing)return writer;
+  writer.fence?.assertOpen();return writer;
+}
 export class ArtifactWorkspaceStore {
   private readonly db: DatabaseSync;
   private readonly nowFn: () => number;
@@ -201,10 +209,12 @@ export class ArtifactWorkspaceStore {
 
   constructor(options: ArtifactWorkspaceStoreOptions) {
     assertOrdinarySourceWriterRoute();
-    mkdirSync(dirname(options.dbPath), { recursive: true });
-    this.db = new DatabaseSync(options.dbPath);
+    const dbPath=options.dbPath,writer:KnownArtifactSqliteWriter={fence:dbPath===':memory:'||dbPath===''?undefined:createKnownDirectoryWriterFence(dirname(dbPath),'sqlite-db'),originalTransactionDepth:0,initializing:false};
+    knownArtifactSqliteWriters.set(this,writer);assertKnownArtifactSqliteWriter(this);writer.initializing=true;
+    mkdirSync(dirname(dbPath), { recursive: true });
+    this.db = new DatabaseSync(dbPath);
     try {
-    observeOrdinarySQLiteWriter(options.dbPath,'artifact-workspace-sqlite-v1');
+    observeOrdinarySQLiteWriter(dbPath,'artifact-workspace-sqlite-v1');
     this.db.exec('pragma journal_mode = WAL');
     this.db.exec('pragma synchronous = NORMAL');
     this.db.exec('pragma foreign_keys = ON');
@@ -215,7 +225,7 @@ export class ArtifactWorkspaceStore {
     } catch (error) {
       try { this.db.close(); } catch { /* Preserve the original construction failure. */ }
       throw error;
-    }
+    } finally { writer.initializing=false; }
   }
 
   close(): void {
@@ -223,6 +233,7 @@ export class ArtifactWorkspaceStore {
   }
 
   getOrCreateWorkspace(input: { conversationId: string; workspaceRootId: string }): ArtifactWorkspace {
+    assertKnownArtifactSqliteWriter(this);
     if (!input.conversationId.trim() || !input.workspaceRootId.trim()) {
       throw new ArtifactWorkspaceError('invalid_target', 'workspace identity is required');
     }
@@ -264,6 +275,7 @@ export class ArtifactWorkspaceStore {
     returnedAfter24h: boolean;
     sessionId: string;
   } {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       this.requireWorkspace(input.workspaceId);
       const active = this.db.prepare(`
@@ -298,6 +310,7 @@ export class ArtifactWorkspaceStore {
   }
 
   closeViewSession(input: { workspaceId: string; viewKey: string }): boolean {
+    assertKnownArtifactSqliteWriter(this);
     const result = this.db.prepare(`
       update artifact_workspace_view_sessions set closed_at = ?, last_seen_at = ?
       where workspace_id = ? and view_key = ? and closed_at is null
@@ -306,6 +319,7 @@ export class ArtifactWorkspaceStore {
   }
 
   closeViewSessionsByKey(viewKey: string): number {
+    assertKnownArtifactSqliteWriter(this);
     const result = this.db.prepare(`
       update artifact_workspace_view_sessions set closed_at = ?, last_seen_at = ?
       where view_key = ? and closed_at is null
@@ -318,6 +332,7 @@ export class ArtifactWorkspaceStore {
     expectedStructureRevision: number;
     node: Omit<ArtifactWorkspaceNode, 'id' | 'workspaceId' | 'layoutRevision' | 'createdAt' | 'updatedAt' | 'placeholderState'>;
   }): { workspace: ArtifactWorkspace; node: ArtifactWorkspaceNode } {
+    assertKnownArtifactSqliteWriter(this);
     this.validateNode(input.workspaceId, input.node);
     return this.transaction(() => {
       this.bumpStructure(input.workspaceId, input.expectedStructureRevision);
@@ -327,6 +342,7 @@ export class ArtifactWorkspaceStore {
   }
 
   reserveStructureRevision(workspaceId: string, expectedStructureRevision: number): ArtifactWorkspace {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       this.bumpStructure(workspaceId, expectedStructureRevision);
       return this.requireWorkspace(workspaceId);
@@ -339,6 +355,7 @@ export class ArtifactWorkspaceStore {
     version: Omit<ArtifactWorkspaceVersion, 'id' | 'lineageId' | 'createdAt' | 'status'> & { status?: 'ready' | 'missing' };
     node: Omit<ArtifactWorkspaceNode, 'id' | 'workspaceId' | 'layoutRevision' | 'createdAt' | 'updatedAt' | 'placeholderState' | 'lineageId' | 'artifactVersionId'>;
   }): { lineage: ArtifactLineage; version: ArtifactWorkspaceVersion; node?: ArtifactWorkspaceNode; created: boolean } {
+    assertKnownArtifactSqliteWriter(this);
     this.validateVersion(input.version);
     return this.transaction(() => {
       const existing = this.getLineageBySource(input.workspaceId, input.sourceLocatorHash);
@@ -383,6 +400,7 @@ export class ArtifactWorkspaceStore {
   }
 
   updateLayout(input: { workspaceId: string; patches: ArtifactWorkspaceLayoutPatch[] }): ArtifactWorkspaceNode[] {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => input.patches.map((patch) => {
       const result = this.db.prepare(`
         update artifact_workspace_nodes
@@ -409,6 +427,7 @@ export class ArtifactWorkspaceStore {
   }
 
   tombstoneNode(input: { workspaceId: string; nodeId: string; expectedStructureRevision: number }): ArtifactWorkspaceNode {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       this.bumpStructure(input.workspaceId, input.expectedStructureRevision);
       const result = this.db.prepare(`
@@ -430,6 +449,7 @@ export class ArtifactWorkspaceStore {
     noteText: string;
     expectedStructureRevision: number;
   }): ArtifactWorkspaceNode {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const node = this.getNode(input.nodeId);
       if (!node || node.workspaceId !== input.workspaceId || node.kind !== 'note' || node.tombstonedAt) {
@@ -447,6 +467,7 @@ export class ArtifactWorkspaceStore {
     sourceLocatorHash: string;
     version: Omit<ArtifactWorkspaceVersion, 'id' | 'lineageId' | 'createdAt' | 'status'> & { status?: 'ready' | 'missing' };
   }): { lineage: ArtifactLineage; version: ArtifactWorkspaceVersion; created: boolean } {
+    assertKnownArtifactSqliteWriter(this);
     this.validateVersion(input.version);
     return this.transaction(() => {
       const existing = this.getLineageBySource(input.workspaceId, input.sourceLocatorHash);
@@ -490,6 +511,7 @@ export class ArtifactWorkspaceStore {
     parentVersionId?: string;
     version: Omit<ArtifactWorkspaceVersion, 'id' | 'lineageId' | 'parentVersionId' | 'createdAt' | 'status'> & { status?: 'ready' | 'missing' };
   }): ArtifactWorkspaceVersion {
+    assertKnownArtifactSqliteWriter(this);
     const lineage = this.getLineage(input.lineageId);
     if (!lineage) throw new ArtifactWorkspaceError('invalid_target', 'lineage is missing');
     if (input.parentVersionId) {
@@ -522,6 +544,7 @@ export class ArtifactWorkspaceStore {
     versionId: string;
     expectedStructureRevision: number;
   }): ArtifactLineage {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const lineage = this.getLineage(input.lineageId);
       const version = this.getVersion(input.versionId);
@@ -542,6 +565,7 @@ export class ArtifactWorkspaceStore {
     externalTaskRef?: string;
     supersedesRequestId?: string;
   }): WorkspaceGenerationRequest {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const node = this.getNode(input.placeholderNodeId);
       if (!node || node.workspaceId !== input.workspaceId || node.kind !== 'placeholder' || node.tombstonedAt) {
@@ -584,6 +608,7 @@ export class ArtifactWorkspaceStore {
     oldRequestId: string;
     workspaceId: string;
   }): WorkspaceGenerationRequest {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const old = this.getGenerationRequest(input.oldRequestId);
       if (
@@ -649,6 +674,7 @@ export class ArtifactWorkspaceStore {
     producingAgentId?: string;
     expiresAt: string;
   }): WorkspaceGenerationLease {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const request = this.getGenerationRequest(input.generationRequestId);
       if (
@@ -707,6 +733,7 @@ export class ArtifactWorkspaceStore {
     state: ArtifactWorkspaceGenerationState,
     errorCode?: WorkspaceGenerationRequest['errorCode'],
   ): WorkspaceGenerationRequest {
+    assertKnownArtifactSqliteWriter(this);
     const request = this.getGenerationRequest(requestId);
     if (!request) throw new ArtifactWorkspaceError('invalid_target', 'generation request is missing');
     this.db.prepare('update workspace_generation_requests set state = ?, error_code = ?, updated_at = ? where id = ?')
@@ -715,6 +742,7 @@ export class ArtifactWorkspaceStore {
   }
 
   cancelLease(leaseId: string): WorkspaceGenerationLease {
+    assertKnownArtifactSqliteWriter(this);
     const result = this.db.prepare(`
       update workspace_generation_leases set cancelled_at = ?
       where id = ? and consumed_at is null and cancelled_at is null
@@ -724,6 +752,7 @@ export class ArtifactWorkspaceStore {
   }
 
   consumeLease(leaseId: string): WorkspaceGenerationLease {
+    assertKnownArtifactSqliteWriter(this);
     const result = this.db.prepare(`
       update workspace_generation_leases set consumed_at = ?
       where id = ? and consumed_at is null and cancelled_at is null
@@ -733,6 +762,7 @@ export class ArtifactWorkspaceStore {
   }
 
   extendLease(input: { leaseId: string; expiresAt: string }): WorkspaceGenerationLease {
+    assertKnownArtifactSqliteWriter(this);
     const lease = this.getLease(input.leaseId);
     if (!lease || lease.consumedAt || lease.cancelledAt || Date.parse(input.expiresAt) <= Date.parse(lease.expiresAt)) {
       throw new ArtifactWorkspaceError('invalid_target', 'lease cannot be extended');
@@ -751,6 +781,7 @@ export class ArtifactWorkspaceStore {
     stagingId: string;
     version: Omit<ArtifactWorkspaceVersion, 'id' | 'lineageId' | 'createdAt' | 'status' | 'parentVersionId'>;
   }): { version: ArtifactWorkspaceVersion; node: ArtifactWorkspaceNode } {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const existingClaim = this.getArtifactClaim(input.generationRequestId, input.producedArtifactId);
       if (existingClaim) {
@@ -837,6 +868,7 @@ export class ArtifactWorkspaceStore {
   }
 
   createStagingFile(input: Omit<ArtifactWorkspaceStagingFile, 'id' | 'createdAt'>): ArtifactWorkspaceStagingFile {
+    assertKnownArtifactSqliteWriter(this);
     this.validateStaging(input);
     const id = this.createId('staging');
     this.db.prepare(`
@@ -873,6 +905,7 @@ export class ArtifactWorkspaceStore {
     outcomeId: string;
     staging?: ArtifactWorkspaceStagingFile;
   } {
+    assertKnownArtifactSqliteWriter(this);
     const stagingInput = {
       ...input.staging,
       generationRequestId: input.generationRequestId,
@@ -935,6 +968,7 @@ export class ArtifactWorkspaceStore {
   }
 
   deleteStagingFile(id: string): void {
+    assertKnownArtifactSqliteWriter(this);
     this.db.prepare('delete from artifact_workspace_staging_files where id = ?').run(id);
   }
 
@@ -944,6 +978,7 @@ export class ArtifactWorkspaceStore {
     availability?: ArtifactWorkspaceStagingFile['availability'];
     quarantineReason?: ArtifactWorkspaceStagingFile['quarantineReason'];
   }): ArtifactWorkspaceStagingFile {
+    assertKnownArtifactSqliteWriter(this);
     const current = this.getStagingFile(input.id);
     if (!current) throw new ArtifactWorkspaceError('invalid_target', 'staging row is missing');
     const next = {
@@ -965,6 +1000,7 @@ export class ArtifactWorkspaceStore {
     producedArtifactId: string;
     projectionKind: 'narrow_tool' | 'task_event' | 'startup_reconcile';
   }): boolean {
+    assertKnownArtifactSqliteWriter(this);
     const result = this.db.prepare(`
       insert or ignore into artifact_workspace_projection_receipts (
         generation_request_id, produced_artifact_id, projection_kind, created_at
@@ -979,6 +1015,7 @@ export class ArtifactWorkspaceStore {
     outcomeKind: 'ready_version' | 'staging';
     outcomeId: string;
   }): boolean {
+    assertKnownArtifactSqliteWriter(this);
     const result = this.db.prepare(`
       insert or ignore into artifact_workspace_artifact_claims (
         generation_request_id, produced_artifact_id, outcome_kind, outcome_id, created_at
@@ -1002,6 +1039,7 @@ export class ArtifactWorkspaceStore {
   }
 
   saveTaskCursor(taskId: string, eventIndex: number): void {
+    assertKnownArtifactSqliteWriter(this);
     this.db.prepare(`
       insert into artifact_workspace_task_cursors (task_id, event_index, updated_at)
       values (?, ?, ?)
@@ -1021,6 +1059,7 @@ export class ArtifactWorkspaceStore {
     viewKey: string;
     viewport: ArtifactWorkspaceView['viewport'];
   }): ArtifactWorkspaceView {
+    assertKnownArtifactSqliteWriter(this);
     this.requireWorkspace(input.workspaceId);
     if (!input.viewKey.trim()) throw new ArtifactWorkspaceError('invalid_target', 'view key is required');
     this.db.prepare(`
@@ -1045,6 +1084,7 @@ export class ArtifactWorkspaceStore {
   }
 
   cleanupSecondaryViews(input: { before: string; activeViewKeys: Set<string> }): number {
+    assertKnownArtifactSqliteWriter(this);
     const rows = this.db.prepare(`
       select workspace_id, view_key from artifact_workspace_views
       where view_key <> 'primary' and updated_at < ?
@@ -1063,6 +1103,7 @@ export class ArtifactWorkspaceStore {
   }
 
   createRelation(input: Omit<ArtifactWorkspaceRelation, 'id' | 'createdAt'> & { expectedStructureRevision: number }): ArtifactWorkspaceRelation {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       const from = this.getNode(input.fromNodeId);
       const to = this.getNode(input.toNodeId);
@@ -1097,6 +1138,7 @@ export class ArtifactWorkspaceStore {
     kind: ArtifactWorkspaceRelation['kind'];
     expectedStructureRevision: number;
   }): boolean {
+    assertKnownArtifactSqliteWriter(this);
     return this.transaction(() => {
       this.bumpStructure(input.workspaceId, input.expectedStructureRevision);
       const result = this.db.prepare(`
@@ -1122,6 +1164,7 @@ export class ArtifactWorkspaceStore {
     dedupeKey?: string;
     metadata: Record<string, string | number | boolean | null>;
   }): boolean {
+    assertKnownArtifactSqliteWriter(this);
     const workspace = this.requireWorkspace(input.workspaceId);
     if (workspace.conversationId !== input.conversationId) {
       throw new ArtifactWorkspaceError('invalid_target', 'event conversation does not own workspace');
@@ -1165,6 +1208,7 @@ export class ArtifactWorkspaceStore {
     result: 'success' | 'denied' | 'failed' | 'quarantined';
     errorCode?: string;
   }): void {
+    assertKnownArtifactSqliteWriter(this);
     this.db.prepare(`
       insert into artifact_workspace_audit_log (
         id, actor_id, actor_kind, request_source, workspace_id, node_id, version_id,
@@ -1336,6 +1380,7 @@ export class ArtifactWorkspaceStore {
     workspaceId: string,
     node: Omit<ArtifactWorkspaceNode, 'id' | 'workspaceId' | 'layoutRevision' | 'createdAt' | 'updatedAt' | 'placeholderState'>,
   ): ArtifactWorkspaceNode {
+    assertKnownArtifactSqliteWriter(this,'transaction-tail');
     const timestamp = this.now();
     const id = this.createId('node');
     this.db.prepare(`
@@ -1409,6 +1454,7 @@ export class ArtifactWorkspaceStore {
     lineageId: string,
     input: Omit<ArtifactWorkspaceVersion, 'id' | 'lineageId' | 'createdAt' | 'status'> & { status?: 'ready' | 'missing' },
   ): ArtifactWorkspaceVersion {
+    assertKnownArtifactSqliteWriter(this,'transaction-tail');
     this.validateVersion(input);
     const id = this.createId('version');
     this.db.prepare(`
@@ -1529,6 +1575,7 @@ export class ArtifactWorkspaceStore {
   }
 
   private bumpStructure(workspaceId: string, expectedRevision: number): void {
+    assertKnownArtifactSqliteWriter(this,'transaction-tail');
     const result = this.db.prepare(`
       update artifact_workspaces set structure_revision = structure_revision + 1, updated_at = ?
       where id = ? and structure_revision = ?
@@ -1591,7 +1638,8 @@ export class ArtifactWorkspaceStore {
   }
 
   private transaction<T>(fn: () => T): T {
-    this.db.exec('begin immediate');
+    const writer=assertKnownArtifactSqliteWriter(this);
+    this.db.exec('begin immediate');writer.originalTransactionDepth+=1;
     try {
       const result = fn();
       this.db.exec('commit');
@@ -1599,7 +1647,7 @@ export class ArtifactWorkspaceStore {
     } catch (error) {
       try { this.db.exec('rollback'); } catch { /* rollback failure does not replace the cause */ }
       throw error;
-    }
+    } finally { writer.originalTransactionDepth-=1; }
   }
 
   private createId(prefix: string): string {
@@ -1611,6 +1659,7 @@ export class ArtifactWorkspaceStore {
   }
 
   private applySchema(): void {
+    assertKnownArtifactSqliteWriter(this,'initialization-tail');
     this.db.exec(`
       create table if not exists artifact_workspace_meta (
         schema_version integer primary key check(schema_version = 1)

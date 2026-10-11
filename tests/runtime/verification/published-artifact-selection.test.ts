@@ -15,3 +15,9 @@ it('rejects substituted branches, extra grants and getter evaluation',()=>{
  for(const raw of [{...local,kind:'url'},{...local,readGrant:{}},{...local,kind:'inherited'},{...local,obligationId:''}])expect(()=>parsePublishedArtifactSelection(raw)).toThrow();
  let reads=0;expect(()=>parsePublishedArtifactSelection({...local,get path(){reads++;return 'out.txt';}})).toThrow();expect(reads).toBe(0);
 });
+it('treats inherited selection kind as missing without executing prototype code',()=>{
+ const raw={obligationId:'original',path:'out/report.txt'},prior=Object.getOwnPropertyDescriptor(Object.prototype,'kind');let reads=0,error='';
+ try{Object.defineProperty(Object.prototype,'kind',{configurable:true,get(){reads++;return 'local';}});try{parsePublishedArtifactSelection(raw);}catch(e){error=(e as Error).message;}}
+ finally{if(prior)Object.defineProperty(Object.prototype,'kind',prior);else Reflect.deleteProperty(Object.prototype,'kind');}
+ expect(error).toBe('published_artifact_shape');expect(reads).toBe(0);
+});

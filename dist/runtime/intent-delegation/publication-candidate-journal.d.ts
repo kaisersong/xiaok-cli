@@ -165,8 +165,8 @@ export declare function captureIntentPublicationRetry(raw: RetryIntentPublicatio
         publicationAction: "retry";
         sessionId: string;
         requestSource: "user";
-        now: number;
         candidateId: string;
+        now: number;
         expectedRevision: number;
         instanceId: string;
         expectedLedgerHash: string;

@@ -1,3 +1,4 @@
+// The test account home is isolated; native UID/PID and production facts remain real.
 // Fixed real recovery process. Only the Goal durable commit dependency rejects;
 // service authority, host journal recovery and Goal settlement are production.
 import { writeSync } from 'node:fs';

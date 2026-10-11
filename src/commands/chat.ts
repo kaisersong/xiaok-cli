@@ -51,6 +51,7 @@ import { createGoalTools } from '../ai/tools/goal.js';
 import { executeStagedSkill, formatDebugOutput, type StageDef, type StageOutput, type DebugEvent, analyzeIntent as analyzeStageIntent } from '../runtime/stage/executor.js';
 import { Agent } from '../ai/agent.js';
 import { MultiAgentProgressView, SubAgentNoticeQueue } from '../ui/multi-agent-progress.js';
+import { CliConversationActivities } from '../runtime/conversation-activity/cli.js';
 import { PromptBuilder } from '../ai/prompts/builder.js';
 import { createMemoryStoreAsync, type MemoryStore } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
@@ -441,16 +442,22 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   type ExitSignal = 'sigint' | 'sighup' | 'sigterm' | 'stdin_end';
   let signalExit: Promise<void> | undefined;
   let finishTerminal = () => {};
+  let writeSignalExitNotice: (reason: ExitSignal) => Promise<void> = async () => {};
   const exitFromSignal = (reason: ExitSignal): Promise<void> => {
     if (signalExit) return signalExit;
     finalizationExitReason = reason;
-    signalExit = finalizeChat().then(() => {
+    signalExit = finalizeChat().then(async () => {
       finishTerminal();
+      await writeSignalExitNotice(reason);
+    }).then(() => {
       process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
     }, error => {
-      log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
-      finishTerminal();
-      process.exit(1);
+      try {
+        log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
+        finishTerminal();
+      } finally {
+        process.exit(1);
+      }
     });
     return signalExit;
   };
@@ -606,6 +613,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const subAgentNotices = new SubAgentNoticeQueue();
   let flushSubAgentNotices = (): void => {};
   let interactiveNotificationsReady = false;
+  let cliActivities: CliConversationActivities | undefined;
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
@@ -815,6 +823,14 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const intentAuthority=()=>productObservation?.executionAuthority??(ownIntentAuthority??=createSessionExecutionAuthority({root:sessionStoreRoot,sessionIdentity:sessionId,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:instanceId,scopeId:'cli-intent-native'})}));
   const releaseDrainedSessionOwnership = async (): Promise<void> => {
+    if (process.platform === 'win32') {
+      const ledger = sessionStore.getIntentNativeLedgerSync(sessionId);
+      if (!ledger || ledger.ownership.ownerInstanceId !== instanceId || ledger.ownership.state === 'released') return;
+      const released = await sessionStore.releaseOrdinarySessionOwnership({ sessionId, instanceId,
+        expectedLedgerHash: intentNativeLedgerHash(ledger), requestSource: 'user', now: Date.now(),
+        hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: instanceId, scopeId: 'cli-session-exit' }) });
+      if (released) { currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId)!; return; }
+    }
     // The old compound/native authority has been drained and retired. Acquire
     // a fresh lease before reading the ledger and committing its exact CAS.
     const authority = createSessionExecutionAuthority({ root: sessionStoreRoot, sessionIdentity: sessionId,
@@ -1327,7 +1343,9 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     permissionManager,
     onPrompt: async (name, input) => {
       const tuiDecide = async () => {
-        const choice = await showPermissionPrompt(name, input, { transcriptLogger, renderer: replRenderer });
+        const choice = await showPermissionPrompt(name, input, {
+          transcriptLogger, renderer: replRenderer, permissionMode: permissionManager.getMode(),
+        });
         if (choice.action === 'deny') return false;
         if (choice.action === 'allow_once') return true;
         if (choice.action === 'allow_session') { permissionManager.addSessionRule(choice.rule); return true; }
@@ -1455,6 +1473,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       for (const result of results) if (result.status === 'rejected' && result.reason !== finalizationReason) errors.push(result.reason);
     };
     await settle([
+      () => cliActivities?.close(),
       () => agent?.waitForStoppedResources(),
       () => stopIntentRuntimeSync(), () => stopSkillEvalRuntimeSync(),
       () => lifecycleHooks.closeAndDrain(),
@@ -1690,6 +1709,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         }
       } finally { disarmGoal(); }
     }
+  }
+
+  if (!opts.print && isTTY() && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0') {
+    try { cliActivities = await CliConversationActivities.attach({ cwd, sessionId, instanceId, identityPath: join(getConfigDir(), 'sessions'), platform, changed: () => flushSubAgentNotices(),
+      onError: error => log.debug('cli_activity_unavailable', String(error)) }); }
+    catch (error) { log.debug('cli_activity_owner_unavailable', String(error)); }
   }
 
   // 触发 SessionStart hook
@@ -2685,9 +2710,11 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   flushSubAgentNotices = (): void => {
-    subAgentNotices.flush(interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
+    const canWrite = interactiveNotificationsReady && (!process.stdout.isTTY || scrollRegion.isActive())
       && !runtimeState.isInteractivePromptActive() && !scrollRegion.hasActiveOverlayPrompt()
-      && !scrollRegion.isContentStreaming(), writeOrchestrationBlock);
+      && !scrollRegion.isContentStreaming();
+    subAgentNotices.flush(canWrite, writeOrchestrationBlock);
+    cliActivities?.flush(canWrite && runtimeState.getSnapshot().turnSurfaceState === 'input_ready', writeOrchestrationBlock);
   };
 
   const persistSessionBody = async (options: {
@@ -3942,7 +3969,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   });
 
   runtimeHooks.on('turn_stop', (event) => {
-    if (subAgentNotices.hasPending) {
+    if (subAgentNotices.hasPending || cliActivities?.hasPending) {
       endStreamingPhaseForInterrupt();
       flushSubAgentNotices();
     }
@@ -3991,6 +4018,15 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     process.stderr.write = originalStderrWrite;
     try { statusBar.destroy(); } catch {}
     disposeInterruptHandlers();
+  };
+  writeSignalExitNotice = async reason => {
+    if ((reason !== 'sigint' && reason !== 'stdin_end') || !process.stdin.isTTY || !process.stdout.isTTY) return;
+    await new Promise<void>((resolve, reject) => {
+      originalStdoutWrite(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`, error => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
   };
   const onInterrupt = () => {
     if (modelIngressClosed || interactiveBashActive || externalShellActive) return;
@@ -4922,7 +4958,10 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   } finally {
     // A bootstrap failure seals the same population and uses the same drain.
     finishBootstrap();
-    try { await finalizeChat(); } finally { removeSignalHandlers(); }
+    try {
+      await finalizeChat();
+      if (signalExit) await signalExit;
+    } finally { removeSignalHandlers(); }
 
   }
 }

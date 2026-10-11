@@ -1,12 +1,18 @@
+import type { ModelStreamPhysicalRun } from '../../src/ai/runtime/model-stream-physical-owner.js';
 import { randomUUID } from 'node:crypto';
 import type { Config, Message, ModelAdapter, StreamChunk } from '../../src/types.js';
 import { resolveRuntimeModelBinding } from '../../src/ai/providers/control-plane.js';
 import { createAdapterFromBinding } from '../../src/ai/models.js';
 import { streamDesktopTaskProviderConversation } from '../../src/ai/runtime/provider-conversation-authorization.js';
-import { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
+import { streamDesktopTaskRecovery } from './desktop-task-stream.js';
+import type { streamDesktopSummaryRecovery } from './desktop-summary-stream.js';
 
 type Binding = ReturnType<typeof resolveRuntimeModelBinding>;
-type Request = Omit<Parameters<typeof streamDesktopSummaryRecovery>[0], 'adapter'> & { adapter?: Pick<ModelAdapter, 'stream'> };
+type Request = Omit<Parameters<typeof streamDesktopTaskRecovery>[0], 'adapter' | 'onRecovery'> & {
+  adapter?: Pick<ModelAdapter, 'stream'>;
+  // Selected-model fallback keeps its original notification contract.
+  onRecovery?: Parameters<typeof streamDesktopSummaryRecovery>[0]['onRecovery'];
+};
 export type ProjectAgentModel = Awaited<ReturnType<typeof createProjectAgentModel>>;
 
 export function validateProjectAgentModelSelection(modelId: unknown, runtimeType: unknown, config: Config, requestSource?: 'user'|'agent'|'scheduler'): void {
@@ -46,7 +52,9 @@ export async function createProjectAgentModel(options: {
   return {
     get binding() { return binding; },
     get adapter() { return adapter; },
-    async *stream(input: Request): AsyncGenerator<StreamChunk> {
+    stream(input: Request, physicalRun?: ModelStreamPhysicalRun): AsyncGenerator<StreamChunk> {
+      let closingFailure: { error: unknown } | undefined, closingBusiness: { error: unknown } | undefined;
+      const source = (async function* () {
       for (;;) {
         input.options?.signal?.throwIfAborted();
         if (Date.now() >= input.deadline) throw new Error('project_agent_model_deadline');
@@ -54,8 +62,8 @@ export async function createProjectAgentModel(options: {
         const systemPrompt = switched ? input.systemPrompt.replace(`你当前运行的模型是: ${initialName}`, `你当前运行的模型是: ${adapter.getModelName()}`) : input.systemPrompt;
         if (messages.some(message => message.content.some(block => block.type === 'image')) && !binding.capabilities.includes('image_in')) throw new Error('project_agent_model_image_not_supported');
         if (!canFallback) {
-          // The summary stream owns authority, preparation and invocation callbacks.
-          yield* streamDesktopSummaryRecovery({...input, adapter, messages, systemPrompt});
+          // Task recovery owns authority, preparation and invocation callbacks.
+          yield* streamDesktopTaskRecovery({...input, adapter, messages, systemPrompt}, physicalRun);
           return;
         }
         await input.beforeRequest?.();
@@ -75,8 +83,10 @@ export async function createProjectAgentModel(options: {
           // Only the selected request is buffered. Tools cannot run from a failed partial response.
           for (;;) {
             let next: IteratorResult<StreamChunk>;
-            try { next = await iterator.next(); }
-            catch (error) { providerFailed = true; providerError = error; break; }
+            const raw = iterator.next();
+            const receipt = physicalRun?.observeRead(raw, () => [input.options?.signal?.reason]);
+            try { next = await raw; receipt?.consume(); }
+            catch (error) { receipt?.classifyFailure(error); providerFailed = true; providerError = error; break; }
             if (next.done) break;
             const chunk = next.value;
             // Usage belongs to this actual request even when its visible result fails.
@@ -84,7 +94,13 @@ export async function createProjectAgentModel(options: {
             input.options?.signal?.throwIfAborted();
             chunks.push(chunk);
           }
-        } finally { await iterator.return?.(); }
+        } catch (error) { providerFailed = true; providerError = error; }
+        finally {
+          let observedReturn = false;
+          try { const raw = iterator.return?.(); if (raw) { physicalRun?.observeReturn(raw); observedReturn = Boolean(physicalRun); await raw; } }
+          catch (error) { if (!observedReturn) physicalRun?.noteReturnFailure(error); closingFailure = { error }; if (providerFailed) closingBusiness = { error: providerError }; }
+        }
+        if (closingFailure) return;
         input.options?.signal?.throwIfAborted();
         if (!providerFailed && (!chunks.some(chunk => chunk.type === 'done') || !chunks.some(chunk => chunk.type === 'tool_use' || (chunk.type === 'text' && chunk.delta.trim())))) {
           providerFailed = true;
@@ -105,6 +121,20 @@ export async function createProjectAgentModel(options: {
         for (const chunk of chunks) yield chunk;
         return;
       }
+    
+      })();
+      const checked = async (raw: Promise<IteratorResult<StreamChunk>>): Promise<IteratorResult<StreamChunk>> => {
+        let result: IteratorResult<StreamChunk> | undefined, failure: { error: unknown } | undefined;
+        try { result = await raw; } catch (error) { failure = { error }; }
+        if (closingFailure) {
+          const business = closingBusiness ?? failure;
+          if (business && business.error !== closingFailure.error) throw new AggregateError([business.error, closingFailure.error], 'project_model_business_and_return_failed', { cause: business.error });
+          throw closingFailure.error;
+        }
+        if (failure) throw failure.error;
+        return result!;
+      };
+      return { [Symbol.asyncIterator]() { return this; }, next: () => checked(source.next()), return: value => checked(source.return(value)), throw: error => checked(source.throw(error)) } as AsyncGenerator<StreamChunk>;
     },
   };
 }

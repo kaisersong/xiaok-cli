@@ -129,9 +129,10 @@ describe('production subagent resource lifecycle', () => {
   });
 
   it('isolates a cancelled model reader and never executes its late tool request', async () => {
-    const {options, registry, manager} = fixture();
+    const {options, registry, manager, path} = fixture();
     let finish!: () => void;
     let started = false;
+    let released = false;
     const gate = new Promise<void>(resolve => {finish = resolve;});
     const execute = vi.fn(async () => 'unexpected');
     registry.registerTool({permission:'safe',definition:{name:'late_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},execute});
@@ -145,12 +146,17 @@ describe('production subagent resource lifecycle', () => {
     try {
       const child = await coordinator.spawn({...caller,taskName:'late',message:'run',createSession:() => createNamedSubAgentSession(options)});
       await vi.waitFor(() => expect(started).toBe(true));
-      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({resourcesReleased:true});
-      finish();
-      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({closed:true,resourcesReleased:false,cleanupPending:true});
+      expect(manager.release).not.toHaveBeenCalled();
+      const pending = coordinator.listAgents(caller).find(agent => agent.id === child.id);
+      expect(pending).toMatchObject({status:'closed',executionActive:false,resourcesReleased:false,runtimeResident:true});
+      expect(pending?.cleanupError).toBeUndefined();
+      released = true; finish();
+      await vi.waitFor(() => expect(manager.release).toHaveBeenCalledWith(path));
+      expect(await coordinator.closeAgent({...caller,target:child.id})).toMatchObject({closed:true,resourcesReleased:true,cleanupPending:false});
       expect(execute).not.toHaveBeenCalled();
       expect(manager.release).toHaveBeenCalledOnce();
-    } finally {finish(); await coordinator.dispose();}
+    } finally {if (!released) {released = true; finish();} await coordinator.dispose();}
   });
 
   it('publishes actual stalled tool health while retaining the SubAgent execution owner',async()=>{

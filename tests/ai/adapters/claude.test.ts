@@ -465,3 +465,14 @@ describe('ClaudeAdapter', () => {
     vi.useRealTimers();
   });
 });
+
+
+it('keeps actual Claude request tools and cache control identical with sidecars',async()=>{
+ const {ToolRegistry}=await import('../../../src/ai/tools/index.js');const {createReadTool}=await import('../../../src/ai/tools/read.js');const {ClaudeAdapter}=await import('../../../src/ai/adapters/claude.js');const Anthropic=(await import('@anthropic-ai/sdk')).default;
+ const tool=createReadTool({cwd:process.cwd()}),registry=new ToolRegistry({},[tool]),adapter=new ClaudeAdapter('test','claude-opus-4-7'),client=new Anthropic({apiKey:'test'});(adapter as any).client=client;
+ for await(const _ of adapter.stream([],registry.getToolDefinitions(),'system')){}
+ const before=vi.mocked(client.messages.stream).mock.calls.at(-1)![0].tools;
+ registry.registerTool(tool,{outputSchema:{type:'string'},effect:'read',idempotency:'unknown'});
+ for await(const _ of adapter.stream([],registry.getToolDefinitions(),'system')){}
+ expect(vi.mocked(client.messages.stream).mock.calls.at(-1)![0].tools).toEqual(before);registry.dispose();
+});

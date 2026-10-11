@@ -1,5 +1,4 @@
-import { captureApplicationData } from './application-value-data.js';
-import { assertIntentApplicationEnvelope } from './intent-application-binding.js';
+import { captureApplicationData, readApplicationOwnDataField } from './application-value-data.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { parseBusinessApplicationBinding, businessApplicationBindingHash, businessApplicationOwner } from './business-application-binding.js';
 function shape(v, keys) { if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).sort().join(',') !== keys.sort().join(','))
@@ -17,8 +16,7 @@ function freeze(v) { if (v && typeof v === 'object') {
 function ascii(raw) { return Buffer.from(json(raw).replace(/[\u007f-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))); }
 /** Complete native review parser. A parsed value/hash has no approval authority. */
 export function parseApplicationBindingReview(raw) {
-    assertIntentApplicationEnvelope(raw);
-    const intent = Object.getOwnPropertyDescriptor((Object.getOwnPropertyDescriptor(raw, 'binding')?.value ?? {}), 'kind')?.value === 'intent', limit = intent ? 1048576 : 65536;
+    const binding = readApplicationOwnDataField(raw, 'binding', 'application_review_shape'), bindingKind = binding.kind === 'data' ? readApplicationOwnDataField(binding.value, 'kind', 'application_review_shape') : null, intent = bindingKind?.kind === 'data' && bindingKind.value === 'intent', limit = intent ? 1048576 : 65536;
     const snapshot = captureApplicationData(raw, { maximumBytes: limit, maximumNodes: limit, invalid: 'application_review_shape', limit: 'application_review_limit' });
     const serialized = json(snapshot);
     if (Buffer.byteLength(serialized) > limit || ascii(snapshot).length > limit)

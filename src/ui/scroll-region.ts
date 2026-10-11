@@ -195,7 +195,9 @@ export class ScrollRegionManager {
     const reservedRowsAboveInput = overlayRows > 0
       ? overlayRows + this.config.gapHeight + summaryReserveRows
       : this.config.gapHeight + summaryReserveRows;
-    return Math.max(1, this.getInputStartRow(inputFrameRows) - reservedRowsAboveInput - 1);
+    const overlayStartRow = this.getInputStartRow(inputFrameRows) - reservedRowsAboveInput;
+    const leadingGapRows = overlayRows > 0 && overlayStartRow >= 3 ? 1 : 0;
+    return Math.max(1, overlayStartRow - leadingGapRows - 1);
   }
 
   /**
@@ -249,10 +251,15 @@ export class ScrollRegionManager {
     overlayKind?: ScrollPromptFrame['overlayKind'],
   ): string[] {
     const inputFrameRows = this.getInputFrameRows(inputRows);
-    const maxOverlayRows = Math.max(
+    const availableRows = Math.max(
       0,
       this.config.rows - inputFrameRows - 1 - this.config.gapHeight - this.getSummaryReserveRows(),
     );
+    // Keep the transcript tail (including its final newline) and a separator
+    // above menus. In tiny terminals prioritize visible choices and the input.
+    const maxOverlayRows = availableRows >= 4
+      ? availableRows - 3
+      : Math.max(0, availableRows - (availableRows > 1 ? 1 : 0));
     if (maxOverlayRows <= 0) {
       return [];
     }
@@ -313,9 +320,7 @@ export class ScrollRegionManager {
     // Clear old rows before scrolling so stale activity never enters history.
     // Single-line activity keeps its existing overlay behavior.
     if (lines.length > 1) {
-      this.stream.write(output);
-      output = '';
-      this.reserveTranscriptRows(Math.max(1, firstRow - 1), this.getScrollBottom());
+      output += this.reserveTranscriptRows(Math.max(1, firstRow - 1), this.getScrollBottom(), false);
     }
     lines.forEach((line, index) => {
       output += `${MOVE_TO_ROW.replace('%d', String(firstRow + index))}${CLEAR_LINE}${truncateAnsi(line, getSafeRenderWidth(this.config.columns))}\x1b[0m`;
@@ -754,11 +759,9 @@ export class ScrollRegionManager {
     if (!this.active) return;
 
     this._footerVisible = true;
-    // Clear the old multi-row footprint before drawing a resized input/footer.
-    if (this.lastActivityRows > 1) this.stream.write(this.composeActivityClear());
-    // Clear the previous position before painting summary/footer rows: activity
-    // now shares the reserved gap, and a layout change may reuse its old row.
-    const previousActivityClear = this.lastActivityRows === 1 ? this.composeActivityClear() : '';
+    // Retain the old footprint clear in this frame. Sending a separate clear
+    // exposes a blank SubAgent/activity area on every animation tick.
+    const previousActivityClear = this.composeActivityClear();
 
     const cols = this.config.columns;
     const previousInputRows = this.lastInputRenderRows;
@@ -827,7 +830,7 @@ export class ScrollRegionManager {
     const clearStartRow = footerOnly
       ? footerClearStartRow
       : Math.max(1, Math.min(previousOverlayStartRow, footerClearStartRow, transientClearStartRow));
-    this.reserveTranscriptRows(nextScrollBottom, previousScrollBottom);
+    footerOutput += this.reserveTranscriptRows(nextScrollBottom, previousScrollBottom, false);
     for (let row = clearStartRow; row <= inputEndRow; row += 1) {
       // Current editor rows are overwritten below and erased to end-of-line.
       // Clearing them first exposes a blank draft on every activity tick.
@@ -921,7 +924,7 @@ export class ScrollRegionManager {
     this.renderFooterFrame(options, true);
   }
 
-  private reserveTranscriptRows(nextScrollBottom: number, previousScrollBottom: number): void {
+  private reserveTranscriptRows(nextScrollBottom: number, previousScrollBottom: number, emit = true): string {
     const clampedCurrentBottom = Math.max(1, previousScrollBottom);
     const occupiedContentRow = this._cursorCol > 0
       ? this._cursorRow + 1
@@ -929,19 +932,19 @@ export class ScrollRegionManager {
     const visibleContentRow = Math.max(1, Math.min(occupiedContentRow, clampedCurrentBottom));
     const rowsToScroll = Math.max(0, visibleContentRow - nextScrollBottom);
     if (rowsToScroll === 0) {
-      return;
+      return '';
     }
 
-    this.stream.write(SET_SCROLL_REGION.replace('%d', String(clampedCurrentBottom)));
-    this.stream.write(`${MOVE_TO_ROW.replace('%d', String(clampedCurrentBottom))}`);
-    for (let index = 0; index < rowsToScroll; index += 1) {
-      this.stream.write('\n');
-    }
+    const output = SET_SCROLL_REGION.replace('%d', String(clampedCurrentBottom))
+      + MOVE_TO_ROW.replace('%d', String(clampedCurrentBottom))
+      + '\n'.repeat(rowsToScroll);
+    if (emit) this.stream.write(output);
 
     this._cursorRow = Math.max(1, this._cursorRow - rowsToScroll);
     this._contentEndRow = Math.max(0, this._contentEndRow - rowsToScroll);
     this._streamStartRow = Math.max(1, this._streamStartRow - rowsToScroll);
     this._cursorUncertain = false;
+    return output;
   }
 
   private renderOverlayPromptFrame(frame: ScrollPromptFrame): void {
@@ -979,10 +982,12 @@ export class ScrollRegionManager {
       1,
       this.getInputStartRow(previousInputRows) - this.config.gapHeight - this.getSummaryReserveRows(),
     );
+    const scrollBottom = this.getScrollBottomForLayout(inputFrameRows, overlayRows, frame.summaryLine ?? this.lastSummaryLine);
+    const leadingGapStartRow = scrollBottom + 1;
+    const previousLeadingGapStartRow = previousOverlayRows > 0 ? previousScrollBottom + 1 : previousOverlayStartRow;
     const clearStartRow = isPermissionOverlay && shouldSkipPermissionOverlayReserve()
       ? 1
-      : Math.min(previousOverlayStartRow, overlayStartRow);
-    const scrollBottom = Math.max(1, overlayStartRow - 1);
+      : Math.min(previousLeadingGapStartRow, leadingGapStartRow);
     const isPlaceholder = !this.lastInputValue;
 
     this.stream.write(RESET_SCROLL_REGION);
@@ -1002,6 +1007,11 @@ export class ScrollRegionManager {
     this.setScrollRegion(scrollBottom);
     for (let row = clearStartRow; row <= statusBarRow; row += 1) {
       this.clearScreenRow(row);
+    }
+
+    for (let row = leadingGapStartRow; row < overlayStartRow; row += 1) {
+      this.clearScreenRow(row);
+      this.stream.write(this.padLine('', cols, false));
     }
 
     overlayLines.forEach((line, index) => {

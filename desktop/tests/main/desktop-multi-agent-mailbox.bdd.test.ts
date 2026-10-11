@@ -22,7 +22,7 @@ describe('BDD: actual Desktop provider loop and durable mailbox', () => {
     const agentId = `root_${group.groupId}`;
     const onSeal = vi.fn();
     const commands = new MultiAgentCommandSequencer();
-    const mailbox = new DesktopMultiAgentTurnMailbox({ store, groupId: group.groupId, agentId, turnId: 'turn-1', commands, assertCurrent: () => {}, onSeal });
+    const mailbox = new DesktopMultiAgentTurnMailbox({ store, groupId: group.groupId, agentId, turnId: 'turn-1', commands, assertCurrent: () => {}, onSeal: (outcome, acceptedPort) => { expect(Object.isFrozen(acceptedPort)).toBe(true); onSeal(outcome); } });
     const send = (text: string) => store.sendMessage(group.groupId, { sender: { kind: 'user', actorId: 'p1' }, receiverId: agentId, text });
     const registry = new ToolRegistry({ autoMode: true }, [{
       permission: 'safe', definition: { name: 'read', description: 'fixture read', inputSchema: { type: 'object', properties: {} } },

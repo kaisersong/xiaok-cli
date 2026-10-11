@@ -54,4 +54,11 @@ for await (const file of walk(scriptsRoot)) {
   await cp(file, join(out, 'scripts', rel));
   scriptsCopied++;
 }
-console.log(`copy-test-assets: tests=${testsCopied} srcTs=${srcCopied} scripts=${scriptsCopied}`);
+// 4) Exact source inputs used by the real artifact-export helper builder.
+// Keep the emitted test tree self-contained without copying SDK archives or binaries.
+const nativeRel = join('desktop', 'native', 'artifact-export-helper');
+await mkdir(join(out, nativeRel), { recursive: true });
+for (const name of ['go.mod', 'main.go', 'identity_unix.go', 'identity_windows.go']) {
+  await cp(join(root, nativeRel, name), join(out, nativeRel, name));
+}
+console.log(`copy-test-assets: tests=${testsCopied} srcTs=${srcCopied} scripts=${scriptsCopied} nativeSources=4`);

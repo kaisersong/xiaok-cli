@@ -1,3 +1,8 @@
+import type { PluginMcpServerDto, PluginDependencyStatusDto } from '../../../shared/plugin-catalog-ipc-contract';
+import {connectorsErrorMessage} from '../lib/connectors-error';
+import {scheduledErrorMessage} from '../lib/scheduled-timed-action-error';
+import { modelConfigErrorMessage } from '../lib/model-config-error';
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../lib/loop-management-errors';
 import {LoopArtifactList} from './loops/LoopArtifactList';
 import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../lib/loop-run-observation';
 import {LoopPublicationPanel} from './loops/LoopPublicationPanel';
@@ -1042,7 +1047,7 @@ function ModelPane() {
       .then(c => {
         setConfig(c);
       })
-      .catch(e => setError(e.message))
+      .catch(e => setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? e.message))
       .finally(() => setLoading(false));
   }, []);
 
@@ -1073,7 +1078,7 @@ function ModelPane() {
       setApiKey('');
       setSuccess(t.desktopSettings.apiKeyUpdated(updated.providers.find(p => p.id === selectedProvider)?.label ?? selectedProvider));
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1100,7 +1105,7 @@ function ModelPane() {
         setError(`${diagnostic}${guidance}`);
       }
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setTesting(prev => ({ ...prev, [providerId]: false }));
     }
@@ -1129,7 +1134,7 @@ function ModelPane() {
       setSuccess(t.desktopSettings.modelAdded(foundModel.label));
       setShowAddModel('');
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1150,7 +1155,7 @@ function ModelPane() {
       setSuccess(t.desktopSettings.customModelAdded(modelName.trim()));
       setShowAddModel('');
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1176,7 +1181,7 @@ function ModelPane() {
         : '';
       setSuccess(`${t.desktopSettings.modelSwitched(updatedCurrentModel?.label ?? model.label)}${newSessionHint}`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1198,7 +1203,7 @@ function ModelPane() {
       setConfig(updated);
       setSuccess(`${t.desktopSettings.kimiK3RuntimeOptionsSaved} ${t.desktopSettings.kimiK3NewSessionHint}`);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSavingRuntimeOptions(false);
     }
@@ -1214,7 +1219,7 @@ function ModelPane() {
       setConfig(updated);
       setSuccess(t.desktopSettings.modelDeleted);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1233,7 +1238,7 @@ function ModelPane() {
       }
       setSuccess(t.desktopSettings.providerDeleted);
     } catch (e) {
-      setError((e as Error).message);
+      setError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
     }
@@ -1606,7 +1611,7 @@ function AddProviderCard({
       setProviderApiKey('');
       setCustomName('');
     } catch (e) {
-      onError((e as Error).message);
+      onError(modelConfigErrorMessage(e, { operationUnknown: t.desktopSettings.modelConfigOperationUnknown, inputInvalid: t.desktopSettings.modelConfigInputInvalid, unavailable: t.desktopSettings.modelConfigUnavailable }) ?? (e as Error).message);
     } finally {
       setSaving(false);
       onMutationPendingChange(false);
@@ -2272,27 +2277,13 @@ interface MCPInstallConfig {
   createdAt: number;
 }
 
-interface PluginDependencyStatus {
-  pluginName: string;
-  dependencyId: string;
-  displayName: string;
-  pluginInstalled?: boolean;
-  state: 'ready' | 'missing' | 'needs_permission' | 'degraded' | 'unsupported';
-  code: string;
-  resolvedBinary?: string;
-  version?: string;
-  detail?: string;
-  canInstall: boolean;
-  canUpdate: boolean;
-  canDiagnose: boolean;
-  task?: { taskId: string; dependencyId: string; state: 'running' | 'cancelling' };
-}
+type PluginDependencyStatus = PluginDependencyStatusDto;
 
 function McpPane() {
   const { t } = useLocale();
   const ts = t.desktopSettings;
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
-  const [pluginServers, setPluginServers] = useState<Array<{ name: string; pluginName: string; toolCount: number; connected: boolean; enabled: boolean; lastError?: string; lastErrorDetail?: { category: 'python_version_too_old' | 'python_module_missing' | null; message: string; detectedVersion?: string; requiredVersion?: string; command?: string; missingModule?: string } }>>([]);
+  const [pluginServers, setPluginServers] = useState<PluginMcpServerDto[]>([]);
   const [dependencies, setDependencies] = useState<PluginDependencyStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -2301,22 +2292,34 @@ function McpPane() {
   const [newArgs, setNewArgs] = useState('');
   const [dependencyAction, setDependencyAction] = useState('');
 
-  const load = useCallback(() => {
-    Promise.all([
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false);
+  const readGeneration = useRef(0), pendingRead = useRef<number | null>(null), manualReread = useRef(false);
+  const load = useCallback((queueIfBusy = true) => {
+    if (pendingRead.current !== null) { if (queueIfBusy) manualReread.current = true; return; }
+    const generation = ++readGeneration.current;
+    pendingRead.current = generation;
+    Promise.allSettled([
       api.listMCPInstalls().catch(() => []),
-      api.listPluginMcpServers().catch(() => []),
-      api.listPluginDependencyStatuses().catch(() => []),
+      api.listPluginMcpServers(),
+      api.listPluginDependencyStatuses(),
     ]).then(([mcpInstalls, plugins, dependencyStatuses]) => {
-      setInstalls(mcpInstalls);
-      setPluginServers(plugins);
-      setDependencies(dependencyStatuses);
-    }).finally(() => setLoading(false));
+      if (generation !== readGeneration.current) return;
+      if (mcpInstalls.status === 'fulfilled') setInstalls(mcpInstalls.value);
+      if (plugins.status === 'fulfilled') setPluginServers(plugins.value);
+      if (dependencyStatuses.status === 'fulfilled') setDependencies(dependencyStatuses.value);
+      setCatalogUnavailable(plugins.status === 'rejected' || dependencyStatuses.status === 'rejected');
+    }).finally(() => {
+      if (pendingRead.current === generation) {
+        pendingRead.current = null; setLoading(false);
+        if (manualReread.current) { manualReread.current = false; load(); }
+      }
+    });
   }, []);
 
   useEffect(() => {
     load();
-    const timer = setInterval(load, 2_000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => load(false), 2_000);
+    return () => { clearInterval(timer); readGeneration.current += 1; pendingRead.current = null; manualReread.current = false; };
   }, [load]);
 
   const handleCreate = async () => {
@@ -2479,6 +2482,7 @@ function McpPane() {
 
   return (
     <>
+      {catalogUnavailable && <div role="alert" className="mb-3 text-sm text-red-500">{ts.pluginsCatalogUnavailable}</div>}
       {dependencies.length > 0 && (
         <Section>
           <SectionHeader icon={Package}>{ts.mcpPluginDeps}</SectionHeader>
@@ -2527,7 +2531,7 @@ function McpPane() {
                     <div className="flex shrink-0 items-center gap-2">
                       {dependency.task && (
                         <button type="button" disabled={dependency.task.state === 'cancelling'}
-                          onClick={() => void api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId }).then(load).catch(error => alert(error instanceof Error ? error.message : String(error)))}
+                          onClick={() => void api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId }).then(() => load()).catch(error => alert(error instanceof Error ? error.message : String(error)))}
                           className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs disabled:opacity-50">
                           {dependency.task.state === 'cancelling' ? ts.mcpCancellingTask : ts.mcpCancelTask}
                         </button>
@@ -2882,6 +2886,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   const [loopRunResults, setLoopRunResults] = useState<Record<string, RunLoopNowResultView | undefined>>({});
   const [loopDiagnosticsLoading, setLoopDiagnosticsLoading] = useState(true);
   const [loopDiagnosticsError, setLoopDiagnosticsError] = useState('');
+  const [scheduledBindingsError, setScheduledBindingsError] = useState('');
   const [runningLoopId, setRunningLoopId] = useState<string | null>(null);
   const [loopOutputPreviews, setLoopOutputPreviews] = useState<Record<string, LoopOutputPreviewView | undefined>>({});
   const [loopTaskResults, setLoopTaskResults] = useState<Record<string, LoopTaskResultView | undefined>>({});
@@ -2917,12 +2922,15 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       const [definitions, templates, scheduleBindings] = await Promise.all([
         api.getLoopDefinitions(),
         api.listUserLoopTemplates(),
-        api.getLoopScheduleBindings().catch(() => [] as LoopScheduleBindingView[]),
+        api.getLoopScheduleBindings(),
       ]);
       const details = await Promise.all(definitions.map(async (loop) => {
         const [runs, anomalies] = await Promise.all([
           api.getLoopRuns(loop.id),
-          api.getEvidenceAnomalies(loop.id).catch(() => [] as EvidenceAnomalyView[]),
+          api.getEvidenceAnomalies(loop.id).catch(error => {
+            if (loopManagementFailureKind(error) === 'unavailable') throw error;
+            return [] as EvidenceAnomalyView[];
+          }),
         ]);
         return { loop, runs, anomalies };
       }));
@@ -2930,6 +2938,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       setLoopDefinitions(definitions);
       setUserLoopTemplates(templates);
       setLoopScheduleBindings(Object.fromEntries(scheduleBindings.map(binding => [binding.loopId, binding])));
+      setScheduledBindingsError('');
       setLoopRuns(Object.fromEntries(details.map(item => [item.loop.id, item.runs])));
       setLoopAnomalies(Object.fromEntries(details.map(item => [item.loop.id, item.anomalies])));
       setLoopRunResults(prev => {
@@ -2944,11 +2953,13 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
     } catch (error) {
       if(generation!==loopLoadGeneration.current)return;
       setLoopRuns(invalidateLoopObservations);
-      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsLoadError);
+      const scheduledFailure = error instanceof Error && /scheduled_(projection_unavailable|runtime_unavailable|input_invalid)/.test(error.message);
+      if (scheduledFailure) setScheduledBindingsError(scheduledErrorMessage(error,t,true));
+      setLoopDiagnosticsError(scheduledFailure ? scheduledErrorMessage(error,t,true) : loopManagementErrorMessage(error, t, t.desktopSettings.loopDiagnosticsLoadError));
     } finally {
       if (generation===loopLoadGeneration.current) setLoopDiagnosticsLoading(false);
     }
-  }, [t.desktopSettings.loopDiagnosticsLoadError]);
+  }, [t.desktopSettings.loopDiagnosticsLoadError, t.loopOperationResultUnknown, t.loopProjectionUnavailable, t.loopInputInvalid, t.scheduledProjectionUnavailable, t.scheduledOperationUnknown, t.scheduledInputInvalid]);
 
   useEffect(() => {
     void loadLoops();
@@ -2982,7 +2993,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         await loadLoops(true);
       }
     } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : t.desktopSettings.loopDiagnosticsRunFailed);
+      setLoopDiagnosticsError(loopManagementErrorMessage(error, t, t.desktopSettings.loopDiagnosticsRunFailed));
     } finally {
       setRunningLoopId(null);
     }
@@ -3061,7 +3072,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] save edit failed', error);
-      showToast(error instanceof Error ? error.message : t.desktopSettings.saveLoopFailed);
+      showToast(loopManagementErrorMessage(error, t, t.desktopSettings.saveLoopFailed));
     } finally {
       setSavingEdit(false);
     }
@@ -3076,7 +3087,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] delete loop failed', error);
-      showToast(error instanceof Error ? error.message : t.desktopSettings.deleteLoopFailed);
+      showToast(loopManagementErrorMessage(error, t, t.desktopSettings.deleteLoopFailed));
     }
   };
 
@@ -3108,7 +3119,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
   };
 
   const handleCreateUserLoop = async () => {
-    const input: CreateUserLoopTemplateInputView = {
+    const input = {
       loopId: createUserLoopId(),
       title: newLoopTitle.trim(),
       kind: newLoopKind,
@@ -3117,7 +3128,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         outputDirectory: newLoopOutputDirectory.trim(),
         outputFileName: newLoopOutputFileName.trim(),
       } : {}),
-    };
+    } as CreateUserLoopTemplateInputView;
     if (!input.title || !input.prompt) {
       setCreateLoopError(t.desktopSettings.userLoopCreateMissingFields);
       return;
@@ -3135,14 +3146,14 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       showToast(t.desktopSettings.userLoopCreateSuccess, 'success');
       await loadLoops(true);
     } catch (error) {
-      setCreateLoopError(error instanceof Error ? error.message : t.desktopSettings.userLoopCreateFailed);
+      setCreateLoopError(loopManagementErrorMessage(error, t, t.desktopSettings.userLoopCreateFailed));
     } finally {
       setCreatingLoop(false);
     }
   };
 
   const handleCreateFromTemplate = async (template: UserLoopStarterTemplate) => {
-    const input: CreateUserLoopTemplateInputView = {
+    const input = {
       loopId: createUserLoopId(),
       title: template.title,
       kind: template.kind,
@@ -3151,7 +3162,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
         outputDirectory: template.outputDirectory ?? '',
         outputFileName: template.outputFileName ?? 'output.md',
       } : {}),
-    };
+    } as CreateUserLoopTemplateInputView;
     try {
       console.log('[LoopsPane] creating from template', { templateId: template.templateId });
       await api.createUserLoopTemplate(input);
@@ -3159,7 +3170,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
       await loadLoops(true);
     } catch (error) {
       console.error('[LoopsPane] create from template failed', error);
-      showToast(error instanceof Error ? error.message : t.desktopSettings.createFromTemplateFailed);
+      showToast(loopManagementErrorMessage(error, t, t.desktopSettings.createFromTemplateFailed));
     }
   };
 
@@ -3174,6 +3185,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
 
   return (
     <>
+      {showUserLoops && !showDiagnostics && scheduledBindingsError && <div role="alert" className="mb-3 rounded-md border p-3 text-xs text-[var(--c-status-error-text)]"><p>{scheduledBindingsError}</p><button type="button" onClick={()=>void loadLoops()} className="mt-2 rounded-md border px-2 py-1">{t.scheduledRefreshData}</button></div>}
       {showUserLoops && (
       <Section>
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -3284,7 +3296,7 @@ export function LoopsPane({ sections = 'all' }: { sections?: 'all' | 'user' | 'd
             <div className="text-xs text-[var(--c-text-secondary)]">
               {t.desktopSettings.userLoopsLoading}
             </div>
-          ) : userLoops.length === 0 ? (
+          ) : userLoops.length === 0 && !scheduledBindingsError ? (
             <div>
               <p className="text-xs text-[var(--c-text-secondary)] mb-3">
                 {t.desktopSettings.userLoopsEmpty}
@@ -3744,6 +3756,10 @@ function GeneralPane() {
   const [savingSkillDebug, setSavingSkillDebug] = useState(false);
   const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(3);
   const [savingConcurrency, setSavingConcurrency] = useState(false);
+  const skillConfigSequence = useRef(0);
+  const concurrencyConfigSequence = useRef(0);
+  const [skillConfigError, setSkillConfigError] = useState<'' | 'load' | 'unknown' | 'save'>('');
+  const [concurrencyConfigError, setConcurrencyConfigError] = useState<'' | 'load' | 'unknown' | 'save'>('');
   const [serviceStatus, setServiceStatus] = useState<DesktopServiceStatusSnapshot | null>(null);
   const [serviceStatusLoading, setServiceStatusLoading] = useState(true);
   const [serviceStatusError, setServiceStatusError] = useState('');
@@ -3766,9 +3782,14 @@ function GeneralPane() {
   }, [t]);
 
   useEffect(() => {
+    let active = true;
+    const sequence = ++skillConfigSequence.current;
     api.getSkillDebugConfig().then(c => {
-      setSkillDebug(c.enabled);
+      if (active && sequence === skillConfigSequence.current) setSkillDebug(c.enabled);
+    }).catch(() => {
+      if (active && sequence === skillConfigSequence.current) setSkillConfigError('load');
     });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -3780,29 +3801,46 @@ function GeneralPane() {
   }, [loadServiceStatus]);
 
   const handleSkillDebugToggle = async (enabled: boolean) => {
-    setSkillDebug(enabled);
+    const sequence = ++skillConfigSequence.current;
+    setSkillConfigError('');
     setSavingSkillDebug(true);
     try {
-      await api.saveSkillDebugConfig({ enabled });
+      const saved = await api.saveSkillDebugConfig({ enabled });
+      if (sequence === skillConfigSequence.current) setSkillDebug(saved.enabled);
+    } catch (error) {
+      if (sequence === skillConfigSequence.current) setSkillConfigError(
+        error instanceof Error && (error.message === 'desktop_config_operation_unknown' || error.message.endsWith(': desktop_config_operation_unknown'))
+          ? 'unknown' : 'save');
     } finally {
-      setSavingSkillDebug(false);
+      if (sequence === skillConfigSequence.current) setSavingSkillDebug(false);
     }
   };
 
   useEffect(() => {
+    let active = true;
+    const sequence = ++concurrencyConfigSequence.current;
     api.getKswarmConfig().then(c => {
-      setMaxConcurrentTasks(c.maxConcurrentTasks);
+      if (active && sequence === concurrencyConfigSequence.current) setMaxConcurrentTasks(c.maxConcurrentTasks);
+    }).catch(() => {
+      if (active && sequence === concurrencyConfigSequence.current) setConcurrencyConfigError('load');
     });
+    return () => { active = false; };
   }, []);
 
   const handleConcurrencyChange = async (value: number) => {
     const clamped = Math.max(1, Math.min(10, value));
-    setMaxConcurrentTasks(clamped);
+    const sequence = ++concurrencyConfigSequence.current;
+    setConcurrencyConfigError('');
     setSavingConcurrency(true);
     try {
-      await api.saveKswarmConfig({ maxConcurrentTasks: clamped });
+      const saved = await api.saveKswarmConfig({ maxConcurrentTasks: clamped });
+      if (sequence === concurrencyConfigSequence.current) setMaxConcurrentTasks(saved.maxConcurrentTasks);
+    } catch (error) {
+      if (sequence === concurrencyConfigSequence.current) setConcurrencyConfigError(
+        error instanceof Error && (error.message === 'desktop_config_operation_unknown' || error.message.endsWith(': desktop_config_operation_unknown'))
+          ? 'unknown' : 'save');
     } finally {
-      setSavingConcurrency(false);
+      if (sequence === concurrencyConfigSequence.current) setSavingConcurrency(false);
     }
   };
 
@@ -3993,6 +4031,7 @@ function GeneralPane() {
               max={10}
               step={1}
               value={maxConcurrentTasks}
+              disabled={savingConcurrency}
               onChange={(e) => handleConcurrencyChange(Number(e.target.value))}
               className="flex-1 accent-[var(--c-accent)]"
             />
@@ -4001,6 +4040,7 @@ function GeneralPane() {
             </span>
             {savingConcurrency && <Loader2 size={14} className="animate-spin text-[var(--c-text-tertiary)]" />}
           </div>
+          {concurrencyConfigError ? <div role="alert" className="mt-2 text-xs text-[var(--c-status-error-text)]">{concurrencyConfigError === 'load' ? t.desktopSettings.configLoadFailed : concurrencyConfigError === 'unknown' ? t.desktopSettings.configOperationUnknown : t.desktopSettings.configSaveFailed}</div> : null}
           <div className="mt-2 flex justify-between text-[10px] text-[var(--c-text-tertiary)]">
             <span>{t.desktopSettings.taskConcurrencyMin}</span>
             <span>{t.desktopSettings.taskConcurrencyMax}</span>
@@ -4023,6 +4063,7 @@ function GeneralPane() {
             </div>
             <button type="button"
               aria-label={t.desktopSettings.stageDebugToggleAria}
+              disabled={savingSkillDebug}
               onClick={() => handleSkillDebugToggle(!skillDebug)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 skillDebug ? 'bg-[var(--c-accent)]' : 'bg-[var(--c-border)]'
@@ -4035,6 +4076,7 @@ function GeneralPane() {
               />
             </button>
           </div>
+          {skillConfigError ? <div role="alert" className="mt-2 text-xs text-[var(--c-status-error-text)]">{skillConfigError === 'load' ? t.desktopSettings.configLoadFailed : skillConfigError === 'unknown' ? t.desktopSettings.configOperationUnknown : t.desktopSettings.configSaveFailed}</div> : null}
         </Card>
       </Section>
 
@@ -4231,30 +4273,38 @@ function AboutPane() {
   const { t } = useLocale();
   const [updateStatus, setUpdateStatus] = useState<{ checking: boolean; available: boolean; downloading: boolean; downloaded: boolean; installing?: boolean; progress: number; version?: string; error?: string } | null>(null);
   const [checking, setChecking] = useState(false);
-
-  useEffect(() => {
-    const unsub = api.onUpdateStatus(setUpdateStatus);
-    api.getUpdateStatus().then(setUpdateStatus).catch(() => {});
-    return unsub;
-  }, []);
-
-  const handleCheckUpdate = async () => {
-    setChecking(true);
+  const [updateReadError, setUpdateReadError] = useState('');
+  const updateGeneration = useRef(0);
+  const readUpdateFacts = async () => {
+    const generation = ++updateGeneration.current;
     try {
-      await api.checkForUpdates();
-    } finally {
-      setChecking(false);
+      const next = await api.getUpdateStatus();
+      if (generation === updateGeneration.current) { setUpdateStatus(next); setUpdateReadError(''); }
+    } catch {
+      if (generation === updateGeneration.current) setUpdateReadError(t.desktopSettings.updaterProjectionUnavailable);
     }
   };
-
+  useEffect(() => {
+    const unsub = api.onUpdateStatus(status => { ++updateGeneration.current; setUpdateStatus(status); setUpdateReadError(''); });
+    void readUpdateFacts();
+    return () => { ++updateGeneration.current; unsub(); };
+    // The subscription belongs to this mounted pane; explicit refresh reads current facts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleCheckUpdate = async () => {
+    ++updateGeneration.current;
+    setChecking(true);
+    try { await api.checkForUpdates(); await readUpdateFacts(); }
+    catch { setUpdateReadError(t.desktopSettings.updaterOperationUnknown); }
+    finally { setChecking(false); }
+  };
   const handleInstallUpdate = async () => {
+    ++updateGeneration.current;
     try {
-      await api.quitAndInstall();
-    } catch (error) {
-      setUpdateStatus((previous) => previous ? {
-        ...previous, installing: false, error: error instanceof Error ? error.message : String(error),
-      } : previous);
-    }
+      const result = await api.quitAndInstall();
+      if (result?.status === 'rejected_sync' || result?.status === 'pending_error_sticky') setUpdateReadError(t.sidebarUpdateHandoffUnconfirmedHint);
+      else if (!result || !['pending', 'already_pending', 'already_handed_off'].includes(result.status)) setUpdateReadError(t.desktopSettings.updaterOperationUnknown);
+    } catch { setUpdateReadError(t.desktopSettings.updaterOperationUnknown); }
   };
 
   return (
@@ -4286,10 +4336,11 @@ function AboutPane() {
       <Section>
         <SectionHeader icon={Zap}>{t.desktopSettings.softwareUpdate}</SectionHeader>
         <Card>
+          {updateReadError && <div role="alert" className="mb-3 text-sm text-red-500"><p>{updateReadError}</p><button type="button" onClick={() => void readUpdateFacts()} className={btnSecondary}>{t.desktopSettings.updaterRefreshData}</button></div>}
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-medium">
-                {updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmed : updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
+                {updateReadError && !updateStatus ? t.desktopSettings.updaterProjectionUnavailable : updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmed : updateStatus?.installing ? t.desktopSettings.aboutInstalling : updateStatus?.downloaded ? t.desktopSettings.aboutUpdateReady : updateStatus?.downloading ? t.desktopSettings.aboutDownloading : updateStatus?.available ? t.desktopSettings.aboutNewVersion : t.desktopSettings.aboutCurrentVersion}
               </div>
               <div className="text-xs text-[var(--c-text-secondary)] mt-1">
                 {updateStatus?.error && updateStatus.downloaded ? t.sidebarUpdateHandoffUnconfirmedHint :
@@ -4301,7 +4352,7 @@ function AboutPane() {
                  `v${__APP_VERSION__}`}
               </div>
               {updateStatus?.error && updateStatus.error !== 'update_install_handoff_unconfirmed' && (
-                <div className="text-xs text-red-500 mt-1">{updateStatus.error === 'update_install_handoff_unconfirmed' ? t.sidebarUpdateHandoffUnconfirmedHint : updateStatus.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady : updateStatus.error}</div>
+                <div className="text-xs text-red-500 mt-1">{updateStatus.error === 'update_install_handoff_unconfirmed' ? t.sidebarUpdateHandoffUnconfirmedHint : updateStatus.error === 'update_install_not_ready' ? t.sidebarUpdateInstallNotReady : t.desktopSettings.updaterOperationUnknown}</div>
               )}
             </div>
             <div className="flex gap-2">
@@ -4431,6 +4482,7 @@ function runtimeStateLabel(state: ConnectorsProviderRuntime['runtime_state'], ds
     case 'missing_config': return { text: ds.connectorStatusMissingConfig, tone: 'warn' };
     case 'invalid_config': return { text: ds.connectorStatusInvalidConfig, tone: 'err' };
     case 'not_implemented': return { text: ds.connectorStatusNotImplemented, tone: 'mute' };
+    case 'decrypt_failed': return { text: ds.connectorStatusDecryptFailed, tone: 'err' };
     default: return { text: state, tone: 'mute' };
   }
 }
@@ -4550,7 +4602,7 @@ function TestButton({ kind, ds }: TestButtonProps & { ds: LocaleStrings['desktop
       const r = await api.testConnectorProvider(kind);
       setResult(r);
     } catch (e) {
-      setResult({ success: false, latencyMs: 0, error: (e as Error).message });
+      setResult({ success: false, latencyMs: 0, error: connectorsErrorMessage(e, ds) });
     } finally {
       setTesting(false);
     }
@@ -4679,25 +4731,38 @@ function SystemOneSection() {
 
 function ToolsPane() {
   const { t } = useLocale();
+  const ds = t.desktopSettings;
+  const labelsRef = useRef(ds);
+  labelsRef.current = ds;
+  const readGeneration = useRef(0);
+  const [readError, setReadError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [snapshot, setSnapshot] = useState<ConnectorsConfigSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [draft, setDraft] = useState<ConnectorsConfig | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
-  useEffect(() => {
-    let cancelled = false;
-    api.getConnectorsConfig()
-      .then(snap => {
-        if (cancelled) return;
-        setSnapshot(snap);
-        if (snap?.config) setDraft(snap.config);
-      })
-      .catch(e => { if (!cancelled) setError((e as Error).message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+  const load = useCallback(async () => {
+    const generation = ++readGeneration.current;
+    setRefreshing(true);
+    try {
+      const snap = await api.getConnectorsConfig();
+      if (generation !== readGeneration.current) return;
+      if (!snap) throw Error('connectors_projection_unavailable');
+      setSnapshot(snap);
+      setDraft(current => current ?? snap.config);
+      setReadError('');
+    } catch (failure) {
+      if (generation === readGeneration.current) setReadError(connectorsErrorMessage(failure, labelsRef.current, true));
+    } finally {
+      if (generation === readGeneration.current) { setLoading(false); setRefreshing(false); }
+    }
   }, []);
+  useEffect(() => { void load(); return () => { readGeneration.current++; }; }, [load]);
 
   const runtimeOf = useCallback((name: string): ConnectorsProviderRuntime | undefined => {
     return snapshot?.providers.find(p => p.provider_name === name);
@@ -4705,20 +4770,27 @@ function ToolsPane() {
 
   const handleSave = async () => {
     if (!draft) return;
+    const submitted = draft;
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      const next = await api.saveConnectorsConfig(draft);
+      const next = await api.saveConnectorsConfig(submitted);
       if (next) {
+        // Acknowledged save supersedes reads begun before this commit.
+        readGeneration.current++;
+        setRefreshing(false);
+        setReadError('');
         setSnapshot(next);
-        setDraft(next.config);
-        setSuccess(t.desktopSettings.connectorSaved);
+        if (draftRef.current === submitted) {
+          setDraft(next.config);
+          setSuccess(t.desktopSettings.connectorSaved);
+        }
       } else {
         setError(t.desktopSettings.connectorSaveFailedNoDesktop);
       }
     } catch (e) {
-      setError((e as Error).message);
+      setError(connectorsErrorMessage(e, ds));
     } finally {
       setSaving(false);
     }
@@ -4735,7 +4807,8 @@ function ToolsPane() {
   if (!draft) {
     return (
       <div className="text-sm text-[var(--c-text-secondary)]">
-        {t.desktopSettings.connectorLoadFailed}{error && <div className="mt-2 text-red-500">{error}</div>}
+        {readError || t.desktopSettings.connectorLoadFailed}
+        <button type="button" className={btnSecondary} disabled={refreshing} onClick={() => { void load(); }}>{ds.connectorRefreshData}</button>
       </div>
     );
   }
@@ -4745,11 +4818,13 @@ function ToolsPane() {
 
   return (
     <>
-      <Section>
+      <Section key="connectors-overview">
         <SectionHeader icon={Wrench}>{t.desktopSettings.networkTools}</SectionHeader>
         <div className="text-xs text-[var(--c-text-secondary)] mb-3">
           {t.desktopSettings.networkToolsDesc}
         </div>
+        <div aria-live="polite">{readError && <div className="text-xs text-red-500">{readError}</div>}</div>
+        <button type="button" className={btnSecondary} disabled={refreshing} onClick={() => { void load(); }}>{ds.connectorRefreshData}</button>
         {snapshot?.loadStatus === 'parse_failed' && (
           <div className="mb-3 rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
             {t.desktopSettings.connectorConfigParseError}
@@ -4757,13 +4832,13 @@ function ToolsPane() {
         )}
       </Section>
 
-      <Section>
+      <Section key="connectors-search">
         <SectionHeader icon={Search}>{t.desktopSettings.searchProviderTitle}</SectionHeader>
         <div className="flex flex-col gap-3">
           {SEARCH_PROVIDERS.map(opt => {
             const checked = search.provider === opt.key;
             const disabled = !!opt.notImplemented;
-            const runtime = runtimeOf(opt.key);
+            const runtime = runtimeOf(`web_search.${opt.key}`);
             return (
               <Card key={opt.key} className={disabled ? 'opacity-60' : ''}>
                 <label className="flex items-start gap-3 cursor-pointer">
@@ -4819,13 +4894,13 @@ function ToolsPane() {
         <TestButton kind="search" ds={t.desktopSettings} />
       </Section>
 
-      <Section>
+      <Section key="connectors-fetch">
         <SectionHeader icon={LinkIcon}>{t.desktopSettings.fetchProviderTitle}</SectionHeader>
         <div className="flex flex-col gap-3">
           {FETCH_PROVIDERS.map(opt => {
             const checked = fetchCfg.provider === opt.key;
             const disabled = !!opt.notImplemented;
-            const runtime = runtimeOf(opt.key);
+            const runtime = runtimeOf(`web_fetch.${opt.key}`);
             return (
               <Card key={opt.key} className={disabled ? 'opacity-60' : ''}>
                 <label className="flex items-start gap-3 cursor-pointer">

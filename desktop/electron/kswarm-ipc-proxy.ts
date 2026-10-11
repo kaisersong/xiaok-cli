@@ -2,6 +2,10 @@ import type { IpcMain } from 'electron';
 import type { KSwarmService } from './kswarm-service.js';
 import { KSwarmStreamBridge } from './kswarm-stream-bridge.js';
 import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
+import { registerKSwarmProxyTypedIpc } from './kswarm-proxy-typed-ipc.js';
+import { captureIpcData } from './ipc-data-snapshot.js';
+import { proxyRouteOutputIsValid, PROXY_STATUS_RESULT_SCHEMA, type ProxyFactData } from '../shared/kswarm-proxy-ipc-contract.js';
+const defineData = Object.defineProperty;
 
 type ProxyResponseKind = 'json' | 'text' | 'boolean';
 type ProxyService = Pick<KSwarmService, 'request'>
@@ -31,10 +35,13 @@ const SENSITIVE_REQUEST_KEYS = new Set([
   'secret',
 ]);
 
+// Paths are normalized segment-by-segment before this read-only allowlist.
+const PROJECT_ARTIFACT_READ_PATTERN = /^\/projects\/[^/]+\/artifacts\/[^/]+(?:\/[^/]+)*$/;
+
 const SAFE_GET_PATTERNS = [
   /^\/projects$/,
   /^\/projects\/[^/]+$/,
-  /^\/projects\/[^/]+\/artifacts\/[^/]+$/,
+  PROJECT_ARTIFACT_READ_PATTERN,
   // design §9.1/§9.3：getProjectGateSnapshot 只读 DTO 端点，返回值本身在
   // hub.js 层面已经是 allowlist（不含绝对路径/raw evidence body），这里
   // 只需要放行路径本身，不需要额外的响应字段过滤。
@@ -88,67 +95,64 @@ export function registerKSwarmProxy(
   kswarmService: ProxyService | null = null,
   workspace?:{dispatchProject(projectId:string,body:unknown):Promise<Record<string,unknown>|null>;authorize(event:unknown):boolean},
 ): void {
-  ipcMain.handle('desktop:kswarm:proxy:get', (_event, path: string) =>
-    executeProxyRequest(kswarmService, 'GET', path, 'json'));
-
-  ipcMain.handle('desktop:kswarm:proxy:getText', (_event, path: string) =>
-    executeProxyRequest(kswarmService, 'GET', path, 'text'));
-
-  ipcMain.handle('desktop:kswarm:proxy:post', (event, path: string, body?: unknown) =>
-    executeProxyRequest(kswarmService, 'POST', path, 'json', body,false,workspace,event));
-
-  ipcMain.handle('desktop:kswarm:proxy:postJson', async (event, path: string, body?: unknown) => {
-    const result = await executeProxyRequest(kswarmService, 'POST', path, 'json', body, true,workspace,event);
-    if (!isRecord(result) || result.data === null || result.data === undefined) return null;
-    return { ...result.data as Record<string, unknown>, status: readStatus(result) };
+  const authorize = workspace?.authorize, dispatch = workspace?.dispatchProject;
+  const boundWorkspace = workspace && authorize && dispatch ? Object.freeze({
+    authorize: (event: unknown) => authorize.call(workspace, event),
+    dispatchProject: (id: string, body: unknown) => dispatch.call(workspace, id, body),
+  }) : undefined;
+  registerKSwarmProxyTypedIpc(ipcMain, {
+    bridge, service: kswarmService, workspace,
+    isDispatch(path) {
+      const normalized = normalizeKSwarmProxyPath(path);
+      return !!normalized && /^\/projects\/[^/]+\/dispatch$/.test(normalized.pathname);
+    },
+    eligible(method, rawPath) {
+      if (typeof rawPath !== 'string') return false;
+      const normalized = normalizeKSwarmProxyPath(rawPath);
+      const verb = method === 'postJson' ? 'POST' : method === 'getText' ? 'GET' : method.toUpperCase();
+      const kind = method === 'getText' ? 'text' : method === 'delete' ? 'boolean' : 'json';
+      return !!normalized && isKSwarmProxyRequestAllowed(verb, normalized.pathname, kind);
+    },
+    execute(method, event, args) {
+      const path = args[0] as string, body = args[1];
+      if (method === 'subscribe' || method === 'unsubscribe') {
+        if (method === 'subscribe') bridge.subscribe(event as Parameters<KSwarmStreamBridge['subscribe']>[0]);
+        else bridge.unsubscribe(event as Parameters<KSwarmStreamBridge['unsubscribe']>[0]);
+        return { ok: true };
+      }
+      if (method === 'status') {
+        const status = bridge.getConnectionStatus();
+        try {
+          const snapshot = captureIpcData({ status }, 'proxy_operation_unknown');
+          if (PROXY_STATUS_RESULT_SCHEMA.safeParse(snapshot).success) return snapshot;
+        } catch { /* The caller boundary cannot undo any producer effect. */ }
+        return { status: 'disconnected', code: 'proxy_operation_unknown' };
+      }
+      if (method === 'healthz' || method === 'health') return executeConnectionHealth(path, method);
+      if (method === 'postJson') return (async () => {
+        const result = await executeProxyRequest(kswarmService, 'POST', path, 'json', body, true, boundWorkspace, event);
+        if (!isRecord(result) || result.data === null || result.data === undefined) return null;
+        return captureIpcData({ ...result.data as Record<string, unknown>, status: readStatus(result) });
+      })();
+      return executeProxyRequest(kswarmService, method === 'getText' ? 'GET' : method.toUpperCase(), path,
+        method === 'getText' ? 'text' : method === 'delete' ? 'boolean' : 'json', body, false, boundWorkspace, event);
+    },
   });
+}
 
-  ipcMain.handle('desktop:kswarm:proxy:put', (_event, path: string, body?: unknown) =>
-    executeProxyRequest(kswarmService, 'PUT', path, 'json', body));
-
-  ipcMain.handle('desktop:kswarm:proxy:patch', (_event, path: string, body?: unknown) =>
-    executeProxyRequest(kswarmService, 'PATCH', path, 'json', body));
-
-  ipcMain.handle('desktop:kswarm:proxy:delete', (_event, path: string) =>
-    executeProxyRequest(kswarmService, 'DELETE', path, 'boolean'));
-
-  ipcMain.handle('desktop:kswarm:stream:subscribe', (event) => {
-    bridge.subscribe(event);
-    return { ok: true };
-  });
-
-  ipcMain.handle('desktop:kswarm:stream:unsubscribe', (event) => {
-    bridge.unsubscribe(event);
-    return { ok: true };
-  });
-
-  ipcMain.handle('desktop:kswarm:stream:status', () => {
-    return { status: bridge.getConnectionStatus() };
-  });
-
-  ipcMain.handle('desktop:connection:healthz', async (_event, url: string) => {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`${url}/healthz`, { signal: controller.signal });
-      clearTimeout(timer);
-      return { ok: res.ok };
-    } catch {
-      return { ok: false };
-    }
-  });
-
-  ipcMain.handle('desktop:connection:health', async (_event, url: string) => {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000);
-      const res = await fetch(`${url}/health`, { signal: controller.signal });
-      clearTimeout(timer);
-      return { ok: res.ok };
-    } catch {
-      return { ok: false };
-    }
-  });
+async function executeConnectionHealth(url: string, method: 'health' | 'healthz'): Promise<{ ok: boolean }> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), method === 'healthz' ? 5000 : 3000);
+    const response = await fetch(`${url}/${method}`, { signal: controller.signal });
+    clearTimeout(timer);
+    return { ok: response.ok };
+  } catch { return { ok: false }; }
+}
+function captureProxyFacts(pathname: string, value: unknown, method: string): ProxyFactData {
+  const snapshot = captureIpcData(value, 'proxy_operation_unknown') as ProxyFactData;
+  if (!proxyRouteOutputIsValid(pathname, snapshot, method)) throw Error('proxy_operation_unknown');
+  return snapshot;
 }
 
 async function executeProxyRequest(
@@ -176,7 +180,8 @@ async function executeProxyRequest(
       if(!workspace.authorize(event))result={ok:false,code:'workspace_ipc_forbidden'};
       else try{result=await workspace.dispatchProject(decodeURIComponent(dispatch[1]),body);}
       catch(error){result={ok:false,code:error instanceof Error?error.message:'workspace_dispatch_failed'};}
-      if(result!==null){const data=redactKSwarmPayload(result);return includeStatus?{data,status:result.ok===false?409:200}:data;}
+      result=captureIpcData(result,'proxy_operation_unknown');
+      if(result!==null){const data=captureProxyFacts(normalized.pathname,redactKSwarmPayload(result),method);return includeStatus?{data,status:result.ok===false?409:200}:data;}
     }
     const options: RequestInit = {
       method,
@@ -193,7 +198,7 @@ async function executeProxyRequest(
     }
 
     const data = text ? parseJsonOrNull(text) : null;
-    const redacted = redactKSwarmPayload(data);
+    const redacted = captureProxyFacts(normalized.pathname, redactKSwarmPayload(data), method);
     if (includeStatus) {
       return { data: redacted, status: response.status };
     }
@@ -247,7 +252,7 @@ export function isKSwarmProxyRequestAllowed(
   const normalizedMethod = method.toUpperCase();
   if (normalizedMethod === 'GET') {
     if (responseKind === 'text') {
-      return /^\/projects\/[^/]+\/artifacts\/[^/]+$/.test(pathname);
+      return PROJECT_ARTIFACT_READ_PATTERN.test(pathname);
     }
     return responseKind === 'json' && SAFE_GET_PATTERNS.some((pattern) => pattern.test(pathname));
   }
@@ -281,7 +286,7 @@ export function redactKSwarmPayload(value: unknown): unknown {
     const normalizedKey = key.toLowerCase();
     if (SENSITIVE_RESPONSE_KEYS.has(normalizedKey)) continue;
     if (normalizedKey === 'execution' && containsSensitiveResponseData(child)) continue;
-    redacted[key] = redactKSwarmPayload(child);
+    defineData(redacted, key, { __proto__: null, value: redactKSwarmPayload(child), enumerable: true, writable: true, configurable: true } as PropertyDescriptor);
   }
   return redacted;
 }

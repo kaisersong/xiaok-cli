@@ -1,3 +1,4 @@
+import type React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
@@ -205,5 +206,66 @@ describe('ChatView artifact edit action', () => {
     const openButton = screen.getByRole('button', { name: /打开|Open/i });
     expect(openButton).toBeInTheDocument();
     expect(openButton).not.toHaveTextContent(/打开|Open/i);
+  });
+});
+
+function renderFiles(artifacts: NonNullable<React.ComponentProps<typeof ChatView>['result']>['artifacts'],
+  generatedFiles: React.ComponentProps<typeof ChatView>['generatedFiles'] = []) {
+  Element.prototype.scrollIntoView = vi.fn();
+  const onArtifactClick = vi.fn();
+  render(<LocaleProvider><ChatView
+    thread={{ id: 'dedup', title: 'Files', status: 'completed', mode: 'work', createdAt: 1, updatedAt: 1,
+      starred: false, gtdBucket: 'inbox', pinnedAt: null, currentTaskId: null, taskIds: [] }}
+    messages={[]} streamingText="" status="completed" currentQuestion={null}
+    result={{ summary: '', artifacts }} generatedFiles={generatedFiles}
+    prompt="" onPromptChange={vi.fn()} onSubmit={vi.fn()} onAnswer={vi.fn()} onCancel={vi.fn()}
+    canvasOpen={false} onToggleCanvas={vi.fn()} onArtifactClick={onArtifactClick}
+  /></LocaleProvider>);
+  return onArtifactClick;
+}
+
+function pdf(artifactId: string, filePath?: string) {
+  return { artifactId, filePath, kind: 'pdf' as const, title: 'report.pdf', createdAt: 'turn', previewAvailable: true };
+}
+
+describe('ChatView output file identity', () => {
+  it('shows one card for repeated PDF observations and keeps the first open target', () => {
+    const open = renderFiles([pdf('first', '/tmp/report.pdf'), pdf('second', '/tmp/report.pdf')]);
+    expect(screen.getAllByTestId('generated-file-report.pdf')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('generated-file-report.pdf'));
+    expect(open.mock.calls[0][0]).toMatchObject({ artifactId: 'first', filePath: '/tmp/report.pdf' });
+  });
+
+  it('keeps identically named PDFs from separate directories', () => {
+    renderFiles([pdf('first', '/tmp/a/report.pdf'), pdf('second', '/tmp/b/report.pdf')]);
+    expect(screen.getAllByTestId('generated-file-report.pdf')).toHaveLength(2);
+  });
+
+  it.each([
+    ['D:\\Reports\\report.pdf', 'd:/reports/REPORT.pdf'],
+    ['\\\\server\\share\\report.pdf', '\\\\SERVER\\SHARE\\REPORT.pdf'],
+    ['/tmp/报告.pdf', 'file:///tmp/%E6%8A%A5%E5%91%8A.pdf'],
+  ])('deduplicates equivalent paths: %s', (first, second) => {
+    renderFiles([pdf('first', first), pdf('second', second)]);
+    expect(screen.getAllByTestId('generated-file-report.pdf')).toHaveLength(1);
+  });
+
+  it('preserves POSIX path case distinctions', () => {
+    renderFiles([pdf('first', '/tmp/Report.pdf'), pdf('second', '/tmp/report.pdf')]);
+    expect(screen.getAllByTestId('generated-file-report.pdf')).toHaveLength(2);
+  });
+
+  it('uses artifact ID for pathless entries without merging distinct IDs', () => {
+    renderFiles([pdf('first'), pdf('first'), pdf('second')]);
+    expect(screen.getAllByTestId('generated-file-report.pdf')).toHaveLength(2);
+  });
+
+  it('deduplicates generated file fallbacks while retaining separate directories', () => {
+    renderFiles([], [
+      { name: 'report.pdf', filePath: '/tmp/report.pdf' },
+      { name: 'report.pdf', filePath: '/tmp/report.pdf' },
+      { name: 'report.pdf', filePath: '/tmp/other/report.pdf' },
+    ]);
+    expect(screen.getAllByTestId('generated-file-report.pdf')).toHaveLength(2);
   });
 });

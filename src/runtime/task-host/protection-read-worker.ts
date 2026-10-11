@@ -7,12 +7,4 @@ if (source) {
   const { register } = await import('tsx/esm/api');
   register();
 }
-const { DesktopTaskObservationStore } = await import(source ? './protected-observation-store.ts' : './protected-observation-store.js');
-try {
-  const protection = await new DesktopTaskObservationStore(workerData.root, workerData.canonicalRoot).readProtection(workerData.taskId);
-  parentPort?.postMessage({ taskId: workerData.taskId, protection });
-} catch {
-  parentPort?.postMessage({ taskId: workerData.taskId, unavailable: true });
-} finally {
-  parentPort?.close();
-}
+await import(source ? './protection-read-worker-body.ts' : './protection-read-worker-body.js');

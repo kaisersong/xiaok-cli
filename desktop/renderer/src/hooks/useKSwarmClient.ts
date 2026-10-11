@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDesktopApi } from '@xiaok/shared/desktop';
-import type { KSwarmAgentSemanticInput, ProjectTeamOperationView, ProjectTeamPlanView } from '../api/types';
+import type { ProxyHttpBody, KSwarmAgentSemanticInput, ProjectTeamOperationView, ProjectTeamPlanView } from '../api/types';
 
 const RECONNECT_DELAY = 3000;
 const MAX_RECONNECT_DELAY = 60_000;
@@ -87,6 +87,8 @@ export interface KSwarmTask {
   execution?: KSwarmTaskExecution | null;
 }
 
+export type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
+
 export type KSwarmProjectExecutionMode = 'direct' | 'auto' | 'workflow_preferred';
 
 export interface KSwarmTaskExecution {
@@ -126,6 +128,7 @@ export interface KSwarmPhase {
 }
 
 export interface KSwarmProject {
+  requestedStartPolicy?: KSwarmProjectStartPolicy;
   id: string;
   name: string;
   goal?: string;
@@ -279,6 +282,7 @@ export interface KSwarmProjectAgentSelection {
 }
 
 export interface CreateKSwarmProjectInput {
+  startPolicy?: KSwarmProjectStartPolicy;
   name: string;
   goal: string;
   requirements?: string;
@@ -927,7 +931,7 @@ async function httpPost<T>(path: string, body?: unknown): Promise<T | null> {
   const api = getDesktopApi();
   if (!api?.kswarmProxyPost) return null;
   try {
-    return await api.kswarmProxyPost(path, body) as T | null;
+    return await api.kswarmProxyPost(path, body as ProxyHttpBody) as T | null;
   } catch (err) {
     console.warn(`[kswarm] POST ${path} failed`, err);
     return null;
@@ -938,7 +942,7 @@ async function httpPostJson<T>(path: string, body?: unknown): Promise<T | null> 
   const api = getDesktopApi();
   if (!api?.kswarmProxyPostJson) return null;
   try {
-    return await api.kswarmProxyPostJson(path, body) as T | null;
+    return await api.kswarmProxyPostJson(path, body as ProxyHttpBody) as T | null;
   } catch (err) {
     console.warn(`[kswarm] POST(json) ${path} failed`, err);
     return null;
@@ -1041,9 +1045,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
       }
     };
 
+    let subscriptionUncertain = false;
     const applyConnectionStatus = (status?: string) => {
       if (disposed) return;
-      const isConnected = status === 'connected';
+      const isConnected = status === 'connected' && !subscriptionUncertain;
       const wasConnected = connectedRef.current;
       setConnected(isConnected);
       connectedRef.current = isConnected;
@@ -1063,7 +1068,18 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
     });
     wsEventRef.current = unsubEvent || null;
 
-    api.kswarmStreamSubscribe?.();
+    const subscriptionFailed = () => {
+      if (disposed) return;
+      subscriptionUncertain = true;
+      applyConnectionStatus('disconnected');
+    };
+    try {
+      Promise.resolve(api.kswarmStreamSubscribe?.())
+        .then((receipt: unknown) => {
+          if (receipt && typeof receipt === 'object' && 'ok' in receipt && receipt.ok === false) subscriptionFailed();
+        })
+        .catch(subscriptionFailed);
+    } catch { subscriptionFailed(); }
     Promise.resolve(api.kswarmStreamGetStatus?.())
       .then((payload: unknown) => {
         applyConnectionStatus(readConnectionStatus(payload));
@@ -1078,7 +1094,10 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
 
     return () => {
       disposed = true;
-      api.kswarmStreamUnsubscribe?.();
+      try {
+        Promise.resolve(api.kswarmStreamUnsubscribe?.())
+          .catch(error => console.warn('[kswarm] stream unsubscribe outcome unknown', error));
+      } catch (error) { console.warn('[kswarm] stream unsubscribe outcome unknown', error); }
       wsRef.current?.();
       wsRef.current = null;
       wsEventRef.current?.();
@@ -1137,13 +1156,12 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
         planningGuidance: guidance.planningGuidance || undefined,
         enableSummary: input.enableSummary ?? true,
         autoStartPlanning: false,
-      }) as CreateKSwarmProjectResponse | null
+        startPolicy: input.startPolicy ?? 'activate_and_dispatch_after_plan',
+      }) as CreateKSwarmProjectResponse | KSwarmProject | null
       : null;
-    // Server returns { ok, project, preparation, planningStart } — unwrap the
-    // project. Treating the whole envelope as a KSwarmProject left id/name
-    // undefined, so the planning bootstrap below enqueued an empty projectId
-    // and the project silently never planned.
-    const result = response?.project ?? null;
+    // Main's semantic API returns the project directly. Older bridges return
+    // an envelope; accept both and use canonical values for the bootstrap.
+    const result = response && 'project' in response ? response.project : response as KSwarmProject | null;
     if (!result || !result.id) {
       console.error('[createProject] Project create returned no project id', response);
       return null;
@@ -1160,8 +1178,9 @@ export function useKSwarmClient(): KSwarmClientState & KSwarmClientActions {
           goal: input.goal,
           requirements: input.requirements || '',
           planningGuidance: guidance.planningGuidance || '',
-          poAgent: input.poAgent,
-          members: input.members || [],
+          poAgent: result.poAgent || input.poAgent,
+          members: result.members ?? input.members ?? [],
+          startPolicy: result.requestedStartPolicy ?? input.startPolicy ?? 'activate_and_dispatch_after_plan',
         });
         if (!enqueueResult?.ok) {
           console.error('[createProject] Planning bootstrap enqueue rejected', enqueueResult);

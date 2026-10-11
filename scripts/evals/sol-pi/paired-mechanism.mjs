@@ -3,11 +3,11 @@ import { pathToFileURL } from 'node:url';
 import { verifyRecipeEnvironment } from './paired-environment.mjs';
 
 /** Host fixture authorization. This module never constructs an observation body. */
-export async function createPairedMechanism({sourceRoot,runDirectory,workspace,task,session,destination,protocol,profileId,recipeEnvironment,command}){
+export async function createPairedMechanism({sourceRoot,registrationSourceRoot=sourceRoot,runDirectory,workspace,task,session,destination,protocol,profileId,recipeEnvironment,command}){
  const load=file=>import(pathToFileURL(join(sourceRoot,file)).href);
  const [{createObservationService},{createObservationSessionOwner,createObservationReadTool,describeObservationSource},{createFullSendCounter},{FileSessionStore},{resolveProductionCapacityProfile}]=await Promise.all([
   load('src/runtime/sol-pi/observation-service.ts'),load('src/runtime/sol-pi/observation-session-owner.ts'),load('src/runtime/sol-pi/full-send-counter.ts'),load('src/ai/runtime/session-store/file-store.ts'),load('src/runtime/sol-pi/capacity-admission.ts')]);
- const environment=await verifyRecipeEnvironment({sourceRoot,...recipeEnvironment,expected:recipeEnvironment,loadProduction:load});
+ const environment=await verifyRecipeEnvironment({sourceRoot,registrationSourceRoot,...recipeEnvironment,expected:recipeEnvironment,loadProduction:load});
  const capacityProfile=resolveProductionCapacityProfile({destination:destination.url,model:destination.model,protocol,profileId,counter:environment.counter});
  if(!capacityProfile)throw Error('SOLPI_PAIRED_MECHANISM_NOT_QUALIFIED');
  const profileRoot=join(runDirectory,'observation-profile');let service,counter,owner;

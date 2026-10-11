@@ -119,6 +119,9 @@ describe('BDD AP1/AP5/AP9/AP10: actual Desktop factory tool prompt and durable d
     expect(readFileSync(effect, 'utf8')).toBe('SAME');
     await vi.waitFor(() => expect(requests).toBe(4));
     await f.services.cancelTask(task.taskId, 'test-cleanup');
+    release.resolve();
+    await vi.waitFor(async () => expect((await snapshot()).agents.find(agent => agent.id === `root_${initial.group!.groupId}`))
+      .toMatchObject({ executionActive: false, resourcesReleased: true, cleanupPending: false }));
     const next = await f.services.createTask({ prompt: 'New task with the same operation.', permissionMode: 'default', materials: [], context: { threadId: 'approval-thread' } });
     await vi.waitFor(async () => expect((await snapshot()).pendingApprovalCount).toBe(1));
     expect(requests).toBe(5);

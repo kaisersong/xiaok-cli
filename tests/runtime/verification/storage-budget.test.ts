@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { assertVerificationDatabaseBudget, runVerificationTransaction } from '../../../src/runtime/verification/storage-budget.js';
+import { assertVerificationDatabaseBudget, runVerificationTransaction, isVerificationHeadroomNotReady } from '../../../src/runtime/verification/storage-budget.js';
 
 describe('actual persisted verification bytes and FULL classification', () => {
   it('counts tuple/reply metadata, not just payload or number of rows', () => {
@@ -108,7 +108,7 @@ describe('actual SQLite physical cap admission', () => {
       db.exec('CREATE TABLE actual_writer(value BLOB)');
       expect(db.pragma('max_page_count=4', {simple: true})).toBe(4);
       const original = db.pragma.bind(db);
-      const spy = vi.spyOn(db, 'pragma').mockImplementation((query: string, ...args: unknown[]) => query === 'page_count' ? 5 : original(query, ...args));
+      const spy = vi.spyOn(db, 'pragma').mockImplementation((query: unknown, ...args: unknown[]) => query === 'page_count' ? 5 : original(query, ...args));
       expect(() => assertVerificationDatabaseBudget(db, {additionalBytes: 0})).toThrow('verification_control_budget');
       spy.mockRestore();
     } finally { db.close(); }
@@ -118,8 +118,8 @@ describe('actual SQLite physical cap admission', () => {
     try {
       db.exec('CREATE TABLE actual_writer(value BLOB)');
       const original = db.pragma.bind(db), seen: string[] = [];
-      const spy = vi.spyOn(db, 'pragma').mockImplementation((query: string, ...args: unknown[]) => {
-        seen.push(query);
+      const spy = vi.spyOn(db, 'pragma').mockImplementation((query: unknown, ...args: unknown[]) => {
+        seen.push(query as string);
         return original(query, ...args);
       });
       expect(() => assertVerificationDatabaseBudget(db, {additionalBytes: 0})).not.toThrow();
@@ -137,9 +137,16 @@ describe('actual SQLite physical cap admission', () => {
     const Database = createRequire(import.meta.url)('better-sqlite3'), db = new Database(':memory:');
     try {
       const original = db.pragma.bind(db);
-      const spy = vi.spyOn(db, 'pragma').mockImplementation((query: string, ...args: unknown[]) => query === name ? value : original(query, ...args));
+      const spy = vi.spyOn(db, 'pragma').mockImplementation((query: unknown, ...args: unknown[]) => query === name ? value : original(query, ...args));
       expect(() => assertVerificationDatabaseBudget(db, {additionalBytes: 0})).toThrow('verification_control_budget');
       spy.mockRestore();
     } finally { db.close(); }
   });
+});
+
+it.each(['plain-forged','actual-native'] as const)('brands only actual native SQLite FULL after actual own transaction rollback: %s',mode=>{
+ const Database=createRequire(import.meta.url)('better-sqlite3'),db=new Database(':memory:');try{db.exec('CREATE TABLE native_full(value BLOB)');db.pragma('max_page_count=4');let cause:unknown;
+ try{runVerificationTransaction(db,()=>{if(mode==='plain-forged'){db.prepare('INSERT INTO native_full VALUES(?)').run(Buffer.from('actual rollback row'));throw Object.assign(Error('ordinary callback failure'),{name:'SqliteError',code:'SQLITE_FULL'});}db.prepare('INSERT INTO native_full VALUES(?)').run(Buffer.alloc(65536));});}catch(error){cause=error;}
+ expect(cause).toBeInstanceOf(Error);expect(db.inTransaction).toBe(false);expect(db.prepare('SELECT COUNT(*) n FROM native_full').get()).toEqual({n:0});expect(isVerificationHeadroomNotReady(cause,db)).toBe(mode==='actual-native');if(mode==='actual-native')expect((cause as Error).cause).toBeInstanceOf(Database.SqliteError);else expect((cause as Error).cause).not.toBeInstanceOf(Database.SqliteError);
+ }finally{db.close();}
 });

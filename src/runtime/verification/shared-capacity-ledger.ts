@@ -5,6 +5,7 @@ import {inspectSharedCapacityCommand,executeSharedCapacityCommand,type SharedCap
 import {createHash} from 'node:crypto';
 import {inspectCapacityMetadataCommand,executeCapacityMetadataCommand,type MetadataWriteContext} from './capacity-ledger-command-dispatch.js';
 import {types} from 'node:util';
+import {captureOwnerBindingBatch} from './owner-binding-batch-input.js';
 import type {Database} from 'better-sqlite3';
 import {canonicalVerificationJson as json,VERIFICATION_BUDGET} from './protocol.js';
 import {assertVerificationDatabaseBudget,runVerificationTransaction} from './storage-budget.js';
@@ -366,6 +367,12 @@ export function createSharedCapacityLedger(authority:object){
   attributeSession(raw:CapacityAttributionInput){if(arguments.length!==1)throw Error('shared_capacity_arguments');const input=attributionInput(raw);return write(()=>attributeInTransaction(input));},
   querySessionAttribution(raw:CapacityAttributionInput){if(arguments.length!==1)throw Error('shared_capacity_arguments');const input=attributionInput(raw);return readSnapshot(()=>{const physical=owned(input.physicalOwner,input.operationId),beneficiary=owner(input.beneficiaryOwner);return readAttribution(physical,beneficiary);});},
   bindOwner(binding:object):CapacityOwner{if(arguments.length!==1)throw Error('shared_capacity_arguments');identity();synchronous(assertCurrent());if(!binding||typeof binding!=='object')throw Error('shared_capacity_owner');const fixed=ownerIdentity(binding),token=Object.freeze({}) as CapacityOwner;owners.set(token,{binding,identity:fixed});return token;},
+  bindOwners(bindings:readonly object[]):readonly CapacityOwner[]{
+   if(arguments.length!==1)throw Error('shared_capacity_arguments');identity();synchronous(assertCurrent());const captured=captureOwnerBindingBatch(bindings),facts=readSharedCapacityOwners(authority,captured);
+   if(facts.length!==captured.length)throw Error('shared_capacity_owner_changed');
+   const fixed=facts.map(raw=>{const value=fields(raw,['sessionKey','producerKey']);id(value.sessionKey);id(value.producerKey);return Object.freeze(value) as unknown as Readonly<Identity>;});
+   identity();synchronous(assertCurrent());return Object.freeze(captured.map((binding,index)=>{const token=Object.freeze({}) as CapacityOwner;owners.set(token,{binding,identity:fixed[index]!});return token;}));
+  },
   reserve(token:CapacityOwner,raw:CapacityProposal){if(arguments.length!==2)throw Error('shared_capacity_arguments');const proposal=fields(raw,['operationId','resourceId','generation','partition','bytes','bindingHash']) as unknown as CapacityProposal;return write(()=>reserveInTransaction(token,proposal));},
   commit(token:CapacityOwner,operationId:string){if(arguments.length!==2)throw Error('shared_capacity_arguments');return transition(token,operationId,'committed',['reserved']);},
   requestRelease(token:CapacityOwner,operationId:string){if(arguments.length!==2)throw Error('shared_capacity_arguments');return transition(token,operationId,'release_pending',['reserved','committed','unknown']);},

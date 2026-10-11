@@ -1,3 +1,5 @@
+import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
+import type { ProxyHttpBody } from './types';
 import type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
 import type {LoopPublicationAction} from '../../../shared/loop-publication-types.js';
 import { createLogger } from '../lib/logger';
@@ -449,9 +451,9 @@ export const api = {
     return r;
   },
 
-  async recoverTask(taskId: string): Promise<{ snapshot: TaskSnapshot }> {
+  async recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }> {
     log.info('recoverTask', taskId);
-    const r = await window.xiaokDesktop.recoverTask(taskId);
+    const r = await window.xiaokDesktop.recoverTask(taskId, legacyPrompt);
     log.info('recoverTask ok', JSON.stringify({ status: r?.snapshot?.status }));
     return r;
   },
@@ -484,7 +486,7 @@ export const api = {
     return await window.xiaokDesktop.createUserLoopTemplate(input) as CreateUserLoopTemplateResultView;
   },
 
-  async updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): Promise<unknown> {
+  async updateUserLoopTemplate(loopId: string, patch: { title?: string; description?: string; prompt?: string; outputDirectory?: string; outputFileName?: string }): Promise<UserLoopTemplateView | undefined> {
     return await window.xiaokDesktop.updateUserLoopTemplate(loopId, patch);
   },
 
@@ -594,15 +596,7 @@ export const api = {
     return r;
   },
 
-  async createManagedXiaokAgent(input: {
-    name: string;
-    description?: string;
-    roles?: string[];
-    capabilities?: string[];
-    instructions?: string;
-    maxConcurrentTasks?: number;
-    desktopModelId?: string | null;
-  }): Promise<unknown> {
+  async createManagedXiaokAgent(input: ManagedAgentInput): Promise<ManagedAgentResult> {
     log.info('createManagedXiaokAgent', JSON.stringify({ name: input.name, roles: input.roles }));
     const r = await window.xiaokDesktop.createManagedXiaokAgent(input);
     log.info('createManagedXiaokAgent ok');
@@ -789,7 +783,7 @@ export const api = {
   async updateChannelBinding(_accessToken: string, channelId: string, bindingId: string, patch: Record<string, unknown>): Promise<ChannelBindingResponse | null> {
     const api = getDesktopApi();
     if (!api?.kswarmProxyPatch) return null;
-    return await api.kswarmProxyPatch(`/channels/${channelId}/bindings/${bindingId}`, patch) as ChannelBindingResponse | null;
+    return await api.kswarmProxyPatch(`/channels/${channelId}/bindings/${bindingId}`, patch as ProxyHttpBody) as ChannelBindingResponse | null;
   },
   async createChannelBindCode(_accessToken: string, channelType: string): Promise<{ token: string } | null> {
     const api = getDesktopApi();
@@ -1033,11 +1027,7 @@ export const api = {
   async getConnectorsConfig(): Promise<import('./types').ConnectorsConfigSnapshot | null> {
     const desktop = (window as unknown as { xiaokDesktop?: { getConnectorsConfig?: () => Promise<import('./types').ConnectorsConfigSnapshot | null> } }).xiaokDesktop;
     if (desktop?.getConnectorsConfig) {
-      try {
-        return await desktop.getConnectorsConfig();
-      } catch {
-        return null;
-      }
+      return await desktop.getConnectorsConfig();
     }
     return {
       config: {
@@ -1051,33 +1041,21 @@ export const api = {
   async saveConnectorsConfig(input: import('./types').ConnectorsConfig): Promise<import('./types').ConnectorsConfigSnapshot | null> {
     const desktop = (window as unknown as { xiaokDesktop?: { saveConnectorsConfig?: (input: unknown) => Promise<import('./types').ConnectorsConfigSnapshot> } }).xiaokDesktop;
     if (desktop?.saveConnectorsConfig) {
-      try {
-        return await desktop.saveConnectorsConfig(input);
-      } catch {
-        return null;
-      }
+      return await desktop.saveConnectorsConfig(input);
     }
     return null;
   },
   async listConnectorRuntimes(): Promise<import('./types').ConnectorsProviderRuntime[]> {
     const desktop = (window as unknown as { xiaokDesktop?: { listConnectorRuntimes?: () => Promise<import('./types').ConnectorsProviderRuntime[]> } }).xiaokDesktop;
     if (desktop?.listConnectorRuntimes) {
-      try {
-        return await desktop.listConnectorRuntimes();
-      } catch {
-        return [];
-      }
+      return await desktop.listConnectorRuntimes();
     }
     return [];
   },
   async testConnectorProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult> {
     const desktop = (window as unknown as { xiaokDesktop?: { testConnectorProvider?: (kind: 'search' | 'fetch') => Promise<ConnectorTestResult> } }).xiaokDesktop;
     if (desktop?.testConnectorProvider) {
-      try {
-        return await desktop.testConnectorProvider(kind);
-      } catch (e) {
-        return { success: false, latencyMs: 0, providerName: 'unknown', error: (e as Error).message };
-      }
+      return await desktop.testConnectorProvider(kind);
     }
     return { success: false, latencyMs: 0, providerName: 'none', error: 'not available in browser' };
   },

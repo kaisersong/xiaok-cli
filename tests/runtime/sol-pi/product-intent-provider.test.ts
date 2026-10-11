@@ -1,4 +1,7 @@
 import {afterEach,it,expect,vi} from 'vitest';
+import {setImmediate as yieldEventLoop} from 'node:timers/promises';
+// Let the real worker process pending IPC between synchronous product cases.
+afterEach(async()=>{await yieldEventLoop();await yieldEventLoop();});
 import {mkdtempSync,rmSync,writeFileSync,existsSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';import {homedir,tmpdir} from 'node:os';import {randomUUID} from 'node:crypto';
 const route=vi.hoisted(()=>({protected:false}));

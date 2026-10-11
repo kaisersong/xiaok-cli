@@ -9,6 +9,8 @@ import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {createVerificationCompletionComposition} from '../../../src/runtime/verification/completion-composition.js';
 import {createApplicationBindingAuthority} from '../../../src/runtime/verification/application-binding-authority.js';
 import {applicationBindingReviewBytes} from '../../../src/runtime/verification/application-binding-review.js';
+import {businessApplicationBindingHash} from '../../../src/runtime/verification/business-application-binding.js';
+import {goalRegistrationHash} from '../../../src/runtime/verification/owner-enrollment-review.js';
 import {openPrivateVerificationDatabase} from '../../../src/runtime/verification/private-database.js';
 import {createProfileIndexPublisher} from '../../../src/runtime/verification/profile-index-publication.js';
 import {createReceiverReplyVerifier} from '../../../src/runtime/verification/receiver-authentication.js';
@@ -225,6 +227,77 @@ it('routes original requests through the actual signed public daemon and fixed a
   await expect(router.invoke('application.delete',{},peer,new AbortController().signal)).rejects.toThrow(/method/);expect(renewals).toBe(5);
   current=false;await expect(client.applicationTransport.call('application.lookupRequest',request)).rejects.toThrow();
  }finally{client.dispose();await server.close();f.close();}
+});
+it('routes and captures all seven application methods before renewal across the actual authority boundary',async()=>{
+ const durableSnapshot=(database:any)=>({
+  requests:database.prepare('SELECT * FROM goal_application_requests ORDER BY request_id').all(),
+  challenges:database.prepare('SELECT * FROM goal_application_challenges ORDER BY id').all(),
+  clock:database.prepare('SELECT * FROM goal_application_clock ORDER BY domain_id,qualification_epoch').all(),
+  transitions:database.prepare('SELECT * FROM verification_application_transitions ORDER BY transition_id').all(),
+  history:database.prepare('SELECT * FROM verification_application_history ORDER BY owner_key,revision').all(),
+  pointers:database.prepare('SELECT * FROM verification_application_pointers ORDER BY owner_key').all(),
+ });
+ for(const method of ['prepare','prepareRequest','lookupRequest','recoverRequest','authorize','inspect','reconcile'] as const){
+  const f=await fixture();let renewals=0,currentChecks=0,releaseRenew!:()=>void,enteredRenew!:()=>void;const held=new Promise<void>(r=>{releaseRenew=r}),entered=new Promise<void>(r=>{enteredRenew=r;}),calls:string[]=[],countedApplication={prepare:(...args:any[])=>{calls.push('prepare');return f.authority.prepare(...args)},prepareRequest:(...args:any[])=>{calls.push('prepareRequest');return f.authority.prepareRequest(...args)},lookupRequest:(...args:any[])=>{calls.push('lookupRequest');return f.authority.lookupRequest(...args)},recoverRequest:(...args:any[])=>{calls.push('recoverRequest');return f.authority.recoverRequest(...args)},authorize:(...args:any[])=>{calls.push('authorize');return f.authority.authorize(...args)},inspect:(...args:any[])=>{calls.push('inspect');return f.authority.inspect(...args)},reconcile:(...args:any[])=>{calls.push('reconcile');return f.authority.reconcile(...args)}},router=createControllerApplicationRouting({application:countedApplication as any,assertCurrent(){currentChecks++;},async renew(){renewals++;enteredRenew();await held;}}),signal=new AbortController().signal;
+  try{
+   const request={requestSource:'user',requestId:`router-${method}`,binding:structuredClone(binding)};let payload:any,preparedChallengeId:string|undefined;
+   if(method==='prepare')payload={requestSource:'user',binding:structuredClone(binding)};
+   if(method==='prepareRequest')payload=structuredClone(request);
+   if(method==='lookupRequest'||method==='recoverRequest'){payload=structuredClone(request);f.authority.recoverRequest(structuredClone(request),peer);}
+   if(method==='inspect')payload={ownerKind:'goal',ownerId:'goal'};
+   if(method==='authorize'||method==='reconcile'){const prepared=f.authority.prepare({requestSource:'user',binding},peer);preparedChallengeId=prepared.challengeId;if(method==='reconcile')await f.authority.authorize({requestSource:'user',challengeId:prepared.challengeId},peer,new AbortController().signal);payload={requestSource:'user',challengeId:prepared.challengeId};}
+   const before=durableSnapshot(f.database),approvalsBefore=f.approvals(),expectedRegistrationHash=goalRegistrationHash(f.proposal.registration),routedPeer={...peer};const pending=router.invoke(`application.${method}`,payload,routedPeer,signal);await entered;for(const key of ['binding','requestId','challengeId','ownerId'])if(Object.hasOwn(payload,key)){if(key==='binding')payload.binding.objective='mutated-after-call';else payload[key]='mutated-after-call';}routedPeer.uid=999;releaseRenew();const result=await pending;expect(calls).toEqual([method]);expect(renewals).toBe(1);expect(currentChecks).toBe(2);
+   if(method==='prepare')expect((result as any).canonicalReview.binding.objective).toBe(binding.objective);
+   if(method==='prepareRequest')expect((result as any).challenge.canonicalReview.binding.objective).toBe(binding.objective);
+   if(method==='lookupRequest')expect(result).toMatchObject({state:'not_prepared'});
+   if(method==='recoverRequest')expect(result).toMatchObject({state:'not_prepared'});
+   if(method==='inspect')expect(result).toMatchObject({state:'unbound'});
+   if(method==='reconcile')expect(result).toMatchObject({state:'active'});
+   if(method==='authorize')expect(result).toMatchObject({state:'active'});
+   const after=durableSnapshot(f.database),expected=structuredClone(before),originalRequest=after.requests.find((row:any)=>row.request_id===request.requestId),mutatedRequest=after.requests.find((row:any)=>row.request_id==='mutated-after-call');
+   const challengeId=method==='prepare'?(result as any).challengeId:method==='prepareRequest'?(result as any).challenge?.challengeId:preparedChallengeId;
+   const challengeAfter=challengeId?after.challenges.find((row:any)=>row.id===challengeId):undefined;
+   if(method==='prepareRequest'){
+    const principal={uid:peer.uid,gid:peer.gid,auditSessionId:peer.auditSessionId,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555',source:'macos-local-generateduid'};
+    expect(originalRequest).toEqual({request_id:request.requestId,principal_json:json(principal),binding_json:json(binding),challenge_id:challengeId});
+   }
+   if(method==='lookupRequest'||method==='recoverRequest'){expect(originalRequest).toBeDefined();expect(mutatedRequest).toBeUndefined();}
+   if(method==='prepare'||method==='prepareRequest'){
+    expect(after.challenges.length-before.challenges.length).toBe(1);
+    const review=JSON.parse(challengeAfter!.review_json);
+    const expectedReview={version:1,purpose:'completion-application-binding',authorityId:'authority',challengeId,principal:{uid:peer.uid,accountGeneration:'11111111-AAAA-BBBB-CCCC-555555555555',auditSessionId:peer.auditSessionId},requestSource:'user',owner:{profileId:f.owner.profileId,ownerKind:'goal',ownerId:'goal'},registrationHash:expectedRegistrationHash,previousBindingHash:null,binding,bindingHash:businessApplicationBindingHash(binding),deadline:{domainId:'clock',qualificationEpoch:1,notBefore:1000,validUntil:301000}};
+    expect(review).toEqual(expectedReview);
+    const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    expect(challengeAfter).toEqual({id:challengeId,principal:json(peer),boot:expect.stringMatching(uuid),state:'prepared',review_json:json(expectedReview),transition_id:expect.stringMatching(uuid)});
+    expected.challenges.push(challengeAfter!);
+   }else if(method==='authorize'){
+    const committed={...before.challenges.find((row:any)=>row.id===challengeId),state:'committed'};
+    expect(challengeAfter).toEqual(committed);expected.challenges=before.challenges.map((row:any)=>row.id===challengeId?committed:row);
+   }else expect(after.challenges).toEqual(before.challenges);
+   if(method==='prepareRequest'){expect(after.requests.length-before.requests.length).toBe(1);expected.requests.push(originalRequest!);}else expect(after.requests).toEqual(before.requests);
+   if(method==='authorize'){
+    expect(after.transitions.length-before.transitions.length).toBe(1);
+    const challengeRow=challengeAfter!,review=JSON.parse(challengeRow.review_json),transition=after.transitions.find((row:any)=>row.transition_id===challengeRow.transition_id),ownerKey=json(review.owner),bindingJson=json(binding),bindingHash=businessApplicationBindingHash(binding);
+    const expectedTransition={transition_id:challengeRow.transition_id,owner_key:ownerKey,previous_hash:null,binding_json:bindingJson,registration_hash:expectedRegistrationHash,state:'committed'};
+    expect(transition).toEqual(expectedTransition);expected.transitions.push(expectedTransition);
+    expect(after.history.length-before.history.length).toBe(1);
+    const expectedHistory={owner_key:ownerKey,revision:1,binding_hash:bindingHash,binding_json:bindingJson,registration_hash:expectedRegistrationHash};
+    expect(after.history).toContainEqual(expectedHistory);expected.history.push(expectedHistory);
+    const expectedPointer={owner_key:ownerKey,current_json:json({binding,bindingHash,revision:1}),pending_id:null};
+    expect(after.pointers).toContainEqual(expectedPointer);expected.pointers=before.pointers.filter((row:any)=>row.owner_key!==ownerKey).concat(expectedPointer);
+    expect(after.pointers.filter((row:any)=>row.owner_key!==ownerKey)).toEqual(before.pointers.filter((row:any)=>row.owner_key!==ownerKey));expect(f.approvals()-approvalsBefore).toBe(1);
+   }else{expect(after.transitions).toEqual(before.transitions);expect(after.history).toEqual(before.history);expect(after.pointers).toEqual(before.pointers);expect(f.approvals()-approvalsBefore).toBe(0);}
+   if(method==='prepare'||method==='prepareRequest'){expected.clock=[{domain_id:'clock',qualification_epoch:1,last_lower:1000}];expect(after.clock).toEqual(expected.clock);}else expect(after.clock).toEqual(before.clock);
+   for(const key of ['requests','challenges','clock','transitions','history','pointers'] as const)expected[key].sort((a:any,b:any)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
+   expect(after).toEqual(expected);
+  }finally{releaseRenew();f.close();}
+ }
+});
+it('keeps abort-before and abort-after-renew ahead of authority and durable side effects',async()=>{
+ const durableSnapshot=(database:any)=>({challenges:database.prepare('SELECT * FROM goal_application_challenges ORDER BY id').all(),requests:database.prepare('SELECT * FROM goal_application_requests ORDER BY request_id').all(),clock:database.prepare('SELECT * FROM goal_application_clock ORDER BY domain_id,qualification_epoch').all(),transitions:database.prepare('SELECT * FROM verification_application_transitions ORDER BY transition_id').all(),history:database.prepare('SELECT * FROM verification_application_history ORDER BY owner_key,revision').all(),pointers:database.prepare('SELECT * FROM verification_application_pointers ORDER BY owner_key').all()});
+ const f=await fixture();try{
+  for(const phase of ['before','after'] as const){let renewals=0,currentChecks=0,authorityCalls=0;const countedApplication={prepare:(...a:any[])=>{authorityCalls++;return f.authority.prepare(...a)},prepareRequest:(...a:any[])=>{authorityCalls++;return f.authority.prepareRequest(...a)},lookupRequest:(...a:any[])=>{authorityCalls++;return f.authority.lookupRequest(...a)},recoverRequest:(...a:any[])=>{authorityCalls++;return f.authority.recoverRequest(...a)},authorize:(...a:any[])=>{authorityCalls++;return f.authority.authorize(...a)},inspect:(...a:any[])=>{authorityCalls++;return f.authority.inspect(...a)},reconcile:(...a:any[])=>{authorityCalls++;return f.authority.reconcile(...a)}};const controller=new AbortController(),router=createControllerApplicationRouting({application:countedApplication as any,assertCurrent(){currentChecks++;},async renew(){renewals++;if(phase==='after')controller.abort();}});if(phase==='before')controller.abort();const before=durableSnapshot(f.database),approvalsBefore=f.approvals();await expect(router.invoke('application.prepareRequest',{requestSource:'user',requestId:`abort-${phase}`,binding:structuredClone(binding)},peer,controller.signal)).rejects.toThrow();expect(renewals).toBe(phase==='before'?0:1);expect(currentChecks).toBe(phase==='before'?0:1);expect(authorityCalls).toBe(0);expect(f.approvals()).toBe(approvalsBefore);expect(durableSnapshot(f.database)).toEqual(before);}
+ }finally{f.close();}
 });
 it.each(['approved','committed'] as const)('actual SQLite close/reopen preserves %s request and unapproved/absent fences without native replay',async phase=>{
  const f=await fixture();let reopened:ReturnType<typeof f.reopenDatabase>|undefined;

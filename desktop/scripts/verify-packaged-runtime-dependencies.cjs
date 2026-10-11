@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const { realpathSync } = require('node:fs');
 const { isBuiltin } = require('node:module');
 const path = require('node:path');
-const { extractFile, listPackage } = require('@electron/asar');
+const { extractFile, listPackage, statFile } = require('@electron/asar');
 const ts = require('typescript');
 
 const probe = `
@@ -40,7 +40,20 @@ function verifyPackagedRuntimeDependencies({ asarPath, electronPath, platform = 
     for (const node of source.statements) {
       if (!(ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) || !node.moduleSpecifier || !ts.isStringLiteral(node.moduleSpecifier)) continue;
       const specifier = node.moduleSpecifier.text;
-      if (specifier.startsWith('.') || specifier === 'electron' || isBuiltin(specifier)) continue;
+      if (specifier.startsWith('.')) {
+        // Static local imports are just as mandatory as npm dependencies.
+        // A package can pass external import smoke while failing at startup
+        // because an emitted application module was omitted from the archive.
+        const local = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+        try {
+          const info = statFile(asarPath, path.normalize(local));
+          if (info.files) throw new Error('module resolves to a directory');
+        } catch (error) {
+          throw new Error(`missing packaged local module: ${file}: ${specifier}`, { cause: error });
+        }
+        continue;
+      }
+      if (specifier === 'electron' || isBuiltin(specifier)) continue;
       const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
       if (!pkg.dependencies?.[name]) throw new Error(`${name} is not a production dependency (${file}: ${specifier})`);
       specifiers.add(specifier);

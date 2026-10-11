@@ -5,6 +5,7 @@ import { canonicalVerificationJson as json } from './protocol.js';
 const roles = ['collect', 'inspect_current', 'normalize', 'identify_delta', 'extract', 'compare', 'compose', 'rewrite', 'structure', 'conclude', 'validate', 'finalize'];
 const intentTypes = ['generate', 'revise', 'summarize', 'analyze'];
 const riskTiers = ['low', 'medium', 'high'];
+export const INTENT_BUSINESS_CONTRACT_HASH_DOMAIN = 'xiaok-intent-business-contract-v1';
 /** Inspect the whole tree before any parser or canonical serializer can read it. */
 function capture(raw) { return captureApplicationData(raw, { maximumBytes: 65536, maximumNodes: 65536, invalid: 'intent_contract_data', limit: 'intent_contract_limit' }); }
 function fields(value, keys) {
@@ -99,5 +100,5 @@ export function parseIntentBusinessContract(raw) {
     return freeze(value);
 }
 export function intentBusinessContractHash(raw) {
-    return createHash('sha256').update('xiaok-intent-business-contract-v1\0').update(json(parseIntentBusinessContract(raw))).digest('hex');
+    return createHash('sha256').update(INTENT_BUSINESS_CONTRACT_HASH_DOMAIN + '\0').update(json(parseIntentBusinessContract(raw))).digest('hex');
 }

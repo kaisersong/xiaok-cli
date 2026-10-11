@@ -48,6 +48,76 @@ it('batch rejects excessive request population before inspecting any selection',
  let accessed=0;const item=Object.defineProperty({},'kind',{enumerable:true,get(){accessed++;return 'local';}}),requests=Array(100000).fill(item);
  expect(()=>readPublishedArtifacts(fixture(),requests)).toThrow('published_artifact_selection_limit');expect(accessed).toBe(0);
 });
+
+it('keeps 7804 long selections whose exact accounting exceeds 32 MiB',()=>{
+ const count=7804,pathLength=4096,idLength=160,emptyHash=hash(Buffer.alloc(0));
+ const artifacts=[[],[]] as any[][],selections:any[]=[];
+ for(let i=0;i<count;i++){
+  const sectionIndex=i<3902?0:1,obligationId=(sectionIndex?'b':'a').repeat(idLength),prefix=`p${String(i).padStart(4,'0')}`;
+  const path=prefix+'x'.repeat(pathLength-prefix.length);
+  artifacts[sectionIndex].push({path,sha256:emptyHash,size:0,bytesBase64:''});
+  selections.push({kind:'local',obligationId,path});
+ }
+ const body={version:1,owner,dependencies:[],evaluations:artifacts.map((items,index)=>({obligationId:(index?'b':'a').repeat(idLength),definitionHash:'a'.repeat(64),binding:{},evaluation:{},artifacts:items}))};
+ const bytes=Buffer.from(json(body)),payload={owner,businessRevision:1,operationId:'large',fullTupleHash:'b'.repeat(64),payloadHash:hash(bytes),bytes};
+ const selectionBytes=selections.reduce((total,selection)=>total+Buffer.byteLength(json(selection)),0);
+ expect(selectionBytes).toBe(33_557_200);expect(bytes.length).toBeLessThan(32*1024**2);expect(selections).toHaveLength(7804);
+ const result=readPublishedArtifacts(payload,selections);
+ expect(result).toHaveLength(7804);expect(result[0].selection).toEqual(selections[0]);expect(result[3902].selection).toEqual(selections[3902]);expect(result.at(-1)?.selection).toEqual(selections.at(-1));
+ expect(result.every(item=>item.bytes.length===0)).toBe(true);
+});
+it('ignores inherited enumerable selector fields at the complete reader entry',()=>{
+ const previous=Object.getOwnPropertyDescriptor(Object.prototype,'pollutedSelectionField');let reads=0,result='';
+ try{Object.defineProperty(Object.prototype,'pollutedSelectionField',{configurable:true,enumerable:true,get(){reads++;return 'unexpected';},set(){}});result=readPublishedArtifact(fixture(),{kind:'local',obligationId:'output',path:'out/report.txt'}).bytes.toString();}
+ finally{if(previous)Object.defineProperty(Object.prototype,'pollutedSelectionField',previous);else Reflect.deleteProperty(Object.prototype,'pollutedSelectionField');}
+ expect(result).toBe('original verified bytes');expect(reads).toBe(0);
+});
+it('rejects direct index section accessors before invoking caller getters',()=>{
+ let reads=0;const section:any={obligationId:'output'};Object.defineProperty(section,'artifacts',{enumerable:true,get(){reads++;return [];}});
+ expect(()=>createPublishedArtifactIndex(owner,[section],new Set())).toThrow('published_artifact_sections');expect(reads).toBe(0);
+});
+it.each(['symbol','extra','accessor'])('rejects own data outside a selection-array index at the reader boundary: %s',mode=>{
+ let reads=0;const selections:any[]=[{kind:'local',obligationId:'output',path:'out/report.txt'}];
+ if(mode==='symbol')selections[Symbol('approval')]=true;else if(mode==='extra')selections.extra='ignored';else Object.defineProperty(selections,'extra',{enumerable:true,get(){reads++;return true;}});
+ expect(()=>readPublishedArtifacts(fixture(),selections)).toThrow('published_artifact_selection');expect(reads).toBe(0);
+});
+it('rejects expected root binding proxies before invoking their traps',()=>{
+ let traps=0;const expected=new Proxy({},{ownKeys(){traps++;throw Error('unexpected trap');}});
+ expect(()=>readPublishedArtifacts(fixture(),[],expected as any)).toThrow('published_artifact_application');expect(traps).toBe(0);
+});
+it('captures the published payload root before reading bytes or identity metadata',()=>{
+ const valid=fixture();let calls=0;
+ const proxied=new Proxy(valid,{get(){calls++;throw Error('payload get trap');}});expect(()=>readPublishedArtifact(proxied as any,{kind:'local',obligationId:'output',path:'out/report.txt'})).toThrow('published_artifact_payload');
+ const inherited=Object.assign(Object.create({get bytes(){calls++;return valid.bytes;}}),{owner:valid.owner,businessRevision:valid.businessRevision,operationId:valid.operationId,fullTupleHash:valid.fullTupleHash,payloadHash:valid.payloadHash});
+ expect(()=>readPublishedArtifact(inherited,{kind:'local',obligationId:'output',path:'out/report.txt'})).toThrow('published_artifact_payload');
+ const ownAccessor:any={...valid};Object.defineProperty(ownAccessor,'bytes',{enumerable:true,get(){calls++;return valid.bytes;}});expect(()=>readPublishedArtifact(ownAccessor,{kind:'local',obligationId:'output',path:'out/report.txt'})).toThrow('published_artifact_payload');
+ const extra:any={...valid,extra:true};expect(()=>readPublishedArtifact(extra,{kind:'local',obligationId:'output',path:'out/report.txt'})).toThrow('published_artifact_payload');extra[Symbol('hidden')]=true;expect(()=>readPublishedArtifact(extra,{kind:'local',obligationId:'output',path:'out/report.txt'})).toThrow('published_artifact_payload');
+ expect(calls).toBe(0);
+});
+it('uses the captured payload identity after reentrant selection validation',()=>{
+ const payload=fixture(),nativeIncludes=Array.prototype.includes;
+ try{
+  Array.prototype.includes=function(this:unknown[],...args:any[]){payload.operationId='mutated';return Reflect.apply(nativeIncludes,this,args);};
+  const result=readPublishedArtifact(payload,{kind:'local',obligationId:'output',path:'out/report.txt'});
+  expect(result.operationId).toBe('operation');expect(payload.operationId).toBe('mutated');
+ }finally{Array.prototype.includes=nativeIncludes;}
+});
+it('validates payload identity before canonical serialization can inspect it',()=>{
+ let traps=0;const operationId=new Proxy({}, {getPrototypeOf(){traps++;return Object.prototype;},ownKeys(){traps++;return [];},get(){traps++;return undefined;}});
+ expect(()=>readPublishedArtifact({...fixture(),operationId} as any,{kind:'local',obligationId:'output',path:'out/report.txt'})).toThrow('published_artifact_identity');
+ expect(traps).toBe(0);
+});
+it('accepts only a native Set for published artifact index filtering',()=>{
+ let calls=0;const fake=Object.create(Set.prototype);fake.has=()=>{calls++;return true;};
+ expect(()=>createPublishedArtifactIndex(owner,[],fake)).toThrow('published_artifact_shape');expect(calls).toBe(0);
+ const proxied=new Proxy(new Set(),{getPrototypeOf(){calls++;throw Error('prototype trap');},get(){calls++;throw Error('get trap');}});
+ expect(()=>createPublishedArtifactIndex(owner,[],proxied)).toThrow('published_artifact_shape');expect(calls).toBe(0);
+});
+it('rejects inherited selection owner Proxies at the complete artifact reader entry',()=>{
+ let calls=0;const originOwner=new Proxy({},{getPrototypeOf(){calls++;throw Error('prototype trap');},ownKeys(){calls++;throw Error('keys trap');}});
+ const selection={kind:'inherited' as const,obligationId:'output',path:'out/report.txt',originOwner:originOwner as any,originalObligationId:'output'};
+ expect(()=>readPublishedArtifacts(fixture(),[selection])).toThrow('published_artifact_selection');expect(calls).toBe(0);
+});
 it.each(['selection','origin'] as const)('rejects unknown oversized %s keys before invoking the canonical selector parser',mode=>{
  const hugeKey='x'.repeat(2*1024**2),selection=mode==='selection'?{kind:'local',obligationId:'output',path:'out/report.txt',[hugeKey]:'x'}:{kind:'inherited',obligationId:'output',path:'out/report.txt',originalObligationId:'output',originOwner:{profileId:'profile',ownerKind:'task',[hugeKey]:'x'}};
  vi.mocked(parsePublishedArtifactSelection).mockClear();expect(()=>readPublishedArtifacts(fixture(),[selection as any])).toThrow();expect(parsePublishedArtifactSelection).not.toHaveBeenCalled();

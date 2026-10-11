@@ -10,6 +10,7 @@ import { AppearanceProvider } from './contexts/AppearanceContext';
 import { KSwarmProvider } from './contexts/KSwarmContext';
 import { ThreadListProvider } from './contexts/thread-list';
 import './styles/index.css';
+import './styles/punctum.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

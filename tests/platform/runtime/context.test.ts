@@ -237,18 +237,25 @@ describe('platform runtime context', () => {
       await context.mcpReady;
       const name = 'mcp__mutable__search';
       expect(registry.getToolDefinitions().map((tool) => tool.name)).toContain(name);
+      expect(context.capabilityRegistry.getDiscovery(name)).not.toHaveProperty('metadata');
+      expect(registry.searchToolDiscoveries('select:'+name)[0]).not.toHaveProperty('metadata');
+      expect(JSON.parse(await registry.executeTool('tool_search',{query:'select:'+name}))[0]).not.toHaveProperty('effect');
       expect(await registry.executeTool(name, { q: action })).toContain('fixture:');
       if (action === '__race__') {
         const fresh = 'mcp__mutable__fresh';
         await waitFor(() => expect(registry.getToolDefinitions().map((tool) => tool.name)).toContain(fresh));
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(context.mcpTools.map((tool) => tool.definition.name)).toContain(fresh);
+        expect(context.capabilityRegistry.getDiscovery(fresh)).not.toHaveProperty('metadata');
+        expect(registry.searchToolDiscoveries('select:'+fresh)[0]).not.toHaveProperty('metadata');
         expect(await registry.executeTool(fresh, { q: 'still current' })).toContain('fixture:still current');
         return;
       }
       await waitFor(() => {
         expect(context.mcpTools).toEqual([]);
         expect(context.capabilityRegistry.get(name)).toBeUndefined();
+        expect(context.capabilityRegistry.getDiscovery(name)).toBeUndefined();
+        expect(registry.searchToolDiscoveries('select:'+name)).toEqual([]);
         expect(registry.getToolDefinitions().map((tool) => tool.name)).not.toContain(name);
       });
       expect(await registry.executeTool(name, { q: 'stale' })).toContain('Error:');

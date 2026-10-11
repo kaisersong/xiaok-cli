@@ -1,3 +1,4 @@
+import {createKnownDirectoryWriterFence} from '../verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../verification/ordinary-source-writer-observation.js';
 import {parseGoalForkSourceSnapshot,type GoalForkSourceSnapshot} from '../verification/owner-enrollment-review.js';
 import { createHash } from 'node:crypto';
@@ -131,8 +132,9 @@ function validateRecords(sessionId: string, raw: unknown): GoalNativeMutation[] 
 
 /** Main/CLI-owned recovery facts, not authorization. The byte/count bounds are
  * per session, including all terminal records; no whole-profile bound is claimed. */
+const knownGoalNativeWriters=new WeakMap<object,ReturnType<typeof createKnownDirectoryWriterFence>>();
 export class FileGoalNativeJournal {
-  constructor(private readonly rootDir: string, private readonly atomicWrite: AtomicWriteFile = writeFileAtomicallySync) {}
+  constructor(private readonly rootDir: string, private readonly atomicWrite: AtomicWriteFile = writeFileAtomicallySync) {knownGoalNativeWriters.set(this,createKnownDirectoryWriterFence(rootDir,'goal-file-root'));}
 
   load(sessionId: string): GoalNativeMutation[] {
     id(sessionId);
@@ -152,6 +154,8 @@ export class FileGoalNativeJournal {
   }
 
   put(raw: GoalNativeMutationUpdate): void {
+    const writer=knownGoalNativeWriters.get(this);
+    if(!writer)throw Error('known_writer_fence_owner');
     // Capture before filesystem locking, the writer or any host callback.
     const value = JSON.parse(json(raw));
     shape(value, ['sessionId', 'requestSource', 'expectedRevision', 'next']); id(value.sessionId);
@@ -164,6 +168,7 @@ export class FileGoalNativeJournal {
     mkdirSync(this.rootDir, { recursive: true });
     const release = acquireSaveLock(join(this.rootDir, '.goal-native.save.lock'));
     try {
+      writer.assertOpen();
       observeOrdinaryDirectoryWriter(this.rootDir, 'goal-file-root');
       assertOrdinarySourceWriterRoute();
       const records = this.load(value.sessionId), index = records.findIndex(row => row.id === next.id), before = records[index];

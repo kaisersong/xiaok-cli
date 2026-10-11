@@ -1,7 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { buildProjectCardMessageFromToolResult } from '../../renderer/src/components/chatToolResultMessages';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { LocaleProvider } from '../../renderer/src/contexts/LocaleContext';
 import { ProjectInlineCard } from '../../renderer/src/components/projects/ProjectInlineCard';
 
@@ -38,6 +39,15 @@ function renderCard(overrides = {}) {
 }
 
 describe('ProjectInlineCard', () => {
+  it('navigates from a restored conversation creation card to the actual project detail', () => {
+    const message = buildProjectCardMessageFromToolResult(JSON.stringify({ ok: true, created: true, projectId: 'proj-history', project: { id: 'proj-history', name: '历史研究项目', goal: '报告', status: 'planning', members: ['a', 'b', 'c'] } }));
+    expect(message?.projectData).toBeDefined();
+    function Location() { return <output>{useLocation().pathname}</output>; }
+    render(<MemoryRouter><LocaleProvider><ProjectInlineCard {...message!.projectData!} /><Location /></LocaleProvider></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: '历史研究项目' }));
+    expect(screen.getByText('/projects/proj-history')).toBeInTheDocument();
+  });
+
   it('renders project name', () => {
     renderCard();
     expect(screen.getByText('AI推广方案')).toBeTruthy();

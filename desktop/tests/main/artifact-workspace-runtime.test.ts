@@ -78,9 +78,17 @@ describe('artifact workspace runtime contract', () => {
       expect((await host.recoverTask(created.taskId)).snapshot.status).toBe('completed');
     });
 
+    const persisted = (await host.recoverTask(created.taskId)).snapshot;
+    expect(persisted.events.map(event => event.type)).toEqual([
+      'task_started', 'understanding_updated', 'task_execution_started', 'artifact_recorded', 'task_terminal',
+    ]);
+    const artifacts = persisted.events.filter(event => event.type === 'artifact_recorded');
+    expect(artifacts).toHaveLength(1);
+    const artifactIndex = persisted.events.findIndex(event => event.type === 'artifact_recorded');
+    expect(artifactIndex).toBe(3);
     expect(observations).toContainEqual({
       taskId: 'task-owned',
-      eventIndex: 2,
+      eventIndex: artifactIndex,
       recoveredType: 'artifact_recorded',
       recoveredMimeType: 'text/html',
     });

@@ -1,5 +1,8 @@
 import {advanceDirectOperation} from '../../../src/runtime/sol-pi/compound-direct-operation.js';
-import {it,expect,vi} from 'vitest';
+import {afterEach,it,expect,vi} from 'vitest';
+import {setImmediate as yieldEventLoop} from 'node:timers/promises';
+// Let the real worker process pending IPC between synchronous product cases.
+afterEach(async()=>{await yieldEventLoop();await yieldEventLoop();});
 import {mkdtempSync,rmSync,writeFileSync,realpathSync,existsSync,readdirSync,readFileSync} from 'node:fs';import {join} from 'node:path';import {tmpdir,homedir} from 'node:os';import {randomUUID} from 'node:crypto';
 import {createProductObservationOwner,parseObservationPolicyFile} from '../../../src/runtime/sol-pi/product-bootstrap.js';
 import {createProductObservationSubagentTool,getProductObservationDelegationAdapter} from '../../../src/runtime/sol-pi/product-subagent-tool.js';

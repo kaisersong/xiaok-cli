@@ -1,3 +1,4 @@
+import {assertNativeSqliteArrayConstruction} from './native-sqlite-construction-intrinsics.js';
 import {readNativeKSwarmCensus} from './native-sqlite-census.js';
 import {assertKSwarmSqlIntegrity} from './kswarm-sql-integrity.js';
 import type {Database} from 'better-sqlite3';
@@ -79,6 +80,7 @@ export function createKSwarmEnrollmentStore(db:Database,initialize=true){
   recordKSwarmStorageFeature(db);
  }
  function ready(owner:VerificationOwner,allowPending=false){
+  assertNativeSqliteArrayConstruction();
   if(owner.ownerKind!=='kswarm')return;assertKSwarmSqlIntegrity(db);
   const p=db.prepare('SELECT uid,account_id,profile_id,state FROM main.verification_profiles WHERE profile_id=?').get(owner.profileId) as {uid:number;account_id:string;profile_id:string;state:string}|undefined;
   if(!p||!allowPending&&p.state!=='active')throw Error('enrollment_kswarm_principal');
@@ -99,7 +101,7 @@ export function createKSwarmEnrollmentStore(db:Database,initialize=true){
  return Object.freeze({assertProposal,stage,commit,ready});
 }
 
-export function readKSwarmEnrollmentReceipt(database:Database,owner:VerificationOwner){return createKSwarmEnrollmentStore(database,false).ready(owner);}
+export function readKSwarmEnrollmentReceipt(database:Database,owner:VerificationOwner){assertNativeSqliteArrayConstruction();return createKSwarmEnrollmentStore(database,false).ready(owner);}
 
 /** Full original facts around qualified callbacks; never a grant or cached authority. */
 export function readKSwarmEnrollmentSnapshot(database:Database,owner:VerificationOwner):string{

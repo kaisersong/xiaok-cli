@@ -119,6 +119,19 @@ describe('formatSubmittedInput', () => {
     }
   });
 
+  it('erases colored block backgrounds without padding spaces that reflow into extra rows', () => {
+    setColorsEnabled(true);
+    process.stdout.columns = 120;
+    const lines = formatSubmittedInput('你好 KEEP_INPUT').slice(0, -1).split('\n');
+    expect(lines).toEqual([
+      '\x1b[48;5;235m\x1b[K\x1b[0m',
+      '\x1b[48;5;235m › 你好 KEEP_INPUT\x1b[K\x1b[0m',
+      '\x1b[48;5;235m\x1b[K\x1b[0m',
+    ]);
+    expect(formatHistoryBlock({ type: 'text', text: 'KEEP_HISTORY' }))
+      .toContain('KEEP_HISTORY\x1b[K\x1b[0m');
+  });
+
   it('renders the submitted input as a full-width block without a left gutter gap', () => {
     setColorsEnabled(false);
     process.stdout.columns = 24;

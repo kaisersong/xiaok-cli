@@ -8,7 +8,7 @@ import {createKbStoreSqlite} from '../../electron/kb-store-sqlite.js';
 import {createAssistantCandidatePromotionTargets} from '../../electron/assistant-controller.js';
 import type {AssistantPromotionTargetInput} from '../../electron/assistant-candidate-promotion.js';
 let root:string,store:ReturnType<typeof createKbStoreSqlite>,input:AssistantPromotionTargetInput;
-beforeEach(()=>{root=mkdtempSync(join(tmpdir(),'assistant-knowledge-'));store=createKbStoreSqlite(join(root,'kb.sqlite'));const col=store.createCollection({name:'Original',embeddingModelId:'test',embeddingDim:1});input={candidateId:'candidate',loopRunId:'run',targetId:'assistant-source:candidate',title:'原始标题',content:'多段 Unicode 正文 🌱。\n'.repeat(150),scope:'global',collectionId:col.id,provenance:{kind:'assistant_candidate',candidateId:'candidate',loopRunId:'run',evidenceRefs:[{kind:'task',id:'task'}]}};});
+beforeEach(()=>{root=mkdtempSync(join(tmpdir(),'assistant-knowledge-'));store=createKbStoreSqlite(join(root,'kb.sqlite'));const col=store.createCollection({name:'Original',embeddingModelId:'test',embeddingDim:1}, 'user');input={candidateId:'candidate',loopRunId:'run',targetId:'assistant-source:candidate',title:'原始标题',content:'多段 Unicode 正文 🌱。\n'.repeat(150),scope:'global',collectionId:col.id,provenance:{kind:'assistant_candidate',candidateId:'candidate',loopRunId:'run',evidenceRefs:[{kind:'task',id:'task'}]}};});
 afterEach(()=>{store.close();rmSync(root,{recursive:true,force:true});});
 function target(){return createAssistantCandidatePromotionTargets({memoryStore:{} as never,memoryBackend:'layered',kbStore:store});}
 function sourceInput(){return {sourceId:input.targetId,clientRequestKey:'assistant-candidate:'+input.candidateId,collectionId:input.collectionId!,kind:'paste' as const,title:input.title,text:input.content,parseStatus:'pending' as const,metadata:{assistantCandidateId:input.candidateId,assistantRunId:input.loopRunId,assistantEvidenceRefs:input.provenance.evidenceRefs}};}
@@ -51,7 +51,7 @@ it('never reads accessor-bearing input while checking the durable store contract
  expect(()=>store.ensureAssistantSource!(malformed,'user')).toThrow();expect(reads).toBe(0);expect(store.getSource(input.targetId)).toBeUndefined();
 });
 it('rejects a chunk moved to a different collection by an SQL trigger',async()=>{
- const other=store.createCollection({name:'Other',embeddingModelId:'test',embeddingDim:1}),db=store._db as DatabaseSync;
+ const other=store.createCollection({name:'Other',embeddingModelId:'test',embeddingDim:1}, 'user'),db=store._db as DatabaseSync;
  db.prepare("CREATE TEMP TABLE selected_collection(id TEXT)").run();db.prepare('INSERT INTO selected_collection VALUES(?)').run(other.id);
  db.exec("CREATE TEMP TRIGGER move_chunk AFTER UPDATE OF parse_status ON sources WHEN NEW.parse_status='parsed' BEGIN UPDATE chunks SET collection_id=(SELECT id FROM selected_collection) WHERE source_id=NEW.id; END");
  await expect(target().ensureKnowledge(input)).rejects.toThrow();expect(store.getSource(input.targetId)).toBeUndefined();expect(store.listChunks(input.targetId)).toEqual([]);

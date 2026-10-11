@@ -1,5 +1,20 @@
+import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
+import { registerUpdaterIpc } from '../../electron/updater-typed-ipc.js';
+import { registerRecorderWindowIpc } from '../../electron/recorder-window-typed-ipc.js';
+import {registerConnectorsIpc} from '../../electron/connectors-typed-ipc.js';
+import {registerScheduledTimedActionIpc} from '../../electron/scheduled-timed-action-typed-ipc.js';
+import { registerKnowledgeIpc } from '../../electron/knowledge-typed-ipc.js';
+import { registerPrinciplesIpc } from '../../electron/principles-typed-ipc.js';
+import { registerDiagnosticsIpc } from '../../electron/diagnostics-typed-ipc.js';
+import { registerModelProviderIpc } from '../../electron/model-provider-typed-ipc.js';
+import { registerKSwarmProxy } from '../../electron/kswarm-ipc-proxy.js';
+import { registerSemanticDesktopIpc } from '../../electron/semantic-ipc.js';
+import { registerLoopManagementIpc } from '../../electron/loop-management-typed-ipc.js';
+import { registerThreadMetadataIpc } from '../../electron/thread-metadata-typed-ipc.js';
+import { registerDesktopSmallConfigIpc } from '../../electron/desktop-small-config-typed-ipc.js';
 import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
 import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
+import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
 import { registerLoopPublicationIpc } from '../../electron/loop-publication-ipc.js';
@@ -81,6 +96,17 @@ describe('preload API contract', () => {
       'createTask',
       'createTaskWithFiles',
       'subscribeTask',
+      'getConversationActivities',
+      'getConversationActivityUnread',
+      'markConversationActivitiesRead',
+      'subscribeConversationActivityOverview',
+      'subscribeConversationActivities',
+      'getWorkActivity',
+      'getMcpTaskInputs',
+      'answerMcpTaskInput',
+      'cancelMcpWork',
+      'updateWorkReporting',
+      'stopWorkWatch',
       'getMultiAgentSnapshot',
       'listMultiAgentGroups',
       'listMultiAgents',
@@ -359,7 +385,7 @@ describe('preload API contract', () => {
       on: vi.fn(),
       off: vi.fn(),
     };
-    const api = createPreloadApi(ipcRenderer) as Record<string, (input: unknown) => Promise<unknown>>;
+    const api = createPreloadApi(ipcRenderer) as unknown as Record<string, (input: unknown) => Promise<unknown>>;
     const maliciousInput = {
       conversationId: 'conversation-1',
       workspaceRootId: 'root-1',
@@ -920,7 +946,7 @@ describe('preload API contract', () => {
 
   it('FULL_PRELOAD_KEYS is the composition of PRELOAD_API_KEYS + KSWARM_PROXY_KEYS + EXTRA_KEYS + THREAD_META_KEYS', () => {
     const composed = [...PRELOAD_API_KEYS, ...KSWARM_PROXY_KEYS, ...EXTRA_KEYS, ...THREAD_META_KEYS];
-    expect(FULL_PRELOAD_KEYS.sort()).toEqual([...composed].sort());
+    expect([...FULL_PRELOAD_KEYS].sort()).toEqual([...composed].sort());
   });
 
   it('createPreloadApi returns keys matching FULL_PRELOAD_KEYS', () => {
@@ -992,7 +1018,7 @@ describe('preload API contract', () => {
     await api.saveFile({ filePath: '/tmp/test.md', content: 'hello' });
     await (api as any).selectHtmlEditMedia({ kind: 'image' });
     await api.listPrinciples();
-    await api.savePrinciple({ id: 'p1', content: 'test' });
+    await api.savePrinciple({ id: 'p1', content: 'test' } as never);
     await api.deletePrinciple('p1');
 
     expect(ipcRenderer.invoke).toHaveBeenCalledWith('desktop:showSaveDialog', { defaultPath: '/tmp/test.md' });
@@ -1018,15 +1044,38 @@ function extractRegisteredHandlerChannels(): Set<string> {
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
+  registerSemanticDesktopIpc({handle:channel=>{channels.add(channel);}}, {assistant:{} as never,kswarm:{} as never,authorizeAssistant:()=>false});
   registerLoopPublicationIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerLoopCurrentViewIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
+  registerLoopManagementIpc({ handle: channel => { channels.add(channel); } });
+  registerThreadMetadataIpc({ handle: channel => { channels.add(channel); } });
+  registerDesktopSmallConfigIpc({ handle: channel => { channels.add(channel); } });
+  registerModelProviderIpc({ handle: channel => { channels.add(channel); } });
+  registerDiagnosticsIpc({ handle: channel => { channels.add(channel); } });
+  registerPrinciplesIpc({ handle: channel => { channels.add(channel); } });
+  registerKnowledgeIpc({ handle: channel => { channels.add(channel); } });
+  registerScheduledTimedActionIpc({ handle: channel => { channels.add(channel); } });
+  registerConnectorsIpc({ handle: channel => { channels.add(channel); } });
+  registerRecorderWindowIpc({ handle: channel => { channels.add(channel); } }, new Map(), { isMainWindowSender: () => false, isRecorderWindowSender: () => false });
+  registerUpdaterIpc({ handle: channel => { channels.add(channel); } }, new Map(), () => false);
+  registerPluginCatalogIpc({ handle: channel => { channels.add(channel); } });
+  registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
+  registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
   for (const filePath of HANDLER_REGISTRATION_FILES) {
     const source = readFileSync(filePath, 'utf8');
     const re = /(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*'([^']+)'/g;
     let match: RegExpExecArray | null;
     while ((match = re.exec(source)) !== null) {
       channels.add(match[1]!);
+    }
+    // artifactHandler owns the fixed semantic prefix; actual registration and
+    // consumer delivery are covered by artifact-workspace-ipc-registry.test.ts.
+    for (const artifact of source.matchAll(/artifactHandler\(\s*'([^']+)'/g)) {
+      channels.add(`desktop:artifactWorkspace:${artifact[1]}`);
+    }
+    for (const memory of source.matchAll(/memoryHandler\(\s*'([^']+)'/g)) {
+      channels.add(`desktop:${memory[1]}`);
     }
   }
   return channels;
@@ -1107,7 +1156,8 @@ function loadRuntimePreloadApi(): {
 } {
   const require = createRequire(import.meta.url);
   const preloadPath = resolve(process.cwd(), 'electron', 'preload.cjs');
-  const originalLoad = (Module as unknown as { _load: NodeJS.Require })._load;
+  type ModuleLoader = (request: string, parent: unknown, isMain: boolean) => unknown;
+  const originalLoad = (Module as unknown as { _load: ModuleLoader })._load;
   let exposedApi: Record<string, unknown> | null = null;
   const ipcRenderer = {
     invoke: vi.fn(),
@@ -1116,7 +1166,7 @@ function loadRuntimePreloadApi(): {
   };
 
   delete require.cache[preloadPath];
-  (Module as unknown as { _load: NodeJS.Require })._load = ((request: string, parent: unknown, isMain: boolean) => {
+  (Module as unknown as { _load: ModuleLoader })._load = ((request: string, parent: unknown, isMain: boolean) => {
     if (request === 'electron') {
       return {
         contextBridge: {
@@ -1131,12 +1181,12 @@ function loadRuntimePreloadApi(): {
       return { userInfo: () => ({ username: 'test-user' }) };
     }
     return originalLoad(request, parent, isMain);
-  }) as NodeJS.Require;
+  }) as ModuleLoader;
 
   try {
     require(preloadPath);
   } finally {
-    (Module as unknown as { _load: NodeJS.Require })._load = originalLoad;
+    (Module as unknown as { _load: ModuleLoader })._load = originalLoad;
     delete require.cache[preloadPath];
   }
 
@@ -1145,3 +1195,76 @@ function loadRuntimePreloadApi(): {
   }
   return { api: exposedApi, ipcRenderer };
 }
+
+
+describe('Loop management complete11 transport bridge contracts', () => {
+  it.each(['typescript', 'sandbox-cjs'] as const)('keeps all11 actual %s names, payload arity and results', async implementation => {
+    const port = { invoke: vi.fn().mockResolvedValue({ transportOnly: true }), on: vi.fn(), off: vi.fn() };
+    const loaded = implementation === 'sandbox-cjs' ? loadRuntimePreloadApi() : null;
+    const api = loaded?.api ?? createPreloadApi(port);
+    const ipc = loaded?.ipcRenderer ?? port;
+    ipc.invoke.mockResolvedValue({ transportOnly: true });
+    const calls: Array<[string, string, unknown[]]> = [
+      ['getLoopDefinitions', 'listDefinitions', []], ['listUserLoopTemplates', 'listUserTemplates', []],
+      ['createUserLoopTemplate', 'createUserTemplate', [{ loopId: 'loop', kind: 'task_completion', title: 'title', prompt: 'prompt' }]],
+      ['updateUserLoopTemplate', 'updateUserTemplate', ['loop', { prompt: 'updated' }]],
+      ['deleteUserLoopTemplate', 'deleteUserTemplate', ['loop']], ['getEvidenceAnomalies', 'listAnomalies', ['loop']],
+      ['runLoopNow', 'runNow', ['loop']], ['listLoopConstraints', 'listConstraints', ['loop']],
+      ['setLoopConstraintActive', 'setConstraintActive', ['constraint', false]], ['confirmLoopConstraint', 'confirmConstraint', ['constraint']],
+      ['clearLoopRunHistory', 'clearRunHistory', ['loop', ['failed', 'blocked']]],
+    ];
+    for (const [method, suffix, args] of calls) {
+      ipc.invoke.mockClear();
+      const value = await (api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method]!(...args);
+      expect(value).toEqual({ transportOnly: true });
+      expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith(`desktop:loops:${suffix}`, ...args);
+      expect(ipc.invoke.mock.calls[0]).toHaveLength(1 + args.length);
+    }
+  });
+});
+
+
+describe('Thread metadata complete7 transport bridge contracts', () => {
+  it.each(['typescript', 'sandbox-cjs'] as const)('keeps all7 actual %s tuples and the complete migration receipt', async implementation => {
+    const receipt = { ok: false, degraded: true, migrated: false, reason: 'degraded' };
+    const port = { invoke: vi.fn().mockResolvedValue(receipt), on: vi.fn(), off: vi.fn() };
+    const loaded = implementation === 'sandbox-cjs' ? loadRuntimePreloadApi() : null;
+    const api = loaded?.api ?? createPreloadApi(port), ipc = loaded?.ipcRenderer ?? port;
+    ipc.invoke.mockResolvedValue(receipt);
+    const calls: Array<[string, unknown[]]> = [
+      ['getThreadLabels', []], ['setThreadLabel', ['线程', 'pinned']],
+      ['unsetThreadLabel', ['线程', 'pinned']], ['moveThreadLabel', ['线程', 'inbox', 'todo']],
+      ['getAppFlag', ['gtd-enabled']], ['setAppFlag', ['gtd-enabled', 'true']],
+      ['migrateLegacyThreadMeta', [{ pinned: ['历史'], gtdEnabled: true }]],
+    ];
+    for (const [method, args] of calls) {
+      ipc.invoke.mockClear();
+      const value = await (api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method]!(...args);
+      expect(value).toBe(receipt);
+      expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith(`desktop:${method}`, ...args);
+      expect(ipc.invoke.mock.calls[0]).toHaveLength(1 + args.length);
+    }
+  });
+});
+
+describe('Small configuration complete4 transport bridge contracts', () => {
+  it.each(['typescript', 'sandbox-cjs'] as const)('preserves all4 actual %s tuples, complete replies and failure without retry', async implementation => {
+    const port = { invoke: vi.fn(), on: vi.fn(), off: vi.fn() };
+    const loaded = implementation === 'sandbox-cjs' ? loadRuntimePreloadApi() : null;
+    const api = loaded?.api ?? createPreloadApi(port), ipc = loaded?.ipcRenderer ?? port;
+    const calls: Array<[string, unknown[], unknown]> = [
+      ['getSkillDebugConfig', [], { enabled: false }], ['saveSkillDebugConfig', [{ enabled: true }], { enabled: true }],
+      ['getKswarmConfig', [], { maxConcurrentTasks: 3 }], ['saveKswarmConfig', [{ maxConcurrentTasks: 6.8 }], { maxConcurrentTasks: 7 }],
+    ];
+    for (const [method, args, receipt] of calls) {
+      ipc.invoke.mockClear().mockResolvedValueOnce(receipt);
+      expect(await (api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method]!(...args)).toBe(receipt);
+      expect(ipc.invoke).toHaveBeenCalledExactlyOnceWith(`desktop:${method}`, ...args);
+      expect(ipc.invoke.mock.calls[0]).toHaveLength(1 + args.length);
+    }
+    const failure = Error('desktop_config_operation_unknown');
+    ipc.invoke.mockClear().mockRejectedValueOnce(failure);
+    await expect((api as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>).saveSkillDebugConfig!({ enabled: false })).rejects.toBe(failure);
+    expect(ipc.invoke).toHaveBeenCalledTimes(1);
+  });
+});

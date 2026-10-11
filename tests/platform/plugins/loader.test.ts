@@ -31,6 +31,19 @@ describe('plugin loader', () => {
     expect(loaded.map((plugin) => plugin.name)).toEqual(['shared', 'local']);
   });
 
+  it('ignores hidden and legacy backup manifests without deleting them', async () => {
+    const pluginsDir = join(root, 'plugins');
+    for (const name of ['kai-slide-creator', '.kai-slide-creator.bak-old', 'kai-canvas-creator.legacy-backup']) {
+      mkdirSync(join(pluginsDir, name), { recursive: true });
+      writeFileSync(join(pluginsDir, name, 'plugin.json'), JSON.stringify({
+        name: 'kai-slide-creator', version: '3.4.0',
+        mcpServers: [{ name: 'slide-renderer', type: 'stdio', command: 'python3', args: ['server.py'] }],
+      }));
+    }
+    const loaded = await loadPlugins([pluginsDir]);
+    expect(loaded.map(plugin => plugin.rootDir)).toEqual([join(pluginsDir, 'kai-slide-creator')]);
+  });
+
   it('reports collisions instead of silently overriding core capabilities', async () => {
     const pluginDir = join(root, 'plugins');
     mkdirSync(join(pluginDir, 'acme'), { recursive: true });

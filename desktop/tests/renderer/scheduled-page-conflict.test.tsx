@@ -60,10 +60,11 @@ describe('ScheduledPage stale schedule edits', () => {
     await waitFor(() => expect(mocks.deleteThread).toHaveBeenCalledWith('old-thread'));
     mocks.getScheduledTasks.mockResolvedValue([{ ...oldTask, threadId: 'new-thread', lastRunAt: 200, updatedAt: 3 }]);
     const writes: unknown[] = [];
-    // jsdom 29 exposes Storage as a Proxy, so owning/overriding `setItem` on the
-    // `localStorage` instance is silently ignored; spy on the prototype instead.
-    const originalSetItem = Storage.prototype.setItem;
-    const cacheWrites = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+    // The Node compatibility storage has own methods; real jsdom Storage is a
+    // Proxy whose methods live on Storage.prototype. Observe the actual owner.
+    const storageOwner = Object.hasOwn(localStorage, 'setItem') ? localStorage : Storage.prototype;
+    const originalSetItem = storageOwner.setItem;
+    const cacheWrites = vi.spyOn(storageOwner, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
       if (key === 'xiaok:scheduled-tasks') writes.push(JSON.parse(value));
       return originalSetItem.call(this, key, value);
     });

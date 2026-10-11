@@ -1,3 +1,4 @@
+import {createKnownDirectoryWriterFence} from '../../../runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../../../runtime/verification/ordinary-source-writer-observation.js';
 import {constants,openSync,closeSync,fstatSync,readSync,lstatSync,existsSync,realpathSync,mkdirSync,unlinkSync,opendirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -79,8 +80,12 @@ function verifyHolder(binding:SessionAliasBinding){const stat=lstatSync(binding.
  const directory=join(binding.holderRoot,'.canonical-session-aliases');if(existsSync(directory)){const dir=lstatSync(directory);if(!dir.isDirectory()||dir.isSymbolicLink())fail('holder_changed');}}
 /** Caller holds the shared FileSessionStore root mutation lock and actual target
  * execution lease. This low-level identity transaction does not issue grants. */
+function assertAliasWriterOpen(root:string,binding:SessionAliasBinding){
+ createKnownDirectoryWriterFence(root,'session-root').assertOpen();
+ createKnownDirectoryWriterFence(join(binding.holderRoot,'.canonical-session-aliases'),'session-alias-holder').assertOpen();
+}
 export function registerSessionAliasLocked(root:string,input:SessionAliasBinding){
- const binding=captureSessionAlias(input),rows=readSessionAliases(root),existing=rows.find(row=>row.aliasId===binding.aliasId);
+ const binding=captureSessionAlias(input);assertAliasWriterOpen(root,binding);const rows=readSessionAliases(root),existing=rows.find(row=>row.aliasId===binding.aliasId);
  if(existing){if(!isDeepStrictEqual(captureSessionAlias(existing),binding))fail('conflict');if(existing.state!=='active')fail('released');}
  else if(rows.some(row=>row.holderRoot===binding.holderRoot&&row.holderId===binding.holderId))fail('holder_conflict');
  verifyHolder(binding);const path=markerPath(binding),bytes=JSON.stringify(marker(root,binding));if(Buffer.byteLength(bytes)>MARKER_LIMIT)fail('marker_limit');
@@ -94,7 +99,7 @@ export function registerSessionAliasLocked(root:string,input:SessionAliasBinding
  writeFileAtomicallySync(path,bytes,{requireDirectorySync:true});return Object.freeze({markerPath:path,binding:Object.freeze(binding)});
 }
 export function releaseSessionAliasLocked(root:string,input:SessionAliasBinding){
- const binding=captureSessionAlias(input),rows=readSessionAliases(root),existing=rows.find(row=>row.aliasId===binding.aliasId);
+ const binding=captureSessionAlias(input);assertAliasWriterOpen(root,binding);const rows=readSessionAliases(root),existing=rows.find(row=>row.aliasId===binding.aliasId);
  if(!existing||!isDeepStrictEqual(captureSessionAlias(existing),binding))fail('conflict');
  verifyHolder(binding);
  const existingDirectory=join(binding.holderRoot,'.canonical-session-aliases');

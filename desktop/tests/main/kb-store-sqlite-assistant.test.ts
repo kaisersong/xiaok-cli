@@ -14,7 +14,7 @@ describe('KbStore stable assistant source identity', () => {
     rootDir = join(tmpdir(), `xiaok-kb-assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(rootDir, { recursive: true });
     store = createKbStoreSqlite(join(rootDir, 'knowledge.db'));
-    collectionId = store.createCollection({ name: 'Assistant', embeddingModelId: 'm', embeddingDim: 384 }).id;
+    collectionId = store.createCollection({ name: 'Assistant', embeddingModelId: 'm', embeddingDim: 384 }, 'user').id;
   });
 
   afterEach(() => {

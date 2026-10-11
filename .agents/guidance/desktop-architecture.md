@@ -31,6 +31,13 @@
 - 改 IPC / preload contract 时，同步更新 main handler、`preload-api.ts`、`preload.cjs`、renderer API type 和 contract tests。
 
 
+## 创建与恢复流程的回归底线
+
+- 项目与协作空间的创建协议、授权或架构重构，必须保留既有完整用户链：会话明确请求 → 持久实体及列表 → 约定的自动启动/推进 → 创建卡片 → 点击真实详情 → 历史会话重新打开。用户已授权的创建不能悄悄退化成 proposal-only 或额外手工启动。
+- 改结果 DTO 前列出所有消费者：main producer、工具循环、renderer live/replay、任务交付判定、preload/IPC、共享 types。使用生产创建结果穿过消费者测试，不能两边各喂不相容的手造样例后宣称兼容；同时保留旧格式、失败、拒绝和历史数据用例。
+- 文件预览必须覆盖真实 main 路径允许集与 transport，直连 HTTP mock 无法证明 main/preload 链路可用。组件、服务、安装包 IPC 和原生窗口验收分层说明，缺失层不能宣称通过。
+- 2026-10-07 教训：Room-first 移除会话自动创建；后续修复更换回执但漏了卡片消费者。对应复盘见 docs/bugfix/2026-10-07-chat-created-project-card.md，后续创建入口必须复用语义 owner，不破坏上述链。
+
 ## 国际化 (i18n) 强制要求
 
 - renderer 中所有用户可见的字符串（标签、按钮文案、placeholder、toast、confirm、状态文本、错误信息、空状态提示）必须通过 `t.*` locale 引用，禁止硬编码中文或英文。

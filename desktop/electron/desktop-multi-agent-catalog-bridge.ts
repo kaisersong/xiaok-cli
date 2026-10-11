@@ -1,3 +1,4 @@
+import { captureToolDescriptionMetadata, type ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
 import {getBuiltinToolIdentity} from '../../src/ai/tools/native-tool-identity.js';
 import {bindDesktopNativeReadonlyDescriptor} from './desktop-native-catalog-provenance.js';
 import { resolve } from 'node:path';
@@ -24,26 +25,35 @@ const CONTROL_NAMES = new Set<string>(MULTI_AGENT_TOOL_NAMES);
 export class DesktopOwnedToolRegistry extends ToolRegistry {
   private ownership = new Map<string, DesktopToolOwnership>();
   private listeners = new Set<() => void>();
-  constructor(options: RegistryOptions, tools: Tool[]) {
-    super(options, tools);
+  constructor(options: RegistryOptions, tools: Tool[], metadata?: ReadonlyMap<Tool, ToolDescriptionMetadata>) {
+    super(options, tools, metadata);
     for (const tool of tools) this.ownership.set(tool.definition.name, { ownerId: BUILTINS.has(tool.definition.name) ? 'builtin' : 'desktop-host',
       slotKey: tool.definition.name, binding: BUILTINS.has(tool.definition.name) ? 'builtin' : 'rootOnly',
       verifiedReadOnly: PURE_READ_BUILTINS.has(tool.definition.name) });
   }
-  override registerTool(tool: Tool): void {
+  override registerTool(tool: Tool, metadata?: ToolDescriptionMetadata): void {
     // ToolRegistry's constructor dispatches here before subclass fields exist.
-    if (!this.ownership) { super.registerTool(tool); return; }
+    if (!this.ownership) { super.registerTool(tool, metadata); return; }
     const current = this.ownership.get(tool.definition.name);
-    this.registerOwnedTool(tool, current ?? { ownerId: 'desktop-host', slotKey: tool.definition.name, binding: 'rootOnly' });
+    this.registerOwnedTool(tool, current ?? { ownerId: 'desktop-host', slotKey: tool.definition.name, binding: 'rootOnly' }, metadata);
   }
-  registerOwnedTool(tool: Tool, owner: DesktopToolOwnership): void {
+  registerOwnedTool(tool: Tool, owner: DesktopToolOwnership, metadata?: ToolDescriptionMetadata): void {
+    const description = captureToolDescriptionMetadata(metadata);
     const name = tool.definition.name;
     if (CONTROL_NAMES.has(name) || name === 'tool_search') throw new Error('reserved multi-agent control namespace');
     const previous = this.ownership.get(name);
     if (this.getRegisteredTool(name) && previous && (previous.ownerId !== owner.ownerId || previous.slotKey !== owner.slotKey)) throw new Error('Desktop capability name collision');
-    // A default host registration cannot masquerade as another MCP owner.
-    this.ownership.set(name, Object.freeze({ ...owner }));
-    super.registerTool(tool); this.changed();
+    // Complete readonly tree admission must precede subclass publication too.
+    this.preflightToolRegistration(tool);
+    const capturedOwner = Object.freeze({ ...owner });
+    // Ordinary registration keeps its existing notification/ownership semantics.
+    if (!this.isNativeReadonlyOnly) {
+      this.ownership.set(name, capturedOwner);
+      super.registerTool(tool, description); this.changed();
+      return;
+    }
+    super.registerTool(tool, description);
+    this.ownership.set(name, capturedOwner); this.changed();
   }
   override unregisterTool(name: string, expected?: Tool): void {
     if (expected && this.getRegisteredTool(name) !== expected) return;
@@ -89,19 +99,22 @@ export class DesktopToolCatalogBridge {
   }
   private sync(): void {
     const seen = new Set<string>();
-    for (const definition of this.options.registry.getToolDefinitions()) {
+    for (const { coreDefinition: definition, metadata } of this.options.registry.getToolDiscoveries()) {
       if (definition.name === 'tool_search') continue;
       const tool = this.options.registry.getRegisteredTool(definition.name);
       const owner = this.options.registry.ownerOf(definition.name);
       if (!tool || !owner) continue;
       const key = JSON.stringify([owner.ownerId, owner.slotKey]); seen.add(key);
       const previous = this.slots.get(key);
-      if (previous?.tool === tool && previous.present) continue;
+      if (previous?.tool === tool && previous.present) {
+        this.catalog.refreshDescription({ requestSource: 'scheduler', ownerId: owner.ownerId, capabilityId: previous.descriptor.capabilityId }, metadata);
+        continue;
+      }
       const descriptor = this.catalog.publish({ requestSource: 'scheduler', ownerId: owner.ownerId, slotId: previous?.descriptor.slotId,
         entry: { definition: tool.definition, aliases: [], permission: tool.permission, verifiedReadOnly: owner.verifiedReadOnly === true,
           scope: { workspaceId: this.options.workspaceId, materialIds: [], permissions: [tool.permission] },
           bindInvocation: authority => this.bind(tool, owner, authority),
-        } });
+        } }, metadata);
       if(owner.binding==='builtin'&&!owner.bindInvocation&&PURE_READ_BUILTINS.has(tool.definition.name)&&getBuiltinToolIdentity(tool)==='readonly')bindDesktopNativeReadonlyDescriptor(descriptor,tool);
       this.slots.set(key, { descriptor, tool, present: true });
     }

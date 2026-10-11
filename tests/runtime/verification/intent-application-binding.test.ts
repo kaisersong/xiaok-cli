@@ -3,6 +3,8 @@ import {createHash} from 'node:crypto';
 import {createIntentPlan} from '../../../src/ai/intent-delegation/planner.js';
 import {parseIntentBusinessContract} from '../../../src/runtime/verification/intent-business-contract.js';
 import {createIntentApplicationBinding,parseIntentApplicationBinding,intentApplicationBindingHash} from '../../../src/runtime/verification/intent-application-binding.js';
+import {assertIntentApplicationArtifacts} from '../../../src/runtime/verification/intent-application-artifacts.js';
+import {intentHostSubjectOwner} from '../../../src/runtime/verification/intent-host-subject.js';
 const H='a'.repeat(64),sha=(text:string)=>createHash('sha256').update(text).digest('hex');
 function candidate(parent=false):any {
  const result=createIntentPlan({instanceId:'host',sessionId:'session',input:'请写报告，然后生成幻灯片',skills:[]});if(result.kind!=='plan')throw Error('fixture');
@@ -44,6 +46,39 @@ it('active union wrapper preserves strict raw binding validation instead of eras
 
 it('outer binding and binding.kind accessors never execute through the active wrapper',()=>{let reads=0;const binding=createIntentApplicationBinding(candidate()),bindingHash=intentApplicationBindingHash(binding);expect(()=>parseActiveBusinessApplicationBinding({get binding(){reads++;return binding;},bindingHash,revision:1})).toThrow();const changed={...binding,get kind(){reads++;return 'intent';}};expect(()=>parseActiveBusinessApplicationBinding({binding:changed,bindingHash,revision:1})).toThrow();expect(reads).toBe(0);});
 
+it('captures Map.values factory and MapIterator.next for the Intent parent entry',()=>{
+ const rawValues=Map.prototype.values,iteratorPrototype=Object.getPrototypeOf(new Map().values()),rawNext=iteratorPrototype.next;let valuesCalls=0,nextCalls=0,error:unknown;
+ try{
+  Object.defineProperty(Map.prototype,'values',{configurable:true,writable:true,value:function(){valuesCalls++;throw Error('replaced_map_values');}});
+  Object.defineProperty(iteratorPrototype,'next',{configurable:true,writable:true,value:function(){nextCalls++;throw Error('replaced_map_iterator_next');}});
+  try{createIntentApplicationBinding(candidate(true));}catch(e){error=e;}
+ }finally{Object.defineProperty(Map.prototype,'values',{configurable:true,writable:true,value:rawValues});Object.defineProperty(iteratorPrototype,'next',{configurable:true,writable:true,value:rawNext});}
+ expect(error).toBeUndefined();expect(valuesCalls).toBe(0);expect(nextCalls).toBe(0);
+});
+it('does not consult replaceable Array find/some/map/filter methods in Intent producer binding',()=>{
+ const reportCandidate=candidate();reportCandidate.body.producerReports=[{protectionMode:'protected',action:{kind:'artifact-report',stageId:reportCandidate.subject.stageId,kindOfArtifact:'report',storage:'inline',label:'完整标题',path:null,inlineValue:'原文',summary:null,reportedStructuralValidation:'passed',reportedSemanticValidation:'failed',origin:{kind:'model-report',providerInvocationId:'provider',toolInvocationId:'tool'}},requestSource:'agent',now:100,artifactId:'original-artifact'}];
+ const stepCandidate=candidate();stepCandidate.body.executionReports=[];stepCandidate.body.artifacts=[];stepCandidate.body.producerReports=[{protectionMode:'protected',action:{kind:'step-report',stepId:stepCandidate.contract.stages[0].steps[0].stepId,status:'failed',breadcrumb:'failure',receiptNote:null,blockedReason:'retry',origin:{kind:'model-report',providerInvocationId:'provider-step',toolInvocationId:'tool-step'}},requestSource:'agent',now:100,artifactId:null}];
+ const names=['find','some','map','filter'] as const,originals=names.map(name=>Object.getOwnPropertyDescriptor(Array.prototype,name)!),calls:string[]=[];let error:unknown;
+ try{
+  for(const name of names)Object.defineProperty(Array.prototype,name,{configurable:true,writable:true,value:function(){calls.push(name);throw Error(`replaced_array_${name}`);}});
+  try{createIntentApplicationBinding(reportCandidate);createIntentApplicationBinding(stepCandidate);}catch(e){error=e;}
+ }finally{for(let i=0;i<names.length;i++)Object.defineProperty(Array.prototype,names[i],originals[i]!);}
+ expect(error).toBeUndefined();expect(calls).toEqual([]);
+});
+it('uses captured Array iterator and Set constructor for the Intent parent entry',()=>{
+ const raw=candidate(true),arrayIterator=Array.prototype[Symbol.iterator],setDescriptor=Object.getOwnPropertyDescriptor(globalThis,'Set')!;let iteratorCalls=0,setCalls=0,error:unknown;
+ try{
+  Object.defineProperty(Array.prototype,Symbol.iterator,{configurable:true,writable:true,value:function(){iteratorCalls++;throw Error('replaced_array_iterator');}});
+  Object.defineProperty(globalThis,'Set',{configurable:true,writable:true,value:class extends setDescriptor.value{constructor(...args:any[]){setCalls++;throw Error('replaced_set_constructor');}}});
+  try{createIntentApplicationBinding(raw);}catch(e){error=e;}
+ }finally{Object.defineProperty(Array.prototype,Symbol.iterator,{configurable:true,writable:true,value:arrayIterator});Object.defineProperty(globalThis,'Set',setDescriptor);}
+ expect(error).toBeUndefined();expect(iteratorCalls).toBe(0);expect(setCalls).toBe(0);
+});
+it('Intent wrapper checks all section shapes before path preflight through its public entry',()=>{
+ const binding=createIntentApplicationBinding(candidate()),owner={profileId:'profile',...intentHostSubjectOwner(binding.subject)},artifact={path:'x'.repeat(5000),sha256:H,size:0,bytesBase64:''};
+ const section={obligationId:'output',definitionHash:H,binding:{},evaluation:{},artifacts:[artifact]},extra={obligationId:'second',definitionHash:H,binding:{},evaluation:{},artifacts:[],unexpected:true};
+ expect(()=>assertIntentApplicationArtifacts(owner,binding,owner,[section,extra])).toThrow('published_artifact_sections');
+});
 it('retains the same original artifact identity in independent parent stages without renaming',()=>{const raw=candidate(true);raw.body.artifacts.push({...raw.body.artifacts[0],stageId:raw.contract.stages[1].stageId});expect(createIntentApplicationBinding(raw).body.artifacts).toEqual(raw.body.artifacts);});
 it('still rejects a duplicated original stage/artifact tuple and a cross-stage spoof onto that tuple',()=>{const raw=candidate(true);raw.body.artifacts.push({...raw.body.artifacts[0],stageId:raw.contract.stages[1].stageId});const repeated=structuredClone(raw);repeated.body.artifacts.push({...repeated.body.artifacts[0]});expect(()=>createIntentApplicationBinding(repeated)).toThrow('intent_application_artifact_binding');raw.body.artifacts[1].stageId=raw.body.artifacts[0].stageId;expect(()=>createIntentApplicationBinding(raw)).toThrow('intent_application_artifact_binding');});
 

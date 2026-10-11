@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-export declare const REGISTRATION_TABLE_KEYS: {
+export declare const REGISTRATION_TABLE_KEYS: Readonly<{
     readonly verification_owner_dependencies: "parent_key";
     readonly owner_enrollment_intents: "logical_owner_key";
     readonly verification_registered_owners: "owner_key";
@@ -15,7 +15,7 @@ export declare const REGISTRATION_TABLE_KEYS: {
     readonly verification_application_pointers: "owner_key";
     readonly verification_application_history: "owner_key";
     readonly verification_application_transitions: "owner_key";
-};
+}>;
 /** Per-call full SQL census only. No row/permission/clock/current result crosses a checkpoint. */
 export declare function createRegistrationCensusDatabase(db: Database): Readonly<{
     begin(): {

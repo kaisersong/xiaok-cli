@@ -1,4 +1,5 @@
 import { ObservationControls } from './ObservationControls';
+import { ConversationActivityPanel } from './ConversationActivityPanel';
 import { useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createLogger } from '../lib/logger';
 import { useParams, useLocation } from 'react-router-dom';
@@ -28,6 +29,7 @@ import { getStreamingRenderDelay } from '../lib/streaming-render-policy';
 import { parseComputerUseRecoverableAction, resolveComputerUseUserAction } from '../lib/computer-use-recoverable-action';
 import {
   buildProjectCardMessageFromToolResult,
+  buildRoomCardMessageFromToolResult,
   buildWorkflowMessageFromToolResult,
   type WorkflowLabels,
 } from './chatToolResultMessages';
@@ -506,11 +508,6 @@ export function ChatShell() {
           resultRef.current = resultWithArtifacts;
           if (live) setStatus('completed');
           setPlanSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'completed' } : s));
-          // Only set title if thread has no title yet (preserve user's prompt as title)
-          if (taskId && !titleLockedRef.current) {
-            titleLockedRef.current = true;
-            api.updateThreadTitle(taskId, r.summary.slice(0, 40)).catch(() => {});
-          }
         } else {
           // Desktop tasks: artifacts is [], but still set result for generatedFiles extraction
           const finalText = streamRef.current || r.summary;
@@ -603,6 +600,8 @@ export function ChatShell() {
         const ev = event as { type: 'canvas_tool_result'; toolName: string; toolUseId: string; ok: boolean; response: string };
         const immediateMessage = ev.ok && ev.toolName === 'create_project'
           ? buildProjectCardMessageFromToolResult(ev.response)
+          : ev.ok && ev.toolName === 'create_collaboration_room'
+            ? buildRoomCardMessageFromToolResult(ev.response)
           : ev.ok && (ev.toolName === 'run_dynamic_workflow_script' || ev.toolName === 'get_dynamic_workflow_status')
             ? buildWorkflowMessageFromToolResult(ev.response, t as WorkflowLabels)
             : null;
@@ -985,6 +984,10 @@ export function ChatShell() {
             const message = buildProjectCardMessageFromToolResult(evR.response);
             if (message) msgs.push(message);
           }
+          if (evR.ok && evR.toolName === 'create_collaboration_room') {
+            const message = buildRoomCardMessageFromToolResult(evR.response);
+            if (message && !msgs.some(item => item.id === message.id)) msgs.push(message);
+          }
           if (evR.ok && (evR.toolName === 'run_dynamic_workflow_script' || evR.toolName === 'get_dynamic_workflow_status')) {
             const message = buildWorkflowMessageFromToolResult(evR.response, t as WorkflowLabels);
             if (message) msgs.push(message);
@@ -1181,6 +1184,7 @@ export function ChatShell() {
       if (!loadCurrent()) return;
 
       if (threadData) {
+        titleLockedRef.current = Boolean(threadData.title?.trim());
         const allTaskIds = (threadData.taskIds && threadData.taskIds.length > 0) ? threadData.taskIds
           : threadData.currentTaskId ? [threadData.currentTaskId] : [];
         const isEmptyHelpThread = allTaskIds.length === 0 && !initialPrompt;
@@ -1205,14 +1209,20 @@ export function ChatShell() {
         let lastSubSinceIndex = 0;
         let lastSubToolStepsMsgId: string | null = null;
         let lastSnapshot: TaskSnapshot | undefined;
+        const missingTaskIds: string[] = [];
         for (const tid of allTaskIds) {
           // Check again after each async operation
           if (!loadCurrent()) return;
 
           try {
-            const { snapshot } = await api.recoverTask(tid);
+            const { snapshot, recoveredFromTaskId } = await api.recoverTask(tid, allTaskIds.length === 1 ? threadData.title ?? undefined : undefined);
             if (!loadCurrent()) return;
             if (snapshot) {
+              if (!titleLockedRef.current && snapshot.prompt?.trim()) {
+                titleLockedRef.current = true;
+                api.updateThreadTitle(taskId, snapshot.prompt.trim().slice(0, 40)).catch(() => {});
+              }
+              if (recoveredFromTaskId) allMessages.push({ id: `history-recovery-${tid}`, role: 'assistant', content: t.chatShell.historyRecovered(recoveredFromTaskId) });
               console.log(`[ChatShell] Replaying task=${tid} prompt="${snapshot.prompt?.slice(0, 40)}" status=${snapshot.status} events=${snapshot.events?.length}`);
               const isFirst = tid === allTaskIds[0];
               const addPrompt = Boolean(snapshot.prompt && (!isFirst || !initialPrompt));
@@ -1252,11 +1262,13 @@ export function ChatShell() {
                 }
               }
             }
-          } catch { if (!loadCurrent()) return; /* skip failed task */ }
+          } catch { if (!loadCurrent()) return; missingTaskIds.push(tid); }
         }
 
         // Final check before setting any state
         if (!loadCurrent()) return;
+
+        if (missingTaskIds.length) allMessages.push({ id: 'history-unavailable', role: 'assistant', content: t.chatShell.historyUnavailable(missingTaskIds.join(', ')) });
 
         // Now set all state atomically after final check
         setThread(threadData);
@@ -1394,7 +1406,7 @@ export function ChatShell() {
     setResult(null);
 
     // Update thread title only on first user message (keep original topic as title)
-    if (taskId && messages.filter(m => m.role === 'user').length === 0) {
+    if (taskId && !titleLockedRef.current && !thread?.title?.trim() && messages.filter(m => m.role === 'user').length === 0) {
       titleLockedRef.current = true;
       api.updateThreadTitle(taskId, text.slice(0, 40)).catch(() => {});
     }
@@ -1844,6 +1856,7 @@ export function ChatShell() {
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
       <ChatView
+        activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
         approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}

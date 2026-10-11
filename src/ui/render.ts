@@ -405,14 +405,19 @@ export function formatSubmittedInput(text: string): string {
   const lines = text
     .split(/\r?\n/)
     .flatMap((line) => wrapDisplayLine(line, textWidth));
+  // Padding spaces become transcript content during terminal reflow. Paint
+  // the remainder with EL while the background is set, as the live footer does.
+  const backgroundLine = (line: string): string => colorsEnabled
+    ? bgDarkGray(`${line}\x1b[K`)
+    : padToDisplayWidth(line, safeWidth);
 
-  return [bgDarkGray(' '.repeat(safeWidth))]
+  return [backgroundLine('')]
     .concat(lines
     .map((line, index) => {
       const prefix = index === 0 ? firstLinePrefix : continuationPrefix;
-      return bgDarkGray(padToDisplayWidth(`${prefix}${line}`, safeWidth));
+      return backgroundLine(`${prefix}${line}`);
     }))
-    .concat(bgDarkGray(' '.repeat(safeWidth)))
+    .concat(backgroundLine(''))
     .join('\n') + '\n';
 }
 

@@ -1,11 +1,15 @@
+import {createScheduledToolFixture} from '../support/scheduled-tool-context.js';
+import { types } from 'node:util';
+import { openOwnedWorkflowNormalCase } from '../support/owned-workflow-normal-case.js';
 // @vitest-environment node
 import {createServer} from 'node:http';
 import type {AddressInfo} from 'node:net';
+import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
 import { OLD_MODEL_EFFORT_CONFIGS } from '../../../tests/support/model-effort-compatibility.js';
 import { loadConfig } from '../../../src/utils/config.js';
 import { buildDesktopSystemPrompt } from '../../electron/desktop-system-prompt.js';
 import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync, renameSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -58,6 +62,11 @@ function mockKSwarmService(): KSwarmService {
     getStatus: () => ({ running: true, port: 4400, pid: 1, restartCount: 0, lastError: null }),
     onStatusChange: () => () => {},
     getDesktopMutationToken: () => 'desktop-token',
+    // This legacy stub has no service/factory authority. Unsupported newer APIs fail closed.
+    getServiceStatus: async () => { throw Error('fixture_unsupported_service_capability'); },
+    getHealthDiagnosticInput: async () => { throw Error('fixture_unsupported_service_capability'); },
+    restartRelatedService: async () => { throw Error('fixture_unsupported_service_capability'); },
+    getIntentBrokerRoomToken: () => { throw Error('fixture_unsupported_service_capability'); },
     request: async (path: string, init?: RequestInit) => new Response('{"error":"mock"}', { status: 501 }),
   };
 }
@@ -441,7 +450,7 @@ describe('desktop services', () => {
       materials: [{ materialId: material.materialId }],
     });
 
-    expect(created.understanding.taskType).toBe('sales_deck');
+    expect(created.understanding?.taskType).toBe('sales_deck');
     const replayed = await collectFirst(services.subscribeTask(created.taskId), 4);
     expect(replayed.map((event) => event.type)).not.toContain('needs_user');
 
@@ -501,7 +510,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     const observedOptions: Array<StreamOptions | undefined> = [];
     const observedPrompts: string[] = [];
     const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (
@@ -802,13 +811,16 @@ describe('desktop services', () => {
   });
 
   it('runs a script-generated workflow agent node from the node prompt instead of project diagnosis', async () => {
-    const workFolder = join(rootDir, 'script-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-script-workflow","name":"AI products","goal":"分析 AI 产品动态"},"workflowName":"ai_products_analysis_may_2026","prompt":"搜索并分析 Anthropic 与 Meta 在 2026 年 5 月的 AI 产品动态。","label":"Anthropic+Meta 动态采集","phaseTitle":"Anthropic+Meta 动态采集"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const artifactsDir = join(workFolder, 'artifacts');
     const finalArtifactPath = join(artifactsDir, 'script-agent-report.md');
     let receivedPrompt = '';
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner: async ({ prompt, emitRuntimeEvent, sessionId }) => {
         receivedPrompt = prompt;
@@ -832,21 +844,7 @@ describe('desktop services', () => {
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-script-workflow',
-        workflowRunId: 'wf-proj-script-workflow-ai-products-1',
-        workflowId: 'ai_products_analysis_may_2026',
-        nodeId: 'script-agent-3',
-        nodeKind: 'agent_task',
-        nodeTitle: 'Anthropic+Meta 动态采集',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-3',
-        project: { id: 'proj-script-workflow', name: 'AI products', goal: '分析 AI 产品动态', status: 'active', workFolder },
-        input: {
-          prompt: '搜索并分析 Anthropic 与 Meta 在 2026 年 5 月的 AI 产品动态。',
-          label: 'Anthropic+Meta 动态采集',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
@@ -859,10 +857,15 @@ describe('desktop services', () => {
       { path: 'artifacts/script-agent-report.md', kind: 'markdown', label: 'script-agent-report.md' },
     ]);
     expect(result.output?.evidenceRefs).toEqual(['artifact:artifacts/script-agent-report.md']);
+  
+    } finally { await owned.close(services); }
   });
 
   it('falls back to raw markdown summary when a script node returns non-JSON output', async () => {
-    const workFolder = join(rootDir, 'markdown-fallback-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-markdown-fallback","name":"AI products","goal":"分析 AI 产品动态"},"workflowName":"ai_products_analysis_may_2026","prompt":"输出战略与市场分析。","label":"战略与市场分析","phaseTitle":"战略与市场分析"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const markdownSummary = [
       '## 战略与市场分析',
       '',
@@ -871,9 +874,9 @@ describe('desktop services', () => {
       '- 要点一：市场份额持续扩大',
       '- 要点二：竞品动态密集',
     ].join('\n');
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner: async ({ emitRuntimeEvent, sessionId }) => {
         emitRuntimeEvent({
@@ -888,29 +891,20 @@ describe('desktop services', () => {
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-markdown-fallback',
-        workflowRunId: 'wf-proj-markdown-fallback-1',
-        workflowId: 'ai_products_analysis_may_2026',
-        nodeId: 'script-agent-4',
-        nodeKind: 'agent_task',
-        nodeTitle: '战略与市场分析',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-4',
-        project: { id: 'proj-markdown-fallback', name: 'AI products', goal: '分析 AI 产品动态', status: 'active', workFolder },
-        input: {
-          prompt: '输出战略与市场分析。',
-          label: '战略与市场分析',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
     expect(result.output?.summary).toBe(markdownSummary);
+  
+    } finally { await owned.close(services); }
   });
 
   it('retries a script-generated workflow node once after a transient stream close', async () => {
-    const workFolder = join(rootDir, 'retry-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-script-workflow-retry","name":"Workflow retry","goal":"验证 transient retry"},"workflowName":"dynamic_workflow_retry","prompt":"执行一次可能发生 transient stream close 的节点。","label":"重试节点","phaseTitle":"并行 Smoke 检查"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const artifactsDir = join(workFolder, 'artifacts');
     const finalArtifactPath = join(artifactsDir, 'retry-script-agent-report.md');
     const runner = vi.fn(async ({ emitRuntimeEvent, sessionId }) => {
@@ -934,29 +928,15 @@ describe('desktop services', () => {
         }),
       });
     });
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner,
     });
 
     const result = await services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-script-workflow-retry',
-        workflowRunId: 'wf-proj-script-workflow-retry-1',
-        workflowId: 'dynamic_workflow_retry',
-        nodeId: 'script-agent-1',
-        nodeKind: 'agent_task',
-        nodeTitle: '并行 Smoke 检查',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-1',
-        project: { id: 'proj-script-workflow-retry', name: 'Workflow retry', goal: '验证 transient retry', status: 'active', workFolder },
-        input: {
-          prompt: '执行一次可能发生 transient stream close 的节点。',
-          label: '重试节点',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     });
 
@@ -965,39 +945,32 @@ describe('desktop services', () => {
     expect(result.output?.artifacts).toEqual([
       { path: 'artifacts/retry-script-agent-report.md', kind: 'markdown', label: 'retry-script-agent-report.md' },
     ]);
+  
+    } finally { await owned.close(services); }
   });
 
   it('fails a workflow node when the desktop runner fails instead of leaving it running', async () => {
-    const workFolder = join(rootDir, 'failed-workflow-project');
+    const owned = await openOwnedWorkflowNormalCase({"project":{"id":"proj-script-workflow-failed","name":"Workflow failed","goal":"验证失败收敛"},"workflowName":"dynamic_workflow_smoke","prompt":"执行会失败的节点。","label":"失败节点","phaseTitle":"并行 Smoke 检查"});
+    let services: ReturnType<typeof createDesktopServices> | undefined;
+    try {
+    const workFolder = owned.fixture.workspace.path;
     const runner = vi.fn(async () => {
       throw new Error('simulated_worker_failure');
     });
-    const services = createDesktopServices({
+    services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
-      kswarmService: mockKSwarmService(),
+      kswarmService: owned.kswarmService,
       now: () => 300,
       runner,
     });
 
     await expect(services.runKSwarmWorkflowNode({
-      handoff: {
-        projectId: 'proj-script-workflow-failed',
-        workflowRunId: 'wf-proj-script-workflow-failed-1',
-        workflowId: 'dynamic_workflow_smoke',
-        nodeId: 'script-agent-2',
-        nodeKind: 'agent_task',
-        nodeTitle: '并行 Smoke 检查',
-        attempt: 1,
-        handoffId: 'wfhd-script-agent-2',
-        project: { id: 'proj-script-workflow-failed', name: 'Workflow failed', goal: '验证失败收敛', status: 'active', workFolder },
-        input: {
-          prompt: '执行会失败的节点。',
-          label: '失败节点',
-        },
-      },
+      handoff: owned.handoff,
       targetParticipantId: 'xiaok-worker',
     })).rejects.toThrow(/desktop_task_failed/);
     expect(runner).toHaveBeenCalledTimes(1);
+  
+    } finally { await owned.close(services); }
   });
 
   it('probes the current model without running a user task', async () => {
@@ -2068,9 +2041,41 @@ describe('desktop services', () => {
     });
   });
 
-  it('discovers kswarm artifacts written directly to the project artifacts directory', async () => {
+  it('runs project workers concurrently with separate same-name artifact files', async () => {
+    const base = join(rootDir, 'parallel-artifacts');
+    mkdirSync(base, { recursive: true });
+    const legacy = join(base, 'search-evidence.json');
+    writeFileSync(legacy, '{"legacy":true}');
+    let started = 0;
+    let release!: () => void;
+    const bothStarted = new Promise<void>(resolve => { release = resolve; });
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(),
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        const directory = prompt.match(/^产物目录：(.*)$/m)![1];
+        const title = prompt.match(/^任务：(.*)$/m)![1];
+        mkdirSync(directory, { recursive: true });
+        writeFileSync(join(directory, 'search-evidence.json'), JSON.stringify({ task: title }));
+        if (++started === 2) release();
+        await bothStarted;
+        emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '已完成当前资料收集任务，来源证据已写入文件，可核验交接。' });
+      },
+    });
+    const output = await Promise.all(['A', 'B'].map(id => services.runKSwarmHandoffTask({ handoff: {
+      kind: 'kswarm_task_handoff_v1', runId: 'run-' + id,
+      project: { id: 'proj-parallel', name: 'Project', goal: 'Collect sources', requirements: '', artifactsDir: base },
+      task: { id: '../task-' + id, title: id, brief: '', acceptanceCriteria: '' },
+    } })));
+    const paths = output.map(result => result.artifacts.find(artifact => artifact.label === 'search-evidence.json')!.path);
+    expect(paths[0]).not.toBe(paths[1]);
+    expect(paths.every(path => path.startsWith(base) && /[\\/]run-[0-9a-f]{32}[\\/]/.test(path))).toBe(true);
+    expect(paths.map(path => JSON.parse(readFileSync(path, 'utf8')).task)).toEqual(['A', 'B']);
+    expect(readFileSync(legacy, 'utf8')).toBe('{"legacy":true}');
+  });
+
+  it('discovers kswarm artifacts written directly to the handoff output directory', async () => {
     const artifactsDir = join(rootDir, 'artifacts');
-    const artifactPath = join(artifactsDir, 'research-notes.md');
+    let artifactPath = join(artifactsDir, 'research-notes.md');
     let receivedPrompt = '';
     const services = createDesktopServices({
       dataRoot: join(rootDir, 'data'),
@@ -2078,7 +2083,9 @@ describe('desktop services', () => {
       now: () => 300,
       runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
         receivedPrompt = prompt;
-        mkdirSync(artifactsDir, { recursive: true });
+        const outputDirectory = prompt.match(/^产物目录：(.*)$/m)![1];
+        artifactPath = join(outputDirectory, 'research-notes.md');
+        mkdirSync(outputDirectory, { recursive: true });
         writeFileSync(artifactPath, '# Research notes\n\n- 来源：https://example.com 2026-05-20');
         emitRuntimeEvent({
           type: 'receipt_emitted',
@@ -2224,6 +2231,247 @@ describe('desktop services', () => {
     });
   });
 
+  it('inspecting active project work does not falsely recover it as stale', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let receivedPrompt = '';
+    let enter!: () => void, finish!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const finished = new Promise<void>(resolve => { finish = resolve; });
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, taskIds: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt; enter(); await finished;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                rationale: '核心交付物',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const run = services.runKSwarmAssignPo({
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        projectName: 'Project',
+        goal: 'Write report',
+        requirements: 'Chinese output',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    await entered;
+    const active = await services.getActiveTask();
+    const taskFile = readdirSync(join(rootDir, 'data/tasks/snapshots')).find(name => name.endsWith('.json'))!;
+    const seen = await services.recoverTask(taskFile.slice(0, -5));
+    finish();
+    const result = await run;
+    expect(active).toBeNull();
+    expect(seen?.snapshot.status).toBe('running');
+    expect(result).toEqual({ ok: true });
+    expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
+    expect(requests.map(item => item.path)).toEqual([
+      '/projects/proj-1/plan',
+      '/projects/proj-1/tasks',
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({ analysis: '项目目标明确，先输出一份报告。' }),
+    });
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '撰写报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
+  it('runs project planning even while a foreground conversation is waiting', async () => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let receivedPrompt = '';
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
+    const foreground = await coordinator.acquireLease({ policy: 'ordinary', lane: 'foreground' });
+    const services = createDesktopServices({
+      executionCoordinator: coordinator,
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, taskIds: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                rationale: '核心交付物',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const run = services.runKSwarmAssignPo({
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        projectName: 'Project',
+        goal: 'Write report',
+        requirements: 'Chinese output',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    const first = await Promise.race([run, new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 2000))]);
+    foreground.release();
+    const result = await run;
+    expect(first).not.toBe('blocked');
+    expect(result).toEqual({ ok: true });
+    expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
+    expect(requests.map(item => item.path)).toEqual([
+      '/projects/proj-1/plan',
+      '/projects/proj-1/tasks',
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({ analysis: '项目目标明确，先输出一份报告。' }),
+    });
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '撰写报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
+  it.each(['plan_only', 'auto_activate_after_plan', 'activate_and_dispatch_after_plan'] as const)('honors persisted %s after broker planning completes', async (startPolicy) => {
+    const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let receivedPrompt = '';
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          if (path === '/projects/proj-1' && !init?.body) return Response.json({ project: { id: 'proj-1', poAgent: 'xiaok-po', requestedStartPolicy: startPolicy } });
+          requests.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return new Response(JSON.stringify({ ok: true, taskIds: ['proj-1__item-1'] }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        receivedPrompt = prompt;
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: JSON.stringify({
+            analysis: '项目目标明确，先输出一份报告。',
+            successCriteria: ['完成报告'],
+            phases: [{
+              id: 'phase-1',
+              name: '交付',
+              items: [{
+                id: 'item-1',
+                title: '撰写报告',
+                brief: '写一份 markdown 报告。',
+                rationale: '核心交付物',
+                assignedAgent: 'xiaok-worker',
+                dependencies: [],
+                acceptanceCriteria: '报告结构完整。',
+              }],
+            }],
+          }),
+        });
+      },
+    });
+
+    const result = await services.runKSwarmAssignPo({
+      startAfterPlanning: true,
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        projectName: 'Project',
+        goal: 'Write report',
+        requirements: 'Chinese output',
+        members: ['xiaok-worker'],
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    if (startPolicy !== 'plan_only') expect(requests[2].body).toMatchObject({ startPolicy, fromAgent: 'xiaok-po' });
+    expect(receivedPrompt).toContain('用户没有明确指定数量时，不要为本月/近期/最新类信息收集任务编造固定条数门槛');
+    expect(requests.map(item => item.path)).toEqual([
+      '/projects/proj-1/plan',
+      '/projects/proj-1/tasks',
+      ...(startPolicy === 'plan_only' ? [] : ['/projects/proj-1/activate-and-start']),
+    ]);
+    expect(requests[0].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      plan: expect.objectContaining({ analysis: '项目目标明确，先输出一份报告。' }),
+    });
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      tasks: [expect.objectContaining({
+        id: 'item-1',
+        title: '撰写报告',
+        assignedAgent: 'xiaok-worker',
+      })],
+    });
+  });
+
   it('softens generated hard item counts for current-period research when user did not request a count', async () => {
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     const services = createDesktopServices({
@@ -2329,18 +2577,171 @@ describe('desktop services', () => {
 
     expect(result).toEqual({ ok: true });
     expect(requests.map(item => `${item.method} ${item.path}`)).toEqual([
+      'GET /projects/proj-1', // current project-scoped read authorization preflight
       'POST /projects/proj-1/tasks/task-1/review',
       'GET /projects/proj-1',
       'POST /projects/proj-1/synthesize',
     ]);
-    expect(requests[0].body).toMatchObject({
+    expect(requests[1].body).toMatchObject({
       fromAgent: 'xiaok-po',
       review: { passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false },
     });
-    expect(requests[2].body).toMatchObject({
+    expect(requests[3].body).toMatchObject({
       fromAgent: 'xiaok-po',
       synthesis: '# 项目小结\n\n项目已完成，交付物可用。',
     });
+  });
+
+  it('reviews once on the control lane while user and worker leases are occupied', async () => {
+    const requests: Array<{ path: string; method: string; body: Record<string, unknown> }> = [];
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const user = await coordinator.acquireLease({ policy: 'ordinary', lane: 'foreground' });
+    const worker = await coordinator.acquireLease({ policy: 'ordinary', lane: 'background' });
+    const services = createDesktopServices({
+      executionCoordinator: coordinator,
+      dataRoot: join(rootDir, 'data'),
+      kswarmService: {
+        ...mockKSwarmService(),
+        request: async (path: string, init?: RequestInit) => {
+          const method = init?.method ?? 'GET';
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          requests.push({ path, method, body });
+          if (path === '/projects/proj-1' && method === 'GET') {
+            return new Response(JSON.stringify({
+              project: { id: 'proj-1', name: 'Project', goal: 'Write report', status: 'active' },
+              tasks: [{ id: 'task-1', title: '撰写报告', status: 'done' }],
+            }), { status: 200 });
+          }
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      },
+      now: () => 300,
+      runner: async ({ sessionId, prompt, emitRuntimeEvent }) => {
+        emitRuntimeEvent({
+          type: 'receipt_emitted',
+          sessionId,
+          turnId: 'turn_1',
+          intentId: 'intent_1',
+          stepId: 'step_1',
+          note: prompt.includes('项目所有任务已经完成')
+            ? '# 项目小结\n\n项目已完成，交付物可用。'
+            : JSON.stringify({ passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false }),
+        });
+      },
+    });
+
+    const submission = {
+      targetParticipantId: 'xiaok-po',
+      payload: {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        fromWorker: 'xiaok-worker',
+        result: { summary: 'done', artifacts: [{ path: '/tmp/report.md', kind: 'markdown' }] },
+      },
+    };
+    const first = services.runKSwarmReviewSubmission(submission);
+    const duplicate = services.runKSwarmReviewSubmission(submission);
+    expect(first).toBe(duplicate);
+    const early = await Promise.race([first, new Promise<'blocked'>(resolve => setTimeout(() => resolve('blocked'), 2500))]);
+    user.release(); worker.release();
+    expect(early).not.toBe('blocked');
+    const result = await first;
+
+    expect(result).toEqual({ ok: true });
+    expect(requests.map(item => `${item.method} ${item.path}`)).toEqual([
+      'GET /projects/proj-1', // current project-scoped read authorization preflight
+      'POST /projects/proj-1/tasks/task-1/review',
+      'GET /projects/proj-1',
+      'POST /projects/proj-1/synthesize',
+    ]);
+    expect(requests[1].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      review: { passed: true, feedback: '内容完整，可以通过。', planRevisionNeeded: false },
+    });
+    expect(requests[3].body).toMatchObject({
+      fromAgent: 'xiaok-po',
+      synthesis: '# 项目小结\n\n项目已完成，交付物可用。',
+    });
+  });
+
+  it('does not time out a queued PO review after ten minutes', async () => {
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const blocker = await coordinator.acquireLease({ policy: 'ordinary', lane: 'project_control' });
+    let clockNow = Date.now();
+    const time = vi.spyOn(Date, 'now').mockImplementation(() => clockNow);
+    let settled = false;
+    const services = createDesktopServices({
+      executionCoordinator: coordinator, dataRoot: join(rootDir, 'data'), now: () => 300,
+      kswarmService: { ...mockKSwarmService(), request: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }) },
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: JSON.stringify({ passed: true, feedback: '通过。', planRevisionNeeded: false }) });
+      },
+    });
+    const review = services.runKSwarmReviewSubmission({ payload: { projectId: 'proj-queued', taskId: 'task-queued', result: { summary: 'submitted' } } }).then(result => { settled = true; return result; });
+    try {
+      await vi.waitFor(() => expect(coordinator.snapshot().waiting).toBe(1));
+      await new Promise(resolve => setTimeout(resolve, 600));
+      clockNow += 11 * 60 * 1000;
+      await new Promise(resolve => setTimeout(resolve, 750));
+      expect(settled).toBe(false);
+      expect(coordinator.snapshot().waiting).toBe(1);
+      blocker.release();
+      expect(await review).toEqual({ ok: true });
+    } finally { blocker.release(); time.mockRestore(); }
+  });
+
+  it('cancels the actual PO runner before returning execution timeout', async () => {
+    let clockNow = Date.now();
+    const time = vi.spyOn(Date, 'now').mockImplementation(() => clockNow);
+    let started = false;
+    let aborted = false;
+    const services = createDesktopServices({
+      dataRoot: join(rootDir, 'data'), now: () => 300,
+      kswarmService: { ...mockKSwarmService(), request: async (path: string) => {
+        if (path === '/projects/proj-timeout') return Response.json({ project: { id: 'proj-timeout', status: 'active', name: 'Timeout project' }, tasks: [] });
+        throw new Error('fixture_route_unavailable');
+      } },
+      runner: async ({ signal }) => {
+        started = true;
+        await new Promise<void>(resolve => signal.addEventListener('abort', () => { aborted = true; resolve(); }, { once: true }));
+      },
+    });
+    const review = services.runKSwarmReviewSubmission({ payload: { projectId: 'proj-timeout', taskId: 'task-timeout', result: { summary: 'submitted' } } });
+    try {
+      await vi.waitFor(() => expect(started).toBe(true));
+      clockNow += 11 * 60 * 1000;
+      expect(await review).toMatchObject({ ok: false, error: 'desktop_task_timeout' });
+      expect(aborted).toBe(true);
+    } finally { time.mockRestore(); }
+  });
+
+  it('delegates scoped queued idle detection to the bounded KSwarm owner', async () => {
+    vi.stubEnv('XIAOK_TASK_IDLE_TIMEOUT_MS', '100');
+    const coordinator = new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1 });
+    const blocker = await coordinator.acquireLease({ policy: 'ordinary', lane: 'background' });
+    const services = createDesktopServices({
+      executionCoordinator: coordinator, dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(),
+      runner: async ({ sessionId, emitRuntimeEvent }) => {
+        emitRuntimeEvent({ type: 'receipt_emitted', sessionId, turnId: 'turn_1', intentId: 'intent_1', stepId: 'step_1', note: '已完成当前用户要求的分析步骤，结果已确认并可交接。' });
+      },
+    });
+    const legacyInput: unknown = { handoff: {
+      runId: 'run-queued-idle', task: { id: 'task-queued-idle', title: '分析当前步骤', brief: '', acceptanceCriteria: '' },
+      project: { id: 'proj-queued-idle', name: 'Project', goal: 'Analyze current step', requirements: '', workFolder: rootDir },
+    } };
+    // Keep the original kind-less raw compatibility input unqualified, rather than inventing a DTO field.
+    const work: unknown = Reflect.apply(services.runKSwarmHandoffTask, services, [legacyInput]);
+    if (!types.isPromise(work)) throw Error('legacy_queued_fixture_promise_required');
+    void work.catch(() => undefined);
+    try {
+      await vi.waitFor(() => expect(coordinator.snapshot().waiting).toBe(1), { interval: 5 });
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(coordinator.snapshot().waiting).toBe(1);
+      blocker.release();
+      const completed: unknown = await work;
+      if (!completed || typeof completed !== 'object' || !('summary' in completed) || typeof completed.summary !== 'string') throw Error('legacy_queued_fixture_summary_required');
+      expect(completed.summary).toContain('已完成当前用户要求');
+    } finally { blocker.release(); vi.unstubAllEnvs(); }
   });
 
   it('handles kswarm plan approval by requesting dispatch as the PO', async () => {
@@ -2387,7 +2788,7 @@ describe('desktop services', () => {
       providerId: 'kimi',
       modelName: 'kimi-k2-thinking',
       apiKey: 'sk-kimi',
-    });
+    }, undefined, 'user');
 
     expect(snapshot.defaultProvider).toBe('kimi');
     expect(snapshot.defaultModelId).toBe('kimi-kimi-k2-thinking');
@@ -2411,7 +2812,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.saveModelConfig({ providerId: 'kimi' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
     const snapshot = await services.getModelConfig();
     const kimiProvider = snapshot.providers.find(provider => provider.id === 'kimi');
     const kimiDefault = snapshot.models.find(model => model.id === 'kimi-default');
@@ -2451,7 +2852,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    let snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'k3' });
+    let snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'k3' }, undefined, 'user');
     expect(snapshot.models.find(model => model.id === 'kimi-k3')).toMatchObject({
       model: 'k3',
       runtimeOptions: { contextLimit: 262_144, reasoningEffort: 'high' },
@@ -2461,7 +2862,7 @@ describe('desktop services', () => {
       },
     });
 
-    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.6' });
+    snapshot = await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.6' }, undefined, 'user');
     const stable = snapshot.models.find(model => model.id === 'kimi-kimi-k2.6');
     expect(stable).toMatchObject({ model: 'kimi-k2.6' });
     // K2.6 有自己的官方窗口（262,144，与 K3 恰好相同），所以不能只看 contextLimit；
@@ -2489,7 +2890,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
     const configPath = join(rootDir, 'config', 'config.json');
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
     persisted.models['kimi-kimi-k2.7'].runtimeOptions = {
@@ -2514,7 +2915,7 @@ describe('desktop services', () => {
       providerId: 'glm',
       apiKey: 'sk-glm',
       modelName: 'GLM-5.2',
-    });
+    }, undefined, 'user');
 
     // Desktop 合成的 modelId 与 catalog 的 'glm-5.2' 并不相等 —— 这是本测试要守的前提，
     // 而不是要修的东西。修的是「即使 id 不相等，元数据也必须到位」。
@@ -2547,13 +2948,13 @@ describe('desktop services', () => {
       providerId: 'kimi',
       modelName: 'k3',
       baseUrl: 'https://proxy.example.com/v1',
-    });
+    }, undefined, 'user');
     await services.saveModelConfig({
       providerId: 'acme',
       modelName: 'k3',
       baseUrl: 'https://api.acme.example/v1',
       protocol: 'openai_legacy',
-    });
+    }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const persisted = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -2581,7 +2982,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-old' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-old' }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const seeded = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -2594,7 +2995,7 @@ describe('desktop services', () => {
     writeFileSync(configPath, JSON.stringify(seeded, null, 2));
 
     const before = JSON.parse(readFileSync(configPath, 'utf-8'));
-    const snapshot = await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-new' });
+    const snapshot = await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-new' }, undefined, 'user');
     const after = JSON.parse(readFileSync(configPath, 'utf-8'));
 
     expect(snapshot.defaultModelId).toBe('kimi-default');
@@ -2616,15 +3017,15 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const before = JSON.parse(readFileSync(configPath, 'utf-8'));
     const snapshot = await services.updateModelRuntimeOptions({
       modelId: 'kimi-default',
       runtimeOptions: { contextLimit: 1_048_576, reasoningEffort: 'max' },
-    });
+    }, 'user');
     const after = JSON.parse(readFileSync(configPath, 'utf-8'));
 
     expect(snapshot.defaultModelId).toBe(before.defaultModelId);
@@ -2671,7 +3072,7 @@ describe('desktop services', () => {
     expect(readFileSync(path, 'utf8')).toBe(oldContent);
     const binding = resolveRuntimeModelBinding(await loadConfig());
     expect(binding.runtimeOptions).toEqual(current.runtimeOptions);
-    const selected = await services.saveModelConfig({ providerId: current.provider, modelId: current.id });
+    const selected = await services.saveModelConfig({ providerId: current.provider, modelId: current.id }, undefined, 'user');
     expect(selected.defaultModelId).toBe(current.id);
     expect(selected.models.find(model => model.id === current.id)?.runtimeOptions).toEqual(current.runtimeOptions);
     const reloaded = await services.getModelConfig();
@@ -2689,26 +3090,26 @@ describe('desktop services', () => {
     mkdirSync(join(rootDir, 'config'), { recursive: true });
     writeFileSync(join(rootDir, 'config', 'config.json'), JSON.stringify(config));
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    const snapshot = await services.updateModelRuntimeOptions({ modelId: 'old-pinned-model', runtimeOptions: { reasoningEffort: 'max' } });
+    const snapshot = await services.updateModelRuntimeOptions({ modelId: 'old-pinned-model', runtimeOptions: { reasoningEffort: 'max' } }, 'user');
     expect(snapshot.models.find(model => model.id === 'old-pinned-model')?.runtimeOptions).toEqual({ contextLimit: 128_000, reasoningEffort: 'max' });
     expect((await services.getModelConfig()).models.find(model => model.id === 'old-pinned-model')?.runtimeOptions).toEqual({ contextLimit: 128_000, reasoningEffort: 'max' });
   });
 
   it('selects and persists the middle GLM default, preserving an explicit choice on reselection', async () => {
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    const snapshot = await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' });
+    const snapshot = await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' }, undefined, 'user');
     const model = snapshot.models.find(entry => entry.model === 'GLM-5.3')!;
     expect(model.runtimeOptions?.reasoningEffort).toBe('high');
     const persisted = JSON.parse(readFileSync(join(rootDir, 'config', 'config.json'), 'utf-8'));
     expect(persisted.models[model.id].runtimeOptions.reasoningEffort).toBe('high');
-    await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' } });
-    const reselected = await services.saveModelConfig({ providerId: 'glm', modelId: model.id });
+    await services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' } }, 'user');
+    const reselected = await services.saveModelConfig({ providerId: 'glm', modelId: model.id }, undefined, 'user');
     expect(reselected.models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('max');
   });
 
   it('hides effort for unsupported protocols and unknown endpoints without losing the context window', async () => {
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' });
+    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' }, undefined, 'user');
     const configPath = join(rootDir, 'config', 'config.json');
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     for (const override of [{ protocol: 'openai_responses', baseUrl: 'https://api.openai.com/v1' }, { protocol: 'openai_legacy', baseUrl: 'https://proxy.example.com/v1' }]) {
@@ -2717,7 +3118,7 @@ describe('desktop services', () => {
       const model = (await services.getModelConfig()).models.find(entry => entry.model === 'gpt-5.5')!;
       expect(model.runtimeConstraints?.reasoningEfforts ?? []).toEqual([]);
       expect(model.runtimeOptions).toEqual({ contextLimit: 1_050_000 });
-      await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'high' } })).rejects.toThrow();
+      await expect(services.updateModelRuntimeOptions({ modelId: model.id, runtimeOptions: { reasoningEffort: 'high' } }, 'user')).rejects.toThrow();
     }
   });
 
@@ -2727,14 +3128,14 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' });
+    await services.saveModelConfig({ providerId: 'glm', modelName: 'GLM-5.3' }, undefined, 'user');
     const before = await services.getModelConfig();
     const model = before.models.find(entry => entry.model === 'GLM-5.3');
     expect(model?.runtimeConstraints?.reasoningEfforts).toEqual(['low', 'high', 'max']);
     const after = await services.updateModelRuntimeOptions({
       modelId: model!.id,
       runtimeOptions: { ...model!.runtimeOptions, reasoningEffort: 'low' },
-    });
+    }, 'user');
     expect(after.models.find(entry => entry.id === model!.id)?.runtimeOptions).toEqual({
       contextLimit: 1_048_576,
       reasoningEffort: 'low',
@@ -2748,19 +3149,19 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' });
+    await services.saveModelConfig({ providerId: 'openai', modelName: 'gpt-5.5' }, undefined, 'user');
     const snapshot = await services.getModelConfig();
     const model = snapshot.models.find(entry => entry.model === 'gpt-5.5')!;
     expect(model.runtimeConstraints?.reasoningEfforts).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
     const updated = await services.updateModelRuntimeOptions({
       modelId: model.id,
       runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'xhigh' },
-    });
+    }, 'user');
     expect(updated.models.find(entry => entry.id === model.id)?.runtimeOptions?.reasoningEffort).toBe('xhigh');
     await expect(services.updateModelRuntimeOptions({
       modelId: model.id,
       runtimeOptions: { ...model.runtimeOptions, reasoningEffort: 'max' },
-    })).rejects.toThrow(/reasoningEffort/);
+    }, 'user')).rejects.toThrow(/reasoningEffort/);
   });
 
   it('rejects invalid or out-of-scope runtime policy updates without mutating config', async () => {
@@ -2769,14 +3170,14 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
     await services.saveModelConfig({
       providerId: 'custom-k3',
       modelName: 'k3',
       baseUrl: 'https://example.com/v1',
       protocol: 'openai_legacy',
-    });
+    }, undefined, 'user');
 
     const configPath = join(rootDir, 'config', 'config.json');
     const cases = [
@@ -2804,7 +3205,7 @@ describe('desktop services', () => {
 
     for (const testCase of cases) {
       const before = readFileSync(configPath, 'utf-8');
-      await expect(services.updateModelRuntimeOptions(testCase.input)).rejects.toThrow(testCase.error);
+      await expect(services.updateModelRuntimeOptions(testCase.input, 'user')).rejects.toThrow(testCase.error);
       expect(readFileSync(configPath, 'utf-8')).toBe(before);
     }
   });
@@ -2820,14 +3221,14 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi' });
+    await services.saveModelConfig({ providerId: 'kimi' }, undefined, 'user');
     const configPath = join(rootDir, 'config', 'config.json');
     const before = readFileSync(configPath, 'utf-8');
 
     await expect(services.updateModelRuntimeOptions({
       modelId: 'kimi-default',
       runtimeOptions: runtimeOptions as never,
-    })).rejects.toThrow(/runtimeOptions|unsupported/i);
+    }, 'user')).rejects.toThrow('model_config_input_invalid');
     expect(readFileSync(configPath, 'utf-8')).toBe(before);
   });
 
@@ -2837,11 +3238,11 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
 
     const observed: Array<{ model: string; contextLimit?: number }> = [];
-    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (this: OpenAIAdapter) {
       observed.push({
         model: this.getModelName(),
         contextLimit: this.getCapabilities().contextLimit,
@@ -2854,7 +3255,7 @@ describe('desktop services', () => {
       const result = await withoutBrowserGlobals(() => services.testProviderConnection({
         providerId: 'kimi',
         modelId: 'kimi-default',
-      }));
+      }, 'user'));
       expect(result.error).toBeUndefined();
       expect(result).toMatchObject({ success: true });
       expect(observed).toEqual([{ model: 'k3', contextLimit: 262_144 }]);
@@ -2869,13 +3270,13 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
-    await services.saveModelConfig({ providerId: 'anthropic', apiKey: 'sk-anthropic' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'anthropic', apiKey: 'sk-anthropic' }, undefined, 'user');
     const before = await services.getModelConfig();
     expect(before.defaultProvider).toBe('anthropic');
 
     const observed: Array<{ model: string; contextLimit?: number }> = [];
-    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (this: OpenAIAdapter) {
       observed.push({
         model: this.getModelName(),
         contextLimit: this.getCapabilities().contextLimit,
@@ -2885,7 +3286,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       expect(result.error).toBeUndefined();
       expect(result).toMatchObject({ success: true });
       expect(observed).toEqual([{ model: 'k3', contextLimit: 262_144 }]);
@@ -2901,20 +3302,20 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
-    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
+    await services.saveModelConfig({ providerId: 'kimi', modelName: 'kimi-k2.7' }, undefined, 'user');
     const before = await services.getModelConfig();
     expect(before.defaultModelId).toBe('kimi-kimi-k2.7');
 
     const observed: string[] = [];
-    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
+    const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* (this: OpenAIAdapter) {
       observed.push(this.getModelName());
       yield { type: 'text', delta: 'ok' };
       yield { type: 'done' };
     });
 
     try {
-      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       expect(result).toMatchObject({ success: true });
       expect(observed).toEqual(['k3']);
       expect((await services.getModelConfig()).defaultModelId).toBe(before.defaultModelId);
@@ -2976,7 +3377,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     const calls: Array<{
       messages: Message[];
       tools: ToolDefinition[];
@@ -3001,7 +3402,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const result = await withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
 
       expect(result.success).toBe(expectedSuccess);
       expect(calls).toHaveLength(1);
@@ -3030,7 +3431,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     vi.useFakeTimers();
     const streamSpy = vi.spyOn(OpenAIAdapter.prototype, 'stream').mockImplementation(async function* () {
       yield { type: 'text' as const, delta: 'first' };
@@ -3039,7 +3440,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       await vi.advanceTimersByTimeAsync(125);
       await expect(pending).resolves.toMatchObject({ success: true, latencyMs: 125 });
     } finally {
@@ -3054,7 +3455,7 @@ describe('desktop services', () => {
       kswarmService: mockKSwarmService(),
       now: () => 300,
     });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'sk-kimi' }, undefined, 'user');
     vi.useFakeTimers();
     let attempts = 0;
     let timeoutReason: unknown;
@@ -3076,7 +3477,7 @@ describe('desktop services', () => {
     });
 
     try {
-      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }));
+      const pending = withoutBrowserGlobals(() => services.testProviderConnection({ providerId: 'kimi' }, 'user'));
       for (let index = 0; index < 10 && attempts === 0; index += 1) {
         await Promise.resolve();
       }
@@ -3110,7 +3511,7 @@ describe('desktop services', () => {
     writeFileSync(join(npmDir, 'xiaok.ps1'), '# stub');
     process.env.APPDATA = appDataRoot;
 
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, agent: { id: 'xiaok-po' } })));
+    const fetchMock = vi.fn<KSwarmService['request']>(async () => new Response(JSON.stringify({ ok: true, agent: { id: 'xiaok-po' } })));
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
     try {
@@ -3124,13 +3525,13 @@ describe('desktop services', () => {
         providerId: 'anthropic',
         modelId: 'anthropic-default',
         apiKey: 'sk-anthropic',
-      });
+      }, undefined, 'user');
 
       const result = await services.createManagedXiaokAgent({
         name: 'PO-Agent',
         roles: ['project_owner'],
         instructions: '负责规划',
-      });
+      }, { requestSource: 'user' });
 
       expect(result).toEqual({ ok: true, agent: { id: 'xiaok-po' } });
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -3182,7 +3583,7 @@ describe('desktop services', () => {
 
   it('deletes built-in providers, repairs defaults, and keeps an empty configuration deleted', async () => {
     const services = createDesktopServices({ dataRoot: join(rootDir, 'data'), kswarmService: mockKSwarmService(), now: () => 300 });
-    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'test' });
+    await services.saveModelConfig({ providerId: 'kimi', apiKey: 'test' }, undefined, 'user');
     await services.deleteProvider('kimi', { requestSource: 'user' });
     let snapshot = await services.getModelConfig();
     expect(snapshot.models.some(model => model.id === snapshot.defaultModelId && model.provider === snapshot.defaultProvider)).toBe(true);
@@ -3230,7 +3631,7 @@ describe('desktop services', () => {
       baseUrl: 'https://api.test.com/v1',
       apiKey: 'test-key',
       protocol: 'openai_legacy',
-    });
+    }, undefined, 'user');
 
     let snapshot = await services.getModelConfig();
     expect(snapshot.providers.find(p => p.id === 'custom-test')).toBeDefined();
@@ -3256,7 +3657,7 @@ describe('desktop services', () => {
       providerId: 'anthropic',
       modelName: 'claude-test-model',
       label: 'Test Model',
-    });
+    }, undefined, 'user');
 
     let snapshot = await services.getModelConfig();
     const testModel = snapshot.models.find(m => m.model === 'claude-test-model');
@@ -3278,7 +3679,7 @@ describe('desktop services', () => {
     });
 
     // Default config has no API key
-    const result = await services.testProviderConnection({ providerId: 'anthropic' });
+    const result = await services.testProviderConnection({ providerId: 'anthropic' }, 'user');
     expect(result.success).toBe(false);
     expect(result.error).toContain('API key');
   });
@@ -3303,8 +3704,8 @@ describe('desktop services', () => {
     try{
       for(const key of ['XIAOK_ANTHROPIC_API_KEY','XIAOK_CLAUDE_API_KEY','ANTHROPIC_API_KEY','CLAUDE_API_KEY','ANTHROPIC_BASE_URL'])vi.stubEnv(key,undefined);
       await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
-      await services.saveModelConfig({providerId:'anthropic',apiKey:'sk-test-key',baseUrl:`http://127.0.0.1:${(server.address() as AddressInfo).port}`});
-      const result=await services.testProviderConnection({providerId:'anthropic'});
+      await services.saveModelConfig({providerId:'anthropic',apiKey:'sk-test-key',baseUrl:`http://127.0.0.1:${(server.address() as AddressInfo).port}`}, undefined, 'user');
+      const result=await services.testProviderConnection({providerId:'anthropic'}, 'user');
       expect(result.success).toBeDefined();expect(result.success).toBe(false);expect(result.error).toBeDefined();expect(result.error).toContain('synthetic key rejected');
       expect(requests).toHaveLength(1);expect(requests[0]).toMatchObject({method:'POST',path:'/v1/messages',key:'sk-test-key'});
       expect(requests[0].body.model).toEqual(expect.any(String));expect(JSON.stringify(requests[0].body.messages)).toContain('ping');
@@ -3326,7 +3727,7 @@ describe('desktop services', () => {
     await services.saveModelConfig({
       providerId: 'kimi',
       apiKey: 'sk-kimi',
-    });
+    }, undefined, 'user');
 
     let snapshot = await services.getModelConfig();
     expect(snapshot.defaultProvider).toBe('kimi');
@@ -3379,7 +3780,7 @@ describe('desktop services', () => {
       apiKeyMasked: null,
     });
 
-    const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-desktop-1234' });
+    const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-desktop-1234' }, 'user');
     expect(saved).toEqual({
       configured: true,
       keySource: 'config',
@@ -3424,12 +3825,12 @@ describe('desktop services', () => {
       expect(JSON.stringify(fromEnv)).not.toContain('env-jev-key-9999');
 
       // 显式保存的配置优先于环境变量。
-      const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-config-0001' });
+      const saved = await services.saveSystemOneConfig({ apiKey: 'k-jev-config-0001' }, 'user');
       expect(saved.keySource).toBe('config');
       expect(saved.keyEnvVar).toBeNull();
 
       // 清空后整块删除，回落到环境变量。
-      const cleared = await services.saveSystemOneConfig({ apiKey: '' });
+      const cleared = await services.saveSystemOneConfig({ apiKey: '' }, 'user');
       expect(cleared.keySource).toBe('env');
       const raw = JSON.parse(readFileSync(join(process.env.XIAOK_CONFIG_DIR!, 'config.json'), 'utf8')) as Record<string, unknown>;
       expect(raw.systemOne).toBeUndefined();
@@ -3445,7 +3846,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.saveSystemOneConfig({ apiKey: 'k-jev-isolation' });
+    await services.saveSystemOneConfig({ apiKey: 'k-jev-isolation' }, 'user');
     const snapshot = await services.getModelConfig();
 
     expect(snapshot.providers.map((provider) => provider.id)).not.toContain('jev');
@@ -3533,7 +3934,7 @@ describe('desktop services', () => {
     const snapshot = await services.saveModelConfig({
       providerId: 'deepseek',
       apiKey: 'sk-ds-test',
-    });
+    }, undefined, 'user');
 
     const dsProvider = snapshot.providers.find(p => p.id === 'deepseek');
     expect(dsProvider).toBeDefined();
@@ -5055,15 +5456,20 @@ describe('desktop services', () => {
 
   it('timed action tools create notification reminders and agent scheduled tasks', async () => {
     const store = new TimedActionStore(join(rootDir, 'timed-actions.sqlite'));
+    let fixture: ReturnType<typeof createScheduledToolFixture> | undefined;
+    let failed = false;
+    const cleanupErrors: unknown[] = [];
+    try {
     const service = new TimedActionService(store, { now: () => 1_000 });
     const tools = createTimedActionTools(service, 'Asia/Shanghai');
+    fixture = createScheduledToolFixture(tools, 'legacy-agent-task');
 
     const reminderTool = tools.find(tool => tool.definition.name === 'reminder_create');
     const scheduledTool = tools.find(tool => tool.definition.name === 'scheduled_task_create');
     expect(reminderTool).toBeTruthy();
     expect(scheduledTool).toBeTruthy();
 
-    const reminderResult = JSON.parse(await reminderTool!.execute({
+    const reminderResult = JSON.parse(await fixture.execute('reminder_create', {
       content: '看项目',
       schedule_at: 61_000,
     }));
@@ -5074,7 +5480,7 @@ describe('desktop services', () => {
     });
     expect(store.getAction(reminderResult.reminderId)?.executor.kind).toBe('notify');
 
-    const scheduledResult = JSON.parse(await scheduledTool!.execute({
+    const scheduledResult = JSON.parse(await fixture.execute('scheduled_task_create', {
       name: '检查 OpenAI本月分析',
       prompt: '检查 proj-1779188304918，如果完成调用 scheduled_task_cancel',
       frequency: 'interval',
@@ -5088,7 +5494,15 @@ describe('desktop services', () => {
     });
     expect(store.getAction(scheduledResult.taskId)?.executor.kind).toBe('agent_task');
 
-    store.close();
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      try { fixture?.close(); } catch (error) { cleanupErrors.push(error); }
+      try { store.close(); } catch (error) { cleanupErrors.push(error); }
+      if (failed && cleanupErrors.length) console.error('Timed fixture cleanup failed alongside original test failure', cleanupErrors);
+    }
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Timed fixture cleanup failed');
   });
 
   it('system prompt routes stuck Swarm project recovery through file-first repair', async () => {
@@ -5562,7 +5976,10 @@ describe('desktop services', () => {
     });
     // 任务结束后必须释放绑定，防止 taskId 复用/绑定残留。
     expect(observedTaskId).toBeTruthy();
-    expect(getRoomHistoryCapability(observedTaskId as string)).toBeUndefined();
+    const readObservedTaskId = (): string | null => observedTaskId;
+    const finishedTaskId = readObservedTaskId();
+    if (typeof finishedTaskId !== 'string') throw Error('room_fixture_task_id_not_captured');
+    expect(getRoomHistoryCapability(finishedTaskId)).toBeUndefined();
   });
 });
 

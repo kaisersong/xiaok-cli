@@ -1,36 +1,48 @@
-import { isDeepStrictEqual, types } from 'node:util';
+import { isDeepStrictEqual as initialIsDeepStrictEqual, types } from 'node:util';
+const isDeepStrictEqual = initialIsDeepStrictEqual;
 import { readPrivateDatabaseNativeAccess } from './private-database.js';
+import { assertRegistrationIntrinsics, assertRegistrationWeakMapIntrinsics } from './registration-intrinsics.js';
+import { assertNativeSqliteArrayConstruction, assertNativeSqliteColumnConstruction } from './native-sqlite-construction-intrinsics.js';
 const isProxy = types.isProxy, freeze = Object.freeze;
 const apply = Reflect.apply, descriptor = Object.getOwnPropertyDescriptor, prototype = Object.getPrototypeOf;
-const globals = [{ target: types, key: 'isProxy', value: descriptor(types, 'isProxy') }, { target: Object, key: 'freeze', value: descriptor(Object, 'freeze') }, { target: Object, key: 'getPrototypeOf', value: descriptor(Object, 'getPrototypeOf') }, { target: Object, key: 'getOwnPropertyDescriptor', value: descriptor(Object, 'getOwnPropertyDescriptor') }, { target: Object, key: 'create', value: descriptor(Object, 'create') }, { target: Object, key: 'defineProperty', value: descriptor(Object, 'defineProperty') }, { target: Reflect, key: 'apply', value: descriptor(Reflect, 'apply') }, { target: Function.prototype, key: 'call', value: descriptor(Function.prototype, 'call') }, { target: Function.prototype, key: 'apply', value: descriptor(Function.prototype, 'apply') }, { target: Object, key: 'fromEntries', value: descriptor(Object, 'fromEntries') }, { target: Array.prototype, key: 'slice', value: descriptor(Array.prototype, 'slice') }];
-export const REGISTRATION_TABLE_KEYS = { verification_owner_dependencies: 'parent_key', owner_enrollment_intents: 'logical_owner_key', verification_registered_owners: 'owner_key', verification_owners: 'owner_key', mandatory_observation_checks: 'owner_key', verification_registered_invocations: 'owner_key', owner_enrollment_invocation_receipts: 'owner_key', owner_enrollment_goal_sessions: 'owner_key', owner_enrollment_loop_subjects: 'owner_key', owner_enrollment_intent_contracts: 'owner_key', owner_enrollment_kswarm_subjects: 'logical_owner_key', migration_publication_intents: 'owner_key', verification_application_pointers: 'owner_key', verification_application_history: 'owner_key', verification_application_transitions: 'owner_key' };
+const define = Object.defineProperty, nativePush = Array.prototype.push;
+function append(array, value) { define(array, array.length, { __proto__: null, value, enumerable: true, writable: true, configurable: true }); }
+// Only private native result arrays, after the complete closing intrinsic
+// fence. Parameter arrays before that fence retain defineProperty above.
+function appendResult(array, value) { apply(nativePush, array, [value]); }
+export const REGISTRATION_TABLE_KEYS = freeze({ verification_owner_dependencies: 'parent_key', owner_enrollment_intents: 'logical_owner_key', verification_registered_owners: 'owner_key', verification_owners: 'owner_key', mandatory_observation_checks: 'owner_key', verification_registered_invocations: 'owner_key', owner_enrollment_invocation_receipts: 'owner_key', owner_enrollment_goal_sessions: 'owner_key', owner_enrollment_loop_subjects: 'owner_key', owner_enrollment_intent_contracts: 'owner_key', owner_enrollment_kswarm_subjects: 'logical_owner_key', migration_publication_intents: 'owner_key', verification_application_pointers: 'owner_key', verification_application_history: 'owner_key', verification_application_transitions: 'owner_key' });
 const tables = [...Object.keys(REGISTRATION_TABLE_KEYS), 'verification_profiles', 'verification_storage_features'];
 const lower = (v) => v.replace(/[A-Z]/g, c => c.toLowerCase());
 function fail() { throw Error('application_registration_changed'); }
 /** Per-call full SQL census only. No row/permission/clock/current result crosses a checkpoint. */
 export function createRegistrationCensusDatabase(db) {
+    assertRegistrationWeakMapIntrinsics();
     const native = readPrivateDatabaseNativeAccess(db);
     if (!native)
         return undefined;
     function current() {
+        assertRegistrationIntrinsics();
         if (isProxy(db) || descriptor(db, native.symbol)?.value !== native.cpp || prototype(db) !== native.databasePrototype || prototype(native.cpp) !== native.cppPrototype)
             fail();
-        for (const entry of native.fingerprints)
+        for (let i = 0; i < native.fingerprints.length; i++) {
+            const entry = native.fingerprints[i];
             if (!isDeepStrictEqual(descriptor(entry.target, entry.key), entry.descriptor))
                 fail();
-        for (const entry of globals)
-            if (!isDeepStrictEqual(descriptor(entry.target, entry.key), entry.value))
-                fail();
+        }
         if (apply(native.open, native.cpp, []) !== true)
             fail();
     }
     const prepare = (sql) => apply(native.prepare, native.cpp, [sql, db, false, false]);
     const call = (key, stmt, args = []) => apply(native.statement[key], stmt, args);
-    function raw(sql, args = []) { const stmt = prepare(sql); call('raw', stmt, [true]); return call('all', stmt, args); }
+    function raw(sql, args = []) { assertNativeSqliteArrayConstruction(); const stmt = prepare(sql); call('raw', stmt, [true]); const rows = call('all', stmt, args); assertNativeSqliteArrayConstruction(); return rows; }
     function records(sql, args = []) {
+        assertNativeSqliteColumnConstruction();
         const stmt = prepare(sql);
         call('raw', stmt, [true]);
-        const columns = call('columns', stmt), rows = call('all', stmt, args), result = [];
+        assertNativeSqliteColumnConstruction();
+        const columns = call('columns', stmt), rows = call('all', stmt, args);
+        assertNativeSqliteColumnConstruction();
+        const result = [];
         for (let i = 0; i < rows.length; i++) {
             if (rows[i].length !== columns.length)
                 fail();
@@ -40,7 +52,7 @@ export function createRegistrationCensusDatabase(db) {
                     fail();
                 row[columns[j].name] = rows[i][j];
             }
-            result.push(row);
+            appendResult(result, row);
         }
         return result;
     }
@@ -90,9 +102,9 @@ export function createRegistrationCensusDatabase(db) {
             const before = counter(), structure = schema();
             if (!isDeepStrictEqual(before, counter()))
                 fail();
-            const statementCache = new Map();
             return { evidence: { master: structure.master, columns: structure.columns }, has: (table) => structure.present.has(table), records,
                 groups(table, lookups) {
+                    assertNativeSqliteColumnConstruction();
                     if (!Object.hasOwn(REGISTRATION_TABLE_KEYS, table))
                         fail();
                     const result = new Map();
@@ -104,15 +116,13 @@ export function createRegistrationCensusDatabase(db) {
                     for (let start = 0; start < unique.length; start += 128) {
                         const count = Math.min(128, unique.length - start), values = [];
                         for (let i = 0; i < count; i++)
-                            values.push(unique[start + i]);
+                            append(values, unique[start + i]);
                         const sql = 'WITH wanted(lookup) AS (VALUES ' + Array(count).fill('(?)').join(',') + ') SELECT wanted.lookup,item.* FROM wanted JOIN main.' + table + ' AS item ON item.' + REGISTRATION_TABLE_KEYS[table] + '=wanted.lookup';
-                        let stmt = statementCache.get(sql);
-                        if (!stmt) {
-                            stmt = prepare(sql);
-                            call('raw', stmt, [true]);
-                            statementCache.set(sql, stmt);
-                        }
+                        const stmt = prepare(sql);
+                        call('raw', stmt, [true]);
+                        assertNativeSqliteColumnConstruction();
                         const cols = call('columns', stmt), rows = call('all', stmt, values);
+                        assertNativeSqliteColumnConstruction();
                         for (let i = 0; i < rows.length; i++) {
                             const source = rows[i], key = source[0];
                             if (typeof key !== 'string' || !result.has(key) || source.length !== cols.length)
@@ -123,7 +133,7 @@ export function createRegistrationCensusDatabase(db) {
                                     fail();
                                 row[cols[j].name] = source[j];
                             }
-                            result.get(key).push(row);
+                            appendResult(result.get(key), row);
                         }
                     }
                     return result;

@@ -221,3 +221,12 @@ function finding(kind: KSwarmHealthFinding['kind'], severity: KSwarmHealthFindin
     metadata: {},
   };
 }
+
+it('does not diagnose the absence of optional patterns as a base dynamic-workflow failure', () => {
+  const entry = '/app/services/kswarm/src/server/index.js';
+  const result = classifyKSwarmHealth({ expectedEntryPath: entry, spawnEntryExists: true,
+    health: { ok: true, body: { service: { entryPath: entry }, features: ['dynamic_workflows'], brokerConnected: true,
+      workflowCapabilities: { schemaVersion: 'kswarm_workflow_patterns_v1', compiledContract: false, patternPublicView: false } } },
+    broker: { ok: true } });
+  expect(result.some(finding => finding.kind === 'health_capability_mismatch')).toBe(false);
+});

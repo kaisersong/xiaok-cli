@@ -75,10 +75,10 @@ function buildRegistryTool(registry: ConnectorRegistry): Tool {
   return {
     permission: 'safe',
     definition: SEARCH_DEFINITION,
-    async execute(input) {
+    async execute(input, context) {
       const { query, count, max_chars } = normalizeInput(input);
       try {
-        const outcome = await registry.runSearch({ query, count });
+        const outcome = await registry.runSearch({ query, count, signal:context?.signal });
         const text = formatHits(outcome.hits, max_chars);
         if (outcome.fallback) {
           const tag = `(fallback: ${outcome.fallback.to} after ${outcome.fallback.from} error: ${outcome.fallback.reason})`;
@@ -96,11 +96,11 @@ function buildResolverTool(resolve: () => SearchProvider): Tool {
   return {
     permission: 'safe',
     definition: SEARCH_DEFINITION,
-    async execute(input) {
+    async execute(input, context) {
       const { query, count, max_chars } = normalizeInput(input);
       try {
         const provider = resolve();
-        const hits = await provider.search({ query, count });
+        const hits = await provider.search({ query, count, signal:context?.signal });
         return formatHits(hits, max_chars);
       } catch (error) {
         return normalizeProviderErrorMessage(error);
@@ -114,10 +114,10 @@ function buildLegacyTool(fetchFn?: typeof fetch): Tool {
   return {
     permission: 'safe',
     definition: SEARCH_DEFINITION,
-    async execute(input) {
+    async execute(input, context) {
       const { query, count, max_chars } = normalizeInput(input);
       try {
-        const hits = await provider.search({ query, count });
+        const hits = await provider.search({ query, count, signal:context?.signal });
         return formatHits(hits, max_chars);
       } catch (error) {
         return normalizeProviderErrorMessage(error);

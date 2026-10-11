@@ -4226,3 +4226,12 @@ describe('generic OpenAI terminal boundary', () => {
     expect(instance.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 });
+
+
+it('keeps actual OpenAI request tools identical with registration descriptions',async()=>{
+ const {ToolRegistry}=await import('../../../src/ai/tools/index.js');const {createReadTool}=await import('../../../src/ai/tools/read.js');
+ const tool=createReadTool({cwd:process.cwd()}),registry=new ToolRegistry({},[tool]),adapter=createTestAdapter({wireModel:'gpt-4o'});
+ const before=await captureChatCompletionRequest(adapter,registry.getToolDefinitions());
+ registry.registerTool(tool,{outputSchema:{type:'string'},effect:'read',idempotency:'unknown'});
+ const after=await captureChatCompletionRequest(adapter,registry.getToolDefinitions());expect(after.tools).toEqual(before.tools);expect(registry.getToolDefinitions().find(x=>x.name==='read')).toBe(tool.definition);registry.dispose();
+});

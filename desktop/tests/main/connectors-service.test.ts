@@ -28,9 +28,9 @@ describe('ConnectorsService', () => {
   it('binds scoped registries to the same live desktop connector settings', async () => {
     const scoped = new ToolRegistry({ autoMode: true }, []);
     service.bindTools(scoped);
-    const fetchMock=vi.fn(async()=>new Response(JSON.stringify({results:[{title:'Configured search',url:'https://example.com',content:'desktop provider'}]}),{status:200}));
+    const fetchMock=vi.fn<typeof fetch>(async()=>new Response(JSON.stringify({results:[{title:'Configured search',url:'https://example.com',content:'desktop provider'}]}),{status:200}));
     vi.stubGlobal('fetch',fetchMock);
-    await service.setConfig({search:{provider:'tavily',tavilyApiKey:'fixture'},fetch:{provider:'basic'}});
+    await service.setConfig({search:{provider:'tavily',tavilyApiKey:'fixture'},fetch:{provider:'basic'}}, {requestSource:'user'});
     expect(await scoped.executeTool('web_search',{query:'cli reference'})).toContain('Configured search');
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('tavily');
     scoped.dispose();
@@ -38,7 +38,7 @@ describe('ConnectorsService', () => {
   });
 
   it('initializes with default config and registers web tools', () => {
-    const snapshot = service.getConfig();
+    const snapshot = service.getConfig({requestSource:'user'});
     expect(snapshot.config.search.provider).toBe('duckduckgo');
     expect(snapshot.config.fetch.provider).toBe('basic');
     expect(snapshot.loadStatus).toBe('missing');
@@ -58,14 +58,14 @@ describe('ConnectorsService', () => {
     await service.setConfig({
       search: { provider: 'tavily' },
       fetch: { provider: 'basic' },
-    });
+    }, {requestSource:'user'});
     const tavily = service.listProviders().find((r) => r.provider_name === 'web_search.tavily');
     expect(tavily?.runtime_state).toBe('missing_config');
 
     await service.setConfig({
       search: { provider: 'tavily', tavilyApiKey: 'tvly-key' },
       fetch: { provider: 'basic' },
-    });
+    }, {requestSource:'user'});
     const ready = service.listProviders().find((r) => r.provider_name === 'web_search.tavily');
     expect(ready?.runtime_state).toBe('ready');
   });
@@ -74,7 +74,7 @@ describe('ConnectorsService', () => {
     await service.setConfig({
       search: { provider: 'searxng' },
       fetch: { provider: 'firecrawl' },
-    });
+    }, {requestSource:'user'});
     const searxng = service.listProviders().find((r) => r.provider_name === 'web_search.searxng');
     const firecrawl = service.listProviders().find((r) => r.provider_name === 'web_fetch.firecrawl');
     expect(searxng?.runtime_state).toBe('not_implemented');
@@ -86,7 +86,7 @@ describe('ConnectorsService', () => {
     await service.setConfig({
       search: { provider: 'brave', braveApiKey: 'brave-key' },
       fetch: { provider: 'jina' },
-    });
+    }, {requestSource:'user'});
     const after = toolRegistry.getToolDefinitions().find((d) => d.name === 'web_search');
     expect(before).toBeDefined();
     expect(after).toBeDefined();
@@ -97,8 +97,8 @@ describe('ConnectorsService', () => {
     await service.setConfig({
       search: { provider: 'tavily', tavilyApiKey: 'tvly-key-123' },
       fetch: { provider: 'jina', jinaApiKey: 'jina-key-456' },
-    });
-    const snapshot = service.getConfig();
+    }, {requestSource:'user'});
+    const snapshot = service.getConfig({requestSource:'user'});
     expect(snapshot.config.search.tavilyApiKey).toBe('tvly-key-123');
     expect(snapshot.config.fetch.jinaApiKey).toBe('jina-key-456');
     expect(snapshot.loadStatus).toBe('ok');

@@ -1,7 +1,20 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'path'
+import { readFileSync } from 'node:fs'
+import { normalizePath } from 'vite'
+
+const servicesTestEntry = normalizePath(resolve(__dirname, 'electron/desktop-services.ts'))
 
 export default defineConfig({
+  // This alias exists only in the test loader; production source stays private.
+  plugins: [{
+    name: 'real-private-finalization-test-entry',
+    enforce: 'pre',
+    load(id) {
+      if (normalizePath(id.split('?')[0]!) !== servicesTestEntry) return
+      return readFileSync(servicesTestEntry, 'utf8') + '\nexport {streamDesktopToolLoopFinalization as __testFinalization};\n'
+    },
+  }],
   esbuild: {
     jsx: 'automatic',
   },

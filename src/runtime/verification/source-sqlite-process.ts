@@ -22,6 +22,8 @@ export interface SqliteSourcePhysicalFile {readonly suffix:''|'-journal'|'-wal'|
 interface Header {state:'held';count:number;pid:number;nonce:string;snapshots:Array<{index:number;pageSize:number;pageCount:number;physicalFiles:readonly Readonly<SqliteSourcePhysicalFile>[]}>}
 export interface SqliteSourceCapture {source:Readonly<SqliteCustodySource>;pageSize:number;pageCount:number;byteLength:number;sha256:string;physicalFiles:readonly Readonly<SqliteSourcePhysicalFile>[]}
 const captures=new WeakMap<object,{owner:object;facts:readonly Readonly<SqliteSourceCapture>[];pages:readonly Buffer[]}>();
+export interface SqliteSourcePhysicalObservation extends SqliteSourcePhysicalFile {readonly index:number;readonly sha256:string}
+const physicalObservations=new WeakMap<object,{owner:object;facts:readonly Readonly<SqliteSourcePhysicalObservation>[]} >();
 const owners=new WeakMap<object,{current():void;readers:Set<()=>void>}>();
 function fields(value:unknown,keys:string[]):asserts value is Record<string,any>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==keys.sort().join(','))throw Error('source_sqlite_protocol');}
 function decimal(value:string,positive=false){if(typeof value!=='string'||!/^(0|[1-9][0-9]{0,19})$/.test(value)||BigInt(value)>18446744073709551615n||positive&&value==='0')throw Error('source_sqlite_identity');}
@@ -35,7 +37,7 @@ export async function startSqliteSourceCustody(input:{executable:string;uid:numb
  const args=[String(uid),...sources.flatMap(s=>[s.directory.canonicalPath,s.directory.device,s.directory.inode,s.database.basename,s.database.device,s.database.inode,s.sidecars.journal,s.sidecars.wal,s.sidecars.shm])];
  if(args.reduce((bytes,value)=>bytes+Buffer.byteLength(value)+1,0)>192*1024)throw Error('source_sqlite_arguments');signal.throwIfAborted();
  const child:ChildProcessWithoutNullStreams=spawn(executable,args,{cwd:'/',env:{PATH:'/usr/bin:/bin',LC_ALL:'C'},stdio:'pipe'});
- let ended=false,closing=false,failure:Error|undefined,buffer=Buffer.alloc(0),stderrBytes=0,first:unknown,firstSeen=false,busy=false,closePromise:Promise<void>|undefined;
+ let ended=false,closing=false,failure:Error|undefined,buffer=Buffer.alloc(0),stderrBytes=0,first:unknown,firstSeen=false,busy=false,physicalBusy=false,closePromise:Promise<void>|undefined;
  let waiter:{resolve(value:unknown):void;reject(error:Error):void;timer:ReturnType<typeof setTimeout>}|undefined;
  let resolveClosed!:()=>void;const closed=new Promise<void>(resolve=>{resolveClosed=resolve;});const retained:Buffer[]=[];const readers=new Set<()=>void>();
  function poison(error:Error){failure??=error;if(waiter){clearTimeout(waiter.timer);waiter.reject(failure);waiter=undefined;}if(!ended)child.kill('SIGKILL');}
@@ -47,17 +49,59 @@ export async function startSqliteSourceCustody(input:{executable:string;uid:numb
  child.on('close',()=>{ended=true;signal.removeEventListener('abort',abort);if(waiter){clearTimeout(waiter.timer);waiter.reject(failure??Error('source_sqlite_ended'));waiter=undefined;}resolveClosed();});
  async function receive(command?:string):Promise<any>{current();if(waiter)throw Error('source_sqlite_concurrent');if(!command&&firstSeen){const value=first;first=undefined;return value;}const answer=new Promise<unknown>((resolve,reject)=>{const timer=setTimeout(()=>poison(Error('source_sqlite_timeout')),10000);waiter={resolve,reject,timer};});if(command)child.stdin.write(command+'\n');return answer;}
  async function close(){if(closePromise)return closePromise;closing=true;closePromise=(async()=>{if(!ended){const timer=setTimeout(()=>child.kill('SIGKILL'),1000);child.stdin.end('RELEASE\n');await closed;clearTimeout(timer);}if(buffer.length)failure??=Error('source_sqlite_partial_frame');for(const closeReader of readers)closeReader();for(const bytes of retained)bytes.fill(0);retained.length=0;})();return closePromise;}
+ async function rejectAfterClose(error:unknown,fallback:string):Promise<never>{
+  poison(error instanceof Error?error:Error(fallback));
+  try{await close();}catch(cleanupError){throw new AggregateError([error,cleanupError],'source_sqlite_close_unknown',{cause:error});}
+  throw error;
+ }
+ function publicCurrent(){current();if(physicalBusy)throw Error('source_sqlite_physical_active');}
+
  let header:Header;
  function parseHeader(value:unknown):Header{fields(value,['state','count','pid','nonce','snapshots']);if(value.state!=='held'||value.count!==sources.length||value.pid!==child.pid||typeof value.nonce!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.nonce)||!Array.isArray(value.snapshots)||value.snapshots.length!==sources.length)throw Error('source_sqlite_header');value.snapshots.forEach((snapshot:unknown,index:number)=>{fields(snapshot,['index','pageSize','pageCount','physicalFiles']);if(!Array.isArray(snapshot.physicalFiles)||snapshot.physicalFiles.length<1||snapshot.physicalFiles.length>4)throw Error('source_sqlite_header');let previous=-1;for(const file of snapshot.physicalFiles){fields(file,['suffix','device','inode','byteLength']);const at=['','-journal','-wal','-shm'].indexOf(file.suffix);if(at<0||at<=previous||previous<0&&at!==0)throw Error('source_sqlite_header');previous=at;decimal(file.device);decimal(file.inode,true);decimal(file.byteLength);if(at===0&&(file.device!==sources[index]!.database.device||file.inode!==sources[index]!.database.inode))throw Error('source_sqlite_identity');Object.freeze(file);}Object.freeze(snapshot.physicalFiles);const size=snapshot.pageSize,count=snapshot.pageCount;if(snapshot.index!==index||!Number.isSafeInteger(size)||size<512||size>65536||(size&(size-1))||!Number.isSafeInteger(count)||count<1||size*count>128*1024**2)throw Error('source_sqlite_header');});if(value.snapshots.reduce((n:number,s:{pageSize:number;pageCount:number})=>n+s.pageSize*s.pageCount,0)>128*1024**2)throw Error('source_sqlite_total_limit');return value as unknown as Header;}
- try{header=parseHeader(await receive());firstSeen=true;}catch(error){poison(error instanceof Error?error:Error('source_sqlite_header'));await close();throw error;}
+ try{header=parseHeader(await receive());firstSeen=true;}catch(error){return rejectAfterClose(error,'source_sqlite_header');}
  async function check(){const answer=parseHeader(await receive('CHECK'));if(json(answer)!==json(header))throw Error('source_sqlite_changed');current();}
  let captured=false;const owner=Object.freeze({
-  async checkCurrent(){current();if(busy)throw Error('source_sqlite_concurrent');busy=true;try{await check();}catch(error){poison(error instanceof Error?error:Error('source_sqlite_changed'));await close();throw error;}finally{busy=false;}},
-  async capture(maximumBytes=128*1024**2){current();if(!Number.isSafeInteger(maximumBytes)||maximumBytes<0||maximumBytes>128*1024**2)throw Error('source_sqlite_capture_limit');if(busy||captured)throw Error('source_sqlite_capture_consumed');busy=true;captured=true;try{if(header.snapshots.reduce((n,s)=>n+s.pageSize*s.pageCount,0)>maximumBytes)throw Error('source_sqlite_total_limit');const facts:Readonly<SqliteSourceCapture>[]=[];for(const snapshot of header.snapshots){const bytes=Buffer.alloc(snapshot.pageSize*snapshot.pageCount);retained.push(bytes);const hash=createHash('sha256');hash.update('xiaok-source-sqlite-pager-v1\0');hash.update(json({pageSize:snapshot.pageSize,pageCount:snapshot.pageCount}));hash.update('\0');for(let pageNo=1;pageNo<=snapshot.pageCount;pageNo++){const page=await receive('PAGE');fields(page,['state','index','pageNo','nonce','bytes']);if(page.state!=='page'||page.index!==snapshot.index||page.pageNo!==pageNo||page.nonce!==header.nonce||typeof page.bytes!=='string'||page.bytes.length!==snapshot.pageSize*2||!/^[a-f0-9]+$/.test(page.bytes))throw Error('source_sqlite_page');const pageBytes=Buffer.from(page.bytes,'hex');hash.update(pageBytes);pageBytes.copy(bytes,(pageNo-1)*snapshot.pageSize);}facts.push(Object.freeze({source:sources[snapshot.index]!,pageSize:snapshot.pageSize,pageCount:snapshot.pageCount,byteLength:snapshot.pageSize*snapshot.pageCount,physicalFiles:snapshot.physicalFiles,sha256:hash.digest('hex')}));}const end=await receive('PAGE');fields(end,['state','nonce','count']);if(end.state!=='snapshot-complete'||end.nonce!==header.nonce||end.count!==sources.length)throw Error('source_sqlite_incomplete');await check();const token=Object.freeze({});captures.set(token,{owner,facts:Object.freeze(facts),pages:Object.freeze([...retained])});for(let index=0;index<facts.length;index++)if(facts[index]!.source.snapshotFormat==='writer-lock-sqlite-v1'&&readSqliteSourceSchema(owner,token,index).length!==0)throw Error('source_sqlite_writer_lock_schema');return token;}catch(error){poison(error instanceof Error?error:Error('source_sqlite_capture'));await close();throw error;}finally{busy=false;}},
+  /** A fresh observation of every original physical file, never retirement or
+   * evidence that a previous reviewed logical snapshot remains unchanged. */
+  async capturePhysicalFiles(maximumPhysicalBytes=128*1024**2){
+   current();if(arguments.length>1||!Number.isSafeInteger(maximumPhysicalBytes)||maximumPhysicalBytes<0||maximumPhysicalBytes>128*1024**2)throw Error('source_sqlite_physical_limit');
+   if(busy||readers.size)throw Error('source_sqlite_concurrent');
+   const expected=header.snapshots.flatMap(snapshot=>snapshot.physicalFiles.map(file=>({index:snapshot.index,...file})));
+   if(expected.reduce((total,file)=>total+BigInt(file.byteLength),0n)>BigInt(maximumPhysicalBytes))throw Error('source_sqlite_physical_limit');
+   busy=true;physicalBusy=true;try{
+    await check();const start=await receive('RAW');fields(start,['state','nonce','count','files']);
+    if(start.state!=='physical-start'||start.nonce!==header.nonce||start.count!==sources.length||json(start.files)!==json(expected))throw Error('source_sqlite_physical_manifest');
+    const facts:Readonly<SqliteSourcePhysicalObservation>[]=[];
+    for(const file of expected){
+     const begin=await receive('RAW-NEXT');fields(begin,['state','nonce','index','suffix','device','inode','byteLength']);
+     if(begin.state!=='physical-file'||begin.nonce!==header.nonce||json({index:begin.index,suffix:begin.suffix,device:begin.device,inode:begin.inode,byteLength:begin.byteLength})!==json(file))throw Error('source_sqlite_physical_file');
+     const length=Number(file.byteLength),hash=createHash('sha256');let offset=0;
+     while(offset<length){const chunk=await receive('RAW-NEXT');fields(chunk,['state','nonce','index','suffix','offset','bytes']);
+      if(chunk.state!=='physical-chunk'||chunk.nonce!==header.nonce||chunk.index!==file.index||chunk.suffix!==file.suffix||chunk.offset!==offset||typeof chunk.bytes!=='string'||chunk.bytes.length<2||chunk.bytes.length>65536*2||chunk.bytes.length%2||!/^[a-f0-9]+$/.test(chunk.bytes))throw Error('source_sqlite_physical_chunk');
+      const bytes=Buffer.from(chunk.bytes,'hex');try{if(bytes.length>length-offset)throw Error('source_sqlite_physical_chunk');hash.update(bytes);offset+=bytes.length;}finally{bytes.fill(0);}
+     }
+     const end=await receive('RAW-NEXT');fields(end,['state','nonce','index','suffix','byteLength']);
+     if(end.state!=='physical-file-complete'||end.nonce!==header.nonce||end.index!==file.index||end.suffix!==file.suffix||end.byteLength!==file.byteLength)throw Error('source_sqlite_physical_incomplete');
+     facts.push(Object.freeze({...file,sha256:hash.digest('hex')}));
+    }
+    const end=await receive('RAW-NEXT');fields(end,['state','nonce','count','fileCount']);
+    if(end.state!=='physical-complete'||end.nonce!==header.nonce||end.count!==sources.length||end.fileCount!==expected.length)throw Error('source_sqlite_physical_incomplete');
+    await check();current();const token=Object.freeze({});physicalObservations.set(token,{owner,facts:Object.freeze(facts)});return token;
+   }catch(error){return rejectAfterClose(error,'source_sqlite_physical_capture');}finally{busy=false;physicalBusy=false;}
+  },
+  async checkCurrent():Promise<void>{current();if(busy)throw Error('source_sqlite_concurrent');busy=true;try{await check();}catch(error){return rejectAfterClose(error,'source_sqlite_changed');}finally{busy=false;}},
+  async capture(maximumBytes=128*1024**2){current();if(!Number.isSafeInteger(maximumBytes)||maximumBytes<0||maximumBytes>128*1024**2)throw Error('source_sqlite_capture_limit');if(busy||captured)throw Error('source_sqlite_capture_consumed');busy=true;captured=true;try{if(header.snapshots.reduce((n,s)=>n+s.pageSize*s.pageCount,0)>maximumBytes)throw Error('source_sqlite_total_limit');const facts:Readonly<SqliteSourceCapture>[]=[];for(const snapshot of header.snapshots){const bytes=Buffer.alloc(snapshot.pageSize*snapshot.pageCount);retained.push(bytes);const hash=createHash('sha256');hash.update('xiaok-source-sqlite-pager-v1\0');hash.update(json({pageSize:snapshot.pageSize,pageCount:snapshot.pageCount}));hash.update('\0');for(let pageNo=1;pageNo<=snapshot.pageCount;pageNo++){const page=await receive('PAGE');fields(page,['state','index','pageNo','nonce','bytes']);if(page.state!=='page'||page.index!==snapshot.index||page.pageNo!==pageNo||page.nonce!==header.nonce||typeof page.bytes!=='string'||page.bytes.length!==snapshot.pageSize*2||!/^[a-f0-9]+$/.test(page.bytes))throw Error('source_sqlite_page');const pageBytes=Buffer.from(page.bytes,'hex');hash.update(pageBytes);pageBytes.copy(bytes,(pageNo-1)*snapshot.pageSize);}facts.push(Object.freeze({source:sources[snapshot.index]!,pageSize:snapshot.pageSize,pageCount:snapshot.pageCount,byteLength:snapshot.pageSize*snapshot.pageCount,physicalFiles:snapshot.physicalFiles,sha256:hash.digest('hex')}));}const end=await receive('PAGE');fields(end,['state','nonce','count']);if(end.state!=='snapshot-complete'||end.nonce!==header.nonce||end.count!==sources.length)throw Error('source_sqlite_incomplete');await check();const token=Object.freeze({});captures.set(token,{owner,facts:Object.freeze(facts),pages:Object.freeze([...retained])});for(let index=0;index<facts.length;index++)if(facts[index]!.source.snapshotFormat==='writer-lock-sqlite-v1'&&readSqliteSourceSchema(owner,token,index).length!==0)throw Error('source_sqlite_writer_lock_schema');return token;}catch(error){return rejectAfterClose(error,'source_sqlite_capture');}finally{busy=false;}},
   close,
- });owners.set(owner,{current,readers});return owner;
+ });owners.set(owner,{current:publicCurrent,readers});return owner;
 }
 export function readSqliteSourceCapture(owner:object,token:object):readonly Readonly<SqliteSourceCapture>[]{const entry=owners.get(owner),capture=captures.get(token);if(!entry||!capture||capture.owner!==owner)throw Error('source_sqlite_capture_brand');entry.current();return capture.facts;}
+
+/** Immutable observed hashes only; a later physical action requires a new
+ * actual observation and its separate native authorization/currentness gate. */
+export function readSqliteSourcePhysicalFiles(owner:object,token:object):readonly Readonly<SqliteSourcePhysicalObservation>[] {
+ if(arguments.length!==2)throw Error('source_sqlite_physical_arguments');const entry=owners.get(owner),observation=physicalObservations.get(token);
+ if(!entry||!observation||observation.owner!==owner)throw Error('source_sqlite_physical_brand');entry.current();return observation.facts;
+}
 
 /** Opens a parsing representation only. The captured hash always describes the
  * original pager bytes; changing WAL header flags here neither changes those

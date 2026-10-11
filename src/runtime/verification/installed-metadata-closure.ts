@@ -3,7 +3,8 @@ import {parseIntentContractEnrollment,intentContractOriginalRegistration} from '
 import {canonicalVerificationJson as json} from './protocol.js';
 import {parseLoopHostSubject,loopHostSubjectOwner} from './loop-host-subject.js';
 import {parseOwnerEnrollmentRegistration} from './owner-enrollment-review.js';
-import {isDeepStrictEqual} from 'node:util';
+import {isDeepStrictEqual as initialIsDeepStrictEqual} from 'node:util';
+const isDeepStrictEqual=initialIsDeepStrictEqual;
 import type {InstalledControllerLifetime} from './installed-controller-lifetime.js';
 import {readInstalledMetadataSessionFacts} from './installed-metadata-source.js';
 import {readInstalledProfileSourceCapture,checkInstalledProfileSourceCapture} from './profile-source-capture.js';
@@ -428,3 +429,8 @@ export async function collectInstalledMetadataClosure(lifetime:InstalledControll
  * later physical await must additionally use the actual async CHECK. */
 export function readInstalledMetadataClosure(lifetime:InstalledControllerLifetime,handle:object){if(arguments.length!==2)throw Error('installed_metadata_closure_arguments');return stored(lifetime,handle).facts;}
 export async function checkInstalledMetadataClosure(lifetime:InstalledControllerLifetime,handle:object):Promise<void>{if(arguments.length!==2)throw Error('installed_metadata_closure_arguments');const value=stored(lifetime,handle);await checkInstalledProfileSourceCapture(lifetime,value.owner,value.token);current(value);}
+/** Exact original capture linkage, never a caller-provided closure DTO. */
+export function assertInstalledMetadataClosureCapture(lifetime:InstalledControllerLifetime,handle:object,owner:object,token:object):void{
+ if(arguments.length!==4)throw Error('installed_metadata_closure_arguments');
+ const value=stored(lifetime,handle);if(value.owner!==owner||value.token!==token)throw Error('installed_metadata_closure_capture');
+}

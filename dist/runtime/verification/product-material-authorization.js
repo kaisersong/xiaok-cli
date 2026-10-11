@@ -1,4 +1,5 @@
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual as initialIsDeepStrictEqual } from 'node:util';
+const isDeepStrictEqual = initialIsDeepStrictEqual;
 import { isAbsolute } from 'node:path';
 import { parseMaterialPrepareResult } from './material-request.js';
 import { canonicalVerificationJson } from './protocol.js';

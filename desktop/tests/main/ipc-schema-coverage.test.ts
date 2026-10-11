@@ -1,5 +1,9 @@
+import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
 import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
 import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
+import {registerLoopManagementIpc} from '../../electron/loop-management-typed-ipc.js';
+import {registerThreadMetadataIpc} from '../../electron/thread-metadata-typed-ipc.js';
+import {registerDesktopSmallConfigIpc} from '../../electron/desktop-small-config-typed-ipc.js';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,8 +11,12 @@ import { join } from 'node:path';
 const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'main.ts'), 'utf8');
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 const currentViewChannels:string[]=[];
+registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerLoopCurrentViewIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
 registerLoopOutputIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
+registerLoopManagementIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerThreadMetadataIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerDesktopSmallConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});
 
 function extractIpcChannels(source: string): string[] {
   const matches = [...source.matchAll(/(?:(?:ipcMain|shutdownAwareIpc)\.handle|fileHandler)\(\s*['"]([^'"]+)['"]/g)];

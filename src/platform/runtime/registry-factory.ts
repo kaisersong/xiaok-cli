@@ -1,3 +1,4 @@
+import type {ToolDescriptionMetadata} from '../../shared/tool-description-metadata.js';
 import { createInteractiveBashTool } from '../../ai/tools/bash.js';
 import type { ModelAdapter, Tool } from '../../types.js';
 import type { SubAgentProgressEvent } from '../../ai/agents/subagent-presentation.js';
@@ -248,10 +249,12 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     ];
 
     // 构建基础 tool list
+    const descriptions=new Map<Tool,ToolDescriptionMetadata>();
     const baseTools = buildToolList(
       options.skillTool,
       { cwd, allowOutsideCwd: Boolean(options.platform.sandboxEnforcer) },
       extraTools,
+      descriptions,
     );
 
     // 应用 sandbox
@@ -261,6 +264,9 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
     const sandboxedTools = applySandboxToTools(executionTools, options.platform.sandboxEnforcer, {
       onSandboxDenied: handleSandboxDenied,
     });
+
+    const wrappedDescriptions=new Map<Tool,ToolDescriptionMetadata>();
+    executionTools.forEach((source,index)=>{const metadata=descriptions.get(source);if(metadata)wrappedDescriptions.set(sandboxedTools[index],metadata);});
 
     // 合并 built-in 和 MCP tools（保证 ordering）
     const sandboxedMcpTools = applySandboxToTools(expandMcpCatalog(options.platform.mcpTools), options.platform.sandboxEnforcer, {
@@ -297,7 +303,7 @@ export function createPlatformRegistryFactory(options: PlatformRegistryFactoryOp
       onPrompt: options.onPrompt,
       agentId,
       onToolObserved: options.onToolObserved,
-    }, filteredTools);
+    }, filteredTools,wrappedDescriptions);
     registries.add(registry);
     const platformMcpInstances = new Set(sandboxedMcpTools);
     const baseNames = new Set(sandboxedTools.map((tool) => tool.definition.name));

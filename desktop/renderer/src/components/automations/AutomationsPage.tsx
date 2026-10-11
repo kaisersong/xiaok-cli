@@ -1,3 +1,5 @@
+import {scheduledErrorMessage} from '../../lib/scheduled-timed-action-error';
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../../lib/loop-management-errors';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Activity, AlertTriangle, Clock, RefreshCw } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -42,6 +44,7 @@ export function AutomationsPage() {
   const [globalBackgroundAutoRunEnabled, setGlobalBackgroundAutoRunEnabled] = useState(true);
   const [savingGlobalAutoRun, setSavingGlobalAutoRun] = useState(false);
   const [overviewSnapshot, setOverviewSnapshot] = useState<AutomationOverviewSnapshotView | null>(null);
+  const [loopActionError, setLoopActionError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +90,7 @@ export function AutomationsPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--c-bg-page)]" data-testid="automations-page">
+      {loopActionError && <p role="alert" className="px-8 py-3 text-sm text-[var(--c-error)]">{loopActionError}</p>}
       <header className="border-b border-[var(--c-border)] px-8 py-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -183,11 +187,15 @@ export function AutomationsPage() {
                             onClick={async () => {
                               if (!confirm(t.automationsClearConfirm(item.title))) return;
                               try {
+                                setLoopActionError('');
                                 await api.clearLoopRunHistory(item.loopId!, ['failed', 'blocked']);
                                 const snapshot = await api.getAutomationOverviewSnapshot();
                                 setOverviewSnapshot(snapshot);
                               } catch (e) {
                                 console.error('[Automations] clear failures failed', e);
+                                if (loopManagementFailureKind(e)) {
+                                  setLoopActionError(loopManagementErrorMessage(e, t, t.loopOperationResultUnknown));
+                                }
                               }
                             }}
                             className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"
@@ -205,7 +213,7 @@ export function AutomationsPage() {
                                 const snapshot = await api.getAutomationOverviewSnapshot();
                                 setOverviewSnapshot(snapshot);
                               } catch (e) {
-                                console.error('[Automations] clear schedule failures failed', e);
+                                setLoopActionError(scheduledErrorMessage(e,t));
                               }
                             }}
                             className="text-[10px] text-[var(--c-text-tertiary)] hover:text-red-600 hover:underline"

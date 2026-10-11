@@ -147,6 +147,80 @@ describe('buildModelOptions', () => {
     }
   });
 
+  it('groups interleaved configured and catalog models by provider without mutating config', () => {
+    const config = {
+      ...configFixture,
+      providers: {
+        kimi: configFixture.providers.kimi,
+        'z-local': { type: 'custom' as const, protocol: 'openai_legacy' as const },
+        glm: { type: 'first_party' as const, protocol: 'openai_legacy' as const },
+      },
+      models: {
+        'kimi-coding': configFixture.models['kimi-coding'],
+        'local-qwen': { provider: 'z-local', model: 'qwen', label: 'Local' },
+        'glm-configured': { provider: 'glm', model: 'glm-test', label: 'Configured GLM' },
+        'kimi-k2-fast': configFixture.models['kimi-k2-fast'],
+        'orphan-model': { provider: 'a-missing', model: 'orphan', label: 'Orphan' },
+      },
+    };
+    const before = structuredClone(config);
+    const options = buildModelOptions(config);
+    const groups = options.filter((option, index) => index === 0 || option.provider !== options[index - 1].provider)
+      .map(option => option.provider);
+    expect(groups).toEqual(['a-missing', 'glm', 'kimi', 'z-local']);
+    expect(options.filter(option => option.provider === 'kimi').slice(0, 2).map(option => option.id))
+      .toEqual(['kimi-coding', 'kimi-k2-fast']);
+    expect(options.findIndex(option => option.id === 'glm-configured'))
+      .toBeLessThan(options.findIndex(option => option.id === 'glm-5.3-flash'));
+    expect(new Set(options.map(option => option.id)).size).toBe(options.length);
+    expect(config).toEqual(before);
+  });
+
+  it.each([false, true])('preserves current selection and navigates provider groups (renderer=%s)', async (useRenderer) => {
+    const config = {
+      ...configFixture,
+      defaultModelId: 'z-second',
+      providers: {
+        zeta: { type: 'custom' as const, protocol: 'openai_legacy' as const },
+        alpha: { type: 'custom' as const, protocol: 'openai_legacy' as const },
+      },
+      models: {
+        'z-first': { provider: 'zeta', model: 'z1', label: 'Zeta First' },
+        'a-first': { provider: 'alpha', model: 'a1', label: 'Alpha First' },
+        'z-second': { provider: 'zeta', model: 'z2', label: 'Zeta Second' },
+        'a-second': { provider: 'alpha', model: 'a2', label: 'Alpha Second' },
+      },
+    };
+    const before = structuredClone(config);
+    const harness = createTtyHarness(100, 24);
+    const renderer = new ReplRenderer(process.stdout);
+    const scrollRegion = new ScrollRegionManager(process.stdout);
+    try {
+      if (useRenderer) {
+        scrollRegion.begin();
+        scrollRegion.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'z2' });
+        renderer.setScrollRegion(scrollRegion);
+      }
+      let pending = selectModel(config, useRenderer ? { renderer } : {});
+      const rows = harness.screen.lines().filter(line => /\[(alpha|zeta)\]/.test(line));
+      expect(rows.map(line => line.match(/\[(alpha|zeta)\]/)?.[1])).toEqual(['alpha', 'alpha', 'zeta', 'zeta']);
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({ modelId: 'z-second', provider: 'zeta', model: 'z2' });
+      pending = selectModel(config, useRenderer ? { renderer } : {});
+      harness.send('\x1b[B');
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({ modelId: 'a-first', provider: 'alpha', model: 'a1' });
+      pending = selectModel(config, useRenderer ? { renderer } : {});
+      harness.send('\x1b[A');
+      harness.send('\r');
+      await expect(pending).resolves.toMatchObject({ modelId: 'z-first', provider: 'zeta', model: 'z1' });
+      expect(config).toEqual(before);
+    } finally {
+      if (process.stdin.listenerCount('data') > 0) harness.send('\x1b');
+      harness.restore();
+    }
+  });
+
   it('lists every configured model entry instead of one model per provider', () => {
     const options = buildModelOptions({
       ...configFixture,

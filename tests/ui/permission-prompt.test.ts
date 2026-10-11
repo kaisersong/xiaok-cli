@@ -127,6 +127,13 @@ describe('permission-prompt', () => {
       expect(lines).toContain('Always-allow scope: bash(ls *) (* means any arguments; argument changes need no new approval)');
       expect(lines.at(-1)).toContain('1-5 select  Up/Down navigate  Enter confirm  Esc cancel');
     });
+
+    it('localizes the auto data-loss reason for English prompts', () => {
+      const lines = stripAll(formatPermissionPromptLines('bash', { command: 'git reset --hard HEAD' },
+        [{ label: 'Allow once', selected: true }], 'en', 'auto'));
+      expect(lines).toContain('Approval reason: auto mode still confirms data-loss commands: git reset --hard');
+      expect(lines).toContain('❯ 1. Allow once');
+    });
   });
 
   describe('buildPermissionRequest', () => {
@@ -154,6 +161,70 @@ describe('permission-prompt', () => {
   });
 
   describe('interactive replay', () => {
+    it.each(['plain', 'renderer', 'scroll'] as const)('shows numbered options and directly selects all five choices in %s mode', async (surface) => {
+      const actions = ['allow_once', 'allow_session', 'allow_project', 'allow_global', 'deny'];
+      for (let index = 0; index < actions.length; index += 1) {
+        const harness = createTtyHarness(120, 24);
+        try {
+          const renderer = surface === 'plain' ? undefined : new ReplRenderer(process.stdout);
+          if (surface === 'scroll') {
+            const region = new ScrollRegionManager(process.stdout);
+            renderer!.setScrollRegion(region); region.begin();
+            region.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'test · auto' });
+          } else if (renderer) {
+            renderer.renderInput({ prompt: '> ', input: '', cursor: 0, overlayLines: [] });
+          }
+          const pending = showPermissionPrompt('bash', { command: 'rm -rf ./build' }, { renderer });
+          const screen = harness.screen.text();
+          for (let number = 1; number <= 5; number += 1) expect(screen).toContain(`${number}. `);
+          expect(screen).toContain('数字直选');
+          harness.send(String(index + 1));
+          await expect(pending).resolves.toMatchObject({ action: actions[index] });
+          if (index > 0 && index < 4) await expect(pending).resolves.toHaveProperty('rule', 'bash(rm *)');
+          expect(harness.screen.text()).not.toContain('xiaok 想要执行以下操作');
+        } finally { harness.restore(); }
+      }
+    });
+
+    it.each(['12', '1garbage', '\x1b[200~4\x1b[201~'])('does not approve a non-single-digit input %j', async (key) => {
+      const harness = createTtyHarness();
+      try {
+        const pending = showPermissionPrompt('bash', { command: 'rm -rf ./build' });
+        harness.send(key); harness.send('\x1b');
+        await expect(pending).resolves.toEqual({ action: 'deny' });
+      } finally { harness.restore(); }
+    });
+
+    it.each(['plain', 'scroll'] as const)('explains the retained destructive-command confirmation in auto mode on %s', async (surface) => {
+      const harness = createTtyHarness(120, 24);
+      try {
+        const renderer = surface === 'plain' ? undefined : new ReplRenderer(process.stdout);
+        if (renderer) {
+          const region = new ScrollRegionManager(process.stdout);
+          renderer.setScrollRegion(region); region.begin();
+          region.renderFooter({ inputPrompt: 'Type your message...', statusLine: 'test · auto' });
+        }
+        const pending = showPermissionPrompt('bash', { command: 'S=/tmp/build; cd "$S"; rm -rf ./cache' }, {
+          renderer, ...{ permissionMode: 'auto' as const },
+        });
+        const screen = harness.screen.text();
+        harness.send('5');
+        await expect(pending).resolves.toEqual({ action: 'deny' });
+        expect(screen).toContain('确认原因: auto 模式仍需确认：递归强制删除');
+      } finally { harness.restore(); }
+    });
+
+    it.each([
+      ['default', 'rm -rf ./build'], ['auto', 'S=/tmp/build; cd "$S"; export NAME=test; printf ok'],
+    ] as const)('does not invent an auto reason for mode=%s command=%s', async (mode, command) => {
+      const harness = createTtyHarness();
+      try {
+        const pending = showPermissionPrompt('bash', { command }, { ...{ permissionMode: mode } });
+        const screen = harness.screen.text(); harness.send('5'); await pending;
+        expect(screen).not.toContain('确认原因:');
+      } finally { harness.restore(); }
+    });
+
     it('re-renders the same approval block instead of accumulating duplicate rows while navigating', async () => {
       const harness = createTtyHarness();
 
@@ -313,7 +384,7 @@ describe('permission-prompt', () => {
       const beforeDecision = harness.screen.text();
       expect(beforeDecision).toContain('xiaok 想要执行以下操作');
       expect(beforeDecision).toContain('命令: cmd /c where pi');
-      expect(beforeDecision).toContain('❯ 允许一次');
+      expect(beforeDecision).toContain('❯ 1. 允许一次');
       const beforeLines = harness.screen.lines();
       const titleIndex = beforeLines.findIndex((line) => line.includes('xiaok 想要执行以下操作'));
       const footerIndex = beforeLines.findIndex((line) => line.includes('Type your message'));
@@ -324,8 +395,8 @@ describe('permission-prompt', () => {
 
       harness.send('\x1b[B');
       const afterNavigate = harness.screen.text();
-      expect(afterNavigate).toContain('❯ 本次会话始终允许 bash(cmd *)');
-      expect(afterNavigate).not.toContain('❯ 允许一次');
+      expect(afterNavigate).toContain('❯ 2. 本次会话始终允许 bash(cmd *)');
+      expect(afterNavigate).not.toContain('❯ 1. 允许一次');
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_session', rule: 'bash(cmd *)' });

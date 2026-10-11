@@ -31,7 +31,7 @@ const readFiles=new Set(),replyCapture=createFinalReplyCapture();
 const runtimeSession=new AgentSessionState();let mechanism;
 if(entry.arm==='candidate'&&entry.surface==='cli'&&entry.mechanismAvailability==='eligible'){
  const {resolveRuntimeModelBinding}=await source('src/ai/providers/control-plane.ts');const binding=resolveRuntimeModelBinding(frozenConfig);
- mechanism=await createPairedMechanism({sourceRoot:repo,runDirectory:dir,workspace:root,task,session:runtimeSession,command,recipeEnvironment:manifest.recipeEnvironment,protocol:binding.protocol,profileId:adapter.getHarnessProfileId?.(),destination:{provider:binding.providerId,model:binding.wireModel,url:binding.baseUrl.replace(/\/$/,'')+'/chat/completions'}});
+ mechanism=await createPairedMechanism({sourceRoot:repo,registrationSourceRoot:manifest.sourceRoots.candidate,runDirectory:dir,workspace:root,task,session:runtimeSession,command,recipeEnvironment:manifest.recipeEnvironment,protocol:binding.protocol,profileId:adapter.getHarnessProfileId?.(),destination:{provider:binding.providerId,model:binding.wireModel,url:binding.baseUrl.replace(/\/$/,'')+'/chat/completions'}});
 }
 let visibleVerified=false,toolCalls=0,deniedCalls=0,registryReturned=0,bashObserved=0,recallCalls=0,recallCompleted=0;
 const registry=new ToolRegistry({autoMode:true,hooksRunner:{runPreHooks:async(name,input)=>{

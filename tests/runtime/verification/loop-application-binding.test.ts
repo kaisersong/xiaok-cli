@@ -1,5 +1,7 @@
 import {expect,it} from 'vitest';
 import {createLoopApplicationBinding,parseLoopApplicationBinding,loopApplicationBindingHash} from '../../../src/runtime/verification/loop-application-binding.js';
+import {assertLoopApplicationArtifacts} from '../../../src/runtime/verification/loop-application-artifacts.js';
+import {loopHostSubjectOwner} from '../../../src/runtime/verification/loop-host-subject.js';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 
 const H='a'.repeat(64);
@@ -39,6 +41,40 @@ it.each([['builtin',base],['health',health],['user-template',template],['evening
 it('preserves task-only empty outputs and distinct prompt/objective without minting proof',()=>{
  const value=createLoopApplicationBinding(template());expect(value.contract).toMatchObject({outputDirectory:'',outputFileName:'',prompt:'Original prompt.',loopContract:{objective:'Separate original objective.',successCriteria:[{kind:'task_completed',strength:'weak'}]}});
  expect(Object.keys(value).sort()).toEqual(['version','kind','subject','candidateId','candidateRevision','originalTriggerJson','triggerHash','logicalRunKey','contract','contractHash','body','candidatePayloadHash'].sort());
+});
+it('rejects a non-enumerable required root field before candidate capture',()=>{
+ const raw=base();Object.defineProperty(raw,'contract',{value:raw.contract,enumerable:false,writable:true,configurable:true});
+ expect(()=>createLoopApplicationBinding(raw)).toThrow('loop_application_shape');
+});
+it.each([
+ ['wrong version','version','loop_application_kind'],
+ ['invalid subject','subject','loop_subject_shape'],
+ ['invalid candidate id','candidateId','loop_application_identity'],
+ ['invalid revision','candidateRevision','loop_application_number'],
+] as const)('preserves historical %s error before malformed trigger parsing',(_name,field,error)=>{
+ const raw=base();raw.originalTriggerJson='{';
+ if(field==='version')raw.version=2;
+ if(field==='subject')raw.subject={};
+ if(field==='candidateId')raw.candidateId='';
+ if(field==='candidateRevision')raw.candidateRevision=0;
+ expect(()=>createLoopApplicationBinding(raw)).toThrow(error);
+});
+it.each([['non-string',42],['blank',' ']] as const)('preserves trigger text validation for %s input',(_name,trigger)=>{
+ const raw=base();raw.originalTriggerJson=trigger;
+ expect(()=>createLoopApplicationBinding(raw)).toThrow('loop_application_text');
+});
+it('parses the trigger once after complete capture, so JSON.parse reentry cannot alter the bound candidate',()=>{
+ const expected=createLoopApplicationBinding(base()),raw=base(),original=JSON.parse;let triggerParses=0;
+ try{
+  JSON.parse=function(text:any,...args:any[]){if(text===raw.originalTriggerJson){triggerParses++;raw.body.summary='reentered';}return Reflect.apply(original,this,[text,...args]);} as typeof JSON.parse;
+  const actual=createLoopApplicationBinding(raw);
+  expect(triggerParses).toBe(1);expect(actual.body.summary).toBe('Original scan.');expect(actual.candidatePayloadHash).toBe(expected.candidatePayloadHash);
+ }finally{JSON.parse=original;}
+});
+it('Loop wrapper checks all section shapes before path preflight through its public entry',()=>{
+ const binding=createLoopApplicationBinding(base()),owner={profileId:'profile',...loopHostSubjectOwner(binding.subject)},artifact={path:'x'.repeat(5000),sha256:H,size:0,bytesBase64:''};
+ const section={obligationId:'output',definitionHash:H,binding:{},evaluation:{},artifacts:[artifact]},extra={obligationId:'second',definitionHash:H,binding:{},evaluation:{},artifacts:[],unexpected:true};
+ expect(()=>assertLoopApplicationArtifacts(owner,binding,owner,[section,extra])).toThrow('published_artifact_sections');
 });
 it.each([
  (v:any)=>{v.contract=assistant().contract;},
@@ -104,6 +140,13 @@ it('requires evening candidate byte-lexical ID order without silently sorting',(
  const raw=assistant();raw.body.candidates=[candidate('a'),candidate('z')];const captured=createLoopApplicationBinding(raw);
  const changed:any=structuredClone(captured);changed.body.candidates.reverse();expect(()=>parseLoopApplicationBinding(changed)).toThrow();
  raw.body.candidates.reverse();expect(()=>createLoopApplicationBinding(raw)).toThrow(/candidate_order/);
+});
+it('rejects oversized original trigger JSON before parsing it',()=>{
+ const raw=base();raw.originalTriggerJson='{"kind":"'+ 'x'.repeat(65540) +'"}';
+ const nativeParse=JSON.parse;let calls=0;
+ try{JSON.parse=function(...args:any[]){calls++;return Reflect.apply(nativeParse,this,args);};expect(()=>createLoopApplicationBinding(raw)).toThrow('loop_application_limit');}
+ finally{JSON.parse=nativeParse;}
+ expect(calls).toBe(0);
 });
 it('preserves morning recommendation order/reasons and the actual maximum of three',()=>{
  const raw=assistant('morning');raw.body.recommendations.push({title:'Second',reasonCode:'different',evidenceRefs:[{kind:'task',id:'t2'}]});

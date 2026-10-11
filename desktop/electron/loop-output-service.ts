@@ -11,7 +11,7 @@ import {openLoopOutputDirectory,readLoopOutputPreview,readLoopTaskResult,resolve
 import type {LoopStore} from './loop-store.js';
 import type {CompletionEvidenceStore} from './completion-evidence-store.js';
 import type {TaskSnapshot} from '../../src/runtime/task-host/types.js';
-import type {DesktopShutdownGate,IpcHandleRegistrar} from './shutdown-aware-ipc-main.js';
+import type {DesktopShutdownGate} from './shutdown-aware-ipc-main.js';
 interface Action {loopId:string;requestSource:'user'|'agent'|'scheduler'}
 type Kind='preview'|'task'|'open'|'list';
 type ListAction=Action&{page:LoopArtifactPageRequest};
@@ -73,7 +73,4 @@ export function createLoopOutputService(options:{store:LoopStore;evidenceStore:C
  return Object.freeze({listPublishedArtifacts:(raw:ListAction)=>act(raw,'list'),readOutputPreview:(raw:Action)=>act(raw,'preview'),readTaskResult:(raw:Action)=>act(raw,'task'),openOutputDirectory:(raw:Action)=>act(raw,'open'),async close(){closed=true;lifetime.abort(Error('loop_output_closed'));await Promise.allSettled([...pending]);}});
 }
 export type LoopOutputService=ReturnType<typeof createLoopOutputService>;
-export function registerLoopOutputIpc(ipc:IpcHandleRegistrar,service:LoopOutputService,authorize:(event:unknown)=>boolean){
- ipc.handle('desktop:loops:listPublishedArtifacts',(event,...args)=>{if(!authorize(event)||args.length!==2)throw Error('loop_output_ipc_denied');executionIdentity(args[0]);return service.listPublishedArtifacts({loopId:args[0],page:parseLoopArtifactPageRequest(args[1]),requestSource:'user'});});
- for(const [channel,method] of [['desktop:loops:readOutputPreview','readOutputPreview'],['desktop:loops:readTaskResult','readTaskResult'],['desktop:loops:openOutputDirectory','openOutputDirectory']] as const){ipc.handle(channel,(event,...args)=>{if(!authorize(event)||args.length!==1)throw Error('loop_output_ipc_denied');executionIdentity(args[0]);return service[method]({loopId:args[0],requestSource:'user'});});}
-}
+export {registerLoopOutputIpc} from './loop-output-ipc.js';

@@ -1,4 +1,6 @@
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual as initialIsDeepStrictEqual } from 'node:util';
+const isDeepStrictEqual = initialIsDeepStrictEqual;
+import { assertNativeSqliteArrayConstruction } from './native-sqlite-construction-intrinsics.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { freezeCapturedData } from './captured-source-json.js';
 import { capturedSqliteEncoding, encodeCapturedSqliteCell } from './source-sqlite-cell.js';
@@ -10,10 +12,13 @@ const asciiName = (name) => name.replace(/[A-Z]/g, character => character.toLowe
 export function assertNativeSqliteProducerTableKinds(database) {
     if (arguments.length !== 1)
         throw Error('native_sqlite_census_query');
+    assertNativeSqliteArrayConstruction();
     const modules = database.pragma('module_list');
+    assertNativeSqliteArrayConstruction();
     if (modules.some(row => typeof row.name === 'string' && producerTables.has(asciiName(row.name))))
         throw Error('native_sqlite_census_schema');
     const tables = database.pragma('main.table_list');
+    assertNativeSqliteArrayConstruction();
     if (tables.some(row => row.schema === 'main' && typeof row.name === 'string' && producerTables.has(asciiName(row.name)) && row.type !== 'table'))
         throw Error('native_sqlite_census_schema');
 }
@@ -21,7 +26,9 @@ export function assertNativeSqliteProducerTableKinds(database) {
 export function assertNativeSqliteStoredProducerColumns(database, table) {
     if (arguments.length !== 2 || !producerTables.has(table))
         throw Error('native_sqlite_census_query');
+    assertNativeSqliteArrayConstruction();
     const columns = database.prepare('PRAGMA main.table_xinfo(' + quote(table) + ')').all();
+    assertNativeSqliteArrayConstruction();
     if (columns.some(column => column.hidden !== 0))
         throw Error('native_sqlite_census_schema');
 }
@@ -86,7 +93,9 @@ function rows(database, encoding, columns, from, parameters, order = '', anchor,
     assertAnchor();
     const projection = columns.flatMap(name => [quote(name), 'typeof(' + quote(name) + ')', 'CAST(' + quote(name) + ' AS BLOB)']).concat(scalar ? [scalar, 'typeof(' + scalar + ')', 'CAST(' + scalar + ' AS BLOB)'] : []).join(',');
     const statement = prepare(database, 'SELECT ' + projection + ' FROM ' + from + (order ? ' ORDER BY ' + order : ''), statements);
+    assertNativeSqliteArrayConstruction();
     const values = statement.raw(true).safeIntegers(true).all(...(anchor ? [anchor.table, anchor.table, anchor.table, ...parameters] : parameters));
+    assertNativeSqliteArrayConstruction();
     if (anchor) {
         for (const value of values) {
             const i = columns.length * 3, actual = encodeCapturedSqliteCell(value[i + 1], value[i], value[i + 2], encoding);
@@ -184,6 +193,7 @@ export function readNativeSqliteCensus(database, query, argument) {
     const scoped = Object.hasOwn(scopedQueries, query) ? scopedQueries[query] : undefined;
     if (!scoped && !inventoryTables.includes(query) || scoped && typeof argument !== 'string' || !scoped && argument !== undefined)
         throw Error('native_sqlite_census_query');
+    assertNativeSqliteArrayConstruction();
     const context = createContext(database), result = census(context, query, argument);
     finish(context);
     return result;
@@ -192,12 +202,14 @@ export function readNativeSqliteCensus(database, query, argument) {
 export function readNativeEnrollmentCensus(database) {
     if (arguments.length !== 1)
         throw Error('native_sqlite_census_query');
+    assertNativeSqliteArrayConstruction();
     const run = () => { const context = createContext(database), result = inventoryTables.map(table => census(context, table)); finish(context); return Object.freeze(result); };
     return database.inTransaction ? run() : database.transaction(run)();
 }
 export function readNativeKSwarmCensus(database, ownerKey, profileId) {
     if (arguments.length !== 3 || typeof ownerKey !== 'string' || typeof profileId !== 'string')
         throw Error('native_sqlite_census_query');
+    assertNativeSqliteArrayConstruction();
     const run = () => { const context = createContext(database), queries = ['owner', 'obligations', 'dependencies', 'registered', 'profile', 'invocations', 'receipts', 'subject', 'storageFeature']; const result = Object.fromEntries(queries.map(query => [query, census(context, query, query === 'storageFeature' ? 'kswarm-owner' : query === 'profile' ? profileId : ownerKey)])); finish(context); return Object.freeze(result); };
     return database.inTransaction ? run() : database.transaction(run)();
 }

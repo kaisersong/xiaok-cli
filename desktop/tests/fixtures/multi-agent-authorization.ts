@@ -33,7 +33,7 @@ export type SqliteWithAuthorizer = DatabaseSync & {
 
 // Only the network adapter and Electron shell are substituted. The factory,
 // default TaskRunner, registry, service, coordinator, store and IPC are real.
-export async function authorizationFixture(cleanup: Array<() => void | Promise<void>>, existingRoot?: string) {
+export async function authorizationFixture(cleanup: Array<() => void | Promise<void>>, existingRoot?: string, overrides: Partial<Parameters<typeof createDesktopServices>[0]> = {}) {
   const root = existingRoot ?? mkdtempSync(join(tmpdir(), 'xiaok-execution-auth-'));
   if (!existingRoot) cleanup.push(() => rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
   vi.stubEnv('XIAOK_CONFIG_DIR', join(root, 'config'));
@@ -43,11 +43,11 @@ export async function authorizationFixture(cleanup: Array<() => void | Promise<v
     onStatusChange: () => () => {}, getDesktopMutationToken: () => 'fixture', request: async () => new Response('{}', { status: 503 }),
   } as unknown as KSwarmService;
   const services = createDesktopServices({ dataRoot: join(root, 'data'), knowledgeDbPath: join(root, 'knowledge.sqlite'),
-    kswarmService, workspaceRoot: root, pluginRootDir: join(root, 'plugins'), pluginDependencies: [] });
+    kswarmService, workspaceRoot: root, pluginRootDir: join(root, 'plugins'), pluginDependencies: [], ...overrides });
   cleanup.push(() => services.disposeMultiAgent());
   const boundary = services.multiAgent!;
   await boundary.ready;
-  await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' });
+  await services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture-no-network' }, undefined, 'user');
   const store = (boundary.service as unknown as { options: { store: DesktopMultiAgentStore } }).options.store;
   const db = (store as unknown as { db: SqliteWithAuthorizer }).db;
   const contexts: DesktopAgentExecutionContext[] = [];

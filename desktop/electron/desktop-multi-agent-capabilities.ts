@@ -1,3 +1,5 @@
+import {inheritNativeReadonlyExecutionContext} from '../../src/ai/tools/native-readonly-context.js';
+import { captureToolDescriptionMetadata, type ToolDescriptionMetadata, type ToolDiscovery } from '../../src/shared/tool-description-metadata.js';
 import {inheritDesktopNativeReadonlyDescriptor,assertDesktopNativeDescriptorCurrent} from './desktop-native-catalog-provenance.js';
 import { randomUUID } from 'node:crypto';
 import type { PermissionClass, Tool, ToolDefinition, ToolExecutionContext, ToolPermissionGrant } from '../../src/types.js';
@@ -57,6 +59,7 @@ const keyOf = (ownerId: string, slotId: string): string => JSON.stringify([owner
 /** Main-only catalog: names address capabilities but never grant their identity. */
 export class DesktopCapabilityCatalog {
   private readonly descriptors = new Map<string, DesktopCapabilityDescriptor>();
+  private readonly descriptions = new Map<string, Readonly<ToolDescriptionMetadata> | undefined>();
   private readonly slotOwners = new Map<string, string>();
   private readonly slotRevisions = new Map<string, number>();
   private readonly names = new Map<string, string>();
@@ -66,7 +69,7 @@ export class DesktopCapabilityCatalog {
   private readonly workspaceRevisions = new Map<string, number>();
   private readonly workspaceAuthorizations = new Map<string, Readonly<ExecutionAuthorizationSnapshot>>();
 
-  publish(input: { requestSource: Source; ownerId: string; slotId?: string; entry: DesktopCapabilityEntry }): DesktopCapabilityDescriptor {
+  publish(input: { requestSource: Source; ownerId: string; slotId?: string; entry: DesktopCapabilityEntry }, metadata?: ToolDescriptionMetadata): DesktopCapabilityDescriptor {
     this.assertSource(input.requestSource, 'scheduler');
     if (!input.ownerId) throw new Error('capability requires owner');
     const slotId = input.slotId ?? randomUUID();
@@ -82,18 +85,39 @@ export class DesktopCapabilityCatalog {
     }
     const scope = copyScope(input.entry.scope);
     if (!scope.permissions.includes(input.entry.permission)) throw new Error('capability permission is outside its scope');
+    const description = captureToolDescriptionMetadata(metadata);
     const revision = (this.slotRevisions.get(slotId) ?? 0) + 1;
     const descriptor: DesktopCapabilityDescriptor = Object.freeze({ ...input.entry,
       definition: structuredClone(input.entry.definition), aliases: Object.freeze([...input.entry.aliases]), scope,
       capabilityId: randomUUID(), ownerId: input.ownerId, slotId, revision, canonicalName: input.entry.definition.name,
     });
     // Validate first, then atomically remove all aliases of the previous revision.
-    if (previous) this.removeNames(key, previous);
+    if (previous) { this.removeNames(key, previous); this.descriptions.delete(previous.capabilityId); }
+    this.descriptions.set(descriptor.capabilityId, description);
     this.descriptors.set(key, descriptor); this.slotOwners.set(slotId, input.ownerId); this.slotRevisions.set(slotId, revision);
     for (const name of names) this.names.set(name, key);
     this.authorized.delete(key);
     this.refreshAll();
     return descriptor;
+  }
+
+  /** Host-only descriptive snapshot; never an invocation or authorization grant. */
+  getDiscovery(capabilityId: string): ToolDiscovery | undefined {
+    const descriptor = [...this.descriptors.values()].find(item => item.capabilityId === capabilityId);
+    if (!descriptor) return undefined;
+    const metadata = this.descriptions.get(capabilityId);
+    return Object.freeze(metadata ? { coreDefinition: descriptor.definition, metadata } : { coreDefinition: descriptor.definition });
+  }
+
+  describe(capabilityId: string): ToolDiscovery | undefined { return this.getDiscovery(capabilityId); }
+
+  refreshDescription(input: { requestSource: Source; ownerId: string; capabilityId: string }, metadata?: ToolDescriptionMetadata): void {
+    this.assertSource(input.requestSource, 'scheduler');
+    const descriptor = [...this.descriptors.values()].find(item => item.capabilityId === input.capabilityId);
+    if (!descriptor || descriptor.ownerId !== input.ownerId) throw new Error('stale capability description or owner mismatch');
+    const description = captureToolDescriptionMetadata(metadata);
+    this.descriptions.set(descriptor.capabilityId, description);
+    this.refreshAll();
   }
 
   authorize(input: { requestSource: Source; capabilityId: string }): void {
@@ -109,7 +133,7 @@ export class DesktopCapabilityCatalog {
     for (const [key, descriptor] of this.descriptors) {
       if (descriptor.ownerId !== input.ownerId || input.slotId && descriptor.slotId !== input.slotId
         || input.expectedCapabilityId && descriptor.capabilityId !== input.expectedCapabilityId) continue;
-      this.removeNames(key, descriptor); this.descriptors.delete(key); this.authorized.delete(key);
+      this.removeNames(key, descriptor); this.descriptors.delete(key); this.authorized.delete(key); this.descriptions.delete(descriptor.capabilityId);
     }
     this.refreshAll();
   }
@@ -235,7 +259,10 @@ export class DesktopCapabilityCatalog {
     }
     for (const [name, tool] of record.tools) {
       const next = desired.get(name);
-      if (next && (tool as Tool & { capabilityId?: string }).capabilityId === next.descriptor.capabilityId) continue;
+      if (next && (tool as Tool & { capabilityId?: string }).capabilityId === next.descriptor.capabilityId) {
+        record.handle.registry.updateToolDescription(tool, this.descriptions.get(next.descriptor.capabilityId));
+        continue;
+      }
       record.handle.registry.unregisterTool(name, tool); record.tools.delete(name);
     }
     for (const [name, { key, descriptor }] of desired) {
@@ -261,11 +288,11 @@ export class DesktopCapabilityCatalog {
             session: { ...context.session, cwd: authority.cwd },
           } : undefined;
           context?.onToolInvocationStarted?.();
-          return invoke(input, boundContext);
+          return invoke(input, inheritNativeReadonlyExecutionContext(context, boundContext));
         },
       };
       inheritDesktopNativeReadonlyDescriptor(descriptor,tool);
-      record.tools.set(name, tool); record.handle.registry.registerTool(tool);
+      record.tools.set(name, tool); record.handle.registry.registerTool(tool, this.descriptions.get(descriptor.capabilityId));
     }
   }
 

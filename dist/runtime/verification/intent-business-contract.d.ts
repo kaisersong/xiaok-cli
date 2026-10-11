@@ -40,6 +40,7 @@ export interface IntentBusinessContract {
     readonly stages: readonly Readonly<IntentContractStage>[];
     readonly verification: Readonly<GoalVerificationDefinition>;
 }
+export declare const INTENT_BUSINESS_CONTRACT_HASH_DOMAIN = "xiaok-intent-business-contract-v1";
 /** Pure immutable contract. No owner is enrolled and no result is verified here. */
 export declare function parseIntentBusinessContract(raw: unknown): Readonly<IntentBusinessContract>;
 export declare function intentBusinessContractHash(raw: unknown): string;

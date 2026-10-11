@@ -7,6 +7,7 @@ import {
   deployBundledPluginFiles,
   prepareBundledPluginPythonRuntime,
   ensureManagedPythonVenv,
+  ensureHealthyManagedPythonVenv,
   ensureReportRendererDistCompat,
   ensureReportRendererCssCompat,
   ensureCanvasServerDepsCompat,
@@ -771,6 +772,74 @@ describe('deploy-bundled-plugins', () => {
       expect(result.pythonAvailable).toBe(false);
       expect(result.venvReady).toBe(false);
       expect(result.pythonCommand).toBeUndefined();
+    });
+  });
+
+  describe('managed Python health and recovery', () => {
+    it.each(['posix', 'windows'])('preserves a healthy %s environment without a global Python', async (platform) => {
+      const venvDir = join(rootDir, 'python-env');
+      const venvPython = platform === 'windows' ? join(venvDir, 'Scripts', 'python.exe') : join(venvDir, 'bin', 'python3');
+      mkdirSync(dirname(venvPython), { recursive: true });
+      writeFileSync(venvPython, 'existing');
+      const exec = vi.fn(async () => ({ stdout: 'cp311' }));
+      expect(await ensureHealthyManagedPythonVenv({ venvDir, venvPython, candidates: [], exec })).toBe(true);
+      expect(exec).toHaveBeenCalledTimes(1);
+      expect(readFileSync(venvPython, 'utf8')).toBe('existing');
+    });
+
+    it('rebuilds a killed interpreter using a working bundled Python and preserves a backup', async () => {
+      const venvDir = join(rootDir, 'python-env');
+      const venvPython = join(venvDir, 'bin', 'python3');
+      mkdirSync(dirname(venvPython), { recursive: true });
+      writeFileSync(venvPython, 'old');
+      const exec = vi.fn(async (command: string, args: string[]) => {
+        if (args[0] === '-m') {
+          expect(command).toBe('bundled-python');
+          expect(existsSync(venvDir)).toBe(false);
+          mkdirSync(dirname(venvPython), { recursive: true });
+          writeFileSync(venvPython, 'new');
+          return { stdout: '' };
+        }
+        if (command === venvPython && readFileSync(venvPython, 'utf8') === 'old') throw new Error('SIGKILL');
+        return { stdout: 'cp311' };
+      });
+      expect(await ensureHealthyManagedPythonVenv({ venvDir, venvPython, candidates: ['bundled-python', 'python3'], exec })).toBe(true);
+      expect(readFileSync(venvPython, 'utf8')).toBe('new');
+      const backup = readdirSync(rootDir).find(name => name.startsWith('.python-env.backup-'))!;
+      expect(readFileSync(join(rootDir, backup, 'bin', 'python3'), 'utf8')).toBe('old');
+      expect(exec.mock.calls.some(([cmd]) => cmd === 'python3')).toBe(false);
+    });
+
+    it('leaves the old environment intact when candidates are missing or too old', async () => {
+      const venvDir = join(rootDir, 'python-env');
+      const venvPython = join(venvDir, 'Scripts', 'python.exe');
+      mkdirSync(dirname(venvPython), { recursive: true });
+      writeFileSync(venvPython, 'old');
+      const exec = vi.fn(async (command: string) => {
+        if (command === 'python') return { stdout: 'cp39' };
+        throw new Error('unavailable');
+      });
+      expect(await ensureHealthyManagedPythonVenv({ venvDir, venvPython, candidates: ['python', 'py'], exec })).toBe(false);
+      expect(readFileSync(venvPython, 'utf8')).toBe('old');
+      expect(readdirSync(rootDir).sort()).toEqual(['bundled-plugins', 'plugins', 'python-env']);
+    });
+
+    it('restores the original Windows environment when replacement validation fails', async () => {
+      const venvDir = join(rootDir, 'python-env');
+      const venvPython = join(venvDir, 'Scripts', 'python.exe');
+      mkdirSync(dirname(venvPython), { recursive: true });
+      writeFileSync(venvPython, 'old');
+      const exec = vi.fn(async (command: string, args: string[]) => {
+        if (args[0] === '-m') {
+          mkdirSync(dirname(venvPython), { recursive: true });
+          writeFileSync(venvPython, 'broken-new');
+          return { stdout: '' };
+        }
+        if (command === 'py') return { stdout: 'cp314' };
+        throw new Error('unavailable');
+      });
+      expect(await ensureHealthyManagedPythonVenv({ venvDir, venvPython, candidates: ['py'], exec })).toBe(false);
+      expect(readFileSync(venvPython, 'utf8')).toBe('old');
     });
   });
 

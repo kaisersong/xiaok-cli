@@ -90,6 +90,51 @@ static int held_output(const char *nonce){struct stat facts[DBS][4];for(int i=0;
 static int check_scope(int i){struct database_scope *s=&scopes[i];int fd=directory(s->path);if(fd<0)return 0;struct stat st;int okay=!fstat(fd,&st)&&st.st_dev==s->device&&st.st_ino==s->inode;close(fd);if(!okay||!s->db||sqlite3_get_autocommit(s->db)||sqlite3_txn_state(s->db,"main")!=SQLITE_TXN_WRITE)return 0;
  for(int k=0;k<4;k++){struct file_identity *f=&s->files[k];if(metadata(i,k,&st)&&!(errno==ENOENT&&!f->exists&&!invalid))return 0;if(f->fd>=0&&(fstat(f->fd,&st)||st.st_dev!=f->device||st.st_ino!=f->inode))return 0;}return s->files[0].fd>=0&&!invalid;
 }
+/* Whole physical-file observations only. Borrowing the VFS fd is essential:
+ * closing another fd on a locked inode would drop this process's POSIX locks. */
+static struct {int active,index,kind,fd,owned,file_started;off_t offset;struct stat facts[DBS][4];} physical={.fd=-1};
+static int physical_same(const struct stat*a,const struct stat*b){
+ if(a->st_dev!=b->st_dev||a->st_ino!=b->st_ino||a->st_uid!=b->st_uid||a->st_mode!=b->st_mode||a->st_nlink!=b->st_nlink||a->st_size!=b->st_size)return 0;
+#ifdef __APPLE__
+ return a->st_mtimespec.tv_sec==b->st_mtimespec.tv_sec&&a->st_mtimespec.tv_nsec==b->st_mtimespec.tv_nsec&&a->st_ctimespec.tv_sec==b->st_ctimespec.tv_sec&&a->st_ctimespec.tv_nsec==b->st_ctimespec.tv_nsec;
+#else
+ return a->st_mtim.tv_sec==b->st_mtim.tv_sec&&a->st_mtim.tv_nsec==b->st_mtim.tv_nsec&&a->st_ctim.tv_sec==b->st_ctim.tv_sec&&a->st_ctim.tv_nsec==b->st_ctim.tv_nsec;
+#endif
+}
+static int physical_close_file(void){int okay=1;if(physical.owned&&physical.fd>=0&&close(physical.fd))okay=0;physical.fd=-1;physical.owned=physical.file_started=0;physical.offset=0;return okay;}
+static int physical_current(void){
+ for(int i=0;i<count;i++){if(!check_scope(i))return 0;for(int k=0;k<4;k++)if(scopes[i].files[k].exists){struct stat now;if(metadata(i,k,&now)||!physical_same(&now,&physical.facts[i][k]))return 0;}}
+ if(physical.fd>=0){struct stat now;if(fstat(physical.fd,&now)||!physical_same(&now,&physical.facts[physical.index][physical.kind]))return 0;}return 1;
+}
+static int physical_begin(const char*nonce){
+ if(physical.active||physical.fd>=0)return 0;unsigned long long total=0;int files=0;
+ for(int i=0;i<count;i++)for(int k=0;k<4;k++)if(scopes[i].files[k].exists){struct stat*s=&physical.facts[i][k];if(metadata(i,k,s)||s->st_size<0||(unsigned long long)s->st_size>128ull*1024*1024-total)return 0;total+=(unsigned long long)s->st_size;files++;
+  for(int j=0;j<=i;j++)for(int n=0;n<4;n++)if((j<i||n<k)&&scopes[j].files[n].exists&&physical.facts[j][n].st_dev==s->st_dev&&physical.facts[j][n].st_ino==s->st_ino)return 0;
+ }
+ physical.active=1;physical.index=physical.kind=0;if(!physical_current())return 0;
+ printf("{\"state\":\"physical-start\",\"nonce\":\"%s\",\"count\":%d,\"files\":[",nonce,count);int comma=0;
+ for(int i=0;i<count;i++)for(int k=0;k<4;k++)if(scopes[i].files[k].exists){struct stat*s=&physical.facts[i][k];printf("%s{\"index\":%d,\"suffix\":\"%s\",\"device\":\"%llu\",\"inode\":\"%llu\",\"byteLength\":\"%llu\"}",comma?",":"",i,suffixes[k],(unsigned long long)s->st_dev,(unsigned long long)s->st_ino,(unsigned long long)s->st_size);comma=1;}
+ puts("]}");return files>0&&!ferror(stdout);
+}
+static int physical_next(const char*nonce){
+ if(!physical.active||!physical_current())return 0;
+ if(physical.file_started){struct stat*s=&physical.facts[physical.index][physical.kind];
+  if(physical.offset<s->st_size){unsigned char bytes[65536];char encoded[131073];size_t want=(size_t)(s->st_size-physical.offset);if(want>sizeof(bytes))want=sizeof(bytes);ssize_t got;do{got=pread(physical.fd,bytes,want,physical.offset);}while(got<0&&errno==EINTR);if(got<=0||(size_t)got>want||!physical_current())return 0;
+   const char*hex="0123456789abcdef";for(ssize_t n=0;n<got;n++){encoded[n*2]=hex[bytes[n]>>4];encoded[n*2+1]=hex[bytes[n]&15];}encoded[got*2]=0;
+   printf("{\"state\":\"physical-chunk\",\"nonce\":\"%s\",\"index\":%d,\"suffix\":\"%s\",\"offset\":%llu,\"bytes\":\"%s\"}\n",nonce,physical.index,suffixes[physical.kind],(unsigned long long)physical.offset,encoded);physical.offset+=got;return !ferror(stdout);
+  }
+  printf("{\"state\":\"physical-file-complete\",\"nonce\":\"%s\",\"index\":%d,\"suffix\":\"%s\",\"byteLength\":\"%llu\"}\n",nonce,physical.index,suffixes[physical.kind],(unsigned long long)s->st_size);if(!physical_close_file())return 0;physical.kind++;return !ferror(stdout);
+ }
+ while(physical.index<count){while(physical.kind<4&&!scopes[physical.index].files[physical.kind].exists)physical.kind++;if(physical.kind<4)break;physical.index++;physical.kind=0;}
+ if(physical.index==count){int files=0;for(int i=0;i<count;i++)for(int k=0;k<4;k++)files+=scopes[i].files[k].exists;physical.active=0;printf("{\"state\":\"physical-complete\",\"nonce\":\"%s\",\"count\":%d,\"fileCount\":%d}\n",nonce,count,files);return !ferror(stdout);}
+ struct file_identity*known=&scopes[physical.index].files[physical.kind];struct stat*expected=&physical.facts[physical.index][physical.kind];
+ if(known->fd>=0)physical.fd=known->fd;
+ else{for(int i=0;i<count;i++)for(int k=0;k<4;k++)if(scopes[i].files[k].fd>=0){struct stat now;if(fstat(scopes[i].files[k].fd,&now)||(now.st_dev==expected->st_dev&&now.st_ino==expected->st_ino))return 0;}
+  char name[NAME_MAX+1];if(!name_for(physical.index,physical.kind,name))return 0;physical.fd=openat(scopes[physical.index].directory,name,O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC);if(physical.fd<0)return 0;physical.owned=1;
+ }
+ physical.file_started=1;if(!physical_current())return 0;
+ printf("{\"state\":\"physical-file\",\"nonce\":\"%s\",\"index\":%d,\"suffix\":\"%s\",\"device\":\"%llu\",\"inode\":\"%llu\",\"byteLength\":\"%llu\"}\n",nonce,physical.index,suffixes[physical.kind],(unsigned long long)expected->st_dev,(unsigned long long)expected->st_ino,(unsigned long long)expected->st_size);return !ferror(stdout);
+}
 #ifndef XIAOK_SQLITE_ENTRY
 #define XIAOK_SQLITE_ENTRY main
 #endif
@@ -113,6 +158,9 @@ int XIAOK_SQLITE_ENTRY(int argc,char **argv){
  for(;;){char line[16];int received=command(line);if(received==0){result=0;goto end;}if(received<0)goto end;if(!strcmp(line,"RELEASE\n")){result=0;goto end;}
   for(int i=0;i<count;i++)if(!check_scope(i))goto end;
   if(!strcmp(line,"CHECK\n")){if(!held_output(nonce))goto end;continue;}
+  if(!strcmp(line,"RAW\n")){if(!physical_begin(nonce))goto end;continue;}
+  if(!strcmp(line,"RAW-NEXT\n")){if(!physical_next(nonce))goto end;continue;}
+  if(physical.active)goto end;
   if(strcmp(line,"PAGE\n")||complete)goto end;
   if(capture_index==count){complete=1;printf("{\"state\":\"snapshot-complete\",\"nonce\":\"%s\",\"count\":%d}\n",nonce,count);continue;}
   if(!page_output(capture_index,capture_page,nonce))goto end;
@@ -124,5 +172,5 @@ int XIAOK_SQLITE_ENTRY(int argc,char **argv){
 #ifdef XIAOK_CUSTODY_TRACE
  for(int i=0;i<count;i++)if(scopes[i].db)fprintf(stderr,"result %d invalid %d sqlite %s\n",result,invalid,sqlite3_errmsg(scopes[i].db));
 #endif
- holding=0;for(int i=count-1;i>=0;i--)if(scopes[i].db){if(!sqlite3_get_autocommit(scopes[i].db)&&sqlite3_exec(scopes[i].db,"ROLLBACK",NULL,NULL,NULL)!=SQLITE_OK)result=65;if(sqlite3_close(scopes[i].db)!=SQLITE_OK)result=65;}for(int i=0;i<opened;i++)close(scopes[i].directory);return result;
+ if(!physical_close_file())result=65;holding=0;for(int i=count-1;i>=0;i--)if(scopes[i].db){if(!sqlite3_get_autocommit(scopes[i].db)&&sqlite3_exec(scopes[i].db,"ROLLBACK",NULL,NULL,NULL)!=SQLITE_OK)result=65;if(sqlite3_close(scopes[i].db)!=SQLITE_OK)result=65;}for(int i=0;i<opened;i++)close(scopes[i].directory);return result;
 }

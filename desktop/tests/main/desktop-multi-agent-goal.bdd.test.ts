@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
 import { DesktopMultiAgentService, type DesktopHostDeliveryAuthority } from '../../electron/desktop-multi-agent-service.js';
 import { DesktopExecutionCoordinator } from '../../electron/desktop-execution-coordinator.js';
@@ -115,9 +116,13 @@ describe('BDD: Goal settlement and child execution share the actual group decisi
     expect(goal.getPendingAttachmentForTest('thread')).toBeNull(); expect(runs).toBe(1);
     expect(await goal.getGoal('thread')).toMatchObject({ state: { turnsUsed: 1 }, waitingReason: outcome === 'init-failed' ? 'children_need_attention' : 'waiting_children' });
     const child = store.allAgents(groupId).find(agent => agent.depth === 1)!;
-    if (outcome === 'handoff-write-failure') {
-      const send = store.sendMessage.bind(store);
-      vi.spyOn(store, 'sendMessage').mockImplementation((group, input) => { if (input.kind === 'error') throw new Error('SQLITE_FULL: handoff'); return send(group, input); });
+    const faultDb = outcome === 'handoff-write-failure' ? (store as unknown as { db: DatabaseSync }).db : null;
+    if (faultDb) {
+      const sqlLiteral = (value: string) => `'${value.replaceAll("'", "''")}'`;
+      faultDb.exec(`CREATE TEMP TRIGGER deny_goal_child_handoff BEFORE INSERT ON messages
+        WHEN NEW.group_id=${sqlLiteral(groupId)} AND NEW.sender_agent_id=${sqlLiteral(child.id)}
+          AND json_extract(NEW.data_json,'$.kind')='error'
+        BEGIN SELECT RAISE(ABORT,'SQLITE_FULL: handoff'); END;`);
     }
     if (outcome === 'interrupted' || outcome === 'closed' || outcome.startsWith('queued-')) {
       const access = service.createUserAccess({ requestSource: 'user', actorId: 'user', threadId: 'thread', profileId: 'profile', workspaceId: 'workspace' });
@@ -128,13 +133,17 @@ describe('BDD: Goal settlement and child execution share the actual group decisi
       expect(store.getAgent(groupId, child.id)?.executionActive).toBe(true);
       expect(goal.getPendingAttachmentForTest('thread')).toBeNull();
     }
-    finish(); await vi.waitFor(() => expect(store.getAgent(groupId, child.id)?.executionActive).toBe(false));
-    if (outcome === 'handoff-write-failure') {
-      await vi.waitFor(() => expect(store.getGroup(groupId)?.mutationBlockedReason).toMatch(/persistence/));
-      expect(service.goalReadiness('thread')).toBe('children_need_attention');
-      expect(store.listMessages(groupId, `root_${groupId}`)).toHaveLength(0);
-      expect(store.readEvents(groupId, 0, 100).filter(event => event.kind === 'result')).toHaveLength(0);
-      expect(goal.getPendingAttachmentForTest('thread')).toBeNull(); return;
+    try {
+      finish(); await vi.waitFor(() => expect(store.getAgent(groupId, child.id)?.executionActive).toBe(false));
+      if (outcome === 'handoff-write-failure') {
+        await vi.waitFor(() => expect(store.getGroup(groupId)?.mutationBlockedReason).toMatch(/persistence/));
+        expect(service.goalReadiness('thread')).toBe('children_need_attention');
+        expect(store.listMessages(groupId, `root_${groupId}`)).toHaveLength(0);
+        expect(store.readEvents(groupId, 0, 100).filter(event => event.kind === 'result')).toHaveLength(0);
+        expect(goal.getPendingAttachmentForTest('thread')).toBeNull(); return;
+      }
+    } finally {
+      faultDb?.exec('DROP TRIGGER IF EXISTS temp.deny_goal_child_handoff');
     }
     expect(await goal.getGoal('thread')).toMatchObject({ state: { status: 'active' },
       ...(outcome.startsWith('late-') ? {} : { waitingReason: outcome === 'completed' ? 'waiting_children' : 'children_need_attention' }) });

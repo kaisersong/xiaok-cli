@@ -46,12 +46,19 @@ it('inspects and consumes the original fixed metadata command inside the same re
   f.database.function('metadata_tx_trace',(step:string)=>{trace.push({step,transaction:f.database.inTransaction});return 0;});
   f.database.exec("CREATE TRIGGER trace_metadata_allocation BEFORE INSERT ON shared_capacity_reservations BEGIN SELECT metadata_tx_trace('allocation'); END;CREATE TRIGGER trace_metadata_intent BEFORE INSERT ON controller_metadata_intents BEGIN SELECT metadata_tx_trace('intent'); END");
   const source=createInstalledControllerMetadataSource(f.lifetime),facts=readInstalledMetadataSource(source,f.database,'authority');
-  f.shared.capacity.prepareControllerMetadata(source,{requestId:'transaction-order',resourceId:facts.resourceId,expectedRevision:0,minimumPageCount:32});
+  const resource=f.database.prepare('SELECT revision,record_json FROM controller_metadata_resources WHERE resource_id=?').get(facts.resourceId) as {revision:number;record_json:string};
+  const confirmed=JSON.parse(resource.record_json) as {state:string;chargedMaximumPageCount:number};
+  expect(resource.revision).toBeGreaterThan(0);expect(confirmed.state).toBe('confirmed');
+  const originalReservations=f.database.prepare('SELECT COUNT(*) n FROM shared_capacity_reservations').get() as {n:number};expect(originalReservations).toEqual({n:2});
+  const request={requestId:'transaction-order',resourceId:facts.resourceId,expectedRevision:resource.revision,minimumPageCount:confirmed.chargedMaximumPageCount+1};
+  expect(()=>f.shared.capacity.prepareControllerMetadata(source,{...request,expectedRevision:0})).toThrow('metadata_capacity_revision');
+  expect(trace).toEqual([]);expect(f.database.prepare('SELECT COUNT(*) n FROM shared_capacity_reservations').get()).toEqual(originalReservations);
+  f.shared.capacity.prepareControllerMetadata(source,request);
   expect(trace.map(t=>t.step)).toEqual(['inspect','allocation','allocation','consume','intent']);expect(trace.every(t=>t.transaction)).toBe(true);expect(f.database.inTransaction).toBe(false);
   const [command,ledger]=inspected!,actual=ledger as {reserveMetadataCommand(command:object):unknown};
   expect(()=>actual.reserveMetadataCommand({...command})).toThrow('capacity_metadata_command_brand');
   expect(()=>actual.reserveMetadataCommand(command)).toThrow('capacity_metadata_command_consumed');
   expect(()=>f.database.transaction(()=>actual.reserveMetadataCommand({})).immediate()).toThrow('shared_capacity_reentrant_transaction');
-  expect(f.database.prepare('SELECT COUNT(*) n FROM shared_capacity_reservations').get()).toEqual({n:2});expect(f.database.inTransaction).toBe(false);
+  expect(f.database.prepare('SELECT COUNT(*) n FROM shared_capacity_reservations').get()).toEqual({n:originalReservations.n+2});expect(f.database.inTransaction).toBe(false);
  }finally{a.mockRestore();b.mockRestore();await f.close();}
 });

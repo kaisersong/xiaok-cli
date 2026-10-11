@@ -254,6 +254,9 @@ export interface Config {
   };
 }
 
+export type ConfigV2Input = Omit<Config, 'intentBoundary'> & { intentBoundary?: Config['intentBoundary'] };
+export type ConfigInput = ConfigV2Input | LegacyConfig;
+
 const VALID_LEGACY_PROVIDERS = ['claude', 'openai', 'custom'] as const;
 
 export const DEFAULT_INTENT_BOUNDARY_CONFIG: IntentBoundaryConfig = {

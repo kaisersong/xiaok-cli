@@ -8,6 +8,8 @@ export interface SessionExecutionContext {
 }
 /** Host bootstrap only. Never exposed as a tool or IPC deserializer. */
 export declare function createSessionExecutionContext(claims: SessionExecutionClaims): SessionExecutionContext;
+/** Read-only host identity check. This does not create an execution lease. */
+export declare function assertSessionExecutionContext(context: SessionExecutionContext, expected: SessionExecutionClaims): void;
 export type SessionExecutionKind = 'compound' | 'direct-mutation' | 'compaction' | 'recovery';
 export interface SessionExecutionLease {
     assertCurrent(): void;

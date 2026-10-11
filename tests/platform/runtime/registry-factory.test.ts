@@ -149,6 +149,7 @@ describe('registry-factory sandbox auto mode', () => {
       undefined,
       { cwd: '/test/cwd', allowOutsideCwd: true },
       expect.any(Array),
+      expect.any(Map),
     );
   });
 

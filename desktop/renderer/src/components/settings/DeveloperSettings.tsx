@@ -1,3 +1,4 @@
+import { loopManagementErrorMessage, loopManagementFailureKind } from '../../lib/loop-management-errors';
 import {loopObservationLabel,loopNeedsRevalidation,invalidateLoopObservations} from '../../lib/loop-run-observation';
 import {LoopPublicationPanel} from '../loops/LoopPublicationPanel';
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -194,7 +195,10 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
       const details = await Promise.all(definitions.map(async (loop) => {
         const [runs, anomalies] = await Promise.all([
           api.getLoopRuns(loop.id),
-          api.getEvidenceAnomalies(loop.id).catch(() => [] as EvidenceAnomalyView[]),
+          api.getEvidenceAnomalies(loop.id).catch(error => {
+            if (loopManagementFailureKind(error) === 'unavailable') throw error;
+            return [] as EvidenceAnomalyView[];
+          }),
         ])
         return { loop, runs, anomalies }
       }))
@@ -205,11 +209,11 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
     } catch (error) {
       if(generation!==loopLoadGeneration.current)return;
       setLoopRuns(invalidateLoopObservations);
-      setLoopDiagnosticsError(error instanceof Error ? error.message : ds.loopDiagnosticsLoadError)
+      setLoopDiagnosticsError(loopManagementErrorMessage(error, t, ds.loopDiagnosticsLoadError))
     } finally {
       if (generation===loopLoadGeneration.current) setLoopDiagnosticsLoading(false)
     }
-  }, [ds.loopDiagnosticsLoadError])
+  }, [ds.loopDiagnosticsLoadError, t.loopOperationResultUnknown, t.loopProjectionUnavailable, t.loopInputInvalid])
 
   useEffect(() => {
     void loadLoopDiagnostics()
@@ -277,7 +281,7 @@ export function DeveloperSettings({ accessToken, onNavigate }: Props) {
       setLoopRunResults(prev => ({ ...prev, [loopId]: result }))
       await loadLoopDiagnostics(true)
     } catch (error) {
-      setLoopDiagnosticsError(error instanceof Error ? error.message : ds.loopDiagnosticsRunFailed)
+      setLoopDiagnosticsError(loopManagementErrorMessage(error, t, ds.loopDiagnosticsRunFailed))
     } finally {
       setRunningLoopId(null)
     }

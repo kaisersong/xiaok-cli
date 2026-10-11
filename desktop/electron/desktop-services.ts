@@ -1,3 +1,19 @@
+import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
+import type { DesktopSkillStats } from '../shared/desktop-diagnostics-ipc-contract.js';
+import { captureModelProviderInput } from './model-provider-typed-ipc.js';
+import { MODEL_PROVIDER_ID_SCHEMA, SAVE_MODEL_CONFIG_SCHEMA, UPDATE_MODEL_RUNTIME_SCHEMA, SYSTEM_ONE_PATCH_SCHEMA, MANAGED_AGENT_INPUT_SCHEMA, PROVIDER_CONNECTION_INPUT_SCHEMA } from '../shared/model-provider-ipc-contract.js';
+import {createNativeWorkflowRestrictionCheckpoint,bindNativeWorkflowRestrictionCheckpoint,assertNativeRegistryCheckpointCurrent,type NativeWorkflowRestrictionCheckpoint} from '../../src/runtime/task-host/workflow-restriction-checkpoint.js';
+import { getBuiltinToolIdentity } from '../../src/ai/tools/native-tool-identity.js';
+import type { ToolDescriptionMetadata } from '../../src/shared/tool-description-metadata.js';
+import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
+import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
+import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
+import type { ActivityOwnerConfig } from '../../src/runtime/conversation-activity/owner-runtime.js';
+import { formatTaskToolResultResponse } from '../../src/runtime/task-host/tool-result-response.js';
+import { resolveKSwarmReviewReadPaths } from './kswarm-review-files.js';
+import { ConversationRoomService, createConversationRoomTool } from './conversation-room-service.js';
+import { KSwarmExecutionClock, resolveKSwarmWorkerRunMs } from './kswarm-execution-clock.js';
+import { findLegacyTaskHistory } from './legacy-task-history.js';
 import { getSupportedModelReasoningEfforts } from '../../src/ai/providers/model-reasoning-effort.js';
 import { resolveProviderTransport } from '../../src/ai/providers/auth-resolver.js';
 import {createBackgroundTaskIdentityController} from './background-task-identity.js';
@@ -67,7 +83,7 @@ import { DesktopMultiAgentService, type DesktopAgentExecutionContext, type Deskt
 import { DesktopMultiAgentApprovalTransport } from './desktop-multi-agent-approval-transport.js';
 import { DesktopMultiAgentRuntime } from './desktop-multi-agent-runtime.js';
 import { getDesktopDelegationPolicy } from './desktop-delegation-policy.js';
-import { streamDesktopTaskRecovery, type DesktopTaskRequestPreparer } from './desktop-task-stream.js';
+import { streamDesktopTaskRecovery, createDesktopModelPhysicalScope, admitDesktopModelPhysicalRead, closeDesktopModelPhysicalScope, type DesktopModelPhysicalScope, type DesktopTaskRequestPreparer } from './desktop-task-stream.js';
 import { DesktopMultiAgentWorktrees } from './desktop-multi-agent-worktrees.js';
 import { DesktopOwnedToolRegistry, DesktopToolCatalogBridge } from './desktop-multi-agent-catalog-bridge.js';
 import { DesktopMcpCatalogRegistration } from './desktop-mcp-catalog-registration.js';
@@ -93,6 +109,8 @@ import { createGoalTools } from '../../src/ai/tools/goal.js';
 import type { GoalInput } from '../../src/runtime/goal/types.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
+import { captureIpcData } from './ipc-data-snapshot.js';
+import { SKILL_DEBUG_CONFIG_SCHEMA, KSWARM_CONCURRENCY_CONFIG_SCHEMA } from '../shared/desktop-small-config-ipc-contract.js';
 import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
 import { resolveSystemOneConfig, setSystemOneConfig } from '../../src/ai/providers/system-one-config.js';
 import type { SystemOneConfig } from '../../src/types.js';
@@ -178,7 +196,14 @@ import {
   type PreparedGoalTask,
 } from './desktop-goal-coordinator.js';
 import { SqliteGoalStore } from './goal-store-sqlite.js';
-import { DesktopExecutionCoordinator, withExecutionLane } from './desktop-execution-coordinator.js';
+import { DesktopExecutionCoordinator, currentExecutionLane, withExecutionLane } from './desktop-execution-coordinator.js';
+import { ConversationProjectService, type ConversationProjectRoomClient } from './conversation-project-service.js';
+import { ConversationActivityStore } from '../../src/runtime/conversation-activity/store.js';
+import { ConversationActivityService, type ActivityActor, type ConversationActivityApi } from '../../src/runtime/conversation-activity/service.js';
+import { ConversationActivitySources, type ProjectActivityPage } from '../../src/runtime/conversation-activity/sources.js';
+import { ConversationMcpActivities } from '../../src/runtime/conversation-activity/mcp.js';
+import { callMcpToolWithTasks } from '../../src/platform/mcp/tasks.js';
+import type { ReportingPreference } from '../../src/runtime/conversation-activity/types.js';
 // NOTE: LayeredMemoryStore/resolveLayeredConfig are loaded dynamically
 // because they import better-sqlite3 which may not be compatible with the current Electron
 // version's native module ABI.
@@ -352,7 +377,7 @@ export function getDesktopMemoryBackend(dataRoot: string): 'layered' | 'fallback
   return _desktopMemoryStoreBackend;
 }
 import { buildPythonServerEnv, normalizePythonServerCommand } from './python-runtime.js';
-import { buildManagedXiaokAgentPayload } from './managed-xiaok-agent.js';
+import { buildManagedXiaokAgentPayload, buildManagedXiaokAgentSemanticPayload } from './managed-xiaok-agent.js';
 import { ArtifactWorkspaceStore } from './artifact-workspace-store.js';
 import { ArtifactWorkspaceFileManager } from './artifact-workspace-files.js';
 import {
@@ -382,18 +407,7 @@ interface SkillExecRecord {
   triggerType: 'slash_command' | 'tool_call' | 'auto';
 }
 
-export interface SkillStats {
-  skillName: string;
-  totalCalls: number;
-  successCount: number;
-  errorCount: number;
-  avgDurationMs: number;
-  p95DurationMs: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  lastCalledAt: number;
-  firstCalledAt: number;
-}
+export type SkillStats = DesktopSkillStats;
 
 const EXEC_FILE = 'skill-exec.json';
 const MAX_EXEC_RECORDS = 500;
@@ -470,11 +484,15 @@ function extractSkillNames(input: Record<string, unknown>): string[] {
 }
 
 export interface DesktopServicesOptions {
+  notifyConversationActivity?: (activity: import('../../src/runtime/conversation-activity/types.js').ConversationActivity,
+    watch: import('../../src/runtime/conversation-activity/types.js').WorkWatch) => Promise<'shown' | 'suppressed' | 'failed'>;
   /** Main-owned embedding/profile path; never accepted from renderer or tools. */
   knowledgeDbPath?: string;
   dataRoot: string;
   /** Main-owned working directory, never copied from renderer task input. */
   workspaceRoot?: string;
+  /** Desktop main may restore independently authorized historical launch domains. */
+  restoreHistoricalLaunchWorkspaces?: boolean;
   now?: () => number;
   runner?: TaskRunner;
   kswarmService: KSwarmService;
@@ -552,13 +570,14 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
         },
       },
       async execute(input, context) {
+        input = captureIpcData(input, 'scheduled_input_invalid');
         const content = String(input.content ?? '').trim();
         const scheduleAt = Number(input.schedule_at ?? 0);
         if (!content || scheduleAt <= 0) {
           return 'Error: content 和 schedule_at 不能为空';
         }
         const tz = String(input.timezone ?? timezone);
-        const record = service.createReminder(content, scheduleAt, tz);
+        const record = service.createReminder(content, scheduleAt, tz, {requestSource: 'agent', ownerKind: 'agent_task', ownerId: context?.taskId ?? ''});
         return JSON.stringify({
           reminderId: record.reminderId,
           status: record.status,
@@ -592,7 +611,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
       permission: 'safe',
       definition: {
         name: 'reminder_cancel',
-        description: '取消一个通知提醒',
+        description: '**严禁取消用户、助手或其他 agent 拥有的提醒**。只能取消由当前 agent 创建且仍由其拥有的通知提醒；提醒只通知，不执行 AI 任务。',
         inputSchema: {
           type: 'object',
           properties: {
@@ -602,9 +621,10 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
         },
       },
       async execute(input, context) {
+        input = captureIpcData(input, 'scheduled_input_invalid');
         const id = String(input.reminder_id ?? '').trim();
         if (!id) return 'Error: reminder_id 不能为空';
-        const ok = service.cancelReminder(id);
+        const ok = service.cancelReminder(id, {requestSource: 'agent', ownerId: context?.taskId});
         return ok ? `已取消提醒 ${id}` : `未找到提醒 ${id}`;
       },
     },
@@ -631,6 +651,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
         },
       },
       async execute(input, context) {
+        input = captureIpcData(input, 'scheduled_input_invalid');
         const name = String(input.name ?? '').trim();
         const prompt = String(input.prompt ?? '').trim();
         if (!name || !prompt) return 'Error: name 和 prompt 不能为空';
@@ -651,7 +672,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
               maxRuns: input.max_runs === undefined ? undefined : Number(input.max_runs),
               expiresAt: input.expires_at === undefined ? undefined : Number(input.expires_at),
             },
-          });
+          }, {requestSource: 'agent', ownerId: context?.taskId});
           const action = service.getActions().find(a => a.id === task.id);
           return JSON.stringify({
             ok: true,
@@ -694,6 +715,7 @@ export function createTimedActionTools(service: TimedActionService, timezone = I
         },
       },
       async execute(input, context) {
+        input = captureIpcData(input, 'scheduled_input_invalid');
         const id = String(input.task_id ?? '').trim();
         if (!id) return 'Error: task_id 不能为空';
         const target = service.listScheduledTasks().find(t => t.id === id);
@@ -716,6 +738,7 @@ export function createRoomTimedActionTools(service:TimedActionService, scope:{ro
   return createTimedActionTools(service).filter(tool=>tool.definition.name.startsWith('scheduled_task_')).map(tool=>({...tool,
     definition:{...tool.definition,description:tool.definition.description+' Only the current collaboration room and current agent are in scope. Due tasks return to this room. Never manage other rooms or user-owned tasks.'},
     async execute(input){
+      input = captureIpcData(input, 'scheduled_input_invalid');
       if(tool.definition.name==='scheduled_task_list')return JSON.stringify(ownActions());
       if(tool.definition.name==='scheduled_task_cancel'){
         const id=String(input.task_id??'');
@@ -814,12 +837,12 @@ export interface DesktopModelConfigSnapshot {
 
 export interface DesktopSaveModelConfigInput {
   providerId: string;
-  modelId?: string;
-  modelName?: string;
-  label?: string;
-  apiKey?: string;
-  baseUrl?: string;
-  protocol?: ProtocolId;
+  modelId?: string | null;
+  modelName?: string | null;
+  label?: string | null;
+  apiKey?: string | null;
+  baseUrl?: string | null;
+  protocol?: ProtocolId | null;
 }
 
 export interface DesktopUpdateModelRuntimeOptionsInput {
@@ -894,7 +917,60 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   const observationTasks = new Map<string, DesktopObservationTaskActivation>();
   let observationAdmissionBusy = false;
   const observationTaskControls = new Map<string, object>();
-  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1 });
+  const conversationRooms = new ConversationRoomService({ dataRoot: options.dataRoot });
+  let activityStore: ConversationActivityStore | undefined;
+  let activityService: ConversationActivityApi | undefined;
+  let activitySources: ConversationActivitySources | ConversationActivityAttachedSources | undefined;
+  let activityMcp: ConversationMcpActivities | undefined;
+  const activityMcpConnections = new Set<McpClientConnection>();
+  let unsubscribeActivityGroups: (() => void) | undefined;
+  let activityAttachment: Promise<void> | undefined;
+  let activityRoomClient: ConversationProjectRoomClient | undefined;
+  const activityEnabled = !options.runner && process.env.XIAOK_CONVERSATION_ACTIVITY !== '0';
+  const conversationProjects = new ConversationProjectService({ dataRoot: options.dataRoot, kswarmService: options.kswarmService,
+    ...(activityEnabled ? { activityHooks: {
+      prepare: async input => {
+        await activityAttachment;
+        if (!activityService) throw new Error('activity_unavailable');
+        await activityService.prepareAssociation(input, { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
+      },
+      created: async input => {
+        if (!activityService || !activitySources) throw new Error('activity_unavailable');
+        const identity = await readActivityIdentity(input.projectId);
+        if (!identity.ok || !identity.sourceDataEpoch || !identity.roomId || !activityRoomClient) throw new Error('activity_source_unsupported');
+        const room = await activityRoomClient.getRoomSnapshot(identity.roomId);
+        if (!isRecord(room) || room.ok === false || !isRecord(room.room)) throw new Error('activity_source_forbidden');
+        const watchId = `project:${input.operationId}`;
+        await activityService.bindWork({ operationId: input.operationId, watchId, source: 'kswarm',
+          logicalSourceId: 'kswarm-local', sourceDataEpoch: identity.sourceDataEpoch, workId: input.projectId });
+        await activitySources.startWatch(watchId);
+        return { activityWatchId: watchId };
+      },
+    } } : {}) });
+  const readActivityProject = async (projectId: string, after: number, signal: AbortSignal): Promise<ProjectActivityPage> => {
+    const response = await options.kswarmService.request(`/projects/${encodeURIComponent(projectId)}/activity?after=${after}`, {
+      signal, headers: { 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
+    });
+    if (!response.ok) throw new Error(`activity_source_http_${response.status}`);
+    return await response.json() as ProjectActivityPage;
+  };
+  const readActivityIdentity = async (projectId: string): Promise<{ ok: boolean; sourceDataEpoch?: string; roomId?: string }> => {
+    const response = await options.kswarmService.request(`/projects/${encodeURIComponent(projectId)}/activity-identity`, {
+      headers: { 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
+    });
+    if (!response.ok) throw new Error(`activity_source_http_${response.status}`);
+    return await response.json();
+  };
+  const executionCoordinator = options.executionCoordinator ?? new DesktopExecutionCoordinator({ backgroundCapacity: 1, projectControlCapacity: 1, projectWorkerCapacity: 3 });
+  const scopedKSwarmHosts = new Set<WeakRef<InProcessTaskRuntimeHost>>();
+  const resolveScopedTaskHost = (taskId: string, fallback: InProcessTaskRuntimeHost): InProcessTaskRuntimeHost => {
+    for (const reference of scopedKSwarmHosts) {
+      const owner = reference.deref();
+      if (!owner) scopedKSwarmHosts.delete(reference);
+      else if (owner.ownsLiveExecution(taskId)) return owner;
+    }
+    return fallback;
+  };
   const coordinateRunner = (runner: TaskRunner): TaskRunner => input => (
     executionCoordinator.run(input.signal, () => runner(input))
   );
@@ -910,8 +986,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   });
   let artifactWorkspaceService: ArtifactWorkspaceService | undefined;
   let goalCoordinator: DesktopGoalCoordinator | undefined;
-  const tools = buildToolList();
-  const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools);
+  const builtinDescriptions = new Map<Tool, ToolDescriptionMetadata>();
+  const tools = buildToolList(undefined, undefined, [], builtinDescriptions);
+  const registry = new DesktopOwnedToolRegistry({ autoMode: true }, tools, builtinDescriptions);
   const staticGatewayNames = new Set(options.pluginProviderRuntime ? createAllHostGateways(options.pluginProviderRuntime).map(tool => tool.definition.name) : []);
   const multiAgentCwd = resolve(options.workspaceRoot ?? process.cwd());
   const multiAgentProfileId = createHash('sha256').update(resolve(options.dataRoot)).digest('hex');
@@ -943,6 +1020,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     worktrees: multiAgentWorktrees,
     executionDomain: Object.freeze({ profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd,
       actorId: `desktop-user:${multiAgentProfileId}` }),
+    ...(options.restoreHistoricalLaunchWorkspaces ? { authorizeHistoricalThreadDomain: (thread: import('./desktop-multi-agent-store.js').MultiAgentThreadBinding): boolean => {
+      // Only main-issued, existing bindings can qualify. No IPC/model path can
+      // initialize a new workspace grant or override a revoked historical one.
+      if (thread.profileId !== multiAgentProfileId || !isAbsolute(thread.cwd)
+        || resolve(thread.cwd) !== thread.cwd || createHash('sha256').update(thread.cwd).digest('hex') !== thread.workspaceId) return false;
+      const stored = multiAgentStore.getThread(thread.threadId);
+      if (!stored || stored.profileId !== thread.profileId || stored.workspaceId !== thread.workspaceId || stored.cwd !== thread.cwd) return false;
+      const authorization = multiAgentStore.readWorkspaceAuthorization({ profileId: thread.profileId, workspaceId: thread.workspaceId });
+      return authorization?.executionAllowed === true;
+    } } : {}),
     onExecutionAuthorizationChanged: snapshot => multiAgentCatalog!.applyExecutionAuthorization(snapshot),
     stopForWorkspaceExecutionRevocation: async () => {
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
@@ -956,6 +1043,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     beforeThreadDeletionCommit:(threadId,operationId)=>observationLifecycle.beforeDelete(threadId,operationId),
     beforeThreadDeletion: async threadId => {
+      const deletion = multiAgentStore?.getThread(threadId)?.deletionReceipt;
+      if (deletion && activityService) {
+        activityService.handleThreadDeletion(threadId, deletion.operationId);
+        for (const watch of activityStore?.listWatches() ?? []) if (watch.origin.threadId === threadId) { activitySources?.stopWatch(watch.watchId); activityMcp?.stopWatch(watch.watchId); }
+      }
       await codexTasks.stopThread(threadId);
       if (!goalCoordinator) throw new Error('multi_agent_goal_coordinator_unavailable');
       await goalCoordinator.stopForThreadDeletion({ threadId, requestSource: 'user' });
@@ -983,7 +1075,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   );
   let kbStore: ReturnType<typeof createKbStoreSqlite> | undefined;
   const kswarmCreateProjectToolOptions: KSwarmCreateProjectToolOptions = {
+    createRoom: (input, context) => conversationRooms.create(input, {...context, requestSource:'agent'}),
     enqueuePlanBootstrap: input => initialPlanBootstrapQueue.enqueue(input),
+    finalizeProjectProposal: (proposal, context) => conversationProjects.isAuthorized(context.taskId)
+      ? conversationProjects.create(proposal, { ...context, requestSource: 'agent' })
+      : Promise.resolve(undefined),
   };
   registerKSwarmTools(registry, options.kswarmService, kswarmCreateProjectToolOptions);
 
@@ -1425,6 +1521,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               ...(isCuaServer ? { startupSignal: computerUseActivationSignal } : {}),
             });
             connectionRef = connection;
+            activityMcpConnections.add(connection); activityMcp?.register(connection);
             const catalogTimeout = server.timeout?.catalog ?? resolveMcpCatalogTimeoutMs();
             const callTimeout = server.timeout?.call ?? resolveMcpCallToolTimeoutMs();
             const schemas = (await connection.client.listTools(
@@ -1432,9 +1529,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
               { timeout: catalogTimeout, ...(isCuaServer ? { signal: computerUseActivationSignal } : {}) },
             )).tools as McpToolSchema[];
             const callToolResult = async (name: string, input: Record<string, unknown>, options?: McpInvocationOptions) => {
-              const result = await callMcpToolWithSignal(connection.client,
+              const context = options?.executionContext;
+              const observer = context && activityMcp ? await activityMcp.observer(context.taskId, context.toolInvocationId ?? randomUUID(), connection) : undefined;
+              const result = await callMcpToolWithTasks(connection,
                 { name, arguments: input },
-                { timeout: callTimeout, signal: options?.signal, ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
+                { timeout: callTimeout, signal: options?.signal, declaration: schemas.find(schema => schema.name === name) as import('@modelcontextprotocol/client').Tool | undefined,
+                  observer, detachOnTask: Boolean(observer), ...(options?.onProgress ? { onprogress: options.onProgress } : {}) },
               );
               options?.signal?.throwIfAborted();
               return normalizeMcpRuntimeToolResult(result);
@@ -1779,6 +1879,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     // Use timestamp + random suffix to ensure unique taskId across app restarts.
     createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     onPersistedEvent: async input => {
+      if (input.event.type === 'task_terminal' && multiAgentService && hostDeliveryAuthority) {
+        try { await multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority, taskId: input.taskId }); }
+        catch (error) { console.warn('[conversation-activity] run reconciliation failed:', error instanceof Error ? error.message : 'activity_run_pending'); }
+      }
       if (artifactWorkspaceService) {
         try {
           await artifactWorkspaceService.handlePersistedTaskEvent(input);
@@ -1800,20 +1904,36 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     await multiAgentReady;
     await multiAgentService?.registerThreadWithOwnership({ threadId, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd }, 'user');
   };
-  const localTaskHost = multiAgentService ? {
+  const prepareActivityViewerThread = async (threadId: string, actor: ActivityActor): Promise<void> => {
+    if (actor?.requestSource !== 'user' || actor.actorId !== `desktop-user:${multiAgentProfileId}`) throw new Error('activity_actor_forbidden');
+    await multiAgentReady;
+    // Reuse the same trusted user identity admission as the Agents read API.
+    // Existing historical bindings are validated by activity service, never rebound.
+    if (!multiAgentStore?.getThread(threadId)) await prepareMultiAgentThread(threadId);
+  };
+  const localTaskHost = {
     prepareTask: async (input: TaskCreateInput) => {
-      await multiAgentReady;
-      if (input.executionScope && input.executionScope.kind !== 'goal_turn') return host.prepareTask(input);
-      const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
-      await prepareMultiAgentThread(threadId);
-      return multiAgentService.prepareRoot(host, threadId, input);
+      let prepared: Awaited<ReturnType<typeof host.prepareTask>>;
+      if (multiAgentService && (!input.executionScope || input.executionScope.kind === 'goal_turn')) {
+        await multiAgentReady;
+        const threadId = input.context?.threadId ?? `local_${randomUUID()}`;
+        await prepareMultiAgentThread(threadId);
+        prepared = await multiAgentService.prepareRoot(host, threadId, input);
+      } else {
+        prepared = await host.prepareTask(input);
+      }
+      if (currentExecutionLane() === 'foreground') {
+        await conversationProjects.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+        conversationRooms.bindPreparedTask({ ...input, taskId: prepared.taskId }, { requestSource: 'user' });
+      }
+      return prepared;
     },
     prepareReservedTask: async (input:TaskCreateInput,reservation:import('../../src/runtime/task-host/task-runtime-host.js').TaskIdentityReservation)=>{
       await multiAgentReady;const threadId=input.context?.threadId;if(!threadId)throw Error('background_fresh_thread_required');
-      await prepareMultiAgentThread(threadId);return multiAgentService.prepareRoot(host,threadId,input,reservation);
+      await prepareMultiAgentThread(threadId);return multiAgentService!.prepareRoot(host,threadId,input,reservation);
     },
     startTask: host.startTask.bind(host), cancelTask: host.cancelTask.bind(host),
-  } : host;
+  };
   goalCoordinator = new DesktopGoalCoordinator({
     store: goalStore,
     nativeJournal: new FileGoalNativeJournal(join(options.dataRoot, 'goals')),
@@ -1837,11 +1957,82 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   // Goal construction only installs its owner; recovery can now await its real
   // receipt before the same ready Promise opens any local task admission.
   const multiAgentReady = multiAgentService?.initialize(host) ?? Promise.resolve();
+  const installActivityGroupSubscription = () => {
+    if (!multiAgentStore || unsubscribeActivityGroups) return;
+    unsubscribeActivityGroups = multiAgentStore.subscribe(event => {
+        const group = multiAgentStore.requireGroup(event.groupId);
+        void (async () => {
+          await activityAttachment;
+          for (const run of multiAgentStore.getActivityRuns(event.groupId)) {
+            const members = multiAgentStore.getActivityMembers(run.runId);
+            if (!members.some(member => member.agentId !== `root_${event.groupId}`)) continue;
+            const operationId = `agent-run:${run.runId}`;
+            if (activityStore!.getWatch(operationId)) continue;
+            await activityService!.prepareAssociation({ threadId: group.threadId, operationId, creationIdempotencyKey: operationId }, { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
+            await activityService!.bindWork({ operationId, watchId: operationId, source: 'agent_group', logicalSourceId: 'agent-group-local', sourceDataEpoch: event.groupId, workId: event.groupId, runId: run.runId });
+          }
+          await activitySources!.refreshGroup(event.groupId, true);
+        })().catch(error => console.warn('[conversation-activity] agent event failed:', error instanceof Error ? error.message : 'activity_group_unavailable'));
+      });
+  };
+  if (activityEnabled && multiAgentStore) {
+    try {
+      activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { now: options.now });
+      activityService = new ConversationActivityService({ store: activityStore, profileId: multiAgentProfileId,
+        notify: options.notifyConversationActivity,
+        actorId: `desktop-user:${multiAgentProfileId}`, getThread: threadId => { const thread = multiAgentStore.getThread(threadId); return thread ? {
+          profileId: thread.profileId, threadId: thread.threadId, workspaceId: thread.workspaceId, deleteState: thread.deleteState ?? 'none',
+        } : null; },
+        canObserveWork: async watch => {
+          if (watch.source === 'task_host') {
+            const snapshot = (await resolveScopedTaskHost(watch.workId, host).recoverTask(watch.workId)).snapshot;
+            return snapshot.context?.threadId === (watch.actualExecutionThreadId ?? watch.origin.threadId);
+          }
+          if (watch.source === 'agent_group') return multiAgentStore.requireGroup(watch.workId).threadId === watch.origin.threadId;
+          if (watch.source === 'mcp') return activityMcp?.canObserve(watch) ?? false;
+          if (watch.source === 'kswarm') {
+            if (!activityRoomClient) return false;
+            // Fetch only routing identity before Room authorization. A project
+            // detail response can contain private summaries and artifact paths.
+            const identity = await readActivityIdentity(watch.workId);
+            const roomId = identity.roomId;
+            if (!identity.ok || identity.sourceDataEpoch !== watch.sourceDataEpoch) return false;
+            if (!roomId) return false;
+            const snapshot = await activityRoomClient.getRoomSnapshot(roomId);
+            return isRecord(snapshot) && snapshot.ok !== false && isRecord(snapshot.room);
+          }
+          return false;
+        }, onError: error => console.warn('[conversation-activity]', error instanceof Error ? error.message : 'activity_delivery_failed'),
+      });
+      activitySources = new ConversationActivitySources({ store: activityStore, service: activityService,
+        taskHost: taskId => resolveScopedTaskHost(taskId, host), readProject: readActivityProject,
+        readGroup: (groupId, after) => multiAgentStore.readEvents(groupId, after),
+        groupMembers: runId => multiAgentStore.getActivityMembers(runId),
+        onError: error => console.warn('[conversation-activity-source]', error instanceof Error ? error.message : 'activity_source_failed') });
+      activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+        originThread: async taskId => {
+          const parent = activityStore!.listWatches().find(watch => watch.source === 'task_host' && watch.workId === taskId);
+          if (parent) return parent.origin.threadId;
+          const snapshot = await host.inspectTask(taskId);
+          return snapshot?.context?.threadId ?? null;
+        }, onError: error => console.warn('[conversation-activity-mcp]', error instanceof Error ? error.message : 'activity_mcp_unavailable') });
+      for (const connection of activityMcpConnections) activityMcp.register(connection);
+      installActivityGroupSubscription();
+      activityService.start();
+    } catch (error) {
+      activityService?.dispose(); activityStore?.close(); activityService = undefined; activityStore = undefined;
+      console.warn('[conversation-activity] unavailable:', error instanceof Error ? error.message : 'initialization_failed');
+    }
+  }
+
   let multiAgentStartupReady = !multiAgentService;
   if (multiAgentService) hostDeliveryAuthority = multiAgentService.bindHostDeliveryOwner(host);
   // Keep initialization failure observable by every admission path, without an
   // unhandled rejection when the window has not submitted its first task yet.
-  void multiAgentReady.then(() => { multiAgentStartupReady = true; }, () => {});
+    void multiAgentReady.then(() => {
+      multiAgentStartupReady = true;
+      if (multiAgentService && hostDeliveryAuthority) void multiAgentService.reconcileActivityRuns({ requestSource: 'scheduler', authority: hostDeliveryAuthority }).catch(error => console.warn('[conversation-activity] recovery pending:', error instanceof Error ? error.message : 'activity_run_pending'));
+    }, () => {});
   // Ready callers must enter Goal synchronously so its original permission
   // revision is captured before any queued revoke/regrant can run.
   const afterLocalRecovery = <T>(action: () => Promise<T>): Promise<T> => (
@@ -1905,13 +2096,32 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return createProjectAgentModel({ modelId, loadConfig });
   };
 
-  const createKSwarmTaskHost = (workspaceRoot: string, participantId?: string) => {
+  type KSwarmScopedTaskOptions = { workflowRestrictionCheckpoint?: NativeWorkflowRestrictionCheckpoint; nativeReadonlyOnly?: boolean; readOnlyPaths?: string[]; control?: boolean; projectWorker?: boolean; signal?: AbortSignal; onStarted?: () => void | Promise<void> };
+  const createKSwarmTaskHost = async (workspaceRoot: string, participantId?: string, taskOptions: KSwarmScopedTaskOptions = {}) => {
     taskSourcePopulation.assertAccepting();
-    const scopedTools = buildToolList(undefined, { cwd: workspaceRoot });
-    const scopedRegistry = new ToolRegistry({ autoMode: true }, scopedTools);
-    return taskSourcePopulation.createHost({
+    const execution = { clock: undefined as KSwarmExecutionClock | undefined };
+    const scopedDescriptions = new Map<Tool, ToolDescriptionMetadata>();
+    const builtScopedTools = buildToolList(undefined, { cwd: workspaceRoot, readOnlyPaths: taskOptions.readOnlyPaths }, [], scopedDescriptions);
+    const scopedTools = taskOptions.nativeReadonlyOnly
+      ? builtScopedTools.filter(tool => getBuiltinToolIdentity(tool) === 'readonly') : builtScopedTools;
+    const scopedRegistry = new ToolRegistry({ autoMode: true, nativeReadonlyOnly: taskOptions.nativeReadonlyOnly }, scopedTools, scopedDescriptions);
+    if(taskOptions.workflowRestrictionCheckpoint)bindNativeWorkflowRestrictionCheckpoint(scopedRegistry,taskOptions.workflowRestrictionCheckpoint);
+    const scopedHost = taskSourcePopulation.createHost({
+      // This scoped owner is bounded by the KSwarm queue/run clocks.
+      taskIdleTimeoutMs: 0,
       materialRegistry,
-      runner: coordinateRunner(options.runner ?? createDesktopModelRunnerWithRegistry(
+      runner: input => {
+        const signal = taskOptions.signal ? AbortSignal.any([input.signal, taskOptions.signal]) : input.signal;
+        return withExecutionLane(taskOptions.control && executionCoordinator.hasLaneCapacity('project_control') ? 'project_control' : taskOptions.projectWorker && executionCoordinator.hasLaneCapacity('project_worker') ? 'project_worker' : 'background', () => coordinateRunner(async runInput => {
+        const freshGate = () => { runInput.signal.throwIfAborted(); taskOptions.signal?.throwIfAborted(); taskSourcePopulation.assertAccepting(); };
+        freshGate();
+        execution.clock = new KSwarmExecutionClock(10 * 60 * 1000);
+        execution.clock.start();
+        freshGate();
+        await taskOptions.onStarted?.();
+        await assertNativeRegistryCheckpointCurrent(scopedRegistry);
+        freshGate();
+        return (options.runner ?? createDesktopModelRunnerWithRegistry(
         scopedRegistry,
         scopedTools,
         options.dataRoot,
@@ -1920,22 +2130,34 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         kswarmCreateProjectToolOptions,
         {
           cwd:workspaceRoot,
+          nativeReadonlyOnly: taskOptions.nativeReadonlyOnly,
           getProjectModel: () => resolveProjectAgentModel(participantId),
           officeToMarkdown: input => officeDocumentParser.parse(input),
           // Each KSwarm scoped registry gets the same main-owned runtime, so the
           // report/slide gateways are reachable there too (design §6.2/§6.3).
           ...(options.pluginProviderRuntime ? { pluginProviderRuntime: options.pluginProviderRuntime } : {}),
         },
-      )),
+      ))(runInput);
+      })({ ...input, signal }));
+      },
       now: options.now,
       aheGuards: { artifactEvidence: false, recoveryContinuity: true },
       createTaskId: () => `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     });
+    try {
+      kswarmTextExecutionClocks.set(scopedHost, execution);
+      scopedKSwarmHosts.add(new WeakRef(scopedHost));
+      return scopedHost;
+    } catch (error) {
+      try { await taskSourcePopulation.retireHost(scopedHost); }
+      catch (retirementError) { throw new AggregateError([error, retirementError], 'kswarm_task_source_retirement_unconfirmed'); }
+      throw error;
+    }
   };
 
   const withKSwarmTaskHost = async <T>(workspaceRoot: string, participantId: string | undefined,
-    work: (host: InProcessTaskRuntimeHost) => Promise<T>): Promise<T> => {
-    const taskHost = createKSwarmTaskHost(workspaceRoot, participantId);
+    work: (host: InProcessTaskRuntimeHost) => Promise<T>, taskOptions: KSwarmScopedTaskOptions = {}): Promise<T> => {
+    const taskHost = await createKSwarmTaskHost(workspaceRoot, participantId, taskOptions);
     let originalFailure: { error: unknown } | undefined;
     let settledBodyResult!: T;
     let settledBodyFailure: {
@@ -1971,8 +2193,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   };
 
   const createCollaborationRoomTaskRunner = () => {
-    const roomTools=buildToolList();
-    const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools});
+    const roomDescriptions = new Map<Tool, ToolDescriptionMetadata>();
+    const roomTools=buildToolList(undefined, undefined, [], roomDescriptions);
+    const roomRegistry=createRoomToolRegistry({mode:'discussion',tools:roomTools,metadata:roomDescriptions});
     connectorsService.bindTools(roomRegistry);
     return {registry:roomRegistry,runner:options.runner ?? createDesktopModelRunnerWithRegistry(roomRegistry,roomTools,options.dataRoot,options.kswarmService,materialRegistry,{}, {roomDiscussion:true})};
   };
@@ -2067,17 +2290,25 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     toolRegistry: registry,
   });
 
-  async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal }) {
+  async function runKSwarmHandoffTask({ handoff, targetParticipantId, signal, onExecutionStarted }: { handoff: KSwarmTaskHandoff; targetParticipantId?: string; signal?: AbortSignal; onExecutionStarted?: () => void | Promise<void> }) {
     if(handoff.workspaceContext||handoff.project.requiredProtocol==='room_workspace_v1')throw new Error('workspace_runtime_protocol_required');
     const throwIfAborted = () => {
+      taskSourcePopulation.assertAccepting();
       if (signal?.aborted) {
         throw new DOMException('agent aborted', 'AbortError');
       }
     };
 
     throwIfAborted();
-    const artifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
-    const workspaceRoot = handoff.project.workFolder || (artifactsDir ? dirname(artifactsDir) : process.cwd());
+    const baseArtifactsDir = handoff.project.artifactsDir || (handoff.project.workFolder ? join(handoff.project.workFolder, 'artifacts') : '');
+    const workspaceRoot = handoff.project.workFolder || (baseArtifactsDir ? dirname(baseArtifactsDir) : process.cwd());
+    const runDirectory = createHash('sha256').update(JSON.stringify([handoff.project.id, handoff.task.id, handoff.runId])).digest('hex').slice(0, 32);
+    const artifactsDir = baseArtifactsDir && executionCoordinator.hasLaneCapacity('project_worker')
+      ? join(baseArtifactsDir, 'run-' + runDirectory) : baseArtifactsDir;
+    if (artifactsDir) mkdirSync(artifactsDir, { recursive: true });
+    const clock = new KSwarmExecutionClock(resolveKSwarmWorkerRunMs(handoff.task));
+    let executionStarted = false;
+    const queueDeadline = Date.now() + 60 * 60 * 1000;
     return withKSwarmTaskHost(workspaceRoot, targetParticipantId, async taskHost => {
     const runStartedAt = Date.now();
     const requiresArtifactEvidence = shouldRequireKSwarmArtifactEvidence(handoff.task);
@@ -2089,6 +2320,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       `目标：${handoff.project.goal}`,
       handoff.project.requirements ? `要求：${handoff.project.requirements}` : '',
       artifactsDir ? `产物目录：${artifactsDir}` : '',
+      baseArtifactsDir && artifactsDir !== baseArtifactsDir ? `已有项目资料目录（只读参考，当前产物写入上面的产物目录）：${baseArtifactsDir}` : '',
       `任务：${handoff.task.title}`,
       handoff.task.brief ? `任务说明：${handoff.task.brief}` : '',
       handoff.task.acceptanceCriteria ? `验收标准：${handoff.task.acceptanceCriteria}` : '',
@@ -2101,15 +2333,28 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         ? '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，把产物文件写入上面的产物目录，使用文件路径作为交接依据，并返回 result manifest。'
         : '不要调用项目推进或修复工具来代替本次任务执行；请直接完成当前任务，并返回 result manifest。如果任务没有要求生成文件，artifacts 可以为空数组，但 summary 必须说明完成了哪些要求。',
     ].filter(Boolean).join('\n');
-    const created = await taskHost.createTask({ prompt, materials: [] });
+    let createdTaskId: string | undefined;
+    let cancellationRequested = false;
+    let cancellation: Promise<void> | undefined;
+    let bodyFailure: { error: unknown } | undefined;
     const cancelCreatedTask = () => {
-      void taskHost.cancelTask(created.taskId).catch(() => {});
+      cancellationRequested = true;
+      if (createdTaskId && !cancellation) {
+        cancellation = taskHost.cancelTask(createdTaskId);
+        // The finally block observes the original failure after physical settle.
+        void cancellation.catch(() => {});
+      }
     };
     signal?.addEventListener('abort', cancelCreatedTask, { once: true });
-    try {
+    const runPreparedTask = async () => {
       throwIfAborted();
-      const deadline = Date.now() + 10 * 60 * 1000;
-      while (Date.now() < deadline) {
+      const created = await taskHost.prepareTask({ prompt, materials: [] });
+      createdTaskId = created.taskId;
+      if (cancellationRequested || signal?.aborted) cancelCreatedTask();
+      throwIfAborted();
+      await taskHost.startTask(created.taskId);
+      throwIfAborted();
+      while (executionStarted ? !clock.expired() : Date.now() < queueDeadline) {
         throwIfAborted();
         const current = await taskHost.inspectTask(created.taskId);
         if (!current) throw Error('desktop_task_snapshot_missing');
@@ -2143,15 +2388,33 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           };
         }
         if (recovered.snapshot.status === 'failed' || recovered.snapshot.status === 'cancelled') {
-          throw new Error(`desktop_task_${recovered.snapshot.status}`);
+          throw new Error(`desktop_task_${recovered.snapshot.status}: ${getKSwarmRuntimeTaskFailureReason(recovered.snapshot) || 'unknown_runtime_failure'}`);
         }
         await new Promise(resolve => setTimeout(resolve, 500));
       }
+      await taskHost.cancelTask(created.taskId);
       throw new Error('desktop_task_timeout');
-    } finally {
-      signal?.removeEventListener('abort', cancelCreatedTask);
+    };
+    let result!: Awaited<ReturnType<typeof runPreparedTask>>;
+    try { result = await runPreparedTask(); }
+    catch (error) { bodyFailure = { error }; }
+    signal?.removeEventListener('abort', cancelCreatedTask);
+    if (cancellation) {
+      try { await cancellation; }
+      catch (error) {
+        if (bodyFailure) throw new AggregateError([bodyFailure.error, error], 'kswarm_handoff_cancellation_unconfirmed');
+        throw error;
+      }
     }
-    });
+    if (bodyFailure) throw bodyFailure.error;
+    return result;
+    }, { projectWorker: true, signal, onStarted: async () => {
+      throwIfAborted();
+      executionStarted = true;
+      clock.start();
+      await onExecutionStarted?.();
+      throwIfAborted();
+    } });
   }
 
   async function runWorkspaceProjectTask({handoff,workspace,targetParticipantId}:{handoff:KSwarmTaskHandoff;workspace:RoomWorkspaceRunOptions;targetParticipantId?:string}) {
@@ -2246,8 +2509,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
   }
 
   async function runKSwarmWorkflowNode({ handoff, targetParticipantId }: { handoff: KSwarmWorkflowNodeHandoff; targetParticipantId?: string }) {
-    const workspaceRoot = handoff.project?.workFolder || process.cwd();
-    const artifactsDir = handoff.project?.workFolder ? join(handoff.project.workFolder, 'artifacts') : '';
+    const { getKSwarmWorkflowReadPort } = await import('./kswarm-service.js');
+    const restriction=await createNativeWorkflowRestrictionCheckpoint(await getKSwarmWorkflowReadPort(options.kswarmService),{projectId:handoff.projectId,workflowRunId:handoff.workflowRunId,workflowId:handoff.workflowId,nodeId:handoff.nodeId,nodeKind:handoff.nodeKind,attempt:handoff.attempt,handoffId:handoff.handoffId,participantId:targetParticipantId||'xiaok-worker',...(handoff.project?.workFolder?{admittedRoot:handoff.project.workFolder}:{})});
+    if(handoff.project?.id&&handoff.project.id!==handoff.projectId)throw Error('workflow_project_binding_mismatch');
+    const workspaceRoot = restriction.root;
+    const artifactsDir = join(workspaceRoot, 'artifacts');
     const taskDeliverableNode = isKSwarmTaskDeliverableWorkflowNode(handoff);
     const projectDeliverableNode = isKSwarmProjectDeliverableWorkflowNode(handoff);
     const deliverableNode = taskDeliverableNode || projectDeliverableNode;
@@ -2318,10 +2584,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       },
       reviewDecision: null,
     };
-    });
+    }, {workflowRestrictionCheckpoint:restriction.checkpoint,...(handoff.nodeKind==='review'?{control:true}:{}),nativeReadonlyOnly:restriction.readonly});
   }
 
-  async function runKSwarmAssignPo({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+  async function runKSwarmAssignPo({ payload, targetParticipantId, startAfterPlanning }: { payload: Record<string, unknown>; targetParticipantId?: string; startAfterPlanning?: boolean }) {
     try {
       const projectId = readString(payload.projectId) || readString(payload.taskId);
       if (!projectId) return { ok: false as const, error: 'project_id_missing' };
@@ -2329,7 +2595,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const members = readStringArray(payload.members);
       const fallbackWorkerId = members[0] || 'xiaok-worker';
       const prompt = buildKSwarmAssignPoPrompt(payload, fallbackWorkerId);
-      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, prompt));
+      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, prompt), { control: true });
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const plan = normalizeKSwarmPlan(isRecord(parsed.plan) ? parsed.plan : parsed, fallbackWorkerId, {
         userGoal: readString(payload.goal),
@@ -2369,6 +2635,23 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             error: tasksError instanceof Error ? tasksError.message : String(tasksError),
             phase: 'tasks' as const,
           };
+        }
+      }
+      if (startAfterPlanning) {
+        // Broker planning used to stop after persisting the board. Read the
+        // canonical user policy, then enter the same activation gate as the
+        // durable bootstrap queue; never infer permission from model output.
+        const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+        if (!isRecord(detail)) throw new Error('project_policy_unavailable');
+        const project = isRecord(detail.project) ? detail.project : detail;
+        const policy = readString(project.requestedStartPolicy);
+        if (project.poAgent !== fromAgent) throw new Error('project_po_mismatch');
+        if (policy === 'auto_activate_after_plan' || policy === 'activate_and_dispatch_after_plan') {
+          await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/activate-and-start`, withKSwarmDesktopMutationToken(options.kswarmService, {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ fromAgent, startPolicy: policy,
+              idempotencyKey: `initial-plan-bootstrap:${projectId}:${policy}` }),
+          }));
         }
       }
       return { ok: true as const };
@@ -2417,14 +2700,27 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return { ok: true as const };
   }
 
-  async function runKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
+  const pendingKSwarmReviews = new Map<string, ReturnType<typeof executeKSwarmReviewSubmission>>();
+  function runKSwarmReviewSubmission(input: Parameters<typeof executeKSwarmReviewSubmission>[0]) {
+    const result = isRecord(input.payload.result) ? input.payload.result : {};
+    const key = JSON.stringify([input.payload.projectId, input.payload.taskId, input.payload.runId ?? result.runId ?? result.provenance ?? result]);
+    const pending = pendingKSwarmReviews.get(key);
+    if (pending) return pending;
+    const work = executeKSwarmReviewSubmission(input).finally(() => pendingKSwarmReviews.delete(key));
+    pendingKSwarmReviews.set(key, work);
+    return work;
+  }
+
+  async function executeKSwarmReviewSubmission({ payload, targetParticipantId }: { payload: Record<string, unknown>; targetParticipantId?: string }) {
     try {
       const projectId = readString(payload.projectId);
       const taskId = readString(payload.taskId);
       if (!projectId || !taskId) return { ok: false as const, error: 'project_or_task_id_missing' };
       const fromAgent = targetParticipantId || readString(payload.poAgent) || XIAOK_PO_SEED_ID;
       const reviewPrompt = buildKSwarmReviewPrompt(payload);
-      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, reviewPrompt));
+      const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
+      const readOnlyPaths = resolveKSwarmReviewReadPaths(payload, detail);
+      const runtimeResult = await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, reviewPrompt), { control: true, nativeReadonlyOnly: true, readOnlyPaths });
       const parsed = parseKSwarmRuntimeStructuredJson(runtimeResult);
       const review = normalizeKSwarmReview(isRecord(parsed.review) ? parsed.review : parsed);
 
@@ -2438,7 +2734,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         const detail = await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}`);
         if (shouldSynthesizeKSwarmProject(detail)) {
           const synthesisPrompt = buildKSwarmSynthesisPrompt(detail);
-          const synthesis = (await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, synthesisPrompt))).summary;
+          const synthesis = (await withKSwarmTaskHost(process.cwd(), fromAgent, taskHost => runKSwarmRuntimeTextTask(taskHost, synthesisPrompt), { control: true })).summary;
           await requestKSwarmJson(options.kswarmService, `/projects/${encodeURIComponent(projectId)}/synthesize`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -2494,7 +2790,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     let pending = historicalWorkflowArtifactRecovery.get(taskId);
     if (!pending) {
       pending = (async () => {
-        const recovered = await host.recoverTask(taskId);
+        const recovered = await resolveScopedTaskHost(taskId, host).recoverTask(taskId);
+        recovered.snapshot = conversationProjects.restoreCreationCard(recovered.snapshot);
         const lookup = findHistoricalWorkflowStatusLookup(recovered.snapshot);
         return lookup
           ? recoverHistoricalWorkflowStatusArtifacts({
@@ -2531,6 +2828,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return materialInstancesClosing;
   }
 
+  const authorizeLocalTaskActor = async (taskId: string, actor: NativeActor): Promise<void> => {
+    if (actor?.requestSource !== 'user' || actor.actorId !== `desktop-user:${multiAgentProfileId}`) throw new Error('task_actor_forbidden');
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(taskId)) throw new Error('invalid_task_id');
+    await multiAgentReady;
+    const snapshot = await snapshotStore.recoverTask(taskId);
+    const threadId = snapshot?.context?.threadId;
+    const thread = threadId ? multiAgentStore?.getThread(threadId) : null;
+    if (thread && (thread.profileId !== multiAgentProfileId || (thread.deleteState ?? 'none') !== 'none')) throw new Error('task_scope_forbidden');
+  };
+
   return {
     multiAgent: multiAgentService ? { service: multiAgentService, ready: multiAgentReady, profileId: multiAgentProfileId, workspaceId: multiAgentWorkspaceId, cwd: multiAgentCwd } : null,
     goalShutdown,
@@ -2540,6 +2847,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     sealAndDrainArtifactWorkspaceServiceInstance: () => artifactWorkspaceService.sealAndDrainInstanceMutations(),
     async disposeMultiAgent(): Promise<void> {
       goalShutdown.ingress.stopAccepting();
+      activityMcp?.dispose();
+      unsubscribeActivityGroups?.(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
       await codexTasks.dispose();
       unsubscribeMultiAgentGoal?.();
       await multiAgentApprovals?.dispose();
@@ -2556,17 +2865,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         registry.registerTool(tool);
       }
     },
-    getConnectorsConfig() {
-      return connectorsService.getConfig();
+    getConnectorsConfig(request?: ConnectorsMutationRequest) {
+      return connectorsService.getConfig(request);
     },
-    async setConnectorsConfig(input: unknown) {
-      return connectorsService.setConfig(input);
+    async setConnectorsConfig(input: unknown, request?: ConnectorsMutationRequest) {
+      return connectorsService.setConfig(input, request);
     },
     listConnectorRuntimes() {
       return connectorsService.listProviders();
     },
-    async testConnectorProvider(kind: 'search' | 'fetch') {
-      return connectorsService.testProvider(kind);
+    async testConnectorProvider(kind: 'search' | 'fetch', request?: ConnectorsMutationRequest) {
+      return connectorsService.testProvider(kind, request);
     },
     registerChannelTools() {
       const channelTools: Tool[] = [
@@ -3002,13 +3311,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
         }
         if (!nativeSelected && context?.threadId) multiAgentService?.assertExecutionAdmission(context.threadId, permissionRevision);
-        return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor) : goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context });
+        return nativeSelected ? codexTasks.create({ prompt: input.prompt, materials, context },nativeActor)
+          : conversationRooms.withUserRequest({prompt:input.prompt},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, threadId: context?.threadId }, { requestSource: 'user' },
+            () => goalCoordinator.admitUserTask({ prompt: input.prompt, materials, context })));
       });
     },
     async getModelConfig() {
       return modelSnapshot(await loadConfig());
     },
-    async saveModelConfig(input: DesktopSaveModelConfigInput, nativeActor?: NativeActor) {
+    async saveModelConfig(input: DesktopSaveModelConfigInput, nativeActor?: NativeActor, requestSource?: 'user' | 'agent' | 'scheduler') {
+      if (requestSource !== 'user') throw new Error('model_config_user_required');
+      input = captureModelProviderInput(input, SAVE_MODEL_CONFIG_SCHEMA);
       if(input.modelId===LOCAL_CODEX_MODEL){
         if(nativeActor?.requestSource!=='user'||nativeActor.actorId!==`desktop-user:${multiAgentProfileId}`)throw new Error('native_access_denied');
         codexTasks.select(true);return modelSnapshot(await loadConfig());
@@ -3060,7 +3373,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       await saveConfig(config);
       codexTasks.select(false);return modelSnapshot(config);
     },
-    async updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput) {
+    async updateModelRuntimeOptions(input: DesktopUpdateModelRuntimeOptionsInput, requestSource?: 'user' | 'agent' | 'scheduler') {
+      if (requestSource !== 'user') throw new Error('model_config_user_required');
+      input = captureModelProviderInput(input, UPDATE_MODEL_RUNTIME_SCHEMA);
       const config = await loadConfig();
       const model = config.models[input.modelId];
       if (!model) {
@@ -3103,13 +3418,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async getSystemOneConfig(): Promise<DesktopSystemOneConfigSnapshot> {
       return systemOneSnapshot(await loadConfig());
     },
-    async saveSystemOneConfig(input: DesktopSaveSystemOneConfigInput): Promise<DesktopSystemOneConfigSnapshot> {
+    async saveSystemOneConfig(input: DesktopSaveSystemOneConfigInput | undefined, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<DesktopSystemOneConfigSnapshot> {
+      if (requestSource !== 'user') throw new Error('model_config_user_required');
+      input = captureModelProviderInput(input, SYSTEM_ONE_PATCH_SCHEMA.optional());
       const config = await loadConfig();
       setSystemOneConfig(config, sanitizeSystemOnePatch(input));
       await saveConfig(config);
       return systemOneSnapshot(config);
     },
     async createManagedXiaokAgent(input: {
+      id?: string;
       name: string;
       description?: string;
       roles?: string[];
@@ -3118,11 +3436,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       maxConcurrentTasks?: number;
       desktopModelId?: string | null;
     }, context?: { requestSource: 'user' | 'agent' | 'scheduler' }) {
+      if (context?.requestSource !== 'user') throw new Error('model_config_user_required');
+      input = captureModelProviderInput(input, MANAGED_AGENT_INPUT_SCHEMA);
       const config = await loadConfig();
       if (input.desktopModelId !== undefined) validateProjectAgentModelSelection(input.desktopModelId, 'xiaok', config, context?.requestSource);
       const payload = buildManagedXiaokAgentPayload(input, config);
-      const semanticPayload = Object.fromEntries(['id', 'name', 'description', 'instructions', 'roles', 'capabilities', 'taskCapabilities', 'outputCapabilities', 'runtimeType', 'runtimeSource', 'runtimeModel', 'runtimeHealth', 'maxConcurrentTasks', 'desktopModelId']
-        .flatMap(key => (payload as unknown as Record<string, unknown>)[key] === undefined ? [] : [[key, (payload as unknown as Record<string, unknown>)[key]]]));
+      const semanticPayload = buildManagedXiaokAgentSemanticPayload(payload);
       return requestKSwarmJson(options.kswarmService, '/agents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-kswarm-mutation-token': options.kswarmService.getDesktopMutationToken() },
@@ -3133,9 +3452,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const config = await loadConfig();
       return { enabled: config.skillDebug ?? false };
     },
-    async saveSkillDebugConfig(input: { enabled: boolean }) {
+    async saveSkillDebugConfig(input: { enabled: boolean }, requestSource: 'user' | 'agent' | 'scheduler') {
+      if (requestSource !== 'user') throw new Error('desktop_config_request_source_forbidden');
+      const captured = captureIpcData(input, 'desktop_config_input_invalid');
+      if (!SKILL_DEBUG_CONFIG_SCHEMA.safeParse(captured).success) throw new Error('desktop_config_input_invalid');
       const config = await loadConfig();
-      config.skillDebug = input.enabled;
+      config.skillDebug = captured.enabled;
       await saveConfig(config);
       return { enabled: config.skillDebug };
     },
@@ -3143,9 +3465,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const config = await loadConfig();
       return { maxConcurrentTasks: config.kswarm?.maxConcurrentTasks ?? 3 };
     },
-    async saveKswarmConfig(input: { maxConcurrentTasks: number }) {
+    async saveKswarmConfig(input: { maxConcurrentTasks: number }, requestSource: 'user' | 'agent' | 'scheduler') {
+      if (requestSource !== 'user') throw new Error('desktop_config_request_source_forbidden');
+      const captured = captureIpcData(input, 'desktop_config_input_invalid');
+      if (!KSWARM_CONCURRENCY_CONFIG_SCHEMA.safeParse(captured).success) throw new Error('desktop_config_input_invalid');
       const config = await loadConfig();
-      const clamped = Math.max(1, Math.min(10, Math.round(input.maxConcurrentTasks)));
+      const clamped = Math.max(1, Math.min(10, Math.round(captured.maxConcurrentTasks)));
       config.kswarm = { ...(config.kswarm || {}), maxConcurrentTasks: clamped };
       await saveConfig(config);
       return { maxConcurrentTasks: clamped };
@@ -3158,7 +3483,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         return await Promise.race([Promise.resolve(stats), timeout]);
       } catch { return []; }
     },
-    async testProviderConnection(input: { providerId: string; modelId?: string }): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+    async testProviderConnection(input: { providerId: string; modelId?: string }, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
+      if (requestSource !== 'user') throw new Error('model_config_user_required');
+      input = captureModelProviderInput(input, PROVIDER_CONNECTION_INPUT_SCHEMA);
       const config = await loadConfig();
       const providerId = normalizeProviderId(input.providerId);
       const provider = config.providers[providerId];
@@ -3229,6 +3556,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     async deleteProvider(providerId: string, context?: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
       if (context?.requestSource !== 'user') throw new Error('model_config_user_required');
+      providerId = captureModelProviderInput(providerId, MODEL_PROVIDER_ID_SCHEMA);
       const config = await loadConfig();
       delete config.providers[providerId];
       for (const [modelId, model] of Object.entries(config.models)) {
@@ -3239,6 +3567,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     },
     async deleteModel(modelId: string, context?: { requestSource: 'user' | 'agent' | 'scheduler' }): Promise<void> {
       if (context?.requestSource !== 'user') throw new Error('model_config_user_required');
+      modelId = captureModelProviderInput(modelId, MODEL_PROVIDER_ID_SCHEMA);
       const config = await loadConfig();
       delete config.models[modelId];
       repairModelConfigDefault(config);
@@ -3283,20 +3612,97 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async revokeObservationTask(taskId: string, context: {requestSource:'user';control:object}) { if(context?.requestSource!=='user'||observationTaskControls.get(taskId)!==context.control)throw new Error('observation_task_owner_required'); const entry=observationTasks.get(taskId); if(!entry)throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_ACTIVE'); entry.consumed=true; entry.revoked=true; entry.live?.revoke(); await host.cancelTask(taskId, 'observation_permission_revoked'); },
     createTask: (input: Parameters<typeof host.createTask>[0], nativeActor?: NativeActor) => {
       if(codexTasks.selected()) return codexTasks.create(input,nativeActor);
-      return afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input));
+      return conversationRooms.withUserRequest({prompt:input.prompt,permissionMode:input.permissionMode},{requestSource:'user'},()=>conversationProjects.withUserRequest({ prompt: input.prompt, permissionMode: input.permissionMode, threadId: input.context?.threadId }, { requestSource: 'user' },
+        () => afterLocalRecovery(() => goalCoordinator.admitUserTask(multiAgentService ? { ...input, context: localChatContext(input.context) } : input))));
     },
+    /** Main-only binding; never exposed through preload or a model tool. */
+    bindConversationRoomCreator: (creator: (input:Record<string,unknown>,context:{requestSource:'user';signal?:AbortSignal})=>Promise<unknown>) => conversationRooms.bindCreator(creator),
+    bindConversationProjectRoomClient: (client: ConversationProjectRoomClient) => {
+      activityRoomClient = client; conversationProjects.bindRoomClient(client);
+      void multiAgentReady.then(async () => { await conversationProjects.recoverActivityBindings(); for (const watch of activityStore?.listWatches() ?? []) await activitySources?.startWatch(watch.watchId); }).catch(error => console.warn('[conversation-activity] restore failed:', error));
+    },
+    async attachConversationActivityOwner(sourceConfig: Pick<ActivityOwnerConfig, 'kswarm' | 'managedSources'>) {
+      if (!activityEnabled || !multiAgentStore) return;
+      if (activityAttachment) return activityAttachment;
+      activityAttachment = (async () => {
+        await multiAgentReady;
+        // Stop all in-process writers and source owners before acquiring the
+        // daemon lock. Native executors keep their original ownership.
+        activityMcp?.dispose(); activitySources?.dispose(); activityService?.dispose(); activityStore?.close();
+        activityStore = undefined;
+        const client = await ensureConversationActivityOwner({ schemaVersion: 1, dataRoot: options.dataRoot,
+          profileId: multiAgentProfileId, actorId: `desktop-user:${multiAgentProfileId}`,
+          identity: { kind: 'desktop', path: join(options.dataRoot, 'multi-agent', 'groups.sqlite') }, ...sourceConfig });
+        options.kswarmService.bindActivityOwner?.(client);
+        activityStore = new ConversationActivityStore(join(options.dataRoot, 'conversation-activity.sqlite'), { readOnly: true });
+        activityService = new ConversationActivityAttachedService(client, `desktop-user:${multiAgentProfileId}`);
+        activitySources = new ConversationActivityAttachedSources(client);
+        activityMcp = new ConversationMcpActivities({ store: activityStore, service: activityService, actorId: `desktop-user:${multiAgentProfileId}`,
+          externalObserver: connection => connection.activityEndpoint?.config.type !== 'stdio',
+          endpointReady: async connection => {
+            const endpoint = connection.activityEndpoint;
+            if (!endpoint || !connection.tasks) throw new Error('activity_mcp_endpoint_unverified');
+            await client.request('mcpRegister', { endpointId: connection.tasks.endpointId, name: endpoint.name,
+              ...(endpoint.config.type !== 'stdio' ? { config: endpoint.config, ...(endpoint.cwd ? { cwd: endpoint.cwd } : {}) } : {}) });
+          },
+          originThread: async taskId => {
+            const parent = activityStore!.listWatches().find(watch => watch.source === 'task_host' && watch.workId === taskId);
+            return parent?.origin.threadId ?? (await host.inspectTask(taskId))?.context?.threadId ?? null;
+          }, onError: error => console.warn('[conversation-activity-mcp]', error instanceof Error ? error.message : 'activity_mcp_unavailable') });
+        for (const connection of activityMcpConnections) activityMcp.register(connection);
+        installActivityGroupSubscription();
+      })();
+      return activityAttachment;
+    },
+    conversationActivity: activityEnabled && multiAgentStore ? {
+      mcpInputs: async (watchId: string, actor: ActivityActor) => { await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request('mcpInputs', { watchId }) : activityMcp.inputs(watchId, actor); },
+      mcpAnswer: async (watchId: string, input: Parameters<ConversationMcpActivities['answerInput']>[1], actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<void>('mcpAnswer', { watchId, input }) : activityMcp.answerInput(watchId, input, actor); },
+      mcpCancel: async (watchId: string, actor: ActivityActor) => { await activityAttachment; await activityService!.getWork(watchId, actor); if (!activityMcp) throw new Error('activity_mcp_unavailable'); return activityService instanceof ConversationActivityAttachedService && ![...activityMcpConnections].some(connection => connection.tasks?.endpointId === activityStore?.getWatch(watchId)?.logicalSourceId && connection.activityEndpoint?.config.type === 'stdio') ? activityService.client.request<{ requested: true }>('mcpCancel', { watchId }) : activityMcp.cancel(watchId, actor); },
+      unread: (actor: ActivityActor) => activityService!.unreadThreads(actor),
+      read: (threadId: string, through: number, actor: ActivityActor) => activityService!.markRead(threadId, through, actor),
+      overview: (actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribeOverview']>[1]) => activityService!.subscribeOverview(actor, callback),
+      getWork: (watchId: string, actor: ActivityActor) => activityService!.getWork(watchId, actor),
+      list: async (threadId: string, actor: ActivityActor, page?: { afterLocalSeq?: number; limit?: number }) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.listActivities(threadId, actor, page); },
+      subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await activityAttachment; await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
+      reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
+      stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
+      projectChanged: (projectId: string) => activitySources!.refreshProject(projectId, true),
+      projectConnectionChanged: (status: 'connected' | 'disconnected' | 'reconnecting') => activitySources!.projectConnectionChanged(status),
+    } : null,
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
     // Main composition only; never exported through preload or an agent tool.
     captureLoopPublicationAdmission: () => goalCoordinator.captureBackgroundAdmission(),
     reserveBackgroundTask:backgroundTaskIdentity.reserve,
     createReservedBackgroundTask:backgroundTaskIdentity.create,
     discardReservedBackgroundTask:backgroundTaskIdentity.discard,
-    createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'>) =>
-      withExecutionLane('background', () => afterLocalRecovery(() => goalCoordinator.admitUserTask({
+    createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'> & {
+      scheduledOrigin?: { actionId: string; runId: string; createdByTaskId?: string };
+    }) => withExecutionLane('background', () => afterLocalRecovery(async () => {
+      const origin = input.scheduledOrigin;
+      const creator = origin?.createdByTaskId ? await snapshotStore.recoverTask(origin.createdByTaskId) : null;
+      const threadId = creator?.context?.threadId;
+      const binding = threadId ? multiAgentStore?.getThread(threadId) : null;
+      const operationId = origin ? `scheduled:${origin.actionId}:${origin.runId}` : undefined;
+      if (activityService && operationId && threadId && binding?.profileId === multiAgentProfileId && (binding.deleteState ?? 'none') === 'none') {
+        await activityService.prepareAssociation({ threadId, operationId, creationIdempotencyKey: operationId },
+          { requestSource: 'user', actorId: `desktop-user:${multiAgentProfileId}` });
+      }
+      const task = await goalCoordinator.admitUserTask({
         prompt: input.prompt, materials: input.materials, permissionMode: input.permissionMode,
         watchdogMs: input.watchdogMs, maxToolLoopIterations: input.maxToolLoopIterations,
         context: localChatContext(),
-      }))),
+      });
+      if (activityService && activitySources && activityStore?.getAssociation(operationId ?? '')) {
+        const snapshot = await snapshotStore.recoverTask(task.taskId);
+        if (snapshot) {
+          const watchId = `task:${task.taskId}`;
+          await activityService.bindWork({ operationId: operationId!, watchId, source: 'task_host', logicalSourceId: 'task-host-local',
+            sourceDataEpoch: snapshot.sessionId, workId: task.taskId, runId: origin!.runId, actualExecutionThreadId: snapshot.context?.threadId });
+          await activitySources.startWatch(watchId);
+        }
+      }
+      return task;
+    })),
     getGoal: (threadId: string) => goalCoordinator.getGoal(threadId),
     getGoalNativeMutation: (threadId: string) => goalCoordinator.getGoalNativeMutation(threadId),
     recoverGoalNativeMutation: (input: { threadId: string; requestSource: 'user' | 'agent' | 'scheduler' }) => {
@@ -3355,12 +3761,22 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     runKSwarmAssignPo,
     runKSwarmReviewSubmission,
     runKSwarmPlanApproved,
-    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number }) => (codexTasks.owns(taskId)?codexTasks.host:host).subscribeTask(taskId,sinceIndex),
-    answerQuestion: (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => codexTasks.owns(input.taskId)?codexTasks.answer(input,nativeActor):host.answerQuestion(input),
-    cancelTask: (taskId:string, reasonOrActor?:string|NativeActor) => codexTasks.owns(taskId)?codexTasks.cancel(taskId,typeof reasonOrActor==='string'?undefined:reasonOrActor):host.cancelTask(taskId,typeof reasonOrActor==='string'?reasonOrActor:undefined),
+    authorizeTaskRead: authorizeLocalTaskActor,
+    subscribeTask: (taskId:string,sinceIndex?:{ sinceIndex?: number; signal?: AbortSignal }) => (codexTasks.owns(taskId)?codexTasks.host:resolveScopedTaskHost(taskId, host)).subscribeTask(taskId,sinceIndex),
+    answerQuestion: async (input: Parameters<typeof host.answerQuestion>[0], nativeActor?:NativeActor) => {
+      if (codexTasks.owns(input.taskId)) return codexTasks.answer(input, nativeActor);
+      if (nativeActor) await authorizeLocalTaskActor(input.taskId, nativeActor);
+      return resolveScopedTaskHost(input.taskId, host).answerQuestion(input);
+    },
+    cancelTask: async (taskId:string, reasonOrActor?:string|NativeActor) => {
+      if (codexTasks.owns(taskId)) return codexTasks.cancel(taskId, typeof reasonOrActor === 'string' ? undefined : reasonOrActor);
+      if (reasonOrActor && typeof reasonOrActor !== 'string') await authorizeLocalTaskActor(taskId, reasonOrActor);
+      return resolveScopedTaskHost(taskId, host).cancelTask(taskId, typeof reasonOrActor === 'string' ? reasonOrActor : undefined);
+    },
     async getActiveTask(): Promise<{ taskId: string } | null> {
       for (const ref of await host.getActiveTasks()) {
-        const snapshot = (await (codexTasks.owns(ref.taskId)?codexTasks.host:host).recoverTask(ref.taskId)).snapshot;
+        if (!codexTasks.owns(ref.taskId) && resolveScopedTaskHost(ref.taskId, host) !== host) continue;
+        const snapshot = (await (codexTasks.owns(ref.taskId)?codexTasks.host:resolveScopedTaskHost(ref.taskId, host)).recoverTask(ref.taskId)).snapshot;
         if (snapshot.executionScope?.kind === 'goal_turn') {
           const binding = goalStore.getTaskBinding(ref.taskId);
           if (snapshot.executionScope.origin === 'continuation' || binding?.attachedAt === null) continue;
@@ -3369,7 +3785,18 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       }
       return null;
     },
-    recoverTask: (taskId:string) => codexTasks.owns(taskId)?codexTasks.host.recoverTask(taskId):recoverTaskWithWorkflowArtifacts(taskId),
+    async recoverTask(taskId: string, legacyPrompt?: string): Promise<{ snapshot: TaskSnapshot; recoveredFromTaskId?: string }> {
+      try { return await (codexTasks.owns(taskId) ? codexTasks.host.recoverTask(taskId) : recoverTaskWithWorkflowArtifacts(taskId)); }
+      catch (error) {
+        // Only a physically missing legacy task may use this read-only fallback.
+        // Existing-but-unreadable/protected tasks retain their original error.
+        if (!legacyPrompt || existsSync(join(options.dataRoot, 'tasks', 'snapshots', `${taskId}.json`))) throw error;
+        const snapshot = await findLegacyTaskHistory({ root: join(options.dataRoot, 'tasks'), prompt: legacyPrompt,
+          read: id => snapshotStore.recoverTask(id) });
+        if (!snapshot) throw error;
+        return { snapshot, recoveredFromTaskId: snapshot.taskId };
+      }
+    },
     async recoverStaleTasks(): Promise<void> {
       await multiAgentReady;
       const active = await host.getActiveTasks();
@@ -3381,7 +3808,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
             // path would collapse recoverable generation state into failure.
             continue;
           }
-          await (codexTasks.owns(ref.taskId)?codexTasks.host:host).recoverTask(ref.taskId);
+          await (codexTasks.owns(ref.taskId)?codexTasks.host:resolveScopedTaskHost(ref.taskId, host)).recoverTask(ref.taskId);
         } catch {
           // Per-task recovery failure must not block desktop startup.
         }
@@ -3862,6 +4289,8 @@ function kindFromFilename(filename: string): string {
   return 'file';
 }
 
+const kswarmTextExecutionClocks = new WeakMap<InProcessTaskRuntimeHost, { clock?: KSwarmExecutionClock }>();
+
 async function runKSwarmRuntimeTextTask(
   host: InProcessTaskRuntimeHost,
   prompt: string,
@@ -3880,10 +4309,16 @@ async function runKSwarmRuntimeTextTask(
   const maxAttempts = 2;
   let lastFailure: string | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let retry = false;
+    const execution = kswarmTextExecutionClocks.get(host);
+    if (execution) execution.clock = undefined;
     const created = await host.createTask({ prompt, materials: options.materials ?? [] });
     options.onTaskCreated?.(created.taskId);
     const deadline = Date.now() + 10 * 60 * 1000;
-    while (Date.now() < deadline) {
+    const queueDeadline = Date.now() + 60 * 60 * 1000;
+    while (execution
+      ? (execution.clock ? !execution.clock.expired() : Date.now() < queueDeadline)
+      : Date.now() < deadline) {
       const current = await host.inspectTask(created.taskId);
       if (!current) throw Error('desktop_task_snapshot_missing');
       const recovered = { snapshot: current };
@@ -3914,12 +4349,16 @@ async function runKSwarmRuntimeTextTask(
           && isRetryableKSwarmRuntimeTaskFailure(lastFailure)
         ) {
           await new Promise(resolve => setTimeout(resolve, 750));
+          retry = true;
           break;
         }
         throw new Error(`desktop_task_${recovered.snapshot.status}: ${lastFailure}`);
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    if (retry) continue;
+    await host.cancelTask(created.taskId);
+    throw new Error('desktop_task_timeout');
   }
   throw new Error(lastFailure ? `desktop_task_failed: ${lastFailure}` : 'desktop_task_timeout');
 }
@@ -5514,7 +5953,7 @@ async function executeDesktopTaskTool(
     officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   },
 ): Promise<{ ok: boolean; result: string }> {
-  if (toolCall.name === 'read_material' && !options.scoped) {
+  if (toolCall.name === 'read_material' && !options.scoped && !options.registry.isNativeReadonlyOnly) {
     return runMonitoredTool({name:toolCall.name,context:options.context,run: context => executeReadMaterialForDesktop(toolCall.input, {
       taskId: options.taskId,
       materials: options.materials,
@@ -5602,6 +6041,7 @@ const DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT = [
 ].join('\n');
 
 async function streamDesktopToolLoopFinalization(input: {
+  modelPhysicalScope?: DesktopModelPhysicalScope;
   prepareRequest?: DesktopTaskRequestPreparer;
   projectModel?: ProjectAgentModel;
   beforeRequest?: () => Promise<void>;
@@ -5618,6 +6058,10 @@ async function streamDesktopToolLoopFinalization(input: {
   emitRuntimeEvent: TaskRunnerInput['emitRuntimeEvent'];
   onUsage?: (chunk: Extract<StreamChunk, { type: 'usage' }>, invocationId: string) => void | Promise<void>;
 }): Promise<{ reply: string; assistantBlocks: MessageBlock[] }> {
+  const local = !input.modelPhysicalScope;
+  const modelPhysicalScope = input.modelPhysicalScope ?? createDesktopModelPhysicalScope();
+  let modelBodyFailure: { error: unknown } | undefined;
+  const body = async () => {
   const assistantBlocks: MessageBlock[] = [];
   let reply = '';
   let providerInvocationId = `inv_${randomUUID()}`;
@@ -5639,7 +6083,9 @@ async function streamDesktopToolLoopFinalization(input: {
     options: input.streamOptions,
     invocationId: providerInvocationId,
   };
-  for await (const chunk of (input.projectModel ? input.projectModel.stream : streamDesktopTaskRecovery)(request)) {
+  const modelPhysicalRun = admitDesktopModelPhysicalRead(modelPhysicalScope);
+    try {
+    for await (const chunk of (input.projectModel ? input.projectModel.stream : streamDesktopTaskRecovery)(request, modelPhysicalRun)) {
     if (chunk.type === 'usage') {
       const captured = input.onUsage?.(chunk, providerInvocationId);
       if (captured) await captured;
@@ -5679,11 +6125,23 @@ async function streamDesktopToolLoopFinalization(input: {
       continue;
     }
   }
+    } finally { modelPhysicalRun.finish(); }
   throwIfAborted(input.signal);
   if (!reply.trim()) {
     throw new Error('desktop_tool_loop_finalization_empty');
   }
   return { reply, assistantBlocks };
+
+  };
+  let result: { reply: string; assistantBlocks: MessageBlock[] } | undefined;
+  try { result = await body(); } catch (error) { modelBodyFailure = { error }; }
+  if (local) try { await closeDesktopModelPhysicalScope(modelPhysicalScope, input.signal.reason); }
+  catch (physicalError) {
+    if (modelBodyFailure && modelBodyFailure.error !== physicalError) throw new AggregateError([modelBodyFailure.error, physicalError], 'desktop_finalization_business_and_model_cleanup_failed', { cause: modelBodyFailure.error });
+    throw physicalError;
+  }
+  if (modelBodyFailure) throw modelBodyFailure.error;
+  return result!;
 }
 
 interface ToolLoopStrategies {
@@ -5700,11 +6158,13 @@ interface ToolLoopStrategies {
 }
 
 interface ToolLoopContext {
+  modelPhysicalScope?: DesktopModelPhysicalScope;
   observationBinding?: DesktopObservationBinding;
   /** Not ready until main-owned protected-history durability is available. */
   observationOwner?: ObservationSessionOwner;
   metricsSurface?: 'desktop' | 'desktop-child';
   beforeManagedTurnSeal?(reply:string):Promise<void>;
+  finalizeProjectProposal?: (proposal: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
   projectModel?: ProjectAgentModel;
   canResumeSummary?: () => boolean;
   adapter: Pick<ModelAdapter, 'stream'> & Partial<Pick<ModelAdapter, 'getObservationRequestPreview'|'getModelName'>> & { getCapabilities?(): Partial<import('../../src/ai/runtime/model-capabilities.js').ModelCapabilities> };
@@ -6013,8 +6473,21 @@ export async function runDesktopToolLoop(ctx: ToolLoopContext): Promise<Awaited<
     if (ctx.observationOwner && ctx.observationOwner !== binding.owner) throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_READY');
     ctx = { ...ctx, observationOwner: binding.owner };
   }
-  return withObservationExecutionOwner(ctx.observationOwner, () =>
-    withObservationMetrics(ctx.metricsSurface ?? 'desktop', () => runDesktopToolLoopOwned(ctx)));
+  const local = !ctx.modelPhysicalScope;
+  const modelPhysicalScope = ctx.modelPhysicalScope ?? createDesktopModelPhysicalScope();
+  ctx = { ...ctx, modelPhysicalScope };
+  let modelBodyFailure: { error: unknown } | undefined;
+  let modelResult: Awaited<ReturnType<typeof runDesktopToolLoopBody>> | undefined;
+  try { modelResult = await withObservationExecutionOwner(ctx.observationOwner, () =>
+    withObservationMetrics(ctx.metricsSurface ?? 'desktop', () => runDesktopToolLoopOwned(ctx))); }
+  catch (error) { modelBodyFailure = { error }; }
+  if (local) try { await closeDesktopModelPhysicalScope(modelPhysicalScope, ctx.signal.reason); }
+  catch (physicalError) {
+    if (modelBodyFailure && modelBodyFailure.error !== physicalError) throw new AggregateError([modelBodyFailure.error, physicalError], 'desktop_local_business_and_model_cleanup_failed', { cause: modelBodyFailure.error });
+    throw physicalError;
+  }
+  if (modelBodyFailure) throw modelBodyFailure.error;
+  return modelResult!;
 }
 
 function observationRequestPreparer(ctx: ToolLoopContext): DesktopTaskRequestPreparer | undefined {
@@ -6195,14 +6668,17 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
 
     const assistantBlocks: MessageBlock[] = [];
 
+    await assertNativeRegistryCheckpointCurrent(ctx.registry);
     const apiMessages = await prepareDesktopLoopRequest(ctx, streamOptions, iteration > 1, lastRequestInputTokens);
     lastRequestInputTokens = 0;
     let providerInvocationId = `inv_${randomUUID()}`;
     let connectionRecovering = false;
+    const modelPhysicalRun = admitDesktopModelPhysicalRead(ctx.modelPhysicalScope!);
+    try {
     for await (const chunk of (ctx.projectModel ? ctx.projectModel.stream : streamDesktopTaskRecovery)({
       adapter: ctx.adapter,
       prepareRequest: observationRequestPreparer(ctx),
-      beforeRequest: ctx.roomExecution?.authorize,
+      beforeRequest: async()=>{await assertNativeRegistryCheckpointCurrent(ctx.registry);await ctx.roomExecution?.authorize();},
       messages: apiMessages,
       tools: ctx.allToolDefs,
       systemPrompt: ctx.systemPrompt,
@@ -6218,7 +6694,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         await ctx.emitRuntimeEvent({type:'execution_health',sessionId:ctx.sessionId,turnId:ctx.turnId,state:'recovering'});
       },
       onInvocation: id => { providerInvocationId = id; },
-    })) {
+    }, modelPhysicalRun)) {
       if (chunk.type === 'usage') {
         try {
           const inputTkns = chunk.usage?.inputTokens ?? 0;
@@ -6268,6 +6744,7 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         }
       }
     }
+    } finally { modelPhysicalRun.finish(); }
     throwIfAborted(ctx.signal);
     ctx.messages.push({ role: 'assistant', content: assistantBlocks });
     const toolCalls = assistantBlocks.filter((b): b is ToolCall => b.type === 'tool_use');
@@ -6424,11 +6901,25 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
         scoped: Boolean(ctx.mailbox),
       }); } catch (error) { toolImages.finish(false); throw error; }
       let { ok, result } = execution;
+      if (ok && isToolName(toolCall.name, 'create_project') && ctx.finalizeProjectProposal) {
+        let proposal: Record<string, unknown> | undefined;
+        try {
+          const parsed = JSON.parse(result);
+          if (isRecord(parsed?.proposal) && parsed.proposal.kind === 'project_proposal') proposal = parsed.proposal;
+        } catch { /* A failed/non-JSON tool result cannot authorize creation. */ }
+        if (proposal) {
+          ctx.signal.throwIfAborted();
+          await ctx.beforeManagedTurnSeal?.(result);
+          ctx.signal.throwIfAborted();
+          const finalized = await ctx.finalizeProjectProposal(proposal);
+          if (finalized) { result = JSON.stringify(finalized); ok = finalized.ok === true; }
+        }
+      }
       const invocationImages = toolImages.finish(ok);
       ctx.signal.throwIfAborted();
       if (observationProjectionFailure) throw observationProjectionFailure;
       if (ok) {
-        await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: result.slice(0, 10000), toolUseId: toolCall.id });
+        await ctx.emitRuntimeEvent({ type: 'post_tool_use', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolResponse: formatTaskToolResultResponse(toolCall.name, result), toolUseId: toolCall.id });
       } else {
         await ctx.emitRuntimeEvent({ type: 'post_tool_use_failure', sessionId: ctx.sessionId, turnId: ctx.turnId, toolName: toolCall.name, toolInput: runtimeToolInput, toolUseId: toolCall.id, error: result.slice(0, 10000) });
       }
@@ -6601,9 +7092,10 @@ async function runDesktopToolLoopBody(ctx: ToolLoopContext): Promise<{
       content: [{ type: 'text', text: DESKTOP_MODEL_TOOL_LOOP_FINALIZATION_PROMPT }],
     });
     const finalized = await streamDesktopToolLoopFinalization({
+      modelPhysicalScope: ctx.modelPhysicalScope,
       projectModel: ctx.projectModel,
       prepareRequest: observationRequestPreparer(ctx),
-      beforeRequest: ctx.roomExecution?.authorize,
+      beforeRequest: async()=>{await assertNativeRegistryCheckpointCurrent(ctx.registry);await ctx.roomExecution?.authorize();},
       deadline: ctx.taskDeadline,
       adapter: ctx.adapter,
       apiMessages: await prepareDesktopLoopRequest(ctx, streamOptions, true, lastRequestInputTokens),
@@ -6763,7 +7255,9 @@ interface KSwarmInitialPlanBootstrapInput {
 type KSwarmProjectStartPolicy = 'plan_only' | 'auto_activate_after_plan' | 'activate_and_dispatch_after_plan';
 
 interface KSwarmCreateProjectToolOptions {
+  createRoom?: (input: Record<string,unknown>, context:{taskId:string;signal?:AbortSignal})=>Promise<Record<string,unknown>>;
   enqueuePlanBootstrap?: (input: KSwarmInitialPlanBootstrapInput) => { ok: true; status: 'queued' } | { ok: false; error: string };
+  finalizeProjectProposal?: (proposal: Record<string, unknown>, context: { taskId: string; signal: AbortSignal }) => Promise<Record<string, unknown> | undefined>;
 }
 
 export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, options: KSwarmCreateProjectToolOptions = {}): Tool {
@@ -6771,7 +7265,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
     permission: 'safe',
     definition: {
       name: 'create_project',
-      description: '生成一份多智能体协作项目提案（ProjectProposal）。此工具只能产出提案：严禁直接创建正式项目、严禁修改任何项目状态；正式项目必须由用户在桌面端确认后通过协作空间（Room-first）路径创建。当用户表达想要多智能体协作/工作流时调用此工具生成提案；单人可完成的任务（写报告、写调研、生成文档、分析材料等）严禁调用，直接执行。',
+      description: '根据用户明确的 Xiaok 项目创建要求生成项目定义；工具只能提供定义，工具自身严禁直接创建正式项目。正式用户会话由主进程验证授权后建立真实 Xiaok 项目，默认规划完成后自动激活并派发，不要求用户创建或操作协作空间，无需再次确认或手工点启动。严禁未经用户明确创建授权建立持久项目，严禁伪造身份、绕过主进程或把 proposal 当作已创建项目；只有结果包含真实 projectId 才能报告创建成功，启动状态以 preparation/planningStart 为准。普通写作、分析及会话内 SubAgent 协作不授予创建持久项目的权限。用户明确只要规划/不执行时保留计划范围。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -6806,11 +7300,9 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
       },
     },
     async execute(input) {
-      // Proposal-only contract (design §9.3, §10.1, §16.3): this tool must
-      // never perform KSwarm mutations (no POST /projects, no agent
-      // auto-creation). It assembles the exact create request the user will
-      // confirm, and returns it as a ProjectProposal. Formal creation runs
-      // through the trusted user Room-first path after confirmation.
+      // The tool remains read-only. The host may finalize this definition
+      // through main-owned Room-first creation when its real task context
+      // holds an explicit user authorization; tool input cannot mint one.
       // Identity fields (requestSource/actor) are transport facts and are
       // dropped from the proposal payload.
       const { name, goal, requirements, memberNames = [], memberCount = 0, workFolder, executionMode, startPolicy, _xiaokRequestScope } = input as {
@@ -6888,7 +7380,7 @@ export function createKSwarmCreateProjectTool(kswarmService: KSwarmService, opti
           ...(resolvedWorkFolder ? { workFolder: resolvedWorkFolder } : {}),
           ...(clientRequestKey ? { clientRequestKey } : {}),
           createdAt: new Date().toISOString(),
-          note: '提案未执行：正式项目需要用户在桌面端确认后，经协作空间（Room-first）路径创建。',
+          note: '当前仅返回未执行的项目定义，尚无正式项目。只有可信用户会话具有明确创建授权时，主进程才会建立真实 Xiaok 项目；严禁声称已创建或指向不存在的提案确认界面。',
         };
         return JSON.stringify({ ok: true, proposal });
       } catch (err) {
@@ -6986,7 +7478,10 @@ function normalizeCreateProjectKeyPart(value: unknown): string {
 
 function buildCreateProjectPlanningGuidanceForTool(input: { goal: string; requirements?: string }): string {
   const text = `${input.goal || ''}\n${input.requirements || ''}`;
-  const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(text);
+  const formatRequests = text
+    .replace(/markdown\s*(?:不算(?:交付)?(?:完成)?|不是(?:最终)?交付物|不是(?:最终)?报告)/gi, '')
+    .replace(/(?:不要|不接受|不得|严禁|不能(?:只)?(?:用)?|不允许|not\s+|no\s+)\s*(?:普通)?\s*markdown/gi, '');
+  const explicitMarkdown = /(\.md\b|\.markdown\b|\bmarkdown\b)/i.test(formatRequests);
   const explicitPptx = /(\.pptx\b|\bpptx\b|\bpowerpoint\b|\bppt\s*(文件|file|deck)?\b)/i.test(text);
   const explicitPdf = /(\.pdf\b|\bpdf\b|PDF文件|pdf文件)/i.test(text);
   const slide = /(幻灯片|演示文稿|slide deck|slides|presentation)/i.test(text);
@@ -7501,6 +7996,20 @@ export function createKSwarmRepairProjectTaskTool(_kswarmService: KSwarmService)
     },
   };
 }
+interface ObservationInitializationState {
+  service?: DesktopMultiAgentService;
+  incarnation?: object;
+  firstRootEpoch?: number;
+  phase: 'initializing' | 'ready' | 'failed';
+  ownerAttempt?: object;
+  failure?: { error: unknown };
+}
+const observationInitializationStates = new WeakMap<DesktopObservationTaskActivation, ObservationInitializationState>();
+function noteObservationInitializationReady(activation: DesktopObservationTaskActivation): void {
+  const state = observationInitializationStates.get(activation);
+  if (state?.phase === 'initializing') state.phase = 'ready';
+}
+
 export function createDesktopModelRunnerWithRegistry(
   registry: ToolRegistry,
   tools: Tool[],
@@ -7516,6 +8025,7 @@ export function createDesktopModelRunnerWithRegistry(
     roomDiscussion?:boolean;
     publishedInstructions?:string;
     roomExecution?:{context:RoomWorkspaceContextSources;getModelBinding?:()=>Promise<ReturnType<typeof resolveRuntimeModelBinding>>;authorize:()=>Promise<void>;takePendingInput?:()=>string|undefined};
+    nativeReadonlyOnly?: boolean;
     restrictedArtifactGeneration?: boolean;
     /** Stable provider-runtime identity captured before services exist (§4). */
     pluginProviderRuntime?: GatewayRuntimeFacade;
@@ -7523,13 +8033,14 @@ export function createDesktopModelRunnerWithRegistry(
     officeToMarkdown?: (input: { absolutePath: string; maxOutputChars: number; signal?: AbortSignal }) => Promise<OfficeTextExtractionResult>;
   } = {},
 ): (input: TaskRunnerInput, rootContext?: DesktopAgentExecutionContext) => Promise<void> {
+  const nativeReadonlyOnly = registry.isNativeReadonlyOnly;
   const cwd = runnerOptions.cwd ?? runnerOptions.multiAgent?.cwd ?? process.cwd();
   const pluginSkillRoots = getPluginSkillRoots();
   let skillCatalog = createSkillCatalog(undefined, cwd, { extraRoots: pluginSkillRoots });
   let loadedSkillCatalogVersion = -1;
   let skillToolAdded = false;
 
-  if (!runnerOptions.restrictedArtifactGeneration) {
+  if (!nativeReadonlyOnly && !runnerOptions.restrictedArtifactGeneration) {
     // Register kswarm create_project tool (allows AI to create multi-agent projects from chat)
     registerKSwarmTools(registry, kswarmService, createProjectToolOptions);
     registry.registerTool(createReportArtifactTool());
@@ -7569,9 +8080,9 @@ export function createDesktopModelRunnerWithRegistry(
     });
   }
 
-  return async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, persistObservationSnapshot, executionPersistence, registerCompoundFinalPublication, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }, rootContext) => {
+  const run = async ({ taskId, sessionId, prompt, materials, signal: hostSignal, deadlineMs, history: hostHistory, persistObservationSnapshot, executionPersistence, registerCompoundFinalPublication, emitRuntimeEvent, emitUsage, maxToolLoopIterations, executionScope, permissionMode }: TaskRunnerInput, rootContext: DesktopAgentExecutionContext | undefined, observationActivation: DesktopObservationTaskActivation | undefined) => {
     const pendingRoomImages:MessageBlock[]=[];
-    if(runnerOptions.roomExecution)registry.registerTool({permission:'safe',definition:{name:'read_workspace_material',description:'Read a document or image downloaded into the current collaboration workspace. Use file_path relative to the workspace. Images are supplied to the model visually; documents return extracted text. Paths outside the workspace are forbidden.',inputSchema:{type:'object',properties:{file_path:{type:'string'},maxChars:{type:'number'}},required:['file_path']}},async execute(input,context){
+    if(!nativeReadonlyOnly && runnerOptions.roomExecution)registry.registerTool({permission:'safe',definition:{name:'read_workspace_material',description:'Read a document or image downloaded into the current collaboration workspace. Use file_path relative to the workspace. Images are supplied to the model visually; documents return extracted text. Paths outside the workspace are forbidden.',inputSchema:{type:'object',properties:{file_path:{type:'string'},maxChars:{type:'number'}},required:['file_path']}},async execute(input,context){
       const record=await materialRegistry.importMaterial({taskId,sourcePath:String(input.file_path),role:'customer_material',roleSource:'auto'});
       const result=await executeReadMaterialForDesktop({materialId:record.materialId,maxChars:input.maxChars},{taskId,materials:[record],materialRegistry,signal:context?.signal,officeToMarkdown:runnerOptions.officeToMarkdown,pdfToText:async bytes=>(await import('./pdf-text.js')).extractPdfText(bytes)});
       if(result.ok)pendingRoomImages.push(...buildImageBlocksForMaterials([record]));
@@ -7591,7 +8102,7 @@ export function createDesktopModelRunnerWithRegistry(
       : undefined;
     let skillNamesDetected: string[] = [];
     let skillTriggerType: 'slash_command' | 'tool_call' | 'auto' = 'auto';
-    if (!runnerOptions.roomDiscussion && !runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
+    if (!nativeReadonlyOnly && !runnerOptions.roomDiscussion && !runnerOptions.restrictedArtifactGeneration && loadedSkillCatalogVersion !== getSkillCatalogVersion()) {
       const targetVersion = getSkillCatalogVersion();
       try {
         const skills = await skillCatalog.reload();
@@ -7606,7 +8117,7 @@ export function createDesktopModelRunnerWithRegistry(
         loadedSkillCatalogVersion = targetVersion;
       }
     }
-    const currentSkills = runnerOptions.roomDiscussion || runnerOptions.restrictedArtifactGeneration ? [] : skillCatalog.list();
+    const currentSkills = nativeReadonlyOnly || runnerOptions.roomDiscussion || runnerOptions.restrictedArtifactGeneration ? [] : skillCatalog.list();
     const skillsContext = currentSkills.length > 0 ? formatSkillsContext(currentSkills) : '';
     const slashMatch = parseSlashCommand(prompt);
     let effectivePrompt = prompt;
@@ -7632,7 +8143,7 @@ export function createDesktopModelRunnerWithRegistry(
     }
 
     // Register skill_bundle_refs tool for skill executions
-    if (!runnerOptions.restrictedArtifactGeneration) {
+    if (!nativeReadonlyOnly && !runnerOptions.restrictedArtifactGeneration) {
       const bundleTool = createSkillBundleRefsTool(skillCatalog);
       registry.registerTool(bundleTool);
     }
@@ -7641,7 +8152,7 @@ export function createDesktopModelRunnerWithRegistry(
       ? buildMaterialManifestForPrompt(materials)
       : '';
 
-    const observationActivation = runnerOptions.observationTasks?.get(taskId) ?? (rootContext ? [...(runnerOptions.observationTasks?.values()??[])].find(entry=>entry.group?.groupId===rootContext.groupId) : undefined);
+
     if (observationActivation && (runnerOptions.roomExecution || executionScope || !persistObservationSnapshot || (!rootContext&&hostHistory.length) || (observationActivation.consumed&&!observationActivation.group) || observationActivation.revoked)) throw new Error('SOL_PI_DESKTOP_OBSERVATION_NOT_READY');
     if (observationActivation) observationActivation.consumed = true;
     const baseConfig = await loadConfig();
@@ -7700,6 +8211,7 @@ export function createDesktopModelRunnerWithRegistry(
         credentialSecrets: Object.values(config.providers ?? {}).flatMap(provider => typeof provider.apiKey === 'string' && provider.apiKey ? [provider.apiKey] : []),
         permissionMode: permissionMode ?? 'default', onPrompt: observationActivation.onPrompt, authorizeValidationMaterials:observationActivation.authorizeValidationMaterials, persist: persistObservationSnapshot!, executionPersistence });
       observationActivation.live = observed;
+      noteObservationInitializationReady(observationActivation);
     }
     if(observationActivation&&rootContext&&!observedGroup){
       if(!runnerOptions.observationGroupHost||projectModel)throw Error('SOL_PI_DESKTOP_GROUP_RUNTIME_REQUIRED');
@@ -7707,6 +8219,7 @@ export function createDesktopModelRunnerWithRegistry(
         taskId,cwd,policy:observationActivation.policy,sourceRegistry:registry,profileRoot:observationActivation.profileRoot,environmentRoot:observationActivation.environmentRoot,
         credentialSecrets:Object.values(config.providers??{}).flatMap(provider=>typeof provider.apiKey==='string'&&provider.apiKey?[provider.apiKey]:[]),permissionMode:permissionMode??'default',onPrompt:observationActivation.onPrompt,authorizeValidationMaterials:observationActivation.authorizeValidationMaterials});
       observationActivation.group=observedGroup;observationActivation.live=observedGroup;
+      noteObservationInitializationReady(observationActivation);
     }
     if(!observedGroup)await bindRootScope();
     const invocationRegistry = observed?.registry ?? scopedRegistry?.registry ?? registry;
@@ -7735,10 +8248,14 @@ export function createDesktopModelRunnerWithRegistry(
     messages = buildDesktopProviderMessages(adapter, observedGroup?[]:hostHistory, userContent);
     } catch(error) {try{await observed?.dispose();}finally{if(observationActivation&&!observedGroup)observationActivation.live=undefined;}throw error;}
 
+    const modelPhysicalScope = rootContext
+      ? runnerOptions.multiAgent!.service.captureRootModelPhysicalScope(rootContext) : createDesktopModelPhysicalScope();
     const pendingUsageWrites: Promise<void>[] = [];
-    let loopResult: Awaited<ReturnType<typeof runDesktopToolLoop>>;
+    let modelBodyFailure: { error: unknown } | undefined;
+    let loopResult!: Awaited<ReturnType<typeof runDesktopToolLoop>>;
     try {
       const runLoop=(loopBinding=observed?.binding,loopRegistry=invocationRegistry,loopMessages=messages,loopSignal=signal,beforeManagedTurnSeal?:()=>Promise<void>)=>runDesktopToolLoop({
+      modelPhysicalScope,
       beforeManagedTurnSeal,
       observationBinding: loopBinding,
       adapter,
@@ -7747,6 +8264,9 @@ export function createDesktopModelRunnerWithRegistry(
       messages:loopMessages,
       allToolDefs:observedGroup?loopRegistry.getToolDefinitions():allToolDefs,
       registry: loopRegistry,
+      finalizeProjectProposal: createProjectToolOptions.finalizeProjectProposal
+        ? proposal => createProjectToolOptions.finalizeProjectProposal!(proposal, { taskId, signal })
+        : undefined,
       invocationOptions,
       signal:loopSignal,
       taskDeadline: resolveDesktopRunDeadline(rootContext?.effectiveDeadline, deadlineMs),
@@ -7805,13 +8325,20 @@ export function createDesktopModelRunnerWithRegistry(
         return runLoop(turn.binding,turn.registry,nativeMessages,turn.signal,async()=>{observedGroup!.session.replaceMessages(nativeMessages);await turn.publishHistory();});
       },observedExtraTools):await runLoop();
     } catch (error) {
+      modelBodyFailure = { error };
       await Promise.allSettled(pendingUsageWrites);
-      throw error;
-    } finally {
+    }
+    try { await closeDesktopModelPhysicalScope(modelPhysicalScope, signal.reason); }
+    catch (physicalError) {
+      if (modelBodyFailure && modelBodyFailure.error !== physicalError) throw new AggregateError([modelBodyFailure.error, physicalError], 'desktop_model_business_and_physical_cleanup_failed', { cause: modelBodyFailure.error });
+      throw physicalError;
+    }
+    {
       scopedRegistry?.dispose();
       try { if(observed&&observationActivation)observationActivation.diagnostics=observed.diagnostics(); }
       finally { try { await observed?.dispose(); } finally { if(observationActivation&&!observedGroup)observationActivation.live=undefined; } }
     }
+    if (modelBodyFailure) throw modelBodyFailure.error;
     await Promise.all(pendingUsageWrites);
 
     const { reply, totalToolCalls, totalInputTokens, totalOutputTokens, referenceReads } = loopResult;
@@ -7846,6 +8373,45 @@ export function createDesktopModelRunnerWithRegistry(
       });
     }
   };
+  return async (input, rootContext) => {
+    const service = runnerOptions.multiAgent?.service;
+    const scope = rootContext && runnerOptions.observationTasks?.size
+      ? service?.captureObservationInitializationScope(rootContext) : undefined;
+    const activation = runnerOptions.observationTasks?.get(input.taskId)
+      ?? (rootContext ? [...(runnerOptions.observationTasks?.values() ?? [])].reverse().filter(entry => {
+        const binding = observationInitializationStates.get(entry);
+        if (binding) return Boolean(scope && binding.service === service && binding.incarnation === scope.incarnation);
+        return entry.group?.groupId === rootContext.groupId;
+      }).sort((a, b) => (observationInitializationStates.get(b)?.firstRootEpoch ?? -1)
+        - (observationInitializationStates.get(a)?.firstRootEpoch ?? -1))[0] : undefined);
+    if (!activation) return run(input, rootContext, undefined);
+    let state = observationInitializationStates.get(activation);
+    if (state && (state.service !== service || state.incarnation !== scope?.incarnation
+      || (scope && scope.rootEpoch < state.firstRootEpoch!))) throw Error('SOL_PI_DESKTOP_OBSERVATION_NOT_READY');
+    if (state?.failure) throw state.failure.error;
+    if (state?.phase === 'initializing') throw Error('SOL_PI_DESKTOP_OBSERVATION_NOT_READY');
+    if (!state) {
+      state = { service, incarnation: scope?.incarnation, firstRootEpoch: scope?.rootEpoch,
+        phase: activation.group || activation.live ? 'ready' : 'initializing' };
+      observationInitializationStates.set(activation, state);
+    }
+    const ownerAttempt = state.phase === 'initializing' ? Object.freeze(Object.create(null)) : undefined;
+    if (ownerAttempt) state.ownerAttempt = ownerAttempt;
+    try { await run(input, rootContext, activation); }
+    catch (error) {
+      if (ownerAttempt && state.ownerAttempt === ownerAttempt && state.phase === 'initializing') {
+        state.failure = { error }; state.phase = 'failed';
+        if (scope && service) {
+          try { service.retainFailedObservationInitializationScope(scope); }
+          catch (retentionError) {
+            state.failure = { error: new AggregateError([error, retentionError], 'SOL_PI_DESKTOP_OBSERVATION_SCOPE_FAILED') };
+            throw state.failure.error;
+          }
+        }
+      }
+      throw error;
+    } finally { if (ownerAttempt && state.ownerAttempt === ownerAttempt) state.ownerAttempt = undefined; }
+  };
 }
 
 function registerKSwarmTools(
@@ -7853,6 +8419,7 @@ function registerKSwarmTools(
   kswarmService: KSwarmService,
   createProjectToolOptions: KSwarmCreateProjectToolOptions = {},
 ): void {
+  if (createProjectToolOptions.createRoom) registry.registerTool(createConversationRoomTool(createProjectToolOptions.createRoom));
   registry.registerTool(createKSwarmCreateProjectTool(kswarmService, createProjectToolOptions));
   registry.registerTool(createKSwarmInspectProjectTool(kswarmService));
   registry.registerTool(createKSwarmContinueProjectTool(kswarmService));

@@ -187,6 +187,7 @@ it.skipIf(process.platform !== 'darwin').each(['sigterm', 'double-interrupt'] as
     await waitFor(() => expect(existsSync(f.marker), output + f.diagnostic()).toBe(true), { timeoutMs: 20000 });
     if (mode === 'sigterm') process.kill(child.pid, 'SIGTERM'); else child.write('\x03\x03');
     expect(await exit, output).toBe(mode === 'sigterm' ? 143 : 0);
+    expect(output.match(/已退出。/g)?.length ?? 0).toBe(mode === 'sigterm' ? 0 : 1);
     expect(existsSync(f.marker + '.settled'), output).toBe(true);
     expect(f.session()?.intentDelegation?.ownership.state).toBe('released');
     expect(existsSync(join(f.config, 'goals')) ? readdirSync(join(f.config, 'goals')).filter(name => name.endsWith('.json')) : []).toEqual([]);

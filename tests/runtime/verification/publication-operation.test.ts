@@ -84,7 +84,11 @@ it.each(['publish','expired-approval','wrong-peer','repeat','lost-commit','reope
      await post('Profiler.enable');await post('Profiler.startPreciseCoverage',{callCount:true,detailed:true});
      await operations.readOwnerPayload({...request,offset:262144},f.peer,cancellation.signal);
      const coverage=await post('Profiler.takePreciseCoverage');
-     const reads=coverage.result.filter((script:any)=>script.url.replace(/\\/g,'/').endsWith('/src/runtime/verification/verified-publication-payload.ts')).flatMap((script:any)=>script.functions.filter((fn:any)=>fn.functionName==='readRow')).reduce((count:number,fn:any)=>count+fn.ranges[0].count,0);
+     const scripts=coverage.result.filter((script:any)=>/\/src\/runtime\/verification\/verified-publication-payload\.(?:ts|js)$/.test(script.url.replace(/\\/g,'/')));
+     expect(scripts).toHaveLength(1);
+     const functions=scripts[0].functions.filter((fn:any)=>fn.functionName==='readRow');
+     expect(functions).toHaveLength(1);expect(functions[0].ranges.length).toBeGreaterThan(0);
+     const reads=functions[0].ranges[0].count;
      expect(reads).toBe(1);
     }finally{await post('Profiler.stopPreciseCoverage');inspector.disconnect();}
     return;

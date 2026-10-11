@@ -1,6 +1,9 @@
+import {assertNativeRegistryCheckpointCurrent} from '../../runtime/task-host/workflow-restriction-checkpoint.js';
+import {createNativeReadonlyExecutionContext} from './native-readonly-context.js';
+import {captureToolDescriptionMetadata,BUILTIN_READ_DESCRIPTION,type ToolDescriptionMetadata,type ToolDiscovery} from '../../shared/tool-description-metadata.js';
 import { isIntentProducerTool } from './intent-delegation.js';
 import { isObservationDelegationTool } from '../../runtime/sol-pi/delegation-tool-brand.js';
-import {registerBuiltinToolIdentity,inheritBuiltinToolIdentity} from './native-tool-identity.js';
+import {registerBuiltinToolIdentity,inheritBuiltinToolIdentity,getBuiltinToolIdentity,isNativeReadonlyExecutionEligible} from './native-tool-identity.js';
 import {getCompoundSandboxPreparation,inheritCompoundSandboxPreparation} from '../../platform/sandbox/tool-wrappers.js';
 import { IntersectedPermissionManager } from '../permissions/intersection.js';
 import { measureToolResult, observationMetricsEnabled } from '../../runtime/trace/observation-metrics.js';
@@ -34,6 +37,8 @@ import {
   buildCapabilityToolDefinition,
   buildToolSearchEntry,
   dedupeToolSearchEntries,
+  dedupeToolSearchCandidates,
+  selectToolSearchCandidates,
   getCanonicalToolId,
   selectToolEntries,
   type ToolSearchEntry,
@@ -49,9 +54,11 @@ export function buildToolList(
   skillTool?: Tool,
   workspace?: WorkspaceToolOptions,
   extraTools: Tool[] = [],
+  metadataSink?:Map<Tool,ToolDescriptionMetadata>,
 ): Tool[] {
+  const readTool=createReadTool(workspace);metadataSink?.set(readTool,BUILTIN_READ_DESCRIPTION);
   const tools: Tool[] = [
-    createReadTool(workspace),
+    readTool,
     createWriteTool(workspace),
     createEditTool(workspace),
     bashTool,
@@ -91,6 +98,8 @@ export interface CompoundRegistryExecutionPort {
 }
 
 export interface RegistryOptions {
+  /** Host-only review role; native object identity is the sole admission authority. */
+  nativeReadonlyOnly?: boolean;
   compoundExecution?: CompoundRegistryExecutionPort;
   toolIdleTimeoutMs?: number;
   capabilityRegistry?: CapabilityRegistry;
@@ -131,11 +140,28 @@ export type ToolPreparationResult = {readonly kind:'prepared';readonly invocatio
 const observationPermissionAuthorities = new WeakMap<object, object>();
 
 export class ToolRegistry {
+  #nativeReadonlyOnly: boolean;
+  get isNativeReadonlyOnly(): boolean { return this.#nativeReadonlyOnly; }
+
+  private admitsNativeReadonly(tool: Tool | undefined): boolean {
+    if (!this.#nativeReadonlyOnly) return Boolean(tool);
+    if (!tool) return false;
+    try { return getBuiltinToolIdentity(tool) === 'readonly' && isNativeReadonlyExecutionEligible(tool); } catch { return false; }
+  }
+
+  private assertNativeReadonlyTree(tool: Tool, seen = new Set<Tool>()): void {
+    if (seen.has(tool) || !this.admitsNativeReadonly(tool)) throw Error('native_readonly_tool_required');
+    seen.add(tool);
+    for (const companion of tool.companionTools ?? []) this.assertNativeReadonlyTree(companion, seen);
+    seen.delete(tool);
+  }
   private executionBoundaryUsed = false;
   private compoundInstallationPending = false;
   private readonly preparedInvocations = new WeakMap<PreparedToolInvocation, { execute(projectResult?: (nativeResult:string)=>Promise<string>): Promise<string>; context?: ToolExecutionContext; name: string }>();
   private tools = new Map<string, Tool>();
   private deferredTools = new Map<string, ToolDefinition>();
+  private descriptions=new Map<string,Readonly<ToolDescriptionMetadata>|undefined>();
+  private deferredDescriptions=new Map<string,Readonly<ToolDescriptionMetadata>|undefined>();
   private canonicalToolNames = new Map<string, string>();
   private permissionManager: PermissionManager;
   private options: Required<Pick<RegistryOptions, 'dryRun' | 'onPrompt'>> & RegistryOptions;
@@ -151,7 +177,16 @@ export class ToolRegistry {
     this.allowedToolsFilter = names ? new Set(names.map((name) => getCanonicalToolId(name))) : null;
   }
 
-  constructor(options: RegistryOptions, tools?: Tool[]) {
+  constructor(options: RegistryOptions, tools?: Tool[],metadata?:ReadonlyMap<Tool,ToolDescriptionMetadata>) {
+    this.#nativeReadonlyOnly = options.nativeReadonlyOnly === true;
+    Object.defineProperty(this, 'isNativeReadonlyOnly', { get: () => this.#nativeReadonlyOnly, configurable: false });
+    if (this.#nativeReadonlyOnly) {
+      if (options.compoundExecution || options.onToolObserved || options.protectedOutputGuard || options.onPrompt) throw Error('native_readonly_external_callback_denied');
+      if (options.hooksRunner && !isEmptyConfiguredHooksRunner(options.hooksRunner)) throw Error('native_readonly_external_callback_denied');
+      options = { ...options, hooksRunner: undefined };
+      // Validate the complete constructor population before publishing any binding.
+      if (tools) for (const tool of tools) this.assertNativeReadonlyTree(tool);
+    }
     if (options.compoundExecution && options.hooksRunner) {
       if (!isEmptyConfiguredHooksRunner(options.hooksRunner)) throw Error('compound_unsupervised_hooks');
       // Do not execute even mutable no-op methods: the factory proved absence of hooks.
@@ -171,14 +206,17 @@ export class ToolRegistry {
       onPrompt: options.onPrompt ?? (async () => false),
       permissionManager: this.permissionManager,
     };
-    for (const tool of tools ?? buildToolList()) {
-      this.registerTool(tool);
+    if (this.#nativeReadonlyOnly) Object.defineProperty(this, 'options', { value: Object.freeze(this.options), writable: false, configurable: false });
+    if(!tools){const sink=new Map<Tool,ToolDescriptionMetadata>();tools=buildToolList(undefined,undefined,[],sink);metadata=sink;if(this.#nativeReadonlyOnly)tools=tools.filter(tool=>this.admitsNativeReadonly(tool));}
+    for (const tool of tools) {
+      this.registerTool(tool,metadata?.get(tool));
     }
-    this.registerTool(createToolSearchTool(this));
+    if (!this.#nativeReadonlyOnly) this.registerTool(createToolSearchTool(this));
   }
 
   /** Main/CLI bootstrap only; never a model tool. No owner swap after preparation. */
   installCompoundExecutionPort<T extends CompoundRegistryExecutionPort>(factory: (tools: readonly Tool[]) => T): T {
+    if (this.#nativeReadonlyOnly) throw Error('native_readonly_compound_port_denied');
     if (this.disposed || this.executionBoundaryUsed || this.options.compoundExecution) throw Error('compound_registry_not_fresh');
     if (this.options.hooksRunner && !isEmptyConfiguredHooksRunner(this.options.hooksRunner)) throw Error('compound_unsupervised_hooks');
     const port = factory(Object.freeze([...this.tools.values()]));
@@ -225,6 +263,7 @@ export class ToolRegistry {
 
   private createObservationFork(extraTools: Tool[], nativeNames: string[], task: { mode: import('../permissions/manager.js').PermissionMode; onPrompt: RegistryOptions['onPrompt'] }|undefined, pendingCompound: boolean): ToolRegistry {
     if (this.disposed) throw new Error('tool registry is disposed');
+    if (this.#nativeReadonlyOnly && (pendingCompound || task?.onPrompt)) throw Error('native_readonly_external_callback_denied');
     const audited = new Set(['read', 'bash', 'edit', 'write', 'glob', 'grep', 'ls']);
     if (nativeNames.some(name => !audited.has(name)) || extraTools.some(tool => tool.definition.name !== 'observation_read' && !isObservationDelegationTool(tool) && !(pendingCompound && isIntentProducerTool(tool))))
       throw new Error('observation registry tool not admitted');
@@ -239,10 +278,11 @@ export class ToolRegistry {
       return { registeredName, tool, execute: tool.execute, permission: tool.permission,
         generation: this.toolGenerations.get(registeredName), schema: cloneToolInput(tool.definition.inputSchema) };
     });
-    const fork = new ToolRegistry({ ...this.options, ...(pendingCompound ? {compoundExecution:undefined} : {}), capabilityRegistry: undefined, capabilitySearch: false,
+    const forkDescriptions=new Map<Tool,ToolDescriptionMetadata>();
+    const fork = new ToolRegistry({ ...this.options, ...(this.#nativeReadonlyOnly ? { onPrompt: undefined, onToolObserved: undefined, protectedOutputGuard: undefined } : {}), ...(pendingCompound ? {compoundExecution:undefined} : {}), capabilityRegistry: undefined, capabilitySearch: false,
       ...(task ? { onPrompt: task.onPrompt } : {}),
       permissionManager: task ? new IntersectedPermissionManager(this.permissionManager, task.mode) : this.permissionManager }, [...originals.map(entry => {const cloned={ ...entry.tool,
-        companionTools: undefined, definition: freezeObservationDefinition({ ...entry.tool.definition, inputSchema: cloneToolInput(entry.schema) }) };inheritCompoundSandboxPreparation(entry.tool,cloned);inheritBuiltinToolIdentity(entry.tool,cloned);return cloned;}), ...extraTools]);
+        companionTools: undefined, definition: freezeObservationDefinition({ ...entry.tool.definition, inputSchema: cloneToolInput(entry.schema) }) };inheritCompoundSandboxPreparation(entry.tool,cloned);inheritBuiltinToolIdentity(entry.tool,cloned);const metadata=this.descriptions.get(entry.registeredName);if(metadata)forkDescriptions.set(cloned,metadata);return cloned;}), ...extraTools],forkDescriptions);
     fork.compoundInstallationPending = pendingCompound;
     fork.unregisterTool('tool_search');
     fork.setAllowedTools([...nativeNames, ...extraTools.map(tool => tool.definition.name)]);
@@ -254,13 +294,23 @@ export class ToolRegistry {
   }
 
   getToolDefinitions(): ToolDefinition[] {
-    return [...this.tools.values()].map((tool) => this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition);
+    return [...this.tools.values()].filter(tool => this.admitsNativeReadonly(tool)).map((tool) => this.options.compoundExecution?.describeTool?.(tool) ?? tool.definition);
   }
 
-  registerTool(tool: Tool): void {
+  /** Subclasses must run complete readonly admission before publishing any state. */
+  protected preflightToolRegistration(tool: Tool): void {
+    if (this.#nativeReadonlyOnly) {
+      if (this.disposed) throw new Error('tool registry is disposed');
+      this.assertNativeReadonlyTree(tool);
+    }
+  }
+  registerTool(tool: Tool,description?:ToolDescriptionMetadata): void {
+    this.preflightToolRegistration(tool);
+    const metadata=captureToolDescriptionMetadata(description);
     if (this.disposed) throw new Error('tool registry is disposed');
     this.toolGenerations.set(tool.definition.name, (this.toolGenerations.get(tool.definition.name) ?? 0) + 1);
     this.tools.set(tool.definition.name, tool);
+    this.descriptions.set(tool.definition.name,metadata);
     this.canonicalToolNames.set(getCanonicalToolId(tool.definition.name), tool.definition.name);
     this.options.capabilityRegistry?.register({
       kind: 'tool',
@@ -268,7 +318,7 @@ export class ToolRegistry {
       description: tool.definition.description,
       inputSchema: tool.definition.inputSchema,
       execute: async (input) => this.executeTool(tool.definition.name, input),
-    }, this);
+    }, this, metadata);
     for (const companion of tool.companionTools ?? []) {
       if (!this.tools.has(companion.definition.name)) {
         this.registerTool(companion);
@@ -276,16 +326,19 @@ export class ToolRegistry {
     }
   }
 
-  registerDeferredTool(definition: ToolDefinition): void {
+  registerDeferredTool(definition: ToolDefinition,description?:ToolDescriptionMetadata): void {
+    if (this.#nativeReadonlyOnly) throw Error('native_readonly_tool_required');
+    const metadata=captureToolDescriptionMetadata(description);
     if (this.disposed) throw new Error('tool registry is disposed');
     this.filterGeneration++;
     this.deferredTools.set(definition.name, definition);
+    this.deferredDescriptions.set(definition.name,metadata);
     this.options.capabilityRegistry?.register({
       kind: 'tool',
       name: definition.name,
       description: definition.description,
       inputSchema: definition.inputSchema,
-    }, this);
+    }, this, metadata);
   }
 
   dispose(): void {
@@ -294,20 +347,21 @@ export class ToolRegistry {
     this.filterGeneration++;
     this.options.capabilityRegistry?.unregisterOwner(this);
     this.tools.clear();
-    this.deferredTools.clear();
+    this.deferredTools.clear();this.descriptions.clear();this.deferredDescriptions.clear();
     this.canonicalToolNames.clear();
     this.allowedToolsFilter = null;
   }
 
   getRegisteredTool(name: string): Tool | undefined {
-    return this.tools.get(name);
+    const tool = this.tools.get(name);
+    return this.admitsNativeReadonly(tool) ? tool : undefined;
   }
 
   unregisterTool(name: string, expected?: Tool): void {
     if (expected && this.tools.get(name) !== expected) return;
     this.toolGenerations.set(name, (this.toolGenerations.get(name) ?? 0) + 1);
     this.tools.delete(name);
-    this.deferredTools.delete(name);
+    this.deferredTools.delete(name);this.descriptions.delete(name);this.deferredDescriptions.delete(name);
     this.options.capabilityRegistry?.unregister(name, this);
     const canonical = getCanonicalToolId(name);
     if (this.canonicalToolNames.get(canonical) === name) {
@@ -324,83 +378,41 @@ export class ToolRegistry {
     }
   }
 
-  searchDeferredTools(query: string): ToolDefinition[] {
-    const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
-
-    if (query.startsWith('select:')) {
-      const names = query
-        .slice('select:'.length)
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean);
-
-      return selectToolEntries(deferredEntries, names);
-    }
-
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return dedupeToolSearchEntries(deferredEntries);
-    }
-
-    return dedupeToolSearchEntries(deferredEntries.filter((entry) => {
-      const tool = entry.definition;
-      return (
-        tool.name.toLowerCase().includes(normalizedQuery) ||
-        tool.description.toLowerCase().includes(normalizedQuery)
-      );
-    }));
+  getToolDiscoveries():ToolDiscovery[]{
+    return [...this.tools.entries()].filter(([,tool])=>this.admitsNativeReadonly(tool)).map(([name,tool])=>{const coreDefinition=this.options.compoundExecution?.describeTool?.(tool)??tool.definition,metadata=this.descriptions.get(name);return Object.freeze(metadata?{coreDefinition,metadata}:{coreDefinition});});
   }
-
-  searchTools(query: string): ToolDefinition[] {
-    if (this.disposed) return [];
-    const activeTools = this.getToolDefinitions();
-    const activeEntries = activeTools.map((tool) => buildToolSearchEntry(tool));
-    const deferredEntries = [...this.deferredTools.values()].map((tool) => buildToolSearchEntry(tool));
-    const capabilityEntries = (this.options.capabilitySearch === false ? []
-      : this.options.capabilityRegistry?.search(query.startsWith('select:') ? '' : query) ?? [])
-      .map((capability) => buildToolSearchEntry(buildCapabilityToolDefinition(capability)));
-
-    if (query.startsWith('select:')) {
-      const names = query
-        .slice('select:'.length)
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean);
-      return selectToolEntries([...activeEntries, ...deferredEntries, ...capabilityEntries], names);
-    }
-
-    const normalizedQuery = query.trim().toLowerCase();
-    const matches = normalizedQuery
-      ? activeEntries.filter((entry) => {
-        const tool = entry.definition;
-        return (
-          tool.name.toLowerCase().includes(normalizedQuery) ||
-          tool.description.toLowerCase().includes(normalizedQuery)
-        );
-      })
-      : activeEntries;
-
-    const deferredMatches = normalizedQuery
-      ? deferredEntries.filter((entry) => {
-        const tool = entry.definition;
-        return (
-          tool.name.toLowerCase().includes(normalizedQuery) ||
-          tool.description.toLowerCase().includes(normalizedQuery)
-        );
-      })
-      : deferredEntries;
-
-    return dedupeToolSearchEntries([...matches, ...deferredMatches, ...capabilityEntries]);
+  /** Host-only description refresh; cannot replace an execution or its authority. */
+  updateToolDescription(tool:Tool,description?:ToolDescriptionMetadata):void{
+    const metadata=captureToolDescriptionMetadata(description);if(this.disposed||this.tools.get(tool.definition.name)!==tool)throw Error('tool_description_registration_mismatch');this.descriptions.set(tool.definition.name,metadata);
   }
+  private deferredDiscoveries():ToolDiscovery[]{return [...this.deferredTools.entries()].map(([name,coreDefinition])=>{const metadata=this.deferredDescriptions.get(name);return Object.freeze(metadata?{coreDefinition,metadata}:{coreDefinition});});}
+  private selectDiscoveries(discoveries:ToolDiscovery[],query:string):ToolDiscovery[]{
+    const entries=discoveries.map(discovery=>({...buildToolSearchEntry(discovery.coreDefinition),discovery}));
+    if(query.startsWith('select:'))return selectToolSearchCandidates(entries,query.slice(7).split(',').map(name=>name.trim()).filter(Boolean)).map(entry=>entry.discovery);
+    const normalized=query.trim().toLowerCase();return dedupeToolSearchCandidates(entries.filter(({definition})=>!normalized||definition.name.toLowerCase().includes(normalized)||definition.description.toLowerCase().includes(normalized))).map(entry=>entry.discovery);
+  }
+  searchDeferredToolDiscoveries(query:string):ToolDiscovery[]{return this.selectDiscoveries(this.deferredDiscoveries(),query);}
+  searchDeferredTools(query:string):ToolDefinition[]{return this.searchDeferredToolDiscoveries(query).map(entry=>entry.coreDefinition);}
+  searchToolDiscoveries(query:string):ToolDiscovery[]{
+    if(this.disposed)return [];
+    const capabilities=this.#nativeReadonlyOnly || this.options.capabilitySearch===false?[]:this.options.capabilityRegistry?.searchDiscoveries(query.startsWith('select:')?'':query)??[];
+    return this.selectDiscoveries([...this.getToolDiscoveries(),...this.deferredDiscoveries(),...capabilities.map(({coreRecord,metadata})=>{const coreDefinition=buildCapabilityToolDefinition(coreRecord);return Object.freeze(metadata?{coreDefinition,metadata}:{coreDefinition});})],query);
+  }
+  searchTools(query:string):ToolDefinition[]{return this.searchToolDiscoveries(query).map(entry=>entry.coreDefinition);}
 
   async executeTool(
     name: string,
     rawInput: Record<string, unknown>,
     context?: ToolExecutionContext,
   ): Promise<string> {
+    await assertNativeRegistryCheckpointCurrent(this);
     if(this.compoundInstallationPending)throw Error('compound_child_installation_required');
     this.executionBoundaryUsed = true;
     try {
+      if (this.#nativeReadonlyOnly) {
+        const registeredName = this.canonicalToolNames.get(getCanonicalToolId(name)) ?? name;
+        if (!this.admitsNativeReadonly(this.tools.get(registeredName))) return 'Error: native_readonly_tool_required';
+      }
       if (this.options.compoundExecution) return await this.executeThroughCompoundPort(name, rawInput, context);
       const prepared = await this.prepareToolInvocation(name, rawInput, context);
       if (typeof prepared !== 'string') return await this.executePreparedTool(prepared);
@@ -466,12 +478,14 @@ export class ToolRegistry {
   }
 
   async executePreparedTool(prepared: PreparedToolInvocation): Promise<string> {
+    await assertNativeRegistryCheckpointCurrent(this);
     if(this.compoundInstallationPending)throw Error('compound_child_installation_required');
     if (this.options.compoundExecution) throw Error('compound_native_port_required');
     return this.consumePreparedTool(prepared);
   }
 
   private async consumePreparedTool(prepared: PreparedToolInvocation, projectResult?: (nativeResult:string)=>Promise<string>): Promise<string> {
+    await assertNativeRegistryCheckpointCurrent(this);
     const record = this.preparedInvocations.get(prepared);
     if (!record) throw new Error('prepared_tool_invocation_invalid_or_consumed');
     this.preparedInvocations.delete(prepared);
@@ -488,6 +502,7 @@ export class ToolRegistry {
   }
 
   async prepareToolInvocationDetailed(name: string, rawInput: Record<string, unknown>, context?: ToolExecutionContext): Promise<ToolPreparationResult> {
+    await assertNativeRegistryCheckpointCurrent(this);
     if(this.compoundInstallationPending)throw Error('compound_child_installation_required');
     this.executionBoundaryUsed = true;
     if (this.options.compoundExecution) return Object.freeze({ kind: 'not_started', reason: 'blocked', message: 'Error: compound_native_port_required' });
@@ -523,6 +538,7 @@ export class ToolRegistry {
     const registeredName = this.canonicalToolNames.get(canonicalToolId) ?? name;
     const tool = this.tools.get(registeredName);
     if (!tool) return stop(`Error: 未知工具: ${name}`, 'invalid');
+    if (!this.admitsNativeReadonly(tool)) return stop('Error: native_readonly_tool_required', 'denied');
     const execute = tool.execute;
     const compoundPreparation = this.options.compoundExecution ? getCompoundSandboxPreparation(tool) : undefined;
     const permission = tool.permission;
@@ -531,7 +547,7 @@ export class ToolRegistry {
     catch { return stop('Error: invalid tool schema snapshot', 'invalid'); }
     const toolGeneration = this.toolGenerations.get(registeredName);
     const filterGeneration = this.filterGeneration;
-    const authorityChanged = () => this.parentAuthorityChanged?.() === true || this.disposed
+    const authorityChanged = () => !this.admitsNativeReadonly(tool) || this.parentAuthorityChanged?.() === true || this.disposed
       || this.filterGeneration !== filterGeneration
       || this.toolGenerations.get(registeredName) !== toolGeneration
       || this.tools.get(registeredName) !== tool
@@ -698,10 +714,11 @@ export class ToolRegistry {
       let rawResult = await runMonitoredTool({name,context:invocationContext,
         idleMs:tool.executionPolicy?.idleTimeoutMs ?? this.toolIdleTimeoutMs,
         waitsForUser:tool.executionPolicy?.waitsForUser,
-        run: ctx => {
+        run: async ctx => {
+          await assertNativeRegistryCheckpointCurrent(this);
           ctx?.signal?.throwIfAborted();
           assertInvocationCurrent();
-          return execute.call(tool, input, ctx);
+          return execute.call(tool, input, this.#nativeReadonlyOnly ? createNativeReadonlyExecutionContext(ctx) : ctx);
         },
       });
       context?.signal?.throwIfAborted();

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getLoopScheduleBindings: vi.fn(),
   createUserLoopTemplate: vi.fn(),
   createLoopSchedule: vi.fn(),
+  clearLoopRunHistory: vi.fn(),
   getAutomationOverviewSnapshot: vi.fn(),
   getAutomationsConfig: vi.fn(),
   setGlobalBackgroundAutoRun: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('../../renderer/src/api/bridge', () => ({
     getLoopScheduleBindings: mocks.getLoopScheduleBindings,
     createUserLoopTemplate: mocks.createUserLoopTemplate,
     createLoopSchedule: mocks.createLoopSchedule,
+    clearLoopRunHistory: mocks.clearLoopRunHistory,
     getAutomationOverviewSnapshot: mocks.getAutomationOverviewSnapshot,
     getAutomationsConfig: mocks.getAutomationsConfig,
     setGlobalBackgroundAutoRun: mocks.setGlobalBackgroundAutoRun,
@@ -391,6 +393,37 @@ describe('Automations Loops page', () => {
     renderSettings();await screen.findByText('Weekly Briefing');fireEvent.click(screen.getByRole('button',{name:'预览输出文件: Weekly Briefing'}));await screen.findByText('Old published bytes');
     mocks.readLoopOutputPreview.mockRejectedValueOnce(Error('publication_expired'));fireEvent.click(screen.getByRole('button',{name:'预览输出文件: Weekly Briefing'}));
     await waitFor(()=>expect(screen.queryByText('Old published bytes')).not.toBeInTheDocument());
+  });
+
+  it.each(['loop_operation_unknown', "Error invoking remote method 'desktop:loops:createUserTemplate': Error: loop_operation_unknown"])('loop typed boundary keeps uncertain creation input and localized result: %s', async message => {
+    mocks.createUserLoopTemplate.mockRejectedValueOnce(Error(message));renderSettings();
+    fireEvent.click(await screen.findByRole('button',{name:'新建循环'}));
+    fireEvent.change(screen.getByLabelText('名称'),{target:{value:'Unconfirmed creation'}});
+    fireEvent.change(screen.getByLabelText('Prompt'),{target:{value:'Keep original input'}});
+    fireEvent.click(screen.getByRole('button',{name:'创建循环'}));
+    expect(await screen.findByText('操作结果未确认，请刷新后检查。')).toBeInTheDocument();
+    expect(screen.getByLabelText('名称')).toHaveValue('Unconfirmed creation');
+    expect(screen.getByLabelText('Prompt')).toHaveValue('Keep original input');
+    expect(mocks.createUserLoopTemplate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('循环已创建')).not.toBeInTheDocument();
+  });
+  it('loop typed boundary retains prior anomaly facts after projection becomes unavailable',async()=>{
+    mocks.getEvidenceAnomalies.mockResolvedValue([{id:'old-anomaly',loopId:'artifact-evidence-regression',ownerKind:'task',ownerId:'old-task',kind:'source_unavailable',status:'open',firstSeenAt:1,lastSeenAt:1,seenCount:1,message:'Previously observed anomaly',evidenceIds:[],metadata:{}}]);
+    renderSettings('/automations/diagnostics');await screen.findByText('Previously observed anomaly');
+    mocks.getEvidenceAnomalies.mockRejectedValue(Error('loop_projection_unavailable'));
+    fireEvent.click(screen.getByRole('button',{name:'刷新'}));
+    expect(await screen.findByText('暂时无法读取循环数据，请刷新后重试。')).toBeInTheDocument();
+    expect(screen.getByText('Previously observed anomaly')).toBeInTheDocument();
+    expect(mocks.runLoopNow).not.toHaveBeenCalled();
+  });
+  it('loop typed boundary displays uncertain clear outcome and preserves overview without another mutation',async()=>{
+    mocks.getAutomationOverviewSnapshot.mockResolvedValue({generatedAt:10,globalBackgroundAutoRunEnabled:true,totals:{loops:1,userLoops:1,schedules:0,activeSchedules:0,diagnostics:0,recentFailures:1},recentFailures:[{id:'old-failure',source:'loop_run',ownerId:'user-loop-1',loopId:'user-loop-1',title:'Preserved failure',status:'failed',message:'Original failure facts',occurredAt:1}]});
+    mocks.clearLoopRunHistory.mockRejectedValueOnce(Error('loop_operation_unknown'));
+    const confirm=vi.spyOn(window,'confirm').mockReturnValue(true);
+    try{renderSettings('/automations/overview');await screen.findByText('Original failure facts');fireEvent.click(screen.getByRole('button',{name:'清除此记录'}));
+      expect(await screen.findByRole('alert')).toHaveTextContent('操作结果未确认，请刷新后检查。');
+      expect(screen.getByText('Original failure facts')).toBeInTheDocument();expect(mocks.clearLoopRunHistory).toHaveBeenCalledTimes(1);
+    }finally{confirm.mockRestore();}
   });
 
 });

@@ -15,6 +15,43 @@ function createIpcMainMock() {
 }
 
 describe('kswarm ipc proxy', () => {
+  it.each(['get', 'getText'])('reads nested project artifacts through the production %s handler', async (channel) => {
+    const { ipcMain, handlers } = createIpcMainMock();
+    const body = channel === 'getText' ? '# 综合报告\n正文' : JSON.stringify({ safe: true });
+    const request = vi.fn(async () => new Response(body, { status: 200 }));
+    registerKSwarmProxy(ipcMain as never, {} as never, { request });
+    const path = '/projects/proj-1/artifacts/run-a/' + encodeURIComponent('报告 中文 100%.md');
+    const result = await handlers.get(`desktop:kswarm:proxy:${channel}`)?.({}, path);
+    expect(result).toEqual(channel === 'getText' ? body : { safe: true });
+    expect(request).toHaveBeenCalledWith(path, expect.objectContaining({ method: 'GET' }));
+  });
+
+  it.each([
+    '/projects/proj-1/artifacts/run-a/../report.md',
+    '/projects/proj-1/artifacts/run-a/%2e%2e/report.md',
+    '/projects/proj-1/artifacts/run-a%2freport.md',
+    '/projects/proj-1/artifacts/run-a/%5creport.md',
+    '/projects/proj-1/artifacts/run-a//report.md',
+    '/projects/proj-1/artifacts/run-a/./report.md',
+    '/projects/proj-1/private/run-a/report.md',
+  ])('keeps rejecting unsafe nested artifact reads %s', async (path) => {
+    const { ipcMain, handlers } = createIpcMainMock();
+    const request = vi.fn();
+    registerKSwarmProxy(ipcMain as never, {} as never, { request });
+    for (const channel of ['get', 'getText']) {
+      expect(await handlers.get(`desktop:kswarm:proxy:${channel}`)?.({}, path)).toBeNull();
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not expand write permissions for nested artifacts', async () => {
+    const { ipcMain, handlers } = createIpcMainMock();
+    const request = vi.fn();
+    registerKSwarmProxy(ipcMain as never, {} as never, { request });
+    expect(await handlers.get('desktop:kswarm:proxy:put')?.({}, '/projects/p/artifacts/run-a/report.md', { content: 'x' })).toBeNull();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it.each(['post','postJson'])('routes %s workspace dispatch through one trusted semantic owner without legacy fallback',async channel=>{
     const {ipcMain,handlers}=createIpcMainMock(),request=vi.fn();
     const dispatchProject=vi.fn(async()=>({ok:false,code:'workspace_mapping_required'}));

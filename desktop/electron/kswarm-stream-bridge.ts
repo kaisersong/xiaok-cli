@@ -14,6 +14,8 @@ type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting';
 
 export class KSwarmStreamBridge {
   private subscriptions = new Map<number, Subscription>();
+  private eventObservers = new Set<(event: KSwarmStreamEvent) => void>();
+  private connectionObservers = new Set<(status: ConnectionStatus) => void>();
   private connectionStatus: ConnectionStatus = 'disconnected';
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -44,6 +46,16 @@ export class KSwarmStreamBridge {
     this.subscriptions.delete(event.sender.id);
   }
 
+  observeEvents(listener: (event: KSwarmStreamEvent) => void): () => void {
+    this.eventObservers.add(listener);
+    return () => this.eventObservers.delete(listener);
+  }
+
+  observeConnection(listener: (status: ConnectionStatus) => void): () => void {
+    this.connectionObservers.add(listener); listener(this.connectionStatus);
+    return () => this.connectionObservers.delete(listener);
+  }
+
   getConnectionStatus(): ConnectionStatus {
     return this.connectionStatus;
   }
@@ -58,7 +70,7 @@ export class KSwarmStreamBridge {
       this.ws.close();
       this.ws = null;
     }
-    this.subscriptions.clear();
+    this.subscriptions.clear(); this.eventObservers.clear(); this.connectionObservers.clear();
   }
 
   private connect(): void {
@@ -72,11 +84,13 @@ export class KSwarmStreamBridge {
       this.ws = ws;
 
       ws.onopen = () => {
+        if (this.disposed || this.ws !== ws) return;
         this.reconnectAttempts = 0;
         this.setConnectionStatus('connected');
       };
 
       ws.onmessage = (event) => {
+        if (this.disposed || this.ws !== ws) return;
         try {
           const data = JSON.parse(String(event.data)) as KSwarmStreamEvent;
           this.dispatchEvent(data);
@@ -84,6 +98,7 @@ export class KSwarmStreamBridge {
       };
 
       ws.onclose = () => {
+        if (this.disposed || this.ws !== ws) return;
         this.ws = null;
         this.setConnectionStatus('disconnected');
         this.scheduleReconnect();
@@ -129,6 +144,7 @@ export class KSwarmStreamBridge {
   }
 
   private dispatchEvent(payload: KSwarmStreamEvent): void {
+    for (const listener of this.eventObservers) { try { listener(payload); } catch { /* Background consumers cannot break UI delivery. */ } }
     for (const [id, sub] of this.subscriptions) {
       if (sub.webContents.isDestroyed()) {
         this.subscriptions.delete(id);
@@ -142,6 +158,9 @@ export class KSwarmStreamBridge {
   private setConnectionStatus(status: ConnectionStatus): void {
     if (this.connectionStatus === status) return;
     this.connectionStatus = status;
+    for (const listener of this.connectionObservers) {
+      try { listener(status); } catch (error) { console.warn('[kswarm-bridge] observer failed:', error instanceof Error ? error.message : 'observer_failed'); }
+    }
     for (const [id, sub] of this.subscriptions) {
       if (sub.webContents.isDestroyed()) {
         this.subscriptions.delete(id);

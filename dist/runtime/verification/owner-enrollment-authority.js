@@ -1,6 +1,8 @@
+import { assertNativeSqliteArrayConstruction } from './native-sqlite-construction-intrinsics.js';
 import { readIntentSqlContract } from './intent-sql-parsing-context.js';
 import { createRegistrationCensusDatabase, REGISTRATION_TABLE_KEYS } from './registration-census-database.js';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual as initialIsDeepStrictEqual } from 'node:util';
+const isDeepStrictEqual = initialIsDeepStrictEqual;
 import { captureRegistrationSnapshot } from './registration-value-snapshot.js';
 import { assertKSwarmSqlIntegrity } from './kswarm-sql-integrity.js';
 import { captureKSwarmEnrollmentData } from './kswarm-enrollment-data.js';
@@ -319,6 +321,7 @@ export function createOwnerEnrollmentAuthority(input) {
         known.assertIdentity(known.committed ? 'committed' : 'authorizing', known.committedOwner ?? known.result?.owner);
     }
     function commitEnrollment(owner, proposal, context) {
+        assertNativeSqliteArrayConstruction();
         if (!db.inTransaction)
             throw Error('enrollment_final_transaction');
         const entry = grants.get(context.authorization);
@@ -702,6 +705,7 @@ export function createOwnerEnrollmentAuthority(input) {
         return captureRegistrationSnapshot(sorted);
     }
     function registrationReadVector(owner, activation, originalIntent) {
+        assertNativeSqliteArrayConstruction();
         if (registrationDatabase) {
             const census = registrationDatabase.begin(), root = json(owner), pending = [root], identities = new Map(), dependencies = new Map();
             if (isIntentContractOwner(owner)) {

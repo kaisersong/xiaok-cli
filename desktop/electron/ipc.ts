@@ -1,6 +1,15 @@
+import { registerPluginCatalogIpc } from './plugin-catalog-typed-ipc.js';
+import { registerKnowledgeIpc, captureKnowledgeOutput } from './knowledge-typed-ipc.js';
+import { registerPrinciplesIpc } from './principles-typed-ipc.js';
+import { registerDiagnosticsIpc } from './diagnostics-typed-ipc.js';
+import { registerModelProviderIpc } from './model-provider-typed-ipc.js';
+import { registerLoopManagementIpc } from './loop-management-typed-ipc.js';
+import { MEMORY_IPC_CONTRACTS, type MemoryIpcOperation } from './memory-ipc-contract.js';
+import { ARTIFACT_WORKSPACE_OUTPUT_SCHEMAS, ARTIFACT_WORKSPACE_RISK_TAGS } from './artifact-workspace-ipc-contract.js';
+import { registerConversationActivityIpc } from './conversation-activity-ipc.js';
 import {z, type ZodSchema} from 'zod';
 import {registerIpcHandler, type RiskTag} from './ipc-runtime.js';
-import {absoluteFilePath, filePathInput, saveFileInput, openFileResult, readFileResult, saveFileResult} from './file-ipc-schemas.js';
+import {absoluteFilePath, filePathInput, saveFileInput, openFileResult, readFileResult, saveFileResult, ignoredClipboardInput, clipboardFilePathsResult, showSaveDialogInput, showSaveDialogResult} from './file-ipc-schemas.js';
 import { parseGoalVerificationDefinition } from '../../src/runtime/goal/verification-definition.js';
 import { authorizeDesktopValidationMaterials } from './desktop-validation-materials.js';
 import { createDesktopObservationApprovals } from './desktop-observation-approval.js';
@@ -14,7 +23,6 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import type { createDesktopServices } from './desktop-services.js';
 import type { DesktopLoopRuntime } from './loop-executor.js';
 import type { MeetingTranscriber } from './meeting-service.js';
-import type { CreateUserLoopTemplateInput } from './loop-types.js';
 import { createMeetingAudioPermissionService } from './meeting-audio-permission.js';
 import type { ArtifactWorkspaceErrorCode } from '../shared/artifact-workspace-types.js';
 import { OFFICE_EXTENSIONS } from '../../src/runtime/materials/document-formats.js';
@@ -22,7 +30,7 @@ import {
   computeKnowledgeContentHash,
   reconstructKnowledgeSourceText,
 } from './kb-source-identity.js';
-import type { IpcHandleRegistrar } from './shutdown-aware-ipc-main.js';
+import type { IpcHandleRegistrar, IpcHandlerListener } from './shutdown-aware-ipc-main.js';
 import { registerDesktopMultiAgentIpc, type MultiAgentIpcEvent } from './desktop-multi-agent-ipc.js';
 import { parseGoalRequestId } from '../shared/goal-attachment.js';
 
@@ -759,10 +767,15 @@ export async function registerDesktopIpc(
   services: DesktopServices,
   options: RegisterDesktopIpcOptions = {}
 ): Promise<void> {
-  const fileHandler = <I, O>(channel: string, input: ZodSchema<I>, output: ZodSchema<O>, riskTags: RiskTag[], handler: (input: I, event: IpcMainInvokeEvent) => Promise<O>) => registerIpcHandler({
-    registrar: ipcMain, channel, input, output, riskTags, sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 1, handler,
+  const fileHandler = <I, O>(channel: string, input: ZodSchema<I>, output: ZodSchema<O>, riskTags: RiskTag[], handler: (input: I, event: IpcMainInvokeEvent) => Promise<O>, rolloutRound: 1 | 2 | 3 = 1) => registerIpcHandler({
+    registrar: ipcMain, channel, input, output, riskTags, sourceFile: 'desktop/electron/ipc.ts', rolloutRound, handler,
   });
   const primaryWindow = () => options.getMainWindow?.() ?? window;
+  const taskActor = (event: IpcMainInvokeEvent) => {
+    const actor = options.multiAgentAuthorize?.(event);
+    if (!actor) throw new Error('task_actor_forbidden');
+    return { ...actor, requestSource: 'user' as const };
+  };
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
   });
@@ -845,23 +858,42 @@ export async function registerDesktopIpc(
     return viewKey;
   };
 
-  ipcMain.handle('desktop:artifactWorkspace:getArtifactWorkspaceSnapshot', async (event, rawInput) => {
+  const artifactHandler = (
+    operation: ArtifactWorkspaceOperation,
+    handler: (input: ArtifactWorkspaceIpcRecord, event: IpcMainInvokeEvent) => Promise<unknown>,
+  ) => registerIpcHandler({
+    registrar: ipcMain,
+    channel: `desktop:artifactWorkspace:${operation}`,
+    input: z.custom<ArtifactWorkspaceIpcRecord>(isRecordValue, {
+      message: 'Artifact workspace input must be an object',
+    }).transform(raw => sanitizeArtifactWorkspaceIpcInput(operation, raw)),
+    output: ARTIFACT_WORKSPACE_OUTPUT_SCHEMAS[operation],
+    sourceFile: 'desktop/electron/ipc.ts',
+    rolloutRound: 3,
+    riskTags: ARTIFACT_WORKSPACE_RISK_TAGS[operation],
+    inputError: error => normalizeArtifactWorkspaceIpcError(error instanceof z.ZodError
+      ? { code: 'invalid_target', message: 'Artifact workspace input must be an object' }
+      : error),
+    outputError: () => normalizeArtifactWorkspaceIpcError(new Error('ipc_contract_violation')),
+    handler,
+  });
+  artifactHandler('getArtifactWorkspaceSnapshot', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'getArtifactWorkspaceSnapshot', rawInput, {
       viewKey: artifactWorkspaceViewKey(event),
       sanitizeData: sanitizeArtifactWorkspaceSnapshotOutput,
     });
   });
-  ipcMain.handle('desktop:artifactWorkspace:closeArtifactWorkspace', async (event, rawInput) => {
+  artifactHandler('closeArtifactWorkspace', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'closeArtifactWorkspace', rawInput, {
       viewKey: artifactWorkspaceViewKey(event),
     });
   });
-  ipcMain.handle('desktop:artifactWorkspace:readArtifactWorkspaceVersionPreview', async (_event, rawInput) => {
+  artifactHandler('readArtifactWorkspaceVersionPreview', async (rawInput, _event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'readArtifactWorkspaceVersionPreview', rawInput, {
       sanitizeData: sanitizeArtifactWorkspacePreviewOutput,
     });
   });
-  ipcMain.handle('desktop:artifactWorkspace:exportArtifactWorkspaceVersion', async (event, rawInput) => {
+  artifactHandler('exportArtifactWorkspaceVersion', async (rawInput, event) => {
     return invokeArtifactWorkspaceOperation(async () => {
       const input = sanitizeArtifactWorkspaceIpcInput('exportArtifactWorkspaceVersion', rawInput);
       const prepared = await artifactWorkspaceServices.exportArtifactWorkspaceVersion(input);
@@ -877,115 +909,58 @@ export async function registerDesktopIpc(
       return { exported: true };
     }, sanitizeArtifactWorkspaceExportOutput);
   });
-  ipcMain.handle('desktop:artifactWorkspace:createArtifactPlaceholder', async (event, rawInput) => {
+  artifactHandler('createArtifactPlaceholder', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactPlaceholder', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:submitArtifactGeneration', async (event, rawInput) => {
+  artifactHandler('submitArtifactGeneration', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'submitArtifactGeneration', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:cancelArtifactGeneration', async (event, rawInput) => {
+  artifactHandler('cancelArtifactGeneration', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'cancelArtifactGeneration', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:retryArtifactGeneration', async (event, rawInput) => {
+  artifactHandler('retryArtifactGeneration', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'retryArtifactGeneration', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:preferArtifactVersion', async (event, rawInput) => {
+  artifactHandler('preferArtifactVersion', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'preferArtifactVersion', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:removeArtifactWorkspaceNode', async (event, rawInput) => {
+  artifactHandler('removeArtifactWorkspaceNode', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'removeArtifactWorkspaceNode', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:updateArtifactWorkspaceLayout', async (event, rawInput) => {
+  artifactHandler('updateArtifactWorkspaceLayout', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'updateArtifactWorkspaceLayout', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:saveArtifactWorkspaceViewport', async (event, rawInput) => {
+  artifactHandler('saveArtifactWorkspaceViewport', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'saveArtifactWorkspaceViewport', rawInput, {
       viewKey: artifactWorkspaceViewKey(event),
     });
   });
-  ipcMain.handle('desktop:artifactWorkspace:createArtifactWorkspaceCollection', async (event, rawInput) => {
+  artifactHandler('createArtifactWorkspaceCollection', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactWorkspaceCollection', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:createArtifactWorkspaceNote', async (event, rawInput) => {
+  artifactHandler('createArtifactWorkspaceNote', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactWorkspaceNote', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:updateArtifactWorkspaceNote', async (event, rawInput) => {
+  artifactHandler('updateArtifactWorkspaceNote', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'updateArtifactWorkspaceNote', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:createArtifactWorkspaceRelation', async (event, rawInput) => {
+  artifactHandler('createArtifactWorkspaceRelation', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'createArtifactWorkspaceRelation', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:setArtifactCollectionMembership', async (event, rawInput) => {
+  artifactHandler('setArtifactCollectionMembership', async (rawInput, event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'setArtifactCollectionMembership', rawInput, { viewKey: artifactWorkspaceViewKey(event) });
   });
-  ipcMain.handle('desktop:artifactWorkspace:recordArtifactWorkspaceEvent', async (_event, rawInput) => {
+  artifactHandler('recordArtifactWorkspaceEvent', async (rawInput, _event) => {
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'recordArtifactWorkspaceEvent', rawInput);
   });
-  ipcMain.handle('desktop:getModelConfig', async () => {
-    log('info', 'getModelConfig');
-    const r = await services.getModelConfig();
-    log('info', 'getModelConfig ok', { providers: r?.providers?.length ?? 0 });
-    return r;
-  });
-  ipcMain.handle('desktop:saveModelConfig', async (_event, input) => {
-    log('info', 'saveModelConfig', { providerId: input?.providerId });
-    const r = await services.saveModelConfig(input, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
-    log('info', 'saveModelConfig ok');
-    return r;
-  });
-  ipcMain.handle('desktop:updateModelRuntimeOptions', async (_event, input) => {
-    log('info', 'updateModelRuntimeOptions', { modelId: input?.modelId });
-    const r = await services.updateModelRuntimeOptions(input);
-    log('info', 'updateModelRuntimeOptions ok', { modelId: input?.modelId });
-    return r;
-  });
-  ipcMain.handle('desktop:getSystemOneConfig', async () => {
-    log('info', 'getSystemOneConfig');
-    const r = await services.getSystemOneConfig();
-    log('info', 'getSystemOneConfig ok', { configured: r?.configured });
-    return r;
-  });
-  ipcMain.handle('desktop:saveSystemOneConfig', async (_event, input) => {
-    log('info', 'saveSystemOneConfig');
-    const r = await services.saveSystemOneConfig(input);
-    log('info', 'saveSystemOneConfig ok', { configured: r?.configured });
-    return r;
-  });
-  ipcMain.handle('desktop:createManagedXiaokAgent', async (_event, input) => {
-    log('info', 'createManagedXiaokAgent', { name: input?.name, roles: input?.roles });
-    const r = await services.createManagedXiaokAgent(input, { requestSource: 'user' });
-    log('info', 'createManagedXiaokAgent ok');
-    return r;
-  });
-  ipcMain.handle('desktop:testProviderConnection', async (_event, input) => {
-    log('info', 'testProviderConnection', { providerId: input?.providerId });
-    const r = await services.testProviderConnection(input);
-    log('info', 'testProviderConnection ok', { success: r?.success, latencyMs: r?.latencyMs });
-    return r;
-  });
-  ipcMain.handle('desktop:listAvailableModelsForProvider', async (_event, providerId) => {
-    log('info', 'listAvailableModelsForProvider', { providerId });
-    const r = await services.listAvailableModelsForProvider(providerId);
-    log('info', 'listAvailableModelsForProvider ok', { count: r?.length });
-    return r;
-  });
-  ipcMain.handle('desktop:deleteProvider', async (_event, providerId) => {
-    log('info', 'deleteProvider', { providerId });
-    await services.deleteProvider(providerId, { requestSource: 'user' });
-    log('info', 'deleteProvider ok');
-  });
-  ipcMain.handle('desktop:deleteModel', async (_event, modelId) => {
-    log('info', 'deleteModel', { modelId });
-    await services.deleteModel(modelId, { requestSource: 'user' });
-    log('info', 'deleteModel ok');
-  });
+  registerModelProviderIpc(ipcMain, services, options.multiAgentAuthorize as Parameters<typeof registerModelProviderIpc>[2]);
   ipcMain.handle('desktop:kswarm:startProjectPlanning', async (_event, input) => {
     log('info', 'startProjectPlanning', { projectId: input?.projectId });
     const r = services.startProjectPlanning(input);
     log('info', 'startProjectPlanning ok', { ok: r?.ok });
     return r;
   });
-  ipcMain.handle('desktop:readClipboardFilePaths', async () => expandSelectedMaterialPaths(readClipboardPathCandidates(clipboard)));
+  fileHandler('desktop:readClipboardFilePaths', ignoredClipboardInput, clipboardFilePathsResult, ['clipboard', 'fs-read'], async () => expandSelectedMaterialPaths(readClipboardPathCandidates(clipboard)), 2);
   ipcMain.handle('desktop:readClipboardImage', async () => {
     try {
       const img = clipboard.readImage();
@@ -1160,24 +1135,30 @@ export async function registerDesktopIpc(
     });
   });
   ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'answerQuestion', { taskId: input?.taskId });
-    const r = await services.answerQuestion(input, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    const r = await services.answerQuestion(input, actor);
     log('info', 'answerQuestion ok');
     return r;
   });
   ipcMain.handle('desktop:cancelTask', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'cancelTask', { taskId: input?.taskId });
-    await services.cancelTask(input.taskId, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    await services.cancelTask(input.taskId, actor);
     log('info', 'cancelTask ok');
   });
-  ipcMain.handle('desktop:getActiveTask', async () => {
+  ipcMain.handle('desktop:getActiveTask', async (_event) => {
+    const actor = taskActor(_event);
     const r = await services.getActiveTask();
+    if (r) await services.authorizeTaskRead(r.taskId, actor);
     log('debug', 'getActiveTask', { taskId: r?.taskId ?? null });
     return r;
   });
   ipcMain.handle('desktop:recoverTask', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
     log('info', 'recoverTask', { taskId: input?.taskId });
-    const r = await services.recoverTask(input.taskId);
+    const r = await services.recoverTask(input.taskId, typeof input.legacyPrompt === 'string' ? input.legacyPrompt : undefined);
+    await services.authorizeTaskRead(r.snapshot.taskId, actor);
     log('info', 'recoverTask ok', { status: r?.snapshot?.status });
     return r;
   });
@@ -1241,8 +1222,22 @@ export async function registerDesktopIpc(
       return { canceled: true, filePath, content: '', error: String(e) };
     }
   });
+  const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null);
+  options.registerLifetimeDisposer?.(disposeActivity);
   const activeTaskSubs = new Map<string, AbortController>();
+  const activeTaskSubIds = new Map<string, string>();
+  options.registerLifetimeDisposer?.(() => { for (const controller of activeTaskSubs.values()) controller.abort(); activeTaskSubs.clear(); activeTaskSubIds.clear(); });
+  ipcMain.handle('desktop:unsubscribeTask', async (_event, input) => {
+    taskActor(_event);
+    const key = `${(_event?.sender ?? primaryWindow().webContents).id}:${input.taskId}`;
+    if (typeof input.subscriptionId === 'string' && activeTaskSubIds.get(key) === input.subscriptionId) {
+      activeTaskSubs.get(key)?.abort(); activeTaskSubs.delete(key); activeTaskSubIds.delete(key);
+    }
+  });
   ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
+    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+    if (input.sinceIndex !== undefined && (!Number.isSafeInteger(input.sinceIndex) || input.sinceIndex < 0)) throw new Error('invalid_task_event_cursor');
+    if (input.subscriptionId !== undefined && (typeof input.subscriptionId !== 'string' || !input.subscriptionId.length || input.subscriptionId.length > 256)) throw new Error('invalid_task_subscription_id');
     const taskId = input.taskId as string;
     const target = _event?.sender ?? primaryWindow().webContents;
     const subscriptionKey = `${target.id}:${taskId}`;
@@ -1258,18 +1253,20 @@ export async function registerDesktopIpc(
 
     const controller = new AbortController();
     activeTaskSubs.set(subscriptionKey, controller);
+    activeTaskSubIds.set(subscriptionKey, input.subscriptionId ?? 'legacy');
     const onDestroyed = () => controller.abort();
     target.once?.('destroyed', onDestroyed);
 
     void (async () => {
       try {
         const stream = sinceIndex !== undefined
-          ? services.subscribeTask(taskId, { sinceIndex })
-          : services.subscribeTask(taskId);
+          ? services.subscribeTask(taskId, { sinceIndex, signal: controller.signal })
+          : services.subscribeTask(taskId, { signal: controller.signal });
         for await (const event of stream) {
           if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
+          await services.authorizeTaskRead(taskId, actor);
           target.send(`desktop:taskEvent:${taskId}`, event);
         }
         log('info', 'subscribeTask stream ended', { taskId });
@@ -1281,6 +1278,7 @@ export async function registerDesktopIpc(
         target.removeListener?.('destroyed', onDestroyed);
         if (activeTaskSubs.get(subscriptionKey) === controller) {
           activeTaskSubs.delete(subscriptionKey);
+          activeTaskSubIds.delete(subscriptionKey);
         }
       }
     })();
@@ -1319,7 +1317,7 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:updateMCPInstall', async (_event, id, input) => services.updateMCPInstall(id, input));
   ipcMain.handle('desktop:deleteMCPInstall', async (_event, id) => services.deleteMCPInstall(id));
   // Plugin MCP servers
-  ipcMain.handle('desktop:listPluginMcpServers', () => services.listPluginMcpServers());
+  registerPluginCatalogIpc(ipcMain, services);
   // Design v58 §7.2: `setPluginMcpServerEnabled` only mutated a view model and
   // had no durable desired-state store, and the blanket restart bypassed the CUA
   // preference. Both are deleted; retry is component-scoped and user-sourced.
@@ -1341,8 +1339,7 @@ export async function registerDesktopIpc(
     await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
   });
   ipcMain.handle('desktop:installPlugin', (_event, name) => services.installPlugin(name));
-  ipcMain.handle('desktop:listAvailablePlugins', () => services.listAvailablePlugins());
-  ipcMain.handle('desktop:listPluginDependencyStatuses', () => services.listPluginDependencyStatuses());
+
   ipcMain.handle('desktop:installPluginDependency', (_event, input) => services.installPluginDependency({ ...input, requestSource: 'user' }));
   ipcMain.handle('desktop:updatePluginDependency', (_event, input) => services.updatePluginDependency({ ...input, requestSource: 'user' }));
   ipcMain.handle('desktop:cancelPluginDependencyTask', (_event, input) => services.cancelPluginDependencyTask({ ...input, requestSource: 'user' }));
@@ -1363,118 +1360,29 @@ export async function registerDesktopIpc(
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
-  ipcMain.handle('desktop:getSkillStats', async () => {
-    try {
-      return await services.getSkillStats();
-    } catch { return []; }
-  });
-  ipcMain.handle('desktop:trace:export', async (_event, input) => {
-    log('info', 'traceExport', { kind: input?.kind, id: input?.id });
-    const result = await services.exportTraceBundle(input);
-    log('info', 'traceExport result', { ok: result.ok, path: result.path });
-    return result;
-  });
-  ipcMain.handle('desktop:diagnose', async (_event, input) => {
-    log('info', 'diagnose', { kind: input?.kind, id: input?.id });
-    const result = await services.diagnose(input);
-    log('info', 'diagnose result', { health: result?.health, primaryFinding: result?.primaryFinding?.category ?? null });
-    return result;
-  });
+  registerDiagnosticsIpc(ipcMain, services);
 
-  ipcMain.handle('desktop:loops:listDefinitions', () => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.listLoopDefinitions();
-  });
-  ipcMain.handle('desktop:loops:listUserTemplates', () => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.listUserLoopTemplates();
-  });
-  ipcMain.handle('desktop:loops:createUserTemplate', (_event, input) => {
-    log('info', 'loops:createUserTemplate', { title: input?.title, kind: input?.kind, loopId: input?.loopId });
-    try {
-      const loopRuntime = getLoopRuntime(options);
-      const result = loopRuntime.loopStore.createUserLoopTemplate(readCreateUserLoopTemplateInput(input));
-      log('info', 'loops:createUserTemplate ok', { loopId: result.template.loopId });
-      return result;
-    } catch (e) {
-      log('error', 'loops:createUserTemplate failed', String(e));
-      throw e;
-    }
-  });
-  ipcMain.handle('desktop:loops:updateUserTemplate', (_event, loopId, patch) => {
-    log('info', 'loops:updateUserTemplate', { loopId, patchKeys: patch ? Object.keys(patch) : [] });
-    try {
-      const loopRuntime = getLoopRuntime(options);
-      const id = readLoopId(loopId);
-      const result = loopRuntime.loopStore.updateUserLoopTemplate(id, patch ?? {});
-      log('info', 'loops:updateUserTemplate ok', { loopId: id, found: !!result });
-      return result;
-    } catch (e) {
-      log('error', 'loops:updateUserTemplate failed', { loopId, error: String(e) });
-      throw e;
-    }
-  });
-  ipcMain.handle('desktop:loops:deleteUserTemplate', (_event, loopId) => {
-    log('info', 'loops:deleteUserTemplate', { loopId });
-    try {
-      const loopRuntime = getLoopRuntime(options);
-      const id = readLoopId(loopId);
-      loopRuntime.loopStore.deleteUserLoopTemplate(id);
-      log('info', 'loops:deleteUserTemplate ok', { loopId: id });
-    } catch (e) {
-      log('error', 'loops:deleteUserTemplate failed', { loopId, error: String(e) });
-      throw e;
-    }
-  });
-  ipcMain.handle('desktop:loops:listAnomalies', (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.listAnomalies(readLoopId(loopId));
-  });
-  ipcMain.handle('desktop:loops:runNow', async (_event, loopId) => {
-    log('info', 'loops:runNow', { loopId });
-    try {
-      const loopRuntime = getLoopRuntime(options);
-      const result = await loopRuntime.runner.runLoopNow(readLoopId(loopId),undefined,undefined,{requestSource:'user'});
-      log('info', 'loops:runNow result', { loopId, status: result.status });
-      return result;
-    } catch (e) {
-      log('error', 'loops:runNow failed', { loopId, error: String(e) });
-      throw e;
-    }
-  });
-  ipcMain.handle('desktop:loops:listConstraints', (_event, loopId) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.getConstraintsByLoopId(readLoopId(loopId));
-  });
-  ipcMain.handle('desktop:loops:setConstraintActive', (_event, constraintId, active) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.setConstraintActive(String(constraintId), Boolean(active));
-  });
-  ipcMain.handle('desktop:loops:confirmConstraint', (_event, constraintId) => {
-    const loopRuntime = getLoopRuntime(options);
-    return loopRuntime.loopStore.confirmConstraint(String(constraintId));
-  });
-  ipcMain.handle('desktop:loops:clearRunHistory', (_event, loopId, statuses) => {
-    log('info', 'loops:clearRunHistory', { loopId, statuses });
-    try {
-      const loopRuntime = getLoopRuntime(options);
-      const id = readLoopId(loopId);
-      const validStatuses = Array.isArray(statuses) && statuses.every(s => typeof s === 'string') ? statuses : undefined;
-      const removed = loopRuntime.loopStore.clearLoopRunHistory(id, validStatuses);
-      log('info', 'loops:clearRunHistory ok', { loopId: id, removed });
-      return { ok: true, removed };
-    } catch (e) {
-      log('error', 'loops:clearRunHistory failed', { loopId, error: String(e) });
-      throw e;
-    }
-  });
+  registerLoopManagementIpc(ipcMain, options.loopRuntime);
 
   // ---- Memory ----
   const { getDesktopMemoryStore } = await import('./desktop-services.js');
   const { parseMemories } = await import('./memory-import-parser.js');
   const memoryStore = getDesktopMemoryStore(services.getDataRoot());
 
-  ipcMain.handle('desktop:listMemories', async () => {
+  const memoryHandler = (operation: MemoryIpcOperation, listener: IpcHandlerListener) => {
+    const contract = MEMORY_IPC_CONTRACTS[operation];
+    const common = {
+      registrar: ipcMain, channel: `desktop:${operation}`, output: contract.output,
+      sourceFile: 'desktop/electron/ipc.ts', rolloutRound: 4 as const,
+      riskTags: contract.riskTags, inputError: contract.inputError, outputError: contract.outputError,
+    };
+    if (contract.payloadMode === 'tuple') {
+      registerIpcHandler({ ...common, payloadMode: 'tuple', input: contract.input as ZodSchema<unknown[]>, handler: async (args, event) => listener(event, ...args) });
+    } else {
+      registerIpcHandler({ ...common, input: contract.input, handler: async (input, event) => listener(event, input) });
+    }
+  };
+  memoryHandler('listMemories', async () => {
     try {
       if (memoryStore.search) {
         return (await memoryStore.search('', 50)).map(r => ({
@@ -1486,7 +1394,7 @@ export async function registerDesktopIpc(
       }));
     } catch (e) { log('error', 'listMemories failed', e); return []; }
   });
-  ipcMain.handle('desktop:createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => {
+  memoryHandler('createMemory', async (_event, input: { content: string; tags: string[]; source?: string }) => {
     try {
       const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       await memoryStore.save({
@@ -1496,7 +1404,7 @@ export async function registerDesktopIpc(
       return { id, content: input.content, tags: input.tags, createdAt: Date.now() };
     } catch (e) { log('error', 'createMemory failed', e); throw e; }
   });
-  ipcMain.handle('desktop:updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => {
+  memoryHandler('updateMemory', async (_event, input: { id: string; content?: string; tags?: string[] }) => {
     try {
       // Delete old + re-save with updated content
       await memoryStore.delete?.(input.id);
@@ -1508,11 +1416,11 @@ export async function registerDesktopIpc(
       return { id: input.id, content, tags: input.tags ?? [], createdAt: Date.now() };
     } catch (e) { log('error', 'updateMemory failed', e); throw e; }
   });
-  ipcMain.handle('desktop:deleteMemory', async (_event, id: string) => {
+  memoryHandler('deleteMemory', async (_event, id: string) => {
     try { return await memoryStore.delete?.(id) ?? false; }
     catch (e) { log('error', 'deleteMemory failed', e); throw e; }
   });
-  ipcMain.handle('desktop:importMemories', async (_event, raw: string) => {
+  memoryHandler('importMemories', async (_event, raw: string) => {
     try {
       const { items, errors } = parseMemories(raw);
       if (items.length === 0 && errors.length === 0) return { imported: 0, deduped: 0, parseErrors: ['未解析到任何记忆'] };
@@ -1532,37 +1440,37 @@ export async function registerDesktopIpc(
       return { imported: 0, deduped: 0, parseErrors: [`导入失败: ${e}`] };
     }
   });
-  ipcMain.handle('desktop:memoryStats', async () => {
+  memoryHandler('memoryStats', async () => {
     try { return memoryStore.getStats?.() ?? null; }
     catch (e) { log('error', 'memoryStats failed', e); return null; }
   });
-  ipcMain.handle('desktop:memoryCompact', async () => {
+  memoryHandler('memoryCompact', async () => {
     try { await memoryStore.compact?.(); return true; }
     catch (e) { log('error', 'memoryCompact failed', e); return false; }
   });
-  ipcMain.handle('desktop:memoryPersonaTraits', async () => {
+  memoryHandler('memoryPersonaTraits', async () => {
     try { return memoryStore.getPersonaTraits?.() ?? []; }
     catch (e) { log('error', 'memoryPersonaTraits failed', e); return []; }
   });
-  ipcMain.handle('desktop:memoryListLayer', async (_event, layer: number, limit?: number, offset?: number) => {
+  memoryHandler('memoryListLayer', async (_event, layer: number, limit?: number, offset?: number) => {
     try { return memoryStore.listLayer?.(layer, limit ?? 50, offset ?? 0) ?? []; }
     catch (e) { log('error', 'memoryListLayer failed', e); return []; }
   });
-  ipcMain.handle('desktop:memoryDeleteEntry', async (_event, id: string, layer: number) => {
+  memoryHandler('memoryDeleteEntry', async (_event, id: string, layer: number) => {
     try { return await memoryStore.delete?.(id, layer) ?? false; }
     catch (e) { log('error', 'memoryDeleteEntry failed', e); return false; }
   });
-  ipcMain.handle('desktop:memoryClearAll', async () => {
+  memoryHandler('memoryClearAll', async () => {
     try { memoryStore.clearAll?.(); return true; }
     catch (e) { log('error', 'memoryClearAll failed', e); return false; }
   });
-  ipcMain.handle('desktop:memoryGetModelId', async () => {
+  memoryHandler('memoryGetModelId', async () => {
     try {
       const config = await (await import('../../src/utils/config.js')).loadConfig();
       return config.memory?.modelId ?? null;
     } catch { return null; }
   });
-  ipcMain.handle('desktop:memorySetModelId', async (_event, modelId: string | null) => {
+  memoryHandler('memorySetModelId', async (_event, modelId: string | null) => {
     try {
       const { loadConfig, saveConfig: saveConfigFn } = await import('../../src/utils/config.js');
       const config = await loadConfig();
@@ -1573,7 +1481,7 @@ export async function registerDesktopIpc(
     } catch (e) { log('error', 'memorySetModelId failed', e); return false; }
   });
 
-  ipcMain.handle('desktop:getEmbeddingModels', async () => {
+  memoryHandler('getEmbeddingModels', async () => {
     try {
       const { MODEL_REGISTRY, isModelDownloaded, getManualDownloadHint } = await import('../../src/ai/memory/model-registry.js');
       const { loadConfig } = await import('../../src/utils/config.js');
@@ -1592,12 +1500,12 @@ export async function registerDesktopIpc(
     } catch (e) { log('error', 'getEmbeddingModels failed', e); return []; }
   });
 
-  ipcMain.handle('desktop:downloadEmbeddingModel', async (_event, modelId: string) => {
+  memoryHandler('downloadEmbeddingModel', async (_event, modelId: string) => {
     const { downloadModel } = await import('../../src/ai/memory/model-registry.js');
     await downloadModel(modelId);
   });
 
-  ipcMain.handle('desktop:setEmbeddingModel', async (_event, modelId: string) => {
+  memoryHandler('setEmbeddingModel', async (_event, modelId: string) => {
     try {
       const { loadConfig, saveConfig: saveConfigFn, getConfigDir } = await import('../../src/utils/config.js');
       const config = await loadConfig();
@@ -1650,11 +1558,12 @@ export async function registerDesktopIpc(
   });
 
   // ---- File Export ----
-  ipcMain.handle('desktop:showSaveDialog', async (_event, input: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }> }) => {
+  fileHandler('desktop:showSaveDialog', showSaveDialogInput, showSaveDialogResult, ['dialog'], async (input) => {
     log('info', 'showSaveDialog', { defaultPath: input?.defaultPath });
     const result = await dialog.showSaveDialog(primaryWindow(), {
       defaultPath: input?.defaultPath,
-      filters: input?.filters ?? [{ name: 'Markdown', extensions: ['md'] }],
+      // Generic downloads retain their extension; callers specify format filters for exports.
+      filters: input?.filters ?? undefined,
     });
     if (result.canceled || !result.filePath) {
       log('info', 'showSaveDialog cancelled');
@@ -1662,7 +1571,7 @@ export async function registerDesktopIpc(
     }
     log('info', 'showSaveDialog ok', { filePath: result.filePath });
     return { canceled: false, filePath: result.filePath };
-  });
+  }, 2);
 
   fileHandler('desktop:saveFile', saveFileInput, saveFileResult, ['fs-write'], async (input) => {
     log('info', 'saveFile', { filePath: input?.filePath });
@@ -1692,24 +1601,7 @@ export async function registerDesktopIpc(
   const { PrinciplesStore } = await import('./principles-store.js');
   const principlesStore = new PrinciplesStore(services.getDataRoot());
 
-  ipcMain.handle('desktop:listPrinciples', async () => {
-    log('info', 'listPrinciples');
-    return principlesStore.list();
-  });
-
-  ipcMain.handle('desktop:savePrinciple', async (_event, input) => {
-    log('info', 'savePrinciple', { id: input?.id });
-    const result = await principlesStore.save(input);
-    log('info', 'savePrinciple result', result);
-    return result;
-  });
-
-  ipcMain.handle('desktop:deletePrinciple', async (_event, id: string) => {
-    log('info', 'deletePrinciple', { id });
-    const result = await principlesStore.delete(id);
-    log('info', 'deletePrinciple result', result);
-    return result;
-  });
+  registerPrinciplesIpc(ipcMain, principlesStore, log);
 
   // ---- Knowledge Base ----
   const { createKbStoreSqlite } = await import('./kb-store-sqlite.js');
@@ -1741,7 +1633,7 @@ export async function registerDesktopIpc(
       );
       if (!claim.created) return claim.source;
       const chunks = kbChunker.chunk({ text: result.text, mimeType: result.mimeType });
-      store.insertChunks(sourceId, chunks);
+      store.insertChunks(sourceId, chunks, requestSource);
       return store.updateSourceParseResult(sourceId, {
         parseStatus: 'parsed',
         metadata: sourceExtractionMetadata(result),
@@ -1765,7 +1657,7 @@ export async function registerDesktopIpc(
           description: '默认知识库集合',
           embeddingModelId: 'bge-small-zh-v1.5',
           embeddingDim: 512,
-        });
+        }, 'user');
       }
       const pendingSources = kbStore.listCollections()
         .flatMap(collection => kbStore!.listSources(collection.id))
@@ -1809,27 +1701,31 @@ export async function registerDesktopIpc(
     return kbStore;
   }
 
-  ipcMain.handle('desktop:kb:listCollections', async () => {
+  const knowledgeProducers = new Map<string, IpcHandlerListener>();
+  const knowledgeIpc: IpcHandleRegistrar = { handle(channel, listener) { knowledgeProducers.set(channel, listener); } };
+  registerKnowledgeIpc(ipcMain, knowledgeProducers);
+
+  knowledgeIpc.handle('desktop:kb:listCollections', () => {
     log('info', 'kb:listCollections');
     return getKbStore().listCollections();
   });
 
-  ipcMain.handle('desktop:kb:createCollection', async (_event, input) => {
+  knowledgeIpc.handle('desktop:kb:createCollection', (_event, input) => {
     log('info', 'kb:createCollection', { name: input?.name });
-    return getKbStore().createCollection(input);
+    return getKbStore().createCollection(input, 'user');
   });
 
-  ipcMain.handle('desktop:kb:deleteCollection', async (_event, id: string) => {
+  knowledgeIpc.handle('desktop:kb:deleteCollection', (_event, id: string) => {
     log('info', 'kb:deleteCollection', { id });
-    getKbStore().deleteCollection(id);
+    getKbStore().deleteCollection(id, 'user');
   });
 
-  ipcMain.handle('desktop:kb:listSources', async (_event, collectionId: string) => {
+  knowledgeIpc.handle('desktop:kb:listSources', (_event, collectionId: string) => {
     log('info', 'kb:listSources', { collectionId });
     return getKbStore().listSources(collectionId);
   });
 
-  ipcMain.handle('desktop:kb:addSource', async (_event, input) => {
+  knowledgeIpc.handle('desktop:kb:addSource', async (_event, input) => {
     log('info', 'kb:addSource', { kind: input?.kind, title: input?.title });
     const store = getKbStore();
     const unsafeMetadata = input?.metadata && typeof input.metadata === 'object'
@@ -1863,7 +1759,7 @@ export async function registerDesktopIpc(
         errorCode: 'invalid_source_input',
         error: 'Source content is missing.',
       }, 'user');
-      return finalized;
+      return captureKnowledgeOutput('addSource', finalized);
     } catch (e) {
       log('error', 'kb:addSource processing failed', String(e));
       try {
@@ -1876,10 +1772,10 @@ export async function registerDesktopIpc(
         // The source may already have reached a terminal parse state.
       }
     }
-    return store.getSource(source.id) ?? source;
+    return captureKnowledgeOutput('addSource', store.getSource(source.id) ?? source);
   });
 
-  ipcMain.handle('desktop:kb:pickFiles', async () => {
+  knowledgeIpc.handle('desktop:kb:pickFiles', async () => {
     const { dialog } = await import('electron');
     const result = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
@@ -1894,8 +1790,8 @@ export async function registerDesktopIpc(
         { name: '所有文件', extensions: ['*'] },
       ],
     });
-    if (result.canceled) return [];
-    return result.filePaths;
+    if (result.canceled) return captureKnowledgeOutput('pickFiles', []);
+    return captureKnowledgeOutput('pickFiles', result.filePaths);
   });
 
   ipcMain.handle('desktop:meeting:pickAudioFile', async () => {
@@ -2177,17 +2073,17 @@ export async function registerDesktopIpc(
     });
   });
 
-  ipcMain.handle('desktop:kb:deleteSource', async (_event, id: string) => {
+  knowledgeIpc.handle('desktop:kb:deleteSource', (_event, id: string) => {
     log('info', 'kb:deleteSource', { id });
-    getKbStore().deleteSource(id);
+    getKbStore().deleteSource(id, 'user');
   });
 
-  ipcMain.handle('desktop:kb:getCollectionState', async (_event, collectionId: string) => {
+  knowledgeIpc.handle('desktop:kb:getCollectionState', (_event, collectionId: string) => {
     log('info', 'kb:getCollectionState', { collectionId });
     return getKbStore().getCollectionState(collectionId);
   });
 
-  ipcMain.handle('desktop:kb:getSourceContent', async (_event, input) => {
+  knowledgeIpc.handle('desktop:kb:getSourceContent', (_event, input) => {
     const sourceId = String(input?.sourceId ?? '');
     const offset = Math.max(0, Number(input?.offset ?? 0) || 0);
     const requestedLimit = Number(input?.limit ?? 64_000) || 64_000;
@@ -2196,12 +2092,12 @@ export async function registerDesktopIpc(
     return getKbStore().getSourceWithContent(sourceId, offset, limit);
   });
 
-  ipcMain.handle('desktop:kb:search', async (_event, input) => {
+  knowledgeIpc.handle('desktop:kb:search', async (_event, input) => {
     log('info', 'kb:search', { collectionId: input?.collectionId, query: input?.query?.slice(0, 50) });
     const store = getKbStore();
     const query = (input?.query ?? '').trim();
     const topK = input?.topK ?? 10;
-    if (!query) return [];
+    if (!query) return captureKnowledgeOutput('search', []);
     const collectionId = input?.collectionId ?? '';
     const sourceIds = input?.sourceIds as string[] | undefined;
     const allSources = store.listSources(collectionId);
@@ -2233,67 +2129,8 @@ export async function registerDesktopIpc(
       }
     }
     results.sort((a, b) => b.fusedScore - a.fusedScore);
-    return results.slice(0, topK);
+    return captureKnowledgeOutput('search', results.slice(0, topK));
   });
-}
-
-function getLoopRuntime(options: RegisterDesktopIpcOptions): NonNullable<RegisterDesktopIpcOptions['loopRuntime']> {
-  if (!options.loopRuntime) {
-    throw new Error('loop diagnostics runtime is not registered');
-  }
-  return options.loopRuntime;
-}
-
-function readLoopId(input: unknown): string {
-  if (typeof input !== 'string' || input.trim().length === 0) {
-    throw new Error('loopId must be a non-empty string');
-  }
-  return input;
-}
-
-
-function readCreateUserLoopTemplateInput(input: unknown): CreateUserLoopTemplateInput {
-  if (!isRecord(input)) {
-    throw new Error('user loop template input must be an object');
-  }
-  if (input.kind !== 'markdown_file' && input.kind !== 'task_completion') {
-    throw new Error('user loop template kind must be markdown_file or task_completion');
-  }
-  const base = {
-    loopId: readLoopId(input.loopId),
-    title: readNonEmptyString(input.title, 'title'),
-    description: typeof input.description === 'string' ? input.description : undefined,
-    prompt: readNonEmptyString(input.prompt, 'prompt'),
-    now: Date.now(),
-  };
-  let result: CreateUserLoopTemplateInput;
-  if (input.kind === 'task_completion') {
-    result = { ...base, kind: 'task_completion' };
-  } else {
-    result = {
-      ...base,
-      kind: 'markdown_file',
-      outputDirectory: readNonEmptyString(input.outputDirectory, 'outputDirectory'),
-      outputFileName: readNonEmptyString(input.outputFileName, 'outputFileName'),
-    };
-  }
-  if (Object.prototype.hasOwnProperty.call(input, 'scheduleEnabled')) {
-    result.scheduleEnabled = input.scheduleEnabled === true;
-  }
-  if (isRecord(input.scheduleTrigger)) {
-    result.scheduleTrigger = input.scheduleTrigger;
-  }
-  if (Object.prototype.hasOwnProperty.call(input, 'autoRunApproved')) {
-    result.autoRunApproved = input.autoRunApproved === true;
-  }
-  return result;
-}
-
-function readNonEmptyString(input: unknown, fieldName: string): string {
-  if (typeof input !== 'string' || input.trim().length === 0) {
-    throw new Error(`${fieldName} must be a non-empty string`);
-  }
-  return input;
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

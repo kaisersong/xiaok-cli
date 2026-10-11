@@ -1,3 +1,4 @@
+import { hasDynamicWorkflowSupport } from '../shared/kswarm-health-contract.js';
 import { resolve } from 'node:path';
 
 export type KSwarmHealthDiagnosticKind =
@@ -51,7 +52,6 @@ export interface KSwarmHealthDiagnosticInput {
   } | null;
 }
 
-const WORKFLOW_PATTERN_SCHEMA_VERSION = 'kswarm_workflow_patterns_v1';
 
 export function classifyKSwarmHealth(input: KSwarmHealthDiagnosticInput): KSwarmHealthFinding[] {
   if (!input.spawnEntryExists) {
@@ -201,17 +201,6 @@ function getHealthServiceSourceHash(body: Record<string, unknown> | null): strin
   if (!service || typeof service !== 'object' || Array.isArray(service)) return null;
   const sourceHash = (service as Record<string, unknown>).sourceHash;
   return typeof sourceHash === 'string' && sourceHash.length > 0 ? sourceHash : null;
-}
-
-function hasDynamicWorkflowSupport(body: Record<string, unknown> | null): boolean {
-  const features = body?.features;
-  if (!Array.isArray(features) || !features.includes('dynamic_workflows')) return false;
-  const capabilities = body?.workflowCapabilities;
-  if (!capabilities || typeof capabilities !== 'object' || Array.isArray(capabilities)) return false;
-  const record = capabilities as Record<string, unknown>;
-  return record.schemaVersion === WORKFLOW_PATTERN_SCHEMA_VERSION
-    && record.compiledContract === true
-    && record.patternPublicView === true;
 }
 
 function severityRank(severity: KSwarmHealthSeverity): number {

@@ -2,14 +2,17 @@
 // simulated by editing boot_owners or pretending the current PID died.
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
+import {userInfo,homedir} from 'node:os';
+import {realpathSync} from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { createDesktopServices } from '../../electron/desktop-services.js';
 import { registerDesktopMultiAgentIpc, type MultiAgentIpcEvent } from '../../electron/desktop-multi-agent-ipc.js';
 import type { DesktopMultiAgentStore } from '../../electron/desktop-multi-agent-store.js';
 import type { KSwarmService } from '../../electron/kswarm-service.js';
 
-const [root, mode] = process.argv.slice(2);
+const [root, mode, accountRoot, childHome] = process.argv.slice(2);
 if (!root || !['committed-deny', 'uncommitted-deny', 'retired-receipt'].includes(mode)) throw new Error('invalid crash fixture arguments');
+if(!accountRoot||!childHome||realpathSync(userInfo().homedir)!==realpathSync(childHome)||realpathSync(homedir())!==realpathSync(childHome))throw Error('crash_fixture_account_preload_required');
 process.env.XIAOK_CONFIG_DIR = join(root, 'config');
 const kswarmService = {
   start: async () => {}, stop: async () => {}, restart: async () => {},

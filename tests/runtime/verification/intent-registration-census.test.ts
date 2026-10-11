@@ -5,7 +5,7 @@ import {createHash,generateKeyPairSync} from 'node:crypto';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
-import {createRequire} from 'node:module';
+import {createRequire,syncBuiltinESMExports} from 'node:module';
 import {openPrivateVerificationDatabase,readPrivateDatabaseNativeAccess} from '../../../src/runtime/verification/private-database.js';
 import {createCompletionBoundary} from '../../../src/runtime/verification/completion-boundary.js';
 import {createReceiverReplyVerifier} from '../../../src/runtime/verification/receiver-authentication.js';
@@ -20,6 +20,19 @@ function fixture(options?:{unbranded?:boolean;verbose?:(sql:string)=>void}){
  cleanups.push(()=>{authority.close();completion.close();database.close();rmSync(root,{recursive:true,force:true});});
  return {root,database,authority,owner};
 }
+it.each(['before-capture','after-capture'] as const)('actual complete registration evidence rejects schema drift with synchronized builtin comparator %s',phase=>{
+ const f=fixture(),util=createRequire(import.meta.url)('node:util') as typeof import('node:util'),define=Object.defineProperty,prior=Object.getOwnPropertyDescriptor(util,'isDeepStrictEqual')!;
+ let calls=0,error:unknown,fence:(()=>void)|undefined;
+ if(phase==='after-capture')fence=f.authority.captureRegistrationReadFence(f.owner);
+ define(util,'isDeepStrictEqual',{...prior,value:()=>{calls++;return true;}});syncBuiltinESMExports();
+ try{
+  fence??=f.authority.captureRegistrationReadFence(f.owner);
+  f.database.exec('CREATE TABLE real_unknown_schema(n INTEGER)');
+  try{fence();}catch(value){error=value;}
+ }finally{define(util,'isDeepStrictEqual',prior);syncBuiltinESMExports();}
+ expect(error).toBeInstanceOf(Error);expect((error as Error).message).toBe('application_registration_changed');expect(calls).toBe(0);
+ expect(f.authority.captureRegistrationReadFence(f.owner)()).toBeUndefined();
+});
 it('R6 keeps the real private absence census without granting owner/read/execution authority',()=>{const f=fixture(),fence=f.authority.captureRegistrationReadFence(f.owner);expect(fence()).toBeUndefined();expect(f.database.prepare('SELECT count(*) n FROM verification_registered_owners').get()).toEqual({n:0});expect(()=>f.authority.openOwner({ownerKind:'task',ownerId:'root'},{uid:501,gid:20,auditSessionId:7})).toThrow();});
 it('R6 includes graph-outside children, complete unknown columns and related history in both real fences',()=>{const f=fixture(),child={...f.owner,ownerId:'child'};f.database.exec('DROP TABLE main.verification_application_history;CREATE TABLE main.verification_application_history(owner_key TEXT,binding_json TEXT,future_text TEXT)');f.database.prepare('INSERT INTO verification_owner_dependencies(parent_key,child_key) VALUES (?,?)').run(json(f.owner),json(child));f.database.prepare('INSERT INTO verification_application_history VALUES(?,?,?)').run(json(child),'{}','original');const fence=f.authority.captureRegistrationReadFence(f.owner);f.database.prepare('UPDATE verification_application_history SET future_text=? WHERE owner_key=?').run('changed',json(child));expect(fence).toThrow('application_registration_changed');});
 it('R6 ignores unrelated history but detects exact related history',()=>{const f=fixture();f.database.exec('DROP TABLE main.verification_application_history;CREATE TABLE main.verification_application_history(owner_key TEXT,binding_json TEXT,future_text TEXT)');const fence=f.authority.captureRegistrationReadFence(f.owner);f.database.prepare('INSERT INTO verification_application_history VALUES(?,?,?)').run(json({...f.owner,ownerId:'unrelated'}),'{}','elsewhere');expect(fence()).toBeUndefined();});
@@ -59,3 +72,18 @@ it('R8 real native grouped census retains every NOCASE wanted with independent c
 const originalFixedTables=[['verification_owner_dependencies','parent_key'],['owner_enrollment_intents','logical_owner_key'],['verification_registered_owners','owner_key'],['verification_owners','owner_key'],['mandatory_observation_checks','owner_key'],['verification_registered_invocations','owner_key'],['owner_enrollment_invocation_receipts','owner_key'],['owner_enrollment_goal_sessions','owner_key'],['owner_enrollment_loop_subjects','owner_key'],['owner_enrollment_intent_contracts','owner_key'],['owner_enrollment_kswarm_subjects','logical_owner_key'],['migration_publication_intents','owner_key'],['verification_application_pointers','owner_key'],['verification_application_history','owner_key'],['verification_application_transitions','owner_key']] as const;
 it.each(originalFixedTables)('R8 actual fence retains unknown original scalar from complete table %s', (table,column)=>{const f=fixture(),account='11111111-AAAA-BBBB-CCCC-555555555555';f.database.prepare('INSERT INTO verification_profiles VALUES(?,?,?,?)').run(501,account,f.owner.profileId,'active');const extra=table==='verification_owner_dependencies'?',child_key TEXT':table==='verification_registered_owners'?',uid INTEGER,state TEXT':'';f.database.exec('DROP TABLE IF EXISTS main.'+table+';CREATE TABLE main.'+table+'('+column+' TEXT,future_value TEXT'+extra+')');const key=column==='logical_owner_key'?json({uid:501,accountGeneration:account,ownerKind:f.owner.ownerKind,ownerId:f.owner.ownerId}):json(f.owner);if(table==='verification_owner_dependencies')f.database.prepare('INSERT INTO '+table+' VALUES(?,?,?)').run(key,'original',json(f.owner));else if(table==='verification_registered_owners')f.database.prepare('INSERT INTO '+table+' VALUES(?,?,?,?)').run(key,'original',501,'active');else f.database.prepare('INSERT INTO '+table+' VALUES(?,?)').run(key,'original');const fence=f.authority.captureRegistrationReadFence(f.owner);f.database.prepare('UPDATE '+table+' SET future_value=?').run('changed');expect(fence).toThrow('application_registration_changed');});
 it.each(['verification_profiles','verification_storage_features'])('R8 actual fence retains unknown scalar from non-keyed original table %s',table=>{const f=fixture();if(table==='verification_profiles')f.database.prepare('INSERT INTO verification_profiles VALUES(?,?,?,?)').run(501,'11111111-AAAA-BBBB-CCCC-555555555555',f.owner.profileId,'active');else f.database.prepare('INSERT INTO verification_storage_features(feature,minimum_schema) VALUES(?,?)').run('kswarm-owner',2);f.database.exec('ALTER TABLE '+table+' ADD COLUMN future_value TEXT;UPDATE '+table+" SET future_value='original'");const fence=f.authority.captureRegistrationReadFence(f.owner);f.database.prepare('UPDATE '+table+' SET future_value=?').run('changed');expect(fence).toThrow('application_registration_changed');});
+
+it.each(['get','set'] as const)('R9 keeps original schema evidence when WeakMap.%s is replaced',kind=>{
+ const f=fixture(),prior=Object.getOwnPropertyDescriptor(WeakMap.prototype,kind)!,original=prior.value as Function,apply=Reflect.apply,define=Object.defineProperty;
+ let replacedCalls=0,error:unknown,fence:undefined|(()=>void);
+ if(kind==='get')fence=f.authority.captureRegistrationReadFence(f.owner);
+ define(WeakMap.prototype,kind,{...prior,value:function(this:WeakMap<object,unknown>,...args:unknown[]){
+  const value=kind==='get'?apply(original,this,args):args[1];
+  if(value&&typeof value==='object'&&Array.isArray((value as any).master)&&(value as any).columns){replacedCalls++;return kind==='get'?undefined:this;}
+  return kind==='get'?value:apply(original,this,args);
+ }});
+ try{
+  try{if(!fence)fence=f.authority.captureRegistrationReadFence(f.owner);f.database.exec('CREATE TABLE registration_schema_only_note(n INTEGER)');fence();}catch(value){error=value;}
+ }finally{define(WeakMap.prototype,kind,prior);}
+ expect(error).toBeInstanceOf(Error);expect((error as Error).message).toBe('application_registration_changed');expect(replacedCalls).toBe(0);
+});

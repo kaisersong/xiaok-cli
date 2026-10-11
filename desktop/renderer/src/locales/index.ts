@@ -83,6 +83,11 @@ export interface LocaleStrings {
   collaborationRoomMentionAll: string;
   collaborationRoomsTitle: string;
   collaborationRoomsSubtitle: string;
+  collaborationRoomGoalLabel: string;
+  collaborationRoomGoalPlaceholder: string;
+  collaborationRoomAiDefaultsHint: string;
+  collaborationRoomAdvanced: string;
+  collaborationRoomAiCreating: string;
   collaborationRoomsCreate: string;
   collaborationRoomsEmptyTitle: string;
   collaborationRoomMore: string;
@@ -1251,6 +1256,12 @@ export interface LocaleStrings {
     taskConcurrencyMin: string;
     taskConcurrencyMax: string;
     // general pane - stage debug
+    configLoadFailed: string;
+    configSaveFailed: string;
+    configOperationUnknown: string;
+    modelConfigOperationUnknown: string;
+    modelConfigInputInvalid: string;
+    modelConfigUnavailable: string;
     stageDebugTitle: string;
     stageDebugDesc: string;
     stageDebugOn: string;
@@ -1816,6 +1827,10 @@ export interface LocaleStrings {
     aboutDownloadedVersion: (version: string) => string;
     aboutDownloadProgress: (progress: number) => string;
     aboutVersionAvailable: (version: string) => string;
+    updaterProjectionUnavailable: string;
+    updaterOperationUnknown: string;
+    updaterInputInvalid: string;
+    updaterRefreshData: string;
     aboutChecking: string;
     aboutInstallRestart: string;
     aboutInstallProgress: string;
@@ -1912,6 +1927,11 @@ export interface LocaleStrings {
     // connectors pane
     connectorSaveFailedNoDesktop: string;
     connectorConfigParseError: string;
+    connectorProjectionUnavailable: string;
+    connectorOperationUnknown: string;
+    connectorInputInvalid: string;
+    connectorRefreshData: string;
+    connectorStatusDecryptFailed: string;
     connectorLoadFailed: string;
     networkTools: string;
     networkToolsDesc: string;
@@ -1992,6 +2012,10 @@ export interface LocaleStrings {
     pluginsInstall: string;
     pluginsInstallFailed: string;
     pluginsRestartHint: string;
+    pluginsCatalogUnavailable: string;
+    pluginsCatalogRetry: string;
+    pluginsCatalogLoading: string;
+    pluginsCatalogToolCount: (count: number) => string;
     // LocalMemoryStatsCard
     relativeTimeJustNow: string;
     relativeTimeMinutesAgo: (n: number) => string;
@@ -2382,6 +2406,10 @@ export interface LocaleStrings {
   projectsPageOffline: string;
 
   // projects - knowledge and rules tab
+  projectsPrinciplesOperationUnknown: string;
+  projectsPrinciplesInputInvalid: string;
+  projectsPrinciplesProjectionUnavailable: string;
+  projectsPrinciplesRefresh: string;
   projectsPrinciplesTab: string;
   projectsPrinciplesAdd: string;
   projectsPrinciplesImportMemory: string;
@@ -2636,6 +2664,7 @@ export interface LocaleStrings {
 
   // welcome page
   welcome: {
+    brandName: string;
     greetingSuffix: string;
     inputPlaceholder: string;
     goalQuickPrompt: string;
@@ -2662,6 +2691,8 @@ export interface LocaleStrings {
   };
 
   assistant: {
+    operationUnknown: string;
+    refreshStatus: string;
     title: string;
     morningScheduleName: string;
     eveningScheduleName: string;
@@ -2735,6 +2766,11 @@ export interface LocaleStrings {
 
   // knowledge page
   knowledge: {
+    projectionUnavailable: string;
+    operationUnknown: string;
+    inputInvalid: string;
+    refreshData: string;
+
     loading: string;
     pageTitle: string;
     emptyTitle: string;
@@ -2785,6 +2821,10 @@ export interface LocaleStrings {
     meetingRecorderFinishEditing: string;
     meetingRecorderProcessingTitle: string;
     meetingRecorderProcessingHint: string;
+    meetingRecorderInputInvalid: string;
+    meetingRecorderOperationUnknown: string;
+    meetingRecorderSavedFollowupFailed: string;
+    meetingRecorderNewDraftUnsaved: string;
     meetingRecorderCloseBlocked: string;
     meetingSettings: string;
     meetingControlPanelTitle: string;
@@ -2932,6 +2972,11 @@ export interface LocaleStrings {
   automationsConstraintsNewBadge: string;
 
   // scheduled page
+  scheduledProjectionUnavailable: string;
+  scheduledOperationUnknown: string;
+  scheduledInputInvalid: string;
+  scheduledRefreshData: string;
+  scheduledMutationNotApplied: string;
   scheduledTitle: string;
   scheduledSubtitle: string;
   scheduledNew: string;
@@ -3000,6 +3045,15 @@ export interface LocaleStrings {
   scheduledLinkedLoop: string;
 
   // chatView
+  conversationActivity: {
+    submitInput: string; declineInput: string; cancelWork: string; cancelRequested: string; unsupportedInput: string;
+    title: string; stopped: string; unavailable: string; projectClosed: string; historyGap: string; details: string; lastUpdate: string; lastProgress: string; nextReport: string;
+    frequency: string; normal: string; criticalOnly: string; quiet: string; stop: string; stopHint: string; noProgress: string; error: string;
+    report: (state: string, time: string) => string;
+    unread: (count: number) => string;
+    sources: Record<'kswarm' | 'task_host' | 'agent_group' | 'mcp', string>;
+    states: Record<'accepted' | 'queued' | 'running' | 'blocked' | 'input_required' | 'completed' | 'failed' | 'cancelled', string>;
+  };
   chatView: {
     executionSyncing: string;
     executionDisconnected: string;
@@ -3121,6 +3175,8 @@ export interface LocaleStrings {
   chatShell: {
     attachmentLabel: string;
     cuUnavailable: string;
+    historyUnavailable: (taskIds: string) => string;
+    historyRecovered: (taskId: string) => string;
     taskCreateFailed: string;
     goalAttachmentQuerying: string;
     goalAttachmentUnknown: string;
@@ -3348,6 +3404,9 @@ export interface LocaleStrings {
   automationsViewLoopDetail: string;
   automationsViewScheduleDetail: string;
   automationsClearRecord: string;
+  loopOperationResultUnknown: string;
+  loopProjectionUnavailable: string;
+  loopInputInvalid: string;
   automationsClearConfirm: (title: string) => string;
 
   // user loop starter templates

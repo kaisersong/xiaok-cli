@@ -14,6 +14,11 @@ export function createSessionExecutionContext(claims: SessionExecutionClaims): S
   const context = Object.freeze({ opaqueSessionExecutionContext: true as const });
   contexts.set(context, Object.freeze({ ...claims })); return context;
 }
+/** Read-only host identity check. This does not create an execution lease. */
+export function assertSessionExecutionContext(context: SessionExecutionContext, expected: SessionExecutionClaims): void {
+  const claims = contexts.get(context);
+  if (!claims || claims.requestSource !== expected.requestSource || claims.ownerId !== expected.ownerId || claims.scopeId !== expected.scopeId) throw Error('invalid_session_execution_context');
+}
 export type SessionExecutionKind = 'compound' | 'direct-mutation' | 'compaction' | 'recovery';
 export interface SessionExecutionLease {
   assertCurrent(): void;

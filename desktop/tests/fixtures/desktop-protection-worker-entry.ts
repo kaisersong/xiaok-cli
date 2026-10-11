@@ -31,6 +31,16 @@ export function preserveOriginalModuleUrls(contents: string, file: string) {
   }
   return { contents: transformed, originalUrl, replacements: spans.length };
 }
+const compilerInputAuditScript = String.raw`import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { syncBuiltinESMExports } from 'node:module';
+const original=fs.readFileSync,first=new Map();
+const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
+fs.readFileSync=function(file,...args){const value=original.call(this,file,...args);if(typeof file==='string'&&path.isAbsolute(file)&&!first.has(file))first.set(file,digest(Buffer.isBuffer(value)?value:Buffer.from(value)));return value;};syncBuiltinESMExports();
+process.once('exit',()=>{const configIndex=process.argv.indexOf('--project'),config=configIndex>=0?process.argv[configIndex+1]:undefined;if(!config)return;const drift=[];for(const [file,hash]of first)if(fs.existsSync(file)&&digest(original.call(fs,file))!==hash)drift.push(file);fs.writeFileSync(path.join(path.dirname(config),'compiler-input-audit.json'),JSON.stringify({firstReads:Object.fromEntries(first),drift,exitCode:process.exitCode??0},null,2)+'\n',{flag:'wx'});});
+`;
+
 function sourceTreeHash(): string {
   const digest = createHash('sha256');
   const visit = (directory: string): void => {
@@ -54,16 +64,26 @@ export async function compileProtectionWorkerEntry() {
   const sourceSha = hash(source);
   const treeSha = sourceTreeHash();
   try {
+    const rootConfig = join(projectRoot, 'tsconfig.json');
+    const rootConfigSha = hash(rootConfig);
+    const rootConfigRead = ts.readConfigFile(rootConfig, ts.sys.readFile);
+    if (rootConfigRead.error) throw Error('worker_root_config_invalid');
+    const parsedRoot = ts.parseJsonConfigFileContent(rootConfigRead.config, ts.sys, projectRoot);
+    if (parsedRoot.errors.length) throw Error('worker_root_config_invalid');
+    const roots = [source, join(projectRoot, 'src/runtime/task-host/protection-read-worker-body.ts'),
+      join(projectRoot, 'src/runtime/task-host/protected-observation-store.ts'), ...parsedRoot.fileNames.filter(file => file.endsWith('.d.ts'))];
     const config = join(root, 'tsconfig.json');
     writeFileSync(config, JSON.stringify({
       extends: join(projectRoot, 'tsconfig.json'),
       compilerOptions: { rootDir: join(projectRoot, 'src'), outDir: root,
         incremental: false, tsBuildInfoFile: join(root, '.tsbuildinfo'),
-        declaration: false, sourceMap: false, noEmit: false },
-      include: [join(projectRoot, 'src/**/*.ts')],
+        declaration: false, sourceMap: false, noEmit: false, noCheck: false },
+      include: [], files: roots,
     }));
+    const inputPreload = join(root, 'compiler-input-preload.mjs');
+    writeFileSync(inputPreload, compilerInputAuditScript);
     await promisify(execFile)(process.execPath,
-      [resolve(projectRoot, 'node_modules/typescript/bin/tsc'), '--project', config],
+      ['--import', pathToFileURL(inputPreload).href, resolve(projectRoot, 'node_modules/typescript/bin/tsc'), '--project', config],
       { cwd: projectRoot, maxBuffer: 2 * 1024 * 1024 });
     writeFileSync(join(root, 'package.json'), readFileSync(join(projectRoot, 'package.json')));
     const storeEntry = join(root, 'runtime/task-host/protected-observation-store.js');
@@ -88,9 +108,18 @@ export async function compileProtectionWorkerEntry() {
       replacements: moduleUrls.get(file)!.replacements }));
     renameSync(bundle, storeEntry);
     const output = join(root, 'runtime/task-host/protection-read-worker.js');
-    if (!existsSync(output) || !existsSync(join(root, 'runtime/task-host/protected-observation-store.js'))
-      || hash(source) !== sourceSha || sourceTreeHash() !== treeSha) throw Error('fresh_protection_worker_compilation_changed');
-    return { root, output, sourceSha, treeSha, emittedSha: hash(output), audit };
+    const compilerAudit = JSON.parse(readFileSync(join(root, 'compiler-input-audit.json'), 'utf8')) as { firstReads: Record<string, string>; drift: string[]; exitCode: number };
+    const readDrift = Object.entries(compilerAudit.firstReads).filter(([file, sha]) => !existsSync(file) || hash(file) !== sha).map(([file]) => file);
+    if (compilerAudit.exitCode !== 0 || compilerAudit.drift.length || readDrift.length) throw Error('fresh_protection_worker_input_changed');
+    const emittedOutputs: Record<string, string> = {};
+    const captureOutputs = (directory: string): void => { for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = join(directory, entry.name); if (entry.isDirectory()) captureOutputs(file); else if (file.endsWith('.js')) emittedOutputs[file] = hash(file);
+    } }; captureOutputs(root);
+    if (!existsSync(output) || !existsSync(join(root, 'runtime/task-host/protection-read-worker-body.js'))
+      || !existsSync(join(root, 'runtime/task-host/protected-observation-store.js'))
+      || hash(source) !== sourceSha || sourceTreeHash() !== treeSha || hash(rootConfig) !== rootConfigSha) throw Error('fresh_protection_worker_compilation_changed');
+    return { root, output, sourceSha, treeSha, emittedSha: hash(output), audit,
+      compilation: { roots, noCheck: false as const, firstReadHashes: compilerAudit.firstReads, readDrift, emittedOutputs } };
   } catch (error) {
     rmSync(root, { recursive: true, force: true, maxRetries: 3 });
     throw error;

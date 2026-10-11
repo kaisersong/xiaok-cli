@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {isDeepStrictEqual} from 'node:util';
+import {isDeepStrictEqual as initialIsDeepStrictEqual} from 'node:util';
+const isDeepStrictEqual=initialIsDeepStrictEqual;
 import {basename,dirname,isAbsolute,join,resolve,relative,sep} from 'node:path';
 import {readCapturedFileSession,parseFileSessionSnapshot,parseSessionDeletionJournal} from '../../ai/runtime/session-store/file-store.js';
 import {captureSessionAlias,parseSessionAliasRows,type SessionAliasBinding,type SessionAliasRow} from '../../ai/runtime/session-store/aliases.js';

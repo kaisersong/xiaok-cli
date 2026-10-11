@@ -1,3 +1,4 @@
+import {RoomInlineCard,type RoomCardData} from './collaboration/RoomInlineCard';
 import { type ReactNode, useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import remarkGfm from 'remark-gfm';
 import { BookOpen, ChevronDown, ExternalLink, PencilLine } from 'lucide-react';
@@ -14,7 +15,7 @@ import { api } from '../api';
 import { getDesktopApi } from '../shared/desktop';
 import { getDesktopDocumentMimeType } from '../shared/document-formats';
 import { useLocale } from '../contexts/LocaleContext';
-import { fileBasename } from '../lib/file-path';
+import { fileBasename, filePathIdentity, normalizeClipboardFilePath } from '../lib/file-path';
 import type { ThreadRecord } from '../api/types';
 import type { ArtifactSummary, NeedsUserQuestion, TaskResult } from '../../../shared/task-types';
 import { A2UI_MIME_TYPE, isA2UIMimeType } from '../../../../src/a2ui/index.js';
@@ -187,12 +188,13 @@ export interface ComputerUseActionData {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'computer_use_action' | 'result_card';
+  role: 'user' | 'assistant' | 'progress' | 'tool_steps' | 'project_card' | 'room_card' | 'computer_use_action' | 'result_card';
   content: string;
   stage?: string;
   steps?: ToolStep[];
   stepsLive?: boolean;
   projectData?: ProjectCardData;
+  roomData?: RoomCardData;
   computerUseAction?: ComputerUseActionData;
   result?: TaskResult | null;
   generatedFiles?: GeneratedFile[];
@@ -261,6 +263,7 @@ export interface ArtifactOpenOptions {
 interface ChatViewProps {
   executionConnection?: MultiAgentConnection | null;
   approvalContent?: ReactNode;
+  activityContent?: ReactNode;
   pendingApprovalCount?: number;
   thread: ThreadRecord;
   messages: ChatMessage[];
@@ -286,7 +289,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({
-  thread, messages, streamingText, status, currentQuestion, result, approvalContent, pendingApprovalCount = 0,
+  thread, messages, streamingText, status, currentQuestion, result, approvalContent, activityContent, pendingApprovalCount = 0,
   executionConnection,
   generatedFiles,
   prompt, onPromptChange, onSubmit, onQueue, queuedText, onCancelQueue, onAnswer, onCancel,
@@ -502,6 +505,8 @@ export function ChatView({
                     memberCount={msg.projectData.memberCount}
                     executionMode={msg.projectData.executionMode}
                   />
+                ) : msg.role === 'room_card' && msg.roomData ? (
+                  <RoomInlineCard {...msg.roomData} />
                 ) : msg.role === 'computer_use_action' && msg.computerUseAction ? (
                   <div className="max-w-[663px] rounded-lg border border-[var(--c-border)] bg-[var(--c-bg-card)] p-4 text-sm text-[var(--c-text-primary)] shadow-sm">
                     <div className="font-medium">{t.chatView.needsComputerUse}</div>
@@ -597,6 +602,7 @@ export function ChatView({
               </div>
             )}
 
+            {activityContent}
             {approvalContent}
 
             {/* Question */}
@@ -779,6 +785,20 @@ function ArtifactOpenButton({
   );
 }
 
+/** Display each output file once even if multiple artifact observations recorded it. */
+function uniqueOutputFiles<T extends { filePath?: string; artifactId?: string }>(files: T[]): T[] {
+  const seen = new Set<string>();
+  return files.filter(file => {
+    const identity = file.filePath
+      ? `path:${filePathIdentity(normalizeClipboardFilePath(file.filePath))}`
+      : file.artifactId ? `artifact:${file.artifactId}` : undefined;
+    if (!identity) return true;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
 function ResultCard({
   result,
   generatedFiles,
@@ -793,8 +813,10 @@ function ResultCard({
   const [kbSaved, setKbSaved] = useState(false);
   const { t } = useLocale();
   const hasSummary = Boolean(result?.summary?.trim());
-  const hasArtifacts = Boolean(result?.artifacts && result.artifacts.length > 0);
-  if (!hasSummary && !hasArtifacts && generatedFiles.length === 0) return null;
+  const artifacts = uniqueOutputFiles(result?.artifacts ?? []);
+  const outputFiles = uniqueOutputFiles(generatedFiles);
+  const hasArtifacts = artifacts.length > 0;
+  if (!hasSummary && !hasArtifacts && outputFiles.length === 0) return null;
 
   const handleSaveToKb = async () => {
     if (!result?.summary) return;
@@ -831,9 +853,9 @@ function ResultCard({
       {hasSummary && result ? (
         <MarkdownRenderer content={result.summary} />
       ) : null}
-      {result?.artifacts && result.artifacts.length > 0 && (
+      {hasArtifacts && (
         <div className="mt-3 flex flex-col gap-2">
-          {result.artifacts.map(a => {
+          {artifacts.map(a => {
             if (isA2uiArtifact(a)) {
               return (
                 <A2uiResultArtifactPreview
@@ -892,9 +914,9 @@ function ResultCard({
           })}
         </div>
       )}
-      {(!result?.artifacts || result.artifacts.length === 0) && generatedFiles.length > 0 && (
+      {!hasArtifacts && outputFiles.length > 0 && (
         <div className="mt-3 flex flex-col gap-2" data-testid="generated-files-list">
-          {generatedFiles.map(f => {
+          {outputFiles.map(f => {
             const ext = f.name?.split('.').pop()?.toUpperCase() || 'FILE';
             const displayName = fileBasename(f.name) || f.name;
             const info = { artifactId: f.filePath, title: f.name, kind: 'other', filePath: f.filePath };

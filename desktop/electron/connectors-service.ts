@@ -1,3 +1,5 @@
+import {assertConnectorsUser,captureConnectorsInput,captureConnectorsKind,captureConnectorsSnapshot} from './connectors-authority.js';
+import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
 import { ConnectorRegistry } from '../../src/ai/tools/connectors/registry.js';
 import {
   cloneDefaultConnectorsConfig,
@@ -44,22 +46,27 @@ export class ConnectorsService {
     this.bindTools(this.toolRegistry);
   }
 
-  getConfig(): ConnectorsConfigSnapshot {
+  getConfig(request?: ConnectorsMutationRequest): ConnectorsConfigSnapshot {
+    assertConnectorsUser(request);
     return this.snapshot();
   }
 
-  async setConfig(input: unknown): Promise<ConnectorsConfigSnapshot> {
-    const persisted = await this.store.save(input);
+  async setConfig(input: unknown, request?: ConnectorsMutationRequest): Promise<ConnectorsConfigSnapshot> {
+    const actor = assertConnectorsUser(request);
+    const snapshot = captureConnectorsInput(input);
+    const persisted = await this.store.save(snapshot, actor);
     this.registry.apply(persisted);
     this.loadStatus = 'ok';
-    return this.snapshot();
+    return this.snapshot('connectors_operation_unknown');
   }
 
   listProviders(): ProviderRuntime[] {
     return this.registry.listProviderRuntimes();
   }
 
-  async testProvider(kind: 'search' | 'fetch'): Promise<ConnectorTestResult> {
+  async testProvider(kind: 'search' | 'fetch', request?: ConnectorsMutationRequest): Promise<ConnectorTestResult> {
+    assertConnectorsUser(request);
+    kind = captureConnectorsKind(kind);
     const start = Date.now();
     try {
       if (kind === 'search') {
@@ -91,12 +98,12 @@ export class ConnectorsService {
     }
   }
 
-  private snapshot(): ConnectorsConfigSnapshot {
-    return {
+  private snapshot(errorCode = 'connectors_projection_unavailable'): ConnectorsConfigSnapshot {
+    return captureConnectorsSnapshot({
       config: this.registry.getConfig(),
       loadStatus: this.loadStatus,
       providers: this.registry.listProviderRuntimes(),
-    };
+    }, errorCode);
   }
 
   /** Each invocation owns its wrappers; provider configuration stays main-owned. */

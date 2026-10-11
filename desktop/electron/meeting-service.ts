@@ -135,7 +135,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
       summaryProvider: input.summaryProvider,
       summaryProviderHash: input.consentSnapshot?.configHash ?? '',
       startedAt: now(),
-    });
+    }, input.requestSource);
 
     let transcription: MeetingTranscriptionResult;
     try {
@@ -150,7 +150,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         status: 'failed',
         failureReason: error instanceof Error ? error.message : 'transcription_failed',
         endedAt: now(),
-      }) ?? meeting;
+      }, input.requestSource) ?? meeting;
       return {
         ok: false,
         error: 'transcription_failed',
@@ -158,7 +158,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         reason: failed.failureReason,
       };
     }
-    deps.store.updateMeeting(meeting.id, { status: 'summarizing' });
+    deps.store.updateMeeting(meeting.id, { status: 'summarizing' }, input.requestSource);
 
     const summaryResult = await deps.summaryService.summarizeMeeting({
       transcript: transcription.text,
@@ -172,7 +172,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         status: 'summary_blocked_by_privacy',
         failureReason: summaryResult.reason,
         summaryProviderHash: summaryResult.binding.configHash,
-      }) ?? meeting;
+      }, input.requestSource) ?? meeting;
       return {
         ok: false,
         error: 'summary_blocked_by_privacy',
@@ -199,14 +199,14 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         summary: summaryResult.summary,
       },
     }, input.requestSource);
-    const chunks = deps.store.insertChunks(source.id, buildMeetingChunks(transcription.segments, summaryResult.summary));
+    const chunks = deps.store.insertChunks(source.id, buildMeetingChunks(transcription.segments, summaryResult.summary), input.requestSource);
     const saved = deps.store.updateMeeting(meeting.id, {
       sourceId: source.id,
       status: 'saved',
       title: source.title,
       summaryProviderHash: input.consentSnapshot?.configHash ?? '',
       endedAt: completedAt,
-    }) ?? meeting;
+    }, input.requestSource) ?? meeting;
 
     return { ok: true, meeting: saved, source, chunks, summary: summaryResult.summary };
   }
@@ -291,7 +291,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
       summaryProvider: 'manual-transcript',
       startedAt: now(),
       endedAt: now(),
-    });
+    }, input.requestSource);
 
     const source = deps.store.addSource({
       collectionId: input.collectionId,
@@ -314,8 +314,8 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         end: audioInfo.durationSeconds,
         text: transcript,
       }],
-    ));
-    const saved = deps.store.updateMeeting(meeting.id, { sourceId: source.id }) ?? meeting;
+    ), input.requestSource);
+    const saved = deps.store.updateMeeting(meeting.id, { sourceId: source.id }, input.requestSource) ?? meeting;
     return { ok: true, meeting: saved, source, chunks };
   }
 
@@ -342,7 +342,7 @@ export function createMeetingService(deps: CreateMeetingServiceDeps): MeetingSer
         deps.store.updateMeeting(meeting.id, {
           status: nextStatus,
           failureReason: failureReason ?? meeting.failureReason,
-        });
+        }, 'scheduler');
         changes.push({ meetingId: meeting.id, from: meeting.status, to: nextStatus });
       }
     }

@@ -1,3 +1,5 @@
+import {types} from 'node:util';
+import {isReadonlySandboxEnforcer} from './enforcer.js';
 import {inheritBuiltinToolIdentity} from '../../ai/tools/native-tool-identity.js';
 import type { Tool, ToolExecutionContext } from '../../types.js';
 import type { createSandboxEnforcer } from './enforcer.js';
@@ -52,7 +54,12 @@ export function applySandboxToTools(tools:Tool[],enforcer?:SandboxEnforcer,optio
    context?.signal?.throwIfAborted();context?.assertPermissionApproval?.();
    return tool.execute(input,context);
   }};
-  inheritBuiltinToolIdentity(tool,wrapped);
+  inheritBuiltinToolIdentity(tool,wrapped,()=>{
+   if(!isReadonlySandboxEnforcer(enforcer)||types.isProxy(options)||![Object.prototype,null].includes(Object.getPrototypeOf(options)))return false;
+   const callback=Object.getOwnPropertyDescriptor(options,'onSandboxDenied');
+   if(callback)return 'value' in callback&&callback.value===undefined;
+   return Object.getOwnPropertyDescriptor(Object.prototype,'onSandboxDenied')===undefined;
+  });
   compoundPreparations.set(wrapped,{execute:wrapped.execute,prepare:(input,context)=>prepare(input,context,true)});
   return wrapped;
  });

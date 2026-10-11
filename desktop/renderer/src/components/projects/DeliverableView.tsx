@@ -7,7 +7,8 @@ import { FileText, ExternalLink } from 'lucide-react';
 import type { KSwarmProject, KSwarmArtifact, KSwarmTask } from '../../hooks/useKSwarmClient';
 import { useLocale } from '../../contexts/LocaleContext';
 import { ArtifactPreviewModal } from './ArtifactPreviewModal';
-import { artifactDisplayName, formatArtifactGeneratedTime, resolveArtifactUrl } from './artifactActions';
+import { artifactDisplayName, coerceArtifactTime, formatArtifactGeneratedTime, resolveArtifactUrl } from './artifactActions';
+import { filePathIdentity, normalizeClipboardFilePath } from '../../lib/file-path';
 
 interface DeliverableViewProps {
   project: KSwarmProject;
@@ -131,9 +132,14 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
       ? rawArtifacts
           .map((item: unknown) => normalizeDeliverableFile(item, project.id))
           .filter((item): item is KSwarmArtifact => item !== null)
+          .sort((a, b) => Number(artifactDisplayName(a) === 'search-evidence.json') - Number(artifactDisplayName(b) === 'search-evidence.json')
+            || (coerceArtifactTime(b.generatedAt) ?? coerceArtifactTime(b.updatedAt) ?? 0) - (coerceArtifactTime(a.generatedAt) ?? coerceArtifactTime(a.updatedAt) ?? 0))
       : [];
     if (artifacts.length > 0) taskOutputs.push({ task, artifacts });
   }
+
+  taskOutputs.reverse();
+  taskOutputs.sort((a, b) => taskOutputTime(b) - taskOutputTime(a));
 
   const deliverables = project.deliverables || [];
   const rawDeliverable = project.deliverable;
@@ -161,6 +167,23 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
   return (
     <div className="p-6 space-y-6">
       {/* Project deliverable text */}
+      {/* Workspace files not yet linked to a deliverable/task */}
+      {projectFiles.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">{t.projectsDeliverableProjectFiles}</h3>
+          <div className="flex flex-col gap-2">
+            {projectFiles.map((artifact, i) => (
+              <ArtifactCard
+                key={`${artifact.url || artifact.path || artifact.filename || artifact.name || 'workspace'}-${i}`}
+                artifact={artifact}
+                taskTitle={t.projectsDeliverableProjectWorkspace}
+                onPreview={setPreviewArtifact}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {deliverable && (
         <div className="rounded-lg border-[0.5px] border-[var(--c-border-subtle)] bg-[var(--c-bg-card)] p-4">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)] mb-3">{t.projectsDeliverableTitle}</h3>
@@ -193,23 +216,6 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
         </div>
       )}
 
-      {/* Workspace files not yet linked to a deliverable/task */}
-      {projectFiles.length > 0 && (
-        <div>
-          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--c-text-muted)]">{t.projectsDeliverableProjectFiles}</h3>
-          <div className="flex flex-col gap-2">
-            {projectFiles.map((artifact, i) => (
-              <ArtifactCard
-                key={`${artifact.url || artifact.path || artifact.filename || artifact.name || 'workspace'}-${i}`}
-                artifact={artifact}
-                taskTitle={t.projectsDeliverableProjectWorkspace}
-                onPreview={setPreviewArtifact}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Task output summaries */}
       {taskOutputs.length > 0 && (
         <div>
@@ -225,7 +231,7 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
                     {task.assignedAgent && <span className="text-[10px] text-[var(--c-text-muted)]">@{task.assignedAgent}</span>}
                   </div>
                   {typeof task.result === 'object' && task.result !== null && task.result.summary && (
-                    <p className="mt-1.5 text-[11px] text-[var(--c-text-tertiary)] pl-4">{task.result.summary}</p>
+                    <p className="mt-1.5 text-[11px] text-[var(--c-text-tertiary)] pl-4 line-clamp-2">{task.result.summary}</p>
                   )}
                 </div>
                 {/* Artifacts */}
@@ -241,6 +247,7 @@ export function DeliverableView({ project, tasks: propTasks, workspaceArtifacts 
           </div>
         </div>
       )}
+
       {previewArtifact && (
         <ArtifactPreviewModal artifact={previewArtifact} onClose={() => setPreviewArtifact(null)} />
       )}
@@ -287,23 +294,18 @@ function addArtifactKeys(target: Set<string>, artifact: KSwarmArtifact) {
 }
 
 function getArtifactKeys(artifact: KSwarmArtifact): string[] {
-  const rawValues = [
-    artifact.filename,
-    artifact.name,
-    artifact.relativePath,
-    artifact.path,
-    artifact.url,
-  ];
-  const keys = new Set<string>();
-  for (const value of rawValues) {
-    if (!value) continue;
-    const raw = String(value).trim();
-    if (!raw) continue;
-    keys.add(raw);
-    const name = basename(raw);
-    if (name) keys.add(name);
+  const keys = artifact.path ? [`path:${filePathIdentity(normalizeClipboardFilePath(artifact.path))}`] : [];
+  const url = resolveArtifactUrl(artifact);
+  if (url) {
+    try { keys.push(decodeURIComponent(url)); } catch { keys.push(url); }
   }
-  return [...keys];
+  return keys;
+}
+
+function taskOutputTime(output: { task: KSwarmTask; artifacts: KSwarmArtifact[] }): number {
+  const artifactTime = Math.max(0, ...output.artifacts.map(artifact => coerceArtifactTime(artifact.generatedAt) ?? coerceArtifactTime(artifact.updatedAt) ?? 0));
+  return coerceArtifactTime(output.task.completedAt) ?? coerceArtifactTime(output.task.updatedAt)
+    ?? (artifactTime || coerceArtifactTime(output.task.createdAt) || 0);
 }
 
 function isGeneratedPlanArtifact(artifact: KSwarmArtifact): boolean {
@@ -347,7 +349,7 @@ function normalizeDeliverableFile(item: unknown, projectId?: string): KSwarmArti
     projectId: stringField(obj, 'projectId') || projectId,
     path: rawPath,
     relativePath,
-    url: rawUrl || artifactUrlFromProject(projectId, filename || displayName),
+    url: rawUrl,
     size: numberField(obj, 'size'),
   };
 }
@@ -386,7 +388,7 @@ function basename(value?: string): string {
 function inferMimeType(value?: string): string | undefined {
   const lower = (value || '').toLowerCase();
   if (!lower) return undefined;
-  if (lower.includes('/')) return value;
+
   if (lower === 'markdown' || lower.endsWith('.md') || lower.endsWith('.markdown')) return 'text/markdown';
   if (lower === 'json' || lower.endsWith('.json')) return 'application/json';
   if (lower === 'html' || lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';

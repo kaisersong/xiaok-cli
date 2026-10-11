@@ -8,7 +8,7 @@ import { type IntentProducerActionInput } from '../../../runtime/intent-delegati
 import { type IntentExecutionTerminalInput } from '../../../runtime/intent-delegation/intent-commit-boundary.js';
 import { type SessionAliasBinding } from './aliases.js';
 import { type SessionMigrationInput, type SessionMigrationMarker } from './migration.js';
-import { type SessionExecutionLease } from './execution-authority.js';
+import { type SessionExecutionContext, type SessionExecutionLease } from './execution-authority.js';
 import { type SessionCompareAndSave, type SessionCommitReceipt } from './store.js';
 import type { PersistedSessionSnapshot, SessionListEntry, SessionStore } from './store.js';
 import { type AtomicWriteFile } from '../../../utils/atomic-file.js';
@@ -33,6 +33,14 @@ interface SessionDeletionJournal {
 type ObservedMutationMethod = 'save' | 'compareAndSave';
 /** Only a fact about this exact original method invocation, never execution authority. */
 export declare function isConfirmedFileSessionPrecommitRejection(store: FileSessionStore, method: ObservedMutationMethod, promise: Promise<unknown>): boolean;
+export interface OrdinarySessionOwnershipRelease {
+    sessionId: string;
+    instanceId: string;
+    expectedLedgerHash: string;
+    requestSource: 'user' | 'agent' | 'scheduler';
+    now: number;
+    hostContext: SessionExecutionContext;
+}
 export declare class FileSessionStore implements SessionStore {
     private readonly rootDir;
     private readonly atomicWrite;
@@ -79,6 +87,12 @@ export declare class FileSessionStore implements SessionStore {
     retryIntentNativeContractSubject(raw: RetryIntentNativeInput & {
         lease: SessionExecutionLease;
     }): Promise<IntentNativeContractRecord>;
+    /** Host-only Windows exit service. Never registered as an agent tool or IPC. */
+    releaseOrdinarySessionOwnership(raw: OrdinarySessionOwnershipRelease): Promise<boolean>;
+    private assertOrdinaryReleaseOwner;
+    private readOrdinaryReleaseSource;
+    private assertCommitExecutionLease;
+    private assertOrdinaryReleaseDelta;
     transitionIntentSessionOwnership(raw: IntentOwnershipInput & {
         lease: SessionExecutionLease;
     }): Promise<void>;

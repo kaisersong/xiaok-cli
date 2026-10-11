@@ -1,3 +1,4 @@
+import {createKnownDirectoryWriterFence} from '../../src/runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinarySQLiteWriter } from '../../src/runtime/verification/ordinary-source-writer-observation.js';
 import { captureGoalCommitForStore } from '../../src/runtime/goal/completion-projection.js';
 import { randomUUID } from 'node:crypto';
@@ -40,11 +41,14 @@ export interface GoalContextTask {
   recordedAt: number;
 }
 
+const knownSqliteGoalWriters=new WeakMap<object,{fence?:ReturnType<typeof createKnownDirectoryWriterFence>}>();
 export class SqliteGoalStore implements GoalStore {
   private readonly db: DatabaseSync;
 
   constructor(dbPath: string) {
     assertOrdinarySourceWriterRoute();
+    const writer={fence:dbPath===':memory:'||dbPath===''?undefined:createKnownDirectoryWriterFence(dirname(dbPath),'sqlite-db')};
+    knownSqliteGoalWriters.set(this,writer);writer.fence?.assertOpen();
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
     try {
@@ -404,6 +408,8 @@ export class SqliteGoalStore implements GoalStore {
   }
 
   private transaction<T>(action: () => T): T {
+    const writer=knownSqliteGoalWriters.get(this);if(!writer)throw Error('known_writer_fence_owner');
+    writer.fence?.assertOpen();
     this.db.exec('begin immediate');
     try {
       assertOrdinarySourceWriterRoute();

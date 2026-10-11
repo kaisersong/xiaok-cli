@@ -350,17 +350,24 @@ async function runChat(initialInput, opts) {
     };
     let signalExit;
     let finishTerminal = () => { };
+    let writeSignalExitNotice = async () => { };
     const exitFromSignal = (reason) => {
         if (signalExit)
             return signalExit;
         finalizationExitReason = reason;
-        signalExit = finalizeChat().then(() => {
+        signalExit = finalizeChat().then(async () => {
             finishTerminal();
+            await writeSignalExitNotice(reason);
+        }).then(() => {
             process.exit(reason === 'sighup' ? 129 : reason === 'sigterm' ? 143 : 0);
         }, error => {
-            log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
-            finishTerminal();
-            process.exit(1);
+            try {
+                log.warn('chat finalization unconfirmed', { failureMessages: describeChatFinalizationFailures(error) });
+                finishTerminal();
+            }
+            finally {
+                process.exit(1);
+            }
         });
         return signalExit;
     };
@@ -730,6 +737,18 @@ async function runChat(initialInput, opts) {
         }
         const intentAuthority = () => productObservation?.executionAuthority ?? (ownIntentAuthority ??= createSessionExecutionAuthority({ root: sessionStoreRoot, sessionIdentity: sessionId, hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: instanceId, scopeId: 'cli-intent-native' }) }));
         const releaseDrainedSessionOwnership = async () => {
+            if (process.platform === 'win32') {
+                const ledger = sessionStore.getIntentNativeLedgerSync(sessionId);
+                if (!ledger || ledger.ownership.ownerInstanceId !== instanceId || ledger.ownership.state === 'released')
+                    return;
+                const released = await sessionStore.releaseOrdinarySessionOwnership({ sessionId, instanceId,
+                    expectedLedgerHash: intentNativeLedgerHash(ledger), requestSource: 'user', now: Date.now(),
+                    hostContext: createSessionExecutionContext({ requestSource: 'user', ownerId: instanceId, scopeId: 'cli-session-exit' }) });
+                if (released) {
+                    currentIntentLedger = sessionStore.getIntentNativeLedgerSync(sessionId);
+                    return;
+                }
+            }
             // The old compound/native authority has been drained and retired. Acquire
             // a fresh lease before reading the ledger and committing its exact CAS.
             const authority = createSessionExecutionAuthority({ root: sessionStoreRoot, sessionIdentity: sessionId,
@@ -3854,6 +3873,18 @@ async function runChat(initialInput, opts) {
                 catch { }
                 disposeInterruptHandlers();
             };
+            writeSignalExitNotice = async (reason) => {
+                if ((reason !== 'sigint' && reason !== 'stdin_end') || !process.stdin.isTTY || !process.stdout.isTTY)
+                    return;
+                await new Promise((resolve, reject) => {
+                    originalStdoutWrite(`\n已退出。${dim(` 继续上次工作：xiaok -c  或  xiaok --resume ${sessionId}`)}\n`, error => {
+                        if (error)
+                            reject(error);
+                        else
+                            resolve();
+                    });
+                });
+            };
             const onInterrupt = () => {
                 if (modelIngressClosed || interactiveBashActive || externalShellActive)
                     return;
@@ -4851,6 +4882,8 @@ async function runChat(initialInput, opts) {
         finishBootstrap();
         try {
             await finalizeChat();
+            if (signalExit)
+                await signalExit;
         }
         finally {
             removeSignalHandlers();

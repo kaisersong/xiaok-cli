@@ -5,7 +5,7 @@ import {isDeepStrictEqual} from 'node:util';
 import {canonicalVerificationJson as json} from '../verification/protocol.js';
 import {parseIntentBusinessContract,intentBusinessContractHash,type IntentBusinessContract} from '../verification/intent-business-contract.js';
 import {parseGoalVerificationDefinition,type GoalVerificationDefinition} from '../goal/verification-definition.js';
-import {captureIntentData} from './intent-commit-boundary.js';
+import {captureIntentData} from './data.js';
 import {createEmptySessionIntentLedger,createIntentLedgerRecord,type IntentPlanDraft,type IntentLedgerRecord,type SessionIntentLedger} from './types.js';
 import {assertSessionWriteOwnership,resumeSessionOwnership,takeoverSessionOwnership,releaseSessionOwnership} from './ownership.js';
 import type {PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';

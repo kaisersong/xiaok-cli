@@ -1,3 +1,5 @@
+import { withDesktopBootstrapWriter } from './desktop-bootstrap-writer.js';
+import { ShuttingDownError, type DesktopShutdownGate } from './shutdown-aware-ipc-main.js';
 import type { DesktopShutdownCoordinator } from './desktop-shutdown-coordinator.js';
 import { createKSwarmService, sealAndDrainKSwarmServiceInstance, type KSwarmService, type CreateKSwarmServiceOptions } from './kswarm-service.js';
 
@@ -32,4 +34,23 @@ export function createDesktopKSwarmService(
   const service = createKSwarmService(options);
   registerKSwarmInstanceLifetime(service, finalSteps);
   return service;
+}
+
+/** Main composition only: retain actual startup across all owner awaits. */
+export function startDesktopKSwarmService(
+  gate: DesktopShutdownGate,
+  service: KSwarmService,
+  attachOwner?: (config: Awaited<ReturnType<NonNullable<KSwarmService['activityOwnerConfig']>>>) => Promise<void>,
+): Promise<void> {
+  return withDesktopBootstrapWriter(gate, async () => {
+    const fresh = () => { if (!gate.isOpen) throw new ShuttingDownError('kswarm-activity-startup'); };
+    fresh();
+    if (attachOwner && service.activityOwnerConfig) {
+      const config = await service.activityOwnerConfig();
+      fresh();
+      await attachOwner(config);
+      fresh();
+    }
+    await service.start();
+  });
 }

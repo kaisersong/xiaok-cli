@@ -3,7 +3,8 @@ import { parseIntentContractEnrollment, intentContractOriginalRegistration } fro
 import { canonicalVerificationJson as json } from './protocol.js';
 import { parseLoopHostSubject, loopHostSubjectOwner } from './loop-host-subject.js';
 import { parseOwnerEnrollmentRegistration } from './owner-enrollment-review.js';
-import { isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual as initialIsDeepStrictEqual } from 'node:util';
+const isDeepStrictEqual = initialIsDeepStrictEqual;
 import { readInstalledMetadataSessionFacts } from './installed-metadata-source.js';
 import { readInstalledProfileSourceCapture, checkInstalledProfileSourceCapture } from './profile-source-capture.js';
 import { iterateCapturedProfileDeclarations } from './captured-profile-mapper.js';

@@ -37,6 +37,52 @@ function createMockScrollRegion() {
 }
 
 describe('ScrollRegionManager activity rendering', () => {
+  it('commits multi-row SubAgent ticks as one frame without a blank activity interval', () => {
+    const harness = createTtyHarness(80, 24);
+    const manager = new ScrollRegionManager(process.stdout);
+    const originalWrite = process.stdout.write;
+    const frames: string[] = [];
+    try {
+      manager.begin();
+      manager.renderInput('KEEP_DRAFT', 4);
+      manager.renderActivity('SubAgent 双鱼座: 思考中 1m2s\n⠋ Thinking · 26m20s');
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        const result = originalWrite.call(process.stdout, chunk);
+        frames.push(harness.screen.text());
+        return result;
+      }) as typeof process.stdout.write;
+      for (let index = 0; index < 12; index++) {
+        const before = frames.length;
+        manager.renderActivity(`SubAgent 双鱼座: 思考中 1m${index + 3}s\n⠙ Thinking · 26m20s`);
+        expect(frames.length - before).toBe(1);
+        for (const frame of frames.slice(before)) {
+          expect(frame).toContain('SubAgent 双鱼座');
+          expect(frame).toContain('Thinking');
+          expect(frame).toContain('KEEP_DRAFT');
+        }
+      }
+    } finally {
+      process.stdout.write = originalWrite;
+      manager.end();
+      harness.restore();
+    }
+  });
+
+  it('commits transcript reservation and activity growth together', () => {
+    const { manager, getChunks, resetOutput } = createMockScrollRegion();
+    manager.begin();
+    manager.setContentCursor(manager.maxContentRows);
+    manager.writeAtContentCursor('TAIL');
+    manager.renderActivity('Thinking');
+    resetOutput();
+    manager.renderActivity('SubAgent A: thinking\nSubAgent B: read\nWorking');
+    const frames = getChunks().filter(Boolean);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toContain('SubAgent A');
+    expect(frames[0]).toContain('Working');
+    manager.end();
+  });
+
   it('separates live activity from a full transcript using existing footer space without scrolling', () => {
     const harness = createTtyHarness(80, 24);
     const manager = new ScrollRegionManager(process.stdout);

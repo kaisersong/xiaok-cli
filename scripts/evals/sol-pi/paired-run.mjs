@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import {homedir} from 'node:os';
-import {verifyRecipeEnvironment} from './paired-environment.mjs';
+import {verifyRecipeEnvironment,selectRegisteredRecipeManifest} from './paired-environment.mjs';
 import {constants,writeFileSync} from 'node:fs';
 import {spawn,spawnSync,execFileSync} from 'node:child_process';
 import {resolve,join,dirname,delimiter} from 'node:path';
@@ -38,7 +38,8 @@ async function binding(source,config){
 export async function preparePairedRun({output,legacyBaseline,candidateRoot=repo,recipeEnvironmentDirectory=join(homedir(),'.cache/xiaok/sol-pi/deepseek-recipe-0.1.1')}){
  if(process.platform!=='darwin')throw Error('SOLPI_PAIRED_MACOS_ONLY');
  output=resolve(output);legacyBaseline=await fs.realpath(legacyBaseline);candidateRoot=await fs.realpath(candidateRoot);
- const recipe=await verifyRecipeEnvironment({sourceRoot:candidateRoot,environmentPath:join(recipeEnvironmentDirectory,'environment.json'),manifestPath:join(recipeEnvironmentDirectory,'manifest.json')});
+ const manifestPath=await selectRegisteredRecipeManifest({sourceRoot:candidateRoot,environmentRoot:recipeEnvironmentDirectory});
+ const recipe=await verifyRecipeEnvironment({sourceRoot:candidateRoot,environmentPath:join(recipeEnvironmentDirectory,'environment.json'),manifestPath});
  const historical=JSON.parse(await fs.readFile(join(legacyBaseline,'manifest.json'),'utf8'));
  const finished=JSON.parse(await fs.readFile(join(legacyBaseline,'finished.json'),'utf8'));
  if(finished.integrity!=='verified')throw Error('legacy-baseline-not-verified');

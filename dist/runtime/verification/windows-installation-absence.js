@@ -1,5 +1,5 @@
 import { lstatSync, readFileSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { dirname, join, sep, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -36,7 +36,7 @@ export function readWindowsInstallationAbsence() {
                 throw Error('windows_absence_changed');
         }
         helperCurrent();
-        const result = spawnSync(helper, [], { cwd: dirname(helper), env: {}, shell: false, windowsHide: true, timeout: 5000, maxBuffer: 4096 });
+        const result = spawnSync(win32.toNamespacedPath(helper), [], { cwd: win32.toNamespacedPath(dirname(helper)), env: {}, shell: false, windowsHide: true, timeout: 5000, maxBuffer: 4096 });
         if (result.error || result.status !== 0 || result.signal)
             return 'unavailable';
         helperCurrent();

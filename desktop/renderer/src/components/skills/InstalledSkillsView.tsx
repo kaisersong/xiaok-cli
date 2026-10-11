@@ -1,3 +1,4 @@
+import type { DesktopSkillStats } from '../../../../shared/desktop-diagnostics-ipc-contract.js'
 import React, { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
 import { discoverExternalSkills, getExternalDirs, setExternalDirs, type ExternalSkillDir } from '../../api'
@@ -6,18 +7,7 @@ import type { ViewSkill } from './types'
 import { SkillList } from './SkillList'
 import { secondaryButtonBorderStyle, secondaryButtonXsCls } from '../buttonStyles'
 
-interface SkillStats {
-  skillName: string
-  totalCalls: number
-  successCount: number
-  errorCount: number
-  avgDurationMs: number
-  p95DurationMs: number
-  totalInputTokens: number
-  totalOutputTokens: number
-  lastCalledAt: number
-  firstCalledAt: number
-}
+type SkillStats = DesktopSkillStats
 
 type SkillTextSubset = {
   searchResults: (count: number) => string

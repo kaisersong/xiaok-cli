@@ -1,13 +1,13 @@
-import { applicationDataDescriptors, captureApplicationData } from './application-value-data.js';
+import { applicationDataDescriptors, captureApplicationData, readApplicationOwnDataField } from './application-value-data.js';
 import { createHash } from 'node:crypto';
-import { types } from 'node:util';
 import { VERIFICATION_BUDGET } from './protocol.js';
 import { canonicalVerificationJson as json } from './protocol.js';
 import { parseIntentHostSubject } from './intent-host-subject.js';
-import { parseIntentBusinessContract, intentBusinessContractHash } from './intent-business-contract.js';
+import { parseIntentBusinessContract, INTENT_BUSINESS_CONTRACT_HASH_DOMAIN } from './intent-business-contract.js';
 import { parsePublishedArtifactSelection } from './published-artifact-selection.js';
 import { parseIntentProducerReport } from '../intent-delegation/producer-report.js';
 const coreFields = 'version kind subject candidateId candidateRevision contract body';
+const defineData = Object.defineProperty;
 function fields(raw, names) { if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).sort().join(',') !== names.split(' ').sort().join(','))
     throw Error('intent_application_shape'); }
 function id(raw) { if (typeof raw !== 'string' || !raw || Buffer.byteLength(raw) > 160 || /[\x00-\x1f\x7f]/.test(raw))
@@ -24,13 +24,17 @@ function freeze(value) { if (value && typeof value === 'object') {
     Object.freeze(value);
 } return value; }
 const dataDescriptors = (value, maximumKeys = 65536) => applicationDataDescriptors(value, maximumKeys, 'intent_application_data');
-const copyData = (raw, maximumBytes, maximumNodes) => captureApplicationData(raw, { maximumBytes, maximumNodes, invalid: 'intent_application_data', limit: 'intent_application_limit' });
+const copyData = (raw, maximumBytes, maximumNodes, invalid = 'intent_application_data') => captureApplicationData(raw, { maximumBytes, maximumNodes, invalid, limit: 'intent_application_limit' });
+const ownDescriptorValue = (descriptors, key) => { const descriptor = descriptors[key]; return descriptor && Object.hasOwn(descriptor, 'value') ? Reflect.get(descriptor, 'value', descriptor) : undefined; };
+function append(target, value) { defineData(target, `${target.length}`, { value, enumerable: true, writable: true, configurable: true }); }
 function parentByteLimit(stages) { return Math.min(VERIFICATION_BUDGET.controlDatabaseBytes, 131084 + stages * (6 * 65536 + 4096)); }
 /** Data snapshot only: it cannot establish that a producer, native approval or receiver ran. */
 function capture(raw) {
     const descriptors = dataDescriptors(raw);
-    const contract = parseIntentBusinessContract(copyData(descriptors.contract?.value, 65536, 65536));
-    const body = dataDescriptors(descriptors.body?.value), parent = body.kind?.value === 'intent-parent', stages = contract.stages.length;
+    const contract = parseIntentBusinessContract(copyData(ownDescriptorValue(descriptors, 'contract'), 65536, 65536));
+    const bodyRaw = ownDescriptorValue(descriptors, 'body'), body = dataDescriptors(bodyRaw), bodyKind = readApplicationOwnDataField(bodyRaw, 'kind', 'intent_application_body'), parent = bodyKind.kind === 'data' && bodyKind.value === 'intent-parent', stages = contract.stages.length;
+    if (bodyKind.kind === 'missing')
+        throw Error('intent_application_body');
     const result = copyData(raw, parent ? parentByteLimit(stages) : 131084, parent ? (stages + 2) * 65536 : 65536);
     bounded(result);
     return result;
@@ -38,10 +42,11 @@ function capture(raw) {
 function bounded(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
         throw Error('intent_application_limit');
-    const { contract, ...candidate } = raw;
+    const descriptors = dataDescriptors(raw), contract = ownDescriptorValue(descriptors, 'contract'), candidate = Object.fromEntries(Reflect.ownKeys(descriptors).filter((key) => typeof key === 'string' && key !== 'contract').map(key => [key, ownDescriptorValue(descriptors, key)]));
     if (Buffer.byteLength(json(contract)) > 65536)
         throw Error('intent_application_limit');
-    if (candidate.body?.kind !== 'intent-parent') {
+    const candidateBodyKind = candidate.body && typeof candidate.body === 'object' ? readApplicationOwnDataField(candidate.body, 'kind', 'intent_application_body') : null;
+    if (candidateBodyKind?.kind !== 'data' || candidateBodyKind.value !== 'intent-parent') {
         if (Buffer.byteLength(json(candidate)) > 65536 || Buffer.byteLength(json(raw)) > 131084)
             throw Error('intent_application_limit');
         return;
@@ -53,15 +58,22 @@ function bounded(raw) {
     if (Buffer.byteLength(json(metadata)) > 65536 + 4096 * stages)
         throw Error('intent_application_limit');
     // Measurement only. Preserve the actual descriptors and full inherited provenance.
-    if (!Array.isArray(candidate.body.artifacts))
+    const artifactsField = readApplicationOwnDataField(candidate.body, 'artifacts', 'intent_application_artifacts');
+    if (artifactsField.kind !== 'data' || !Array.isArray(artifactsField.value))
         throw Error('intent_application_artifacts');
     const groups = new Map();
-    for (const artifact of candidate.body.artifacts) {
-        if (!artifact || typeof artifact !== 'object' || !artifact.selection || typeof artifact.selection !== 'object')
+    for (const artifact of artifactsField.value) {
+        if (!artifact || typeof artifact !== 'object')
             throw Error('intent_application_artifacts');
-        const group = groups.get(artifact.stageId) ?? [], selection = artifact.selection;
-        group.push({ ...artifact, selection: { kind: 'local', obligationId: selection.kind === 'inherited' ? selection.originalObligationId : selection.obligationId, path: selection.path } });
-        groups.set(artifact.stageId, group);
+        const stageId = readApplicationOwnDataField(artifact, 'stageId', 'intent_application_artifacts'), selectionField = readApplicationOwnDataField(artifact, 'selection', 'intent_application_artifacts');
+        if (stageId.kind !== 'data' || !selectionField.value || typeof selectionField.value !== 'object')
+            throw Error('intent_application_artifacts');
+        const selection = selectionField.value, selectionKind = readApplicationOwnDataField(selection, 'kind', 'intent_application_artifacts'), obligation = readApplicationOwnDataField(selection, selectionKind.kind === 'data' && selectionKind.value === 'inherited' ? 'originalObligationId' : 'obligationId', 'intent_application_artifacts'), path = readApplicationOwnDataField(selection, 'path', 'intent_application_artifacts');
+        if (selectionKind.kind !== 'data' || obligation.kind !== 'data' || path.kind !== 'data')
+            throw Error('intent_application_artifacts');
+        const group = groups.get(stageId.value) ?? [];
+        append(group, { ...artifact, selection: { kind: 'local', obligationId: obligation.value, path: path.value } });
+        groups.set(stageId.value, group);
     }
     for (const group of groups.values())
         if (Buffer.byteLength(json(group)) > 65536)
@@ -108,7 +120,8 @@ function artifacts(raw, stages) {
     }
 }
 function body(raw, subject, contract) {
-    if (raw?.kind === 'intent-stage') {
+    const bodyKind = raw && typeof raw === 'object' ? readApplicationOwnDataField(raw, 'kind', 'intent_application_body') : undefined;
+    if (bodyKind?.kind === 'data' && bodyKind.value === 'intent-stage') {
         fields(raw, 'kind stageId summary executionReports artifacts' + (Object.hasOwn(raw, 'producerReports') ? ' producerReports' : ''));
         if (subject.stageId === null || raw.stageId !== subject.stageId)
             throw Error('intent_application_stage');
@@ -162,7 +175,7 @@ function body(raw, subject, contract) {
                 throw Error('intent_application_report_artifact');
         }
     }
-    else if (raw?.kind === 'intent-parent') {
+    else if (bodyKind?.kind === 'data' && bodyKind.value === 'intent-parent') {
         fields(raw, 'kind summary stages artifacts');
         if (subject.stageId !== null)
             throw Error('intent_application_parent');
@@ -199,11 +212,12 @@ function parse(raw, create) {
     if (value.subject.sessionId !== value.contract.sessionId || value.subject.intentId !== value.contract.intentId)
         throw Error('intent_application_subject');
     value.body = body(value.body, value.subject, value.contract);
-    const contractHash = intentBusinessContractHash(value.contract), candidatePayloadHash = hash('xiaok-intent-candidate-payload-v1', value.body);
+    const contractHash = hash(INTENT_BUSINESS_CONTRACT_HASH_DOMAIN, value.contract), candidatePayloadHash = hash('xiaok-intent-candidate-payload-v1', value.body);
     if (!create && (value.contractHash !== contractHash || value.candidatePayloadHash !== candidatePayloadHash))
         throw Error('intent_application_hash');
-    value.contractHash = contractHash;
-    value.candidatePayloadHash = candidatePayloadHash;
+    defineData(value, 'contractHash', { value: contractHash, enumerable: true, writable: true, configurable: true });
+    defineData(value, 'candidatePayloadHash', { value: candidatePayloadHash, enumerable: true, writable: true, configurable: true });
+    fields(value, coreFields + ' contractHash candidatePayloadHash');
     bounded(value);
     return freeze(value);
 }
@@ -215,13 +229,17 @@ export function intentApplicationBindingHash(raw) { return hash('xiaok-intent-ap
 export function assertIntentApplicationEnvelope(raw) {
     if (!raw || typeof raw !== 'object')
         return;
-    if (types.isProxy(raw))
-        throw Error('intent_application_data');
-    const descriptor = Object.getOwnPropertyDescriptor(raw, 'binding');
-    if (!descriptor || !('value' in descriptor) || !descriptor.value || typeof descriptor.value !== 'object')
+    const field = readApplicationOwnDataField(raw, 'binding', 'intent_application_data');
+    if (field.kind !== 'data' || !field.value || typeof field.value !== 'object')
         return;
-    if (types.isProxy(descriptor.value))
-        throw Error('intent_application_data');
-    if (Object.getOwnPropertyDescriptor(descriptor.value, 'kind')?.value === 'intent')
-        parseIntentApplicationBinding(descriptor.value);
+    const kind = readApplicationOwnDataField(field.value, 'kind', 'intent_application_data');
+    if (kind.kind === 'data' && kind.value === 'intent') {
+        const bodyKind = readApplicationOwnDataField(field.value, 'body', 'intent_application_data');
+        if (bodyKind.kind === 'data' && bodyKind.value && typeof bodyKind.value === 'object') {
+            const member = readApplicationOwnDataField(bodyKind.value, 'kind', 'intent_application_body');
+            if (member.kind === 'missing')
+                throw Error('intent_application_body');
+        }
+        parseIntentApplicationBinding(field.value);
+    }
 }

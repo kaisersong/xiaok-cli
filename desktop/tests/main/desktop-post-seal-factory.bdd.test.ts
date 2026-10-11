@@ -76,7 +76,7 @@ describe('R4 actual Desktop factory owns live delivery and recovery callback wir
   }
 
   it.each(['passed', 'failed'] as const)('PF1 actual default provider loop finishes root execution but publishes host delivery %s through the real service', async outcome => {
-    const f = await setup(); await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' });
+    const f = await setup(); await f.services.saveModelConfig({ providerId: 'kimi', apiKey: 'fixture' }, undefined, 'user');
     const reports: HostDeliveryReport[] = [], service = f.services.multiAgent!.service, original = service.recordHostDelivery.bind(service);
     vi.spyOn(service, 'recordHostDelivery').mockImplementation(async input => { const ack = await original(input); reports.push(ack); return ack; });
     let calls = 0;

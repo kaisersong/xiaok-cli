@@ -67,3 +67,58 @@ it('fresh original native groups preserve integer mode even when it changes and 
  expect(next.groups('verification_application_history',['owner']).get('owner')![0]!.n).toBe(7);
  next.finish();
 });
+
+it('repeated groups in the same checkpoint inherit each actual native integer mode without losing a bit',()=>{
+ const root=mkdtempSync(join(tmpdir(),'registration-same-checkpoint-mode-'));
+ cleanup.push(()=>rmSync(root,{recursive:true,force:true}));
+ const db=openPrivateVerificationDatabase(root);cleanup.push(()=>db.close());
+ db.exec("CREATE TABLE verification_application_history(owner_key TEXT,n INTEGER);INSERT INTO verification_application_history VALUES('owner',9007199254740993)");
+ const current=createRegistrationCensusDatabase(db)!.begin();
+ expect(current.groups('verification_application_history',['owner']).get('owner')![0]!.n).toBe(9007199254740992);
+ try{
+  db.defaultSafeIntegers(true);
+  const grouped=current.groups('verification_application_history',['owner']).get('owner')![0]!;
+  const fresh=current.records('SELECT * FROM main.verification_application_history')[0]!;
+  expect(grouped.n).toBe(9007199254740993n);expect(grouped).toEqual(fresh);
+ }finally{db.defaultSafeIntegers(false);}
+ expect(current.groups('verification_application_history',['owner']).get('owner')![0]!.n).toBe(9007199254740992);
+ expect(()=>current.finish()).not.toThrow();
+});
+
+it('a statement first read in BigInt mode cannot keep that mode after the same checkpoint restores Number',()=>{
+ const root=mkdtempSync(join(tmpdir(),'registration-same-checkpoint-restore-'));
+ cleanup.push(()=>rmSync(root,{recursive:true,force:true}));
+ const db=openPrivateVerificationDatabase(root);cleanup.push(()=>db.close());
+ db.exec("CREATE TABLE verification_application_history(owner_key TEXT,n INTEGER);INSERT INTO verification_application_history VALUES('owner',9007199254740993)");
+ const current=createRegistrationCensusDatabase(db)!.begin();
+ try{db.defaultSafeIntegers(true);expect(current.groups('verification_application_history',['owner']).get('owner')![0]!.n).toBe(9007199254740993n);}
+ finally{db.defaultSafeIntegers(false);}
+ const grouped=current.groups('verification_application_history',['owner']).get('owner')![0]!;
+ expect(grouped.n).toBe(9007199254740992);expect(grouped).toEqual(current.records('SELECT * FROM main.verification_application_history')[0]!);
+ expect(()=>current.finish()).not.toThrow();
+});
+
+it('both actual 128-key chunks keep complete independent native rows through repeated integer mode changes',()=>{
+ const root=mkdtempSync(join(tmpdir(),'registration-same-checkpoint-chunks-'));
+ cleanup.push(()=>rmSync(root,{recursive:true,force:true}));
+ const db=openPrivateVerificationDatabase(root);cleanup.push(()=>db.close());
+ db.exec('CREATE TABLE verification_application_history(owner_key TEXT,n INTEGER,future_blob BLOB,future_null TEXT,constructor TEXT,future_float REAL)');
+ const insert=db.prepare('INSERT INTO verification_application_history VALUES(?,?,?,?,?,?)'),keys=Array.from({length:130},(_,i)=>'owner-'+i);
+ for(let i=0;i<keys.length;i++)insert.run(keys[i],9007199254740993n+BigInt(i),Buffer.from([i,7]),null,'retained',1.25);
+ const current=createRegistrationCensusDatabase(db)!.begin();
+ current.groups('verification_application_history',keys);
+ try{
+  db.defaultSafeIntegers(true);
+  const groups=current.groups('verification_application_history',keys);
+  expect(groups.size).toBe(130);
+  for(let i=0;i<keys.length;i++){
+   const row=groups.get(keys[i]!)![0]!,fresh=current.records('SELECT * FROM main.verification_application_history WHERE owner_key=?',[keys[i]])[0]!;
+   expect(Object.getPrototypeOf(row)).toBe(null);expect(row).toEqual(fresh);expect(row.n).toBe(9007199254740993n+BigInt(i));
+   expect(row.future_blob).not.toBe(fresh.future_blob);expect(row.future_null).toBe(null);expect(row.constructor).toBe('retained');expect(row.future_float).toBe(1.25);
+   (row.future_blob as Buffer)[1]=99;expect((fresh.future_blob as Buffer)[1]).toBe(7);
+  }
+ }finally{db.defaultSafeIntegers(false);}
+ const groups=current.groups('verification_application_history',keys);
+ for(const key of keys)expect(groups.get(key)![0]).toEqual(current.records('SELECT * FROM main.verification_application_history WHERE owner_key=?',[key])[0]!);
+ expect(()=>current.finish()).not.toThrow();
+});

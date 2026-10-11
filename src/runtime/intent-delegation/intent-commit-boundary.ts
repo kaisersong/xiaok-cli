@@ -1,3 +1,5 @@
+import {captureIntentSnapshot} from './intent-snapshot-data.js';
+export {captureIntentSnapshot} from './intent-snapshot-data.js';
 import {assertIntentVerificationRetained} from './verification-execution-journal.js';
 import {assertIntentPublicationRetained} from './publication-candidate-journal.js';
 import {assertIntentNativeJournalRetained,assertNoIntentNativeJournal} from './native-contract-journal.js';
@@ -12,11 +14,7 @@ export interface IntentExecutionTerminal {
 export interface IntentExecutionTerminalInput extends IntentExecutionTerminal {sessionId:string;intentId:string}
 import {captureIntentData} from './data.js';
 export {captureIntentData} from './data.js';
-export function captureIntentSnapshot(snapshot:PersistedSessionSnapshot):PersistedSessionSnapshot {
- const descriptor=Object.getOwnPropertyDescriptor(snapshot,'intentDelegation');
- if(descriptor&&!('value'in descriptor))throw Error('intent_commit_accessor');
- return {...snapshot,intentDelegation:descriptor?.value===undefined?undefined:captureIntentData(descriptor.value)};
-}
+
 const id=(v:unknown)=>typeof v==='string'&&v.length>0&&Buffer.byteLength(v)<=160&&!/[\x00-\x1f\x7f]/.test(v);
 export function parseIntentExecutionInput(raw:unknown):IntentExecutionTerminalInput {
  const v=captureIntentData(raw) as IntentExecutionTerminalInput;

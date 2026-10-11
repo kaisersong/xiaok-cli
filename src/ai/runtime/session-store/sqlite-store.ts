@@ -1,3 +1,4 @@
+import {createKnownDirectoryWriterFence} from '../../../runtime/verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinarySQLiteWriter } from '../../../runtime/verification/ordinary-source-writer-observation.js';
 import {consumeIntentParentCandidateWrite,type IntentParentCandidateWrite} from '../../../runtime/intent-delegation/publication-host.js';
 import {consumeIntentReceiverWrite,type IntentReceiverWriteInput} from '../../../runtime/intent-delegation/receiver-publication-host.js';
@@ -74,11 +75,20 @@ export interface SessionMessageSearchHit {
   textContent: string;
 }
 
+const knownSqliteSessionWriters=new WeakMap<object,{fence?:ReturnType<typeof createKnownDirectoryWriterFence>}>();
+const acceptedSqliteSessionForks=new WeakMap<object,object>();
+function assertKnownSqliteSessionWriter(owner:object,rootLockHeld=false,acceptedFork?:object):void {
+  const writer=knownSqliteSessionWriters.get(owner);if(!writer)throw Error('known_writer_fence_owner');
+  if(rootLockHeld||acceptedFork!==undefined){if(!rootLockHeld||!acceptedFork||acceptedSqliteSessionForks.get(acceptedFork)!==owner)throw Error('known_writer_fence_owner');return;}
+  writer.fence?.assertOpen();
+}
 export class SQLiteSessionStore implements SessionStore {
   private readonly db: Database.Database;
 
   constructor(private readonly dbPath: string) {
     assertOrdinarySourceWriterRoute();
+    knownSqliteSessionWriters.set(this,{fence:dbPath===':memory:'||dbPath===''?undefined:createKnownDirectoryWriterFence(dirname(dbPath),'sqlite-db')});
+    assertKnownSqliteSessionWriter(this);
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     try {
@@ -114,84 +124,100 @@ export class SQLiteSessionStore implements SessionStore {
     const snapshot=this.readSnapshot(sessionId);if(!snapshot)return undefined;parseIntentNativeContracts(snapshot.intentDelegation?.nativeContracts,sessionId);return freezeIntentNativeLedger(captureIntentSnapshot(snapshot).intentDelegation);
   }
   async recordIntentReceiverPublication(raw:IntentReceiverWriteInput):Promise<IntentPublicationCandidate>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=consumeIntentReceiverWrite(this,raw);this.assertIntentNativeLease(input.sessionId,input.requestSource,lease);
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_receiver_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const candidate=parseIntentPublicationCandidates(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.candidateId);if(!candidate)throw Error('intent_receiver_candidate');return candidate;
   }
   async recordIntentVerificationOperation(raw:RecordIntentVerificationOperationInput&{lease:SessionExecutionLease}):Promise<IntentVerificationExecution>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentVerificationOperation(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,allowedKinds:['direct-mutation','recovery']});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_verification_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentVerificationExecutions(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.id);if(!row)throw Error('intent_verification_missing');return row;
   }
   async observeIntentVerificationEnrollment(raw:ObserveIntentVerificationInput&{lease:SessionExecutionLease}):Promise<IntentVerificationExecution>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentVerificationObservation(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,allowedKinds:['direct-mutation','recovery']});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_verification_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentVerificationExecutions(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.id);if(!row)throw Error('intent_verification_missing');return row;
   }
   async claimIntentVerificationEnrollment(raw:ClaimIntentVerificationInput&{lease:SessionExecutionLease}):Promise<IntentVerificationExecution>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentVerificationClaim(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_verification_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentVerificationExecutions(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.id);if(!row)throw Error('intent_verification_missing');return row;
   }
   async reserveIntentVerificationExecution(raw:ReserveIntentVerificationInput&{lease:SessionExecutionLease}):Promise<IntentVerificationExecution>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentVerificationReserve(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_verification_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentVerificationExecutions(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.candidateId===input.candidateId&&r.obligationId===input.obligationId);if(!row)throw Error('intent_verification_missing');return row;
   }
   async retryIntentPublicationApplication(raw:RetryIntentPublicationInput&{lease:SessionExecutionLease}):Promise<IntentPublicationCandidate>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentPublicationRetry(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_candidate_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentPublicationCandidates(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.candidateId);if(!row)throw Error('intent_candidate_missing');return row;
   }
   async observeIntentPublicationApplication(raw:ObserveIntentPublicationInput&{lease:SessionExecutionLease}):Promise<IntentPublicationCandidate>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentPublicationObservation(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,allowedKinds:['direct-mutation','recovery']});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_candidate_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentPublicationCandidates(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.candidateId);if(!row)throw Error('intent_candidate_missing');return row;
   }
   async claimIntentPublicationApplication(raw:ClaimIntentPublicationInput&{lease:SessionExecutionLease}):Promise<IntentPublicationCandidate>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentPublicationClaim(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_candidate_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const row=parseIntentPublicationCandidates(this.readSnapshot(input.sessionId)?.intentDelegation).find(r=>r.id===input.candidateId);if(!row)throw Error('intent_candidate_missing');return row;
   }
   async reserveIntentParentPublicationCandidate(raw:IntentParentCandidateWrite):Promise<IntentPublicationCandidate>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=consumeIntentParentCandidateWrite(this,raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_candidate_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const ledger=this.readSnapshot(input.sessionId)?.intentDelegation,row=parseIntentPublicationCandidates(ledger).find(r=>r.intentId===ledger?.activeIntentId&&r.stageId===null);if(!row)throw Error('intent_candidate_missing');return row;
   }
   async reserveIntentPublicationCandidate(raw:ReserveIntentPublicationInput&{lease:SessionExecutionLease}):Promise<IntentPublicationCandidate>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentPublicationRequest(raw);assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_candidate_session');this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
     const ledger=this.readSnapshot(input.sessionId)?.intentDelegation,row=parseIntentPublicationCandidates(ledger).find(r=>r.intentId===ledger?.activeIntentId&&r.stageId===ledger?.intents.find(i=>i.intentId===ledger.activeIntentId)?.activeStageId);if(!row)throw Error('intent_candidate_missing');return row;
   }
   async reserveIntentNativeContract(raw:ReserveIntentNativeInput&{lease:SessionExecutionLease}):Promise<IntentNativeContractRecord>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentNativeRequest('reserve',raw);
     this.commitNativeIntent(input,lease);
     const intentId=input.nativeAction==='reserve'?input.plan.intentId:('intentId'in input?input.intentId:'');
     const row=parseIntentNativeContracts(this.readSnapshot(input.sessionId)?.intentDelegation?.nativeContracts,input.sessionId).find(r=>r.intentId===intentId);if(!row)throw Error('intent_native_missing');return row;
   }
   async advanceIntentNativeContractSubject(raw:AdvanceIntentNativeInput&{lease:SessionExecutionLease}):Promise<IntentNativeContractRecord>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentNativeRequest('advance',raw);
     this.commitNativeIntent(input,lease);
     const intentId=input.nativeAction==='reserve'?input.plan.intentId:('intentId'in input?input.intentId:'');
     const row=parseIntentNativeContracts(this.readSnapshot(input.sessionId)?.intentDelegation?.nativeContracts,input.sessionId).find(r=>r.intentId===intentId);if(!row)throw Error('intent_native_missing');return row;
   }
   async retryIntentNativeContractSubject(raw:RetryIntentNativeInput&{lease:SessionExecutionLease}):Promise<IntentNativeContractRecord>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentNativeRequest('retry',raw);
     this.commitNativeIntent(input,lease);
     const intentId=input.nativeAction==='reserve'?input.plan.intentId:('intentId'in input?input.intentId:'');
     const row=parseIntentNativeContracts(this.readSnapshot(input.sessionId)?.intentDelegation?.nativeContracts,input.sessionId).find(r=>r.intentId===intentId);if(!row)throw Error('intent_native_missing');return row;
   }
   async transitionIntentSessionOwnership(raw:IntentOwnershipInput&{lease:SessionExecutionLease}):Promise<void>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentNativeRequest('ownership',raw);
     this.commitNativeIntent(input,lease);
   }
   private commitNativeIntent(input:IntentNativeMutation,lease:SessionExecutionLease):void{
+    assertKnownSqliteSessionWriter(this);
     assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,...(input.nativeAction!=='advance'||input.phase==='enrolling'?{kind:'direct-mutation' as const}:{allowedKinds:['direct-mutation','recovery'] as const})});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_native_session');
     this.commitSnapshot(snapshot,undefined,undefined,lease,false,input);
   }
 
   async recordIntentProducerAction(raw:IntentProducerActionInput&{lease:SessionExecutionLease}):Promise<void>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentProducerRequest(raw);
     assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource,kind:'direct-mutation'});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_producer_session');
@@ -199,6 +225,7 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   async recordIntentExecutionTerminal(raw:IntentExecutionTerminalInput&{lease:SessionExecutionLease}):Promise<void>{
+    assertKnownSqliteSessionWriter(this);
     const {input,lease}=captureIntentExecutionRequest(raw);
     assertSessionExecutionLease(lease,{root:dirname(this.dbPath),sessionIdentity:input.sessionId,requestSource:input.requestSource});
     const snapshot=this.readSnapshot(input.sessionId);if(!snapshot)throw Error('intent_execution_session');
@@ -206,22 +233,26 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   async save(snapshot: PersistedSessionSnapshot, options?: { lease?: SessionExecutionLease }): Promise<void> {
+    assertKnownSqliteSessionWriter(this);
     this.commitSnapshot(snapshot, undefined, undefined, options?.lease);
   }
 
   async compareAndSave(input: SessionCompareAndSave): Promise<SessionCommitReceipt> {
+    assertKnownSqliteSessionWriter(this);
     assertSessionExecutionLease(input.lease, { root: dirname(this.dbPath), sessionIdentity: input.nextSnapshot.sessionId });
     return this.commitSnapshot(input.nextSnapshot, input);
   }
 
   private mutationInProgress = false;
-  private commitSnapshot(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation): SessionCommitReceipt {
+  private commitSnapshot(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation,acceptedFork?:object): SessionCommitReceipt {
+    assertKnownSqliteSessionWriter(this,rootLockHeld,acceptedFork);
     if (this.mutationInProgress) throw Error('session_commit_reentrant');
     this.mutationInProgress = true;
-    try { return this.commitSnapshotLocked(captureIntentSnapshot(snapshot), cas, forkSourceId, executionLease, rootLockHeld,terminal); }
+    try { return this.commitSnapshotLocked(captureIntentSnapshot(snapshot), cas, forkSourceId, executionLease, rootLockHeld,terminal,acceptedFork); }
     finally { this.mutationInProgress = false; }
   }
-  private commitSnapshotLocked(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation): SessionCommitReceipt {
+  private commitSnapshotLocked(snapshot: PersistedSessionSnapshot, cas?: SessionCompareAndSave, forkSourceId?: string, executionLease?: SessionExecutionLease, rootLockHeld = false, terminal?:IntentExecutionTerminalInput|IntentProducerActionInput|IntentNativeMutation|IntentPublicationMutation,acceptedFork?:object): SessionCommitReceipt {
+    assertKnownSqliteSessionWriter(this,rootLockHeld,acceptedFork);
     const releaseExecution = acquireSessionStoreExecutionGuard(dirname(this.dbPath), snapshot.sessionId, cas?.lease ?? executionLease, rootLockHeld);
     try {
     const durableSnapshot = toDurableSessionSnapshot(snapshot);
@@ -370,12 +401,14 @@ export class SQLiteSessionStore implements SessionStore {
     }).immediate();
   }
   async markSessionMigrated(input: SessionMigrationInput): Promise<SessionMigrationMarker> {
+    assertKnownSqliteSessionWriter(this);
     if (this.mutationInProgress) throw Error('session_commit_reentrant');
     this.mutationInProgress = true;
     try { return this.markSessionMigratedLocked(input); }
     finally { this.mutationInProgress = false; }
   }
   private markSessionMigratedLocked(input: SessionMigrationInput): SessionMigrationMarker {
+    assertKnownSqliteSessionWriter(this);
     assertSessionExecutionLease(input.lease, { root: dirname(this.dbPath), sessionIdentity: input.sessionId });
     const marker = migrationMarkerFromInput(input);
     this.db.transaction(() => {
@@ -461,9 +494,11 @@ export class SQLiteSessionStore implements SessionStore {
   }
 
   async fork(sessionId: string): Promise<PersistedSessionSnapshot> {
+    assertKnownSqliteSessionWriter(this);
     const releaseRoot = acquireSaveLock(join(dirname(this.dbPath), '.session-store-lock'));
     let releaseSource = () => {};
-    try { releaseSource = acquireSessionStoreExecutionGuard(dirname(this.dbPath), sessionId, undefined, true); } catch (error) { releaseRoot(); throw error; }
+    try { assertKnownSqliteSessionWriter(this);releaseSource = acquireSessionStoreExecutionGuard(dirname(this.dbPath), sessionId, undefined, true); } catch (error) { releaseRoot(); throw error; }
+    const acceptedFork=Object.freeze({});acceptedSqliteSessionForks.set(acceptedFork,this);
     try {
     const source = await this.load(sessionId);
     if (!source) {
@@ -496,8 +531,8 @@ export class SQLiteSessionStore implements SessionStore {
         : undefined,
       skillExecution: source.skillExecution ? cloneSessionSkillExecutionState(source.skillExecution) : undefined,
     };
-    const committed = this.commitSnapshot(forked, undefined, source.sessionId, undefined, true);
-    return { ...forked, ...committed };    } finally { try { releaseSource(); } finally { releaseRoot(); } }
+    const committed = this.commitSnapshot(forked, undefined, source.sessionId, undefined, true,undefined,acceptedFork);
+    return { ...forked, ...committed };    } finally { try { releaseSource(); } finally { try { releaseRoot(); } finally { acceptedSqliteSessionForks.delete(acceptedFork); } } }
   }
 
   searchMessages(query: string, limit = 10): SessionMessageSearchHit[] {

@@ -1,5 +1,5 @@
 import type { DesktopMailboxPort, MultiAgentDrainedBatch } from '../shared/multi-agent-types.js';
-import type { DesktopMultiAgentStore } from './desktop-multi-agent-store.js';
+import type { DesktopMultiAgentStore, DesktopMultiAgentMutationPort } from './desktop-multi-agent-store.js';
 
 /** One group, one short command queue. Execution and cleanup promises never own it. */
 export class MultiAgentCommandSequencer {
@@ -57,7 +57,7 @@ export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
     assertCurrent(): void;
     assertSemanticCurrent?(): void;
     beforeSeal?(): void;
-    onSeal(outcome: SealOutcome): void;
+    onSeal(outcome: SealOutcome, acceptedPort: DesktopMultiAgentMutationPort): void;
   }) {
     semanticMailboxes.set(this, () => this.options.commands.run(() => {
       this.assertActive();
@@ -94,7 +94,7 @@ export class DesktopMultiAgentTurnMailbox implements DesktopMailboxPort {
       if (outcome === 'completed' && unread && !input.limitReached) return { kind: 'continue' };
       const limited = outcome === 'completed' && unread && Boolean(input.limitReached);
       this.options.beforeSeal?.();
-      this.options.store.transaction(() => this.options.onSeal(limited ? 'failed' : outcome));
+      this.options.store.transaction((acceptedPort) => this.options.onSeal(limited ? 'failed' : outcome, acceptedPort));
       this.sealed = { kind: limited ? 'limit_reached' : 'sealed' };
       return this.sealed;
     });

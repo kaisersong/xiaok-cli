@@ -292,3 +292,17 @@ describe('OpenAIResponsesAdapter', () => {
     vi.useRealTimers();
   });
 });
+
+
+it('keeps actual Responses request tools identical with registration descriptions',async()=>{
+ const {ToolRegistry}=await import('../../../src/ai/tools/index.js');const {createReadTool}=await import('../../../src/ai/tools/read.js');const {OpenAIResponsesAdapter}=await import('../../../src/ai/adapters/openai-responses.js');
+ const fetchMock=vi.fn().mockResolvedValue({ok:true,json:async()=>({output:[]})});vi.stubGlobal('fetch',fetchMock);
+ const tool=createReadTool({cwd:process.cwd()}),registry=new ToolRegistry({},[tool]),adapter=new OpenAIResponsesAdapter('test','gemini-2.5-pro','https://example.invalid/v1');
+ try{
+  for await(const _ of adapter.stream([],registry.getToolDefinitions(),'system')){}
+  const before=JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).tools;
+  registry.registerTool(tool,{outputSchema:{type:'string'},effect:'read',idempotency:'unknown'});
+  for await(const _ of adapter.stream([],registry.getToolDefinitions(),'system')){}
+  expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)).tools).toEqual(before);
+ }finally{registry.dispose();vi.unstubAllGlobals();}
+});

@@ -1,3 +1,4 @@
+import {createKnownDirectoryWriterFence} from '../verification/known-directory-writer-fence.js';
 import { assertOrdinarySourceWriterRoute, observeOrdinaryDirectoryWriter } from '../verification/ordinary-source-writer-observation.js';
 import {isDeepStrictEqual} from 'node:util';
 import {parseCapturedSourceJson,capturedFields,capturedIdentity,capturedInteger,freezeCapturedData} from '../verification/captured-source-json.js';
@@ -26,6 +27,7 @@ export class GoalTamperDetectedError extends Error {
   }
 }
 
+const knownGoalWriters=new WeakMap<object,{fence:ReturnType<typeof createKnownDirectoryWriterFence>;closed:boolean;pending?:Promise<void>}>();
 export class FileGoalStore implements GoalStore {
   private readonly digests = new Map<string, { digest: string; storageRevision: number }>();
   private queue: Promise<void> = Promise.resolve();
@@ -33,7 +35,7 @@ export class FileGoalStore implements GoalStore {
   constructor(
     private readonly rootDir: string,
     private readonly atomicWrite: AtomicWriteFile = writeFileAtomicallySync,
-  ) {}
+  ) {knownGoalWriters.set(this,{fence:createKnownDirectoryWriterFence(rootDir,'goal-file-root'),closed:false});}
 
   async load(sessionId: string): Promise<GoalDocument | null> {
     const raw = this.readRaw(sessionId);
@@ -107,7 +109,20 @@ export class FileGoalStore implements GoalStore {
     });
   }
 
+  /** User-only cooperative fence; other producers and legacy history stay unknown. */
+  fenceKnownWriter(requestSource: 'user' | 'agent' | 'scheduler'): Promise<void> {
+    const owner=knownGoalWriters.get(this);
+    if(!owner||arguments.length!==1)return Promise.reject(Error('known_writer_fence_owner'));
+    if(requestSource!=='user')return Promise.reject(Error('known_writer_fence_request_source'));
+    if(!['darwin','linux'].includes(process.platform))return Promise.reject(Error('known_writer_fence_platform'));
+    if(owner.pending)return owner.pending;
+    owner.closed=true;const accepted=this.queue;
+    const work=Promise.resolve().then(async()=>{await accepted;const release=acquireSaveLock(join(this.rootDir,'.goal-store.save.lock'));try{owner.fence.persist();}finally{release();}});
+    owner.pending=work;void work.then(()=>{if(owner.pending===work)owner.pending=undefined;},()=>{if(owner.pending===work)owner.pending=undefined;});return work;
+  }
+
   private async withQueue(action: () => Promise<void>): Promise<void> {
+    if(knownGoalWriters.get(this)?.closed)throw Error('goal_store_closed');
     let release!: () => void;
     const previous = this.queue;
     this.queue = new Promise<void>((resolve) => { release = resolve; });
@@ -117,6 +132,7 @@ export class FileGoalStore implements GoalStore {
       assertOrdinarySourceWriterRoute();
       mkdirSync(this.rootDir, { recursive: true });
       releaseLock = acquireSaveLock(join(this.rootDir, '.goal-store.save.lock'));
+      knownGoalWriters.get(this)!.fence.assertOpen();
       observeOrdinaryDirectoryWriter(this.rootDir, 'goal-file-root');
       assertOrdinarySourceWriterRoute();
       await action();
