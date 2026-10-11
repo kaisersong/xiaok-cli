@@ -125,10 +125,12 @@ export interface Credentials {
 }
 export type YZJInboundMode = 'webhook' | 'websocket';
 export interface YZJNamedChannel {
+    allowedSenders?: string[];
     name: string;
     robotId: string;
 }
 export interface YZJChannelConfig {
+    allowedSenders?: string[];
     enabled?: boolean;
     webhookUrl?: string;
     inboundMode?: YZJInboundMode;

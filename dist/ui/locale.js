@@ -42,6 +42,8 @@ const TOOL_LABELS = {
 const UI_COPY = {
     'zh-CN': {
         approvalTitle: 'xiaok 想要执行以下操作',
+        mandatoryReview: '这个操作有风险，每次都会询问',
+        writeTarget: (path) => `写入文件：${path}`,
         autoApprovalReason: (reason) => `确认原因: auto 模式仍需确认：${AUTO_APPROVAL_REASONS_ZH[reason] ?? reason}`,
         currentCommandLabel: '本次执行命令',
         commandApprovalScope: (rule) => `始终允许的范围: ${rule}（* 表示任意参数，参数变化无需重复确认）`,
@@ -60,12 +62,15 @@ const UI_COPY = {
             file: '文件',
             path: '路径',
             pattern: '模式',
+            url: 'URL',
         },
         ranCollapseNotice: '… 更多命令已折叠（完成后按 Ctrl+O 查看）',
         hint: '数字直选  ↑↓ 切换  Enter 确认  Esc 取消',
     },
     en: {
         approvalTitle: 'xiaok wants to run',
+        mandatoryReview: 'This operation carries risk and requires approval every time',
+        writeTarget: (path) => `Write file: ${path}`,
         autoApprovalReason: (reason) => `Approval reason: auto mode still confirms data-loss commands: ${reason}`,
         currentCommandLabel: 'Command to run now',
         commandApprovalScope: (rule) => `Always-allow scope: ${rule} (* means any arguments; argument changes need no new approval)`,
@@ -84,6 +89,7 @@ const UI_COPY = {
             file: 'File',
             path: 'Path',
             pattern: 'Pattern',
+            url: 'URL',
         },
         ranCollapseNotice: '… More commands collapsed (press Ctrl+O after completion to view)',
         hint: '1-5 select  Up/Down navigate  Enter confirm  Esc cancel',

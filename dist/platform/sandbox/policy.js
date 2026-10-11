@@ -1,10 +1,25 @@
+import { resolve, win32 } from 'node:path';
+import { resolveRealPath } from '../../ai/permissions/workspace.js';
 function normalizePathForMatch(path) {
     return path.replace(/\\/g, '/').replace(/\/+$/g, '');
 }
+const WINDOWS_ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+/**
+ * 比较前先规范化：resolve 消除 `.`/`..`，再用 realpath（不存在时取最近已存在父目录）解析符号链接，
+ * 最后统一分隔符。非 Windows 主机上遇到 Windows 风格绝对路径时只做词法规范化。
+ */
+function canonicalizePathForMatch(path) {
+    if (process.platform !== 'win32' && WINDOWS_ABSOLUTE_PATH.test(path)) {
+        return normalizePathForMatch(win32.resolve(path));
+    }
+    return normalizePathForMatch(resolveRealPath(resolve(path)));
+}
 function matchesPrefix(prefixes, value) {
-    const normalizedValue = normalizePathForMatch(value);
+    if (prefixes.length === 0)
+        return false;
+    const normalizedValue = canonicalizePathForMatch(value);
     return prefixes.some((prefix) => {
-        const normalizedPrefix = normalizePathForMatch(prefix);
+        const normalizedPrefix = canonicalizePathForMatch(prefix);
         return normalizedValue === normalizedPrefix || normalizedValue.startsWith(`${normalizedPrefix}/`);
     });
 }
@@ -40,13 +55,19 @@ export function createSandboxPolicy(options) {
     const allowedEnv = new Set(options.allowedEnv ?? []);
     return {
         checkPath(path) {
-            if (matchesPrefix(denylist, path)) {
-                return { allowed: false, reason: 'path is explicitly denied' };
+            try {
+                if (matchesPrefix(denylist, path)) {
+                    return { allowed: false, reason: 'path is explicitly denied' };
+                }
+                if (allowlist.length > 0 && !matchesPrefix(allowlist, path)) {
+                    return { allowed: false, reason: 'path is outside allowlist' };
+                }
+                return { allowed: true };
             }
-            if (allowlist.length > 0 && !matchesPrefix(allowlist, path)) {
-                return { allowed: false, reason: 'path is outside allowlist' };
+            catch {
+                // 无法规范化的路径（含 NUL、符号链接环等）一律拒绝（fail-closed）
+                return { allowed: false, reason: 'path could not be normalized' };
             }
-            return { allowed: true };
         },
         filterEnv(env) {
             return Object.fromEntries(Object.entries(env).filter(([key]) => allowedEnv.has(key)));

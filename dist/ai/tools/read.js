@@ -92,7 +92,7 @@ export function createReadTool(options = {}) {
             const { file_path, offset = 1, limit, max_chars = MODEL_OUTPUT_CAP } = input;
             let resolvedPath;
             try {
-                resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd);
+                resolvedPath = assertWorkspacePath(file_path, cwd, 'read', allowOutsideCwd, options.outsideCwdGuard);
             }
             catch (error) {
                 let reference;
