@@ -26,7 +26,7 @@ describe('migrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(3);
+    expect(getSchemaVersion(db)).toBe(4);
 
     const tables = db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -49,6 +49,27 @@ describe('migrations', () => {
 
     runMigrations(db);
     runMigrations(db);
-    expect(getSchemaVersion(db)).toBe(3);
+    expect(getSchemaVersion(db)).toBe(4);
+  });
+
+  it('backfills only complete consistent lineage; mixed and missing legacy origins stay unresolved', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaok-mig-scope-'));
+    db = new Database(path.join(tmpDir, 'test.db'));
+    runMigrations(db);
+    db.prepare('INSERT INTO memory_l1_extracted(id,summary,scope,cwd) VALUES(?,?,?,?)').run('global', 'g', 'global', null);
+    db.prepare('INSERT INTO memory_l1_extracted(id,summary,scope,cwd) VALUES(?,?,?,?)').run('project', 'p', 'project', '/p');
+    for (const [id, ids] of [['g', '["global"]'], ['p', '["project"]'], ['mixed', '["global","project"]'], ['missing', '["absent"]'], ['empty', '[]']]) {
+      db.prepare('INSERT INTO memory_l2_scenario(id,source_ids,scenario) VALUES(?,?,?)').run(id, ids, id);
+    }
+    db.prepare('INSERT INTO memory_l3_persona(id,source_ids,trait) VALUES(?,?,?)').run('trait-p', '["p"]', 'private');
+    for (const table of ['memory_l2_scenario', 'memory_l3_persona']) {
+      db.exec(`ALTER TABLE ${table} DROP COLUMN scope`); db.exec(`ALTER TABLE ${table} DROP COLUMN cwd`);
+    }
+    db.prepare('UPDATE memory_meta SET value=? WHERE key=?').run('3', 'schema_version');
+    runMigrations(db);
+    expect(db.prepare('SELECT scope,cwd FROM memory_l2_scenario WHERE id=?').get('p')).toEqual({ scope: 'project', cwd: '/p' });
+    expect(db.prepare('SELECT scope FROM memory_l2_scenario WHERE id=?').get('g')).toEqual({ scope: 'global' });
+    for (const id of ['mixed', 'missing', 'empty']) expect(db.prepare('SELECT scope FROM memory_l2_scenario WHERE id=?').get(id)).toEqual({ scope: 'unresolved' });
+    expect(db.prepare('SELECT scope,cwd FROM memory_l3_persona WHERE id=?').get('trait-p')).toEqual({ scope: 'project', cwd: '/p' });
   });
 });

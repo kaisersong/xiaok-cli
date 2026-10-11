@@ -46,6 +46,7 @@ import { getDesktopApi } from '../shared/desktop';
 import { automationFocusTargetId } from '../lib/automation-deep-link';
 import { LocalMemoryStatsCard } from './settings/LocalMemoryStatsCard';
 import { MemoryModelSettings } from './settings/MemoryModelSettings';
+import { MemoryCompactionModelSettings } from './settings/MemoryCompactionModelSettings';
 import { McpErrorRemediationBanner } from './settings/McpErrorRemediationBanner';
 import { DesktopAppearanceSettings } from './settings/DesktopAppearanceSettings';
 import { LocalExecutionAuthorizationCard } from './settings/LocalExecutionAuthorizationCard';
@@ -4108,16 +4109,30 @@ function getRelatedServiceDisplayStatus(service: DesktopRelatedServiceStatus, t:
 
 function MemoryPane() {
   const { t } = useLocale();
+  const [memoryTab, setMemoryTab] = useState<'content' | 'configuration'>('content');
+  const ds = t.desktopSettings;
   return (
     <Section>
-      <SectionHeader icon={Brain}>{t.desktopSettings.memoryPaneTitle}</SectionHeader>
-      <p className="text-xs text-[var(--c-text-secondary)] mb-4">
-        {t.desktopSettings.memoryPaneDesc}
-      </p>
-      <LocalMemoryStatsCard />
-      <div className="mt-6">
-        <MemoryModelSettings />
+      <SectionHeader icon={Brain}>{ds.memoryPaneTitle}</SectionHeader>
+      <p className="text-xs text-[var(--c-text-secondary)] mb-4">{ds.memoryPaneDesc}</p>
+      <div role="tablist" aria-label={ds.memoryPaneTitle} className="mb-5 flex gap-4 border-b border-[var(--c-border-subtle)]">
+        {(['content', 'configuration'] as const).map(tab => (
+          <button type="button" role="tab" key={tab} id={`memory-tab-${tab}`}
+            aria-selected={memoryTab === tab} aria-controls={`memory-panel-${tab}`}
+            onClick={() => setMemoryTab(tab)}
+            className={`border-b-2 px-1 py-2 text-sm ${memoryTab === tab ? 'border-[var(--c-accent)] text-[var(--c-text-heading)]' : 'border-transparent text-[var(--c-text-muted)]'}`}>
+            {tab === 'content' ? ds.memoryContentTab : ds.memoryConfigurationTab}
+          </button>
+        ))}
       </div>
+      <div role="tabpanel" id="memory-panel-content" aria-labelledby="memory-tab-content" hidden={memoryTab !== 'content'}>
+        <LocalMemoryStatsCard showModelConfig={false} />
+      </div>
+      {memoryTab === 'configuration' && <div role="tabpanel" id="memory-panel-configuration" aria-labelledby="memory-tab-configuration" className="space-y-6">
+        <MemoryCompactionModelSettings />
+        <MemoryModelSettings />
+        <SystemOneSection />
+      </div>}
     </Section>
   );
 }
@@ -4862,7 +4877,6 @@ function ToolsPane() {
         </div>
       </Section>
 
-      <SystemOneSection />
     </>
   );
 }

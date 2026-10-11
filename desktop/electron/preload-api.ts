@@ -1,3 +1,4 @@
+import type { MemoryCompactionResult } from '../shared/memory-distillation-contract.js';
 import type { ConversationActivity, WorkWatch, WorkProjection, ReportingPreference, McpInputForm } from '../shared/conversation-activity-types.js';
 import type {OpenFileResult, ReadFileResult, SaveFileInput, SaveFileResult} from '../shared/file-ipc-contract.js';
 import type { IpcRenderer } from 'electron';
@@ -1538,7 +1539,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   deleteMemory(id: string): Promise<void>;
   importMemories(raw: string): Promise<unknown>;
   memoryStats(): Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>;
-  memoryCompact(): Promise<boolean>;
+  memoryCompact(): Promise<MemoryCompactionResult>;
   memoryPersonaTraits(): Promise<{ trait: string; confidence: number }[]>;
   memoryListLayer(layer: number, limit?: number, offset?: number): Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>;
   memoryDeleteEntry(id: string, layer: number): Promise<boolean>;
@@ -2109,7 +2110,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMemory: (id) => ipcRenderer.invoke('desktop:deleteMemory', id) as Promise<void>,
     importMemories: (items) => ipcRenderer.invoke('desktop:importMemories', items) as Promise<unknown>,
     memoryStats: () => ipcRenderer.invoke('desktop:memoryStats') as Promise<{ l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number } | null>,
-    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<boolean>,
+    memoryCompact: () => ipcRenderer.invoke('desktop:memoryCompact') as Promise<MemoryCompactionResult>,
     memoryPersonaTraits: () => ipcRenderer.invoke('desktop:memoryPersonaTraits') as Promise<{ trait: string; confidence: number }[]>,
     memoryListLayer: (layer: number, limit?: number, offset?: number) => ipcRenderer.invoke('desktop:memoryListLayer', layer, limit, offset) as Promise<{ id: string; content: string; tags?: string[]; createdAt: string; meta?: Record<string, unknown> }[]>,
     memoryDeleteEntry: (id: string, layer: number) => ipcRenderer.invoke('desktop:memoryDeleteEntry', id, layer) as Promise<boolean>,

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 export function getSchemaVersion(db: Database.Database): number {
   const hasTable = db.prepare(
@@ -127,10 +127,43 @@ function migrateV2toV3(db: Database.Database): void {
   setSchemaVersion(db, 3);
 }
 
+function migrateV3toV4(db: Database.Database): void {
+  db.transaction(() => {
+    for (const table of ['memory_l2_scenario', 'memory_l3_persona']) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'`);
+      db.exec(`ALTER TABLE ${table} ADD COLUMN cwd TEXT`);
+    }
+    // Existing derived rows had no scope. Infer it only from complete, consistent lineage.
+    for (const [table, sources] of [
+      ['memory_l2_scenario', 'memory_l1_extracted'],
+      ['memory_l3_persona', 'memory_l2_scenario'],
+    ]) {
+      const rows = db.prepare(`SELECT id, source_ids FROM ${table}`).all() as Array<{ id: string; source_ids: string }>;
+      for (const row of rows) {
+        let scope = 'unresolved'; let cwd: string | null = null;
+        try {
+          const ids: unknown = JSON.parse(row.source_ids);
+          if (Array.isArray(ids) && ids.length && ids.every(id => typeof id === 'string')) {
+            const lineage = ids.map(id => db.prepare(`SELECT scope, cwd FROM ${sources} WHERE id=?`).get(id) as { scope: string; cwd: string | null } | undefined);
+            const first = lineage[0];
+            if (first && (first.scope === 'global' || (first.scope === 'project' && first.cwd))
+              && lineage.every(source => source && source.scope === first.scope && source.cwd === first.cwd)) {
+              scope = first.scope; cwd = first.cwd;
+            }
+          }
+        } catch { /* Incomplete legacy lineage stays private until explicitly re-distilled. */ }
+        db.prepare(`UPDATE ${table} SET scope=?, cwd=? WHERE id=?`).run(scope, cwd, row.id);
+      }
+    }
+    setSchemaVersion(db, 4);
+  })();
+}
+
 const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
   1: migrateV0toV1,
   2: migrateV1toV2,
   3: migrateV2toV3,
+  4: migrateV3toV4,
 };
 
 export function runMigrations(db: Database.Database): void {

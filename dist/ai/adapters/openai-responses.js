@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
 const STREAM_TIMEOUT_MS = 5 * 60_000;
@@ -17,8 +18,11 @@ function isRetryableError(error) {
     }
     return false;
 }
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms, signal) {
+    if (signal)
+        await delay(ms, undefined, { signal });
+    else
+        await new Promise(resolve => setTimeout(resolve, ms));
 }
 export class OpenAIResponsesAdapter {
     apiKey;
@@ -47,9 +51,10 @@ export class OpenAIResponsesAdapter {
     async *stream(messages, tools, systemPrompt, options) {
         let attempt = 0;
         while (true) {
+            options?.signal?.throwIfAborted();
             let emittedAny = false;
             try {
-                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options?.signal)) {
+                for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options)) {
                     emittedAny = true;
                     yield chunk;
                 }
@@ -57,15 +62,16 @@ export class OpenAIResponsesAdapter {
             }
             catch (error) {
                 // 已产出 chunk 后重试会重复输出，必须放弃重试
-                if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES)
+                if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES)
                     throw error;
                 const delayMs = Math.min(2000 * 2 ** attempt, 10000);
-                await sleep(delayMs);
+                await sleep(delayMs, options?.signal);
                 attempt++;
             }
         }
     }
-    async *streamOnce(messages, tools, systemPrompt, signal) {
+    async *streamOnce(messages, tools, systemPrompt, options) {
+        const signal = options?.signal;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
         const mergedSignal = signal
@@ -83,6 +89,7 @@ export class OpenAIResponsesAdapter {
                 },
                 body: JSON.stringify({
                     model: this.model,
+                    ...(options?.maxOutputTokens !== undefined ? { max_output_tokens: options.maxOutputTokens } : {}),
                     input: buildResponsesInput(messages, systemPrompt),
                     ...(isGlobalPublicOpenAIResponsesBaseUrl(this.baseUrl) ? { store: false } : {}),
                     tools: tools.length > 0
@@ -108,6 +115,8 @@ export class OpenAIResponsesAdapter {
             throw new Error(`${response.status} ${await response.text()}`);
         }
         const result = await response.json();
+        if (options?.maxOutputTokens !== undefined && result.status !== 'completed')
+            throw new Error('memory_output_incomplete');
         for (const item of result.output ?? []) {
             if (item.type === 'message') {
                 for (const content of item.content ?? []) {

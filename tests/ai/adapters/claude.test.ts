@@ -465,3 +465,20 @@ describe('ClaudeAdapter', () => {
     vi.useRealTimers();
   });
 });
+
+
+describe('Claude memory output budget', () => {
+  it('maps max_tokens and rejects output exhaustion', async () => {
+    const { ClaudeAdapter } = await import('../../../src/ai/adapters/claude.js');
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const client = new Anthropic({ apiKey: 'fixture' }); const adapter = new ClaudeAdapter('fixture', 'claude-opus-4-7');
+    client.messages.stream = vi.fn(() => ({ async *[Symbol.asyncIterator]() {
+      yield { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 4096 } };
+      yield { type: 'message_stop' };
+    } })) as never;
+    (adapter as unknown as { client: typeof client }).client = client;
+    const consume = async () => { for await (const _ of adapter.stream([], [], 'system', { maxOutputTokens: 4096 })) { /* consume */ } };
+    await expect(consume()).rejects.toThrow('memory_output_incomplete');
+    expect(client.messages.stream).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 4096 }), expect.anything());
+  });
+});

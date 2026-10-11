@@ -33,6 +33,9 @@ export interface LayerEntry {
   meta?: Record<string, unknown>;
 }
 
+import type { MemoryCompactionRequest, MemoryCompactionResult } from '../../types.js';
+export type { MemoryCompactionRequest, MemoryCompactionResult } from '../../types.js';
+
 export interface MemoryStore {
   save(record: MemoryRecord): Promise<void>;
   getById?(id: string): MemoryRecord | undefined;
@@ -40,7 +43,7 @@ export interface MemoryStore {
   search?(query: string, limit?: number): Promise<MemoryRecord[]>;
   writeRawMessage?(sessionId: string, role: string, content: string): Promise<void>;
   close?(): void;
-  compact?(): Promise<void>;
+  compact?(request: MemoryCompactionRequest): Promise<MemoryCompactionResult>;
   getStats?(): { l0: number; l1: number; l2: number; l3: number; dbSizeBytes: number };
   getPersonaTraits?(): { trait: string; confidence: number }[];
   clearAll?(): void;

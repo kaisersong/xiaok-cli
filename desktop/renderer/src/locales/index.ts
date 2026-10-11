@@ -1263,6 +1263,11 @@ export interface LocaleStrings {
     appInfoDataPath: string;
     avatarTooLarge: string;
     memoryPaneTitle: string;
+    memoryContentTab: string;
+    memoryConfigurationTab: string;
+    memoryEmbeddingCurrent: string;
+    memoryModelConfigFailed: string;
+
     memoryPaneDesc: string;
     // voice settings
     voiceTitle: string;
@@ -1463,6 +1468,7 @@ export interface LocaleStrings {
     memoryLocalTitle: string;
     memoryCompact: string;
     memoryCompactDone: string;
+    memoryCompactFailed: string;
     memoryClear: string;
     memoryClearConfirmTitle: string;
     memoryClearConfirmDesc: string;

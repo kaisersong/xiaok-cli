@@ -1,4 +1,4 @@
-import type { MemoryStore, MemoryRecord, MemoryType } from './store.js';
+import type { MemoryStore, MemoryRecord, MemoryType, MemoryCompactionRequest, MemoryCompactionResult } from './store.js';
 import type { ModelAdapter } from '../../types.js';
 import { type EmbeddingConfig } from './embedding.js';
 export interface LayeredMemoryConfig {
@@ -24,6 +24,7 @@ export declare class LayeredMemoryStore implements MemoryStore {
     private compactionConfig;
     private compactTimer?;
     private compacting;
+    private closed;
     constructor(config: LayeredMemoryConfig);
     setLLMFn(fn: (prompt: string) => Promise<string>): void;
     save(record: MemoryRecord): Promise<void>;
@@ -35,7 +36,7 @@ export declare class LayeredMemoryStore implements MemoryStore {
     search(query: string, limit?: number): Promise<MemoryRecord[]>;
     getById(id: string): MemoryRecord | undefined;
     writeRawMessage(sessionId: string, role: string, content: string): Promise<void>;
-    compact(): Promise<void>;
+    compact(request: MemoryCompactionRequest): Promise<MemoryCompactionResult>;
     delete(id: string, layer?: number): Promise<boolean>;
     getPersonaTraits(): {
         trait: string;

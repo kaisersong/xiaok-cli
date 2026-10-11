@@ -1,3 +1,4 @@
+import { registerMemoryDistillationIpc } from '../../electron/memory-distillation.js';
 import { registerConversationActivityIpc } from '../../electron/conversation-activity-ipc.js';
 import Module, { createRequire } from 'node:module';
 import { registerDesktopMultiAgentIpc } from '../../electron/desktop-multi-agent-ipc.js';
@@ -988,6 +989,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   // registrar instead of duplicating its command table in this source scanner.
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
   dispose();
+  registerMemoryDistillationIpc({ handle: channel => { channels.add(channel); } }, {}, () => false);
   registerRoomWorkspaceIpc({ handle: channel => { channels.add(channel); } }, {} as never, () => false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
   for (const filePath of HANDLER_REGISTRATION_FILES) {

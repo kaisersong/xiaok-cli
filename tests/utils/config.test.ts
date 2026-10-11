@@ -43,6 +43,17 @@ describe('config', () => {
     }
   });
 
+  it('provides the same saved memory choices to synchronous Desktop startup and async callers', async () => {
+    const config = { ...DEFAULT_CONFIG, memory: { modelId: 'chat-memory-model', embedding: { provider: 'local' as const, model: 'bge-small-zh-v1.5' } } };
+    await saveConfig(config);
+    const mod = await import('../../src/utils/config.js');
+    const sync = (mod as typeof mod & { loadConfigSync: () => typeof config }).loadConfigSync;
+    expect(typeof sync).toBe('function');
+    expect(sync().memory).toEqual((await loadConfig()).memory);
+    expect(sync().memory?.modelId).toBe('chat-memory-model');
+    expect(sync().memory?.embedding?.model).toBe('bge-small-zh-v1.5');
+  });
+
   it('returns DEFAULT_CONFIG when no config file exists', async () => {
     const config = await loadConfig();
     expect(config.schemaVersion).toBe(2);

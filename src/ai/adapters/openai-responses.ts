@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { ModelAdapter, Message, StreamChunk, ToolDefinition } from '../../types.js';
 import { isAbortError } from '../runtime/abort-utils.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
@@ -13,6 +14,7 @@ type ResponsesOutputItem =
   | { type: 'function_call'; call_id?: string; name?: string; arguments?: string };
 
 type ResponsesResult = {
+  status?: string;
   output?: ResponsesOutputItem[];
   usage?: ResponsesUsage;
 };
@@ -32,8 +34,9 @@ function isRetryableError(error: unknown): boolean {
   return false;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal) await delay(ms, undefined, { signal });
+  else await new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
 export class OpenAIResponsesAdapter implements ModelAdapter {
@@ -87,18 +90,19 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
   ): AsyncIterable<StreamChunk> {
     let attempt = 0;
     while (true) {
+      options?.signal?.throwIfAborted();
       let emittedAny = false;
       try {
-        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options?.signal)) {
+        for await (const chunk of this.streamOnce(messages, tools, systemPrompt, options)) {
           emittedAny = true;
           yield chunk;
         }
         return;
       } catch (error) {
         // 已产出 chunk 后重试会重复输出，必须放弃重试
-        if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
+        if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) throw error;
         const delayMs = Math.min(2000 * 2 ** attempt, 10000);
-        await sleep(delayMs);
+        await sleep(delayMs, options?.signal);
         attempt++;
       }
     }
@@ -108,8 +112,9 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     messages: Message[],
     tools: ToolDefinition[],
     systemPrompt: string,
-    signal?: AbortSignal,
+    options?: StreamOptions,
   ): AsyncIterable<StreamChunk> {
+    const signal = options?.signal;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
     const mergedSignal = signal
@@ -127,6 +132,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
         },
         body: JSON.stringify({
           model: this.model,
+          ...(options?.maxOutputTokens !== undefined ? { max_output_tokens: options.maxOutputTokens } : {}),
           input: buildResponsesInput(messages, systemPrompt),
           ...(isGlobalPublicOpenAIResponsesBaseUrl(this.baseUrl) ? { store: false } : {}),
           tools: tools.length > 0
@@ -152,6 +158,7 @@ export class OpenAIResponsesAdapter implements ModelAdapter {
     }
 
     const result = await response.json() as ResponsesResult;
+    if (options?.maxOutputTokens !== undefined && result.status !== 'completed') throw new Error('memory_output_incomplete');
 
     for (const item of result.output ?? []) {
       if (item.type === 'message') {

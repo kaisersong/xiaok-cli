@@ -4226,3 +4226,44 @@ describe('generic OpenAI terminal boundary', () => {
     expect(instance.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 });
+
+
+describe('explicit stateless memory output budget', () => {
+  it.each([
+    ['https://api.openai.com/v1', 'max_completion_tokens'],
+    ['http://localhost:9999/v1', 'max_tokens'],
+  ])('maps bounded output for %s and leaves ordinary requests unchanged', async (baseUrl, field) => {
+    const adapter = createTestAdapter({ wireModel: 'test-model', baseUrl });
+    const bounded = await captureChatCompletionRequest(adapter, [], [], { maxOutputTokens: 4096 });
+    expect(bounded).toHaveProperty(field, 4096);
+    const ordinary = await captureChatCompletionRequest(adapter);
+    expect(ordinary).not.toHaveProperty('max_tokens'); expect(ordinary).not.toHaveProperty('max_completion_tokens');
+  });
+  it('rejects truncated output even if the emitted text is valid JSON', async () => {
+    const adapter = createTestAdapter({ wireModel: 'test-model' });
+    const OpenAI = (await import('openai')).default; const client = new OpenAI({ apiKey: 'test' });
+    vi.spyOn(client.chat.completions, 'create').mockResolvedValue({ async *[Symbol.asyncIterator]() {
+      yield { choices: [{ delta: { content: '{"scenarios":[]}' }, finish_reason: 'length' }] };
+    } } as never);
+    (adapter as unknown as { client: typeof client }).client = client;
+    const consume = async () => { for await (const _ of adapter.stream([], [], 'system', { maxOutputTokens: 4096 })) { /* actual transport */ } };
+    await expect(consume()).rejects.toThrow('memory_output_incomplete');
+  });
+});
+
+
+describe('memory-only DeepSeek thinking mode', () => {
+  it('disables thinking only on the exact official generic endpoint', async () => {
+    const adapter = createTestAdapter({ wireModel: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com/v1', providerId: 'deepseek', providerType: 'first_party' });
+    const memory = await captureChatCompletionRequest(adapter, [], [], { reasoningMode: 'disabled', maxOutputTokens: 8192 });
+    expect(memory).toHaveProperty('thinking', { type: 'disabled' });
+    expect(memory).not.toHaveProperty('reasoning_effort');
+    expect(await captureChatCompletionRequest(adapter)).not.toHaveProperty('thinking');
+  });
+  it.each(['https://api.deepseek.com.invalid/v1', 'http://api.deepseek.com/v1', 'http://localhost:8888/v1', 'https://api.openai.com/v1'])(
+    'does not attach DeepSeek fields to %s', async baseUrl => {
+      const adapter = createTestAdapter({ wireModel: 'test-model', baseUrl });
+      expect(await captureChatCompletionRequest(adapter, [], [], { reasoningMode: 'disabled' })).not.toHaveProperty('thinking');
+    },
+  );
+});

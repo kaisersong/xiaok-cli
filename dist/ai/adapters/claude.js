@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { isAbortError } from '../runtime/abort-utils.js';
 import { resolveClonedCapabilityOverrides } from './catalog-identity.js';
 const MAX_RETRIES = 3;
@@ -45,8 +46,11 @@ function isRetryableError(error) {
     }
     return false;
 }
-async function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms, signal) {
+    if (signal)
+        await delay(ms, undefined, { signal });
+    else
+        await new Promise(resolve => setTimeout(resolve, ms));
 }
 export class ClaudeAdapter {
     client;
@@ -96,6 +100,7 @@ export class ClaudeAdapter {
     async *stream(messages, tools, systemPrompt, options) {
         let attempt = 0;
         while (true) {
+            options?.signal?.throwIfAborted();
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
             const signal = options?.signal
@@ -112,11 +117,11 @@ export class ClaudeAdapter {
             catch (error) {
                 clearTimeout(timer);
                 // 一旦本次尝试已产出 chunk（消费端已实时落地/上屏），重试会重复输出，必须放弃重试
-                if (emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
+                if (options?.signal?.aborted || emittedAny || !isRetryableError(error) || attempt >= MAX_RETRIES) {
                     throw error;
                 }
                 const delayMs = Math.min(1000 * 2 ** attempt, 16000);
-                await sleep(delayMs);
+                await sleep(delayMs, options?.signal);
                 attempt += 1;
             }
             finally {
@@ -181,7 +186,7 @@ export class ClaudeAdapter {
         const client = await this.getClient();
         const stream = client.messages.stream({
             model: this.model,
-            max_tokens: CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
+            max_tokens: options?.maxOutputTokens ?? CLAUDE_REQUEST_MAX_OUTPUT_TOKENS,
             system: (options?.promptCache?.systemPrompt ?? systemPrompt),
             messages: anthropicMessages,
             tools: anthropicTools.length > 0 ? anthropicTools : undefined,
@@ -248,6 +253,8 @@ export class ClaudeAdapter {
                         },
                     };
                 }
+                if (options?.maxOutputTokens !== undefined && ['max_tokens', 'model_context_window_exceeded'].includes(String(event.delta.stop_reason)))
+                    throw new Error('memory_output_incomplete');
             }
             else if (event.type === 'message_stop') {
                 yield { type: 'done' };

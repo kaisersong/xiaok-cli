@@ -1,6 +1,7 @@
 import { createMemoryStoreAsync } from '../ai/memory/store.js';
 import { createLLMFromAdapter } from '../ai/memory/layered-store.js';
-import { createAdapter } from '../ai/models.js';
+import { createAdapterFromBinding } from '../ai/models.js';
+import { resolveRuntimeModelBinding } from '../ai/providers/control-plane.js';
 import { loadConfig } from '../utils/config.js';
 export function registerMemoryCommands(program) {
     const mem = program
@@ -83,28 +84,32 @@ export function registerMemoryCommands(program) {
         .action(async () => {
         const config = await loadConfig();
         const store = await createMemoryStoreAsync(config.memory);
-        if (!store.compact) {
-            console.log('当前记忆后端不支持 compaction');
-            store.close?.();
-            return;
-        }
         try {
-            const adapter = createAdapter(config);
-            store.setLLMFn?.(createLLMFromAdapter(adapter));
+            if (!store.compact) {
+                console.log('当前记忆后端不支持 compaction');
+                return;
+            }
+            try {
+                const requested = config.memory?.modelId;
+                const modelId = requested && config.models[requested] ? requested : undefined;
+                const adapter = createAdapterFromBinding(resolveRuntimeModelBinding(config, modelId));
+                store.setLLMFn?.(createLLMFromAdapter(adapter));
+            }
+            catch (e) {
+                console.error('无法初始化模型 adapter:', String(e));
+                return;
+            }
+            console.log('正在压缩记忆...');
+            await store.compact({ requestSource: 'user', force: true });
+            console.log('压缩完成。');
+            if (store.getStats) {
+                const stats = store.getStats();
+                console.log(`  L0: ${stats.l0} | L1: ${stats.l1} | L2: ${stats.l2} | L3: ${stats.l3}`);
+            }
         }
-        catch (e) {
-            console.error('无法初始化模型 adapter:', String(e));
+        finally {
             store.close?.();
-            return;
         }
-        console.log('正在压缩记忆...');
-        await store.compact();
-        console.log('压缩完成。');
-        if (store.getStats) {
-            const stats = store.getStats();
-            console.log(`  L0: ${stats.l0} | L1: ${stats.l1} | L2: ${stats.l2} | L3: ${stats.l3}`);
-        }
-        store.close?.();
     });
     mem
         .command('clear')

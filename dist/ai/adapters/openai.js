@@ -701,6 +701,16 @@ export class OpenAIAdapter {
             stream: true,
             stream_options: { include_usage: true },
         };
+        if (options?.maxOutputTokens !== undefined) {
+            const official = new URL(this.harnessContext.identity.canonicalBaseUrl ?? 'https://api.openai.com/v1').hostname === 'api.openai.com';
+            Object.assign(request, official ? { max_completion_tokens: options.maxOutputTokens } : { max_tokens: options.maxOutputTokens });
+        }
+        const endpoint = new URL(this.harnessContext.identity.canonicalBaseUrl ?? 'https://api.openai.com/v1');
+        const memoryThinkingDisabled = options?.reasoningMode === 'disabled'
+            && this.harnessContext.profile.id === 'generic-openai'
+            && endpoint.protocol === 'https:' && endpoint.hostname === 'api.deepseek.com';
+        if (memoryThinkingDisabled)
+            Object.assign(request, { thinking: { type: 'disabled' } });
         const cacheKey = options?.cacheKey;
         if (this.harnessContext.flags.promptCacheKey
             && this.harnessContext.profile.encodeCacheKey
@@ -712,7 +722,7 @@ export class OpenAIAdapter {
         const supportedEfforts = getSupportedModelReasoningEfforts({ ...identity, baseUrl: identity.canonicalBaseUrl });
         const selectedEffort = this.harnessContext.runtimeOptions?.reasoningEffort
             ?? getDefaultModelReasoningEffort(supportedEfforts);
-        if (selectedEffort && supportedEfforts.includes(selectedEffort)) {
+        if (!memoryThinkingDisabled && selectedEffort && supportedEfforts.includes(selectedEffort)) {
             Object.assign(request, { reasoning_effort: selectedEffort });
         }
         const strictKimiK3 = this.harnessContext.profile.id !== 'generic-openai';
@@ -832,6 +842,10 @@ export class OpenAIAdapter {
                 }
             }
             if (choice?.finish_reason) {
+                if (options?.maxOutputTokens !== undefined && choice.finish_reason === 'length') {
+                    await streamIterator.return?.();
+                    throw new Error('memory_output_incomplete');
+                }
                 if (strictKimiK3 && !officialReasoningSeen) {
                     throw new Error('KIMI_REASONING_ADMISSION_REQUIRED');
                 }

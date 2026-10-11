@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Brain, Plus, Upload, RefreshCw, Trash2, Search, Pencil, X } from 'lucide-react'
 import { useLocale } from '../../contexts/LocaleContext'
 import { getDesktopApi } from '../../shared/desktop'
@@ -50,7 +50,7 @@ function formatTimeAgo(dateStr: string | undefined, ds: { relativeTimeJustNow: s
   return ds.relativeTimeDaysAgo(days)
 }
 
-export function LocalMemoryStatsCard() {
+export function LocalMemoryStatsCard({ showModelConfig = true }: { showModelConfig?: boolean } = {}) {
   const { t } = useLocale()
   const ds = t.desktopSettings
 
@@ -60,6 +60,9 @@ export function LocalMemoryStatsCard() {
   const [activeLayer, setActiveLayer] = useState(0)
   const [compacting, setCompacting] = useState(false)
   const [compactDone, setCompactDone] = useState(false)
+  const [compactError, setCompactError] = useState(false)
+  const [modelOptions, setModelOptions] = useState<{ id: string; label: string }[]>([])
+  const compactDoneTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -81,7 +84,7 @@ export function LocalMemoryStatsCard() {
   const [editTags, setEditTags] = useState('')
 
   const api = getDesktopApi()
-  const memoryApi = api?.memory as any
+  const memoryApi = api?.memory
 
   const loadEntries = useCallback(async (layer: number) => {
     if (!memoryApi?.listLayer) return
@@ -100,32 +103,41 @@ export function LocalMemoryStatsCard() {
     if (!memoryApi) { setLoading(false); return }
     setLoading(true)
     try {
-      const [statsResult, listResult, mid] = await Promise.all([
+      const [statsResult, listResult, mid, models] = await Promise.all([
         memoryApi.stats?.() ?? null,
         memoryApi.listLayer?.(activeLayer, 200, 0) ?? [],
         memoryApi.getModelId?.() ?? null,
+        api?.getModelConfig?.().catch(() => null) ?? null,
       ])
       if (statsResult) setStats(statsResult)
       setEntries(Array.isArray(listResult) ? listResult : [])
-      setModelId(mid ?? null)
+      setModelOptions(models?.models ?? [])
+      setModelId(mid && models?.models.some(model => model.id === mid) ? mid : null)
     } catch (err) {
       console.error('LocalMemoryStatsCard loadData failed', err)
     } finally {
       setLoading(false)
     }
-  }, [memoryApi, activeLayer])
+  }, [memoryApi, activeLayer, api])
 
   useEffect(() => { void loadData() }, [loadData])
+  useEffect(() => () => { if (compactDoneTimer.current) clearTimeout(compactDoneTimer.current) }, [])
 
   const handleCompact = useCallback(async () => {
     if (!memoryApi?.compact) return
     setCompacting(true)
+    setCompactError(false)
+    setCompactDone(false)
     try {
-      await memoryApi.compact()
+      const result = await memoryApi.compact()
+      if (!result || !['completed', 'unchanged'].includes(result.status)
+        || ![result.l1, result.l2, result.l3].every(n => Number.isInteger(n) && n >= 0)) throw new Error('invalid_memory_compaction_result')
       setCompactDone(true)
-      setTimeout(() => setCompactDone(false), 2000)
+      if (compactDoneTimer.current) clearTimeout(compactDoneTimer.current)
+      compactDoneTimer.current = setTimeout(() => setCompactDone(false), 2000)
       void loadData()
     } catch (err) {
+      setCompactError(true)
       console.error('compact failed', err)
     } finally {
       setCompacting(false)
@@ -313,6 +325,7 @@ export function LocalMemoryStatsCard() {
         </div>
       </div>
 
+      {compactError && <p role="alert" className="text-sm text-[var(--c-status-error)]">{ds.memoryCompactFailed}</p>}
       {/* Layer stats */}
       {stats && (
         <div
@@ -346,7 +359,7 @@ export function LocalMemoryStatsCard() {
       )}
 
       {/* Compression model selector */}
-      <div className="flex items-center gap-3">
+      {showModelConfig && <div className="flex items-center gap-3">
         <span className="text-sm text-[var(--c-text-secondary)]">{ds.memoryCompactionModel}:</span>
         <select
           value={modelId ?? '__default__'}
@@ -359,11 +372,9 @@ export function LocalMemoryStatsCard() {
           }}
         >
           <option value="__default__">{ds.memoryCompactionModelDefault}</option>
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
-          <option value="gpt-4o">gpt-4o</option>
-          <option value="deepseek-chat">deepseek-chat</option>
+          {modelOptions.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
         </select>
-      </div>
+      </div>}
 
       {/* Search */}
       <div

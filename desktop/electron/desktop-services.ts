@@ -1,3 +1,5 @@
+import { createDesktopMemoryLlm, getActiveMemoryEmbeddingModel } from './memory-distillation.js';
+import { MODEL_REGISTRY } from '../../src/ai/memory/model-registry.js';
 import { ensureConversationActivityOwner } from '../../src/runtime/conversation-activity/owner-launcher.js';
 import { ConversationActivityAttachedService } from '../../src/runtime/conversation-activity/owner-service.js';
 import { ConversationActivityAttachedSources } from '../../src/runtime/conversation-activity/owner-source-client.js';
@@ -85,7 +87,7 @@ import { createGoalTools } from '../../src/ai/tools/goal.js';
 import type { GoalInput } from '../../src/runtime/goal/types.js';
 import { createSkillCatalog, parseSlashCommand, formatSkillsContext, findSkillByCommandName, type SkillMeta, type SkillCatalog } from '../../src/ai/skills/loader.js';
 import { createSkillTool } from '../../src/ai/skills/tool.js';
-import { getConfigDir, getConfigPath, loadConfig, saveConfig } from '../../src/utils/config.js';
+import { getConfigDir, getConfigPath, loadConfig, loadConfigSync, saveConfig } from '../../src/utils/config.js';
 import { resolveSystemOneConfig, setSystemOneConfig } from '../../src/ai/providers/system-one-config.js';
 import type { SystemOneConfig } from '../../src/types.js';
 import { createIntentDelegationTools } from '../../src/ai/tools/intent-delegation.js';
@@ -283,15 +285,27 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
     return _desktopMemoryStore;
   }
 
+  _desktopMemoryStore?.close?.();
+  _desktopMemoryStore = null;
   let store: MemoryStore;
+  let layeredCandidate: MemoryStore | undefined;
 
   try {
     if (!_LayeredMemoryStoreClass || !_resolveLayeredConfigFn) {
       throw new Error('layered-store module not available');
     }
     const dbPath = join(dataRoot, 'memory.db');
-    const config = _resolveLayeredConfigFn({ dbPath });
+    const currentConfig = loadConfigSync();
+    const config = _resolveLayeredConfigFn({
+      ...currentConfig.memory,
+      embedding: {
+        ...currentConfig.memory?.embedding,
+        model: getActiveMemoryEmbeddingModel(currentConfig, MODEL_REGISTRY.map(model => model.id)),
+      },
+      dbPath,
+    });
     const layeredStore = new _LayeredMemoryStoreClass(config);
+    layeredCandidate = layeredStore;
     _desktopMemoryStoreBackend = 'layered';
 
     // Migrate from legacy user-memories.json if present
@@ -334,8 +348,11 @@ export function getDesktopMemoryStore(dataRoot: string): MemoryStore {
       }
     }
 
+    layeredStore.setLLMFn(createDesktopMemoryLlm());
     store = layeredStore;
+    layeredCandidate = undefined;
   } catch (err) {
+    layeredCandidate?.close?.();
     console.warn('[memory] LayeredMemoryStore unavailable (native module issue), using fallback:', (err as Error).message);
     store = createFallbackMemoryStore(dataRoot);
     _desktopMemoryStoreBackend = 'fallback';
@@ -3463,8 +3480,16 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       subscribe: async (threadId: string, actor: ActivityActor, callback: Parameters<ConversationActivityService['subscribe']>[2]) => { await awaitActivityAttachment(); await prepareActivityViewerThread(threadId, actor); return activityService!.subscribe(threadId, actor, callback); },
       reporting: (watchId: string, preference: ReportingPreference, revision: number, actor: ActivityActor) => activityService!.updateReporting(watchId, preference, revision, actor),
       stop: async (watchId: string, revision: number, actor: ActivityActor) => { const result = await activityService!.stopWatch(watchId, revision, actor); activitySources?.stopWatch(watchId); activityMcp?.stopWatch(watchId); return result; },
-      projectChanged: (projectId: string) => activitySources!.refreshProject(projectId, true),
-      projectConnectionChanged: (status: 'connected' | 'disconnected' | 'reconnecting') => activitySources!.projectConnectionChanged(status),
+      projectChanged: async (projectId: string) => {
+        await awaitActivityAttachment();
+        if (!activitySources) throw new Error('activity_owner_unavailable');
+        await activitySources.refreshProject(projectId, true);
+      },
+      projectConnectionChanged: async (status: 'connected' | 'disconnected' | 'reconnecting') => {
+        await awaitActivityAttachment();
+        if (!activitySources) throw new Error('activity_owner_unavailable');
+        await activitySources.projectConnectionChanged(status);
+      },
     } : null,
     /** Main-only scheduler/loop entry. A fresh thread cannot attach to an armed user Goal. */
     createBackgroundTask: (input: Pick<TaskCreateInput, 'prompt' | 'materials' | 'permissionMode' | 'watchdogMs' | 'maxToolLoopIterations'> & {

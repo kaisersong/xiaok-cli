@@ -1336,6 +1336,11 @@ export const zh: LocaleStrings = {
     appInfoDataPath: "数据路径: ~/.xiaok/config.json",
     avatarTooLarge: "头像文件过大，请选择更小的图片",
     memoryPaneTitle: "记忆管理",
+    memoryContentTab: "记忆内容",
+    memoryConfigurationTab: "记忆配置",
+    memoryEmbeddingCurrent: "当前配置",
+    memoryModelConfigFailed: "模型配置读取或保存失败，请重试。",
+
     memoryPaneDesc: "管理你的偏好、工作流和项目知识。新对话会自动加载相关记忆。",
     // Voice settings
     voiceTitle: "语音输入",
@@ -1535,7 +1540,8 @@ export const zh: LocaleStrings = {
     memoryDeleteConfirm: "删除这条记忆？",
     // Local layered memory
     memoryLocalTitle: "本地记忆",
-    memoryCompact: "压缩",
+    memoryCompact: "提炼",
+    memoryCompactFailed: "提炼失败，原有记忆已保留。请检查模型后重试。",
     memoryCompactDone: "完成",
     memoryClear: "清除",
     memoryClearConfirmTitle: "清除所有记忆",

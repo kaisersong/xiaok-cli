@@ -28,6 +28,8 @@ export interface ModelInvocationOptions {
 }
 
 export interface StreamOptions extends ModelInvocationOptions {
+  maxOutputTokens?: number;
+  reasoningMode?: 'disabled';
   signal?: AbortSignal;
 }
 

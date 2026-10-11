@@ -25,6 +25,29 @@ async function makeServices() {
 }
 
 describe('desktop activity owner attach failure', () => {
+  it('returns stable asynchronous errors after attachment failure and waits for a retry', async () => {
+    const { services } = await makeServices();
+    try {
+      const api = services.conversationActivity!;
+      ensure.mockRejectedValueOnce(new Error('activity_owner_start_timeout'));
+      await expect(services.attachConversationActivityOwner(sourceConfig)).rejects.toThrow('activity_owner_start_timeout');
+      await expect(api.projectConnectionChanged('disconnected')).rejects.toThrow('activity_owner_unavailable');
+      await expect(api.projectChanged('p')).rejects.toThrow('activity_owner_unavailable');
+      ensure.mockClear();
+      let resolve!: (client: unknown) => void;
+      ensure.mockImplementation(() => new Promise(r => { resolve = r; }));
+      const attachment = services.attachConversationActivityOwner(sourceConfig);
+      await vi.waitFor(() => expect(ensure).toHaveBeenCalledTimes(1));
+      let settled = false;
+      const connection = api.projectConnectionChanged('connected').finally(() => { settled = true; });
+      const project = api.projectChanged('p');
+      await Promise.resolve(); expect(settled).toBe(false);
+      const client = { request: vi.fn(async () => ({})), dispose: vi.fn(), ownerEpoch: 'e1' };
+      resolve(client); await attachment; await connection; await project;
+      expect(client.request).toHaveBeenCalledWith('hint', { source: 'kswarm', workId: 'p' });
+    } finally { await services.disposeMultiAgent(); }
+  });
+
   it('does not cache a failed attach: the next call tries again, and consumers only ever see one stable user-safe code', async () => {
     const { services } = await makeServices();
     try {

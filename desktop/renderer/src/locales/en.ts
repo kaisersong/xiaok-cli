@@ -1385,6 +1385,11 @@ export const en: LocaleStrings = {
     appInfoDataPath: "Data path: ~/.xiaok/config.json",
     avatarTooLarge: "Avatar file is too large. Please choose a smaller image.",
     memoryPaneTitle: "Memory",
+    memoryContentTab: "Memory content",
+    memoryConfigurationTab: "Memory configuration",
+    memoryEmbeddingCurrent: "Current configuration",
+    memoryModelConfigFailed: "Could not load or save the model configuration. Please retry.",
+
     memoryPaneDesc: "Manage your preferences, workflows, and project knowledge. New conversations auto-load relevant memories.",
     // Voice settings
     voiceTitle: "Voice Input",
@@ -1547,7 +1552,8 @@ export const en: LocaleStrings = {
     memoryDeleteConfirm: "Delete this memory entry?",
     // Local layered memory
     memoryLocalTitle: "Local Memory",
-    memoryCompact: "Compact",
+    memoryCompact: "Distill",
+    memoryCompactFailed: "Distillation failed. Existing memories are preserved. Check the model and retry.",
     memoryCompactDone: "Done",
     memoryClear: "Clear",
     memoryClearConfirmTitle: "Clear All Memories",

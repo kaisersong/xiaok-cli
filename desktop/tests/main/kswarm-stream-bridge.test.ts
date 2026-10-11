@@ -39,6 +39,37 @@ describe('KSwarmStreamBridge', () => {
     bridge.dispose();
   });
 
+  it('isolates initial and later observer failures without preventing startup or unsubscribe', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const sockets: any[] = [];
+    class Socket {
+      static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
+      readyState = 0; onopen?: () => void; onclose?: () => void; onmessage?: (event: { data: string }) => void;
+      close() { this.readyState = 3; this.onclose?.(); }
+      constructor(_url: string) { sockets.push(this); }
+    }
+    globalThis.WebSocket = Socket as unknown as typeof WebSocket;
+    const bridge = new KSwarmStreamBridge('ws://fixture');
+    const broken = vi.fn(() => { throw new Error('not_attached'); });
+    let stop!: () => void;
+    try {
+      expect(() => { stop = bridge.observeConnection(broken); }).not.toThrow();
+      bridge.observeConnection(async () => { throw new Error('async_failed'); });
+      bridge.observeEvents(async () => { throw new Error('event_failed'); });
+      const status = vi.fn(); bridge.observeConnection(status);
+      const wc = createMockWebContents(1); bridge.subscribe(createMockEvent(wc));
+      bridge.start(); sockets[0].readyState = 1; sockets[0].onopen();
+      sockets[0].onmessage({ data: JSON.stringify({ type: 'project_activity', projectId: 'p' }) });
+      await Promise.resolve(); await Promise.resolve();
+      expect(status).toHaveBeenLastCalledWith('connected');
+      expect(wc.send).toHaveBeenCalledWith('desktop:kswarm:wsEvent', { type: 'project_activity', projectId: 'p' });
+      expect(warning).toHaveBeenCalledWith('[kswarm-bridge] observer failed:', 'async_failed');
+      expect(warning).toHaveBeenCalledWith('[kswarm-bridge] observer failed:', 'event_failed');
+      stop(); const calls = broken.mock.calls.length;
+      sockets[0].close(); expect(broken).toHaveBeenCalledTimes(calls);
+    } finally { bridge.dispose(); warning.mockRestore(); }
+  });
+
   it('subscribes and unsubscribes webContents', () => {
     const bridge = new KSwarmStreamBridge('ws://localhost:9999/ws');
     const wc = createMockWebContents(1);
