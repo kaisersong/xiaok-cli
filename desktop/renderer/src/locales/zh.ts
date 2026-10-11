@@ -1275,6 +1275,7 @@ export const zh: LocaleStrings = {
     mobileRelayStateMissing: "尚未登录 relay，手机在外网时无法连接",
     mobileRelayStateUnparseable: "relay 凭据格式无法解析，需要重新登录",
     mobileRelayExpiredAt: "到期时间",
+    mobileRelaySignInFailed: "无法打开 Relay 登录页面。请再次点击重试。",
     mobileRelaySignInAction: "打开登录页面",
     mobileRelayReauthHint: "relay 凭据有效期为 7 天，过期后需要重新登录一次；登录成功后把新 JWT 写回 ~/.intent-broker/credentials。",
     mobilePairingLoading: "正在生成配对二维码...",

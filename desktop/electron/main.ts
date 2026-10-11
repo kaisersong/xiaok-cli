@@ -1,3 +1,6 @@
+import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
+import { registerMobileSignInIpc } from './mobile-signin-typed-ipc.js';
+import { captureIpcData } from './ipc-data-snapshot.js';
 import { createDesktopServiceControl } from './desktop-service-control.js';
 import { registerServiceControlIpc } from './service-control-typed-ipc.js';
 import { registerMobileReadonlyIpc, captureMobileRelayStatus } from './mobile-readonly-typed-ipc.js';
@@ -870,14 +873,21 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
    * for the relay's own sign-in page, and the URL is derived here from the relay
    * config rather than accepted from the caller.
    */
-  shutdownAwareIpc.handle('desktop:mobile:openRelaySignIn', () => {
-    const relayUrl = mobileRelayConfig?.relayUrl ?? latestMobileRelayStatus.relayUrl;
-    if (!relayUrl) return { ok: false as const, error: 'relay_url_unknown' };
-    const signInUrl = `${relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login`;
-    void shell.openExternal(signInUrl);
-    debugMain('mobile-relay:sign-in-opened', { signInUrl });
-    return { ok: true as const, url: signInUrl };
+  const mobileSignInOwner = createMobileRelaySignInOwner({
+    getRelayUrl: () => {
+      try {
+        return mobileRelayConfig
+          ? captureIpcData(mobileRelayConfig, 'mobile_signin_operation_unknown').relayUrl
+          : captureMobileRelayStatus(latestMobileRelayStatus).relayUrl;
+      } catch { throw Error('mobile_signin_operation_unknown'); }
+    },
+    openExternal: url => shell.openExternal(url),
+    onOpened: () => debugMain('mobile-relay:sign-in-opened', { targetKind: 'relay-auth-login' }),
   });
+  const mobileSignInProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:mobile:openRelaySignIn', () => mobileSignInOwner.open('user')],
+  ]);
+  registerMobileSignInIpc(shutdownAwareIpc, mobileSignInProducers);
   const mobileReadonlyProducers = new Map<string, IpcHandlerListener>([
     ['desktop:mobile:getRelayStatus', () => latestMobileRelayStatus],
     ['desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({

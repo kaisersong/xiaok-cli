@@ -1204,6 +1204,7 @@ export interface LocaleStrings {
     mobileRelayStateMissing: string;
     mobileRelayStateUnparseable: string;
     mobileRelayExpiredAt: string;
+    mobileRelaySignInFailed: string;
     mobileRelaySignInAction: string;
     mobileRelayReauthHint: string;
     mobilePairingLoading: string;

@@ -1,3 +1,4 @@
+import type { MobileRelaySignInResult } from '../shared/mobile-signin-ipc-contract.js';
 import type { RelatedServiceIdDto, RelatedServiceStatusDto, ServiceStatusSnapshotDto } from '../shared/service-control-ipc-contract.js';
 import type { MobilePairingInfoDto, MobileRelayStatusDto } from '../shared/mobile-readonly-ipc-contract.js';
 import type { PluginMcpServerDto, PluginDependencyStatusDto, AvailablePluginDto } from '../shared/plugin-catalog-ipc-contract.js';
@@ -1189,7 +1190,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getMobileRelayStatus(): Promise<DesktopMobileRelayStatus>;
   onMobileRelayStatus(handler: (status: DesktopMobileRelayStatus) => void): () => void;
   /** Opens the relay's own sign-in page; the URL is derived in main, not passed in. */
-  openMobileRelaySignIn(): Promise<{ ok: boolean; url?: string; error?: string }>;
+  openMobileRelaySignIn(): Promise<MobileRelaySignInResult>;
   readClipboardFilePaths(): Promise<string[]>;
   readClipboardImage(): Promise<string | null>;
   selectDirectory(): Promise<{ filePath: string }>;
@@ -1570,7 +1571,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteModel: (modelId) => ipcRenderer.invoke('desktop:deleteModel', modelId) as Promise<void>,
     getMobilePairingInfo: () => ipcRenderer.invoke('desktop:mobile:getPairingInfo') as Promise<DesktopMobilePairingInfo>,
     getMobileRelayStatus: () => ipcRenderer.invoke('desktop:mobile:getRelayStatus') as Promise<DesktopMobileRelayStatus>,
-    openMobileRelaySignIn: () => ipcRenderer.invoke('desktop:mobile:openRelaySignIn') as Promise<{ ok: boolean; url?: string; error?: string }>,
+    openMobileRelaySignIn: () => ipcRenderer.invoke('desktop:mobile:openRelaySignIn') as Promise<MobileRelaySignInResult>,
     onMobileRelayStatus(handler) {
       const channel = 'desktop:mobileRelayStatus';
       const listener = (_event: unknown, payload: unknown) => {

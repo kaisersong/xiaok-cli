@@ -23,6 +23,7 @@ beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.pairing.mockResolvedValue(pairing('first')); mocks.relay.mockResolvedValue(relay()); mocks.qr.mockImplementation(async (link: string) => 'data:image/png;base64,' + btoa(link));
   mocks.onStatus.mockImplementation(() => mocks.off); mocks.copy.mockResolvedValue(undefined);
+  mocks.signIn.mockResolvedValue({ ok: true, url: 'https://owned.invalid/auth/login' });
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: mocks.copy } });
 });
 afterEach(() => { cleanup(); localStorage.removeItem('xiaok:locale'); });
@@ -84,6 +85,6 @@ describe('actual MobilePane atomic presentation and readonly recovery', () => {
   });
   it('preserves the explicit user sign-in button as an independent action', async () => {
     mocks.relay.mockResolvedValueOnce(relay('expired')); mount(); const button = await screen.findByRole('button', { name: '打开登录页面' });
-    expect(mocks.signIn).not.toHaveBeenCalled(); fireEvent.click(button); expect(mocks.signIn).toHaveBeenCalledTimes(1);
+    expect(mocks.signIn).not.toHaveBeenCalled(); await act(async () => fireEvent.click(button)); expect(mocks.signIn).toHaveBeenCalledTimes(1);
   });
 });

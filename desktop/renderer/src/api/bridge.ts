@@ -1,3 +1,4 @@
+import type { MobileRelaySignInResult } from '../../../shared/mobile-signin-ipc-contract';
 import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
 import type { ProxyHttpBody } from './types';
 import type {LoopArtifactPageRequest,LoopArtifactListView} from '../../../shared/loop-artifacts.js';
@@ -635,7 +636,7 @@ export const api = {
   onMobileRelayStatus(handler: (status: DesktopMobileRelayStatus) => void): () => void {
     return window.xiaokDesktop.onMobileRelayStatus(handler);
   },
-  async openMobileRelaySignIn(): Promise<{ ok: boolean; url?: string; error?: string }> {
+  async openMobileRelaySignIn(): Promise<MobileRelaySignInResult> {
     return await window.xiaokDesktop.openMobileRelaySignIn();
   },
   async getMobilePairingInfo(): Promise<DesktopMobilePairingInfo> {

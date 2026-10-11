@@ -1324,6 +1324,7 @@ export const en: LocaleStrings = {
     mobileRelayStateMissing: "Not signed in to the relay; remote access is unavailable",
     mobileRelayStateUnparseable: "Relay credentials are unreadable — sign in again",
     mobileRelayExpiredAt: "Expired at",
+    mobileRelaySignInFailed: "Unable to open the Relay sign-in page. Click again to retry.",
     mobileRelaySignInAction: "Open sign-in page",
     mobileRelayReauthHint: "Relay credentials last 7 days; after they expire you must sign in again and write the new JWT back to ~/.intent-broker/credentials.",
     mobilePairingLoading: "Generating pairing QR code...",

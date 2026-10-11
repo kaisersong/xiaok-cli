@@ -919,12 +919,38 @@ function MobilePane() {
     }, 2500);
   }, [pairing?.deepLink]);
 
+  const [signInBusy, setSignInBusy] = useState(false);
+  const [signInFailed, setSignInFailed] = useState(false);
+  const signInLifetime = useRef<{ active: boolean; busy: boolean } | null>(null);
+  useEffect(() => {
+    const lifetime = { active: true, busy: false };
+    signInLifetime.current = lifetime;
+    return () => { lifetime.active = false; if (signInLifetime.current === lifetime) signInLifetime.current = null; };
+  }, []);
+  const openRelaySignIn = useCallback(async () => {
+    const lifetime = signInLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
+    setSignInBusy(true);
+    setSignInFailed(false);
+    try {
+      const result = await api.openMobileRelaySignIn();
+      if (lifetime.active) setSignInFailed(!result || typeof result !== 'object' || result.ok !== true || typeof result.url !== 'string' || result.url.length === 0);
+    } catch {
+      if (lifetime.active) setSignInFailed(true);
+    } finally {
+      lifetime.busy = false;
+      if (lifetime.active) setSignInBusy(false);
+    }
+  }, []);
+
   const relayReady = Boolean(pairing?.relayUrl && pairing.relayJwt && pairing.relayRoomSecret);
 
   return (
     <div className="space-y-6">
       <Section>
         <SectionHeader icon={Smartphone}>{t.desktopSettings.mobilePairingTitle}</SectionHeader>
+        {signInFailed && <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{t.desktopSettings.mobileRelaySignInFailed}</div>}
         {relayUnavailable && (
           <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             <div>{t.desktopSettings.mobileRelayReadUnavailable}</div>
@@ -956,7 +982,8 @@ function MobilePane() {
             {relayStatus.requiresUserReauth && relayStatus.relayUrl && (
               <button
                 type="button"
-                onClick={() => { void api.openMobileRelaySignIn(); }}
+                onClick={() => { void openRelaySignIn(); }}
+                disabled={signInBusy}
                 className="mt-2 inline-flex items-center gap-1 rounded-md bg-[var(--c-accent)] px-3 py-1.5 text-xs text-white"
               >
                 {t.desktopSettings.mobileRelaySignInAction}
