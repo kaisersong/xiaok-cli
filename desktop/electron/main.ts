@@ -1017,11 +1017,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const updaterProducers = new Map<string, IpcHandlerListener>();
   const updaterIpc: IpcHandleRegistrar = { handle(channel, listener) { updaterProducers.set(channel, listener); } };
   updaterIpc.handle('desktop:getUpdateStatus', () => {
-    try {
-      return { ...getUpdateStatus(), currentVersion: app.getVersion() };
-    } catch (e) {
-      return { checking: false, available: false, downloading: false, downloaded: false, progress: 0, error: (e as Error).message, currentVersion: app.getVersion() };
-    }
+    return { ...getUpdateStatus(), currentVersion: app.getVersion() };
   });
   updaterIpc.handle('desktop:checkForUpdates', async () => {
     try {

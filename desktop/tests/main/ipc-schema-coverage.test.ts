@@ -1,3 +1,4 @@
+import { registerScheduledTimedActionIpc } from '../../electron/scheduled-timed-action-typed-ipc.js';
 import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
 import {registerLoopOutputIpc} from '../../electron/loop-output-service.js';
 import {registerLoopCurrentViewIpc} from '../../electron/loop-current-views.js';
@@ -12,6 +13,7 @@ const mainSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron'
 const ipcSource = readFileSync(join(import.meta.dirname, '..', '..', 'electron', 'ipc.ts'), 'utf8');
 const currentViewChannels:string[]=[];
 registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerScheduledTimedActionIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerLoopCurrentViewIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
 registerLoopOutputIpc({handle:channel=>{currentViewChannels.push(channel);}},{} as never,()=>false);
 registerLoopManagementIpc({handle:channel=>{currentViewChannels.push(channel);}});
