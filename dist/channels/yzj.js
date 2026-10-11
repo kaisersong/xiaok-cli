@@ -1,4 +1,3 @@
-import { normalizeAllowedSenders } from './sender-allowlist.js';
 function normalizeWebhookPath(raw) {
     const trimmed = raw?.trim();
     if (!trimmed)
@@ -17,7 +16,6 @@ export function resolveYZJConfig(config, overrides = {}) {
     }
     return {
         webhookUrl,
-        allowedSenders: normalizeAllowedSenders(merged.allowedSenders),
         inboundMode: merged.inboundMode ?? 'websocket',
         webhookPath: normalizeWebhookPath(merged.webhookPath),
         webhookPort: merged.webhookPort ?? 3001,

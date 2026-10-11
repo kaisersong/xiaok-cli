@@ -5,8 +5,6 @@ export interface RuntimeTurnRequest {
     sessionId: string;
     cwd: string;
     source: 'chat' | 'yzj';
-    initiator?: string;
-    channelTurnId?: string;
     input: string | MessageBlock[];
 }
 export interface SkillEntry {

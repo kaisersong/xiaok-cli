@@ -2,8 +2,6 @@ export type UiLocale = 'zh-CN' | 'en';
 export declare function getToolActivityLabel(toolName: string, locale?: UiLocale): string;
 export declare function getUiCopy(locale?: UiLocale): {
     readonly approvalTitle: "xiaok 想要执行以下操作";
-    readonly mandatoryReview: "这个操作有风险，每次都会询问";
-    readonly writeTarget: (path: string) => string;
     readonly autoApprovalReason: (reason: string) => string;
     readonly currentCommandLabel: "本次执行命令";
     readonly commandApprovalScope: (rule: string) => string;
@@ -43,14 +41,11 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly file: "文件";
         readonly path: "路径";
         readonly pattern: "模式";
-        readonly url: "URL";
     };
     readonly ranCollapseNotice: "… 更多命令已折叠（完成后按 Ctrl+O 查看）";
     readonly hint: "数字直选  ↑↓ 切换  Enter 确认  Esc 取消";
 } | {
     readonly approvalTitle: "xiaok wants to run";
-    readonly mandatoryReview: "This operation carries risk and requires approval every time";
-    readonly writeTarget: (path: string) => string;
     readonly autoApprovalReason: (reason: string) => string;
     readonly currentCommandLabel: "Command to run now";
     readonly commandApprovalScope: (rule: string) => string;
@@ -90,7 +85,6 @@ export declare function getUiCopy(locale?: UiLocale): {
         readonly file: "File";
         readonly path: "Path";
         readonly pattern: "Pattern";
-        readonly url: "URL";
     };
     readonly ranCollapseNotice: "… More commands collapsed (press Ctrl+O after completion to view)";
     readonly hint: "1-5 select  Up/Down navigate  Enter confirm  Esc cancel";

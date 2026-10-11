@@ -1,4 +1,3 @@
-import { runWithTurnOrigin } from '../../channels/turn-origin.js';
 import { isAbortError } from './abort-utils.js';
 import { normalizeRuntimeError } from './runtime-errors.js';
 import { createPromptCacheAffinity } from './prompt-cache-affinity.js';
@@ -32,23 +31,21 @@ export class RuntimeFacade {
             throw new Error(`${normalized.code}: ${normalized.message}`);
         }
         try {
-            await runWithTurnOrigin({ source: request.source, initiator: request.initiator, channelTurnId: request.channelTurnId }, async () => {
-                const cacheKey = createPromptCacheAffinity(request.sessionId);
-                if (cacheKey) {
-                    if (onRuntimeEvent) {
-                        await this.options.agent.runTurn(input, onChunk, signal, { cacheKey }, onRuntimeEvent);
-                    }
-                    else {
-                        await this.options.agent.runTurn(input, onChunk, signal, { cacheKey });
-                    }
-                }
-                else if (onRuntimeEvent) {
-                    await this.options.agent.runTurn(input, onChunk, signal, undefined, onRuntimeEvent);
+            const cacheKey = createPromptCacheAffinity(request.sessionId);
+            if (cacheKey) {
+                if (onRuntimeEvent) {
+                    await this.options.agent.runTurn(input, onChunk, signal, { cacheKey }, onRuntimeEvent);
                 }
                 else {
-                    await this.options.agent.runTurn(input, onChunk, signal);
+                    await this.options.agent.runTurn(input, onChunk, signal, { cacheKey });
                 }
-            });
+            }
+            else if (onRuntimeEvent) {
+                await this.options.agent.runTurn(input, onChunk, signal, undefined, onRuntimeEvent);
+            }
+            else {
+                await this.options.agent.runTurn(input, onChunk, signal);
+            }
         }
         catch (runError) {
             if (isAbortError(runError)) {
