@@ -1,3 +1,4 @@
+import { runWithTurnOrigin } from '../../channels/turn-origin.js';
 import type { Agent, OnRuntimeEvent } from '../agent.js';
 import type { MessageBlock, StreamChunk } from '../../types.js';
 import type { PromptBuilder, PromptBuilderInput } from '../prompts/builder.js';
@@ -9,6 +10,8 @@ export interface RuntimeTurnRequest {
   sessionId: string;
   cwd: string;
   source: 'chat' | 'yzj';
+  initiator?: string;
+  channelTurnId?: string;
   input: string | MessageBlock[];
 }
 
@@ -61,35 +64,37 @@ export class RuntimeFacade {
     }
 
     try {
-      const cacheKey = createPromptCacheAffinity(request.sessionId);
-      if (cacheKey) {
-        if (onRuntimeEvent) {
+      await runWithTurnOrigin({ source: request.source, initiator: request.initiator, channelTurnId: request.channelTurnId }, async () => {
+        const cacheKey = createPromptCacheAffinity(request.sessionId);
+        if (cacheKey) {
+          if (onRuntimeEvent) {
+            await this.options.agent.runTurn(
+              input,
+              onChunk,
+              signal,
+              { cacheKey },
+              onRuntimeEvent,
+            );
+          } else {
+            await this.options.agent.runTurn(
+              input,
+              onChunk,
+              signal,
+              { cacheKey },
+            );
+          }
+        } else if (onRuntimeEvent) {
           await this.options.agent.runTurn(
             input,
             onChunk,
             signal,
-            { cacheKey },
+            undefined,
             onRuntimeEvent,
           );
         } else {
-          await this.options.agent.runTurn(
-            input,
-            onChunk,
-            signal,
-            { cacheKey },
-          );
+          await this.options.agent.runTurn(input, onChunk, signal);
         }
-      } else if (onRuntimeEvent) {
-        await this.options.agent.runTurn(
-          input,
-          onChunk,
-          signal,
-          undefined,
-          onRuntimeEvent,
-        );
-      } else {
-        await this.options.agent.runTurn(input, onChunk, signal);
-      }
+      });
     } catch (runError) {
       if (isAbortError(runError)) {
         this.rollbackSkillNames(newSkillsThisTurn);

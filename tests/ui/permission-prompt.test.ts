@@ -559,3 +559,54 @@ describe('permission-prompt', () => {
     });
   });
 });
+
+describe('确认撤回与 URL 摘要', () => {
+  it('展示单行 URL 并限制摘要长度', () => {
+    expect(buildPermissionRequest('web_fetch', { url: 'https://example.invalid/page' }).summary).toBe('web_fetch: https://example.invalid/page');
+    const summary = buildPermissionRequest('web_fetch', { url: 'https://example.invalid/\n' + 'x'.repeat(300) }).summary;
+    expect(summary).not.toContain('\n');
+    expect(summary.length).toBeLessThanOrEqual(211);
+  });
+  it('撤回后清理输入和菜单，忽略后续输入', async () => {
+    const harness = createTtyHarness();
+    const controller = new AbortController();
+    const before = process.stdin.listenerCount('data');
+    try {
+      const pending = showPermissionPrompt('read', { path: '/ws/file' }, { signal: controller.signal });
+      controller.abort();
+      await expect(pending).resolves.toEqual({ action: 'deny' });
+      expect(process.stdin.listenerCount('data')).toBe(before);
+      expect(harness.screen.text()).not.toContain('工具: read');
+      harness.send('3'); controller.abort();
+    } finally { harness.restore(); }
+  });
+});
+
+it('renderer 确认撤回关闭菜单并保留上方输出', async () => {
+  const harness = createTtyHarness();
+  const renderer = new ReplRenderer(process.stdout);
+  const controller = new AbortController();
+  try {
+    renderer.prepareBlockOutput();
+    process.stdout.write('saved output\n');
+    renderer.renderInput({ prompt: '> ', input: '', cursor: 0, overlayLines: [] });
+    const pending = showPermissionPrompt('read', { path: '/ws/file' }, { renderer, signal: controller.signal });
+    controller.abort();
+    await expect(pending).resolves.toEqual({ action: 'deny' });
+    expect(harness.screen.text()).not.toContain('工具: read');
+    expect(harness.screen.text()).toContain('saved output');
+  } finally { harness.restore(); }
+});
+
+it('已决定的提示忽略随后 abort', async () => {
+  const harness = createTtyHarness();
+  const controller = new AbortController();
+  try {
+    const pending = showPermissionPrompt('read', { path: '/ws/file' }, { signal: controller.signal });
+    harness.send('\r');
+    await expect(pending).resolves.toEqual({ action: 'allow_once' });
+    const before = harness.screen.text();
+    controller.abort();
+    expect(harness.screen.text()).toBe(before);
+  } finally { harness.restore(); }
+});

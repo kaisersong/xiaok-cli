@@ -27,7 +27,8 @@ export interface PermissionRequestPayload {
 }
 
 function singleLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length > 200 ? `${line.slice(0, 197)}...` : line;
 }
 
 /** 从工具输入中提取关键参数用于展示 */
@@ -37,6 +38,7 @@ function extractTarget(input: Record<string, unknown>, locale: UiLocale = 'zh-CN
   if (typeof input.file_path === 'string') return { key: labels.file, value: singleLine(input.file_path) };
   if (typeof input.path === 'string') return { key: labels.path, value: singleLine(input.path) };
   if (typeof input.pattern === 'string') return { key: labels.pattern, value: singleLine(input.pattern) };
+  if (typeof input.url === 'string') return { key: labels.url, value: singleLine(input.url) };
   return null;
 }
 
@@ -170,8 +172,10 @@ export async function showPermissionPrompt(
     transcriptLogger?: TranscriptLogger;
     renderer?: ReplRenderer;
     permissionMode?: PermissionMode;
+    signal?: AbortSignal;
   },
 ): Promise<PermissionChoice> {
+  if (config?.signal?.aborted) return { action: 'deny' };
   const rule = deriveRule(toolName, input);
   const transcriptLogger = config?.transcriptLogger;
   const renderer = config?.renderer;
@@ -288,6 +292,7 @@ export async function showPermissionPrompt(
     const done = (choice: PermissionChoice) => {
       if (resolved) return;
       resolved = true;
+      config?.signal?.removeEventListener('abort', onAbort);
       clearAll();
       stopPermissionInput(onData);
 
@@ -370,8 +375,11 @@ export async function showPermissionPrompt(
       }
     };
 
+    const onAbort = () => done({ action: 'deny' });
     renderAll();
     startPermissionInput(onData);
+    config?.signal?.addEventListener('abort', onAbort, { once: true });
+    if (config?.signal?.aborted) onAbort();
   });
 }
 

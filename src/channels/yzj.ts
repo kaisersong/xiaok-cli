@@ -1,3 +1,4 @@
+import { normalizeAllowedSenders } from './sender-allowlist.js';
 import type { Config, YZJChannelConfig } from '../types.js';
 import type { ChannelRequest } from './webhook.js';
 import type { YZJIncomingMessage, YZJResolvedConfig } from './yzj-types.js';
@@ -22,6 +23,7 @@ export function resolveYZJConfig(config: Config, overrides: Partial<YZJChannelCo
 
   return {
     webhookUrl,
+    allowedSenders: normalizeAllowedSenders(merged.allowedSenders),
     inboundMode: merged.inboundMode ?? 'websocket',
     webhookPath: normalizeWebhookPath(merged.webhookPath),
     webhookPort: merged.webhookPort ?? 3001,
