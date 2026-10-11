@@ -1278,6 +1278,8 @@ export const zh: LocaleStrings = {
     mobileRelaySignInAction: "打开登录页面",
     mobileRelayReauthHint: "relay 凭据有效期为 7 天，过期后需要重新登录一次；登录成功后把新 JWT 写回 ~/.intent-broker/credentials。",
     mobilePairingLoading: "正在生成配对二维码...",
+    mobileRelayReadUnavailable: "暂时无法读取移动端连接状态。",
+    mobileRelayReadRetry: "重新读取连接状态",
     mobilePairingLoadFailed: "读取移动端配对信息失败。",
     mobilePairingQrAlt: "移动端配对二维码",
     mobilePairingCopyLink: "复制链接",

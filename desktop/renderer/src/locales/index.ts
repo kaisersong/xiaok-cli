@@ -1207,6 +1207,8 @@ export interface LocaleStrings {
     mobileRelaySignInAction: string;
     mobileRelayReauthHint: string;
     mobilePairingLoading: string;
+    mobileRelayReadUnavailable: string;
+    mobileRelayReadRetry: string;
     mobilePairingLoadFailed: string;
     mobilePairingQrAlt: string;
     mobilePairingCopyLink: string;

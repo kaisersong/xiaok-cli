@@ -1,3 +1,4 @@
+import { registerMobileReadonlyIpc, captureMobileRelayStatus } from './mobile-readonly-typed-ipc.js';
 import { registerUpdaterIpc } from './updater-typed-ipc.js';
 import { registerRecorderWindowIpc } from './recorder-window-typed-ipc.js';
 import {registerConnectorsIpc} from './connectors-typed-ipc.js';
@@ -873,7 +874,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       credentialState: 'missing',
       requiresUserReauth: true,
     };
-  shutdownAwareIpc.handle('desktop:mobile:getRelayStatus', () => latestMobileRelayStatus);
+
   /**
    * Deliberately not a generic "open any URL" bridge: the renderer can only ask
    * for the relay's own sign-in page, and the URL is derived here from the relay
@@ -887,13 +888,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     debugMain('mobile-relay:sign-in-opened', { signInUrl });
     return { ok: true as const, url: signInUrl };
   });
-  shutdownAwareIpc.handle('desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
-    desktopName: 'Xiaok Desktop',
-    identity: mobileIdentity,
-    gatewayStatus: mobileGateway.getStatus(),
-    relayUrl: mobileRelayConfig?.relayUrl,
-    relayJwt: mobileRelayConfig?.relayJwt,
-  }));
+  const mobileReadonlyProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:mobile:getRelayStatus', () => latestMobileRelayStatus],
+    ['desktop:mobile:getPairingInfo', () => buildMobilePairingPayload({
+      desktopName: 'Xiaok Desktop',
+      identity: mobileIdentity,
+      gatewayStatus: mobileGateway.getStatus(),
+      relayUrl: mobileRelayConfig?.relayUrl,
+      relayJwt: mobileRelayConfig?.relayJwt,
+    })],
+  ]);
+  registerMobileReadonlyIpc(shutdownAwareIpc, mobileReadonlyProducers);
+
   const mobileRelayBridge = mobileRelayConfig
     ? createMobileRelayBridge({
       identity: mobileIdentity,
@@ -912,28 +918,34 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       respondToApproval: respondMobileApproval,
       getArtifactPreview: getMobileArtifactPreview,
       onStatus: (status) => {
+        latestMobileRelayStatus = status;
+        let snapshot: MobileRelayStatus;
+        try { snapshot = captureMobileRelayStatus(status); }
+        catch {
+          debugMain('mobile-relay:projection-unavailable', { code: 'mobile_projection_unavailable' });
+          return;
+        }
         debugMain('mobile-relay:status', {
-          running: status.running,
-          connected: status.connected,
-          relayUrl: status.relayUrl,
-          roomId: status.roomId,
-          credentialState: status.credentialState,
-          ...(status.credentialExpiresAt ? { credentialExpiresAt: status.credentialExpiresAt } : {}),
-          requiresUserReauth: status.requiresUserReauth,
-          lastError: status.lastError,
+          running: snapshot.running,
+          connected: snapshot.connected,
+          relayUrl: snapshot.relayUrl,
+          roomId: snapshot.roomId,
+          credentialState: snapshot.credentialState,
+          ...(snapshot.credentialExpiresAt ? { credentialExpiresAt: snapshot.credentialExpiresAt } : {}),
+          requiresUserReauth: snapshot.requiresUserReauth,
+          lastError: snapshot.lastError,
         });
         // A credential problem is terminal until the user signs in again, so say
         // exactly that once instead of repeating a bare 401 every 30 seconds.
-        if (status.requiresUserReauth) {
+        if (snapshot.requiresUserReauth) {
           debugMain('mobile-relay:reauth-required', {
-            credentialState: status.credentialState,
-            credentialExpiresAt: status.credentialExpiresAt ?? null,
-            action: `open ${status.relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login to sign in again`,
+            credentialState: snapshot.credentialState,
+            credentialExpiresAt: snapshot.credentialExpiresAt ?? null,
+            action: `open ${snapshot.relayUrl.replace(/^ws/, 'http').replace(/\/ws$/, '')}/auth/login to sign in again`,
           });
         }
-        latestMobileRelayStatus = status;
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('desktop:mobileRelayStatus', status);
+          mainWindow.webContents.send('desktop:mobileRelayStatus', snapshot);
         }
       },
     })

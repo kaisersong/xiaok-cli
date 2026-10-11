@@ -1,3 +1,4 @@
+import type { MobilePairingInfoDto, MobileRelayStatusDto } from '../shared/mobile-readonly-ipc-contract.js';
 import type { PluginMcpServerDto, PluginDependencyStatusDto, AvailablePluginDto } from '../shared/plugin-catalog-ipc-contract.js';
 import type { UpdateIpcStatusDto, UpdateInstallDto } from '../shared/updater-ipc-contract.js';
 import type { RecorderWindowReply, RecorderWindowNotificationReply } from '../shared/recorder-window-ipc-contract.js';
@@ -839,30 +840,9 @@ export interface MeetingSaveAsrConfigInput {
   };
 }
 
-export type DesktopMobileRelayCredentialState =
-  | 'ok' | 'missing' | 'expired' | 'rejected' | 'unparseable';
-
-export interface DesktopMobileRelayStatus {
-  running: boolean;
-  connected: boolean;
-  relayUrl: string;
-  roomId: string;
-  lastError: string | null;
-  credentialState: DesktopMobileRelayCredentialState;
-  credentialExpiresAt?: string;
-  requiresUserReauth: boolean;
-}
-
-export interface DesktopMobilePairingInfo {
-  desktopId: string;
-  desktopName: string;
-  gatewayURL: string;
-  reachableURLs: string[];
-  relayUrl?: string;
-  relayJwt?: string;
-  relayRoomSecret: string;
-  deepLink: string;
-}
+export type DesktopMobileRelayCredentialState = MobileRelayStatusDto['credentialState'];
+export type DesktopMobileRelayStatus = MobileRelayStatusDto;
+export type DesktopMobilePairingInfo = MobilePairingInfoDto;
 
 export type DesktopChannelType = 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
 

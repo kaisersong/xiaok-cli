@@ -813,65 +813,110 @@ function VoicePane() {
 
 function MobilePane() {
   const { t } = useLocale();
-  const [pairing, setPairing] = useState<DesktopMobilePairingInfo | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [snapshot, setSnapshot] = useState<{ pairing: DesktopMobilePairingInfo; qrDataUrl: string } | null>(null);
+  const pairing = snapshot?.pairing ?? null;
+  const qrDataUrl = snapshot?.qrDataUrl ?? '';
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-  // Relay credentials expire after 7 days and there is no refresh grant, so the
-  // UI has to distinguish "offline" from "you must sign in again".
+  const pairingLifetime = useRef<{ active: boolean; busy: boolean } | null>(null);
+  const copyTimer = useRef<number | null>(null);
+  // Relay credentials have no refresh grant; these reads never sign in for the user.
   const [relayStatus, setRelayStatus] = useState<DesktopMobileRelayStatus | null>(null);
+  const [relayUnavailable, setRelayUnavailable] = useState(false);
+  const [relayReading, setRelayReading] = useState(false);
+  const relayLifetime = useRef<{ active: boolean; busy: boolean; revision: number } | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void api.getMobileRelayStatus().then((status) => {
-      if (!cancelled) setRelayStatus(status);
-    }).catch(() => undefined);
-    const off = api.onMobileRelayStatus?.((status) => setRelayStatus(status));
-    return () => {
-      cancelled = true;
-      off?.();
-    };
+  const loadRelayStatus = useCallback(async () => {
+    const lifetime = relayLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
+    const revision = lifetime.revision;
+    setRelayReading(true);
+    try {
+      const status = await api.getMobileRelayStatus();
+      if (lifetime.active && lifetime.revision === revision) {
+        setRelayStatus(status);
+        setRelayUnavailable(false);
+      }
+    } catch {
+      if (lifetime.active && lifetime.revision === revision) setRelayUnavailable(true);
+    } finally {
+      lifetime.busy = false;
+      if (lifetime.active) setRelayReading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    const lifetime = { active: true, busy: false, revision: 0 };
+    relayLifetime.current = lifetime;
+    const off = api.onMobileRelayStatus?.((status) => {
+      if (!lifetime.active) return;
+      lifetime.revision++;
+      setRelayStatus(status);
+      setRelayUnavailable(false);
+    });
+    void loadRelayStatus();
+    return () => {
+      lifetime.active = false;
+      if (relayLifetime.current === lifetime) relayLifetime.current = null;
+      off?.();
+    };
+  }, [loadRelayStatus]);
+
   const loadPairingInfo = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
+    const lifetime = pairingLifetime.current;
+    if (!lifetime?.active || lifetime.busy) return;
+    lifetime.busy = true;
     if (mode === 'refresh') setRefreshing(true);
     else setLoading(true);
     setError('');
     try {
       const info = await api.getMobilePairingInfo();
-      setPairing(info);
-      setQrDataUrl(await QRCode.toDataURL(info.deepLink, {
-        errorCorrectionLevel: 'M',
-        margin: 1,
-        width: 220,
-        color: {
-          dark: '#111827',
-          light: '#ffffff',
-        },
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t.desktopSettings.mobilePairingLoadFailed);
+      if (!lifetime.active) return;
+      const qr = await QRCode.toDataURL(info.deepLink, {
+        errorCorrectionLevel: 'M', margin: 1, width: 220,
+        color: { dark: '#111827', light: '#ffffff' },
+      });
+      if (!lifetime.active) return;
+      setSnapshot({ pairing: info, qrDataUrl: qr });
+      setCopyStatus('idle');
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    } catch {
+      if (lifetime.active) setError(t.desktopSettings.mobilePairingLoadFailed);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      lifetime.busy = false;
+      if (lifetime.active) { setLoading(false); setRefreshing(false); }
     }
   }, [t.desktopSettings.mobilePairingLoadFailed]);
 
   useEffect(() => {
+    const lifetime = { active: true, busy: false };
+    pairingLifetime.current = lifetime;
     void loadPairingInfo();
+    return () => {
+      lifetime.active = false;
+      if (pairingLifetime.current === lifetime) pairingLifetime.current = null;
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    };
   }, [loadPairingInfo]);
 
   const copyPairingLink = useCallback(async () => {
-    if (!pairing?.deepLink) return;
+    const lifetime = pairingLifetime.current;
+    if (!pairing?.deepLink || !lifetime?.active) return;
     try {
       await navigator.clipboard.writeText(pairing.deepLink);
+      if (!lifetime.active) return;
       setCopyStatus('copied');
     } catch {
+      if (!lifetime.active) return;
       setCopyStatus('failed');
     }
-    window.setTimeout(() => setCopyStatus('idle'), 2500);
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => {
+      if (lifetime.active) setCopyStatus('idle');
+    }, 2500);
   }, [pairing?.deepLink]);
 
   const relayReady = Boolean(pairing?.relayUrl && pairing.relayJwt && pairing.relayRoomSecret);
@@ -880,6 +925,14 @@ function MobilePane() {
     <div className="space-y-6">
       <Section>
         <SectionHeader icon={Smartphone}>{t.desktopSettings.mobilePairingTitle}</SectionHeader>
+        {relayUnavailable && (
+          <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div>{t.desktopSettings.mobileRelayReadUnavailable}</div>
+            <button type="button" onClick={() => void loadRelayStatus()} disabled={relayReading} className={`${btnSecondary} mt-2`}>
+              {t.desktopSettings.mobileRelayReadRetry}
+            </button>
+          </div>
+        )}
         {relayStatus && relayStatus.credentialState !== 'ok' && (
           <div
             className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
@@ -912,13 +965,17 @@ function MobilePane() {
           </div>
         )}
         <Card>
-          {loading ? (
+          {error && (
+            <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div>{error}</div>
+              {!pairing && <button type="button" onClick={() => void loadPairingInfo('refresh')} disabled={refreshing} className={`${btnSecondary} mt-2`}>{t.desktopSettings.mobilePairingRefresh}</button>}
+            </div>
+          )}
+          {loading && !pairing ? (
             <div className="flex items-center gap-2 text-sm text-[var(--c-text-secondary)]">
               <Loader2 size={14} className="animate-spin" />
               <span>{t.desktopSettings.mobilePairingLoading}</span>
             </div>
-          ) : error ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           ) : pairing ? (
             <div className="grid gap-5 md:grid-cols-[240px_1fr]">
               <div className="flex flex-col items-center gap-3">

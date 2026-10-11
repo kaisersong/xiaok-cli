@@ -1,3 +1,4 @@
+import { registerMobileReadonlyIpc } from '../../electron/mobile-readonly-typed-ipc.js';
 import { registerPluginCatalogIpc } from '../../electron/plugin-catalog-typed-ipc.js';
 import { registerUpdaterIpc } from '../../electron/updater-typed-ipc.js';
 import { registerRecorderWindowIpc } from '../../electron/recorder-window-typed-ipc.js';
@@ -1059,6 +1060,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerRecorderWindowIpc({ handle: channel => { channels.add(channel); } }, new Map(), { isMainWindowSender: () => false, isRecorderWindowSender: () => false });
   registerUpdaterIpc({ handle: channel => { channels.add(channel); } }, new Map(), () => false);
   registerPluginCatalogIpc({ handle: channel => { channels.add(channel); } });
+  registerMobileReadonlyIpc({ handle: channel => { channels.add(channel); } });
   registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);

@@ -1327,6 +1327,8 @@ export const en: LocaleStrings = {
     mobileRelaySignInAction: "Open sign-in page",
     mobileRelayReauthHint: "Relay credentials last 7 days; after they expire you must sign in again and write the new JWT back to ~/.intent-broker/credentials.",
     mobilePairingLoading: "Generating pairing QR code...",
+    mobileRelayReadUnavailable: "Mobile connection status is temporarily unavailable.",
+    mobileRelayReadRetry: "Read connection status again",
     mobilePairingLoadFailed: "Failed to load mobile pairing info.",
     mobilePairingQrAlt: "Mobile pairing QR code",
     mobilePairingCopyLink: "Copy link",
