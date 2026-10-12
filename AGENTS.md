@@ -8,6 +8,16 @@
 - 纯文案、格式、注释和不改变产品行为的指令整理，做对应检查即可。运行与改动相关的测试和构建；通过后，只有新改动、失败或未解风险才扩大或重复验证。测试调用真实生产入口，不在测试中重实现被测逻辑。
 - 保留其他任务的改动；协作时先确认工作归属。worktree 只用于隔离实现，不将 feature worktree `npm link` 到全局；需要验证本地 xiaok 命令时先确认主 checkout 和实际入口。worktree 是否活跃以 `git worktree list` 为准，集成后再清理本任务 worktree。
 
+## GitHub 提交、PR 与发布要求
+
+- 任何改动都不得直推 `master`，包括终端显示等小修。先开工作分支，再提 PR；PR 说明写清改了什么、为什么改。
+- 提交前先看 `git diff --stat`，核对改动文件与 PR 描述一致；精确暂存本任务文件，再检查 `git diff --cached --stat`。禁止在 build 之后用 `git commit -a`，避免把重建的 `dist/` 和 build-info 混入提交。
+- 每个 PR 附回归测试证据，写出实际执行的命令及结果。没跑过的明确写「未跑」，不得用「应该没问题」代替证据。
+- 涉及授权、权限、环境变量、配置文件或安全的改动按 P0/P1 处理，编码与评审必须使用两个不同模型（例如 Codex 编码、GLM 评审）；PR 写明模型身份和评审结论。不同会话、工具或客户端不等于不同模型，未完成评审不得写成已通过。
+- 写「现在没有行为 / 不生效 / 不存在」类结论，必须附写者自己读到的 `文件:行号` 或运行结果；转引注明「转引、未核实」。
+- 合并前由质量在 PR 最终完整 HEAD 上验证，PR 写完整提交 SHA；HEAD 更新后重新确认验证覆盖该 SHA。创始人决定合并，Agent 不自行合并。
+- 发布时 Desktop tag 与 CLI 打包必须使用同一个完整提交 SHA。CLI 依次执行 `npm run build`、`npm run pack:cli`、`npm run verify:pack-dist`，各步成功且最终验证退出码为 0 才发布；记录完整 SHA、命令与结果。
+
 ## 架构与不可省略的边界
 
 - 术语定义与 Avoid 反例统一见 [CONTEXT.md](CONTEXT.md)。开工运行 `npm run hygiene:check`；修改代码后运行 `npm run governance:check`，架构增量查看用 `npm run architecture:check -- --changed`。正常检查不更新存量 baseline。
