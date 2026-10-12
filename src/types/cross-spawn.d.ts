@@ -8,5 +8,9 @@ declare module 'cross-spawn' {
 
   function spawn(command: string, args?: readonly string[], options?: SpawnOptions): ChildProcess;
 
+  namespace spawn {
+    const sync: typeof import('node:child_process').spawnSync;
+  }
+
   export = spawn;
 }

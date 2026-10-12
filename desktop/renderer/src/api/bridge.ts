@@ -758,10 +758,10 @@ export const api = {
   async listChannels() {
     return window.xiaokDesktop.listChannels();
   },
-  async createChannel(input: { type: string; name: string; webhookUrl?: string }) {
+  async createChannel(input: { type: string; name: string; webhookUrl?: string; appId?: string; appSecret?: string; token?: string; botToken?: string; chatId?: string }) {
     return window.xiaokDesktop.createChannel(input as never);
   },
-  async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }) {
+  async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean; appId?: string; appSecret?: string; token?: string; botToken?: string; chatId?: string }) {
     return window.xiaokDesktop.updateChannel(id, input as never);
   },
   async deleteChannel(id: string) {
@@ -769,7 +769,7 @@ export const api = {
   },
   async testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
     if (!window.xiaokDesktop?.testChannel) {
-      return { success: false, error: 'testChannel API not available' };
+      throw Error('channel_mcp_mutation_runtime_unavailable');
     }
     return await window.xiaokDesktop.testChannel(channelId);
   },
@@ -843,7 +843,7 @@ export const api = {
   async createMCPInstall(input: { name: string; source: string; command: string; args?: string[] }) {
     return window.xiaokDesktop.createMCPInstall(input as never);
   },
-  async updateMCPInstall(id: string, input: { name?: string; source?: string; command?: string; enabled?: boolean }) {
+  async updateMCPInstall(id: string, input: { name?: string; source?: string; command?: string; args?: string[]; enabled?: boolean }) {
     return window.xiaokDesktop.updateMCPInstall(id, input as never);
   },
   async deleteMCPInstall(id: string) {
@@ -1402,7 +1402,9 @@ export async function searchMarketSkills(_accessToken: string, _query: string, _
 }
 
 export async function installSkill(_accessToken: string, ref: SkillReference): Promise<{ success: boolean; message: string }> {
-  return api.installSkill(ref.skill_key);
+  const result = await api.installSkill(ref.skill_key);
+  if (!result.success) throw new Error(result.message);
+  return result;
 }
 
 export async function deleteSkill(_accessToken: string, ref: SkillReference): Promise<void> {

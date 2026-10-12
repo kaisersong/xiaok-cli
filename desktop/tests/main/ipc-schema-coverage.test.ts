@@ -1,3 +1,7 @@
+import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
+import { registerSkillMutationIpc } from '../../electron/skill-mutation-typed-ipc.js';
+import { registerChannelMcpMutationIpc } from '../../electron/channel-mcp-mutation-typed-ipc.js';
+import { registerMeetingMutationIpc } from '../../electron/meeting-mutation-typed-ipc.js';
 import { registerMeetingReadonlyIpc } from '../../electron/meeting-readonly-typed-ipc.js';
 import { registerChannelMcpReadonlyIpc } from '../../electron/channel-mcp-readonly-typed-ipc.js';
 import { registerSkillListIpc } from '../../electron/skill-list-typed-ipc.js';
@@ -24,6 +28,7 @@ registerAutomationConfigIpc({handle:channel=>{currentViewChannels.push(channel);
 registerSkillListIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerChannelMcpReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerMeetingReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerComputerUseCapabilityReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});registerKswarmStatusReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});registerSkillMutationIpc({handle:channel=>{currentViewChannels.push(channel);}});registerChannelMcpMutationIpc({handle:channel=>{currentViewChannels.push(channel);}});registerMeetingMutationIpc({handle:channel=>{currentViewChannels.push(channel);}}, new Map());
 registerServiceControlIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerMobileReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});

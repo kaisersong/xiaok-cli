@@ -43,7 +43,7 @@ it('bad channel config rejects without modifying the real owned file or creating
   await expect(async () => f.invoke('listChannels')).rejects.toThrow(); expect(readFileSync(path, 'utf8')).toBe('{'); expect(existsSync(path + '.bak')).toBe(false);
 });
 it('actual existing MCP creation output passes the readonly schema with original command and args', async () => {
-  const f = await fixture(), created = await f.service.createMCPInstall({ name:'owned',source:'local',command:'C:\\owned\\command',args:['--owned',''] });
+  const f = await fixture(), created = await f.service.createMCPInstall({ name:'owned',source:'local',command:'C:\\owned\\command',args:['--owned',''] }, 'user');
   const rows = await f.invoke('listMCPInstalls'); expect(rows).toHaveLength(1); expect(rows[0]).toMatchObject(created); expect(rows[0].args).toEqual(['--owned','']);
 });
 it('preserves real absent file success for both readonly facts', async () => { const f = await fixture(); expect(await f.invoke('listChannels')).toEqual([]); expect(await f.invoke('listMCPInstalls')).toEqual([]); });

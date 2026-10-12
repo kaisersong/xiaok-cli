@@ -18,7 +18,7 @@ const storedMeeting = z.object({ asr: z.object({
   volcengine: provider.optional(), aliyun: provider.optional(),
 }).passthrough().optional() }).passthrough();
 
-export function readMeetingAsrReadonly() {
+export function readMeetingAsrConfig(): Config {
   let raw: string | undefined;
   try { raw = readFileSync(getConfigPath(), 'utf8'); }
   catch (error) {
@@ -39,6 +39,11 @@ export function readMeetingAsrReadonly() {
     if (obj.meeting !== undefined && !storedMeeting.safeParse(obj.meeting).success) throw Error('meeting_readonly_projection_unavailable');
     config = normalizeConfig(obj as unknown as Config | LegacyConfig);
   }
+  return config;
+}
+
+export function readMeetingAsrReadonly() {
+  const config = readMeetingAsrConfig();
   const dto = captureIpcData(createMeetingAsrConfigSnapshot(config), 'meeting_readonly_projection_unavailable');
   const parsed = MEETING_ASR_OUTPUT_SCHEMA.safeParse(dto);
   if (!parsed.success) throw Error('meeting_readonly_projection_unavailable');

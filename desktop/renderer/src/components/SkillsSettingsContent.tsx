@@ -43,6 +43,9 @@ import { SkillDetailModal } from './skills/SkillDetailModal'
 import { primaryButtonSmCls, secondaryButtonBorderStyle, secondaryButtonSmCls } from './buttonStyles'
 import { api } from '../api'
 
+type SkillActionErrorKey = 'importFailed' | 'repositoryMissing' | 'deleteConflict' | 'disableFailed' | 'githubInvalidUrl' | 'githubSkillNotFound'
+type SkillAction = { lifetime: object }
+
 type Props = {
   accessToken: string
   onTrySkill?: (prompt: string) => void
@@ -62,7 +65,11 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
   const [loading, setLoading] = useState(true)
   const [marketLoading, setMarketLoading] = useState(false)
   const [officialDisabled, setOfficialDisabled] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setRawError] = useState('')
+  const [actionErrorKey, setActionErrorKey] = useState<SkillActionErrorKey | null>(null)
+  const setError = useCallback((message: string) => { setActionErrorKey(null); setRawError(message) }, [])
+  const setActionError = useCallback((key: SkillActionErrorKey) => { setRawError(''); setActionErrorKey(key) }, [])
+  const visibleError = actionErrorKey ? skillText[actionErrorKey] : error
   const [busySkillId, setBusySkillId] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [githubOpen, setGitHubOpen] = useState(false)
@@ -81,6 +88,36 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
   const addMenuRef = useRef<HTMLDivElement>(null)
   const cardMenuRef = useRef<HTMLDivElement>(null)
   const statsMap = new Map((statFacts.data ?? []).map(s => [s.skillName, s]))
+  const actionLifetime = useRef<object | null>(null)
+  const actionFlight = useRef<SkillAction | null>(null)
+  const defaultRevision = useRef(0)
+  const currentDefaults = useRef(defaultSkills)
+  currentDefaults.current = defaultSkills
+  useEffect(() => {
+    const lifetime = {}
+    actionLifetime.current = lifetime
+    actionFlight.current = null
+    defaultRevision.current += 1
+    setBusySkillId(null); setImporting(false); setUploading(false)
+    return () => {
+      if (actionLifetime.current === lifetime) actionLifetime.current = null
+      if (actionFlight.current?.lifetime === lifetime) actionFlight.current = null
+    }
+  }, [accessToken])
+  // One page-owned default writer. Locale changes do not invalidate authorized work.
+  const beginAction = useCallback((): SkillAction | null => {
+    if (!actionLifetime.current || actionFlight.current) return null
+    const action = { lifetime: actionLifetime.current }
+    actionFlight.current = action
+    return action
+  }, [])
+  const isCurrentAction = useCallback((action: SkillAction) =>
+    actionLifetime.current === action.lifetime && actionFlight.current === action, [])
+  const finishAction = useCallback((action: SkillAction) => {
+    if (!isCurrentAction(action)) return false
+    actionFlight.current = null
+    return true
+  }, [isCurrentAction])
   const catalogPending = useRef<Promise<import('../../../shared/skill-list-ipc-contract').SkillListDto> | null>(null)
   const refreshCatalog = useCallback(async () => {
     if (catalogPending.current) return catalogPending.current
@@ -88,15 +125,24 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
     try { return await pending } finally { if (catalogPending.current === pending) catalogPending.current = null }
   }, [listFacts.reload])
   const refreshBuiltin = useCallback(async () => {
-    const snapshot = await refreshCatalog(); const items = mapPlatformSkillList(snapshot); setBuiltinSkills(items); return items
+    const lifetime = actionLifetime.current
+    const snapshot = await refreshCatalog(); const items = mapPlatformSkillList(snapshot)
+    if (lifetime && actionLifetime.current === lifetime) setBuiltinSkills(items)
+    return items
   }, [refreshCatalog])
   const refreshInstalled = useCallback(async () => {
+    const lifetime = actionLifetime.current, revision = defaultRevision.current
     const [snapshot, defaults] = await Promise.all([refreshCatalog(), listDefaultSkills(accessToken)])
-    setDefaultSkills(defaults)
+    if (lifetime && actionLifetime.current === lifetime && defaultRevision.current === revision) setDefaultSkills(defaults)
     return { installed: mapInstalledSkillList(snapshot), defaults }
   }, [refreshCatalog, accessToken])
   useEffect(() => { setLoading(listFacts.reading && listFacts.data === null) }, [listFacts.reading, listFacts.data])
-  useEffect(() => { void listDefaultSkills(accessToken).then(setDefaultSkills).catch(() => {}) }, [accessToken])
+  useEffect(() => {
+    let active = true
+    const revision = defaultRevision.current
+    void listDefaultSkills(accessToken).then(defaults => { if (active && revision === defaultRevision.current) setDefaultSkills(defaults) }).catch(() => {})
+    return () => { active = false }
+  }, [accessToken])
   useEffect(() => { setBuiltinSkills(null) }, [listFacts.data])
 
   useEffect(() => {
@@ -112,17 +158,17 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
         setMarketSkills(items)
         setOfficialDisabled(false)
         if (query.trim()) {
-          setError('')
+          setRawError('')
         }
       } catch (err) {
         const apiErr = isApiError(err) ? err : null
         if (apiErr?.status === 503 || apiErr?.code === 'skills.market.not_configured') {
           setOfficialDisabled(true)
           setMarketSkills([])
-          setError(skillText.officialUnconfigured)
+          setRawError(skillText.officialUnconfigured)
         } else {
           setMarketSkills([])
-          setError(apiErr?.message || skillText.officialSearchFailed)
+          setRawError(apiErr?.message || skillText.officialSearchFailed)
         }
       } finally {
         setMarketLoading(false)
@@ -160,13 +206,15 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
     return mergeSkills(installedSkills, defaultSkills, marketSkills, query, viewMode)
   }, [viewMode, defaultSkills, installedSkills, marketSkills, query])
 
-  const syncDefaultSkills = useCallback(async (updater: (current: SkillReference[]) => SkillReference[]) => {
-    const current = defaultSkills.map(asSkillRef)
+  const syncDefaultSkills = useCallback(async (updater: (current: SkillReference[]) => SkillReference[], action: SkillAction) => {
+    if (!isCurrentAction(action)) throw new Error('skill_action_stale')
+    const current = currentDefaults.current.map(asSkillRef)
     const next = dedupeSkillRefs(updater(current))
+    defaultRevision.current += 1
     const updated = await replaceDefaultSkills(accessToken, next)
-    setDefaultSkills(updated)
+    if (isCurrentAction(action)) setDefaultSkills(updated)
     return updated
-  }, [accessToken, defaultSkills])
+  }, [accessToken, isCurrentAction])
 
   const shouldConfirmRisk = useCallback((skill: { display_name: string; scan_status?: SkillPackageResponse['scan_status']; scan_summary?: string; scan_has_warnings?: boolean }) => {
     const status = skill.scan_status ?? (skill.scan_has_warnings ? 'suspicious' : 'unknown')
@@ -174,28 +222,36 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
     return window.confirm(skillText.riskConfirm(skill.display_name, skillText.scanStatusLabel(status), skill.scan_summary))
   }, [skillText])
 
-  const ensureInstalledAndDefault = useCallback(async (skill: SkillPackageResponse) => {
+  const ensureInstalledAndDefault = useCallback(async (skill: SkillPackageResponse, action: SkillAction) => {
+    if (!isCurrentAction(action)) return
     const exists = installedSkills.some((item) => item.skill_key === skill.skill_key && item.version === skill.version)
     if (!exists) {
-      await installSkill(accessToken, asSkillRef(skill))
+      const result = await installSkill(accessToken, asSkillRef(skill))
+      if (!isCurrentAction(action)) return
+      if (!result.success) throw new Error('skill_install_failed')
     }
-    await syncDefaultSkills((current) => [...current, asSkillRef(skill)])
+    await syncDefaultSkills((current) => [...current, asSkillRef(skill)], action)
+    if (!isCurrentAction(action)) return
     await refreshInstalled()
-  }, [accessToken, installedSkills, refreshInstalled, syncDefaultSkills])
+  }, [accessToken, installedSkills, isCurrentAction, refreshInstalled, syncDefaultSkills])
 
   const handleEnable = useCallback(async (item: ViewSkill) => {
+    const action = beginAction()
+    if (!action) return
     setBusySkillId(item.id)
     setError('')
     try {
       if (item.is_platform && item.version) {
         await setPlatformSkillOverride(accessToken, item.skill_key, item.version, 'auto')
+        if (!isCurrentAction(action)) return
         await Promise.all([refreshInstalled(), refreshBuiltin()])
         return
       }
       if (item.installed && item.version) {
         const version = item.version
         if (!shouldConfirmRisk(item)) return
-        await syncDefaultSkills((current) => [...current, { skill_key: item.skill_key, version }])
+        await syncDefaultSkills((current) => [...current, { skill_key: item.skill_key, version }], action)
+        if (!isCurrentAction(action)) return
         await refreshInstalled()
         return
       }
@@ -206,65 +262,72 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
         detail_url: item.detail_url,
         repository_url: item.repository_url,
       })
-      if (!shouldConfirmRisk(imported)) return
-      await ensureInstalledAndDefault(imported)
+      if (!isCurrentAction(action) || !shouldConfirmRisk(imported)) return
+      await ensureInstalledAndDefault(imported, action)
     } catch (err) {
+      if (!isCurrentAction(action)) return
       const apiErr = isApiError(err) ? err : null
-      if (apiErr?.code === 'skills.market.repository_missing') {
-        setError(skillText.repositoryMissing)
-      } else {
-        setError(apiErr?.message || skillText.importFailed)
-      }
+      if (apiErr?.code === 'skills.market.repository_missing') setActionError('repositoryMissing')
+      else if (apiErr?.message) setError(apiErr.message)
+      else setActionError('importFailed')
     } finally {
-      setBusySkillId(null)
+      if (finishAction(action)) setBusySkillId(null)
     }
-  }, [accessToken, ensureInstalledAndDefault, refreshBuiltin, refreshInstalled, shouldConfirmRisk, skillText.importFailed, skillText.repositoryMissing, syncDefaultSkills])
+  }, [accessToken, beginAction, ensureInstalledAndDefault, finishAction, isCurrentAction, refreshBuiltin, refreshInstalled, setActionError, setError, shouldConfirmRisk, syncDefaultSkills])
 
   const handleRemove = useCallback(async (item: ViewSkill) => {
     if (!item.version) return
+    const action = beginAction()
+    if (!action) return
     setBusySkillId(item.id)
     setError('')
     try {
       if (item.is_platform) {
         await setPlatformSkillOverride(accessToken, item.skill_key, item.version, 'removed')
+        if (!isCurrentAction(action)) return
         await Promise.all([refreshInstalled(), refreshBuiltin()])
         return
       }
-      await syncDefaultSkills((current) => current.filter((skill) => !(skill.skill_key === item.skill_key && skill.version === item.version)))
+      await syncDefaultSkills((current) => current.filter((skill) => !(skill.skill_key === item.skill_key && skill.version === item.version)), action)
+      if (!isCurrentAction(action)) return
       await deleteSkill(accessToken, { skill_key: item.skill_key, version: item.version })
+      if (!isCurrentAction(action)) return
       await refreshInstalled()
     } catch (err) {
+      if (!isCurrentAction(action)) return
       const apiErr = isApiError(err) ? err : null
-      if (apiErr?.code === 'skills.in_use') {
-        setError(skillText.deleteConflict)
-      } else {
-        setError(skillText.importFailed)
-      }
+      setActionError(apiErr?.code === 'skills.in_use' ? 'deleteConflict' : 'importFailed')
     } finally {
-      setBusySkillId(null)
+      if (finishAction(action)) setBusySkillId(null)
     }
-  }, [accessToken, refreshBuiltin, refreshInstalled, skillText.deleteConflict, skillText.importFailed, syncDefaultSkills])
+  }, [accessToken, beginAction, finishAction, isCurrentAction, refreshBuiltin, refreshInstalled, setActionError, setError, syncDefaultSkills])
 
   const handleDisable = useCallback(async (item: ViewSkill) => {
     if (!item.version) return
+    const action = beginAction()
+    if (!action) return
     setBusySkillId(item.id)
     setError('')
     try {
       if (item.is_platform) {
         await setPlatformSkillOverride(accessToken, item.skill_key, item.version, 'manual')
+        if (!isCurrentAction(action)) return
         await Promise.all([refreshInstalled(), refreshBuiltin()])
         return
       }
-      await syncDefaultSkills((current) => current.filter((skill) => !(skill.skill_key === item.skill_key && skill.version === item.version)))
+      await syncDefaultSkills((current) => current.filter((skill) => !(skill.skill_key === item.skill_key && skill.version === item.version)), action)
+      if (!isCurrentAction(action)) return
       await refreshInstalled()
     } catch {
-      setError(skillText.disableFailed)
+      if (isCurrentAction(action)) setActionError('disableFailed')
     } finally {
-      setBusySkillId(null)
+      if (finishAction(action)) setBusySkillId(null)
     }
-  }, [accessToken, refreshBuiltin, refreshInstalled, skillText.disableFailed, syncDefaultSkills])
+  }, [accessToken, beginAction, finishAction, isCurrentAction, refreshBuiltin, refreshInstalled, setActionError, setError, syncDefaultSkills])
 
   const handleGitHubImport = useCallback(async (candidatePath?: string) => {
+    const action = beginAction()
+    if (!action) return
     setImporting(true)
     setError('')
     try {
@@ -273,54 +336,50 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
         ref: githubRef.trim() || undefined,
         candidate_path: candidatePath,
       })
+      if (!isCurrentAction(action)) return
       setCandidateState(null)
       setGitHubOpen(false)
-      await ensureInstalledAndDefault(response.skill)
+      await ensureInstalledAndDefault(response.skill, action)
+      if (!isCurrentAction(action)) return
       setGitHubUrl('')
       setGitHubRef('')
     } catch (err) {
+      if (!isCurrentAction(action)) return
       const apiErr = isApiError(err) ? err : null
       const details = apiErr?.details
       if (apiErr?.code === 'skills.import_ambiguous' && details && typeof details === 'object' && Array.isArray((details as { candidates?: unknown[] }).candidates)) {
-        setCandidateState({
-          candidates: (details as { candidates: SkillImportCandidate[] }).candidates,
-        })
+        setCandidateState({ candidates: (details as { candidates: SkillImportCandidate[] }).candidates })
         return
       }
-      if (apiErr?.code === 'skills.import_invalid_repository') {
-        setError(skillText.githubInvalidUrl)
-      } else if (apiErr?.code === 'skills.import_not_found') {
-        setError(skillText.githubSkillNotFound)
-      } else {
-        setError(apiErr?.message || skillText.importFailed)
-      }
+      if (apiErr?.code === 'skills.import_invalid_repository') setActionError('githubInvalidUrl')
+      else if (apiErr?.code === 'skills.import_not_found') setActionError('githubSkillNotFound')
+      else if (apiErr?.message) setError(apiErr.message)
+      else setActionError('importFailed')
     } finally {
-      setImporting(false)
+      if (finishAction(action)) setImporting(false)
     }
-  }, [accessToken, ensureInstalledAndDefault, githubRef, githubUrl, skillText.githubInvalidUrl, skillText.githubSkillNotFound, skillText.importFailed])
+  }, [accessToken, beginAction, ensureInstalledAndDefault, finishAction, githubRef, githubUrl, isCurrentAction, setActionError, setError])
 
   const handleUploadImport = useCallback(async () => {
     if (!file) return
+    const action = beginAction()
+    if (!action) return
     setUploading(true)
     setError('')
     try {
-      const response = await importSkillFromUpload(accessToken, {
-        file,
-        install_after_import: false,
-      })
-      if (installAfterImport) {
-        await ensureInstalledAndDefault(response)
-      } else {
-        await refreshInstalled()
-      }
+      const response = await importSkillFromUpload(accessToken, { file, install_after_import: false })
+      if (!isCurrentAction(action)) return
+      if (installAfterImport) await ensureInstalledAndDefault(response, action)
+      else await refreshInstalled()
+      if (!isCurrentAction(action)) return
       setFile(null)
       setUploadOpen(false)
     } catch {
-      setError(skillText.importFailed)
+      if (isCurrentAction(action)) setActionError('importFailed')
     } finally {
-      setUploading(false)
+      if (finishAction(action)) setUploading(false)
     }
-  }, [accessToken, ensureInstalledAndDefault, file, installAfterImport, refreshInstalled, skillText.importFailed])
+  }, [accessToken, beginAction, ensureInstalledAndDefault, file, finishAction, installAfterImport, isCurrentAction, refreshInstalled, setActionError, setError])
 
   const active = (item: ViewSkill) => item.installed && item.enabled_by_default
 
@@ -454,8 +513,8 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
       {viewMode === 'marketplace' && officialDisabled && (
         <p className="text-xs text-[var(--c-text-tertiary)]">{skillText.officialUnconfigured}</p>
       )}
-      {error && (
-        <p className="text-xs" style={{ color: 'var(--c-status-error-text)' }}>{error}</p>
+      {visibleError && (
+        <p className="text-xs" style={{ color: 'var(--c-status-error-text)' }}>{visibleError}</p>
       )}
 
       {viewMode === 'installed' && (

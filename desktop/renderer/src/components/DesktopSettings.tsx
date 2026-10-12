@@ -367,6 +367,15 @@ function VoicePane() {
   const [modelStatusesError, setModelStatusesError] = useState('');
   const [modelAction, setModelAction] = useState<MeetingModelActionState | null>(null);
 
+  // One mounted action owner. Locale changes reproject reasons at render time;
+  // they do not cancel an already authorized main-process mutation.
+  const actionLifetime = useRef<{ active: boolean; saving: boolean; model: boolean } | null>(null);
+  useEffect(() => {
+    const owner = { active: true, saving: false, model: false };
+    actionLifetime.current = owner;
+    return () => { owner.active = false; };
+  }, []);
+
   const engineLabels: Record<MeetingTranscriberEngine, string> = {
     'sherpa-onnx-paraformer': t.knowledge.meetingSpeechEngineSherpaOnnxParaformer,
     whisper: t.knowledge.meetingSpeechEngineWhisperFallback,
@@ -452,7 +461,10 @@ function VoicePane() {
   };
 
   const handleSaveMeetingAsrConfig = async () => {
-    if (!desktop?.meetingSaveAsrConfig || saving) return;
+    const owner = actionLifetime.current;
+    if (!desktop?.meetingSaveAsrConfig || !owner?.active || owner.saving) return;
+    owner.saving = true;
+    const current = () => owner.active && actionLifetime.current === owner;
     setSaving(true);
     setSaved(false);
     setSaveError('');
@@ -479,7 +491,11 @@ function VoicePane() {
         : { defaultProvider: engine };
     try {
       const snapshot = await desktop.meetingSaveAsrConfig(input) as MeetingAsrConfigSnapshot;
+      if (!current()) return;
+      // A read failure remains a read failure. It cannot change this confirmed
+      // save into a failure or replace the readonly owner's last-good facts.
       await asrFacts.reload().catch(() => {});
+      if (!current()) return;
       setAsrDraft(prev => ({
         ...prev,
         volcAppKey: '',
@@ -491,43 +507,52 @@ function VoicePane() {
       }));
       setSaved(true);
     } catch (error) {
-      setSaveError(t.knowledge.meetingOnlineAsrSaveFailed(error instanceof Error ? error.message : 'unknown'));
+      if (current()) setSaveError(error instanceof Error ? error.message : 'unknown');
     } finally {
-      setSaving(false);
+      owner.saving = false;
+      if (current()) setSaving(false);
     }
   };
 
   const handleDownloadMeetingModel = async (modelId: string) => {
-    if (!desktop?.meetingDownloadModel || modelAction) return;
+    const owner = actionLifetime.current;
+    if (!desktop?.meetingDownloadModel || !owner?.active || owner.model) return;
+    owner.model = true;
+    const current = () => owner.active && actionLifetime.current === owner;
     setModelAction({ modelId, kind: 'download' });
     setModelStatusesError('');
     try {
       const result = await desktop.meetingDownloadModel(modelId) as { ok?: boolean; reason?: string; error?: string };
+      if (!current()) return;
+      if (result?.ok === false) setModelStatusesError(result.reason ?? result.error ?? 'unknown');
       await loadMeetingModelStatuses();
-      if (result?.ok === false) {
-        setModelStatusesError(t.knowledge.meetingModelActionFailed(result.reason ?? result.error ?? 'unknown'));
-      }
-      setModelAction(null);
+      if (!current()) return;
     } catch (error) {
-      setModelStatusesError(t.knowledge.meetingModelActionFailed(error instanceof Error ? error.message : 'unknown'));
-      setModelAction(null);
+      if (current()) setModelStatusesError(error instanceof Error ? error.message : 'unknown');
+    } finally {
+      owner.model = false;
+      if (current()) setModelAction(null);
     }
   };
 
   const handleUninstallMeetingModel = async (modelId: string) => {
-    if (!desktop?.meetingUninstallModel || modelAction) return;
+    const owner = actionLifetime.current;
+    if (!desktop?.meetingUninstallModel || !owner?.active || owner.model) return;
+    owner.model = true;
+    const current = () => owner.active && actionLifetime.current === owner;
     setModelAction({ modelId, kind: 'uninstall' });
     setModelStatusesError('');
     try {
       const result = await desktop.meetingUninstallModel(modelId) as { ok?: boolean; reason?: string; error?: string };
+      if (!current()) return;
+      if (result?.ok === false) setModelStatusesError(result.reason ?? result.error ?? 'unknown');
       await loadMeetingModelStatuses();
-      if (result?.ok === false) {
-        setModelStatusesError(t.knowledge.meetingModelActionFailed(result.reason ?? result.error ?? 'unknown'));
-      }
-      setModelAction(null);
+      if (!current()) return;
     } catch (error) {
-      setModelStatusesError(t.knowledge.meetingModelActionFailed(error instanceof Error ? error.message : 'unknown'));
-      setModelAction(null);
+      if (current()) setModelStatusesError(error instanceof Error ? error.message : 'unknown');
+    } finally {
+      owner.model = false;
+      if (current()) setModelAction(null);
     }
   };
 
@@ -682,7 +707,7 @@ function VoicePane() {
             <p className="text-sm text-[var(--c-text-secondary)]">{t.knowledge.meetingModelDownloadStatusTitle}</p>
             {modelStatusesLoading && <span className="text-xs text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusLoading}</span>}
           </div>
-          {modelStatusesError && <p className="text-xs leading-5 text-red-600">{modelStatusesError}</p>}
+          {modelStatusesError && <p className="text-xs leading-5 text-red-600">{t.knowledge.meetingModelActionFailed(modelStatusesError)}</p>}
           {groupedModelStatuses.length > 0 ? (
             <div className="space-y-4">
               {groupedModelStatuses.map(group => (
@@ -784,7 +809,7 @@ function VoicePane() {
           <div className="mt-4 flex items-center justify-between gap-3">
             <div className="min-w-0">
               {saved && <p className="text-xs text-green-700">{ds.meetingAsrSaved}</p>}
-              {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+              {saveError && <p className="text-xs text-red-600">{t.knowledge.meetingOnlineAsrSaveFailed(saveError)}</p>}
             </div>
             <button type="button" onClick={() => void handleSaveMeetingAsrConfig()} disabled={saving} className={btnPrimary}>
               {saving ? ds.meetingAsrSaving : ds.meetingAsrSave}
@@ -2086,15 +2111,46 @@ function ChannelsPane() {
   const [newType, setNewType] = useState('yunzhijia');
   const [newName, setNewName] = useState('');
   const [newFields, setNewFields] = useState<Record<string, string>>({});
-  const [testingChannel, setTestingChannel] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const ts = t.desktopSettings;
   const channelTypeConfig = getChannelTypeConfig(ts);
 
   const load = channelFacts.refresh;
+
+  type ActionOwner = { active: boolean; epoch: number; pending: Map<string, symbol> };
+  type ActionLease = { owner: ActionOwner; epoch: number; token: symbol; keys: string[] };
+  const actionOwner = useRef<ActionOwner>({ active: false, epoch: 0, pending: new Map() });
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set());
+  const testRevision = useRef(0);
+  useEffect(() => {
+    const owner = actionOwner.current;
+    owner.active = true; owner.epoch += 1;
+    setPendingActions(new Set(owner.pending.keys()));
+    setError(''); setSuccess('');
+    return () => {
+      owner.active = false; owner.epoch += 1;
+      testRevision.current += 1;
+      // Pending effects remain locked across locale changes until their real settlement.
+    };
+  }, [locale]);
+  const beginAction = (keys: string[]): ActionLease | null => {
+    const owner = actionOwner.current;
+    if (!owner.active || keys.some(key => owner.pending.has(key))) return null;
+    const token = Symbol();
+    for (const key of keys) owner.pending.set(key, token);
+    setPendingActions(new Set(owner.pending.keys()));
+    return { owner, epoch: owner.epoch, token, keys };
+  };
+  const isCurrentAction = (lease: ActionLease) => actionOwner.current === lease.owner
+    && lease.owner.active && lease.owner.epoch === lease.epoch;
+  const finishAction = (lease: ActionLease) => {
+    for (const key of lease.keys) if (lease.owner.pending.get(key) === lease.token) lease.owner.pending.delete(key);
+    // An old locale may release only its own settled locks; it cannot publish an action fact.
+    if (actionOwner.current === lease.owner && lease.owner.active) setPendingActions(new Set(lease.owner.pending.keys()));
+  };
 
   // Reset fields when type changes
   useEffect(() => {
@@ -2102,47 +2158,63 @@ function ChannelsPane() {
   }, [newType]);
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (!actionOwner.current.active || actionOwner.current.pending.has('create') || !newName.trim()) return;
     const typeConfig = channelTypeConfig[newType];
-    // Check required fields
     for (const field of typeConfig.fields) {
       if (field.required && !newFields[field.key]?.trim()) {
         alert(ts.channelsFieldRequired(field.label));
         return;
       }
     }
+    const lease = beginAction(['create', 'row:' + newType]);
+    if (!lease) return;
     try {
-      await api.createChannel({
-        type: newType,
-        name: newName.trim(),
-        ...newFields,
-      });
-      setNewName('');
-      setNewFields({});
-      setShowAdd(false);
+      await api.createChannel({ type: newType, name: newName.trim(), ...newFields });
+      if (!isCurrentAction(lease)) return;
+      setNewName(''); setNewFields({}); setShowAdd(false);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+    } catch {
+      if (isCurrentAction(lease)) alert(t.channelMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleDelete = async (id: string) => {
+    if (!actionOwner.current.active || actionOwner.current.pending.has('row:' + id)) return;
     if (!confirm(ts.channelsDeleteConfirm)) return;
+    const lease = beginAction(['row:' + id]);
+    if (!lease) return;
     try {
       await api.deleteChannel(id);
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      if (isCurrentAction(lease)) load();
+    } catch {
+      if (isCurrentAction(lease)) alert(t.channelMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleToggle = async (channel: ChannelConfig) => {
+    const lease = beginAction(['row:' + channel.id]);
+    if (!lease) return;
     try {
       await api.updateChannel(channel.id, { enabled: !channel.enabled });
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      if (isCurrentAction(lease)) load();
+    } catch {
+      if (isCurrentAction(lease)) alert(t.channelMutationFailed);
+    } finally { finishAction(lease); }
+  };
+
+  const handleTest = async (id: string) => {
+    const lease = beginAction(['test:' + id]);
+    if (!lease) return;
+    const revision = ++testRevision.current;
+    setError(''); setSuccess('');
+    try {
+      const result = await api.testChannel(id);
+      if (!isCurrentAction(lease) || revision !== testRevision.current) return;
+      if (result.success) setSuccess(ts.channelsTestSuccess(result.latencyMs ?? 0));
+      else setError(result.error?.startsWith('channel_mcp_mutation_') ? ts.channelsTestFailed : result.error || ts.channelsTestFailed);
+    } catch {
+      if (isCurrentAction(lease) && revision === testRevision.current) setError(ts.channelsTestFailed);
+    } finally { finishAction(lease); }
   };
 
   if (loading) {
@@ -2236,7 +2308,7 @@ function ChannelsPane() {
                 </div>
               ))}
               <div className="flex gap-2">
-                <button type="button" onClick={handleCreate} className={btnPrimary}>{ts.channelsCreateBtn}</button>
+                <button type="button" onClick={handleCreate} disabled={pendingActions.has('create')} className={btnPrimary}>{ts.channelsCreateBtn}</button>
                 <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>{ts.channelsCancelBtn}</button>
               </div>
             </div>
@@ -2267,28 +2339,15 @@ function ChannelsPane() {
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <button type="button"
-                      onClick={async () => {
-                        setTestingChannel(ch.id);
-                        try {
-                          const result = await api.testChannel(ch.id);
-                          if (result.success) {
-                            setSuccess(ts.channelsTestSuccess(result.latencyMs ?? 0));
-                          } else {
-                            setError(result.error || ts.channelsTestFailed);
-                          }
-                        } catch (e) {
-                          setError((e as Error).message);
-                        } finally {
-                          setTestingChannel(null);
-                        }
-                      }}
-                      disabled={testingChannel === ch.id}
+                      onClick={() => void handleTest(ch.id)}
+                      disabled={pendingActions.has('test:' + ch.id)}
                       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--c-border)] px-2.5 py-1 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)] transition-colors disabled:opacity-50"
                     >
-                      {testingChannel === ch.id ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                      {pendingActions.has('test:' + ch.id) ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                       {ts.channelsTestBtn}
                     </button>
                     <button type="button"
+                      disabled={pendingActions.has('row:' + ch.id)}
                       onClick={() => handleToggle(ch)}
                       className={`rounded-lg px-3 py-1.5 text-xs transition-colors ${
                         ch.enabled ? 'bg-green-50 text-green-600' : 'bg-[var(--c-bg-deep)] text-[var(--c-text-secondary)]'
@@ -2297,6 +2356,8 @@ function ChannelsPane() {
                       {ch.enabled ? ts.channelsEnabled : ts.channelsDisabled}
                     </button>
                     <button type="button"
+                      aria-label={ts.channelsDeleteConfirm}
+                      disabled={pendingActions.has('row:' + ch.id)}
                       onClick={() => handleDelete(ch.id)}
                       className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                     >
@@ -2342,6 +2403,35 @@ function McpPane() {
 
   const [installsReady, setInstallsReady] = useState(false), [installsUnavailable, setInstallsUnavailable] = useState(false);
   const [catalogUnavailable, setCatalogUnavailable] = useState(false);
+  type ActionOwner = { active: boolean; epoch: number; pending: Map<string, symbol> };
+  type ActionLease = { owner: ActionOwner; epoch: number; token: symbol; keys: string[] };
+  const actionOwner = useRef<ActionOwner>({ active: false, epoch: 0, pending: new Map() });
+  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    const owner = actionOwner.current;
+    owner.active = true; owner.epoch += 1;
+    setPendingActions(new Set(owner.pending.keys()));
+    return () => {
+      owner.active = false; owner.epoch += 1;
+      // Pending effects remain locked across locale changes until their real settlement.
+    };
+  }, [locale]);
+  const beginAction = (keys: string[]): ActionLease | null => {
+    const owner = actionOwner.current;
+    if (!owner.active || keys.some(key => owner.pending.has(key))) return null;
+    const token = Symbol();
+    for (const key of keys) owner.pending.set(key, token);
+    setPendingActions(new Set(owner.pending.keys()));
+    return { owner, epoch: owner.epoch, token, keys };
+  };
+  const isCurrentAction = (lease: ActionLease) => actionOwner.current === lease.owner
+    && lease.owner.active && lease.owner.epoch === lease.epoch;
+  const finishAction = (lease: ActionLease) => {
+    for (const key of lease.keys) if (lease.owner.pending.get(key) === lease.token) lease.owner.pending.delete(key);
+    // An old locale may release only its own settled locks; it cannot publish an action fact.
+    if (actionOwner.current === lease.owner && lease.owner.active) setPendingActions(new Set(lease.owner.pending.keys()));
+  };
+
   const readGeneration = useRef(0), pendingRead = useRef<number | null>(null), manualReread = useRef(false);
   const load = useCallback((queueIfBusy = true) => {
     if (pendingRead.current !== null) { if (queueIfBusy) manualReread.current = true; return; }
@@ -2374,30 +2464,32 @@ function McpPane() {
 
   const handleCreate = async () => {
     if (!newName.trim() || !newCommand.trim()) return;
+    const lease = beginAction(['create']);
+    if (!lease) return;
     try {
       await api.createMCPInstall({
-        name: newName.trim(),
-        source: 'npm',
-        command: newCommand.trim(),
+        name: newName.trim(), source: 'npm', command: newCommand.trim(),
         args: newArgs.trim() ? newArgs.trim().split(/\s+/) : undefined,
       });
-      setNewName('');
-      setNewCommand('');
-      setNewArgs('');
-      setShowAdd(false);
+      if (!isCurrentAction(lease)) return;
+      setNewName(''); setNewCommand(''); setNewArgs(''); setShowAdd(false);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+    } catch {
+      if (isCurrentAction(lease)) alert(t.mcpMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleDelete = async (id: string) => {
+    if (!actionOwner.current.active || actionOwner.current.pending.has('row:' + id)) return;
+    if (!window.confirm(t.mcpInstallDeleteConfirm)) return;
+    const lease = beginAction(['row:' + id]);
+    if (!lease) return;
     try {
       await api.deleteMCPInstall(id);
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      if (isCurrentAction(lease)) load();
+    } catch {
+      if (isCurrentAction(lease)) alert(t.mcpMutationFailed);
+    } finally { finishAction(lease); }
   };
 
   const handleInstallDependency = async (dependency: PluginDependencyStatus) => {
@@ -2760,7 +2852,7 @@ function McpPane() {
                 />
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={handleCreate} className={btnPrimary}>{ts.mcpCreateBtn}</button>
+                <button type="button" onClick={handleCreate} disabled={pendingActions.has('create')} className={btnPrimary}>{ts.mcpCreateBtn}</button>
                 <button type="button" onClick={() => setShowAdd(false)} className={btnSecondary}>{ts.mcpCancelBtn}</button>
               </div>
             </div>
@@ -2792,6 +2884,8 @@ function McpPane() {
                     </div>
                   </div>
                   <button type="button"
+                    aria-label={t.mcpInstallDeleteConfirm}
+                    disabled={pendingActions.has('row:' + install.id)}
                     onClick={() => handleDelete(install.id)}
                     className="rounded-lg p-1.5 text-[var(--c-text-tertiary)] hover:text-red-500 transition-colors"
                   >

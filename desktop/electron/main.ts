@@ -1,3 +1,4 @@
+import { registerKswarmStatusReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { createAutomationConfigOwner } from './automation-config-owner.js';
 import { registerAutomationConfigIpc } from './automation-config-typed-ipc.js';
 import { createMobileRelaySignInOwner } from './mobile-relay-signin.js';
@@ -659,7 +660,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   const kswarmService = createDesktopKSwarmService(desktopShutdownCoordinator, desktopFinalLifetimeSteps, { activityOwnerPending: process.env.XIAOK_CONVERSATION_ACTIVITY !== '0' });
   if (!kswarmService) return window;
   let kswarmStartPromise: Promise<void>;
-  shutdownAwareIpc.handle('desktop:kswarm:getStatus', () => kswarmService.getStatus());
+  registerKswarmStatusReadonlyIpc(shutdownAwareIpc, () => kswarmService.getStatus());
   shutdownAwareIpc.handle('desktop:kswarm:start', () => kswarmService.start());
   shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop());
   shutdownAwareIpc.handle('desktop:kswarm:restart', () => kswarmService.restart());

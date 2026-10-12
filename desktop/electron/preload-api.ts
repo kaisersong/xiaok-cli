@@ -1,3 +1,5 @@
+import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
+import type { MeetingMutationModelResult } from '../shared/meeting-mutation-ipc-contract.js';
 import type { MeetingReadonlyPermission, MeetingReadonlyAsr, MeetingReadonlyModels } from '../shared/meeting-readonly-ipc-contract.js';
 import type { ChannelReadonlyView, McpInstallReadonlyView } from '../shared/channel-mcp-readonly-ipc-contract.js';
 import type { SkillListDto } from '../shared/skill-list-ipc-contract.js';
@@ -858,6 +860,11 @@ export interface DesktopChannelInput {
   type: DesktopChannelType;
   name: string;
   webhookUrl?: string;
+  appId?: string;
+  appSecret?: string;
+  token?: string;
+  botToken?: string;
+  chatId?: string;
 }
 
 export type DesktopMCPInstallView = McpInstallReadonlyView;
@@ -922,6 +929,9 @@ export interface KSwarmServiceStatus {
   pid: number | null;
   restartCount: number;
   lastError: string | null;
+  terminalDegraded?: boolean;
+  persistenceFailStopCount?: number;
+  lastPersistenceFailStop?: string | null;
 }
 
 export type DesktopRelatedServiceId = RelatedServiceIdDto;
@@ -1260,16 +1270,16 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   listChannels(): Promise<DesktopChannelView[]>;
   testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }>;
   createChannel(input: DesktopChannelInput): Promise<DesktopChannelView>;
-  updateChannel(id: string, input: Partial<DesktopChannelInput>): Promise<DesktopChannelView>;
+  updateChannel(id: string, input: Partial<DesktopChannelInput> & { enabled?: boolean }): Promise<DesktopChannelView>;
   deleteChannel(id: string): Promise<void>;
   listMCPInstalls(): Promise<DesktopMCPInstallView[]>;
   createMCPInstall(input: DesktopMCPInput): Promise<DesktopMCPInstallView>;
-  updateMCPInstall(id: string, input: Partial<DesktopMCPInput>): Promise<DesktopMCPInstallView>;
+  updateMCPInstall(id: string, input: Partial<DesktopMCPInput> & { enabled?: boolean }): Promise<DesktopMCPInstallView>;
   deleteMCPInstall(id: string): Promise<void>;
   listPluginMcpServers(): Promise<PluginMcpServerView[]>;
   /** Design v58 §7.2: component-scoped retry; never writes persisted desired state. */
   retryPluginComponent(input: { componentId: string }): Promise<PluginMcpServerView[]>;
-  getComputerUseCapabilityStatus(): Promise<ComputerUseCapabilityStatusView>;
+  getComputerUseCapabilityStatus(): Promise<ComputerUseReadonlyStatus>;
   enableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
   reconnectComputerUse(): Promise<ComputerUseCapabilityStatusView>;
   disableComputerUse(): Promise<ComputerUseCapabilityStatusView>;
@@ -1298,7 +1308,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   getSkillStats(): Promise<DesktopSkillStats[]>;
   getServiceStatus(): Promise<DesktopServiceStatusSnapshot>;
   restartRelatedService(serviceId: DesktopRelatedServiceId): Promise<void>;
-  kswarmGetStatus(): Promise<KSwarmServiceStatus>;
+  kswarmGetStatus(): Promise<KswarmReadonlyStatus>;
   kswarmStart(): Promise<void>;
   kswarmStop(): Promise<void>;
   kswarmRestart(): Promise<void>;
@@ -1397,12 +1407,12 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kbPickFiles(): Promise<string[]>;
   meetingPickAudioFile(): Promise<string | null>;
   meetingGetMicrophonePermission(): Promise<MeetingReadonlyPermission>;
-  meetingRequestMicrophonePermission(): Promise<unknown>;
+  meetingRequestMicrophonePermission(): Promise<import('../shared/meeting-readonly-ipc-contract.js').MeetingReadonlyPermission>;
   meetingGetAsrConfig(): Promise<MeetingReadonlyAsr>;
   meetingSaveAsrConfig(input: MeetingSaveAsrConfigInput): Promise<MeetingAsrConfigSnapshot>;
   meetingListModels(): Promise<MeetingReadonlyModels>;
-  meetingDownloadModel(modelId: string): Promise<unknown>;
-  meetingUninstallModel(modelId: string): Promise<unknown>;
+  meetingDownloadModel(modelId: string): Promise<MeetingMutationModelResult>;
+  meetingUninstallModel(modelId: string): Promise<MeetingMutationModelResult>;
   meetingSaveRecordedAudio(input: unknown): Promise<unknown>;
   meetingTranscribePreview(input: unknown): Promise<unknown>;
   meetingStartLiveTranscription(input: { engine: 'aliyun-asr' | 'volcengine-asr'; sampleRate: number; language?: string }): Promise<{ ok: boolean; sessionId?: string; error?: string }>;
@@ -1745,7 +1755,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     deleteMCPInstall: (id) => ipcRenderer.invoke('desktop:deleteMCPInstall', id) as Promise<void>,
     listPluginMcpServers: () => ipcRenderer.invoke('desktop:listPluginMcpServers') as Promise<PluginMcpServerView[]>,
     retryPluginComponent: (input) => ipcRenderer.invoke('desktop:retryPluginComponent', input) as Promise<PluginMcpServerView[]>,
-    getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus') as Promise<ComputerUseCapabilityStatusView>,
+    getComputerUseCapabilityStatus: () => ipcRenderer.invoke('desktop:getComputerUseCapabilityStatus') as Promise<ComputerUseReadonlyStatus>,
     enableComputerUse: () => ipcRenderer.invoke('desktop:enableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
     reconnectComputerUse: () => ipcRenderer.invoke('desktop:reconnectComputerUse') as Promise<ComputerUseCapabilityStatusView>,
     disableComputerUse: () => ipcRenderer.invoke('desktop:disableComputerUse') as Promise<ComputerUseCapabilityStatusView>,
@@ -1801,7 +1811,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     getSkillStats: () => ipcRenderer.invoke('desktop:getSkillStats') as ReturnType<DesktopApi['getSkillStats']>,
     getServiceStatus: () => ipcRenderer.invoke('desktop:services:getStatus') as Promise<DesktopServiceStatusSnapshot>,
     restartRelatedService: (serviceId) => ipcRenderer.invoke('desktop:services:restart', serviceId) as Promise<void>,
-    kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KSwarmServiceStatus>,
+    kswarmGetStatus: () => ipcRenderer.invoke('desktop:kswarm:getStatus') as Promise<KswarmReadonlyStatus>,
     kswarmStart: () => ipcRenderer.invoke('desktop:kswarm:start') as Promise<void>,
     kswarmStop: () => ipcRenderer.invoke('desktop:kswarm:stop') as Promise<void>,
     kswarmRestart: () => ipcRenderer.invoke('desktop:kswarm:restart') as Promise<void>,
@@ -1961,12 +1971,12 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles') as Promise<string[]>,
     meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<string | null>,
     meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<MeetingReadonlyPermission>,
-    meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<unknown>,
+    meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<import('../shared/meeting-readonly-ipc-contract.js').MeetingReadonlyPermission>,
     meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingReadonlyAsr>,
     meetingSaveAsrConfig: (input) => ipcRenderer.invoke('desktop:meeting:saveAsrConfig', input) as Promise<MeetingAsrConfigSnapshot>,
     meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<MeetingReadonlyModels>,
-    meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<unknown>,
-    meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<unknown>,
+    meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<MeetingMutationModelResult>,
+    meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<MeetingMutationModelResult>,
     meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<unknown>,
     meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<unknown>,
     meetingStartLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:start', input) as ReturnType<DesktopApi['meetingStartLiveTranscription']>,

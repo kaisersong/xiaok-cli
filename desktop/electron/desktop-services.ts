@@ -1,3 +1,6 @@
+import { runDesktopSkillMutation } from './desktop-skill-mutation.js';
+import type { DesktopSkillMutationContext } from '../shared/skill-mutation-ipc-contract.js';
+import { createChannelMcpMutationOwner } from './channel-mcp-mutation-owner.js';
 import { readChannelViews, readMcpInstallViews } from './channel-mcp-readonly-data.js';
 import { captureSkillReadonlyPromise } from './skill-readonly-data.js';
 import { types as skillNodeTypes } from 'node:util';
@@ -909,6 +912,7 @@ function sanitizeSystemOnePatch(input: DesktopSaveSystemOneConfigInput | undefin
 }
 
 export function createDesktopServices(options: DesktopServicesOptions) {
+  const channelMcpMutations = createChannelMcpMutationOwner(options.dataRoot);
   let roomTimedActions:TimedActionService|undefined;
   const getManagedPythonCommand = options.getManagedPythonCommand;
   const officeDocumentParser = createOfficeDocumentParser({
@@ -3259,37 +3263,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
         tier: s.tier,
       }));
     },
-    async installSkill(skillName: string): Promise<{ success: boolean; message: string }> {
-      const result = spawnSync('clawhub', ['install', skillName], {
-        encoding: 'utf-8',
-        timeout: 60000,
-        cwd: process.cwd(),
-      });
-      if (result.error) {
-        return { success: false, message: `执行失败: ${result.error.message}` };
-      }
-      if (result.status !== 0) {
-        const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
-        return { success: false, message: stderr.slice(0, 500) };
-      }
-      bumpSkillCatalogVersion();
-      return { success: true, message: `技能 ${skillName} 已安装` };
+    async installSkill(skillName: string, context: DesktopSkillMutationContext): Promise<{ success: boolean; message: string }> {
+      return runDesktopSkillMutation('install', skillName, context, process.cwd());
     },
-    async uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }> {
-      const result = spawnSync('clawhub', ['uninstall', skillName], {
-        encoding: 'utf-8',
-        timeout: 30000,
-        cwd: process.cwd(),
-      });
-      if (result.error) {
-        return { success: false, message: `执行失败: ${result.error.message}` };
-      }
-      if (result.status !== 0) {
-        const stderr = result.stderr?.trim() || result.stdout?.trim() || '未知错误';
-        return { success: false, message: stderr.slice(0, 500) };
-      }
-      bumpSkillCatalogVersion();
-      return { success: true, message: `技能 ${skillName} 已卸载` };
+    async uninstallSkill(skillName: string, context: DesktopSkillMutationContext): Promise<{ success: boolean; message: string }> {
+      return runDesktopSkillMutation('uninstall', skillName, context, process.cwd());
     },
     async createTaskWithFiles(input: {
       prompt: string;
@@ -3951,112 +3929,31 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async listChannels(): Promise<Array<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }>> {
       return readChannelViews();
     },
-    async testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
-      const config = await loadConfig();
-      const channels = (config as unknown as Record<string, unknown>).channels ?? {};
-      const ch = (channels as Record<string, unknown>)[channelId] as { sendMsgUrl?: string; webhookUrl?: string } | undefined;
-      const url = ch?.sendMsgUrl || ch?.webhookUrl;
-      if (!url) {
-        return { success: false, error: '未配置 webhook URL' };
-      }
-      try {
-        const start = Date.now();
-        // Send a test ping message
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ msgtype: 'text', text: { content: 'xiaok 测试连接 ✅' } }),
-        });
-        const latencyMs = Date.now() - start;
-        if (!response.ok) {
-          return { success: false, latencyMs, error: `HTTP ${response.status}` };
-        }
-        return { success: true, latencyMs };
-      } catch (e) {
-        return { success: false, error: (e as Error).message };
-      }
+    async testChannel(channelId: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.testChannel(channelId, requestSource);
     },
-    async createChannel(input: { type: string; name: string; webhookUrl?: string }): Promise<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }> {
-      const config = await loadConfig();
-      const raw = config as unknown as Record<string, unknown>;
-      if (!raw.channels) raw.channels = {};
-      (raw.channels as Record<string, unknown>)[input.type] = {
-        name: input.name,
-        sendMsgUrl: input.webhookUrl || '',
-        inboundMode: 'webhook',
-        enabled: true,
-      };
-      await saveConfig(config);
-      return {
-        id: input.type,
-        type: input.type,
-        name: input.name,
-        webhookUrl: input.webhookUrl,
-        enabled: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+    async createChannel(input: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.createChannel(input, requestSource);
     },
-    async updateChannel(id: string, input: { type?: string; name?: string; webhookUrl?: string; enabled?: boolean }): Promise<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }> {
-      const config = await loadConfig();
-      const raw = config as unknown as Record<string, unknown>;
-      const channels = (raw.channels as Record<string, unknown>) || {};
-      const ch = channels[id] as Record<string, unknown> | undefined;
-      if (!ch) throw new Error('Channel not found');
-      if (input.name !== undefined) ch.name = input.name;
-      if (input.webhookUrl !== undefined) ch.sendMsgUrl = input.webhookUrl;
-      if (input.enabled !== undefined) ch.enabled = input.enabled;
-      await saveConfig(config);
-      return {
-        id, type: id, name: (ch.name as string) || id,
-        webhookUrl: ch.sendMsgUrl as string | undefined,
-        enabled: ch.enabled !== false, createdAt: 0, updatedAt: Date.now(),
-      };
+    async updateChannel(id: unknown, input: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.updateChannel(id, input, requestSource);
     },
-    async deleteChannel(id: string) {
-      const config = await loadConfig();
-      const raw = config as unknown as Record<string, unknown>;
-      const channels = raw.channels as Record<string, unknown> | undefined;
-      if (channels) delete channels[id];
-      await saveConfig(config);
+    async deleteChannel(id: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.deleteChannel(id, requestSource);
     },
 
     // ---- MCP API ----
     async listMCPInstalls(): Promise<Array<{ id: string; name: string; source: string; command: string; args?: string[]; enabled: boolean; createdAt: number }>> {
       return readMcpInstallViews(options.dataRoot);
     },
-    async createMCPInstall(input: { name: string; source: 'npm' | 'github' | 'local'; command: string; args?: string[] }) {
-      const path = join(options.dataRoot, 'mcp-installs.json');
-      const installs = await loadJsonFile<MCPRecord[]>(path, []);
-      const record: MCPRecord = {
-        id: crypto.randomUUID(),
-        name: input.name,
-        source: input.source,
-        command: input.command,
-        args: input.args,
-        enabled: true,
-        createdAt: Date.now(),
-      };
-      installs.push(record);
-      await saveJsonFile(path, installs);
-      return toMCPView(record);
+    async createMCPInstall(input: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.createMCPInstall(input, requestSource);
     },
-    async updateMCPInstall(id: string, input: { name?: string; source?: 'npm' | 'github' | 'local'; command?: string; enabled?: boolean }) {
-      const path = join(options.dataRoot, 'mcp-installs.json');
-      const installs = await loadJsonFile<MCPRecord[]>(path, []);
-      const idx = installs.findIndex(c => c.id === id);
-      if (idx < 0) throw new Error('MCP install not found');
-      if (input.name !== undefined) installs[idx].name = input.name;
-      if (input.source !== undefined) installs[idx].source = input.source;
-      if (input.command !== undefined) installs[idx].command = input.command;
-      if (input.enabled !== undefined) installs[idx].enabled = input.enabled;
-      await saveJsonFile(path, installs);
-      return toMCPView(installs[idx]);
+    async updateMCPInstall(id: unknown, input: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.updateMCPInstall(id, input, requestSource);
     },
-    async deleteMCPInstall(id: string) {
-      const path = join(options.dataRoot, 'mcp-installs.json');
-      const installs = await loadJsonFile<MCPRecord[]>(path, []);
-      await saveJsonFile(path, installs.filter(c => c.id !== id));
+    async deleteMCPInstall(id: unknown, requestSource?: 'user' | 'agent' | 'scheduler') {
+      return channelMcpMutations.deleteMCPInstall(id, requestSource);
     },
 
     async exportTraceBundle(input: { kind: 'session' | 'project' | 'task'; id: string }): Promise<{ ok: boolean; path?: string; error?: string }> {

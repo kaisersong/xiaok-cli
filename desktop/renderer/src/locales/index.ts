@@ -2933,6 +2933,9 @@ export interface LocaleStrings {
   meetingModelsReadonlyUnavailable: string;
   meetingAsrReadonlyUnknown: string;
   meetingAsrReadonlyUnavailable: string;
+  channelMutationFailed: string;
+  mcpMutationFailed: string;
+  mcpInstallDeleteConfirm: string;
   channelReadonlyUnknown: string;
   channelReadonlyUnavailable: string;
   mcpInstallsReadonlyUnknown: string;

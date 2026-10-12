@@ -4010,7 +4010,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    const channel = await services.createChannel({ type: 'discord', name: 'My Discord', webhookUrl: 'https://discord.com/api/webhooks/...' });
+    const channel = await services.createChannel({ type: 'discord', name: 'My Discord', webhookUrl: 'https://discord.com/api/webhooks/...' }, 'user');
     expect(channel.id).toBe('discord');
     expect(channel.type).toBe('discord');
     expect(channel.name).toBe('My Discord');
@@ -4031,10 +4031,10 @@ describe('desktop services', () => {
     });
 
     // First create
-    await services.createChannel({ type: 'telegram', name: 'Old Name' });
+    await services.createChannel({ type: 'telegram', name: 'Old Name' }, 'user');
 
     // Then update
-    const updated = await services.updateChannel('telegram', { name: 'New Name', webhookUrl: 'https://api.telegram.org/bot123' });
+    const updated = await services.updateChannel('telegram', { name: 'New Name', webhookUrl: 'https://api.telegram.org/bot123' }, 'user');
     expect(updated.name).toBe('New Name');
     expect(updated.webhookUrl).toBe('https://api.telegram.org/bot123');
   });
@@ -4046,7 +4046,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await expect(services.updateChannel('nonexistent', { name: 'test' })).rejects.toThrow('not found');
+    await expect(services.updateChannel('nonexistent', { name: 'test' }, 'user')).rejects.toThrow('not found');
   });
 
   it('deletes a channel from config.json', async () => {
@@ -4056,11 +4056,11 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await services.createChannel({ type: 'feishu', name: 'Feishu' });
+    await services.createChannel({ type: 'feishu', name: 'Feishu' }, 'user');
     let channels = await services.listChannels();
     expect(channels.find(c => c.id === 'feishu')).toBeDefined();
 
-    await services.deleteChannel('feishu');
+    await services.deleteChannel('feishu', 'user');
     channels = await services.listChannels();
     expect(channels.find(c => c.id === 'feishu')).toBeUndefined();
   });
@@ -4089,7 +4089,7 @@ describe('desktop services', () => {
       name: 'Playwright',
       source: 'npm',
       command: '@anthropic/mcp-playwright',
-    });
+    }, 'user');
 
     expect(install.id).toBeDefined();
     expect(install.name).toBe('Playwright');
@@ -4115,9 +4115,9 @@ describe('desktop services', () => {
       name: 'Brave Search',
       source: 'npm',
       command: '@anthropic/mcp-brave-search',
-    });
+    }, 'user');
 
-    const updated = await services.updateMCPInstall(created.id, { enabled: false });
+    const updated = await services.updateMCPInstall(created.id, { enabled: false }, 'user');
     expect(updated.enabled).toBe(false);
   });
 
@@ -4128,7 +4128,7 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    await expect(services.updateMCPInstall('nonexistent', { enabled: false })).rejects.toThrow('not found');
+    await expect(services.updateMCPInstall('nonexistent', { enabled: false }, 'user')).rejects.toThrow('not found');
   });
 
   it('deletes an MCP install', async () => {
@@ -4138,8 +4138,8 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    const created = await services.createMCPInstall({ name: 'Test MCP', source: 'npm', command: 'test' });
-    await services.deleteMCPInstall(created.id);
+    const created = await services.createMCPInstall({ name: 'Test MCP', source: 'npm', command: 'test' }, 'user');
+    await services.deleteMCPInstall(created.id, 'user');
 
     const installs = await services.listMCPInstalls();
     expect(installs).toHaveLength(0);
@@ -4152,8 +4152,8 @@ describe('desktop services', () => {
       now: () => 300,
     });
 
-    const install1 = await services.createMCPInstall({ name: 'MCP1', source: 'npm', command: 'cmd1' });
-    const install2 = await services.createMCPInstall({ name: 'MCP2', source: 'github', command: 'cmd2' });
+    const install1 = await services.createMCPInstall({ name: 'MCP1', source: 'npm', command: 'cmd1' }, 'user');
+    const install2 = await services.createMCPInstall({ name: 'MCP2', source: 'github', command: 'cmd2' }, 'user');
 
     expect(install1.id).not.toBe(install2.id);
     expect(install1.source).toBe('npm');

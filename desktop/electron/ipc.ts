@@ -1,3 +1,8 @@
+import { registerComputerUseCapabilityReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
+import { registerSkillMutationIpc } from './skill-mutation-typed-ipc.js';
+import { registerChannelMcpMutationIpc } from './channel-mcp-mutation-typed-ipc.js';
+import { createMeetingMutationService } from './meeting-mutation-service.js';
+import { registerMeetingMutationIpc } from './meeting-mutation-typed-ipc.js';
 import { registerMeetingReadonlyIpc } from './meeting-readonly-typed-ipc.js';
 import { readMeetingAsrReadonly } from './meeting-readonly-data.js';
 import { registerChannelMcpReadonlyIpc } from './channel-mcp-readonly-typed-ipc.js';
@@ -1293,37 +1298,27 @@ export async function registerDesktopIpc(
     ['desktop:listSkills', () => captureSkillListServiceResult(services.listSkills(), count => log('info', 'listSkills', { count }))],
   ]);
   registerSkillListIpc(ipcMain, skillListProducers);
-  ipcMain.handle('desktop:installSkill', async (_event, skillName) => {
-    log('info', 'installSkill', { skillName });
-    const r = await services.installSkill(skillName);
-    log('info', 'installSkill result', { success: r.success });
-    return r;
-  });
-  ipcMain.handle('desktop:uninstallSkill', async (_event, skillName) => {
-    log('info', 'uninstallSkill', { skillName });
-    const r = await services.uninstallSkill(skillName);
-    log('info', 'uninstallSkill result', { success: r.success });
-    return r;
-  });
+  const skillMutationProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:installSkill', (_event, skillName) => services.installSkill(skillName, { requestSource: 'user' })],
+    ['desktop:uninstallSkill', (_event, skillName) => services.uninstallSkill(skillName, { requestSource: 'user' })],
+  ]);
+  registerSkillMutationIpc(ipcMain, skillMutationProducers);
   // Channel IPC
   const channelMcpReadonlyProducers = new Map<string, IpcHandlerListener>([
     ['desktop:listChannels', () => services.listChannels()],
     ['desktop:listMCPInstalls', () => services.listMCPInstalls()],
   ]);
   registerChannelMcpReadonlyIpc(ipcMain, channelMcpReadonlyProducers);
-  ipcMain.handle('desktop:testChannel', async (_event, channelId) => {
-    log('info', 'testChannel', { channelId });
-    const r = await services.testChannel(channelId);
-    log('info', 'testChannel result', { success: r.success });
-    return r;
-  });
-  ipcMain.handle('desktop:createChannel', async (_event, input) => services.createChannel(input));
-  ipcMain.handle('desktop:updateChannel', async (_event, id, input) => services.updateChannel(id, input));
-  ipcMain.handle('desktop:deleteChannel', async (_event, id) => services.deleteChannel(id));
-  // MCP IPC
-  ipcMain.handle('desktop:createMCPInstall', async (_event, input) => services.createMCPInstall(input));
-  ipcMain.handle('desktop:updateMCPInstall', async (_event, id, input) => services.updateMCPInstall(id, input));
-  ipcMain.handle('desktop:deleteMCPInstall', async (_event, id) => services.deleteMCPInstall(id));
+  const channelMcpMutationProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:testChannel', (_event, id) => services.testChannel(id, 'user')],
+    ['desktop:createChannel', (_event, input) => services.createChannel(input, 'user')],
+    ['desktop:updateChannel', (_event, id, input) => services.updateChannel(id, input, 'user')],
+    ['desktop:deleteChannel', (_event, id) => services.deleteChannel(id, 'user')],
+    ['desktop:createMCPInstall', (_event, input) => services.createMCPInstall(input, 'user')],
+    ['desktop:updateMCPInstall', (_event, id, input) => services.updateMCPInstall(id, input, 'user')],
+    ['desktop:deleteMCPInstall', (_event, id) => services.deleteMCPInstall(id, 'user')],
+  ]);
+  registerChannelMcpMutationIpc(ipcMain, channelMcpMutationProducers);
   // Plugin MCP servers
   registerPluginCatalogIpc(ipcMain, services);
   // Design v58 §7.2: `setPluginMcpServerEnabled` only mutated a view model and
@@ -1333,7 +1328,7 @@ export async function registerDesktopIpc(
     componentId: String((input as { componentId?: unknown })?.componentId ?? ''),
     requestSource: 'user',
   }));
-  ipcMain.handle('desktop:getComputerUseCapabilityStatus', () => services.getComputerUseCapabilityStatus());
+  registerComputerUseCapabilityReadonlyIpc(ipcMain, () => services.getComputerUseCapabilityStatus());
   ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse({ requestSource: 'user' }));
   ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse({ requestSource: 'user' }));
   ipcMain.handle('desktop:disableComputerUse', () => services.disableComputerUse({ requestSource: 'user' }));
@@ -1814,17 +1809,14 @@ export async function registerDesktopIpc(
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle('desktop:meeting:requestMicrophonePermission', async () => (
-    meetingAudioPermissionService.requestPermission()
-  ));
-
-  ipcMain.handle('desktop:meeting:saveAsrConfig', async (_event, input) => {
-    const { loadConfig, saveConfig } = await import('../../src/utils/config.js');
-    const { applyMeetingAsrConfigUpdate, createMeetingAsrConfigSnapshot } = await import('./meeting-asr-config.js');
-    const config = applyMeetingAsrConfigUpdate(await loadConfig(), input ?? {});
-    await saveConfig(config);
-    return createMeetingAsrConfigSnapshot(config);
-  });
+  const meetingMutations = createMeetingMutationService(meetingAudioPermissionService);
+  const meetingMutationProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:meeting:requestMicrophonePermission', () => meetingMutations.requestMicrophonePermission('user')],
+    ['desktop:meeting:saveAsrConfig', (_event, input) => meetingMutations.saveAsrConfig(input, 'user')],
+    ['desktop:meeting:downloadModel', (_event, id) => meetingMutations.downloadModel(id, 'user')],
+    ['desktop:meeting:uninstallModel', (_event, id) => meetingMutations.uninstallModel(id, 'user')],
+  ]);
+  registerMeetingMutationIpc(ipcMain, meetingMutationProducers);
 
   const meetingReadonlyProducers = new Map<string, IpcHandlerListener>([
     ['desktop:meeting:getMicrophonePermission', () => meetingAudioPermissionService.getStatus()],
@@ -1832,16 +1824,6 @@ export async function registerDesktopIpc(
     ['desktop:meeting:listModels', async () => { const { createMeetingModelService } = await import('./meeting-model-service.js'); return createMeetingModelService({ readonlyIoPolicy: 'truthful' }).listModels(); }],
   ]);
   registerMeetingReadonlyIpc(ipcMain, meetingReadonlyProducers);
-
-  ipcMain.handle('desktop:meeting:downloadModel', async (_event, modelId: string) => {
-    const { createMeetingModelService } = await import('./meeting-model-service.js');
-    return createMeetingModelService().downloadModel(String(modelId ?? ''));
-  });
-
-  ipcMain.handle('desktop:meeting:uninstallModel', async (_event, modelId: string) => {
-    const { createMeetingModelService } = await import('./meeting-model-service.js');
-    return createMeetingModelService().uninstallModel(String(modelId ?? ''));
-  });
 
   ipcMain.handle('desktop:meeting:saveRecordedAudio', async (_event, input) => {
     const wavBase64 = typeof input?.wavBase64 === 'string' ? input.wavBase64 : '';

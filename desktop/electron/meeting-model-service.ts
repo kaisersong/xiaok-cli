@@ -5,7 +5,7 @@ import type { ClientRequest, IncomingMessage } from 'node:http';
 import { get as httpGet } from 'node:http';
 import { get as httpsGet } from 'node:https';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify, types as nodeTypes } from 'node:util';
 
 export type MeetingModelCheckReason = 'ready' | 'missing' | 'size_mismatch' | 'hash_mismatch';
@@ -191,6 +191,14 @@ function truthfulModelPathExists(path: string): boolean {
   catch(error) { if(error && typeof error==='object' && !nodeTypes.isProxy(error) && Object.getOwnPropertyDescriptor(error,'code')?.value==='ENOENT')return false;throw error; }
 }
 
+// One cache/model download lease shared by every factory instance in this process.
+// Does not claim a transcriber lease or cancellation protocol.
+const activeMeetingModelDownloads = new Set<string>();
+function meetingModelLeaseKey(cacheDir: string, model: MeetingModelDefinition): string {
+  const path = resolve(cacheDir, model.fileName);
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
 export function createMeetingModelService(options: MeetingModelServiceOptions = {}): MeetingModelService {
   const env = options.env ?? process.env;
   const cacheDir = options.cacheDir ?? resolveMeetingWhisperCacheDir(env);
@@ -269,8 +277,12 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
     },
     async downloadModel(modelId) {
       const model = findModel(modelId);
+      const lease = meetingModelLeaseKey(cacheDir, model);
+      if (activeMeetingModelDownloads.has(lease)) throw Error('meeting_model_busy');
+      activeMeetingModelDownloads.add(lease);
+      try {
       if ((model.packageType ?? 'single-file') === 'directory') {
-        return downloadDirectoryModelPackage(model, cacheDir, downloadFile, extractArchive, getModelInfo);
+        return await downloadDirectoryModelPackage(model, cacheDir, downloadFile, extractArchive, getModelInfo);
       }
       mkdirSync(cacheDir, { recursive: true });
       const modelPath = join(cacheDir, model.fileName);
@@ -293,9 +305,11 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
         throw new Error(check.reason);
       }
       return { ok: true, model: getModelInfo(model) };
+      } finally { activeMeetingModelDownloads.delete(lease); }
     },
     uninstallModel(modelId) {
       const model = findModel(modelId);
+      if (activeMeetingModelDownloads.has(meetingModelLeaseKey(cacheDir, model))) throw Error('meeting_model_busy');
       const isDirectoryPackage = (model.packageType ?? 'single-file') === 'directory';
       rmSync(join(cacheDir, model.fileName), { recursive: isDirectoryPackage, force: true });
       if (isDirectoryPackage) {
