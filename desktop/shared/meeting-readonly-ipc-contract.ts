@@ -1,0 +1,10 @@
+import {z}from'zod';
+export const MEETING_READONLY_METHODS=['getMicrophonePermission','getAsrConfig','listModels']as const;
+export const MEETING_READONLY_INPUT_SCHEMA=z.tuple([]);
+export const MEETING_PERMISSION_OUTPUT_SCHEMA=z.object({status:z.enum(['granted','denied','prompt','restricted','unknown','unsupported'])}).strict();
+export const MEETING_ASR_OUTPUT_SCHEMA=z.object({defaultProvider:z.enum(['sherpa-onnx-paraformer','whisper','volcengine-asr','aliyun-asr']),volcengine:z.object({configured:z.boolean(),appKeyConfigured:z.boolean(),accessKeyConfigured:z.boolean(),endpoint:z.string().optional(),resourceId:z.string()}).strict(),aliyun:z.object({configured:z.boolean(),apiKeyConfigured:z.boolean(),baseUrl:z.string(),model:z.string()}).strict()}).strict();
+export const MEETING_MODELS_OUTPUT_SCHEMA=z.array(z.object({id:z.string(),fileName:z.string(),sizeBytes:z.number(),sizeLabel:z.string(),cacheDir:z.string(),path:z.string(),downloaded:z.boolean(),status:z.enum(['downloaded','not_downloaded','incomplete','corrupt']),capability:z.enum(['asr','punctuation','vad','speaker']),engineId:z.string(),packageId:z.string(),packageType:z.enum(['single-file','directory']),packageState:z.enum(['missing','downloading','incomplete','verified','corrupt']),manifestTrusted:z.boolean(),runtimeAutoDownloadAllowed:z.literal(false),localSizeBytes:z.number().optional(),localSizeLabel:z.string().optional()}).passthrough());
+export const MEETING_READONLY_OUTPUT_SCHEMAS={getMicrophonePermission:MEETING_PERMISSION_OUTPUT_SCHEMA,getAsrConfig:MEETING_ASR_OUTPUT_SCHEMA,listModels:MEETING_MODELS_OUTPUT_SCHEMA}as const;
+export type MeetingReadonlyPermission=z.infer<typeof MEETING_PERMISSION_OUTPUT_SCHEMA>;
+export type MeetingReadonlyAsr=z.infer<typeof MEETING_ASR_OUTPUT_SCHEMA>;
+export type MeetingReadonlyModels=z.infer<typeof MEETING_MODELS_OUTPUT_SCHEMA>;

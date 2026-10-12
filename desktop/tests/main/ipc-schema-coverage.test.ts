@@ -1,3 +1,4 @@
+import { registerMeetingReadonlyIpc } from '../../electron/meeting-readonly-typed-ipc.js';
 import { registerChannelMcpReadonlyIpc } from '../../electron/channel-mcp-readonly-typed-ipc.js';
 import { registerSkillListIpc } from '../../electron/skill-list-typed-ipc.js';
 import { registerAutomationConfigIpc } from '../../electron/automation-config-typed-ipc.js';
@@ -22,6 +23,7 @@ registerMobileSignInIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerAutomationConfigIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerSkillListIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerChannelMcpReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
+registerMeetingReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerServiceControlIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerMobileReadonlyIpc({handle:channel=>{currentViewChannels.push(channel);}});
 registerPluginCatalogIpc({handle:channel=>{currentViewChannels.push(channel);}});

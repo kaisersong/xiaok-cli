@@ -1,3 +1,5 @@
+import { registerMeetingReadonlyIpc } from './meeting-readonly-typed-ipc.js';
+import { readMeetingAsrReadonly } from './meeting-readonly-data.js';
 import { registerChannelMcpReadonlyIpc } from './channel-mcp-readonly-typed-ipc.js';
 import { registerSkillListIpc } from './skill-list-typed-ipc.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
@@ -1812,19 +1814,9 @@ export async function registerDesktopIpc(
     return result.filePaths[0] ?? null;
   });
 
-  ipcMain.handle('desktop:meeting:getMicrophonePermission', async () => (
-    meetingAudioPermissionService.getStatus()
-  ));
-
   ipcMain.handle('desktop:meeting:requestMicrophonePermission', async () => (
     meetingAudioPermissionService.requestPermission()
   ));
-
-  ipcMain.handle('desktop:meeting:getAsrConfig', async () => {
-    const { loadConfig } = await import('../../src/utils/config.js');
-    const { createMeetingAsrConfigSnapshot } = await import('./meeting-asr-config.js');
-    return createMeetingAsrConfigSnapshot(await loadConfig());
-  });
 
   ipcMain.handle('desktop:meeting:saveAsrConfig', async (_event, input) => {
     const { loadConfig, saveConfig } = await import('../../src/utils/config.js');
@@ -1834,10 +1826,12 @@ export async function registerDesktopIpc(
     return createMeetingAsrConfigSnapshot(config);
   });
 
-  ipcMain.handle('desktop:meeting:listModels', async () => {
-    const { createMeetingModelService } = await import('./meeting-model-service.js');
-    return createMeetingModelService().listModels();
-  });
+  const meetingReadonlyProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:meeting:getMicrophonePermission', () => meetingAudioPermissionService.getStatus()],
+    ['desktop:meeting:getAsrConfig', () => readMeetingAsrReadonly()],
+    ['desktop:meeting:listModels', async () => { const { createMeetingModelService } = await import('./meeting-model-service.js'); return createMeetingModelService({ readonlyIoPolicy: 'truthful' }).listModels(); }],
+  ]);
+  registerMeetingReadonlyIpc(ipcMain, meetingReadonlyProducers);
 
   ipcMain.handle('desktop:meeting:downloadModel', async (_event, modelId: string) => {
     const { createMeetingModelService } = await import('./meeting-model-service.js');

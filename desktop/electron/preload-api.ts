@@ -1,3 +1,4 @@
+import type { MeetingReadonlyPermission, MeetingReadonlyAsr, MeetingReadonlyModels } from '../shared/meeting-readonly-ipc-contract.js';
 import type { ChannelReadonlyView, McpInstallReadonlyView } from '../shared/channel-mcp-readonly-ipc-contract.js';
 import type { SkillListDto } from '../shared/skill-list-ipc-contract.js';
 import type { AutomationConfigDto, AutomationOverviewDto } from '../shared/automation-config-ipc-contract.js';
@@ -1395,11 +1396,11 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kbSearch(input?: KnowledgeSearchInput | null): Promise<KnowledgeSearchResultDto[]>;
   kbPickFiles(): Promise<string[]>;
   meetingPickAudioFile(): Promise<string | null>;
-  meetingGetMicrophonePermission(): Promise<unknown>;
+  meetingGetMicrophonePermission(): Promise<MeetingReadonlyPermission>;
   meetingRequestMicrophonePermission(): Promise<unknown>;
-  meetingGetAsrConfig(): Promise<MeetingAsrConfigSnapshot>;
+  meetingGetAsrConfig(): Promise<MeetingReadonlyAsr>;
   meetingSaveAsrConfig(input: MeetingSaveAsrConfigInput): Promise<MeetingAsrConfigSnapshot>;
-  meetingListModels(): Promise<unknown[]>;
+  meetingListModels(): Promise<MeetingReadonlyModels>;
   meetingDownloadModel(modelId: string): Promise<unknown>;
   meetingUninstallModel(modelId: string): Promise<unknown>;
   meetingSaveRecordedAudio(input: unknown): Promise<unknown>;
@@ -1959,11 +1960,11 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<KnowledgeSearchResultDto[]>,
     kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles') as Promise<string[]>,
     meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<string | null>,
-    meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<unknown>,
+    meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<MeetingReadonlyPermission>,
     meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<unknown>,
-    meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingAsrConfigSnapshot>,
+    meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingReadonlyAsr>,
     meetingSaveAsrConfig: (input) => ipcRenderer.invoke('desktop:meeting:saveAsrConfig', input) as Promise<MeetingAsrConfigSnapshot>,
-    meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<unknown[]>,
+    meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<MeetingReadonlyModels>,
     meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<unknown>,
     meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<unknown>,
     meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<unknown>,

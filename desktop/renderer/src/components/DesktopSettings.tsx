@@ -1,3 +1,4 @@
+import { useMeetingModelsReadonly, useMeetingAsrReadonly } from '../hooks/useMeetingReadonly';
 import { useChannelReadonly } from '../hooks/useChannelReadonly';
 import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
 import { useSkillListReadonly, useSkillStatsReadonly } from '../hooks/useSkillReadonly';
@@ -348,7 +349,8 @@ function VoicePane() {
   const [engine, setEngine] = useState<MeetingTranscriberEngine>(readStoredMeetingTranscriberEngine);
   const [model, setModel] = useState<MeetingTranscriberModel>(() => readStoredMeetingTranscriberModel(readStoredMeetingTranscriberEngine()));
   const [language, setLanguage] = useState<MeetingTranscriberLanguage>(readStoredMeetingTranscriberLanguage);
-  const [asrConfig, setAsrConfig] = useState<MeetingAsrConfigSnapshot | null>(null);
+  const modelFacts = useMeetingModelsReadonly(), asrFacts = useMeetingAsrReadonly();
+  const asrConfig = asrFacts.data;
   const [asrDraft, setAsrDraft] = useState({
     volcAppKey: '',
     volcAccessKey: '',
@@ -360,8 +362,8 @@ function VoicePane() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [modelStatuses, setModelStatuses] = useState<MeetingModelStatusSnapshot[]>([]);
-  const [modelStatusesLoading, setModelStatusesLoading] = useState(false);
+  const modelStatuses = modelFacts.data ?? [];
+  const modelStatusesLoading = modelFacts.reading;
   const [modelStatusesError, setModelStatusesError] = useState('');
   const [modelAction, setModelAction] = useState<MeetingModelActionState | null>(null);
 
@@ -394,11 +396,12 @@ function VoicePane() {
     },
   ].filter(group => group.models.length > 0);
 
-  const loadMeetingAsrConfig = useCallback(async () => {
-    if (!desktop?.meetingGetAsrConfig) return;
-    try {
-      const snapshot = await desktop.meetingGetAsrConfig() as MeetingAsrConfigSnapshot;
-      setAsrConfig(snapshot);
+  const loadMeetingModelStatuses = useCallback(async () => {
+    await modelFacts.reload().catch(() => {});
+  }, [modelFacts.reload]);
+  useEffect(() => {
+    const snapshot = asrFacts.data;
+    if (!snapshot) return;
       setAsrDraft(prev => ({
         ...prev,
         volcEndpoint: snapshot.volcengine?.endpoint ?? '',
@@ -414,30 +417,7 @@ function VoicePane() {
       setEngine(nextEngine);
       setModel(nextModel);
       setLanguage(nextLanguage);
-    } catch {
-      setAsrConfig(null);
-    }
-  }, [desktop]);
-
-  const loadMeetingModelStatuses = useCallback(async () => {
-    if (!desktop?.meetingListModels) return;
-    setModelStatusesLoading(true);
-    setModelStatusesError('');
-    try {
-      const result = await desktop.meetingListModels();
-      setModelStatuses(normalizeMeetingModelStatuses(result));
-    } catch (error) {
-      setModelStatuses([]);
-      setModelStatusesError(t.knowledge.meetingModelStatusLoadFailed(error instanceof Error ? error.message : 'unknown'));
-    } finally {
-      setModelStatusesLoading(false);
-    }
-  }, [desktop, t]);
-
-  useEffect(() => {
-    void loadMeetingAsrConfig();
-    void loadMeetingModelStatuses();
-  }, [loadMeetingAsrConfig, loadMeetingModelStatuses]);
+  }, [asrFacts.data]);
 
   const persistTranscriberChoice = (nextEngine: MeetingTranscriberEngine, nextModel: MeetingTranscriberModel, nextLanguage = language) => {
     try {
@@ -499,7 +479,7 @@ function VoicePane() {
         : { defaultProvider: engine };
     try {
       const snapshot = await desktop.meetingSaveAsrConfig(input) as MeetingAsrConfigSnapshot;
-      setAsrConfig(snapshot);
+      await asrFacts.reload().catch(() => {});
       setAsrDraft(prev => ({
         ...prev,
         volcAppKey: '',
@@ -553,7 +533,7 @@ function VoicePane() {
 
   const renderProviderStatus = (configured?: boolean) => (
     <span className={`rounded-full border px-2 py-0.5 text-[11px] ${configured ? 'border-green-200 bg-green-50 text-green-700' : 'border-[var(--c-border)] bg-[var(--c-bg-page)] text-[var(--c-text-tertiary)]'}`}>
-      {configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
+      {asrConfig === null ? t.meetingAsrReadonlyUnknown : configured ? ds.meetingAsrConfigured : ds.meetingAsrNotConfigured}
     </span>
   );
 
@@ -642,6 +622,9 @@ function VoicePane() {
 
   return (
     <div className="space-y-6">
+      {modelFacts.failed && <p role="alert">{t.meetingModelsReadonlyUnavailable}</p>}
+      {asrFacts.failed && <p role="alert">{t.meetingAsrReadonlyUnavailable}</p>}
+      <button type="button" onClick={() => { modelFacts.refresh(); asrFacts.refresh(); }}>{t.desktopReadonlyRetry}</button>
       <Section>
         <SectionHeader icon={Mic}>{ds.meetingRecordingSettingsTitle}</SectionHeader>
         <p className="mb-4 text-sm leading-6 text-[var(--c-text-secondary)]">{ds.meetingRecordingSettingsDesc}</p>
@@ -699,9 +682,8 @@ function VoicePane() {
             <p className="text-sm text-[var(--c-text-secondary)]">{t.knowledge.meetingModelDownloadStatusTitle}</p>
             {modelStatusesLoading && <span className="text-xs text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusLoading}</span>}
           </div>
-          {modelStatusesError ? (
-            <p className="text-xs leading-5 text-red-600">{modelStatusesError}</p>
-          ) : groupedModelStatuses.length > 0 ? (
+          {modelStatusesError && <p className="text-xs leading-5 text-red-600">{modelStatusesError}</p>}
+          {groupedModelStatuses.length > 0 ? (
             <div className="space-y-4">
               {groupedModelStatuses.map(group => (
                 <div key={group.id} className="space-y-2">
@@ -711,7 +693,7 @@ function VoicePane() {
               ))}
             </div>
           ) : (
-            <p className="text-xs leading-5 text-[var(--c-text-tertiary)]">{t.knowledge.meetingModelStatusUnavailable}</p>
+            <p className="text-xs leading-5 text-[var(--c-text-tertiary)]">{modelFacts.data === null ? t.meetingModelsReadonlyUnknown : t.knowledge.meetingModelStatusUnavailable}</p>
           )}
         </Card>
       </Section>

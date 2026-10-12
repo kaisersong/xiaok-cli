@@ -2929,6 +2929,10 @@ export interface LocaleStrings {
   skillsReadonlyListFailed: string;
   skillsReadonlyStatsFailed: string;
   skillsReadonlyRetry: string;
+  meetingModelsReadonlyUnknown: string;
+  meetingModelsReadonlyUnavailable: string;
+  meetingAsrReadonlyUnknown: string;
+  meetingAsrReadonlyUnavailable: string;
   channelReadonlyUnknown: string;
   channelReadonlyUnavailable: string;
   mcpInstallsReadonlyUnknown: string;

@@ -6,7 +6,7 @@ import { get as httpGet } from 'node:http';
 import { get as httpsGet } from 'node:https';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
+import { promisify, types as nodeTypes } from 'node:util';
 
 export type MeetingModelCheckReason = 'ready' | 'missing' | 'size_mismatch' | 'hash_mismatch';
 export type MeetingModelDownloadStatus = 'downloaded' | 'not_downloaded' | 'incomplete' | 'corrupt';
@@ -79,6 +79,7 @@ const MEETING_MODEL_DOWNLOAD_MAX_ATTEMPTS = 20;
 const execFileAsync = promisify(execFileCallback);
 
 export interface MeetingModelServiceOptions {
+  readonlyIoPolicy?: 'truthful';
   cacheDir?: string;
   env?: NodeJS.ProcessEnv;
   models?: readonly MeetingModelDefinition[];
@@ -185,6 +186,11 @@ export function formatMeetingModelSize(bytes: number): string {
   return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 }
 
+function truthfulModelPathExists(path: string): boolean {
+  try { statSync(path); return true; }
+  catch(error) { if(error && typeof error==='object' && !nodeTypes.isProxy(error) && Object.getOwnPropertyDescriptor(error,'code')?.value==='ENOENT')return false;throw error; }
+}
+
 export function createMeetingModelService(options: MeetingModelServiceOptions = {}): MeetingModelService {
   const env = options.env ?? process.env;
   const cacheDir = options.cacheDir ?? resolveMeetingWhisperCacheDir(env);
@@ -198,13 +204,14 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
     return model;
   }
 
-  function getModelInfo(model: MeetingModelDefinition): MeetingModelInfo {
+  function getModelInfo(model: MeetingModelDefinition, truthful = false): MeetingModelInfo {
+    const pathExists = truthful ? truthfulModelPathExists : existsSync;
     const modelPath = join(cacheDir, model.fileName);
     const baseInfo = buildModelPackageInfo(model);
     if ((model.packageType ?? 'single-file') === 'directory') {
-      return getDirectoryModelInfo(model, modelPath, baseInfo);
+      return getDirectoryModelInfo(model, modelPath, baseInfo, pathExists);
     }
-    if (!existsSync(modelPath)) {
+    if (!pathExists(modelPath)) {
       return {
         id: model.id,
         fileName: model.fileName,
@@ -220,11 +227,18 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
     }
 
     const localSizeBytes = statSync(modelPath).size;
-    const check = checkMeetingModelFile({
-      path: modelPath,
-      expectedSizeBytes: model.expectedSizeBytes,
-      expectedSha256: model.expectedSha256,
-    });
+    // The truthful reader must not re-enter existsSync, which hides access errors.
+    const check: MeetingModelCheckResult = truthful
+      ? localSizeBytes !== model.expectedSizeBytes
+        ? { ready: false, reason: 'size_mismatch' }
+        : sha256File(modelPath) !== model.expectedSha256
+          ? { ready: false, reason: 'hash_mismatch' }
+          : { ready: true, reason: 'ready' }
+      : checkMeetingModelFile({
+        path: modelPath,
+        expectedSizeBytes: model.expectedSizeBytes,
+        expectedSha256: model.expectedSha256,
+      });
     const downloaded = check.ready;
     const status = downloaded ? 'downloaded' : check.reason === 'hash_mismatch' ? 'corrupt' : 'incomplete';
     const packageState: MeetingModelPackageState = downloaded
@@ -251,7 +265,7 @@ export function createMeetingModelService(options: MeetingModelServiceOptions = 
   return {
     checkModelFile: checkMeetingModelFile,
     listModels() {
-      return models.map(getModelInfo);
+      return models.map(model => getModelInfo(model, options.readonlyIoPolicy === 'truthful'));
     },
     async downloadModel(modelId) {
       const model = findModel(modelId);
@@ -299,8 +313,9 @@ function getDirectoryModelInfo(
     MeetingModelInfo,
     'engineId' | 'packageId' | 'packageType' | 'manifestTrusted' | 'runtimeAutoDownloadAllowed' | 'capability'
   >,
+  pathExists: (path: string) => boolean = existsSync,
 ): MeetingModelInfo {
-  if (!existsSync(modelPath)) {
+  if (!pathExists(modelPath)) {
     return {
       id: model.id,
       fileName: model.fileName,
@@ -315,11 +330,11 @@ function getDirectoryModelInfo(
     };
   }
 
-  const localSizeBytes = calculateLocalPackageSize(modelPath);
+  const localSizeBytes = calculateLocalPackageSize(modelPath, pathExists);
   const stat = statSync(modelPath);
   const requiredFiles = model.requiredFiles ?? [];
   const hasRequiredFiles = stat.isDirectory()
-    && requiredFiles.every(requiredFile => existsSync(join(modelPath, requiredFile)));
+    && requiredFiles.every(requiredFile => pathExists(join(modelPath, requiredFile)));
   return {
     id: model.id,
     fileName: model.fileName,
@@ -336,13 +351,13 @@ function getDirectoryModelInfo(
   };
 }
 
-function calculateLocalPackageSize(path: string): number {
-  if (!existsSync(path)) return 0;
+function calculateLocalPackageSize(path: string, pathExists: (path: string) => boolean = existsSync): number {
+  if (!pathExists(path)) return 0;
   const stat = statSync(path);
   if (!stat.isDirectory()) return stat.size;
   return readdirSync(path, { withFileTypes: true }).reduce((total, entry) => {
     const childPath = join(path, entry.name);
-    if (entry.isDirectory()) return total + calculateLocalPackageSize(childPath);
+    if (entry.isDirectory()) return total + calculateLocalPackageSize(childPath, pathExists);
     if (entry.isFile()) return total + statSync(childPath).size;
     return total;
   }, 0);
