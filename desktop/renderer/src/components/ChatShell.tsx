@@ -1371,7 +1371,15 @@ export function ChatShell() {
 
   const handleSubmit = async (text: string, files?: Array<{ filePath: string; name: string }>) => {
     if (!taskId || admissionPending.current === renderScope) return false;
-    if(observationDraft&&files?.length){setGoalError(t.observation.filesUnsupported);return false;}
+    if (observationDraft && files?.length) {
+      // Reuse the ordinary task error message position; no Goal panel is required.
+      setMessages(previous => [...previous, {
+        id: `msg-${Date.now()}-err`,
+        role: 'assistant',
+        content: t.observation.filesUnsupported,
+      }]);
+      return false;
+    }
 
     // If streaming is active, queue the message instead of interrupting
     if (status === 'running') {

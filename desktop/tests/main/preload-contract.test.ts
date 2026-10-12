@@ -1,3 +1,5 @@
+import { registerMeetingActions10Ipc } from '../../electron/meeting-actions10-typed-ipc.js';
+import { createObservationRegistrar, OBSERVATION_METHODS } from '../../electron/observation-typed-ipc.js';
 import { registerRuntimeActionIpc } from '../../electron/runtime-action-typed-ipc.js';
 import { registerPluginActionIpc } from '../../electron/plugin-action-typed-ipc.js';
 import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
@@ -1082,6 +1084,9 @@ registerMeetingReadonlyIpc({ handle: channel => { channels.add(channel); } });
 registerComputerUseCapabilityReadonlyIpc({ handle: channel => { channels.add(channel); } });registerKswarmStatusReadonlyIpc({ handle: channel => { channels.add(channel); } });registerSkillMutationIpc({ handle: channel => { channels.add(channel); } });registerChannelMcpMutationIpc({ handle: channel => { channels.add(channel); } });registerMeetingMutationIpc({ handle: channel => { channels.add(channel); } }, new Map());
   registerRuntimeActionIpc({ handle: channel => { channels.add(channel); } }, new Map());
   registerPluginActionIpc({ handle: channel => { channels.add(channel); } }, new Map());
+  registerMeetingActions10Ipc({ handle: channel => { channels.add(channel); } }, new Map());
+  const observation = createObservationRegistrar({ handle: channel => { channels.add(channel); } }, () => {}, 36);
+  for (const method of OBSERVATION_METHODS) observation.handle('desktop:' + method, async () => undefined);
   registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);

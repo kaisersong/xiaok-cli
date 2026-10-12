@@ -1,3 +1,5 @@
+import { registerMeetingActions10Ipc, captureMeeting10LiveUpdate } from './meeting-actions10-typed-ipc.js';
+import { safeMeeting10Thrown } from './meeting-actions10-error-policy.js';
 import { registerPluginActionIpc } from './plugin-action-typed-ipc.js';
 import { openPluginPermissionSettings } from './plugin-action-service.js';
 import { registerComputerUseCapabilityReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
@@ -10,6 +12,8 @@ import { readMeetingAsrReadonly } from './meeting-readonly-data.js';
 import { registerChannelMcpReadonlyIpc } from './channel-mcp-readonly-typed-ipc.js';
 import { registerSkillListIpc } from './skill-list-typed-ipc.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
+import { createObservationRegistrar } from './observation-typed-ipc.js';
+import { createObservationServiceFacade } from './observation-service-facade.js';
 import { captureSkillListServiceResult } from './skill-readonly-data.js';
 import { registerPluginCatalogIpc } from './plugin-catalog-typed-ipc.js';
 import { registerKnowledgeIpc, captureKnowledgeOutput } from './knowledge-typed-ipc.js';
@@ -765,7 +769,7 @@ function parseMeetingLiveSessionId(value: unknown): string {
 }
 
 function stableMeetingLiveError(error: unknown): string {
-  const message = error instanceof Error ? error.message : '';
+  const message = safeMeeting10Thrown(error, 'meeting_live_failed');
   if (message === 'aliyun_asr_not_configured'
     || message === 'volcengine_asr_not_configured'
     || /^(?:aliyun|volcengine|meeting)_live_[a-z0-9_]+(?::[a-z0-9_.-]+)?$/i.test(message)) {
@@ -1047,14 +1051,17 @@ export async function registerDesktopIpc(
       });
     }return event.sender;
   };
-  ipcMain.handle('desktop:prepareObservationTask', async(event,input) => {
+  const observationService = createObservationServiceFacade(services);
+  // Provisional round36; final allocation remains with integration owner.
+  const observationIpc = createObservationRegistrar(ipcMain, event => { observationSender(event); }, 36);
+  observationIpc.handle('desktop:prepareObservationTask', async(event,input) => {
     if(input!==undefined)throw new Error('observation_input_invalid');return observationApprovals.prepare(observationSender(event));
   });
-  ipcMain.handle('desktop:createObservationTask', async(event,raw) => {
+  observationIpc.handle('desktop:createObservationTask', async(event,raw) => {
     const sender=observationSender(event);
     if(!raw||typeof raw!=='object'||Object.keys(raw).some(key=>!['draftId','prompt','threadId'].includes(key))||typeof raw.draftId!=='string'||typeof raw.prompt!=='string'||!raw.prompt.trim()||raw.prompt.length>100000||raw.threadId!==undefined&&(typeof raw.threadId!=='string'||!/^[a-zA-Z0-9_-]{1,256}$/.test(raw.threadId)))throw new Error('observation_input_invalid');
     const approval=observationApprovals.consume(sender,raw.draftId);
-    const result=await services.createObservationTask({prompt:raw.prompt,materials:[],permissionMode:'default',...(raw.threadId?{threadId:raw.threadId}:{})}, {requestSource:'user',approval,
+    const result=await observationService.createObservationTask({prompt:raw.prompt,materials:[],permissionMode:'default',...(raw.threadId?{threadId:raw.threadId}:{})}, {requestSource:'user',approval,
       authorizeValidationMaterials:async request=>{
         if(sender.isDestroyed())throw Error('observation_sender_destroyed');
         const window=BrowserWindow.fromWebContents(sender);if(!window||window.isDestroyed())throw Error('observation_sender_destroyed');
@@ -1072,14 +1079,14 @@ export async function registerDesktopIpc(
       const value=input as {taskId:string};
       const sender=observationSender(event);
       if(!input||typeof input!=='object'||Object.keys(input).length!==1||typeof value.taskId!=='string'||(action!=='status'&&observationSenders.get(value.taskId)?.sender!==sender))throw new Error('observation_task_owner_required');
-      if(action==='stop')services.stopObservationTask(value.taskId,{requestSource:'user',control:observationSenders.get(value.taskId)!.control});
-      if(action==='revoke')await services.revokeObservationTask(value.taskId,{requestSource:'user',control:observationSenders.get(value.taskId)!.control});
-      const diagnostics=services.observationTaskDiagnostics?.(value.taskId),semantic=diagnostics?.semantic,compound=diagnostics?.compound;
-      return {mode:await services.observationTaskStatus(value.taskId),...(semantic?{semantic}:{}),...(compound?{compound}:{})};
+      if(action==='stop')await observationService.stopObservationTask(value.taskId,{requestSource:'user',control:observationSenders.get(value.taskId)!.control});
+      if(action==='revoke')await observationService.revokeObservationTask(value.taskId,{requestSource:'user',control:observationSenders.get(value.taskId)!.control});
+      const facts=observationService.observationTaskDiagnosticFacts(value.taskId);
+      return {mode:await observationService.observationTaskStatus(value.taskId),...facts};
   };
-  ipcMain.handle('desktop:stopObservationTask',observationControl('stop'));
-  ipcMain.handle('desktop:revokeObservationTask',observationControl('revoke'));
-  ipcMain.handle('desktop:getObservationTaskStatus',observationControl('status'));
+  observationIpc.handle('desktop:stopObservationTask',observationControl('stop'));
+  observationIpc.handle('desktop:revokeObservationTask',observationControl('revoke'));
+  observationIpc.handle('desktop:getObservationTaskStatus',observationControl('status'));
   ipcMain.handle('desktop:createTask', async (_event, input) => {
     log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
     const r = await services.createTask(sanitizeTaskCreateInput(input), options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
@@ -1790,7 +1797,10 @@ export async function registerDesktopIpc(
     return captureKnowledgeOutput('pickFiles', result.filePaths);
   });
 
-  ipcMain.handle('desktop:meeting:pickAudioFile', async () => {
+  const meetingActions10Producers = new Map<string, IpcHandlerListener>();
+  const meetingActions10Raw: IpcHandleRegistrar = { handle: (channel, producer) => { meetingActions10Producers.set(channel, producer); } };
+
+  meetingActions10Raw.handle('desktop:meeting:pickAudioFile', async () => {
     const { dialog } = await import('electron');
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
@@ -1818,7 +1828,7 @@ export async function registerDesktopIpc(
   ]);
   registerMeetingReadonlyIpc(ipcMain, meetingReadonlyProducers);
 
-  ipcMain.handle('desktop:meeting:saveRecordedAudio', async (_event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:saveRecordedAudio', async (_event, input) => {
     const wavBase64 = typeof input?.wavBase64 === 'string' ? input.wavBase64 : '';
     if (!wavBase64) return { ok: false, error: 'missing_audio' };
     if (Buffer.byteLength(wavBase64, 'utf8') > 512 * 1024 * 1024) {
@@ -1841,7 +1851,7 @@ export async function registerDesktopIpc(
     return { ok: true, filePath };
   });
 
-  ipcMain.handle('desktop:meeting:transcribePreview', async (_event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:transcribePreview', async (_event, input) => {
     const wavBase64 = typeof input?.wavBase64 === 'string' ? input.wavBase64 : '';
     if (!wavBase64) return { ok: false, error: 'missing_audio' };
     if (Buffer.byteLength(wavBase64, 'utf8') > 96 * 1024 * 1024) {
@@ -1872,14 +1882,14 @@ export async function registerDesktopIpc(
     } catch (error) {
       return {
         ok: false,
-        error: error instanceof Error ? error.message : 'preview_transcription_failed',
+        error: safeMeeting10Thrown(error, 'preview_transcription_failed'),
       };
     } finally {
       await rm(filePath, { force: true }).catch(() => undefined);
     }
   });
 
-  ipcMain.handle('desktop:meeting:live:start', async (event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:live:start', async (event, input) => {
     try {
       const engine = input?.engine === 'aliyun-asr' || input?.engine === 'volcengine-asr'
         ? input.engine as 'aliyun-asr' | 'volcengine-asr'
@@ -1905,7 +1915,7 @@ export async function registerDesktopIpc(
         final: boolean;
       }) => {
         if (!event.sender.isDestroyed()) {
-          event.sender.send('desktop:meeting:live:update', { sessionId: activeSessionId, ...update });
+          event.sender.send('desktop:meeting:live:update', captureMeeting10LiveUpdate(activeSessionId, update));
         }
       };
       let sessionId: string;
@@ -1936,7 +1946,7 @@ export async function registerDesktopIpc(
     }
   });
 
-  ipcMain.handle('desktop:meeting:live:pushAudio', async (event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:live:pushAudio', async (event, input) => {
     try {
       const sessionId = parseMeetingLiveSessionId(input?.sessionId);
       const active = readMeetingLiveSession(event.sender.id, sessionId);
@@ -1957,7 +1967,7 @@ export async function registerDesktopIpc(
     }
   });
 
-  ipcMain.handle('desktop:meeting:live:finish', async (event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:live:finish', async (event, input) => {
     try {
       const sessionId = parseMeetingLiveSessionId(input?.sessionId);
       const active = readMeetingLiveSession(event.sender.id, sessionId);
@@ -1976,7 +1986,7 @@ export async function registerDesktopIpc(
     }
   });
 
-  ipcMain.handle('desktop:meeting:live:cancel', async (event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:live:cancel', async (event, input) => {
     try {
       const sessionId = parseMeetingLiveSessionId(input?.sessionId);
       const active = readMeetingLiveSession(event.sender.id, sessionId);
@@ -1992,7 +2002,7 @@ export async function registerDesktopIpc(
     }
   });
 
-  ipcMain.handle('desktop:meeting:processRecording', async (_event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:processRecording', async (_event, input) => {
     log('info', 'meeting:processRecording', { collectionId: input?.collectionId, title: input?.title });
     const { createMeetingService } = await import('./meeting-service.js');
     const { createLocalMeetingSummaryService } = await import('./meeting-summary-service.js');
@@ -2013,7 +2023,7 @@ export async function registerDesktopIpc(
     });
   });
 
-  ipcMain.handle('desktop:meeting:draftRecording', async (_event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:draftRecording', async (_event, input) => {
     log('info', 'meeting:draftRecording', { title: input?.title });
     const { createMeetingService } = await import('./meeting-service.js');
     const { createLocalMeetingSummaryService } = await import('./meeting-summary-service.js');
@@ -2035,7 +2045,7 @@ export async function registerDesktopIpc(
     });
   });
 
-  ipcMain.handle('desktop:meeting:saveTranscript', async (_event, input) => {
+  meetingActions10Raw.handle('desktop:meeting:saveTranscript', async (_event, input) => {
     log('info', 'meeting:saveTranscript', { collectionId: input?.collectionId, title: input?.title });
     const { createMeetingService } = await import('./meeting-service.js');
     const service = createMeetingService({ store: getKbStore() });
@@ -2047,6 +2057,8 @@ export async function registerDesktopIpc(
       transcript: String(input?.transcript ?? ''),
     });
   });
+
+  registerMeetingActions10Ipc(ipcMain, meetingActions10Producers);
 
   knowledgeIpc.handle('desktop:kb:deleteSource', (_event, id: string) => {
     log('info', 'kb:deleteSource', { id });

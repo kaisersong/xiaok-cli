@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {api} from '../api';
 import {useLocale} from '../contexts/LocaleContext';
 import type {CompoundExecutionStatus} from '../../../shared/host-observation-types';
@@ -7,12 +7,32 @@ export function ObservationControls({draftId,onDraft,taskId,running,activityRevi
  const {t}=useLocale();const [busy,setBusy]=useState(false),[mode,setMode]=useState(''),[failed,setFailed]=useState(false);
  const [semantic,setSemantic]=useState<SemanticCompactionStatus>();
  const [compound,setCompound]=useState<CompoundExecutionStatus>();
- useEffect(()=>{setMode('');setSemantic(undefined);setCompound(undefined);},[taskId]);
- // Reuse task activity notifications; renderer owns no background polling loop.
- useEffect(()=>{let live=true;if(taskId)void api.getObservationTaskStatus(taskId).then(result=>{if(live){setMode(result.mode);setSemantic(result.semantic);setCompound(result.compound);}}).catch(()=>{});return()=>{live=false;};},[taskId,running,activityRevision]);
- const act=async(operation:()=>Promise<void>)=>{setBusy(true);setFailed(false);try{await operation();}catch{setFailed(true);}finally{setBusy(false);}};
+ // Scope, action and read epochs prevent held work from publishing into a new task/draft.
+ const scope=useRef(0),action=useRef(0),read=useRef(0),pending=useRef(false),alive=useRef(true);
+ const [readFailed,setReadFailed]=useState(false);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;scope.current++;read.current++;action.current++;pending.current=false;};},[]);
+ useEffect(()=>{scope.current++;read.current++;action.current++;pending.current=false;setBusy(false);setFailed(false);},[taskId,draftId,running]);
+ useEffect(()=>{setMode('');setSemantic(undefined);setCompound(undefined);setReadFailed(false);},[taskId]);
+ const applyStatus=(result:Awaited<ReturnType<typeof api.getObservationTaskStatus>>)=>{setMode(result.mode);setSemantic(result.semantic);setCompound(result.compound);};
+ // Reuse existing task activity notifications; no additional polling/event owner.
+ useEffect(()=>{
+  let live=true;const revision=++read.current,epoch=scope.current;
+  if(taskId)void api.getObservationTaskStatus(taskId).then(result=>{
+   if(live&&alive.current&&epoch===scope.current&&revision===read.current&&!pending.current){applyStatus(result);setReadFailed(false);}
+  }).catch(()=>{if(live&&alive.current&&epoch===scope.current&&revision===read.current&&!pending.current)setReadFailed(true);});
+  return()=>{live=false;};
+ },[taskId,running,activityRevision]);
+ const act=async<T,>(operation:()=>Promise<T>,publish:(value:T)=>void)=>{
+  if(pending.current)return;
+  pending.current=true;const epoch=scope.current,revision=++action.current;read.current++;
+  const current=()=>alive.current&&epoch===scope.current&&revision===action.current;
+  setBusy(true);setFailed(false);
+  try{const value=await operation();if(current()){read.current++;publish(value);}}
+  catch{if(current())setFailed(true);}
+  finally{if(current()){pending.current=false;setBusy(false);}}
+ };
  return <div className="px-4 py-2 text-xs text-muted-foreground" aria-live="polite">
-  {!running&&!draftId&&<button type="button" disabled={busy} className="underline" onClick={()=>void act(async()=>{const draft=await api.prepareObservationTask();if(draft)onDraft(draft.draftId);})}>{t.observation.enable}</button>}
+  {!running&&!draftId&&<button type="button" disabled={busy} className="underline" onClick={()=>void act(()=>api.prepareObservationTask(),draft=>{if(draft)onDraft(draft.draftId);})}>{t.observation.enable}</button>}
   {draftId&&<><span>{t.observation.ready}</span>{' '}<button type="button" disabled={busy} className="underline" onClick={()=>onDraft(null)}>{t.observation.cancel}</button></>}
   {mode==='active'&&<span>{t.observation.active}</span>}
   {mode==='recall-only'&&<span>{t.observation.recallOnly}</span>}
@@ -31,8 +51,8 @@ export function ObservationControls({draftId,onDraft,taskId,running,activityRevi
    <p>{t.observation.semanticBudget(semantic.attempts,semantic.maxAttempts,(semantic.reservedCostUnits/1e9).toFixed(6),(semantic.maxCostUnits/1e9).toFixed(6))}</p>
    {semantic.mode==='mechanism-experiment'&&<p>{t.observation.semanticExperiment}</p>}
   </div>}
-  {running&&taskId&&mode==='active'&&<button type="button" disabled={busy} className="ml-3 underline" onClick={()=>void act(async()=>setMode((await api.stopObservationTask(taskId)).mode))}>{t.observation.stop}</button>}
-  {running&&taskId&&(mode==='active'||mode==='recall-only')&&<button type="button" disabled={busy} className="ml-3 underline" onClick={()=>void act(async()=>setMode((await api.revokeObservationTask(taskId)).mode))}>{t.observation.revoke}</button>}
-  {failed&&<p role="alert">{t.observation.failed}</p>}
+  {running&&taskId&&mode==='active'&&<button type="button" disabled={busy} className="ml-3 underline" onClick={()=>void act(()=>api.stopObservationTask(taskId),applyStatus)}>{t.observation.stop}</button>}
+  {running&&taskId&&(mode==='active'||mode==='recall-only')&&<button type="button" disabled={busy} className="ml-3 underline" onClick={()=>void act(()=>api.revokeObservationTask(taskId),applyStatus)}>{t.observation.revoke}</button>}
+  {(failed||readFailed)&&<p role="alert">{t.observation.failed}</p>}
  </div>;
 }

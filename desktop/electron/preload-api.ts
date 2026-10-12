@@ -1,3 +1,4 @@
+import type { MeetingActions10Replies, MeetingActions10LiveUpdate } from '../shared/meeting-actions10-ipc-contract.js';
 import type { ComputerUseReadonlyStatus, KswarmReadonlyStatus } from '../shared/runtime-status-readonly-ipc-contract.js';
 import type { MeetingMutationModelResult } from '../shared/meeting-mutation-ipc-contract.js';
 import type { MeetingReadonlyPermission, MeetingReadonlyAsr, MeetingReadonlyModels } from '../shared/meeting-readonly-ipc-contract.js';
@@ -1405,7 +1406,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   kbGetSourceContent(input?: KnowledgeSourceContentInput | null): Promise<KnowledgeSourceContentDto | undefined>;
   kbSearch(input?: KnowledgeSearchInput | null): Promise<KnowledgeSearchResultDto[]>;
   kbPickFiles(): Promise<string[]>;
-  meetingPickAudioFile(): Promise<string | null>;
+  meetingPickAudioFile(): Promise<MeetingActions10Replies['pickAudioFile']>;
   meetingGetMicrophonePermission(): Promise<MeetingReadonlyPermission>;
   meetingRequestMicrophonePermission(): Promise<import('../shared/meeting-readonly-ipc-contract.js').MeetingReadonlyPermission>;
   meetingGetAsrConfig(): Promise<MeetingReadonlyAsr>;
@@ -1413,15 +1414,15 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   meetingListModels(): Promise<MeetingReadonlyModels>;
   meetingDownloadModel(modelId: string): Promise<MeetingMutationModelResult>;
   meetingUninstallModel(modelId: string): Promise<MeetingMutationModelResult>;
-  meetingSaveRecordedAudio(input: unknown): Promise<unknown>;
-  meetingTranscribePreview(input: unknown): Promise<unknown>;
-  meetingStartLiveTranscription(input: { engine: 'aliyun-asr' | 'volcengine-asr'; sampleRate: number; language?: string }): Promise<{ ok: boolean; sessionId?: string; error?: string }>;
-  meetingPushLiveTranscriptionAudio(input: { sessionId: string; pcmBase64: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingFinishLiveTranscription(input: { sessionId: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingCancelLiveTranscription(input: { sessionId: string }): Promise<{ ok: boolean; error?: string }>;
-  meetingDraftRecording(input: unknown): Promise<unknown>;
-  meetingProcessRecording(input: unknown): Promise<unknown>;
-  meetingSaveTranscript(input: unknown): Promise<unknown>;
+  meetingSaveRecordedAudio(input: unknown): Promise<MeetingActions10Replies['saveRecordedAudio']>;
+  meetingTranscribePreview(input: unknown): Promise<MeetingActions10Replies['transcribePreview']>;
+  meetingStartLiveTranscription(input: { engine: 'aliyun-asr' | 'volcengine-asr'; sampleRate: number; language?: string }): Promise<MeetingActions10Replies['live:start']>;
+  meetingPushLiveTranscriptionAudio(input: { sessionId: string; pcmBase64: string }): Promise<MeetingActions10Replies['live:pushAudio']>;
+  meetingFinishLiveTranscription(input: { sessionId: string }): Promise<MeetingActions10Replies['live:finish']>;
+  meetingCancelLiveTranscription(input: { sessionId: string }): Promise<MeetingActions10Replies['live:cancel']>;
+  meetingDraftRecording(input: unknown): Promise<MeetingActions10Replies['draftRecording']>;
+  meetingProcessRecording(input: unknown): Promise<MeetingActions10Replies['processRecording']>;
+  meetingSaveTranscript(input: unknown): Promise<MeetingActions10Replies['saveTranscript']>;
   listCollaborationRooms(): Promise<RoomListResultDto>;
   getCollaborationRoom(roomId: string): Promise<RoomSnapshotDto>;
   createCollaborationRoom(input: RoomCreateInput): Promise<RoomCreateResultDto>;
@@ -1442,14 +1443,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   meetingCloseRecorderWindow(): Promise<RecorderWindowReply>;
   onMeetingRecorderCloseRequested(handler: () => void): () => void;
   onMeetingRecordingSaved(handler: (input: { collectionId: string }) => void): () => void;
-  onMeetingLiveTranscriptionUpdate(handler: (input: {
-    sessionId: string;
-    sentenceId: string;
-    start: number;
-    end: number;
-    text: string;
-    final: boolean;
-  }) => void): () => void;
+  onMeetingLiveTranscriptionUpdate(handler: (input: MeetingActions10LiveUpdate) => void): () => void;
 
   // Thread meta (GTD / pinned)
   getThreadLabels(): Promise<ThreadMetadataSnapshotDto>;
@@ -1969,7 +1963,7 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     kbGetSourceContent: (input) => ipcRenderer.invoke('desktop:kb:getSourceContent', input) as Promise<KnowledgeSourceContentDto | undefined>,
     kbSearch: (input) => ipcRenderer.invoke('desktop:kb:search', input) as Promise<KnowledgeSearchResultDto[]>,
     kbPickFiles: () => ipcRenderer.invoke('desktop:kb:pickFiles') as Promise<string[]>,
-    meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<string | null>,
+    meetingPickAudioFile: () => ipcRenderer.invoke('desktop:meeting:pickAudioFile') as Promise<MeetingActions10Replies['pickAudioFile']>,
     meetingGetMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:getMicrophonePermission') as Promise<MeetingReadonlyPermission>,
     meetingRequestMicrophonePermission: () => ipcRenderer.invoke('desktop:meeting:requestMicrophonePermission') as Promise<import('../shared/meeting-readonly-ipc-contract.js').MeetingReadonlyPermission>,
     meetingGetAsrConfig: () => ipcRenderer.invoke('desktop:meeting:getAsrConfig') as Promise<MeetingReadonlyAsr>,
@@ -1977,15 +1971,15 @@ export function createPreloadApi(ipcRenderer: IpcRendererLike, systemUsername = 
     meetingListModels: () => ipcRenderer.invoke('desktop:meeting:listModels') as Promise<MeetingReadonlyModels>,
     meetingDownloadModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:downloadModel', modelId) as Promise<MeetingMutationModelResult>,
     meetingUninstallModel: (modelId: string) => ipcRenderer.invoke('desktop:meeting:uninstallModel', modelId) as Promise<MeetingMutationModelResult>,
-    meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<unknown>,
-    meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<unknown>,
+    meetingSaveRecordedAudio: (input) => ipcRenderer.invoke('desktop:meeting:saveRecordedAudio', input) as Promise<MeetingActions10Replies['saveRecordedAudio']>,
+    meetingTranscribePreview: (input) => ipcRenderer.invoke('desktop:meeting:transcribePreview', input) as Promise<MeetingActions10Replies['transcribePreview']>,
     meetingStartLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:start', input) as ReturnType<DesktopApi['meetingStartLiveTranscription']>,
     meetingPushLiveTranscriptionAudio: (input) => ipcRenderer.invoke('desktop:meeting:live:pushAudio', input) as ReturnType<DesktopApi['meetingPushLiveTranscriptionAudio']>,
     meetingFinishLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:finish', input) as ReturnType<DesktopApi['meetingFinishLiveTranscription']>,
     meetingCancelLiveTranscription: (input) => ipcRenderer.invoke('desktop:meeting:live:cancel', input) as ReturnType<DesktopApi['meetingCancelLiveTranscription']>,
-    meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<unknown>,
-    meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<unknown>,
-    meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<unknown>,
+    meetingDraftRecording: (input) => ipcRenderer.invoke('desktop:meeting:draftRecording', input) as Promise<MeetingActions10Replies['draftRecording']>,
+    meetingProcessRecording: (input) => ipcRenderer.invoke('desktop:meeting:processRecording', input) as Promise<MeetingActions10Replies['processRecording']>,
+    meetingSaveTranscript: (input) => ipcRenderer.invoke('desktop:meeting:saveTranscript', input) as Promise<MeetingActions10Replies['saveTranscript']>,
     listCollaborationRooms: () => ipcRenderer.invoke('desktop:collaborationRoom:listRooms') as ReturnType<DesktopApi['listCollaborationRooms']>,
     getCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:get', input) as ReturnType<RoomWorkspaceApi['getCollaborationRoomWorkspace']>,
     previewCollaborationRoomWorkspace: (input) => ipcRenderer.invoke('desktop:roomWorkspace:preview', input) as ReturnType<RoomWorkspaceApi['previewCollaborationRoomWorkspace']>,
