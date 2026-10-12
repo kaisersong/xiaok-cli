@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { EventEmitter, once } from 'node:events';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -193,7 +194,22 @@ describe('actual KSwarm service instance permanent drain', () => {
   it('registers the actual service close immediately in Main and retains ordinary stop IPC', () => {
     const source = readFileSync(join(import.meta.dirname, '../../electron/main.ts'), 'utf8');
     expect(source).toMatch(/const kswarmService = createDesktopKSwarmService\(desktopShutdownCoordinator, desktopFinalLifetimeSteps, \{ activityOwnerPending: process\.env\.XIAOK_CONVERSATION_ACTIVITY !== '0' \}\);\s*if \(!kswarmService\) return window;/);
-    expect(source).toContain("shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop())");
+    const ast = ts.createSourceFile('main.ts', source, ts.ScriptTarget.Latest, true);
+    const declarations: ts.VariableDeclaration[] = [];
+    const collect = (node: ts.Node): void => { if (ts.isVariableDeclaration(node)) declarations.push(node); ts.forEachChild(node, collect); };
+    collect(ast);
+    const facade = declarations.find(node => node.name.getText(ast) === 'runtimeActions')!.initializer as ts.CallExpression;
+    expect(facade.expression.getText(ast)).toBe('createDesktopRuntimeActionService');
+    const ops = facade.arguments[0] as ts.ObjectLiteralExpression;
+    const stop = ops.properties.find(node => ts.isPropertyAssignment(node) && node.name.getText(ast) === 'stop') as ts.PropertyAssignment;
+    expect((stop.initializer as ts.ArrowFunction).body.getText(ast)).toBe('kswarmService.stop()');
+    const producers = declarations.find(node => node.name.getText(ast) === 'runtimeActionProducers')!.initializer as ts.NewExpression;
+    const rows = producers.arguments![0] as ts.ArrayLiteralExpression;
+    const entry = rows.elements.find(node => ts.isArrayLiteralExpression(node) && ts.isStringLiteral(node.elements[0]!) && node.elements[0]!.text === 'desktop:kswarm:stop') as ts.ArrayLiteralExpression;
+    const invoke = (entry.elements[1] as ts.ArrowFunction).body as ts.CallExpression;
+    expect(invoke.expression.getText(ast)).toBe('runtimeActions.stop');
+    expect(invoke.arguments.map(node => node.getText(ast))).toEqual(["'user'"]);
+    expect(source).toContain('registerRuntimeActionIpc(shutdownAwareIpc, runtimeActionProducers)');
     expect(source).not.toContain('await kswarmService.stop().catch');
     expect(source.match(/\bcreateDesktopKSwarmService\(/g)).toHaveLength(1);
     expect(source).not.toMatch(/\bcreateKSwarmService\(/);

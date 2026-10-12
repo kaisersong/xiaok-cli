@@ -8,7 +8,7 @@ export interface DesktopSkillStats {
   avgDurationMs: number; p95DurationMs: number; totalInputTokens: number;
   totalOutputTokens: number; lastCalledAt: number; firstCalledAt: number;
 }
-/** Public DTO shape is distinct from the retained, unqualified legacy wire lane. */
+/** Public target DTO is reused at the captured single-target tuple boundary. */
 export const DESKTOP_TRACE_TARGET_SCHEMA = z.object({ kind: z.enum(['session', 'project', 'task']), id: z.string() }).passthrough();
 const historicalNumber = z.custom<number>(value => typeof value === 'number');
 const finding = z.object({ id: z.string(), severity: z.enum(['critical','high','medium','low']),
@@ -17,11 +17,11 @@ const finding = z.object({ id: z.string(), severity: z.enum(['critical','high','
 }).passthrough();
 export const DIAGNOSTICS_IPC_CHANNELS = Object.freeze({ getSkillStats: 'desktop:getSkillStats', exportTraceBundle: 'desktop:trace:export', diagnose: 'desktop:diagnose' });
 export type DesktopDiagnosticsMethod = keyof typeof DIAGNOSTICS_IPC_CHANNELS;
-export const DIAGNOSTICS_INPUT_QUALIFICATION = Object.freeze({ getSkillStats: 'qualified-zero-tuple', exportTraceBundle: 'legacy-unqualified', diagnose: 'legacy-unqualified' });
+export const DIAGNOSTICS_INPUT_QUALIFICATION = Object.freeze({ getSkillStats: 'qualified-zero-tuple', exportTraceBundle: 'qualified-target-tuple', diagnose: 'qualified-target-tuple' });
 export const DIAGNOSTICS_INPUT_SCHEMAS = Object.freeze({
   getSkillStats: z.tuple([]).describe(DIAGNOSTICS_INPUT_QUALIFICATION.getSkillStats),
-  exportTraceBundle: z.unknown().describe(DIAGNOSTICS_INPUT_QUALIFICATION.exportTraceBundle),
-  diagnose: z.unknown().describe(DIAGNOSTICS_INPUT_QUALIFICATION.diagnose),
+  exportTraceBundle: z.tuple([DESKTOP_TRACE_TARGET_SCHEMA]).describe(DIAGNOSTICS_INPUT_QUALIFICATION.exportTraceBundle),
+  diagnose: z.tuple([DESKTOP_TRACE_TARGET_SCHEMA]).describe(DIAGNOSTICS_INPUT_QUALIFICATION.diagnose),
 });
 export const DIAGNOSTICS_OUTPUT_SCHEMAS = Object.freeze({
   getSkillStats: z.array(z.object({ skillName: z.string(), totalCalls: historicalNumber, successCount: historicalNumber,

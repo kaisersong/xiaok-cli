@@ -27,7 +27,7 @@ export interface IpcSchemaEntry {
   payloadMode: 'single' | 'tuple';
   inputStage: 'beforeHandler' | 'afterHostAuthorization';
   wireInput?: ZodSchema;
-  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34;
+  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35;
   riskTags: RiskTag[];
 }
 
@@ -62,7 +62,7 @@ export interface IpcRegistrationOptions<I, O> {
   input: ZodSchema<I>;
   output: ZodSchema<O>;
   sourceFile: string;
-  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34;
+  rolloutRound: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35;
   riskTags?: RiskTag[];
   handler: (input: I, event: IpcMainInvokeEvent, helpers?: IpcStageHelpers<I>) => Promise<O>;
   /** Main-owned adapters preserve domain error envelopes without granting caller authority. */

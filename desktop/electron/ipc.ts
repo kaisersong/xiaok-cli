@@ -1,3 +1,5 @@
+import { registerPluginActionIpc } from './plugin-action-typed-ipc.js';
+import { openPluginPermissionSettings } from './plugin-action-service.js';
 import { registerComputerUseCapabilityReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
 import { registerSkillMutationIpc } from './skill-mutation-typed-ipc.js';
 import { registerChannelMcpMutationIpc } from './channel-mcp-mutation-typed-ipc.js';
@@ -1324,29 +1326,20 @@ export async function registerDesktopIpc(
   // Design v58 §7.2: `setPluginMcpServerEnabled` only mutated a view model and
   // had no durable desired-state store, and the blanket restart bypassed the CUA
   // preference. Both are deleted; retry is component-scoped and user-sourced.
-  ipcMain.handle('desktop:retryPluginComponent', (_event, input) => services.retryPluginComponent({
-    componentId: String((input as { componentId?: unknown })?.componentId ?? ''),
-    requestSource: 'user',
-  }));
   registerComputerUseCapabilityReadonlyIpc(ipcMain, () => services.getComputerUseCapabilityStatus());
   ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse({ requestSource: 'user' }));
   ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse({ requestSource: 'user' }));
   ipcMain.handle('desktop:disableComputerUse', () => services.disableComputerUse({ requestSource: 'user' }));
-  ipcMain.handle('desktop:openPluginDependencyPermissionSettings', async (_event, input) => {
-    if (process.platform !== 'darwin') throw new Error('unsupported_action');
-    const permission = String(input?.permission ?? '');
-    if (permission !== 'screen' && permission !== 'accessibility') throw new Error('invalid_permission');
-    const pane = permission === 'screen'
-      ? 'Privacy_ScreenCapture'
-      : 'Privacy_Accessibility';
-    await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
-  });
-  ipcMain.handle('desktop:installPlugin', (_event, name) => services.installPlugin(name));
-
-  ipcMain.handle('desktop:installPluginDependency', (_event, input) => services.installPluginDependency({ ...input, requestSource: 'user' }));
-  ipcMain.handle('desktop:updatePluginDependency', (_event, input) => services.updatePluginDependency({ ...input, requestSource: 'user' }));
-  ipcMain.handle('desktop:cancelPluginDependencyTask', (_event, input) => services.cancelPluginDependencyTask({ ...input, requestSource: 'user' }));
-  ipcMain.handle('desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input));
+  const pluginActionProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:installPlugin', (_event, name) => services.installPlugin(name, 'user')],
+    ['desktop:installPluginDependency', (_event, input) => services.installPluginDependency({ ...input, requestSource: 'user' })],
+    ['desktop:updatePluginDependency', (_event, input) => services.updatePluginDependency({ ...input, requestSource: 'user' })],
+    ['desktop:cancelPluginDependencyTask', (_event, input) => services.cancelPluginDependencyTask({ ...input, requestSource: 'user' })],
+    ['desktop:diagnosePluginDependency', (_event, input) => services.diagnosePluginDependency(input, 'user')],
+    ['desktop:retryPluginComponent', (_event, input) => services.retryPluginComponent({ componentId: input.componentId, requestSource: 'user' })],
+    ['desktop:openPluginDependencyPermissionSettings', (_event, input) => openPluginPermissionSettings(input, 'user', url => shell.openExternal(url))],
+  ]);
+  registerPluginActionIpc(ipcMain, pluginActionProducers);
   ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
     log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
     if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.prompt !== 'string' || !Array.isArray(input.filePaths)) {

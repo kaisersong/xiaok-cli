@@ -1,3 +1,5 @@
+import { registerRuntimeActionIpc } from '../../electron/runtime-action-typed-ipc.js';
+import { registerPluginActionIpc } from '../../electron/plugin-action-typed-ipc.js';
 import { registerComputerUseCapabilityReadonlyIpc, registerKswarmStatusReadonlyIpc } from '../../electron/runtime-status-readonly-typed-ipc.js';
 import { registerSkillMutationIpc } from '../../electron/skill-mutation-typed-ipc.js';
 import { registerChannelMcpMutationIpc } from '../../electron/channel-mcp-mutation-typed-ipc.js';
@@ -1078,6 +1080,8 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerChannelMcpReadonlyIpc({ handle: channel => { channels.add(channel); } });
 registerMeetingReadonlyIpc({ handle: channel => { channels.add(channel); } });
 registerComputerUseCapabilityReadonlyIpc({ handle: channel => { channels.add(channel); } });registerKswarmStatusReadonlyIpc({ handle: channel => { channels.add(channel); } });registerSkillMutationIpc({ handle: channel => { channels.add(channel); } });registerChannelMcpMutationIpc({ handle: channel => { channels.add(channel); } });registerMeetingMutationIpc({ handle: channel => { channels.add(channel); } }, new Map());
+  registerRuntimeActionIpc({ handle: channel => { channels.add(channel); } }, new Map());
+  registerPluginActionIpc({ handle: channel => { channels.add(channel); } }, new Map());
   registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);

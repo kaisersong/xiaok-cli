@@ -16,9 +16,9 @@ function log(message: string, fields: unknown): void { console.log(`[${new Date(
 function fields(raw: unknown): { kind?: unknown; id?: unknown } {
   return raw && typeof raw === 'object' ? {kind:Object.getOwnPropertyDescriptor(raw,'kind')?.value,id:Object.getOwnPropertyDescriptor(raw,'id')?.value} : {};
 }
-/** Retains old raw routing/errors without pretending unknown wire data is a DTO. */
+/** Producer routing and business error/output semantics remain unchanged. */
 function invokeLegacy(service: Service, method: 'exportTraceBundle'|'diagnose', input: unknown): unknown {
-  return apply(service[method], service, [input]);
+  return apply(service[method], service, method === 'exportTraceBundle' ? [input, 'user'] : [input]);
 }
 
 export function registerDiagnosticsIpc(ipc: IpcHandleRegistrar, rawService?: Service): void {
@@ -46,11 +46,15 @@ export function registerDiagnosticsIpc(ipc: IpcHandleRegistrar, rawService?: Ser
         const snapshot = captureIpcData(raw, 'diagnostics_input_invalid');
         if (!DIAGNOSTICS_INPUT_SCHEMAS.getSkillStats.safeParse(snapshot).success) throw Error('diagnostics_input_invalid');
         return snapshot;
-      }).describe(DIAGNOSTICS_INPUT_QUALIFICATION.getSkillStats) : DIAGNOSTICS_INPUT_SCHEMAS[method],
-      output:DIAGNOSTICS_OUTPUT_SCHEMAS[method],sourceFile:'desktop/electron/diagnostics-typed-ipc.ts',rolloutRound:19 as const,riskTags:risks[method],
+      }).describe(DIAGNOSTICS_INPUT_QUALIFICATION.getSkillStats) : z.custom<unknown[]>(() => true).transform(raw => {
+        const snapshot = captureIpcData(raw, 'diagnostics_input_invalid', { preserveDataPrototype: true });
+        if (!DIAGNOSTICS_INPUT_SCHEMAS[method].safeParse(snapshot).success) throw Error('diagnostics_input_invalid');
+        return snapshot as unknown[];
+      }).describe(DIAGNOSTICS_INPUT_QUALIFICATION[method]),
+      output:DIAGNOSTICS_OUTPUT_SCHEMAS[method],sourceFile:'desktop/electron/diagnostics-typed-ipc.ts',rolloutRound:(method === 'getSkillStats' ? 19 : 35) as 19 | 35,riskTags:risks[method],
       handler: async (raw: unknown) => {
         if (!service) throw Error('diagnostics_runtime_unavailable');
-        const input = method === 'getSkillStats' ? undefined : captureIpcData(raw,'diagnostics_input_invalid',{preserveDataPrototype:true});
+        const input = method === 'getSkillStats' ? undefined : (raw as unknown[])[0];
         if (method !== 'getSkillStats') log(method==='diagnose'?'diagnose':'traceExport',fields(input));
         let result: unknown;
         try {result=method==='getSkillStats'?service.getSkillStats():invokeLegacy(service,method,input);}
@@ -64,7 +68,7 @@ export function registerDiagnosticsIpc(ipc: IpcHandleRegistrar, rawService?: Ser
       },
     };
     if (method === 'getSkillStats') registerIpcHandler<unknown[], unknown>({ ...registration, input: registration.input as import('zod').ZodSchema<unknown[]>, payloadMode: 'tuple' });
-    else registerIpcHandler<unknown, unknown>({ ...registration, payloadMode: 'single' });
+    else registerIpcHandler<unknown[], unknown>({ ...registration, input: registration.input as import('zod').ZodSchema<unknown[]>, payloadMode: 'tuple' });
     owner.installed.add(method);
   }
 }

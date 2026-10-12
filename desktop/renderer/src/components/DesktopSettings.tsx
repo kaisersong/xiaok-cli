@@ -2492,113 +2492,80 @@ function McpPane() {
     } finally { finishAction(lease); }
   };
 
+  const dependencyKey = (dependency: PluginDependencyStatus) => 'dependency:' + dependency.pluginName + ':' + dependency.dependencyId;
   const handleInstallDependency = async (dependency: PluginDependencyStatus) => {
-    if (!dependency.canInstall) return;
-    const confirmed = window.confirm(ts.mcpInstallConfirm(dependency.displayName));
-    if (!confirmed) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:install`;
-    setDependencyAction(actionKey);
+    const key = dependencyKey(dependency);
+    if (!dependency.canInstall || !actionOwner.current.active || actionOwner.current.pending.has(key)) return;
+    if (!window.confirm(ts.mcpInstallConfirm(dependency.displayName))) return;
+    const lease = beginAction([key]); if (!lease) return;
     try {
-      const result = await api.installPluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-        confirmed: true,
-      });
-      if (!result.success) alert(result.error || ts.mcpInstallFailed);
+      const result = await api.installPluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId, confirmed: true });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpInstallFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpInstallFailed); }
+    finally { finishAction(lease); }
   };
-
   const handleSetupPluginDependency = async (dependency: PluginDependencyStatus) => {
-    if (!dependency.canInstall) return;
-    const confirmed = window.confirm(ts.mcpSetupConfirm(formatPluginDependencyTitle(dependency), dependency.displayName));
-    if (!confirmed) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:setup`;
-    setDependencyAction(actionKey);
+    const key = dependencyKey(dependency), pluginKey = 'plugin:' + dependency.pluginName;
+    if (!dependency.canInstall || !actionOwner.current.active || actionOwner.current.pending.has(key) || actionOwner.current.pending.has(pluginKey)) return;
+    if (!window.confirm(ts.mcpSetupConfirm(formatPluginDependencyTitle(dependency), dependency.displayName))) return;
+    const lease = beginAction([key, pluginKey]); if (!lease) return;
     try {
       const pluginResult = await api.installPlugin(dependency.pluginName);
-      if (!pluginResult.success) {
-        alert(pluginResult.error || ts.mcpPluginInstallFailed);
-        return;
-      }
-      const result = await api.installPluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-        confirmed: true,
-      });
-      if (!result.success) alert(result.error || ts.mcpInstallFailed);
+      if (!isCurrentAction(lease)) return;
+      if (!pluginResult.success) { alert(ts.mcpPluginInstallFailed); return; }
+      const result = await api.installPluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId, confirmed: true });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpInstallFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpInstallFailed); }
+    finally { finishAction(lease); }
   };
-
   const handleUpdateDependency = async (dependency: PluginDependencyStatus) => {
-    if (!dependency.canUpdate) return;
-    const confirmed = window.confirm(ts.mcpUpdateConfirm(dependency.displayName));
-    if (!confirmed) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:update`;
-    setDependencyAction(actionKey);
+    const key = dependencyKey(dependency);
+    if (!dependency.canUpdate || !actionOwner.current.active || actionOwner.current.pending.has(key)) return;
+    if (!window.confirm(ts.mcpUpdateConfirm(dependency.displayName))) return;
+    const lease = beginAction([key]); if (!lease) return;
     try {
-      const result = await api.updatePluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-        confirmed: true,
-      });
-      if (!result.success) alert(result.error || ts.mcpUpdateFailed);
+      const result = await api.updatePluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId, confirmed: true });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpUpdateFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpUpdateFailed); }
+    finally { finishAction(lease); }
   };
-
   const handleDiagnoseDependency = async (dependency: PluginDependencyStatus) => {
     if (!dependency.canDiagnose) return;
-    const actionKey = `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
-    setDependencyAction(actionKey);
+    const lease = beginAction([dependencyKey(dependency)]); if (!lease) return;
     try {
-      const result = await api.diagnosePluginDependency({
-        pluginName: dependency.pluginName,
-        dependencyId: dependency.dependencyId,
-      });
-      if (!result.success) alert(result.error || ts.mcpDiagnoseFailed);
+      const result = await api.diagnosePluginDependency({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId });
+      if (!isCurrentAction(lease)) return;
+      if (!result.success) alert(ts.mcpDiagnoseFailed);
       load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    } catch { if (isCurrentAction(lease)) alert(ts.mcpDiagnoseFailed); }
+    finally { finishAction(lease); }
   };
-
+  const handleCancelDependency = async (dependency: PluginDependencyStatus) => {
+    const lease = beginAction(['cancel:' + dependencyKey(dependency)]); if (!lease) return;
+    try {
+      await api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId });
+      if (isCurrentAction(lease)) load();
+    } catch { if (isCurrentAction(lease)) alert(t.mcpMutationFailed); }
+    finally { finishAction(lease); }
+  };
   const handleOpenPermissionSettings = async (permission: 'accessibility' | 'screen') => {
-    try {
-      await api.openPluginDependencyPermissionSettings({ permission });
-    } catch (e) {
-      alert((e as Error).message);
-    }
+    const lease = beginAction(['permission:' + permission]); if (!lease) return;
+    try { await api.openPluginDependencyPermissionSettings({ permission }); }
+    catch { if (isCurrentAction(lease)) alert(t.mcpMutationFailed); }
+    finally { finishAction(lease); }
   };
-
-  // Design v58 §7.2: retry is scoped to one component and never writes desired
-  // state, so a disabled CUA cannot be re-enabled by pressing reconnect.
+  // Retry retains original disabled-CUA policy; one component lock, no desired-state write.
   const handleRetryPluginComponent = async (componentId: string) => {
-    const actionKey = 'plugin-mcp:restart';
-    setDependencyAction(actionKey);
-    try {
-      await api.retryPluginComponent({ componentId });
-      load();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDependencyAction('');
-    }
+    const lease = beginAction(['retry:' + componentId]); if (!lease) return;
+    try { await api.retryPluginComponent({ componentId }); if (isCurrentAction(lease)) load(); }
+    catch { if (isCurrentAction(lease)) alert(t.mcpMutationFailed); }
+    finally { finishAction(lease); }
   };
 
   const handleEnableComputerUse = async () => {
@@ -2636,11 +2603,11 @@ function McpPane() {
               const dependencyServer = pluginServers.find(server => server.pluginName === dependency.pluginName);
               const statusText = formatPluginDependencyStatus(dependency, dependencyServer, ts);
               const dependencyLayerRows = formatPluginDependencyLayerRows(dependency, pluginInstalled, dependencyServer, ts);
-              const isSettingUp = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:setup`;
-              const isInstalling = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:install`;
-              const isUpdating = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:update`;
-              const isDiagnosing = dependencyAction === `${dependency.pluginName}:${dependency.dependencyId}:diagnose`;
-              const isRestartingMcp = dependencyAction === 'plugin-mcp:restart';
+              const isSettingUp = pendingActions.has('plugin:' + dependency.pluginName) || pendingActions.has(dependencyKey(dependency));
+              const isInstalling = pendingActions.has(dependencyKey(dependency));
+              const isUpdating = pendingActions.has(dependencyKey(dependency));
+              const isDiagnosing = pendingActions.has(dependencyKey(dependency));
+              const isRestartingMcp = pendingActions.has('retry:' + (dependencyServer?.name ?? ''));
               const isEnablingComputerUse = dependencyAction === 'computer-use:enable';
               const canReconnectMcp = dependency.state === 'ready' && Boolean(dependencyServer) && dependencyServer?.connected === false;
               const isComputerUse = dependency.pluginName === 'cua-computer-use';
@@ -2674,8 +2641,8 @@ function McpPane() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {dependency.task && (
-                        <button type="button" disabled={dependency.task.state === 'cancelling'}
-                          onClick={() => void api.cancelPluginDependencyTask({ pluginName: dependency.pluginName, dependencyId: dependency.dependencyId }).then(() => load()).catch(error => alert(error instanceof Error ? error.message : String(error)))}
+                        <button type="button" disabled={dependency.task.state === 'cancelling' || pendingActions.has('cancel:' + dependencyKey(dependency))}
+                          onClick={() => void handleCancelDependency(dependency)}
                           className="rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs disabled:opacity-50">
                           {dependency.task.state === 'cancelling' ? ts.mcpCancellingTask : ts.mcpCancelTask}
                         </button>
@@ -2683,6 +2650,7 @@ function McpPane() {
                       {dependency.code === 'permission_accessibility_missing' && (
                         <button
                           type="button"
+                          disabled={pendingActions.has('permission:accessibility')}
                           onClick={() => void handleOpenPermissionSettings('accessibility')}
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                         >
@@ -2693,6 +2661,7 @@ function McpPane() {
                       {dependency.code === 'permission_screen_missing' && (
                         <button
                           type="button"
+                          disabled={pendingActions.has('permission:screen')}
                           onClick={() => void handleOpenPermissionSettings('screen')}
                           className="inline-flex items-center gap-1 rounded-md border border-[var(--c-border)] px-3 py-1.5 text-xs text-[var(--c-text-secondary)] hover:bg-[var(--c-bg-deep)]"
                         >

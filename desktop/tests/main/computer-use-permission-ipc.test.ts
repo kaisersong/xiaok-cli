@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' }, BrowserWindow: { getAllWindows: () => [] },
-  clipboard: {}, dialog: {}, shell: { openExternal: vi.fn() } }));
+  clipboard: {}, dialog: {}, shell: { openExternal: vi.fn(async () => undefined) } }));
 import { shell } from 'electron';
 import { registerDesktopIpc } from '../../electron/ipc.js';
 
@@ -16,7 +16,7 @@ describe('Computer Use permission IPC', () => {
       Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
       await expect(handler({}, { permission: 'screen' })).rejects.toThrow('unsupported_action');
       Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-      await expect(handler({}, { permission: 'anything' })).rejects.toThrow('invalid_permission');
+      await expect(handler({}, { permission: 'anything' })).rejects.toThrow('plugin_action_input_invalid');
       expect(shell.openExternal).not.toHaveBeenCalled();
       await handler({}, { permission: 'screen' });
       expect(shell.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');

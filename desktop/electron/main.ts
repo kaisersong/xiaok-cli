@@ -39,6 +39,8 @@ import {
   getDesktopMemoryStore,
   resumeOneScriptWorkflow,
 } from './desktop-services.js';
+import { createDesktopRuntimeActionService } from './runtime-action-service.js';
+import { registerRuntimeActionIpc } from './runtime-action-typed-ipc.js';
 import { onSkillCatalogChanged } from './skill-catalog-invalidation.js';
 import { registerDesktopIpc } from './ipc.js';
 import {
@@ -661,11 +663,17 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   if (!kswarmService) return window;
   let kswarmStartPromise: Promise<void>;
   registerKswarmStatusReadonlyIpc(shutdownAwareIpc, () => kswarmService.getStatus());
-  shutdownAwareIpc.handle('desktop:kswarm:start', () => kswarmService.start());
-  shutdownAwareIpc.handle('desktop:kswarm:stop', () => kswarmService.stop());
-  shutdownAwareIpc.handle('desktop:kswarm:restart', () => kswarmService.restart());
-  shutdownAwareIpc.handle('desktop:kswarm:resumeWorkflowRun', (_event, input) =>
-    resumeOneScriptWorkflow(kswarmService, input?.projectId, input?.workflowRunId));
+  const runtimeActions = createDesktopRuntimeActionService({
+    start: () => kswarmService.start(), stop: () => kswarmService.stop(), restart: () => kswarmService.restart(),
+    resumeWorkflowRun: input => resumeOneScriptWorkflow(kswarmService, input.projectId, input.workflowRunId),
+  });
+  const runtimeActionProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:kswarm:start', () => runtimeActions.start('user')],
+    ['desktop:kswarm:stop', () => runtimeActions.stop('user')],
+    ['desktop:kswarm:restart', () => runtimeActions.restart('user')],
+    ['desktop:kswarm:resumeWorkflowRun', (_event, input) => runtimeActions.resumeWorkflowRun(input, 'user')],
+  ]);
+  registerRuntimeActionIpc(shutdownAwareIpc, runtimeActionProducers);
   const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
   let runtimeBridgeStarted = false;
   let restartRuntimeBridgeService: () => Promise<void> = async () => { throw Error('service_runtime_unavailable'); };

@@ -1,3 +1,4 @@
+import { assertPluginActionSource, capturePluginActionInput, capturePluginActionRequest, pluginActionCode } from './plugin-action-service.js';
 import { runDesktopSkillMutation } from './desktop-skill-mutation.js';
 import type { DesktopSkillMutationContext } from '../shared/skill-mutation-ipc-contract.js';
 import { createChannelMcpMutationOwner } from './channel-mcp-mutation-owner.js';
@@ -1270,8 +1271,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     return runDependencyProcess(command, args, { timeoutMs: timeout });
   }
 
-  async function mutatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean; requestSource: 'user' | 'agent' | 'scheduler' }, action: 'install' | 'update') {
+  async function mutatePluginDependency(rawInput: { pluginName: string; dependencyId: string; confirmed?: boolean; requestSource: 'user' | 'agent' | 'scheduler' }, action: 'install' | 'update') {
+    const input = capturePluginActionRequest(rawInput);
     if (input.requestSource !== 'user') return { success: false, error: 'request_source_user_required' };
+    capturePluginActionInput(action === 'install' ? 'installPluginDependency' : 'updatePluginDependency', [{ pluginName: input.pluginName, dependencyId: input.dependencyId, ...(input.confirmed === undefined ? {} : { confirmed: input.confirmed }) }]);
     const entry = findPluginDependency(input.pluginName, input.dependencyId);
     if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
     if (!isDependencyPlatformSupported(entry.dependency, await dependencyStatusOptions())) return { success: false, error: 'unsupported_platform' };
@@ -1280,6 +1283,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     if (config.requiresUserConfirmation && !input.confirmed) return { success: false, error: 'confirmation_required' };
     try {
       return await dependencyTasks.run(`${entry.pluginName}:${entry.dependency.id}`, async signal => {
+        try {
         let result: { success: boolean; output?: string; error?: string };
         if (config.kind === 'official_release_archive') {
           if (entry.dependency.id !== 'cua-driver' || entry.pluginName !== 'cua-computer-use') throw new Error('release_not_allowed');
@@ -1307,10 +1311,12 @@ export function createDesktopServices(options: DesktopServicesOptions) {
           result = await runDependencyProcess(status.resolvedBinary, config.args ?? [], { signal, timeoutMs: 300_000 });
         }
         signal.throwIfAborted();
-        if (!result.success) return { success: false, error: result.error };
+        result = capturePluginActionRequest(result);
+        if (!result.success) return { success: false, error: pluginActionCode(result.error, 'plugin_dependency_operation_failed') };
         return { success: true, status: await getDependencyStatusView(entry) };
+        } catch (error) { return { success: false, error: signal.aborted ? 'dependency_cancelled' : pluginActionCode(error, 'plugin_dependency_operation_failed') }; }
       });
-    } catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
+    } catch (error) { return { success: false, error: pluginActionCode(error, 'plugin_dependency_operation_failed') }; }
   }
 
   const persistComputerUsePreference = (): void => {
@@ -3130,11 +3136,11 @@ export function createDesktopServices(options: DesktopServicesOptions) {
      * component and never writes desired state.
      */
     async retryPluginComponent(
-      input: { componentId: string; requestSource: 'user' },
+      rawInput: { componentId: string; requestSource: 'user' },
     ): Promise<PluginMcpServerState[]> {
-      if (input.requestSource !== 'user') {
-        throw new Error('retryPluginComponent requires requestSource "user"');
-      }
+      const input = capturePluginActionRequest(rawInput);
+      assertPluginActionSource(input.requestSource);
+      capturePluginActionInput('retryPluginComponent', [{ componentId: input.componentId }]);
       const target = pluginMcpServers.find((server) => server.name === input.componentId);
       if (!target) return pluginMcpServers;
       // A disabled CUA component must not be activated by a retry.
@@ -3186,7 +3192,9 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     getComputerUseCapabilityStatus(): { state: string; mcpConnected: boolean; wrapperReady: boolean; lastError?: string } {
       return getComputerUseCapabilityStatus();
     },
-    async installPlugin(name: string): Promise<{ success: boolean; error?: string }> {
+    async installPlugin(name: string, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<{ success: boolean; error?: string }> {
+      assertPluginActionSource(requestSource);
+      capturePluginActionInput('installPlugin', [name]);
       const pluginName = name.trim();
       if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(pluginName)) {
         return { success: false, error: 'invalid_plugin_name' };
@@ -3194,7 +3202,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return new Promise((resolve) => {
         execFile('xiaok', ['plugin', 'install', pluginName], { timeout: 120_000 }, (error, stdout, stderr) => {
           if (error) {
-            resolve({ success: false, error: stderr || error.message });
+            resolve({ success: false, error: 'plugin_install_failed' });
             return;
           }
           resolve({ success: true });
@@ -3223,11 +3231,15 @@ export function createDesktopServices(options: DesktopServicesOptions) {
     async updatePluginDependency(input: { pluginName: string; dependencyId: string; confirmed?: boolean; requestSource: 'user' | 'agent' | 'scheduler' }) {
       return mutatePluginDependency(input, 'update');
     },
-    async cancelPluginDependencyTask(input: { pluginName: string; dependencyId: string; requestSource: 'user' | 'agent' | 'scheduler' }) {
+    async cancelPluginDependencyTask(rawInput: { pluginName: string; dependencyId: string; requestSource: 'user' | 'agent' | 'scheduler' }) {
+      const input = capturePluginActionRequest(rawInput);
+      capturePluginActionInput('cancelPluginDependencyTask', [{ pluginName: input.pluginName, dependencyId: input.dependencyId }]);
       if (input?.requestSource !== 'user') throw new Error('request_source_user_required');
       return { cancelling: dependencyTasks.cancel(`${input.pluginName}:${input.dependencyId}`) };
     },
-    async diagnosePluginDependency(input: { pluginName: string; dependencyId: string }): Promise<{ success: boolean; output?: string; status?: unknown; error?: string }> {
+    async diagnosePluginDependency(rawInput: { pluginName: string; dependencyId: string }, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<{ success: boolean; output?: string; status?: unknown; error?: string }> {
+      assertPluginActionSource(requestSource);
+      const [input] = capturePluginActionInput('diagnosePluginDependency', [rawInput]) as [{ pluginName: string; dependencyId: string }];
       const entry = findPluginDependency(input.pluginName, input.dependencyId);
       if (!entry) return { success: false, error: 'plugin_dependency_not_found' };
       if (!isDependencyPlatformSupported(entry.dependency, await dependencyStatusOptions())) return { success: false, error: 'unsupported_platform' };
@@ -3236,8 +3248,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       const doctor = entry.dependency.health?.doctor;
       if (!doctor) return { success: false, error: 'plugin_dependency_diagnose_not_available' };
       const [, ...args] = doctor;
-      const result = await runDependencyCommand(status.resolvedBinary, args, 120_000);
-      if (!result.success) return { success: false, error: result.error };
+      const result = capturePluginActionRequest(await runDependencyCommand(status.resolvedBinary, args, 120_000));
+      if (!result.success) return { success: false, error: pluginActionCode(result.error, 'plugin_diagnose_failed') };
       return { success: true, output: result.output, status: await getDependencyStatusView(entry) };
     },
     async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
@@ -3956,7 +3968,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return channelMcpMutations.deleteMCPInstall(id, requestSource);
     },
 
-    async exportTraceBundle(input: { kind: 'session' | 'project' | 'task'; id: string }): Promise<{ ok: boolean; path?: string; error?: string }> {
+    async exportTraceBundle(input: { kind: 'session' | 'project' | 'task'; id: string }, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<{ ok: boolean; path?: string; error?: string }> {
+      if (requestSource !== 'user') throw Error('diagnostics_export_request_source_forbidden');
       try {
         const bundle = input.kind === 'project'
           ? buildProjectTraceBundleFromKSwarmDetail(await fetchKSwarmProjectFullDetail(options.kswarmService, input.id), { projectId: input.id })

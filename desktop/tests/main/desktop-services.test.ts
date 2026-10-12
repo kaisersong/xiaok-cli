@@ -1131,7 +1131,7 @@ describe('desktop services', () => {
         now: () => 300,
       });
 
-      await expect(services.installPlugin('bad name')).resolves.toEqual({
+      await expect(services.installPlugin('bad name', 'user')).resolves.toEqual({
         success: false,
         error: 'invalid_plugin_name',
       });
