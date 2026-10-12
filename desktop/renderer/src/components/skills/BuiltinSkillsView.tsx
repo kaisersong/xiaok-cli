@@ -1,5 +1,5 @@
 import { Loader2, RefreshCw, Trash2 } from 'lucide-react'
-import { PillToggle } from '../shared'
+import { BooleanSwitch } from '../ui/BooleanSwitch'
 import { listPlatformSkills, setPlatformSkillOverride, type PlatformSkillItem } from '../../api'
 import type { ViewSkill } from './types'
 import { matchesSkillQuery } from './types'
@@ -27,6 +27,7 @@ type Props = {
   accessToken: string
   skillText: SkillTextSubset
   refreshInstalled: () => Promise<unknown>
+  refreshBuiltin: () => Promise<PlatformSkillItem[]>
   setBuiltinSkills: (items: PlatformSkillItem[]) => void
   platformAvailabilityLabel: (status?: ViewSkill['platform_status']) => string
   platformAvailabilityStyle: (status?: ViewSkill['platform_status']) => React.CSSProperties | null
@@ -42,6 +43,7 @@ export function BuiltinSkillsView({
   accessToken,
   skillText,
   refreshInstalled,
+  refreshBuiltin,
   setBuiltinSkills,
   platformAvailabilityLabel,
   platformAvailabilityStyle,
@@ -142,7 +144,8 @@ export function BuiltinSkillsView({
                   </button>
                 ) : (
                   <>
-                    <PillToggle
+                    <BooleanSwitch
+                      ariaLabel={`${skillText.enabledByDefault}: ${skill.display_name}`}
                       checked={isEnabled}
                       disabled={busy}
                       onChange={async () => {
@@ -150,7 +153,7 @@ export function BuiltinSkillsView({
                         try {
                           const newStatus = isEnabled ? 'manual' : 'auto'
                           await setPlatformSkillOverride(accessToken, skill.skill_key, skill.version, newStatus)
-                          const refreshed = await listPlatformSkills(accessToken)
+                          const refreshed = await refreshBuiltin()
                           setBuiltinSkills(refreshed)
                           await refreshInstalled()
                         } catch {
@@ -167,7 +170,7 @@ export function BuiltinSkillsView({
                         setBusySkillId(`builtin:${skill.skill_key}@${skill.version}`)
                         try {
                           await setPlatformSkillOverride(accessToken, skill.skill_key, skill.version, 'removed')
-                          const refreshed = await listPlatformSkills(accessToken)
+                          const refreshed = await refreshBuiltin()
                           setBuiltinSkills(refreshed)
                           await refreshInstalled()
                         } catch {

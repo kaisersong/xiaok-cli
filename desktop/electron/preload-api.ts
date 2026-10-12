@@ -1,3 +1,4 @@
+import type { SkillListDto } from '../shared/skill-list-ipc-contract.js';
 import type { AutomationConfigDto, AutomationOverviewDto } from '../shared/automation-config-ipc-contract.js';
 import type { MobileRelaySignInResult } from '../shared/mobile-signin-ipc-contract.js';
 import type { RelatedServiceIdDto, RelatedServiceStatusDto, ServiceStatusSnapshotDto } from '../shared/service-control-ipc-contract.js';
@@ -1267,7 +1268,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
   setArtifactCollectionMembership(input: SetArtifactCollectionMembershipInput): Promise<ArtifactWorkspaceIpcResult<ArtifactWorkspaceSnapshot>>;
   recordArtifactWorkspaceEvent(input: RecordArtifactWorkspaceEventInput): Promise<ArtifactWorkspaceIpcResult<{ recorded: boolean }>>;
   selectHtmlEditMedia(input: { kind: 'image' | 'svg' }): Promise<HtmlEditMediaSelection>;
-  listSkills(): Promise<Array<{ name: string; aliases: string[]; description: string; source: string; tier: string }>>;
+  listSkills(): Promise<SkillListDto>;
   installSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   uninstallSkill(skillName: string): Promise<{ success: boolean; message: string }>;
   listChannels(): Promise<DesktopChannelView[]>;

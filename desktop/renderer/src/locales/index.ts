@@ -2926,6 +2926,11 @@ export interface LocaleStrings {
   };
 
   // automations page
+  skillsReadonlyListFailed: string;
+  skillsReadonlyStatsFailed: string;
+  skillsReadonlyRetry: string;
+  skillsReadonlyUnknown: string;
+  skillsReadonlyMetricUnknown: string;
   automationsReadFailed: string;
   automationsMutationUnknown: string;
   automationsStateUnknown: string;

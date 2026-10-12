@@ -10,8 +10,10 @@ import {registerCollaborationRoomTypedIpc} from '../../electron/collaboration-ro
 import {registerLoopManagementIpc} from '../../electron/loop-management-typed-ipc.ts';
 import {registerModelProviderIpc} from '../../electron/model-provider-typed-ipc.ts';
 import {registerPrinciplesIpc} from '../../electron/principles-typed-ipc.ts';
+import {registerSkillListIpc} from '../../electron/skill-list-typed-ipc.ts';
 import {registerDiagnosticsIpc} from '../../electron/diagnostics-typed-ipc.ts';
 const cases=[
+{name:'skills',channel:'desktop:listSkills',args:[],error:'skill_list_projection_unavailable',register:(ipc:IpcHandleRegistrar,produce:()=>Promise<unknown>)=>registerSkillListIpc(ipc,new Map([['desktop:listSkills',produce]]))},
 {name:'smallconfig',channel:'desktop:getSkillDebugConfig',args:[],error:'desktop_config_projection_unavailable',register:(ipc:IpcHandleRegistrar,produce:()=>Promise<unknown>)=>registerDesktopSmallConfigIpc(ipc,{getSkillDebugConfig:produce} as never)},
 {name:'thread',channel:'desktop:getThreadLabels',args:[],error:'thread_meta_projection_unavailable',register:(ipc:IpcHandleRegistrar,produce:()=>Promise<unknown>)=>registerThreadMetadataIpc(ipc,{getAll:produce} as never,()=>{})},
 {name:'team',channel:'desktop:kswarm:team:plan',args:[{projectId:'owned'}],error:'kswarm_team_operation_unknown',register:(ipc:IpcHandleRegistrar,produce:()=>Promise<unknown>)=>registerKSwarmTeamTypedIpc(ipc,{planProjectTeam:produce} as never)},
@@ -34,14 +36,13 @@ expect(calls).toBe(1);expect(reads).toBe(0);
 if(c.name==='room')expect(reply).toEqual({ok:false,code:c.error});else expect((failure as Error)?.message).toBe(c.error);
 });
 
-const normal:Record<string,unknown>={smallconfig:{enabled:false},thread:{gtdEnabled:false,inbox:[],todo:[],waiting:[],someday:[],archived:[],pinned:[]},team:{planId:'p',projectId:'owned',projectRevision:0,outcome:'no_change',summary:'existing',items:[]},projectagent:{agentId:'owned',runtimeType:null,healthy:false,callability:'unavailable',durationMs:0},assistant:{profile:{id:'default-personal-assistant',status:'needs_consent',locale:'zh',timeZone:'UTC',eveningTime:'18:00',morningTime:'08:00',workdays:[],quietHours:{start:'23:00',end:'07:00'},dataScopes:[],createdAt:1,updatedAt:1},suggestions:[],pendingCandidateCount:0,candidates:[]},room:{ok:true,rooms:[]},loop:[],model:{configPath:'owned',defaultProvider:'p',defaultModelId:'m',providers:[],models:[],providerProfiles:[]},principles:[],diagnostics:[]};
+const normal:Record<string,unknown>={skills:[],smallconfig:{enabled:false},thread:{gtdEnabled:false,inbox:[],todo:[],waiting:[],someday:[],archived:[],pinned:[]},team:{planId:'p',projectId:'owned',projectRevision:0,outcome:'no_change',summary:'existing',items:[]},projectagent:{agentId:'owned',runtimeType:null,healthy:false,callability:'unavailable',durationMs:0},assistant:{profile:{id:'default-personal-assistant',status:'needs_consent',locale:'zh',timeZone:'UTC',eveningTime:'18:00',morningTime:'08:00',workdays:[],quietHours:{start:'23:00',end:'07:00'},dataScopes:[],createdAt:1,updatedAt:1},suggestions:[],pendingCandidateCount:0,candidates:[]},room:{ok:true,rooms:[]},loop:[],model:{configPath:'owned',defaultProvider:'p',defaultModelId:'m',providers:[],models:[],providerProfiles:[]},principles:[],diagnostics:[]};
 for(const c of cases)for(const kind of ['normal','ownThen','ownConstructor','rejection'])it(c.name+' preserves '+kind+' original promise behavior without reading then',async()=>{
  let calls=0,reads=0;const business=Error('actual-producer-business-error');const value=normal[c.name];const raw=kind==='rejection'?Promise.reject(business):Promise.resolve(value);
  if(kind==='ownThen')Object.defineProperty(raw,'then',{configurable:true,get(){reads++;throw Error('own then executed')}});
  if(kind==='ownConstructor')Object.defineProperty(raw,'constructor',{configurable:true,value:Promise});
  const handlers=new Map<string,IpcHandlerListener>();c.register({handle:(name:string,fn:IpcHandlerListener)=>handlers.set(name,fn)},()=>{calls++;return raw});
- if(kind==='rejection' && c.name==='diagnostics')expect(await handlers.get(c.channel)!({} as never,...c.args)).toEqual([]);
- else if(kind==='rejection')await expect(handlers.get(c.channel)!({} as never,...c.args)).rejects.toBe(business);
+ if(kind==='rejection')await expect(handlers.get(c.channel)!({} as never,...c.args)).rejects.toBe(business);
  else expect(await handlers.get(c.channel)!({} as never,...c.args)).toEqual(value);
  expect(calls).toBe(1);expect(reads).toBe(0);
 });

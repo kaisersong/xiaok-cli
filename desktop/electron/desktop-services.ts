@@ -1,3 +1,5 @@
+import { captureSkillReadonlyPromise } from './skill-readonly-data.js';
+import { types as skillNodeTypes } from 'node:util';
 import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
 import type { DesktopSkillStats } from '../shared/desktop-diagnostics-ipc-contract.js';
 import { captureModelProviderInput } from './model-provider-typed-ipc.js';
@@ -429,12 +431,16 @@ async function appendExecRecord(dataRoot: string, record: SkillExecRecord): Prom
 }
 
 async function loadExecRecords(dataRoot: string): Promise<SkillExecRecord[]> {
-  try {
-    const raw = await readFileAsync(join(dataRoot, EXEC_FILE), 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch { return []; }
+  let raw: unknown;
+  try { raw = await captureSkillReadonlyPromise(readFileAsync(join(dataRoot, EXEC_FILE), 'utf-8'), 'diagnostics_projection_unavailable'); }
+  catch (error) {
+    if (error && typeof error === 'object' && !skillNodeTypes.isProxy(error) && Object.getOwnPropertyDescriptor(error, 'code')?.value === 'ENOENT') return [];
+    throw error;
+  }
+  if (typeof raw !== 'string') throw Error('diagnostics_projection_unavailable');
+  const parsed = captureIpcData(JSON.parse(raw), 'diagnostics_projection_unavailable', { preserveDataPrototype: true });
+  if (!Array.isArray(parsed)) throw Error('diagnostics_projection_unavailable');
+  return parsed as SkillExecRecord[];
 }
 
 function aggregateStats(records: SkillExecRecord[]): SkillStats[] {
@@ -3240,8 +3246,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return materialRegistry.toView(record);
     },
     async listSkills() {
-      const catalog = createSkillCatalog(undefined, process.cwd());
-      const skills = await catalog.reload();
+      let incomplete = false;
+      const catalog = createSkillCatalog(undefined, process.cwd(), { onDiscoveryIssue: () => { incomplete = true; } });
+      const skills = await captureSkillReadonlyPromise(catalog.reload(), 'skill_list_projection_unavailable');
+      if (incomplete || !Array.isArray(skills)) throw Error('skill_list_projection_unavailable');
       return skills.map(s => ({
         name: s.name,
         aliases: s.aliases ?? [],
@@ -3476,12 +3484,8 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       return { maxConcurrentTasks: clamped };
     },
     async getSkillStats(): Promise<SkillStats[]> {
-      try {
-        const records = await loadExecRecords(options.dataRoot);
-        const stats = aggregateStats(records);
-        const timeout = new Promise<SkillStats[]>(resolve => setTimeout(() => resolve([]), 2000));
-        return await Promise.race([Promise.resolve(stats), timeout]);
-      } catch { return []; }
+      const records = await loadExecRecords(options.dataRoot);
+      return aggregateStats(records);
     },
     async testProviderConnection(input: { providerId: string; modelId?: string }, requestSource?: 'user' | 'agent' | 'scheduler'): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
       if (requestSource !== 'user') throw new Error('model_config_user_required');

@@ -3019,6 +3019,11 @@ export const zh: LocaleStrings = {
   },
 
   // automations page
+  skillsReadonlyListFailed: '无法读取技能列表。请重试。',
+  skillsReadonlyStatsFailed: '无法读取技能统计。请重试。',
+  skillsReadonlyRetry: '刷新技能信息',
+  skillsReadonlyUnknown: '技能信息未知',
+  skillsReadonlyMetricUnknown: '统计值未知',
   automationsReadFailed: '无法读取自动化状态。请重试。',
   automationsMutationUnknown: '后台自动运行设置结果未知。请刷新后确认。',
   automationsStateUnknown: '后台自动运行状态未知',

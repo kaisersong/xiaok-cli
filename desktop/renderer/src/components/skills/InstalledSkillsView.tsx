@@ -1,4 +1,5 @@
 import type { DesktopSkillStats } from '../../../../shared/desktop-diagnostics-ipc-contract.js'
+import { fileBasename } from '../../lib/file-path'
 import React, { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react'
 import { discoverExternalSkills, getExternalDirs, setExternalDirs, type ExternalSkillDir } from '../../api'
@@ -59,6 +60,12 @@ type Props = {
   active: (item: ViewSkill) => boolean
   cardMenuRef: React.RefObject<HTMLDivElement | null>
   accessToken: string
+  statsMap: Map<string, SkillStats>
+  catalogReady: boolean
+  statsReady: boolean
+  statsUnavailable: boolean
+  statsUnknownLabel: string
+  statsMetricUnknownLabel: string
 }
 
 export function InstalledSkillsView(props: Props) {
@@ -66,7 +73,7 @@ export function InstalledSkillsView(props: Props) {
     items, loading, busySkillId, menuSkillId, setMenuSkillId,
     onDetailSkill, onEnable, onDisable, onRemove, onTrySkill,
     skillText, locale, platformAvailabilityLabel, platformAvailabilityStyle,
-    scanStatusBadge, active, cardMenuRef, accessToken,
+    scanStatusBadge, active, cardMenuRef, accessToken, statsMap, catalogReady, statsReady, statsUnavailable, statsUnknownLabel, statsMetricUnknownLabel,
   } = props
 
   const [dirs, setDirs] = useState<ExternalSkillDir[]>([])
@@ -76,17 +83,6 @@ export function InstalledSkillsView(props: Props) {
   const [newDir, setNewDir] = useState('')
   const [saving, setSaving] = useState(false)
   const [externalOpen, setExternalOpen] = useState(false)
-  const [statsMap, setStatsMap] = useState<Map<string, SkillStats>>(new Map())
-
-  useEffect(() => {
-    api.getSkillStats()
-      .then(stats => {
-        const map = new Map(stats.map(s => [s.skillName, s]))
-        setStatsMap(map)
-      })
-      .catch(() => {})
-  }, [items])
-
   const refreshExternal = useCallback(async () => {
     setExternalLoading(true)
     setExternalError('')
@@ -148,6 +144,7 @@ export function InstalledSkillsView(props: Props) {
         const totalSuccess = weekRecords.reduce((a, s) => a + s.successCount, 0)
         const avgMs = totalCalls > 0 ? Math.round(weekRecords.reduce((a, s) => a + s.avgDurationMs * s.totalCalls, 0) / totalCalls) : 0
         const rate = totalCalls > 0 ? Math.round(totalSuccess / totalCalls * 100) + '%' : '--'
+        if (![totalCalls, totalSuccess, avgMs].every(Number.isFinite)) return statsMetricUnknownLabel
         if (totalCalls < 5) return null
         return skillText.statsWeekSummary(totalCalls, skillText.statsDetailDurationValue(avgMs), rate)
       })()
@@ -156,10 +153,10 @@ export function InstalledSkillsView(props: Props) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs font-medium text-[var(--c-text-tertiary)]">
-        {skillText.searchResults(items.length)}
+        {catalogReady ? skillText.searchResults(items.length) : statsUnknownLabel}
       </span>
 
-      {weekSummary && (
+      {statsReady && !statsUnavailable && weekSummary && (
         <div className="rounded-lg px-3 py-2 text-xs text-[var(--c-text-tertiary)]" style={{ background: 'var(--c-bg-deep)' }}>
           {weekSummary}
         </div>
@@ -185,6 +182,9 @@ export function InstalledSkillsView(props: Props) {
         active={active}
         cardMenuRef={cardMenuRef}
         statsMap={statsMap}
+        catalogReady={catalogReady}
+        unknownLabel={statsUnknownLabel}
+        metricUnknownLabel={statsMetricUnknownLabel}
       />
 
       {/* external skills collapsible section */}
@@ -282,7 +282,7 @@ export function InstalledSkillsView(props: Props) {
                           <div className="flex flex-col gap-0.5 px-3 pb-2">
                             {dir.skills.map((skill) => (
                               <div
-                                key={skill.path}
+                                key={skill.instruction_path}
                                 className="flex items-center gap-2 rounded px-2 py-1 pl-5"
                                 style={{ background: 'var(--c-bg-menu)' }}
                               >
@@ -290,7 +290,7 @@ export function InstalledSkillsView(props: Props) {
                                   {skill.name}
                                 </span>
                                 <span className="shrink-0 truncate text-[10px] text-[var(--c-text-muted)]">
-                                  {skill.instruction_path.split('/').pop()}
+                                  {fileBasename(skill.instruction_path)}
                                 </span>
                               </div>
                             ))}

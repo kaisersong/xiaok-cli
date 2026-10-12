@@ -994,12 +994,8 @@ export const api = {
   // Skill API (mock)
   // ---------------------
   async listSkills() {
-    if (!window.xiaokDesktop?.listSkills) return [];
-    try {
-      return await window.xiaokDesktop.listSkills();
-    } catch {
-      return [];
-    }
+    if (!window.xiaokDesktop?.listSkills) throw new Error('skill_list_runtime_unavailable');
+    return window.xiaokDesktop.listSkills();
   },
   async installSkill(skillName: string): Promise<{ success: boolean; message: string }> {
     if (!window.xiaokDesktop?.installSkill) {
@@ -1263,11 +1259,8 @@ export const api = {
   },
 
   async getSkillStats() {
-    try {
-      return await window.xiaokDesktop.getSkillStats();
-    } catch {
-      return [];
-    }
+    if (!window.xiaokDesktop?.getSkillStats) throw new Error('diagnostics_runtime_unavailable');
+    return window.xiaokDesktop.getSkillStats();
   },
 
   // ---------------------
@@ -1335,6 +1328,9 @@ export interface MarketSkill {
   registry_slug?: string;
   detail_url?: string;
   repository_url?: string;
+  registry_provider?: string;
+  owner_handle?: string;
+  updated_at?: string;
   installed: boolean;
   enabled_by_default: boolean;
   scan_status?: string;
@@ -1351,6 +1347,7 @@ export interface SkillReference {
 }
 
 export interface SkillImportCandidate {
+  path: string;
   skill_key: string;
   display_name: string;
   description?: string;
@@ -1366,10 +1363,8 @@ export interface PlatformSkillItem {
   platform_status: string;
 }
 
-export async function listInstalledSkills(_accessToken: string): Promise<InstalledSkill[]> {
-  try {
-    const skills = await api.listSkills();
-    return skills.map((s: { name: string; aliases?: string[]; description?: string; source?: string; tier?: string }) => ({
+export function mapInstalledSkillList(skills: import('../../../shared/skill-list-ipc-contract').SkillListDto): InstalledSkill[] {
+  return skills.map((s: { name: string; aliases?: string[]; description?: string; source?: string; tier?: string }) => ({
       skill_key: s.name,
       display_name: s.name,
       description: s.description,
@@ -1378,19 +1373,17 @@ export async function listInstalledSkills(_accessToken: string): Promise<Install
       is_platform: false,
       updated_at: new Date().toISOString(),
     }));
-  } catch {
-    return [];
-  }
+}
+export async function listInstalledSkills(_accessToken: string): Promise<InstalledSkill[]> {
+  return mapInstalledSkillList(await api.listSkills());
 }
 
 export async function listDefaultSkills(_accessToken: string): Promise<InstalledSkill[]> {
   return [];
 }
 
-export async function listPlatformSkills(_accessToken: string): Promise<PlatformSkillItem[]> {
-  try {
-    const skills = await api.listSkills();
-    return skills
+export function mapPlatformSkillList(skills: import('../../../shared/skill-list-ipc-contract').SkillListDto): PlatformSkillItem[] {
+  return skills
       .filter((s: { source?: string }) => s.source === 'builtin' || s.source === 'platform')
       .map((s: { name: string; description?: string }) => ({
         skill_key: s.name,
@@ -1399,9 +1392,9 @@ export async function listPlatformSkills(_accessToken: string): Promise<Platform
         version: '1.0.0',
         platform_status: 'auto',
       }));
-  } catch {
-    return [];
-  }
+}
+export async function listPlatformSkills(_accessToken: string): Promise<PlatformSkillItem[]> {
+  return mapPlatformSkillList(await api.listSkills());
 }
 
 export async function searchMarketSkills(_accessToken: string, _query: string, _officialOnly: boolean): Promise<MarketSkill[]> {
@@ -1421,11 +1414,11 @@ export async function importRegistrySkill(_accessToken: string, _input: { slug: 
   throw new Error('Marketplace not available in desktop mode');
 }
 
-export async function importSkillFromGitHub(_accessToken: string, _input: { repositoryUrl: string }): Promise<{ candidates: SkillImportCandidate[] }> {
+export async function importSkillFromGitHub(_accessToken: string, _input: { repository_url: string; ref?: string; candidate_path?: string }): Promise<{ skill: SkillPackageResponse }> {
   throw new Error('GitHub import not available in desktop mode');
 }
 
-export async function importSkillFromUpload(_input: { fileName: string; content: string }): Promise<{ candidates: SkillImportCandidate[] }> {
+export async function importSkillFromUpload(_accessToken: string, _input: { file: File; install_after_import: boolean }): Promise<SkillPackageResponse> {
   throw new Error('Upload import not available in desktop mode');
 }
 
@@ -1453,6 +1446,8 @@ export function setExternalDirs(_accessToken: string, _dirs: string[]): Promise<
 
 export interface ApiErrorLike extends Error {
   status?: number;
+  code?: string;
+  details?: unknown;
 }
 
 export function isApiError(error: unknown): error is ApiErrorLike {

@@ -17,9 +17,9 @@ const finding = z.object({ id: z.string(), severity: z.enum(['critical','high','
 }).passthrough();
 export const DIAGNOSTICS_IPC_CHANNELS = Object.freeze({ getSkillStats: 'desktop:getSkillStats', exportTraceBundle: 'desktop:trace:export', diagnose: 'desktop:diagnose' });
 export type DesktopDiagnosticsMethod = keyof typeof DIAGNOSTICS_IPC_CHANNELS;
-export const DIAGNOSTICS_INPUT_QUALIFICATION = Object.freeze({ getSkillStats: 'legacy-ignored-arguments', exportTraceBundle: 'legacy-unqualified', diagnose: 'legacy-unqualified' });
+export const DIAGNOSTICS_INPUT_QUALIFICATION = Object.freeze({ getSkillStats: 'qualified-zero-tuple', exportTraceBundle: 'legacy-unqualified', diagnose: 'legacy-unqualified' });
 export const DIAGNOSTICS_INPUT_SCHEMAS = Object.freeze({
-  getSkillStats: z.unknown().describe(DIAGNOSTICS_INPUT_QUALIFICATION.getSkillStats),
+  getSkillStats: z.tuple([]).describe(DIAGNOSTICS_INPUT_QUALIFICATION.getSkillStats),
   exportTraceBundle: z.unknown().describe(DIAGNOSTICS_INPUT_QUALIFICATION.exportTraceBundle),
   diagnose: z.unknown().describe(DIAGNOSTICS_INPUT_QUALIFICATION.diagnose),
 });

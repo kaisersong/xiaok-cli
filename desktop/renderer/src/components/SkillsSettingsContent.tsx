@@ -1,3 +1,5 @@
+import { useSkillListReadonly, useSkillStatsReadonly } from '../hooks/useSkillReadonly';
+import { mapInstalledSkillList, mapPlatformSkillList } from '../api/bridge';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
@@ -8,7 +10,8 @@ import {
   Search,
   Upload,
 } from 'lucide-react'
-import { Modal, TabBar } from '../shared'
+import { Modal } from './shared/Modal'
+import { DirectionAwareTabs } from './ui/direction-aware-tabs'
 import {
   type InstalledSkill,
   type MarketSkill,
@@ -52,7 +55,8 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('installed')
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [menuSkillId, setMenuSkillId] = useState<string | null>(null)
-  const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([])
+  const listFacts = useSkillListReadonly(), statFacts = useSkillStatsReadonly()
+  const installedSkills = useMemo(() => mapInstalledSkillList(listFacts.data ?? []), [listFacts.data])
   const [defaultSkills, setDefaultSkills] = useState<InstalledSkill[]>([])
   const [marketSkills, setMarketSkills] = useState<MarketSkill[]>([])
   const [loading, setLoading] = useState(true)
@@ -70,53 +74,30 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
   const [githubRef, setGitHubRef] = useState('')
   const [importing, setImporting] = useState(false)
   const [detailSkill, setDetailSkill] = useState<ViewSkill | null>(null)
-  const [builtinSkills, setBuiltinSkills] = useState<PlatformSkillItem[]>([])
+  const [builtinOverride, setBuiltinSkills] = useState<PlatformSkillItem[] | null>(null)
+  const builtinSkills = builtinOverride ?? mapPlatformSkillList(listFacts.data ?? [])
   const [builtinLoading, setBuiltinLoading] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const addMenuRef = useRef<HTMLDivElement>(null)
   const cardMenuRef = useRef<HTMLDivElement>(null)
-  const [statsMap, setStatsMap] = useState<Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>>(new Map())
-
-  useEffect(() => {
-    api.getSkillStats()
-      .then(stats => {
-        console.log('[SkillsSettings] stats returned:', stats.length, 'skills');
-        stats.forEach(s => console.log('  -', s.skillName, ':', s.totalCalls, 'calls'));
-        setStatsMap(new Map(stats.map(s => [s.skillName, s])));
-      })
-      .catch(() => {})
-  }, [])
-
+  const statsMap = new Map((statFacts.data ?? []).map(s => [s.skillName, s]))
+  const catalogPending = useRef<Promise<import('../../../shared/skill-list-ipc-contract').SkillListDto> | null>(null)
+  const refreshCatalog = useCallback(async () => {
+    if (catalogPending.current) return catalogPending.current
+    const pending = listFacts.reload(); catalogPending.current = pending
+    try { return await pending } finally { if (catalogPending.current === pending) catalogPending.current = null }
+  }, [listFacts.reload])
   const refreshBuiltin = useCallback(async () => {
-    try {
-      const items = await listPlatformSkills(accessToken)
-      setBuiltinSkills(items)
-    } catch { /* silent */ }
-  }, [accessToken])
-
+    const snapshot = await refreshCatalog(); const items = mapPlatformSkillList(snapshot); setBuiltinSkills(items); return items
+  }, [refreshCatalog])
   const refreshInstalled = useCallback(async () => {
-    const [installed, defaults] = await Promise.all([
-      listInstalledSkills(accessToken),
-      listDefaultSkills(accessToken),
-    ])
-    setInstalledSkills(installed)
+    const [snapshot, defaults] = await Promise.all([refreshCatalog(), listDefaultSkills(accessToken)])
     setDefaultSkills(defaults)
-    return { installed, defaults }
-  }, [accessToken])
-
-  useEffect(() => {
-    void (async () => {
-      setLoading(true)
-      setError('')
-      try {
-        await refreshInstalled()
-      } catch {
-        setError(skillText.loadFailed)
-      } finally {
-        setLoading(false)
-      }
-    })()
-  }, [refreshInstalled, skillText.loadFailed])
+    return { installed: mapInstalledSkillList(snapshot), defaults }
+  }, [refreshCatalog, accessToken])
+  useEffect(() => { setLoading(listFacts.reading && listFacts.data === null) }, [listFacts.reading, listFacts.data])
+  useEffect(() => { void listDefaultSkills(accessToken).then(setDefaultSkills).catch(() => {}) }, [accessToken])
+  useEffect(() => { setBuiltinSkills(null) }, [listFacts.data])
 
   useEffect(() => {
     if (viewMode !== 'marketplace') {
@@ -157,7 +138,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
   useEffect(() => {
     if (viewMode !== 'builtin') return
     setBuiltinLoading(true)
-    refreshBuiltin().finally(() => setBuiltinLoading(false))
+    Promise.resolve().then(() => { setBuiltinLoading(false) })
   }, [viewMode, refreshBuiltin])
 
   useEffect(() => {
@@ -413,11 +394,15 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
+      {listFacts.failed && <p role="alert">{t.skillsReadonlyListFailed}</p>}
+      {statFacts.failed && <p role="alert">{t.skillsReadonlyStatsFailed}</p>}
+      <button type="button" onClick={() => { listFacts.refresh(); statFacts.refresh(); }}>{t.skillsReadonlyRetry}</button>
       {/* TabBar + 搜索 + 添加 */}
       <div className="flex flex-wrap items-center gap-2">
-        <TabBar<SkillTab>
-          tabs={tabItems}
-          active={viewMode}
+        <DirectionAwareTabs<SkillTab>
+          tabs={tabItems.map(tab => ({ id: tab.key, label: tab.label }))}
+          activeId={viewMode}
+          layoutId="skills-settings-view-tabs"
           onChange={(tab) => { setViewMode(tab); setQuery('') }}
         />
         <div className="flex-1" />
@@ -479,6 +464,12 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
           items={items}
           loading={loading}
           accessToken={accessToken}
+          statsMap={statsMap}
+          catalogReady={listFacts.data !== null}
+          statsReady={statFacts.data !== null}
+          statsUnavailable={statFacts.failed}
+          statsUnknownLabel={t.skillsReadonlyUnknown}
+          statsMetricUnknownLabel={t.skillsReadonlyMetricUnknown}
         />
       )}
 
@@ -503,6 +494,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
           skillText={skillText}
           refreshInstalled={refreshInstalled}
           setBuiltinSkills={setBuiltinSkills}
+          refreshBuiltin={refreshBuiltin}
           platformAvailabilityLabel={platformAvailabilityLabel}
           platformAvailabilityStyle={platformAvailabilityStyle}
         />
@@ -663,6 +655,7 @@ export function SkillsSettingsContent({ accessToken, onTrySkill }: Props) {
           platformAvailabilityLabel={platformAvailabilityLabel}
           platformAvailabilityStyle={platformAvailabilityStyle}
           scanStatusBadge={scanStatusBadge}
+          metricUnknownLabel={t.skillsReadonlyMetricUnknown}
           stats={detailSkill.skill_key ? statsMap.get(detailSkill.skill_key) : undefined}
         />
       )}

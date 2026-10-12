@@ -1,10 +1,11 @@
+import { z } from 'zod';
 import { assertStandardIpcPromise } from './ipc-native-promise.js';
 import { types } from 'node:util';
 import type { createDesktopServices } from './desktop-services.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { registerIpcHandler, type RiskTag } from './ipc-runtime.js';
 import type { IpcHandleRegistrar, IpcHandlerListener } from './shutdown-aware-ipc-main.js';
-import { DIAGNOSTICS_IPC_CHANNELS, DIAGNOSTICS_INPUT_SCHEMAS, DIAGNOSTICS_OUTPUT_SCHEMAS, type DesktopDiagnosticsMethod } from '../shared/desktop-diagnostics-ipc-contract.js';
+import { DIAGNOSTICS_IPC_CHANNELS, DIAGNOSTICS_INPUT_QUALIFICATION, DIAGNOSTICS_INPUT_SCHEMAS, DIAGNOSTICS_OUTPUT_SCHEMAS, type DesktopDiagnosticsMethod } from '../shared/desktop-diagnostics-ipc-contract.js';
 type Service = Pick<ReturnType<typeof createDesktopServices>, DesktopDiagnosticsMethod>;
 const methods = Object.keys(DIAGNOSTICS_IPC_CHANNELS) as DesktopDiagnosticsMethod[];
 const isPromise = types.isPromise, apply = Reflect.apply;
@@ -40,23 +41,30 @@ export function registerDiagnosticsIpc(ipc: IpcHandleRegistrar, rawService?: Ser
       if (method === 'diagnose') {const result=snapshot as {health:string;primaryFinding:{category:string}|null};log('diagnose result',{health:result.health,primaryFinding:result.primaryFinding?.category??null});}
       return snapshot;
     };
-    registerIpcHandler<unknown,unknown>({registrar:owner.registrar,channel:DIAGNOSTICS_IPC_CHANNELS[method],
-      input:DIAGNOSTICS_INPUT_SCHEMAS[method],output:DIAGNOSTICS_OUTPUT_SCHEMAS[method],sourceFile:'desktop/electron/diagnostics-typed-ipc.ts',rolloutRound:19,riskTags:risks[method],
-      handler: async raw => {
+    const registration = {registrar:owner.registrar,channel:DIAGNOSTICS_IPC_CHANNELS[method],
+      input: method === 'getSkillStats' ? z.custom<unknown>(() => true).transform(raw => {
+        const snapshot = captureIpcData(raw, 'diagnostics_input_invalid');
+        if (!DIAGNOSTICS_INPUT_SCHEMAS.getSkillStats.safeParse(snapshot).success) throw Error('diagnostics_input_invalid');
+        return snapshot;
+      }).describe(DIAGNOSTICS_INPUT_QUALIFICATION.getSkillStats) : DIAGNOSTICS_INPUT_SCHEMAS[method],
+      output:DIAGNOSTICS_OUTPUT_SCHEMAS[method],sourceFile:'desktop/electron/diagnostics-typed-ipc.ts',rolloutRound:19 as const,riskTags:risks[method],
+      handler: async (raw: unknown) => {
         if (!service) throw Error('diagnostics_runtime_unavailable');
         const input = method === 'getSkillStats' ? undefined : captureIpcData(raw,'diagnostics_input_invalid',{preserveDataPrototype:true});
         if (method !== 'getSkillStats') log(method==='diagnose'?'diagnose':'traceExport',fields(input));
         let result: unknown;
         try {result=method==='getSkillStats'?service.getSkillStats():invokeLegacy(service,method,input);}
-        catch (failure) {if(method==='getSkillStats')return capture([]);throw failure;}
+        catch (failure) {throw failure;}
         if (!isPromise(result)) return capture(result);
         assertStandardIpcPromise(result,error);
         return new Promise((resolve,reject)=>{
           apply(nativeThen,result,[(value:unknown)=>{try{resolve(capture(value));}catch(failure){reject(failure);}},
-            (failure:unknown)=>{if(method==='getSkillStats'){try{resolve(capture([]));}catch(error){reject(error);}}else reject(failure);}]);
+            (failure:unknown)=>reject(failure)]);
         });
       },
-    });
+    };
+    if (method === 'getSkillStats') registerIpcHandler<unknown[], unknown>({ ...registration, input: registration.input as import('zod').ZodSchema<unknown[]>, payloadMode: 'tuple' });
+    else registerIpcHandler<unknown, unknown>({ ...registration, payloadMode: 'single' });
     owner.installed.add(method);
   }
 }

@@ -1,3 +1,4 @@
+import { useSkillListReadonly, useSkillStatsReadonly } from '../hooks/useSkillReadonly';
 import type { PluginMcpServerDto, PluginDependencyStatusDto } from '../../../shared/plugin-catalog-ipc-contract';
 import {connectorsErrorMessage} from '../lib/connectors-error';
 import {scheduledErrorMessage} from '../lib/scheduled-timed-action-error';
@@ -1811,33 +1812,15 @@ function AddProviderCard({
 
 function SkillsPane() {
   const { t } = useLocale();
-  const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const listFacts = useSkillListReadonly(), statFacts = useSkillStatsReadonly();
+  const skills = listFacts.data ?? [];
+  const loading = listFacts.reading && listFacts.data === null;
   const [installing, setInstalling] = useState(false);
   const [installName, setInstallName] = useState('');
   const [showInstall, setShowInstall] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [statsMap, setStatsMap] = useState<Map<string, { totalCalls: number; successCount: number; avgDurationMs: number; totalInputTokens: number; totalOutputTokens: number }>>(new Map());
-
-  useEffect(() => {
-    api.listSkills()
-      .then(setSkills)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    const unsubscribe = api.onSkillsChanged(() => {
-      api.listSkills().then(setSkills).catch(() => {});
-    });
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    api.getSkillStats()
-      .then(stats => {
-        setStatsMap(new Map(stats.map(s => [s.skillName, s])));
-      })
-      .catch(() => {});
-  }, []);
+  const statsMap = new Map((statFacts.data ?? []).map(s => [s.skillName, s]));
 
   const handleInstall = async () => {
     if (!installName.trim()) return;
@@ -1850,8 +1833,7 @@ function SkillsPane() {
         setShowInstall(false);
         setInstallName('');
         // Refresh skill list
-        const updated = await api.listSkills();
-        setSkills(updated);
+        listFacts.refresh();
       } else {
         setError(result.message);
       }
@@ -1871,8 +1853,7 @@ function SkillsPane() {
       if (result.success) {
         setSuccess(result.message);
         // Refresh skill list
-        const updated = await api.listSkills();
-        setSkills(updated);
+        listFacts.refresh();
       } else {
         setError(result.message);
       }
@@ -1883,7 +1864,7 @@ function SkillsPane() {
     }
   };
 
-  if (loading) {
+  if (loading && !listFacts.failed) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
         <Loader2 size={20} className="animate-spin text-[var(--c-text-secondary)]" />
@@ -1893,8 +1874,11 @@ function SkillsPane() {
 
   return (
     <>
+      {listFacts.failed && <p role="alert">{t.skillsReadonlyListFailed}</p>}
+      {statFacts.failed && <p role="alert">{t.skillsReadonlyStatsFailed}</p>}
+      <button type="button" onClick={() => { listFacts.refresh(); statFacts.refresh(); }}>{t.skillsReadonlyRetry}</button>
       <Section>
-        <SectionHeader icon={Puzzle}>{t.desktopSettings.installedSkills(skills.length)}</SectionHeader>
+        <SectionHeader icon={Puzzle}>{listFacts.data === null ? t.skillsReadonlyUnknown : t.desktopSettings.installedSkills(skills.length)}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -1956,7 +1940,7 @@ function SkillsPane() {
         )}
 
         <div className="flex flex-col gap-2">
-          {skills.length === 0 ? (
+          {listFacts.data !== null && skills.length === 0 ? (
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
@@ -1987,7 +1971,7 @@ function SkillsPane() {
                         <span className="text-xs text-[var(--c-text-tertiary)]">[{skill.tier}]</span>
                         {stats && stats.totalCalls > 0 && (
                           <span className="ml-auto text-xs text-[var(--c-text-tertiary)]">
-                            {t.desktopSettings.skillStats(stats.totalCalls, Math.round(stats.avgDurationMs / 1000))}
+                            {Number.isFinite(stats.avgDurationMs) ? t.desktopSettings.skillStats(stats.totalCalls, Math.round(stats.avgDurationMs / 1000)) : t.skillsReadonlyMetricUnknown}
                           </span>
                         )}
                       </div>

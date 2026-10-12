@@ -3039,6 +3039,11 @@ export const en: LocaleStrings = {
   },
 
   // automations page
+  skillsReadonlyListFailed: 'Unable to read skills. Retry.',
+  skillsReadonlyStatsFailed: 'Unable to read skill statistics. Retry.',
+  skillsReadonlyRetry: 'Refresh skill information',
+  skillsReadonlyUnknown: 'Skill information unknown',
+  skillsReadonlyMetricUnknown: 'Statistic unavailable',
   automationsReadFailed: 'Unable to read automation status. Retry.',
   automationsMutationUnknown: 'Background auto-run update outcome is unknown. Refresh to confirm.',
   automationsStateUnknown: 'Background auto-run status unknown',

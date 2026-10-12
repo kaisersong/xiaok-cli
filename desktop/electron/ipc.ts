@@ -1,3 +1,6 @@
+import { registerSkillListIpc } from './skill-list-typed-ipc.js';
+import { captureIpcData } from './ipc-data-snapshot.js';
+import { captureSkillListServiceResult } from './skill-readonly-data.js';
 import { registerPluginCatalogIpc } from './plugin-catalog-typed-ipc.js';
 import { registerKnowledgeIpc, captureKnowledgeOutput } from './knowledge-typed-ipc.js';
 import { registerPrinciplesIpc } from './principles-typed-ipc.js';
@@ -1283,11 +1286,10 @@ export async function registerDesktopIpc(
       }
     })();
   });
-  ipcMain.handle('desktop:listSkills', async () => {
-    const r = await services.listSkills();
-    log('info', 'listSkills', { count: r.length });
-    return r;
-  });
+  const skillListProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:listSkills', () => captureSkillListServiceResult(services.listSkills(), count => log('info', 'listSkills', { count }))],
+  ]);
+  registerSkillListIpc(ipcMain, skillListProducers);
   ipcMain.handle('desktop:installSkill', async (_event, skillName) => {
     log('info', 'installSkill', { skillName });
     const r = await services.installSkill(skillName);
