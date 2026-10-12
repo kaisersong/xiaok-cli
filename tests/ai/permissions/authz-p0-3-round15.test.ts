@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PermissionManager } from '../../../src/ai/permissions/manager.js';
 import { getCommandWriteTargets, requiresCommandConfirmation, exceedsCommandInspectionBudget } from '../../../src/ai/permissions/policy-engine.js';
-import { addAllowRule, adoptProjectRule, loadSettings } from '../../../src/ai/permissions/settings.js';
+import { addAllowRule, adoptProjectRule, getProjectAdoptionRecord, loadSettings } from '../../../src/ai/permissions/settings.js';
 import { buildPermissionPromptOptions } from '../../../src/ui/permission-prompt.js';
 const forms = [
   'archive -o X HEAD', 'archive -oX HEAD', 'archive --output X HEAD', 'archive --output=X HEAD',
@@ -96,7 +96,8 @@ it('adoption corruption preserves other projects and backs up invalid JSON atomi
     const file = join(root,'config','project-rule-adoptions.json');
     const state = JSON.parse(await readFile(file,'utf8'));
     state.adoptions.bad = 42;
-    state.adoptions[repo].push(42);
+    const { key } = await getProjectAdoptionRecord(repo);
+    state.adoptions[key].push(42);
     state.localRules['__proto__'] = ['bash(*)'];
     state.localRules['constructor'] = ['bash(*)'];
     state.localRules.other = ['bash(ls)',42];

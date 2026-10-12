@@ -1,6 +1,5 @@
 import { confirmChatPermission } from './chat-permission.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
-import { shouldPromptProjectRuleAdoption, promptPendingProjectRules } from './project-rule-adoption.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
@@ -933,9 +932,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   ];
 
   const initialPromptSnapshot = await buildPromptSnapshot();
-  if (shouldPromptProjectRuleAdoption({ auto: autoMode, json: opts.json, print: opts.print, stdinIsTTY: process.stdin.isTTY, stdoutIsTTY: process.stdout.isTTY })) {
-    await promptPendingProjectRules(cwd);
-  }
+  // Project-provided allow rules stay unapproved by default; startup never requests adoption.
   const persistedPermissionSettings = await loadSettings(cwd);
   const persistedPermissionRules = mergeRules(persistedPermissionSettings);
 

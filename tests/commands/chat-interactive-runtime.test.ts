@@ -1201,6 +1201,50 @@ describe('chat interactive runtime', () => {
     resetAdapterState();
   });
 
+  it.each([false, true])('starts directly without adopting project rules (shared global settings=%s)', async shared => {
+    const root = join(tmpdir(), `xiaok-quiet-startup-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    tempDirs.push(root);
+    const projectDir = join(root, 'project');
+    const configDir = shared ? join(projectDir, '.xiaok') : join(root, 'config');
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(join(projectDir, '.xiaok'), { recursive: true });
+    const rules = Array.from({ length: 10 }, (_, index) => `bash(echo startup-${index} *)`);
+    writeFileSync(join(projectDir, '.xiaok', 'settings.json'), JSON.stringify({ permissions: { allow: rules } }));
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } }, defaultMode: 'interactive', contextBudget: 4000, channels: {} }));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const loader = await import('../../src/runtime/conversation-activity/cli-loader.js');
+    const attachSpy = vi.spyOn(loader, 'attachCliConversationActivitiesWithinBudget').mockResolvedValue(undefined);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const { loadSettings, mergeRules } = await import('../../src/ai/permissions/settings.js');
+    const stdoutIsTTY = process.stdout.isTTY;
+    process.stdout.isTTY = true;
+    try {
+      for (let session = 0; session < 2; session++) {
+        const harness = createTtyHarness(100, 24);
+        const sigints = process.listeners('SIGINT');
+        const resizes = process.stdout.listeners('resize');
+        try {
+          const program = new Command();
+          registerChatCommands(program);
+          const pending = program.parseAsync(['node', 'xiaok', 'chat']);
+          await waitForInputTurnReady(harness);
+          expect(harness.output.normalized).not.toMatch(/这个项目自带了|逐条确认|\[y\/N\]|已开启后台任务跟进/);
+          expect(readdirSync(configDir)).not.toContain('project-rule-adoptions.json');
+          const settings = await loadSettings(projectDir);
+          expect(settings.approvedProjectAllow).toEqual([]);
+          expect(mergeRules(settings).allowRules).toEqual(shared ? rules : []);
+          harness.send('/exit\r');
+          await pending;
+        } finally {
+          for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
+          for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+          harness.restore();
+        }
+      }
+    } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
+  }, 15000);
+
   it.each([24, 12])('keeps pasted images within the actual chat content margin on a %s-row terminal', async rows => {
     const root = join(tmpdir(), `xiaok-image-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(root);

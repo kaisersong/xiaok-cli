@@ -38,7 +38,6 @@ export interface ActivityStartupNotices {
     queueUnavailable(): void;
     queueStorageNotPrivate(): void;
     queueOwnerUnavailable(): void;
-    queueStarted(): void;
     take(): ActivityStartupNotice | undefined;
 }
 export declare function createActivityStartupNotices(options: {

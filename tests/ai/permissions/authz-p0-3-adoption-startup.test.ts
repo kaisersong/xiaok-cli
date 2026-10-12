@@ -1,20 +1,10 @@
 import { expect, it, vi } from 'vitest';
-import { shouldPromptProjectRuleAdoption, promptPendingProjectRules } from '../../../src/commands/project-rule-adoption.js';
+import { promptPendingProjectRules } from '../../../src/commands/project-rule-adoption.js';
 import { adoptProjectRule, listPendingProjectRules } from '../../../src/ai/permissions/settings.js';
 import { promptProjectRuleAdoption } from '../../../src/ui/permission-prompt.js';
 vi.mock('../../../src/ai/permissions/settings.js', () => ({ adoptProjectRule: vi.fn(), listPendingProjectRules: vi.fn(), getProjectAdoptionRecord: async () => ({ file: "/tmp/xiaok-test/project-rule-adoptions.json", key: "/ws/repo" }) }));
 vi.mock('../../../src/ui/permission-prompt.js', async importOriginal => ({ ...await importOriginal<typeof import('../../../src/ui/permission-prompt.js')>(), promptProjectRuleAdoption: vi.fn() }));
 
-it.each([
-  [{auto: false, json: false, print: false, stdinIsTTY: true, stdoutIsTTY: true}, true],
-  [{auto: true, stdinIsTTY: true, stdoutIsTTY: true}, false],
-  [{auto: false, json: true, stdinIsTTY: true, stdoutIsTTY: true}, false],
-  [{auto: false, print: true, stdinIsTTY: true, stdoutIsTTY: true}, false],
-  [{auto: false, stdinIsTTY: false, stdoutIsTTY: true}, false],
-  [{auto: false, stdinIsTTY: true, stdoutIsTTY: false}, false],
-] as const)('startup adoption gate: %j', (options, expected) => {
-  expect(shouldPromptProjectRuleAdoption(options)).toBe(expected);
-});
 it.each([
   [new Error('Project rule is no longer present'), '这条规则在询问期间被修改了，已跳过，下次启动会重新询问。'],
   [Object.assign(new Error('save failed'), {code: 'EACCES'}), '这条没有生效，下次启动会再问。'],

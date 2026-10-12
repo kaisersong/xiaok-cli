@@ -1,16 +1,6 @@
 import { adoptProjectRule, listPendingProjectRules, getProjectAdoptionRecord } from '../ai/permissions/settings.js';
 import { escapeProjectRuleDisplay, promptProjectRuleAdoption } from '../ui/permission-prompt.js';
 
-export function shouldPromptProjectRuleAdoption(options: {
-  auto: boolean;
-  json?: boolean;
-  print?: boolean;
-  stdinIsTTY?: boolean;
-  stdoutIsTTY?: boolean;
-}): boolean {
-  return !options.auto && !options.json && !options.print && Boolean(options.stdinIsTTY && options.stdoutIsTTY);
-}
-
 export async function promptPendingProjectRules(cwd: string): Promise<void> {
   const rules = await listPendingProjectRules(cwd);
   if (rules.length === 0) return;

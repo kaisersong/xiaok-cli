@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -73,38 +73,39 @@ describe('activity startup notices', () => {
     expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。');
   });
 
-  it('persists only after terminal output and suppresses subsequent sessions', async () => {
+  it.each(['fresh', 'shown', 'inaccessible'])('successful attachment stays silent across sessions with %s marker state', async state => {
     const dir = mkdtempSync(join(tmpdir(), 'activity-notice-'));
+    const directory = join(dir, 'conversation-activity');
+    const marker = join(directory, 'first-start-notice-shown');
     try {
-      const first = (await load(dir)).take();
-      expect(first?.text).toBe('已开启后台任务跟进：长任务在后台运行时，xiaok 会告诉你进展。不需要的话，设置 XIAOK_CONVERSATION_ACTIVITY=0 即可关闭。');
-      expect((await load(dir)).take()?.text).toBe(first?.text);
-      first?.markShown();
-      expect((await load(dir)).take()).toBeUndefined();
-      if (process.platform !== 'win32') {
-        expect(statSync(join(dir, 'conversation-activity', 'first-start-notice-shown')).mode & 0o777).toBe(0o600);
+      if (state === 'shown') {
+        mkdirSync(directory);
+        writeFileSync(marker, 'existing');
+      } else if (state === 'inaccessible') {
+        writeFileSync(directory, 'blocked');
       }
+      for (let session = 0; session < 2; session++) {
+        const instance = {} as CliConversationActivities;
+        const notices = createActivityStartupNotices({ configDir: dir });
+        expect(await attachCliConversationActivities({ ...options, startupNotices: notices }, {
+          importCli: async () => ({ CliConversationActivities: { attach: async () => instance } }),
+        })).toBe(instance);
+        expect(notices.take()).toBeUndefined();
+      }
+      if (state === 'fresh') expect(existsSync(directory)).toBe(false);
+      if (state === 'inaccessible') expect(existsSync(marker)).toBe(false);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
-  it('silently handles inaccessible marker paths', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'activity-notice-'));
-    try {
-      // A file in place of the directory reliably prevents writes even under root.
-      writeFileSync(join(dir, 'conversation-activity'), 'blocked');
-      const notices = await load(dir);
-      expect(() => notices.take()?.markShown()).not.toThrow();
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
 });
 
 it.each(['v22.14.0', 'v22.15.0', 'v24.0.0'])('uses generic unavailable notice on %s', version => { const notices = createActivityStartupNotices({ configDir: '', version }); notices.queueUnavailable(); expect(notices.take()?.text).toBe('异步任务跟进暂不可用，其他功能不受影响。如不需要，可设 XIAOK_CONVERSATION_ACTIVITY=0 关闭。'); });
 
-it('queues each update notice once alongside first-start notice', () => {
+it('queues each update notice once without a success announcement', () => {
   const notices = createActivityStartupNotices({ configDir: '/tmp/issue-23-notice-missing' });
-  notices.queueLegacyPending(); notices.queueLegacyPending(); notices.queueStarted();
+  notices.queueLegacyPending(); notices.queueLegacyPending();
   expect(notices.take()?.text).toBe('有未完成的后台任务，任务结束后再次打开 xiaok 会自动更新。');
-  expect(notices.take()?.text).toContain('已开启后台任务跟进');
+  expect(notices.take()).toBeUndefined();
   notices.queueLegacyPending(); expect(notices.take()).toBeUndefined();
   notices.queueOwnerReplaced(); notices.queueOwnerReplaced();
   expect(notices.take()?.text).toBe('后台任务跟进已更新，请重新打开终端以继续跟进');
@@ -143,5 +144,5 @@ it('queues replacement callback once and suppresses legacy callback after failed
   const attachSuccess = vi.fn(async (input: Parameters<typeof CliConversationActivities.attach>[0]) => { callback = input.onOwnerReplaced; return {} as CliConversationActivities; });
   await attachCliConversationActivities({ ...options, attachOptions: { ...attachOptions, changed }, startupNotices: success }, { importCli: async () => ({ CliConversationActivities: { attach: attachSuccess } }) });
   callback?.(); callback?.(); expect(success.take()?.text).toBe('后台任务跟进已更新，请重新打开终端以继续跟进');
-  expect(success.take()?.text).toContain('已开启后台任务跟进'); expect(success.take()).toBeUndefined();
+  expect(success.take()).toBeUndefined();
 });

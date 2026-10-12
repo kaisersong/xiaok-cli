@@ -24,12 +24,12 @@ it('returns at 2000ms and delivers a late instance without a timeout notice', as
   const instance = {} as CliConversationActivities; s.resolve(instance);
   await vi.advanceTimersByTimeAsync(0);
   expect(s.onLate).toHaveBeenCalledExactlyOnceWith(instance); expect(s.onSettled).toHaveBeenCalledOnce();
-  expect(s.notices.take()?.text).toBe('已开启后台任务跟进：长任务在后台运行时，xiaok 会告诉你进展。不需要的话，设置 XIAOK_CONVERSATION_ACTIVITY=0 即可关闭。');
+  expect(s.notices.take()).toBeUndefined();
 });
 it('returns an instance within budget without late callbacks', async () => {
   const s = setup(); const instance = {} as CliConversationActivities;
   setTimeout(() => s.resolve(instance), 200); await vi.advanceTimersByTimeAsync(200);
-  expect(await s.promise).toBe(instance); expect(s.onLate).not.toHaveBeenCalled(); expect(s.onSettled).not.toHaveBeenCalled();
+  expect(await s.promise).toBe(instance); expect(s.notices.take()).toBeUndefined(); expect(s.onLate).not.toHaveBeenCalled(); expect(s.onSettled).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
 it.each([false, true])('queues ordinary owner failure (deferred=%s)', async deferred => {

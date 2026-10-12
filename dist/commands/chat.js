@@ -1,3 +1,5 @@
+import { confirmChatPermission } from './chat-permission.js';
+import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, delimiter, join } from 'node:path';
@@ -735,9 +737,11 @@ async function runChat(initialInput, opts) {
         }),
     ];
     const initialPromptSnapshot = await buildPromptSnapshot();
+    // Project-provided allow rules stay unapproved by default; startup never requests adoption.
     const persistedPermissionSettings = await loadSettings(cwd);
     const persistedPermissionRules = mergeRules(persistedPermissionSettings);
     const permissionManager = new PermissionManager({
+        cwd,
         mode: autoMode ? 'auto' : 'default',
         allowRules: persistedPermissionRules.allowRules,
         denyRules: persistedPermissionRules.denyRules,
@@ -828,36 +832,16 @@ async function runChat(initialInput, opts) {
         dryRun: opts.dryRun,
         permissionManager,
         onPrompt: async (name, input) => {
-            const tuiDecide = async () => {
-                const choice = await showPermissionPrompt(name, input, {
-                    transcriptLogger, renderer: replRenderer, permissionMode: permissionManager.getMode(),
-                });
-                if (choice.action === 'deny')
-                    return false;
-                if (choice.action === 'allow_once')
-                    return true;
-                if (choice.action === 'allow_session') {
-                    permissionManager.addSessionRule(choice.rule);
-                    return true;
-                }
-                if (choice.action === 'allow_project') {
-                    await addAllowRule('project', choice.rule, cwd);
-                    permissionManager.addSessionRule(choice.rule);
-                    return true;
-                }
-                if (choice.action === 'allow_global') {
-                    await addAllowRule('global', choice.rule, cwd);
-                    permissionManager.addSessionRule(choice.rule);
-                    return true;
-                }
-                return false;
-            };
-            return withPausedLiveActivity(async () => {
-                if (embeddedChannels.length > 0) {
-                    return embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input);
-                }
-                return tuiDecide();
-            });
+            return withPausedLiveActivity(() => confirmChatPermission(name, input, {
+                prompt: (toolName, toolInput, signal) => showPermissionPrompt(toolName, toolInput, {
+                    transcriptLogger, renderer: replRenderer, permissionMode: permissionManager.getMode(), signal,
+                }),
+                race: embeddedChannels.length > 0
+                    ? tuiDecide => embeddedChannels[0].makeOnPrompt(tuiDecide)(name, input)
+                    : undefined,
+                addAllowRule: (scope, rule) => addAllowRule(scope, rule, cwd),
+                addSessionRule: rule => permissionManager.addSessionRule(rule),
+            }));
         },
         onSandboxDenied: async (deniedPath, toolName) => {
             return withPausedLiveActivity(async () => {
@@ -3321,11 +3305,12 @@ async function runChat(initialInput, opts) {
                     continue;
                 }
                 const transport = new YZJTransport({ webhookUrl: yzjConfig.webhookUrl });
+                const allowedSenders = normalizeAllowedSenders(selectedChannel.allowedSenders ?? yzjConfig.allowedSenders);
                 const embedded = new EmbeddedYZJChannel({
+                    allowedSenders,
                     runtimeFacade: runtimeFacade,
                     runtimeHooks,
                     approvalStore: embeddedApprovalStore,
-                    onPromptOverride: async () => true,
                     transport,
                     selectedChannel,
                     yzjConfig,
@@ -3334,6 +3319,8 @@ async function runChat(initialInput, opts) {
                 });
                 await embedded.start();
                 embeddedChannels.push(embedded);
+                if (!allowedSenders?.length)
+                    writeCommandOutput(trimmed, `${SENDER_ALLOWLIST_MIGRATION}\n\n`);
                 continue;
             }
             if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
