@@ -49,3 +49,16 @@ tar -xzf handoff/evidence/xiaok-unfinished-shutdown-supplement-20261011.tar.gz
 ```
 
 GitHub Release 大包上传超时，已改为直接放入本检查点分支的精简4.6MB历史证据包；不依赖Release下载。其manifest明确只迁移986份小结果/审查票/当前两组记录，旧机8.7GB完整缓存仍保留，缺失的raw日志不能拿摘要补证，应按新机epoch重新验证。
+
+
+## 2026-10-12 session 恢复后检查点（此节为最新进度）
+
+- 从旧 session `01a1260d-bb6a-7fb0-b46f-4a6f928be784` 的只读恢复记录接续；未修改旧 rollout 或共享 app-server。恢复断点217/298。
+- 技能只读2完整源码组件已通过 fresh independent `APPROVE_CODE`：当前219/298，剩79。源码提交 `56547ff2`、文档提交 `697cca6` 均已推送检查点分支。**全部父任务未完成，尚未合并主干。**
+- 修复了实际 bridge 仍吞读取错误（页面mock绿未覆盖），外部技能Windows文件名、周统计/详情历史NaN显示和ChatInput初读unknown遗漏。原getter/proxy/serializer/nativePromise/完整metadata与stats10字段、旧错误/正常行为保留；来源观察器只用于Desktop，CLI默认容错保持。
+- 当前真实关联97files1105/1105/0pending、CLI12files187/187、完整Main/Renderer strict0、gov/changed/newtestlint12无新增、两build0；自有目录Electron source IPC11成功。探针仅实际CJS/authority/Recorder/typedregistrars及提取真实service+reader/catalog链，**不是正常安装/全部UI/私有native权威票**。补充chmod故障是本机macOS实测，Windows ACL/NTFS与新fixture平台验证继续列在父门，不能外推。
+- 两批因果RED（119=111/8与37=36/1）均保留；手动停止的CODE R1因发现初读unknown缺口，exit143/reaped/groupGone/0drift保留，无审批结论。随后修正与新完整CODE R2才接受。原自动中断native/material/P4没有改名或重试。
+- 新证据包 `handoff/evidence/xiaok-skills-readonly-recovery-evidence-20261012.tar.gz`、同名sha256及manifest：397份source snapshot/driver/日志/结果/审查/台账与后继预查，约2.5MB；不含依赖、原生凭证、安装目录、live PID/CPU lock或foreign WIP。按sha校验后解压到仓库根。
+- 最新父队列 `.artifacts/unfinished-closure-20261001/parent-complete-acceptance-queue-skills-readonly-20261012-recovery-r1.json`；当前组件 final/进度在 `skills-readonly2-20261012-kk-r1/skills-component-final-recovery-r1.json` 与 `recovery-20261012-progress.json`。原176/351清单SHA冻结值保持，全部176/351源文件可用；这不是新父验收通过。
+- 下一普通域 Channel/MCP readonly2 已有只读preflight、真实提取当前service方法+真实loadConfig/FileIO的7case characterization与设计草案，**尚未DESIGN批准、没有生产改动、没有加计数**。见 `channel-mcp-readonly2-20261012-recovery-r1/`：坏MCP JSON假空、非数组/坏row直接成功；坏Channel配置被旧loadConfig改为.bak后假空。拟Desktop-only真实只读reader，保Core/CLI原repair行为及mutation7父债；实际runtime App→AppLayout→DesktopSettings两pane，legacy source引用与HTTP API债仍保父范围。
+- sibling主checkout与foreign WIP未改；开工hygiene exit1保留（KSwarm/broker各落后1、plugins落后2）。所有原父176/351/99原15s/300s/3600s、14/Loop13/84paired/50-100-512MiB、allwriters/正常安装/Windows/真实UI-TTY/同版unsigned包/CI保持。用户已授权全部完成后合并最新主干测试；普通操作不重复确认，原任务不派子代理。
