@@ -1,3 +1,4 @@
+import type { ChannelReadonlyView, McpInstallReadonlyView } from '../shared/channel-mcp-readonly-ipc-contract.js';
 import type { SkillListDto } from '../shared/skill-list-ipc-contract.js';
 import type { AutomationConfigDto, AutomationOverviewDto } from '../shared/automation-config-ipc-contract.js';
 import type { MobileRelaySignInResult } from '../shared/mobile-signin-ipc-contract.js';
@@ -850,15 +851,7 @@ export type DesktopMobilePairingInfo = MobilePairingInfoDto;
 
 export type DesktopChannelType = 'yunzhijia' | 'discord' | 'feishu' | 'qq' | 'qqbot' | 'weixin' | 'telegram';
 
-export interface DesktopChannelView {
-  id: string;
-  type: DesktopChannelType;
-  name: string;
-  webhookUrl?: string;
-  enabled: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
+export type DesktopChannelView = ChannelReadonlyView;
 
 export interface DesktopChannelInput {
   type: DesktopChannelType;
@@ -866,15 +859,7 @@ export interface DesktopChannelInput {
   webhookUrl?: string;
 }
 
-export interface DesktopMCPInstallView {
-  id: string;
-  name: string;
-  source: 'npm' | 'github' | 'local';
-  command: string;
-  args?: string[];
-  enabled: boolean;
-  createdAt: number;
-}
+export type DesktopMCPInstallView = McpInstallReadonlyView;
 
 export interface DesktopMCPInput {
   name: string;

@@ -1,3 +1,4 @@
+import { readChannelViews, readMcpInstallViews } from './channel-mcp-readonly-data.js';
 import { captureSkillReadonlyPromise } from './skill-readonly-data.js';
 import { types as skillNodeTypes } from 'node:util';
 import type {ConnectorsMutationRequest} from '../shared/connectors-ipc-contract.js';
@@ -3948,20 +3949,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
     // ---- Channel API (shared config.json) ----
     async listChannels(): Promise<Array<{ id: string; type: string; name: string; webhookUrl?: string; enabled: boolean; createdAt: number; updatedAt: number }>> {
-      const config = await loadConfig();
-      const channels = (config as unknown as Record<string, unknown>).channels ?? {};
-      return Object.entries(channels).map(([key, ch]) => {
-        const c = ch as { sendMsgUrl?: string; webhookUrl?: string; inboundMode?: string; enabled?: boolean; name?: string };
-        return {
-          id: key,
-          type: key,
-          name: c.name || key,
-          webhookUrl: c.webhookUrl || c.sendMsgUrl,
-          enabled: c.enabled !== false,
-          createdAt: 0,
-          updatedAt: 0,
-        };
-      });
+      return readChannelViews();
     },
     async testChannel(channelId: string): Promise<{ success: boolean; latencyMs?: number; error?: string }> {
       const config = await loadConfig();
@@ -4035,8 +4023,7 @@ export function createDesktopServices(options: DesktopServicesOptions) {
 
     // ---- MCP API ----
     async listMCPInstalls(): Promise<Array<{ id: string; name: string; source: string; command: string; args?: string[]; enabled: boolean; createdAt: number }>> {
-      const path = join(options.dataRoot, 'mcp-installs.json');
-      try { return JSON.parse(readFileSync(path, 'utf-8')) } catch { return []; }
+      return readMcpInstallViews(options.dataRoot);
     },
     async createMCPInstall(input: { name: string; source: 'npm' | 'github' | 'local'; command: string; args?: string[] }) {
       const path = join(options.dataRoot, 'mcp-installs.json');

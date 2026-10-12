@@ -7,7 +7,7 @@ import { DIAGNOSTICS_OUTPUT_SCHEMAS } from '../../../shared/desktop-diagnostics-
 import type { DesktopSkillStats } from '../../../shared/desktop-diagnostics-ipc-contract';
 import type { SkillListDto } from '../../../shared/skill-list-ipc-contract';
 const readList = () => api.listSkills(), readStats = () => api.getSkillStats();
-function useReadonly<T>(read: () => Promise<T>, schema: ZodType<T>, catalogEvents: boolean) {
+export function useDesktopReadonly<T>(read: () => Promise<T>, schema: ZodType<T>, catalogEvents: boolean) {
   const { locale } = useLocale();
   const [data, setData] = useState<T | null>(null), [failed, setFailed] = useState(false), [reading, setReading] = useState(true);
   type Waiter = { resolve(value: T): void; reject(error: unknown): void };
@@ -56,5 +56,5 @@ function useReadonly<T>(read: () => Promise<T>, schema: ZodType<T>, catalogEvent
   }, [locale, refresh, catalogEvents]);
   return { data, failed, reading, refresh, reload };
 }
-export function useSkillListReadonly() { return useReadonly<SkillListDto>(readList, SKILL_LIST_OUTPUT_SCHEMA, true); }
-export function useSkillStatsReadonly() { return useReadonly<DesktopSkillStats[]>(readStats, DIAGNOSTICS_OUTPUT_SCHEMAS.getSkillStats, false); }
+export function useSkillListReadonly() { return useDesktopReadonly<SkillListDto>(readList, SKILL_LIST_OUTPUT_SCHEMA, true); }
+export function useSkillStatsReadonly() { return useDesktopReadonly<DesktopSkillStats[]>(readStats, DIAGNOSTICS_OUTPUT_SCHEMAS.getSkillStats, false); }

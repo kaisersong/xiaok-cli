@@ -1,3 +1,5 @@
+import { useChannelReadonly } from '../hooks/useChannelReadonly';
+import { MCP_INSTALLS_READONLY_OUTPUT_SCHEMA } from '../../../shared/channel-mcp-readonly-ipc-contract';
 import { useSkillListReadonly, useSkillStatsReadonly } from '../hooks/useSkillReadonly';
 import type { PluginMcpServerDto, PluginDependencyStatusDto } from '../../../shared/plugin-catalog-ipc-contract';
 import {connectorsErrorMessage} from '../lib/connectors-error';
@@ -2095,8 +2097,9 @@ function getChannelTypeConfig(ts: ReturnType<typeof useLocale>['t']['desktopSett
 }
 
 function ChannelsPane() {
-  const [channels, setChannels] = useState<ChannelConfig[]>([]);
-  const [loading, setLoading] = useState(true);
+  const channelFacts = useChannelReadonly();
+  const channels: ChannelConfig[] = channelFacts.data ?? [];
+  const loading = channelFacts.reading && channelFacts.data === null;
   const [showAdd, setShowAdd] = useState(false);
   const [newType, setNewType] = useState('yunzhijia');
   const [newName, setNewName] = useState('');
@@ -2109,14 +2112,7 @@ function ChannelsPane() {
   const ts = t.desktopSettings;
   const channelTypeConfig = getChannelTypeConfig(ts);
 
-  const load = () => {
-    api.listChannels()
-      .then(setChannels)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => { load(); }, []);
+  const load = channelFacts.refresh;
 
   // Reset fields when type changes
   useEffect(() => {
@@ -2177,8 +2173,10 @@ function ChannelsPane() {
 
   return (
     <>
+      {channelFacts.failed && <p role="alert">{t.channelReadonlyUnavailable}</p>}
+      <button type="button" onClick={load}>{t.desktopReadonlyRetry}</button>
       <Section>
-        <SectionHeader icon={Globe}>{ts.channelsTitle}</SectionHeader>
+        <SectionHeader icon={Globe}>{channelFacts.data === null ? t.channelReadonlyUnknown : ts.channelsTitle}</SectionHeader>
         {/* Status messages */}
         {success && (
           <div className="mb-3 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-600">
@@ -2265,7 +2263,7 @@ function ChannelsPane() {
 
         {/* Channel list */}
         <div className="flex flex-col gap-2">
-          {channels.length === 0 ? (
+          {channelFacts.data === null ? <p>{t.channelReadonlyUnknown}</p> : channels.length === 0 ? (
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />
@@ -2348,7 +2346,7 @@ interface MCPInstallConfig {
 type PluginDependencyStatus = PluginDependencyStatusDto;
 
 function McpPane() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const ts = t.desktopSettings;
   const [installs, setInstalls] = useState<MCPInstallConfig[]>([]);
   const [pluginServers, setPluginServers] = useState<PluginMcpServerDto[]>([]);
@@ -2360,6 +2358,7 @@ function McpPane() {
   const [newArgs, setNewArgs] = useState('');
   const [dependencyAction, setDependencyAction] = useState('');
 
+  const [installsReady, setInstallsReady] = useState(false), [installsUnavailable, setInstallsUnavailable] = useState(false);
   const [catalogUnavailable, setCatalogUnavailable] = useState(false);
   const readGeneration = useRef(0), pendingRead = useRef<number | null>(null), manualReread = useRef(false);
   const load = useCallback((queueIfBusy = true) => {
@@ -2367,12 +2366,13 @@ function McpPane() {
     const generation = ++readGeneration.current;
     pendingRead.current = generation;
     Promise.allSettled([
-      api.listMCPInstalls().catch(() => []),
+      (async () => { const raw = await api.listMCPInstalls(); const parsed = MCP_INSTALLS_READONLY_OUTPUT_SCHEMA.safeParse(raw); if (!parsed.success) throw Error('channel_mcp_projection_unavailable'); return parsed.data; })(),
       api.listPluginMcpServers(),
       api.listPluginDependencyStatuses(),
     ]).then(([mcpInstalls, plugins, dependencyStatuses]) => {
       if (generation !== readGeneration.current) return;
-      if (mcpInstalls.status === 'fulfilled') setInstalls(mcpInstalls.value);
+      if (mcpInstalls.status === 'fulfilled') { setInstalls(mcpInstalls.value); setInstallsReady(true); }
+      setInstallsUnavailable(mcpInstalls.status === 'rejected');
       if (plugins.status === 'fulfilled') setPluginServers(plugins.value);
       if (dependencyStatuses.status === 'fulfilled') setDependencies(dependencyStatuses.value);
       setCatalogUnavailable(plugins.status === 'rejected' || dependencyStatuses.status === 'rejected');
@@ -2388,7 +2388,7 @@ function McpPane() {
     load();
     const timer = setInterval(() => load(false), 2_000);
     return () => { clearInterval(timer); readGeneration.current += 1; pendingRead.current = null; manualReread.current = false; };
-  }, [load]);
+  }, [load, locale]);
 
   const handleCreate = async () => {
     if (!newName.trim() || !newCommand.trim()) return;
@@ -2550,6 +2550,8 @@ function McpPane() {
 
   return (
     <>
+      {installsUnavailable && <p role="alert">{t.mcpInstallsReadonlyUnavailable}</p>}
+      <button type="button" onClick={() => load()}>{t.desktopReadonlyRetry}</button>
       {catalogUnavailable && <div role="alert" className="mb-3 text-sm text-red-500">{ts.pluginsCatalogUnavailable}</div>}
       {dependencies.length > 0 && (
         <Section>
@@ -2784,7 +2786,7 @@ function McpPane() {
         )}
 
         <div className="flex flex-col gap-2">
-          {installs.length === 0 ? (
+          {!installsReady ? <Card>{t.mcpInstallsReadonlyUnknown}</Card> : installs.length === 0 ? (
             <Card>
               <div className="flex items-center gap-3 text-sm text-[var(--c-text-secondary)]">
                 <Info size={16} />

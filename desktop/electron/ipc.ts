@@ -1,3 +1,4 @@
+import { registerChannelMcpReadonlyIpc } from './channel-mcp-readonly-typed-ipc.js';
 import { registerSkillListIpc } from './skill-list-typed-ipc.js';
 import { captureIpcData } from './ipc-data-snapshot.js';
 import { captureSkillListServiceResult } from './skill-readonly-data.js';
@@ -1303,7 +1304,11 @@ export async function registerDesktopIpc(
     return r;
   });
   // Channel IPC
-  ipcMain.handle('desktop:listChannels', async () => services.listChannels());
+  const channelMcpReadonlyProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:listChannels', () => services.listChannels()],
+    ['desktop:listMCPInstalls', () => services.listMCPInstalls()],
+  ]);
+  registerChannelMcpReadonlyIpc(ipcMain, channelMcpReadonlyProducers);
   ipcMain.handle('desktop:testChannel', async (_event, channelId) => {
     log('info', 'testChannel', { channelId });
     const r = await services.testChannel(channelId);
@@ -1314,7 +1319,6 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:updateChannel', async (_event, id, input) => services.updateChannel(id, input));
   ipcMain.handle('desktop:deleteChannel', async (_event, id) => services.deleteChannel(id));
   // MCP IPC
-  ipcMain.handle('desktop:listMCPInstalls', async () => services.listMCPInstalls());
   ipcMain.handle('desktop:createMCPInstall', async (_event, input) => services.createMCPInstall(input));
   ipcMain.handle('desktop:updateMCPInstall', async (_event, id, input) => services.updateMCPInstall(id, input));
   ipcMain.handle('desktop:deleteMCPInstall', async (_event, id) => services.deleteMCPInstall(id));

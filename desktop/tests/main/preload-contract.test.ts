@@ -1,3 +1,4 @@
+import { registerChannelMcpReadonlyIpc } from '../../electron/channel-mcp-readonly-typed-ipc.js';
 import { registerSkillListIpc } from '../../electron/skill-list-typed-ipc.js';
 import { registerAutomationConfigIpc } from '../../electron/automation-config-typed-ipc.js';
 import { registerMobileSignInIpc } from '../../electron/mobile-signin-typed-ipc.js';
@@ -1069,6 +1070,7 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerMobileSignInIpc({ handle: channel => { channels.add(channel); } });
   registerAutomationConfigIpc({ handle: channel => { channels.add(channel); } });
   registerSkillListIpc({ handle: channel => { channels.add(channel); } });
+  registerChannelMcpReadonlyIpc({ handle: channel => { channels.add(channel); } });
   registerKSwarmProxy({ handle: channel => { channels.add(channel); } }, {} as never);
 registerLoopOutputIpc({handle:channel=>{channels.add(channel);}},{} as never,()=>false);
   registerConversationActivityIpc({ handle: channel => { channels.add(channel); } }, null, () => null);
