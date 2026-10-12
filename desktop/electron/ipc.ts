@@ -1,5 +1,9 @@
 import { registerMeetingActions10Ipc, captureMeeting10LiveUpdate } from './meeting-actions10-typed-ipc.js';
 import { safeMeeting10Thrown } from './meeting-actions10-error-policy.js';
+import { registerTask7Ipc, callTask7Producer, captureTask7Output, captureTask7Event } from './task7-typed-ipc.js';
+import { registerMaterialAccessIpc } from './material-access-typed-ipc.js';
+import { captureMaterialAccessPromise } from './material-access-data.js';
+import { registerProjectPlanningIpc } from './project-planning-typed-ipc.js';
 import { registerPluginActionIpc } from './plugin-action-typed-ipc.js';
 import { openPluginPermissionSettings } from './plugin-action-service.js';
 import { registerComputerUseCapabilityReadonlyIpc } from './runtime-status-readonly-typed-ipc.js';
@@ -793,6 +797,10 @@ export async function registerDesktopIpc(
     if (!actor) throw new Error('task_actor_forbidden');
     return { ...actor, requestSource: 'user' as const };
   };
+  const recheckTaskActor = (event: IpcMainInvokeEvent, actor: { actorId: string }) => {
+    if (taskActor(event).actorId !== actor.actorId) throw Error('task_actor_forbidden');
+  };
+  const task7Producers = new Map<string, IpcHandlerListener>();
   const disposeMultiAgentViews = registerDesktopMultiAgentIpc(ipcMain, services.multiAgent, {
     authorize: event => options.multiAgentAuthorize?.(event) ?? null,
   });
@@ -971,14 +979,15 @@ export async function registerDesktopIpc(
     return invokeArtifactWorkspaceIpcOperation(artifactWorkspaceServices, 'recordArtifactWorkspaceEvent', rawInput);
   });
   registerModelProviderIpc(ipcMain, services, options.multiAgentAuthorize as Parameters<typeof registerModelProviderIpc>[2]);
-  ipcMain.handle('desktop:kswarm:startProjectPlanning', async (_event, input) => {
+  registerProjectPlanningIpc(ipcMain, async (_event, input) => {
     log('info', 'startProjectPlanning', { projectId: input?.projectId });
-    const r = services.startProjectPlanning(input);
+    const r = services.startProjectPlanning(input, 'user');
     log('info', 'startProjectPlanning ok', { ok: r?.ok });
     return r;
   });
   fileHandler('desktop:readClipboardFilePaths', ignoredClipboardInput, clipboardFilePathsResult, ['clipboard', 'fs-read'], async () => expandSelectedMaterialPaths(readClipboardPathCandidates(clipboard)), 2);
-  ipcMain.handle('desktop:readClipboardImage', async () => {
+  const materialAccessProducers = new Map<string, IpcHandlerListener>([
+    ['desktop:readClipboardImage', async () => {
     try {
       const img = clipboard.readImage();
       if (img.isEmpty()) return null;
@@ -989,24 +998,24 @@ export async function registerDesktopIpc(
       await writeFile(filePath, png);
       return filePath;
     } catch { return null; }
-  });
-  ipcMain.handle('desktop:selectDirectory', async () => {
+  }],
+    ['desktop:selectDirectory', async () => {
     log('info', 'selectDirectory');
-    const result = await dialog.showOpenDialog(primaryWindow(), {
+    const result = await captureMaterialAccessPromise(dialog.showOpenDialog(primaryWindow(), {
       properties: ['openDirectory', 'createDirectory'],
-    });
+    }), value => captureIpcData(value, 'material_access_projection_unavailable'));
     if (result.canceled || !result.filePaths[0]) {
       log('info', 'selectDirectory cancelled');
       return { filePath: '' };
     }
     log('info', 'selectDirectory ok', { filePath: result.filePaths[0] });
     return { filePath: result.filePaths[0] };
-  });
-  ipcMain.handle('desktop:selectMaterials', async () => {
+  }],
+    ['desktop:selectMaterials', async () => {
     log('info', 'selectMaterials');
-    const result = await dialog.showOpenDialog(primaryWindow(), {
+    const result = await captureMaterialAccessPromise(dialog.showOpenDialog(primaryWindow(), {
       properties: ['openFile', 'multiSelections'],
-    });
+    }), value => captureIpcData(value, 'material_access_projection_unavailable'));
     if (result.canceled) {
       log('info', 'selectMaterials cancelled');
       return { filePaths: [] };
@@ -1014,13 +1023,46 @@ export async function registerDesktopIpc(
     const expanded = await expandSelectedMaterialPaths(result.filePaths);
     log('info', 'selectMaterials ok', { fileCount: expanded.length });
     return { filePaths: expanded };
-  });
-  ipcMain.handle('desktop:importMaterial', async (_event, input) => {
-    log('info', 'importMaterial', { filePath: input?.filePath });
-    const r = await services.importMaterial(input);
-    log('info', 'importMaterial ok');
-    return r;
-  });
+  }],
+    ['desktop:importMaterial', (_event, input) => { log('info', 'importMaterial', { filePath: input.filePath }); return services.importMaterial(input, 'user'); }],
+    ['desktop:openArtifact', (_event, input) => { log('info', 'openArtifact', { artifactId: input.artifactId }); return services.openArtifact(input.artifactId); }],
+    ['desktop:selectHtmlEditMedia', async (_event, input) => {
+    const kind = input?.kind as 'image' | 'svg' | undefined;
+    if (kind !== 'image' && kind !== 'svg') {
+      return { canceled: true, filePath: '', content: '', error: 'invalid_kind' };
+    }
+
+    const result = await captureMaterialAccessPromise(dialog.showOpenDialog(primaryWindow(), {
+      properties: ['openFile'],
+      filters: kind === 'image'
+        ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'] }]
+        : [{ name: 'SVG', extensions: ['svg'] }],
+    }), value => captureIpcData(value, 'material_access_projection_unavailable'));
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) {
+      return { canceled: true, filePath: '', content: '' };
+    }
+
+    try {
+      if (kind === 'image') {
+        const mimeType = getHtmlEditImageMimeType(filePath);
+        if (!mimeType) {
+          return { canceled: true, filePath, content: '', error: 'invalid_extension' };
+        }
+        const content = await readFile(filePath);
+        return { canceled: false, filePath, content: `data:${mimeType};base64,${content.toString('base64')}` };
+      }
+
+      if (extname(filePath).toLowerCase() !== '.svg') {
+        return { canceled: true, filePath, content: '', error: 'invalid_extension' };
+      }
+      return { canceled: false, filePath, content: await readFile(filePath, 'utf-8') };
+    } catch (e) {
+      return { canceled: true, filePath, content: '', error: 'media_read_failed' };
+    }
+  }],
+  ]);
+  registerMaterialAccessIpc(ipcMain, materialAccessProducers);
   const observationSenders = new Map<string, {sender:IpcMainInvokeEvent['sender'];control:object}>();
   const watchedObservationSenders = new WeakSet<object>();
   const observationApprovals = createDesktopObservationApprovals({
@@ -1087,9 +1129,11 @@ export async function registerDesktopIpc(
   observationIpc.handle('desktop:stopObservationTask',observationControl('stop'));
   observationIpc.handle('desktop:revokeObservationTask',observationControl('revoke'));
   observationIpc.handle('desktop:getObservationTaskStatus',observationControl('status'));
-  ipcMain.handle('desktop:createTask', async (_event, input) => {
-    log('info', 'createTask', { prompt: input?.prompt?.slice(0, 50) });
-    const r = await services.createTask(sanitizeTaskCreateInput(input), options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+  task7Producers.set('desktop:createTask', async (_event, input) => {
+    const actor = taskActor(_event);
+    const clean = sanitizeTaskCreateInput(input);
+    log('info', 'createTask', { prompt: clean.prompt.slice(0, 50) });
+    const r = captureTask7Output('createTask', await callTask7Producer(() => services.createTask(clean, actor)));
     log('info', 'createTask ok', { taskId: r?.taskId });
     return r;
   });
@@ -1154,37 +1198,35 @@ export async function registerDesktopIpc(
       threadId: parseGoalThreadId(input.threadId), pending: input.pending,
     });
   });
-  ipcMain.handle('desktop:answerQuestion', async (_event, input) => {
-    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+  task7Producers.set('desktop:answerQuestion', async (_event, input) => {
+    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'answerQuestion', { taskId: input?.taskId });
-    const r = await services.answerQuestion(input, actor);
+    const r = captureTask7Output('answerQuestion', await callTask7Producer(() => services.answerQuestion(input, actor)));
     log('info', 'answerQuestion ok');
     return r;
   });
-  ipcMain.handle('desktop:cancelTask', async (_event, input) => {
-    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+  task7Producers.set('desktop:cancelTask', async (_event, input) => {
+    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'cancelTask', { taskId: input?.taskId });
-    await services.cancelTask(input.taskId, actor);
+    captureTask7Output('cancelTask', await callTask7Producer(() => services.cancelTask(input.taskId, actor)));
     log('info', 'cancelTask ok');
   });
-  ipcMain.handle('desktop:getActiveTask', async (_event) => {
+  task7Producers.set('desktop:getActiveTask', async (_event) => {
     const actor = taskActor(_event);
-    const r = await services.getActiveTask();
-    if (r) await services.authorizeTaskRead(r.taskId, actor);
+    const r = captureTask7Output('getActiveTask', await callTask7Producer(() => services.getActiveTask()));
+    recheckTaskActor(_event, actor);
+    if (r) await callTask7Producer(() => services.authorizeTaskRead(r.taskId, actor));
     log('debug', 'getActiveTask', { taskId: r?.taskId ?? null });
     return r;
   });
-  ipcMain.handle('desktop:recoverTask', async (_event, input) => {
-    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+  task7Producers.set('desktop:recoverTask', async (_event, input) => {
+    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
     log('info', 'recoverTask', { taskId: input?.taskId });
-    const r = await services.recoverTask(input.taskId, typeof input.legacyPrompt === 'string' ? input.legacyPrompt : undefined);
-    await services.authorizeTaskRead(r.snapshot.taskId, actor);
+    const r = captureTask7Output('recoverTask', await callTask7Producer(() => services.recoverTask(input.taskId, input.legacyPrompt)));
+    await callTask7Producer(() => services.authorizeTaskRead(r.snapshot.taskId, actor));
+    recheckTaskActor(_event, actor);
     log('info', 'recoverTask ok', { status: r?.snapshot?.status });
     return r;
-  });
-  ipcMain.handle('desktop:openArtifact', async (_event, input) => {
-    log('info', 'openArtifact', { artifactId: input?.artifactId });
-    return services.openArtifact(input.artifactId);
   });
   fileHandler('desktop:openFileInSystemApp', filePathInput, openFileResult, ['shell-open'], async (input) => {
     const filePath = input?.filePath as string;
@@ -1207,55 +1249,24 @@ export async function registerDesktopIpc(
       return { content: '', error: String(e) };
     }
   });
-  ipcMain.handle('desktop:selectHtmlEditMedia', async (_event, input) => {
-    const kind = input?.kind as 'image' | 'svg' | undefined;
-    if (kind !== 'image' && kind !== 'svg') {
-      return { canceled: true, filePath: '', content: '', error: 'invalid_kind' };
-    }
-
-    const result = await dialog.showOpenDialog(primaryWindow(), {
-      properties: ['openFile'],
-      filters: kind === 'image'
-        ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'] }]
-        : [{ name: 'SVG', extensions: ['svg'] }],
-    });
-    const filePath = result.filePaths[0];
-    if (result.canceled || !filePath) {
-      return { canceled: true, filePath: '', content: '' };
-    }
-
-    try {
-      if (kind === 'image') {
-        const mimeType = getHtmlEditImageMimeType(filePath);
-        if (!mimeType) {
-          return { canceled: true, filePath, content: '', error: 'invalid_extension' };
-        }
-        const content = await readFile(filePath);
-        return { canceled: false, filePath, content: `data:${mimeType};base64,${content.toString('base64')}` };
-      }
-
-      if (extname(filePath).toLowerCase() !== '.svg') {
-        return { canceled: true, filePath, content: '', error: 'invalid_extension' };
-      }
-      return { canceled: false, filePath, content: await readFile(filePath, 'utf-8') };
-    } catch (e) {
-      return { canceled: true, filePath, content: '', error: String(e) };
-    }
-  });
   const disposeActivity = registerConversationActivityIpc(ipcMain, services.conversationActivity, event => options.multiAgentAuthorize?.(event) ?? null);
   options.registerLifetimeDisposer?.(disposeActivity);
   const activeTaskSubs = new Map<string, AbortController>();
   const activeTaskSubIds = new Map<string, string>();
   options.registerLifetimeDisposer?.(() => { for (const controller of activeTaskSubs.values()) controller.abort(); activeTaskSubs.clear(); activeTaskSubIds.clear(); });
-  ipcMain.handle('desktop:unsubscribeTask', async (_event, input) => {
+  ipcMain.handle('desktop:unsubscribeTask', async (_event, ...args) => {
     taskActor(_event);
+    const data = captureIpcData(args, 'task_input_invalid');
+    const parsed = z.tuple([z.object({ taskId: z.string().min(1), subscriptionId: z.string().min(1).max(256).optional() }).strict()]).safeParse(data);
+    if (!parsed.success) throw Error('task_input_invalid');
+    const [input] = parsed.data;
     const key = `${(_event?.sender ?? primaryWindow().webContents).id}:${input.taskId}`;
     if (typeof input.subscriptionId === 'string' && activeTaskSubIds.get(key) === input.subscriptionId) {
       activeTaskSubs.get(key)?.abort(); activeTaskSubs.delete(key); activeTaskSubIds.delete(key);
     }
   });
-  ipcMain.handle('desktop:subscribeTask', async (_event, input) => {
-    const actor = taskActor(_event); await services.authorizeTaskRead(input.taskId, actor);
+  task7Producers.set('desktop:subscribeTask', async (_event, input) => {
+    const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);
     if (input.sinceIndex !== undefined && (!Number.isSafeInteger(input.sinceIndex) || input.sinceIndex < 0)) throw new Error('invalid_task_event_cursor');
     if (input.subscriptionId !== undefined && (typeof input.subscriptionId !== 'string' || !input.subscriptionId.length || input.subscriptionId.length > 256)) throw new Error('invalid_task_subscription_id');
     const taskId = input.taskId as string;
@@ -1286,13 +1297,16 @@ export async function registerDesktopIpc(
           if (controller.signal.aborted || target.isDestroyed?.()) {
             break;
           }
-          await services.authorizeTaskRead(taskId, actor);
-          target.send(`desktop:taskEvent:${taskId}`, event);
+          const dto = captureTask7Event(event);
+          await callTask7Producer(() => services.authorizeTaskRead(taskId, actor));
+          if (controller.signal.aborted || target.isDestroyed?.()) break;
+          recheckTaskActor(_event, actor);
+          target.send(`desktop:taskEvent:${taskId}`, dto);
         }
         log('info', 'subscribeTask stream ended', { taskId });
       } catch (e) {
         if (!controller.signal.aborted) {
-          log('error', 'subscribeTask error', { taskId, message: String(e) });
+          log('error', 'subscribeTask error', { taskId, message: 'task_subscription_failed' });
         }
       } finally {
         target.removeListener?.('destroyed', onDestroyed);
@@ -1347,22 +1361,21 @@ export async function registerDesktopIpc(
     ['desktop:openPluginDependencyPermissionSettings', (_event, input) => openPluginPermissionSettings(input, 'user', url => shell.openExternal(url))],
   ]);
   registerPluginActionIpc(ipcMain, pluginActionProducers);
-  ipcMain.handle('desktop:createTaskWithFiles', async (_event, input) => {
-    log('info', 'createTaskWithFiles', { prompt: input?.prompt?.slice(0, 50), files: input?.filePaths?.length });
-    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.prompt !== 'string' || !Array.isArray(input.filePaths)) {
-      throw new Error('invalid_task_files_input');
-    }
-    if (input.filePaths.some((value: unknown) => typeof value !== 'string')) throw new Error('invalid_task_file_path');
-    const expanded = await expandSelectedMaterialPaths(input.filePaths);
+  task7Producers.set('desktop:createTaskWithFiles', async (_event, input) => {
+    const actor = taskActor(_event);
     const context = sanitizeTaskContext(input.context);
-    const r = await services.createTaskWithFiles({
+    log('info', 'createTaskWithFiles', { prompt: input.prompt.slice(0, 50), files: input.filePaths.length });
+    const expanded = await callTask7Producer(() => expandSelectedMaterialPaths(input.filePaths));
+    recheckTaskActor(_event, actor);
+    const r = captureTask7Output('createTaskWithFiles', await callTask7Producer(() => services.createTaskWithFiles({
       prompt: input.prompt,
       filePaths: expanded,
       ...(context ? { context } : {}),
-    }, options.multiAgentAuthorize?.(_event) ? { ...options.multiAgentAuthorize(_event)!, requestSource: 'user' } : undefined);
+    }, actor)));
     log('info', 'createTaskWithFiles ok', { taskId: r?.taskId });
     return r;
   });
+  registerTask7Ipc(ipcMain, task7Producers, event => { taskActor(event); });
   registerDiagnosticsIpc(ipcMain, services);
 
   registerLoopManagementIpc(ipcMain, options.loopRuntime);

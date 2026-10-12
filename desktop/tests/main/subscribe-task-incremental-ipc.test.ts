@@ -28,7 +28,7 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     }
   });
 
-  function makeHarness(events: Array<{ type: string; n?: number }>) {
+  function makeHarness(events: Array<{ type: string; eventId: string; message: string }>) {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const ipcMain = {
       handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler),
@@ -61,7 +61,7 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
   }
 
   it('forwards only events at/after sinceIndex when provided', async () => {
-    const events = [{ type: 'a', n: 0 }, { type: 'b', n: 1 }, { type: 'c', n: 2 }, { type: 'd', n: 3 }];
+    const events = [{ type: 'progress', eventId: '0', message: 'a' }, { type: 'progress', eventId: '1', message: 'b' }, { type: 'progress', eventId: '2', message: 'c' }, { type: 'progress', eventId: '3', message: 'd' }];
     const h = makeHarness(events);
     await registerDesktopIpc(h.ipcMain as never, h.window as never, h.services as never, h.options);
 
@@ -69,11 +69,11 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     await flush();
 
     expect(h.subscribeCalls).toEqual([{ taskId: 'task_x', options: { sinceIndex: 2, signal: expect.any(AbortSignal) } }]);
-    expect(h.sent).toEqual([{ type: 'c', n: 2 }, { type: 'd', n: 3 }]);
+    expect(h.sent).toEqual([{ type: 'progress', eventId: '2', message: 'c' }, { type: 'progress', eventId: '3', message: 'd' }]);
   });
 
   it('forwards full history when sinceIndex is omitted', async () => {
-    const events = [{ type: 'a', n: 0 }, { type: 'b', n: 1 }];
+    const events = [{ type: 'progress', eventId: '0', message: 'a' }, { type: 'progress', eventId: '1', message: 'b' }];
     const h = makeHarness(events);
     await registerDesktopIpc(h.ipcMain as never, h.window as never, h.services as never, h.options);
 
@@ -81,11 +81,11 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     await flush();
 
     expect(h.subscribeCalls).toEqual([{ taskId: 'task_y', options: { signal: expect.any(AbortSignal) } }]);
-    expect(h.sent).toEqual([{ type: 'a', n: 0 }, { type: 'b', n: 1 }]);
+    expect(h.sent).toEqual([{ type: 'progress', eventId: '0', message: 'a' }, { type: 'progress', eventId: '1', message: 'b' }]);
   });
 
   it('treats sinceIndex of 0 as a full replay (not falsy-dropped)', async () => {
-    const events = [{ type: 'a', n: 0 }, { type: 'b', n: 1 }];
+    const events = [{ type: 'progress', eventId: '0', message: 'a' }, { type: 'progress', eventId: '1', message: 'b' }];
     const h = makeHarness(events);
     await registerDesktopIpc(h.ipcMain as never, h.window as never, h.services as never, h.options);
 
@@ -93,7 +93,7 @@ describe('desktop:subscribeTask sinceIndex passthrough', () => {
     await flush();
 
     expect(h.subscribeCalls).toEqual([{ taskId: 'task_z', options: { sinceIndex: 0, signal: expect.any(AbortSignal) } }]);
-    expect(h.sent).toEqual([{ type: 'a', n: 0 }, { type: 'b', n: 1 }]);
+    expect(h.sent).toEqual([{ type: 'progress', eventId: '0', message: 'a' }, { type: 'progress', eventId: '1', message: 'b' }]);
   });
 
   it('rejects untrusted read, subscription and cancellation sibling entries before touching a task', async () => {

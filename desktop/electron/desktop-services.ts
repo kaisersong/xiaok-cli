@@ -1,3 +1,5 @@
+import { assertMaterialAccessEnvironment, captureMaterialAccessInput, captureMaterialAccessPromise } from './material-access-data.js';
+import type { MaterialAccessImportInput } from './material-access-ipc-contract.js';
 import { assertPluginActionSource, capturePluginActionInput, capturePluginActionRequest, pluginActionCode } from './plugin-action-service.js';
 import { runDesktopSkillMutation } from './desktop-skill-mutation.js';
 import type { DesktopSkillMutationContext } from '../shared/skill-mutation-ipc-contract.js';
@@ -175,6 +177,7 @@ import {
 } from './computer-use-capability-service.js';
 import { createNotebookTools } from '../../src/ai/tools/notebook.js';
 import { createKbTools } from './kb-tools.js';
+import { captureProjectPlanningInput } from './project-planning-service.js';
 import { createKbStoreSqlite } from './kb-store-sqlite.js';
 import { createKbRetriever } from './kb-retrieval.js';
 import { createSourceExtractor } from './kb-source-extractor.js';
@@ -3252,14 +3255,17 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!result.success) return { success: false, error: pluginActionCode(result.error, 'plugin_diagnose_failed') };
       return { success: true, output: result.output, status: await getDependencyStatusView(entry) };
     },
-    async importMaterial(input: { taskId: string; filePath: string; role: MaterialRole }) {
+    async importMaterial(rawInput: { taskId: string; filePath: string; role: MaterialRole }, requestSource?: 'user' | 'agent' | 'scheduler') {
+      if (requestSource !== 'user') throw Error('request_source_user_required');
+      const [input] = captureMaterialAccessInput('importMaterial', [rawInput]) as [MaterialAccessImportInput];
+      assertMaterialAccessEnvironment();
       mkdirSync(options.dataRoot, { recursive: true });
-      const record = await materialRegistry.importMaterial({
+      const record = await captureMaterialAccessPromise(materialRegistry.importMaterial({
         taskId: input.taskId,
         sourcePath: input.filePath,
         role: input.role,
         roleSource: 'user',
-      });
+      }), value => captureIpcData(value, 'material_access_projection_unavailable'));
       return materialRegistry.toView(record);
     },
     async listSkills() {
@@ -4008,8 +4014,10 @@ export function createDesktopServices(options: DesktopServicesOptions) {
       if (!kbStore) throw new Error('knowledge_base_unavailable');
       return kbStore;
     },
-    startProjectPlanning(input: KSwarmInitialPlanBootstrapInput) {
-      return initialPlanBootstrapQueue.enqueue(input);
+    startProjectPlanning(input: KSwarmInitialPlanBootstrapInput, source?: 'user' | 'agent' | 'scheduler') {
+      if (source !== 'user') throw Error('project_planning_source_forbidden');
+      const result = initialPlanBootstrapQueue.enqueue(captureProjectPlanningInput(input));
+      return result.ok ? result : { ok: false as const, error: 'project_planning_failed' };
     },
   };
 }

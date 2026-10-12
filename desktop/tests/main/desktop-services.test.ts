@@ -444,7 +444,7 @@ describe('desktop services', () => {
       taskId: 'desktop_task',
       filePath: sourcePath,
       role: 'customer_material',
-    });
+    }, 'user');
     const created = await services.createTask({
       prompt: '帮我基于这些材料，生成一版给 A 客户 CIO 汇报的制造业数字化方案 PPT 初稿。',
       materials: [{ materialId: material.materialId }],
@@ -4249,7 +4249,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: ['xiaok-worker'],
       startPolicy: 'activate_and_dispatch_after_plan',
-    })));
+    }, 'user')));
 
     const immediateResult = await Promise.race([
       executePromise.then((value) => ({ kind: 'returned' as const, value })),
@@ -4346,7 +4346,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: [],
       startPolicy: 'auto_activate_after_plan',
-    });
+    }, 'user');
 
     expect(result).toMatchObject({ ok: true, status: 'queued' });
     await waitFor(() => {
@@ -4515,7 +4515,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: [],
       startPolicy: 'activate_and_dispatch_after_plan',
-    });
+    }, 'user');
     expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-dispatch-fail/activate-and-start'));
@@ -4603,7 +4603,7 @@ describe('desktop services', () => {
       poAgent: 'xiaok-po',
       members: [],
       startPolicy: 'activate_and_dispatch_after_plan',
-    });
+    }, 'user');
     expect(result).toMatchObject({ ok: true, status: 'queued' });
 
     await waitFor(() => requests.some(request => request.path === '/projects/proj-replan/activate-and-start'));

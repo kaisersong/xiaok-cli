@@ -207,7 +207,7 @@ async function createTaskWithRetry(input: {
   materials: Array<{ materialId: string; role?: MaterialRole }>;
   context?: TaskCreateContext;
   retries?: number;
-}): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
+}): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
   return await window.xiaokDesktop.createTask(input);
 }
 
@@ -403,7 +403,7 @@ export const api = {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     context?: TaskCreateContext;
-  }): Promise<{ taskId: string; understanding: TaskUnderstanding }> {
+  }): Promise<{ taskId: string; understanding?: TaskUnderstanding }> {
     log.info('createTask', JSON.stringify({ prompt: input.prompt, materialsCount: input.materials.length }));
     const result = await createTaskWithRetry(input);
     log.info('createTask ok', JSON.stringify({ taskId: result.taskId }));

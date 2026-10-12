@@ -165,12 +165,14 @@ describe('Kimi K3 D9 packaged renderer automation contract', () => {
       "createTask: (input) => ipcRenderer.invoke('desktop:createTask', input)",
     );
     expect(mainIpc).toContain(
-      "ipcMain.handle('desktop:createTask', async (_event, input) =>",
+      "task7Producers.set('desktop:createTask', async (_event, input) =>",
     );
-    expect(mainIpc).toContain('services.createTask(sanitizeTaskCreateInput(input), options.multiAgentAuthorize');
+    expect(mainIpc).toContain('const clean = sanitizeTaskCreateInput(input)');
+    expect(mainIpc).toContain('services.createTask(clean, actor)');
+    expect(mainIpc).toContain('registerTask7Ipc(ipcMain, task7Producers');
     expect(preload).toContain(
       "recoverTask: (taskId, legacyPrompt) => ipcRenderer.invoke('desktop:recoverTask', { taskId, legacyPrompt })",
     );
-    expect(mainIpc).toContain("services.recoverTask(input.taskId, typeof input.legacyPrompt === 'string' ? input.legacyPrompt : undefined)");
+    expect(mainIpc).toContain("services.recoverTask(input.taskId, input.legacyPrompt)");
   });
 });

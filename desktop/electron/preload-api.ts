@@ -1204,7 +1204,7 @@ export interface DesktopApi extends MultiAgentDesktopAPI, RoomWorkspaceApi {
     prompt: string;
     materials: Array<{ materialId: string; role?: MaterialRole }>;
     context?: TaskCreateContext;
-  }): Promise<{ taskId: string; understanding: TaskUnderstanding }>;
+  }): Promise<{ taskId: string; understanding?: TaskUnderstanding }>;
   createTaskWithFiles(input: {
     prompt: string;
     filePaths: string[];
