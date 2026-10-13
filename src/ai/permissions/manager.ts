@@ -1,11 +1,13 @@
+import { posix, win32 } from 'node:path';
 export type PermissionMode = 'default' | 'auto' | 'plan';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
-import { PermissionPolicyEngine, matches } from './policy-engine.js';
+import { PermissionPolicyEngine, matches, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 
 export interface PermissionManagerOptions {
   mode: PermissionMode;
+  cwd?: string;
   allowRules?: string[];
   denyRules?: string[];
 }
@@ -16,6 +18,7 @@ function readBashCommand(input: Record<string, unknown>): string {
 
 export class PermissionManager {
   private mode: PermissionMode;
+  private readonly cwd: string;
   private allowRules: string[];
   private denyRules: string[];
   private revision = 0;
@@ -23,6 +26,7 @@ export class PermissionManager {
 
   constructor(options: PermissionManagerOptions) {
     this.mode = options.mode;
+    this.cwd = options.cwd ?? process.cwd();
     this.allowRules = [...(options.allowRules ?? [])];
     this.denyRules = [...(options.denyRules ?? [])];
   }
@@ -114,6 +118,22 @@ export class PermissionManager {
       return 'deny';
     }
 
+    if (toolName === 'bash') {
+      const command = readBashCommand(input);
+      const conservative = this.mode !== 'auto' || hasMatchingCommandAllowRule(this.allowRules, command);
+      if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command)) return 'prompt';
+      if (conservative) {
+        const targets = getCommandWriteTargets(command);
+        const hasWorkdir = Object.hasOwn(input, 'workdir');
+        if (targets.length && hasWorkdir && typeof input.workdir !== 'string') return 'prompt';
+        const api = /^[a-z]:|^\\\\|^\/\//i.test(this.cwd) ? win32 : posix;
+        const effectiveDir = typeof input.workdir === 'string' ? api.resolve(this.cwd, input.workdir) : this.cwd;
+        if (targets.length && hasWorkdir && isOutsideWorkspace(input.workdir as string, this.cwd)) return 'prompt';
+        if (targets.some(target => isOutsideWorkspace(target, this.cwd, effectiveDir))) return 'prompt';
+        if (targets.length && this.mode !== 'auto') return 'prompt';
+      }
+    }
+
     if (this.mode === 'auto') {
       if (toolName === 'bash') {
         const autoPromptRisk = requiresAutoPromptForBashCommand(readBashCommand(input));
@@ -166,4 +186,14 @@ export class PermissionManager {
 
     return '';
   }
+}
+
+function isOutsideWorkspace(target: string, cwd: string, effectiveDir = cwd): boolean {
+  if (/^[~]|[$`]/.test(target)) return true;
+  const windows = /^[a-z]:|^\\\\|^\/\//i;
+  const api = windows.test(cwd) ? win32 : posix;
+  if (windows.test(target) && api !== win32) return true;
+  if (api === win32 && posix.isAbsolute(target) && !windows.test(target)) return true;
+  const relative = api.relative(api.resolve(cwd), api.resolve(effectiveDir, target));
+  return relative === '..' || relative.startsWith(`..${api.sep}`) || api.isAbsolute(relative);
 }

@@ -174,13 +174,13 @@ describe('permission-prompt', () => {
           } else if (renderer) {
             renderer.renderInput({ prompt: '> ', input: '', cursor: 0, overlayLines: [] });
           }
-          const pending = showPermissionPrompt('bash', { command: 'rm -rf ./build' }, { renderer });
+          const pending = showPermissionPrompt('bash', { command: 'git status' }, { renderer });
           const screen = harness.screen.text();
           for (let number = 1; number <= 5; number += 1) expect(screen).toContain(`${number}. `);
           expect(screen).toContain('数字直选');
           harness.send(String(index + 1));
           await expect(pending).resolves.toMatchObject({ action: actions[index] });
-          if (index > 0 && index < 4) await expect(pending).resolves.toHaveProperty('rule', 'bash(rm *)');
+          if (index > 0 && index < 4) await expect(pending).resolves.toHaveProperty('rule', 'bash(git *)');
           expect(harness.screen.text()).not.toContain('xiaok 想要执行以下操作');
         } finally { harness.restore(); }
       }
@@ -208,7 +208,7 @@ describe('permission-prompt', () => {
           renderer, ...{ permissionMode: 'auto' as const },
         });
         const screen = harness.screen.text();
-        harness.send('5');
+        harness.send('2');
         await expect(pending).resolves.toEqual({ action: 'deny' });
         expect(screen).toContain('确认原因: auto 模式仍需确认：递归强制删除');
       } finally { harness.restore(); }
@@ -220,7 +220,7 @@ describe('permission-prompt', () => {
       const harness = createTtyHarness();
       try {
         const pending = showPermissionPrompt('bash', { command }, { ...{ permissionMode: mode } });
-        const screen = harness.screen.text(); harness.send('5'); await pending;
+        const screen = harness.screen.text(); harness.send('\x1b'); await pending;
         expect(screen).not.toContain('确认原因:');
       } finally { harness.restore(); }
     });
@@ -288,6 +288,7 @@ describe('permission-prompt', () => {
         recordOutput() {},
         beginSuppress() {},
         endSuppress() {},
+        close() {},
       };
 
       const pending = showPermissionPrompt('bash', { command: 'ls' }, { transcriptLogger: logger });
@@ -476,6 +477,9 @@ describe('permission-prompt', () => {
       expect(openScreen).toContain('tool-row-2');
       expect(openScreen).toContain('xiaok 想要执行以下操作');
       expect(openScreen).toContain('命令: git status --short');
+      const openLines = harness.screen.lines();
+      const titleRow = openLines.findIndex(line => line.includes('xiaok 想要执行以下操作'));
+      expect(openLines[titleRow - 1].trim()).toBe('');
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_once' });
@@ -524,6 +528,28 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
+    it('separates the direct permission menu from prior output once across navigation', async () => {
+      const harness = createTtyHarness(120, 24);
+      process.stdout.write('PREVIOUS_TOOL_OUTPUT\n');
+      const pending = showPermissionPrompt('edit', { file_path: '/tmp/example.sh' });
+      try {
+        const lines = harness.screen.lines();
+        const previous = lines.findIndex(line => line.includes('PREVIOUS_TOOL_OUTPUT'));
+        const title = lines.findIndex(line => line.includes('xiaok 想要执行以下操作'));
+        expect(title).toBe(previous + 2);
+        expect(lines[previous + 1].trim()).toBe('');
+        harness.send('\x1b[B');
+        expect(harness.screen.lines().findIndex(line => line.includes('xiaok 想要执行以下操作'))).toBe(title);
+        harness.send('\r');
+        await pending;
+        expect(harness.screen.text()).toContain('PREVIOUS_TOOL_OUTPUT');
+      } finally {
+        harness.send('\x1b');
+        await pending;
+        harness.restore();
+      }
+    });
+
     it('does not damage surrounding transcript lines when the non-renderer menu closes', async () => {
       const harness = createTtyHarness();
       process.stdout.write('REAL_OUTPUT_ABOVE_MENU\n');
@@ -558,4 +584,55 @@ describe('permission-prompt', () => {
       harness.restore();
     });
   });
+});
+
+describe('确认撤回与 URL 摘要', () => {
+  it('展示单行 URL 并限制摘要长度', () => {
+    expect(buildPermissionRequest('web_fetch', { url: 'https://example.invalid/page' }).summary).toBe('web_fetch: https://example.invalid/page');
+    const summary = buildPermissionRequest('web_fetch', { url: 'https://example.invalid/\n' + 'x'.repeat(300) }).summary;
+    expect(summary).not.toContain('\n');
+    expect(summary.length).toBeLessThanOrEqual(211);
+  });
+  it('撤回后清理输入和菜单，忽略后续输入', async () => {
+    const harness = createTtyHarness();
+    const controller = new AbortController();
+    const before = process.stdin.listenerCount('data');
+    try {
+      const pending = showPermissionPrompt('read', { path: '/ws/file' }, { signal: controller.signal });
+      controller.abort();
+      await expect(pending).resolves.toEqual({ action: 'deny' });
+      expect(process.stdin.listenerCount('data')).toBe(before);
+      expect(harness.screen.text()).not.toContain('工具: read');
+      harness.send('3'); controller.abort();
+    } finally { harness.restore(); }
+  });
+});
+
+it('renderer 确认撤回关闭菜单并保留上方输出', async () => {
+  const harness = createTtyHarness();
+  const renderer = new ReplRenderer(process.stdout);
+  const controller = new AbortController();
+  try {
+    renderer.prepareBlockOutput();
+    process.stdout.write('saved output\n');
+    renderer.renderInput({ prompt: '> ', input: '', cursor: 0, overlayLines: [] });
+    const pending = showPermissionPrompt('read', { path: '/ws/file' }, { renderer, signal: controller.signal });
+    controller.abort();
+    await expect(pending).resolves.toEqual({ action: 'deny' });
+    expect(harness.screen.text()).not.toContain('工具: read');
+    expect(harness.screen.text()).toContain('saved output');
+  } finally { harness.restore(); }
+});
+
+it('已决定的提示忽略随后 abort', async () => {
+  const harness = createTtyHarness();
+  const controller = new AbortController();
+  try {
+    const pending = showPermissionPrompt('read', { path: '/ws/file' }, { signal: controller.signal });
+    harness.send('\r');
+    await expect(pending).resolves.toEqual({ action: 'allow_once' });
+    const before = harness.screen.text();
+    controller.abort();
+    expect(harness.screen.text()).toBe(before);
+  } finally { harness.restore(); }
 });

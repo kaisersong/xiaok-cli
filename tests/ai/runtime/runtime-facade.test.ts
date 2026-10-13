@@ -46,7 +46,7 @@ function createRealFacade(
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
     }),
   };
 }
@@ -170,7 +170,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
     });
     const sessionId = 'sess_ffffffff-ffff-4fff-8fff-ffffffffffff';
 
@@ -218,7 +218,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
     });
     const onActivity = vi.fn();
 
@@ -267,7 +267,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
     });
 
     await facade.runTurn({
@@ -319,7 +319,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
     });
 
     await facade.runTurn({ sessionId: 'sess_1', cwd: '/repo', source: 'chat', input: 'hello' }, () => {});
@@ -361,7 +361,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
       getIntentReminderBlock: () => ({
         type: 'text',
         text: '<system-reminder>Intent run contract: proposal_draft via generate_v1</system-reminder>',
@@ -412,7 +412,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
     });
 
     await facade.runTurn({ sessionId: 'sess_1', cwd: '/repo', source: 'chat', input: 'hello' }, () => {});
@@ -455,7 +455,7 @@ describe('RuntimeFacade', () => {
         pluginCommands: [],
         lspDiagnostics: '',
       }),
-      agent,
+      agent: agent as unknown as ConstructorParameters<typeof RuntimeFacade>[0]['agent'],
       getSkillEntries: () => [
         { name: 'review', listing: '- review: inspect changes' },
       ],
@@ -478,5 +478,31 @@ describe('RuntimeFacade', () => {
       expect.any(Function),
       undefined,
     );
+  });
+});
+
+describe('回合来源隔离', () => {
+  it('真实 runtime 内可读，并发回合不串，结束后不可读', async () => {
+    const { getTurnOrigin } = await import('../../../src/channels/turn-origin.js');
+    const captured: unknown[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const make = () => createRealFacade({
+      getModelName: () => 'mock',
+      stream: async function* () {
+        const before = getTurnOrigin();
+        await gate;
+        expect(getTurnOrigin()).toEqual(before);
+        captured.push(before);
+        yield { type: 'text', delta: 'ok' };
+        yield { type: 'done' };
+      },
+    }).facade;
+    const a = make().runTurn({ sessionId: 'a', cwd: '/ws', source: 'chat', input: 'a' }, () => {});
+    const b = make().runTurn({ sessionId: 'b', cwd: '/ws', source: 'yzj', initiator: 'owner', channelTurnId: 'm', input: 'b' }, () => {});
+    release(); await Promise.all([a, b]);
+    expect(captured).toContainEqual({ source: 'chat', initiator: undefined, channelTurnId: undefined });
+    expect(captured).toContainEqual({ source: 'yzj', initiator: 'owner', channelTurnId: 'm' });
+    expect(getTurnOrigin()).toBeUndefined();
   });
 });

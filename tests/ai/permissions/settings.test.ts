@@ -72,10 +72,11 @@ describe('permissions/settings', () => {
     const settings = {
       global: { permissions: { allow: ['bash(npm *)'], deny: ['bash(rm *)'] } },
       project: { permissions: { allow: ['write(src/*)'] } },
+      approvedProjectAllow: [],
     };
 
     const { allowRules, denyRules } = mergeRules(settings);
-    expect(allowRules).toEqual(['bash(npm *)', 'write(src/*)']);
+    expect(allowRules).toEqual(['bash(npm *)']);
     expect(denyRules).toEqual(['bash(rm *)']);
   });
 
@@ -87,12 +88,11 @@ describe('permissions/settings', () => {
     expect(settings.permissions.allow).toContain('bash(git *)');
   });
 
-  it('addAllowRule writes to project settings', async () => {
+  it('addAllowRule writes local project settings', async () => {
     await addAllowRule('project', 'write(src/*)', projectDir);
 
-    const raw = await readFile(join(projectDir, '.xiaok', 'settings.json'), 'utf-8');
-    const settings = JSON.parse(raw);
-    expect(settings.permissions.allow).toContain('write(src/*)');
+    expect(mergeRules(await loadSettings(projectDir)).allowRules).toContain('write(src/*)');
+    expect(existsSync(join(projectDir, '.xiaok', 'settings.json'))).toBe(false);
   });
 
   it('addAllowRule deduplicates', async () => {
