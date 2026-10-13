@@ -48,7 +48,7 @@ describe('field sensitivity', () => {
     ['ConversationActivity', CONVERSATION_ACTIVITY_SENSITIVITY], ['ActivityOrigin', ACTIVITY_ORIGIN_SENSITIVITY],
   ] as const)('preserves metadata scalars and arrays in %s', (kind, table) => {
     for (const [key, sensitivity] of Object.entries(table)) {
-      if (sensitivity !== 'metadata' || key.includes('.') || key === 'projection' || key === 'origin') continue;
+      if (sensitivity !== 'metadata' || key.includes('.') || key === 'projection' || key === 'origin' || key === 'evidenceRefs') continue;
       for (const value of ['opaque-id', 42, false, null, ['ref-1', 'ref-2']]) {
         expect(projectMetadataOnly(kind, { [key]: value })).toEqual({ [key]: value });
       }
@@ -56,9 +56,28 @@ describe('field sensitivity', () => {
   });
   it('fails closed on malformed objects, getters and object-valued metadata', () => {
     for (const value of [null, undefined, 7, [], canary]) expect(projectMetadataOnly('WorkEvent', value)).toEqual({});
-    const value = { eventId: { secret: canary }, evidenceRefs: [{ secret: canary }] };
+    const value = { eventId: { secret: canary } };
     Object.defineProperty(value, 'source', { get() { throw new Error(canary); } });
     expect(projectMetadataOnly('WorkEvent', value)).toEqual({});
+  });
+});
+
+describe('evidenceRefs must be safe IDs (fail closed, whole event rejected)', () => {
+  it('keeps valid ID arrays', () => {
+    expect(projectMetadataOnly('WorkEvent', { eventId: 'e1', evidenceRefs: ['ref-1', 'task:1#2'] })).toEqual({ eventId: 'e1', evidenceRefs: ['ref-1', 'task:1#2'] });
+  });
+  it.each([
+    ['path', ['ref-1', path]], ['windows path', ['C:\\x']], ['dotdot', ['a..b']], ['object', [{ secret: canary }]],
+    ['number', [1]], ['empty string', ['']], ['too long', ['a'.repeat(129)]], ['not array', 'ref-1'],
+  ])('rejects the whole event when one element is invalid: %s', (_name, refs) => {
+    expect(projectMetadataOnly('WorkEvent', { eventId: 'e1', evidenceRefs: refs })).toBeNull();
+    expect(projectMetadataOnly('WorkProjection', { watchId: 'w1', evidenceRefs: refs })).toBeNull();
+    expect(projectMetadataOnly('ConversationActivity', { projection: { watchId: 'w1', evidenceRefs: refs } })).toBeNull();
+  });
+  it('rejects getter elements without invoking content-bearing errors', () => {
+    const refs = ['ref-1'];
+    Object.defineProperty(refs, 1, { get() { throw new Error(canary); }, enumerable: true });
+    expect(projectMetadataOnly('WorkEvent', { evidenceRefs: refs })).toBeNull();
   });
 });
 

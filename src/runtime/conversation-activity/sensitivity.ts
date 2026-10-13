@@ -1,3 +1,5 @@
+import { isValidExternalId } from './external-id.js';
+
 import type { ActivityOrigin, ConversationActivity, WorkBinding, WorkEvent, WorkProjection, WorkWatch } from './types.js';
 
 export type Sensitivity = 'metadata' | 'content' | 'forbidden';
@@ -316,16 +318,41 @@ const nestedArrays: Partial<Record<MetadataKind, Record<string, MetadataKind>>> 
   RoomWorkspaceChangeInput: { templateEntries: 'RoomWorkspaceTemplateEntry' },
 };
 
+class RejectEvent extends Error {}
+/** Keys whose values must be arrays of safe external IDs (no paths); any bad element rejects the whole event. */
+const ID_ARRAY_KEYS = new Set(['evidenceRefs']);
+
 const scalar = (value: unknown): boolean => value === null || ['string', 'number', 'boolean'].includes(typeof value);
 
 /** Field classification, not schema/ID validation. Unknown fields and raw workspace paths are dropped.
  * Human-written titles/task names are content and must never be added as metadata.
  * Only data properties are read; arbitrary objects cannot smuggle nested unknown fields.
  */
-export function projectMetadataOnly(kind: MetadataKind, value: unknown): Record<string, unknown> {
+export function projectMetadataOnly(kind: MetadataKind, value: unknown): Record<string, unknown> | null {
+  try {
+    return project(kind, value);
+  } catch {
+    // Invalid evidenceRefs, or proxies throwing from reflection: reject the whole event
+    // and never forward content-bearing errors.
+    return null;
+  }
+}
+
+function readIdArray(field: unknown): string[] {
+  if (!Array.isArray(field)) throw new RejectEvent();
+  const copy: string[] = [];
+  for (let index = 0; index < field.length; index++) {
+    const item = Object.getOwnPropertyDescriptor(field, String(index));
+    if (!item || !('value' in item) || !isValidExternalId(item.value)) throw new RejectEvent();
+    copy.push(item.value);
+  }
+  return copy;
+}
+
+function project(kind: MetadataKind, value: unknown): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
-  try {
+  {
     const table = tables[kind];
     if (!table) return result;
     for (const [key, sensitivity] of Object.entries(table)) {
@@ -335,15 +362,17 @@ export function projectMetadataOnly(kind: MetadataKind, value: unknown): Record<
       const field: unknown = descriptor.value;
       const objectKind = nestedObjects[kind]?.[key];
       const arrayKind = nestedArrays[kind]?.[key];
-      if (objectKind) {
-        result[key] = projectMetadataOnly(objectKind, field);
+      if (ID_ARRAY_KEYS.has(key)) {
+        result[key] = readIdArray(field);
+      } else if (objectKind) {
+        result[key] = project(objectKind, field);
       } else if (arrayKind) {
         if (!Array.isArray(field)) continue;
         const copy: Record<string, unknown>[] = [];
         for (let index = 0; index < field.length; index++) {
           const item = Object.getOwnPropertyDescriptor(field, String(index));
           if (!item || !('value' in item)) break;
-          copy.push(projectMetadataOnly(arrayKind, item.value));
+          copy.push(project(arrayKind, item.value));
         }
         if (copy.length === field.length) result[key] = copy;
       } else if (scalar(field)) {
@@ -360,8 +389,5 @@ export function projectMetadataOnly(kind: MetadataKind, value: unknown): Record<
       }
     }
     return result;
-  } catch {
-    // Proxies can throw from reflection; never forward their content-bearing errors.
-    return {};
   }
 }

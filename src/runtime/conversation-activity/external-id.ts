@@ -1,25 +1,22 @@
 import { createHash } from 'node:crypto';
 
-/** New ledger IDs only; existing source/store identities must remain unchanged. */
+/**
+ * New ledger IDs only; existing source/store identities must remain unchanged.
+ * ASCII-only allow-list: control chars (NUL/CR/TAB/DEL), zero-width, bidi controls
+ * and homoglyphs all fall outside it. Max length 128.
+ */
 export function isValidExternalId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 128
     && /^[A-Za-z0-9][A-Za-z0-9._:#-]{0,127}$/.test(value)
     && !value.includes('..');
 }
 
-/** Non-string inputs use a type-tagged representation, never a content-bearing error. */
-function invalidInput(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return `${typeof value}:${typeof value === 'bigint' || typeof value === 'symbol' ? String(value) : JSON.stringify(value)}`;
-  } catch {
-    return `${typeof value}:unserializable`;
-  }
-}
-
-export function normalizeExternalId(value: unknown): string {
-  if (isValidExternalId(value)) return value;
-  return `x:${hashWorkspaceId(invalidInput(value)).slice(0, 32)}`;
+/**
+ * Fail closed: invalid input is rejected (null), never converted into an alias.
+ * Never serializes the input, so malicious toJSON/getters are not invoked.
+ */
+export function parseExternalId(value: unknown): string | null {
+  return isValidExternalId(value) ? value : null;
 }
 
 /** Hash the exact UTF-8 path; no platform-dependent path normalization. */
