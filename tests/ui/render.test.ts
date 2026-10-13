@@ -472,9 +472,9 @@ describe('formatHistoryBlock', () => {
   });
 
   it('returns empty string for unknown block types', () => {
-    // Cast to bypass TypeScript - simulating unknown type
-    const block = { type: 'unknown' } as HistoryMessageBlock;
-    const output = formatHistoryBlock(block);
+    // Invalid persisted data goes to the real formatter; no false valid DTO assertion.
+    const block = { type: 'unknown' };
+    const output = Reflect.apply(formatHistoryBlock, undefined, [block]);
 
     expect(output).toBe('');
   });
