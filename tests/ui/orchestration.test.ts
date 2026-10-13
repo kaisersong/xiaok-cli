@@ -12,6 +12,7 @@ import {
 import { setColorsEnabled } from '../../src/ui/render.js';
 import { stripAnsi } from '../../src/ui/display-width.js';
 import type { IntentLedgerRecord, SessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
+import { DELEGATION_TEMPLATES } from '../../src/ai/intent-delegation/templates.js';
 
 type ReminderText = Extract<ReturnType<typeof buildIntentReminderBlock>, { type: 'text' }> | undefined;
 
@@ -299,6 +300,11 @@ function createLedger(overrides: Partial<IntentLedgerRecord> = {}): SessionInten
 }
 
 function createIntent(overrides: Partial<IntentLedgerRecord> = {}): IntentLedgerRecord {
+  const generateTemplate = DELEGATION_TEMPLATES.find((template) => template.id === 'generate_v1');
+  const collectStep = generateTemplate?.steps.find((step) => step.key === 'collect');
+  const composeStep = generateTemplate?.steps.find((step) => step.key === 'compose');
+  if (!collectStep || !composeStep) throw new Error('generate_v1 UI fixture requires canonical collect/compose steps');
+
   return {
     intentId: 'intent_customer_proposal',
     instanceId: 'plan_customer_proposal',
@@ -337,7 +343,7 @@ function createIntent(overrides: Partial<IntentLedgerRecord> = {}): IntentLedger
         stepId: 'intent_customer_proposal:step:collect',
         key: 'collect',
         order: 0,
-        role: 'researcher',
+        role: collectStep.role,
         skillName: null,
         dependsOn: [],
         status: 'running',
@@ -347,7 +353,7 @@ function createIntent(overrides: Partial<IntentLedgerRecord> = {}): IntentLedger
         stepId: 'intent_customer_proposal:step:draft',
         key: 'draft',
         order: 1,
-        role: 'writer',
+        role: composeStep.role,
         skillName: null,
         dependsOn: ['intent_customer_proposal:step:collect'],
         status: 'planned',
