@@ -13,6 +13,8 @@ import { setColorsEnabled } from '../../src/ui/render.js';
 import { stripAnsi } from '../../src/ui/display-width.js';
 import type { IntentLedgerRecord, SessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 
+type ReminderText = Extract<ReturnType<typeof buildIntentReminderBlock>, { type: 'text' }> | undefined;
+
 describe('ui orchestration formatting', () => {
   it('formats a sticky summary line only for the owning instance', () => {
     const ledger = createLedger();
@@ -53,7 +55,7 @@ describe('ui orchestration formatting', () => {
   });
 
   it('builds an intent reminder block from the active intent', () => {
-    const reminder = buildIntentReminderBlock(createLedger(), 'inst_owner');
+    const reminder = (buildIntentReminderBlock(createLedger(), 'inst_owner') as ReminderText);
 
     expect(reminder).toEqual({
       type: 'text',
@@ -64,37 +66,37 @@ describe('ui orchestration formatting', () => {
   });
 
   it('includes explicitConstraints with "must follow" framing in the reminder block', () => {
-    const reminder = buildIntentReminderBlock(createLedger({
+    const reminder = (buildIntentReminderBlock(createLedger({
       explicitConstraints: ['控制在一页内', '用中文'],
-    }), 'inst_owner');
+    }), 'inst_owner') as ReminderText);
 
     expect(reminder?.text).toContain('Constraints (must follow): 控制在一页内; 用中文');
   });
 
   it('uses semicolons to separate multiple constraints', () => {
-    const reminder = buildIntentReminderBlock(createLedger({
+    const reminder = (buildIntentReminderBlock(createLedger({
       explicitConstraints: ['A', 'B', 'C'],
-    }), 'inst_owner');
+    }), 'inst_owner') as ReminderText);
 
     expect(reminder?.text).toContain('Constraints (must follow): A; B; C');
   });
 
   it('omits constraints line when explicitConstraints is empty', () => {
-    const reminder = buildIntentReminderBlock(createLedger({
+    const reminder = (buildIntentReminderBlock(createLedger({
       explicitConstraints: [],
-    }), 'inst_owner');
+    }), 'inst_owner') as ReminderText);
 
     expect(reminder?.text).not.toContain('Constraints');
   });
 
   it('does not build a reminder block for a completed active intent', () => {
-    const reminder = buildIntentReminderBlock(createLedger({ overallStatus: 'completed' }), 'inst_owner');
+    const reminder = (buildIntentReminderBlock(createLedger({ overallStatus: 'completed' }), 'inst_owner') as ReminderText);
 
     expect(reminder).toBeUndefined();
   });
 
   it('includes preferred stage skills in the hidden run contract when non-generic skills are planned', () => {
-    const reminder = buildIntentReminderBlock(createLedger({
+    const reminder = (buildIntentReminderBlock(createLedger({
       stages: [
         {
           stageId: 'intent_customer_proposal:stage:1',
@@ -151,13 +153,13 @@ describe('ui orchestration formatting', () => {
           needsFreshContextHandoff: true,
         },
       ],
-    }), 'inst_owner');
+    }), 'inst_owner') as ReminderText);
 
     expect(reminder?.text).toContain('Preferred stage skills: 生成报告 -> kai-report-creator');
   });
 
   it('includes authoritative source paths when present without forcing output path hints into the UI', () => {
-    const reminder = buildIntentReminderBlock(createLedger({
+    const reminder = (buildIntentReminderBlock(createLedger({
       deliverable: 'md -> 报告',
       finalDeliverable: '报告',
       providedSourcePaths: ['/Users/song/Downloads/salesforce_ai_evolution.html'],
@@ -196,7 +198,7 @@ describe('ui orchestration formatting', () => {
         },
       ],
       activeStageId: 'intent_customer_proposal:stage:1',
-    }), 'inst_owner');
+    }), 'inst_owner') as ReminderText);
 
     expect(reminder?.text).toContain('Provided sources: /Users/song/Downloads/salesforce_ai_evolution.html');
     expect(reminder?.text).not.toContain('Suggested safe outputs:');

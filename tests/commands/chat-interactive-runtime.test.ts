@@ -86,7 +86,7 @@ function extractLastUserText(messages: Message[]): string {
   }
 
   return lastUserWithText.content
-    .filter((block) => block.type === 'text' && !block.text.startsWith('<system-reminder>'))
+    .filter((block): block is Extract<MessageBlock, { type: 'text' }> => block.type === 'text' && !block.text.startsWith('<system-reminder>'))
     .map((block) => block.text)
     .join('\n');
 }
@@ -1249,7 +1249,7 @@ describe('chat interactive runtime', () => {
       for (const [key, value] of Object.entries(originalEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
       vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
       for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
-      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
       harness.restore();
     }
   }, 15000);
@@ -1291,7 +1291,7 @@ describe('chat interactive runtime', () => {
       expect(crashSpy).not.toHaveBeenCalled();
     } finally {
       for(const listener of process.listeners('SIGINT'))if(!sigint.includes(listener))process.removeListener('SIGINT',listener);
-      for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resize.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       harness.restore();fetchSpy.mockRestore();crashSpy.mockRestore();
     }
   },15000);
@@ -1343,7 +1343,7 @@ describe('chat interactive runtime', () => {
       harness.send('/exit');harness.send('\r'); await pending;
     } finally {
       for(const listener of process.listeners('SIGINT')) if(!sigintListeners.includes(listener))process.removeListener('SIGINT',listener);
-      for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener);
+      for(const listener of process.stdout.listeners('resize'))if(!resizeListeners.includes(listener))process.stdout.removeListener('resize',listener as () => void);
       harness.restore();
       crashSpy.mockRestore();
     }
@@ -1404,7 +1404,7 @@ describe('chat interactive runtime', () => {
           expect(readdirSync(sessionsDir).filter(entry => entry.endsWith('.json'))).toHaveLength(1);
         } finally {
           for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
-          for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener);
+          for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener as () => void);
           harness.restore();
         }
       }
@@ -1472,7 +1472,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1555,7 +1555,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1595,7 +1595,7 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
-    let pending: Promise<void> | undefined;
+    let pending: ReturnType<Command['parseAsync']> | undefined;
 
     try {
       const program = new Command();
@@ -1634,7 +1634,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1671,7 +1671,7 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
-    let pending: Promise<void> | undefined;
+    let pending: ReturnType<Command['parseAsync']> | undefined;
 
     try {
       const program = new Command();
@@ -1728,7 +1728,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1765,7 +1765,7 @@ describe('chat interactive runtime', () => {
     const harness = createTtyHarness(120, 30);
     const sigintListeners = process.listeners('SIGINT');
     const stdoutResizeListeners = process.stdout.listeners('resize');
-    let pending: Promise<void> | undefined;
+    let pending: ReturnType<Command['parseAsync']> | undefined;
 
     try {
       const program = new Command();
@@ -1807,7 +1807,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1868,7 +1868,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -1961,7 +1961,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2035,7 +2035,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2140,7 +2140,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2226,7 +2226,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2289,7 +2289,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2386,7 +2386,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2469,7 +2469,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2584,7 +2584,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2691,7 +2691,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2757,7 +2757,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2849,7 +2849,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -2933,7 +2933,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3016,7 +3016,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3077,7 +3077,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3140,7 +3140,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3230,7 +3230,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3327,7 +3327,7 @@ describe('chat interactive runtime', () => {
         }
         for (const listener of process.stdout.listeners('resize')) {
           if (!stdoutResizeListeners.includes(listener)) {
-            process.stdout.removeListener('resize', listener);
+            process.stdout.removeListener('resize', listener as () => void);
           }
         }
         harness.restore();
@@ -3361,7 +3361,7 @@ describe('chat interactive runtime', () => {
         }
         for (const listener of process.stdout.listeners('resize')) {
           if (!stdoutResizeListeners.includes(listener)) {
-            process.stdout.removeListener('resize', listener);
+            process.stdout.removeListener('resize', listener as () => void);
           }
         }
         secondHarness.restore();
@@ -3463,7 +3463,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3664,7 +3664,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3726,7 +3726,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3796,7 +3796,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3891,7 +3891,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -3988,7 +3988,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       handlerSpy.mockRestore();
@@ -4106,7 +4106,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4197,7 +4197,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4272,7 +4272,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4365,7 +4365,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4483,7 +4483,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4598,7 +4598,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4719,7 +4719,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4816,7 +4816,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -4894,7 +4894,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5149,7 +5149,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5393,7 +5393,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5662,7 +5662,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5738,7 +5738,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5804,7 +5804,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5861,7 +5861,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -5947,7 +5947,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6031,7 +6031,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6103,7 +6103,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();
@@ -6181,7 +6181,7 @@ describe('chat interactive runtime', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
-          process.stdout.removeListener('resize', listener);
+          process.stdout.removeListener('resize', listener as () => void);
         }
       }
       harness.restore();

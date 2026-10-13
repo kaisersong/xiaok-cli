@@ -654,7 +654,7 @@ describe('subagent cleanup in the original turn continuation', () => {
     let finish!: () => void, fail!: (reason: unknown) => void;
     const gate = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
     vi.spyOn(agent, 'runTurn').mockImplementation((_prompt, onChunk) => {
-      onChunk?.({ type: 'text', delta: 'actual result' });
+      (onChunk as Parameters<Agent['runTurn']>[1])?.({ type: 'text', delta: 'actual result' });
       return gate;
     });
     const error = mode === 'undefined-error' ? undefined : new Error('original turn failure');

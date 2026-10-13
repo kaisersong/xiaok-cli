@@ -44,7 +44,7 @@ describe('ConnectorRegistry search routing', () => {
 
   it('falls back to duckduckgo when primary throws and surfaces fallback metadata', async () => {
     let firstCall = true;
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://api.tavily.com')) {
         if (firstCall) {
@@ -69,7 +69,7 @@ describe('ConnectorRegistry search routing', () => {
   });
 
   it('after 3 consecutive primary failures, marks primary invalid_config', async () => {
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://api.tavily.com')) {
         return new Response('boom', { status: 500 });
@@ -120,7 +120,7 @@ describe('ConnectorRegistry search routing', () => {
 describe('ConnectorRegistry fetch routing', () => {
   it('falls back to basic when jina returns 500', async () => {
     let jinaCalled = false;
-    const fetchFn = vi.fn(async (url: string | URL) => {
+    const fetchFn = vi.fn<typeof globalThis.fetch>(async (url) => {
       const u = typeof url === 'string' ? url : url.toString();
       if (u.startsWith('https://r.jina.ai/')) {
         jinaCalled = true;
