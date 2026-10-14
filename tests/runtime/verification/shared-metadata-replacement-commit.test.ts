@@ -16,7 +16,7 @@ const proposal=(operationId:string,partition:'control'|'rollback',bytes=1024)=>(
 function fixture(bytes=1024){
  const path=mkdtempSync(join(tmpdir(),'replacement-commit-')),db=new Database(join(path,'original.sqlite'));db.pragma('journal_mode=DELETE');db.pragma('synchronous=FULL');
  clean.push(()=>{if(db.open)db.close();rmSync(path,{recursive:true,force:true});});db.exec('CREATE TABLE actual_target_ready(intent_id TEXT PRIMARY KEY,result_hash TEXT NOT NULL)');
- const bindings=new WeakMap<object,{sessionKey:string;producerKey:string}>(),prepareProof={},commitProof={};let calls=0;let effect:(database:Database)=>void=()=>{};
+ const bindings=new WeakMap<object,{sessionKey:string;producerKey:string}>(),prepareProof={},commitProof={};let calls=0;let effect:(database:Database.Database)=>void=()=>{};
  const options={database:db,authorityId:'actual-primitive-authority',host:{assertCurrent(){},inspectOwner(binding:object){const value=bindings.get(binding);if(!value)throw Error('foreign owner');return value;},assertReleased(receipt:object){if(receipt!==commitProof)throw Error('foreign absence proof');},assertMetadataReplacement(receipt:object){if(receipt!==prepareProof)throw Error('foreign prepare proof');},assertMetadataReplacementCommit(receipt:object){if(receipt!==commitProof)throw Error('foreign commit proof');},executeMetadataReplacementCommit(receipt:object,context:CapacityMetadataReplacementCommitContext){
   const result=consumeCapacityMetadataReplacementContext(context,ledger,db,receipt);calls++;db.prepare('INSERT INTO actual_target_ready VALUES(?,?)').run(result.intentId,result.resultHash);effect(db);
  }}};
@@ -25,12 +25,12 @@ function fixture(bytes=1024){
  const primary=bind('session','physical-original'),owner=primary.owner;
  ledger.reserve(owner,proposal('source','control',bytes));ledger.commit(owner,'source');ledger.requestRelease(owner,'source');ledger.reserve(owner,proposal('staging','rollback',bytes));ledger.commit(owner,'staging');
  const request:CapacityMetadataReplacementRequest={replacementId:'original-replacement',intentId:'original-import',sources:[{owner,operationId:'source'}],staging:[{owner,operationId:'staging'}],unusedCapacity:[],targets:[{owner,proposal:proposal('target','control',bytes),beneficiaries:[]},{owner,proposal:proposal('future','rollback',bytes),beneficiaries:[]}],proof:prepareProof};
- return{db,ledger,options,owner,primary,request,prepareProof,commitProof,bind,calls:()=>calls,setEffect:(fn:(database:Database)=>void)=>{effect=fn;}};
+ return{db,ledger,options,owner,primary,request,prepareProof,commitProof,bind,calls:()=>calls,setEffect:(fn:(database:Database.Database)=>void)=>{effect=fn;}};
 }
 // Reflect invokes the actual entry, including the real absent-method red. The
 // primitive host is explicitly not a native/installed retirement issuer.
 function commit(f:ReturnType<typeof fixture>,request=f.request,proof:object=f.commitProof):any{return Reflect.apply(Reflect.get(f.ledger,'commitMetadataReplacement'),f.ledger,[request,proof]);}
-const rawFacts=(db:Database)=>['shared_capacity_reservations','shared_capacity_session_attributions','shared_metadata_replacements','shared_metadata_replacement_claims','shared_metadata_replacement_resource_claims','actual_target_ready','shared_capacity_transfers','shared_metadata_replacement_commits','shared_metadata_replacement_consumptions'].map(table=>db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)?db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all():[]);
+const rawFacts=(db:Database.Database)=>['shared_capacity_reservations','shared_capacity_session_attributions','shared_metadata_replacements','shared_metadata_replacement_claims','shared_metadata_replacement_resource_claims','actual_target_ready','shared_capacity_transfers','shared_metadata_replacement_commits','shared_metadata_replacement_consumptions'].map(table=>db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)?db.prepare('SELECT * FROM '+table+' ORDER BY rowid').all():[]);
 it('atomically transfers a sealed stage and retired source to target plus paid future rollback in the original SQLite transaction',()=>{
  const f=fixture();f.ledger.prepareMetadataReplacement(f.request);const result=commit(f);
  expect(result).toMatchObject({replacementId:f.request.replacementId,intentId:f.request.intentId,state:'committed'});expect(f.ledger.usage().chargedBytes).toBe(2048);

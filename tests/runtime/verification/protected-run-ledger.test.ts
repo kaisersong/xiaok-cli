@@ -4,7 +4,6 @@ import {assertVerificationDatabaseBudget} from '../../../src/runtime/verificatio
 import {createPrimitiveBlobAuthority,createPrimitiveCapacityOwnerBinding,registerPrimitiveIssuer} from '../../support/primitive-blob-authority.js';
 import {createControllerMaterialPipeline} from '../../../src/runtime/verification/material-pipeline.js';
 import {buildInputFileArchive} from '../../../src/runtime/isolated-execution/input-tar.js';
-import {createHash} from 'node:crypto';
 import {canonicalVerificationJson} from '../../../src/runtime/verification/protocol.js';
 import {createDockerRunner} from '../../../src/runtime/isolated-execution/docker-runner.js';
 import {createProtectedRunLedger,assertProtectedRunLedgerDatabase} from '../../../src/runtime/verification/protected-run-ledger.js';

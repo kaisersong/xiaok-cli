@@ -36,7 +36,7 @@ it.each(['"\\','\b\n\0','中文','😀','\ud800','\x7f'])('preserves exact canon
  const raw=intentApplicationCandidate();raw.body.summary=sample.repeat(20);const first=createIntentApplicationBinding(raw),{contract,...nonContract}=first;
  raw.body.summary+='x'.repeat(65536-Buffer.byteLength(json(nonContract)));const binding=createIntentApplicationBinding(raw),{contract:acceptedContract,...accepted}=binding;
  expect(Buffer.byteLength(json(accepted))).toBe(65536);expect(parseIntentApplicationBinding(binding)).toEqual(binding);
- const excess=structuredClone(binding);excess.body.summary+='x';expect(()=>parseIntentApplicationBinding(excess)).toThrow('intent_application_limit');
+ const excess=structuredClone(binding);if(!Reflect.set(excess.body,'summary',excess.body.summary+'x'))throw new TypeError('summary_assignment_failed');expect(()=>parseIntentApplicationBinding(excess)).toThrow('intent_application_limit');
 });
 it('rejects an oversized string before canonical serializer receives it',()=>{
  const raw=intentApplicationCandidate();raw.body.summary='x'.repeat(1024**2);let oversizedCalls=0;const stringify=JSON.stringify;

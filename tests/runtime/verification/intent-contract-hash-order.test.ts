@@ -9,7 +9,7 @@ beforeAll(async()=>{
  // Observe trusted first-load references; never weaken afterimport poison protection.
  vi.resetModules();
  const define=Object.defineProperty,get=Object.getOwnPropertyDescriptor,own=Object.hasOwn,apply=Reflect.apply;
- const prior={__proto__:null,...get(Hash.prototype,'update')!},update=prior.value;
+ const prior:PropertyDescriptor & {__proto__?:null}={__proto__:null,...get(Hash.prototype,'update')!},update=prior.value;
  const observer=function(this:Hash,input:unknown,...args:unknown[]){
   if(capturedObserver.active){
    if(input==='xiaok-intent-business-contract-v1\0'){capturedObserver.contractCalls++;throw capturedObserver.failure;}

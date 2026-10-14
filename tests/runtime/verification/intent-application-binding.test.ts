@@ -27,7 +27,6 @@ it('rejects executable input with zero getter calls and hidden extra fields',()=
 it('checks the complete 64KiB bound without truncating text',()=>{const r=candidate();r.body.summary='原'.repeat(3000);expect(createIntentApplicationBinding(r).body.summary).toBe(r.body.summary);r.body.summary='原'.repeat(24000);expect(()=>createIntentApplicationBinding(r)).toThrow();});
 
 import {parseBusinessApplicationBinding,businessApplicationBindingHash,businessApplicationOwner,businessApplicationEpoch,sameBusinessApplicationSubject,parseActiveBusinessApplicationBinding} from '../../../src/runtime/verification/business-application-binding.js';
-import {intentHostSubjectOwner} from '../../../src/runtime/verification/intent-host-subject.js';
 it.each([false,true])('dispatches Intent through the original business union without Goal/Loop coercion (parent=%s)',parent=>{
  const binding=createIntentApplicationBinding(candidate(parent));expect(parseBusinessApplicationBinding(binding)).toEqual(binding);
  expect(businessApplicationBindingHash(binding)).toBe(intentApplicationBindingHash(binding));expect(businessApplicationOwner(binding)).toEqual(intentHostSubjectOwner(binding.subject));

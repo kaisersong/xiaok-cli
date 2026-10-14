@@ -148,13 +148,17 @@ describe('P1-B production request projection planner', () => {
 
   it('preserves host-delimited policy segments verbatim while projecting only the native body', () => {
     const input = fixture(); const before = 'PREHOOK POLICY: prohibit publication\n'; const after = '\nPOSTHOOK WARNING: review required';
-    input.request.messages[1]!.content[0]!.content = before + 'old-cap-1' + after;
+    const resultBlock = input.request.messages[1]!.content[0]!;
+    if (!('content' in resultBlock) || typeof resultBlock.content !== 'string') throw Error('expected_tool_result_content');
+    resultBlock.content = before + 'old-cap-1' + after;
     input.observations[0]!.segments = { before, native: 'old-cap-1', after };
     const result = run(input); expect(result.status).toBe('projected'); if (result.status !== 'projected') return;
     const text = String(result.request.messages[1]!.content[0]!.content); expect(text.startsWith(before)).toBe(true); expect(text.endsWith(after)).toBe(true);
   });
   it('rejects a guessed or stale segment boundary instead of silently deleting policy text', () => {
-    const input = fixture(); input.request.messages[1]!.content[0]!.content += '\nNEW POLICY';
+    const input = fixture(); const resultBlock = input.request.messages[1]!.content[0]!;
+    if (!('content' in resultBlock) || typeof resultBlock.content !== 'string') throw Error('expected_tool_result_content');
+    resultBlock.content += '\nNEW POLICY';
     expect(run(input)).toMatchObject({ status: 'skipped' });
   });
   it('groups consistent references to the same observation into one logical-send proposal', () => {
