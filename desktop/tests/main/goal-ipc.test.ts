@@ -12,6 +12,7 @@ vi.mock('electron', () => ({
 }));
 
 import { registerDesktopIpc } from '../../electron/ipc.js';
+import type { GoalNativeQueryDto } from '../../shared/goal-native-query-ipc-contract.js';
 
 describe('desktop Goal IPC', () => {
   it('exposes only semantic Goal operations and forwards main-owned events', async () => {
@@ -29,8 +30,9 @@ describe('desktop Goal IPC', () => {
     let taskPrepared: ((input: unknown) => void) | undefined;
     const services = {
       getDataRoot: () => '/tmp/xiaok-goal-ipc-test',
-      createTask: vi.fn(async (input: unknown) => input),
-      getGoalNativeMutation: vi.fn(async (threadId: string) => ({ threadId })),
+      // Scripted public transport DTOs only: no SDK instances, grant or authority.
+      createTask: vi.fn(async (_input: unknown) => ({ taskId: 'scripted-task' })),
+      getGoalNativeMutation: vi.fn(async (_threadId: string) => ({ id: 'scripted-summary', kind: 'create', status: 'reserved', objective: 'original' } satisfies GoalNativeQueryDto)),
       recoverGoalNativeMutation: vi.fn(async (input: unknown) => input),
       continueGoalNativeMutation: vi.fn(async (input: unknown) => input),
       cancelGoalNativeMutation: vi.fn(async (input: unknown) => input),
@@ -49,7 +51,7 @@ describe('desktop Goal IPC', () => {
     };
     await registerDesktopIpc({
       handle: (channel: string, handler: (...args: unknown[]) => unknown) => handlers.set(channel, handler),
-    } as never, window as never, services as never);
+    } as never, window as never, services as never, { multiAgentAuthorize: () => ({ actorId: 'goal-ipc-test' }) });
 
     await expect(handlers.get('desktop:goal:create')?.({}, {
       threadId: 'thread_1', objective: '完成任务', expectedEvidenceKinds: ['answer'], turnLimit: 4,
@@ -67,7 +69,7 @@ describe('desktop Goal IPC', () => {
     });
     expect(services.createTask).toHaveBeenCalledWith({
       prompt: 'hello', materials: [], context: { threadId: 'thread_1' },
-    }, undefined);
+    }, { actorId: 'goal-ipc-test', requestSource: 'user' });
 
     for (const [channel, method] of [['recoverPublication', 'recoverGoalPublication'], ['continuePublication', 'continueGoalPublication']] as const) {
       for (const extra of [{ requestSource: 'agent' }, { intentId: 'forged' }, { challenge: {} }]) {
@@ -87,7 +89,7 @@ describe('desktop Goal IPC', () => {
       await handlers.get(`desktop:goal:${channel}`)?.({}, { threadId: 'thread_1' });
       expect(services[method]).toHaveBeenCalledWith({ threadId: 'thread_1', requestSource: 'user' });
     }
-    await handlers.get('desktop:goal:getNativeMutation')?.({}, { threadId: 'thread_1' });
+    await handlers.get('desktop:goal:getNativeMutation')?.({ sender: { isDestroyed: () => false } }, { threadId: 'thread_1' });
     expect(services.getGoalNativeMutation).toHaveBeenCalledWith('thread_1');
 
     goalChanged?.({ threadId: 'thread_1', goal: { state: { status: 'active' } } });

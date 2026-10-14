@@ -1,3 +1,6 @@
+import { registerGoalQueuePendingIpc } from './goal-queuepending-typed-ipc.js';
+import { registerGoalGetIpc } from './goal-get-typed-ipc.js';
+import { registerGoalPauseCancelIpc } from './goal-pause-cancel-typed-ipc.js';
 import { registerGoalNativeQueryIpc } from './goal-native-query-typed-ipc.js';
 import { registerMeetingActions10Ipc, captureMeeting10LiveUpdate } from './meeting-actions10-typed-ipc.js';
 import { safeMeeting10Thrown } from './meeting-actions10-error-policy.js';
@@ -1138,15 +1141,22 @@ export async function registerDesktopIpc(
     log('info', 'createTask ok', { taskId: r?.taskId });
     return r;
   });
-  ipcMain.handle('desktop:goal:get', async (_event, input) => (
-    services.getGoal(parseGoalThreadId(input?.threadId))
-  ));
+  registerGoalGetIpc(ipcMain,
+    threadId => services.getGoal(threadId),
+    parseGoalThreadId,
+    event => {
+      if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_get_sender_forbidden');
+    });
   ipcMain.handle('desktop:goal:create', async (_event, input) => (
     services.createGoal(parseGoalInput(input, 'create'))
   ));
-  ipcMain.handle('desktop:goal:pause', async (_event, input) => (
-    services.pauseGoal(parseGoalThreadId(input?.threadId))
-  ));
+  registerGoalPauseCancelIpc(ipcMain,
+    threadId => services.pauseGoal(threadId),
+    threadId => services.cancelGoal(threadId),
+    parseGoalThreadId,
+    event => {
+      if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_pause_cancel_sender_forbidden');
+    });
   ipcMain.handle('desktop:goal:resume', async (_event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_resume_input');
     const fields = Object.keys(input).filter(key => !['threadId', 'turnLimit', 'requestId'].includes(key));
@@ -1182,9 +1192,7 @@ export async function registerDesktopIpc(
   });
   ipcMain.handle('desktop:goal:recoverPublication', async (_event, input) => services.recoverGoalPublication(parseGoalPublicationInput(input)));
   ipcMain.handle('desktop:goal:continuePublication', async (_event, input) => services.continueGoalPublication(parseGoalPublicationInput(input)));
-  ipcMain.handle('desktop:goal:cancel', async (_event, input) => (
-    services.cancelGoal(parseGoalThreadId(input?.threadId))
-  ));
+
   ipcMain.handle('desktop:goal:replace', async (_event, input) => (
     services.replaceGoal(parseGoalInput(input, 'replace'))
   ));
@@ -1196,13 +1204,8 @@ export async function registerDesktopIpc(
       threadId: parseGoalThreadId(input.threadId), attachmentId,
     });
   });
-  ipcMain.handle('desktop:goal:setUserQueuePending', async (_event, input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.pending !== 'boolean') {
-      throw new Error('invalid_goal_queue_state');
-    }
-    return services.setGoalUserQueuePending({
-      threadId: parseGoalThreadId(input.threadId), pending: input.pending,
-    });
+  registerGoalQueuePendingIpc(ipcMain, services, parseGoalThreadId, event => {
+    if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_queue_sender_forbidden');
   });
   task7Producers.set('desktop:answerQuestion', async (_event, input) => {
     const actor = taskActor(_event); await callTask7Producer(() => services.authorizeTaskRead(input.taskId, actor)); recheckTaskActor(_event, actor);

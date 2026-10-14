@@ -1,3 +1,7 @@
+import { registerGoalNativeQueryIpc } from '../../electron/goal-native-query-typed-ipc.js';
+import { registerGoalGetIpc } from '../../electron/goal-get-typed-ipc.js';
+import { registerGoalPauseCancelIpc } from '../../electron/goal-pause-cancel-typed-ipc.js';
+import { registerGoalQueuePendingIpc } from '../../electron/goal-queuepending-typed-ipc.js';
 import { registerTask7Ipc } from '../../electron/task7-typed-ipc.js';
 import { TASK7_METHODS } from '../../shared/task7-ipc-contract.js';
 import { registerProjectPlanningIpc } from '../../electron/project-planning-typed-ipc.js';
@@ -1058,6 +1062,14 @@ const HANDLER_REGISTRATION_FILES = [
 
 function extractRegisteredHandlerChannels(): Set<string> {
   const channels = new Set<string>();
+  // Registration-only contract extraction: never execute scripted or native producers.
+  const goalRegistrar = { handle: (channel: string) => { channels.add(channel); } };
+  const unusedGoalProducer = (): never => { throw Error('parity_extractor_must_not_invoke_goal_producer'); };
+  registerGoalNativeQueryIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
+  registerGoalGetIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
+  registerGoalPauseCancelIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
+  registerGoalQueuePendingIpc(goalRegistrar, { setGoalUserQueuePending: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer);
+
   // This registrar deliberately generates semantic channels. Execute the real
   // registrar instead of duplicating its command table in this source scanner.
   const dispose = registerDesktopMultiAgentIpc({ handle: channel => { channels.add(channel); } }, null, { authorize: () => null });
