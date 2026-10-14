@@ -1,4 +1,5 @@
 import { isAbortError } from './abort-utils.js';
+import { formatKimiProviderRequestError, getKimiProviderRequestDiagnostic } from './provider-request-error.js';
 
 export interface RuntimeErrorShape {
   code:
@@ -30,6 +31,10 @@ export function normalizeRuntimeError(error: unknown): RuntimeErrorShape {
       message: 'KIMI_K3_DURABLE_RESUME_UNSUPPORTED',
       retryable: false,
     };
+  }
+  const providerDiagnostic = getKimiProviderRequestDiagnostic(error);
+  if (providerDiagnostic) {
+    return { code: 'model_failed', message: formatKimiProviderRequestError(providerDiagnostic), retryable: providerDiagnostic.retryable };
   }
   const transportCode = typeof errorCode === 'string' ? errorCode : '';
   if (

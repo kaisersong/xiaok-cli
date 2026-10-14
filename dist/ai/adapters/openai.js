@@ -2,6 +2,7 @@ import { getDefaultModelReasoningEffort, getSupportedModelReasoningEfforts } fro
 import OpenAI from 'openai';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
 import { buildOpenAIHarnessContext, isOwnedStrictOpenAIHarnessContext, observeReasoningDialect, } from '../providers/model-harness-profile.js';
@@ -25,6 +26,8 @@ function isRetryableError(error) {
         if (error.name === 'TimeoutError')
             return true;
         const record = error;
+        if (record.retryable === false)
+            return false;
         if (record.retryable === true)
             return true;
         const status = record.status;
@@ -211,10 +214,8 @@ async function runProviderOperation(strictKimiK3, operation) {
         if (!strictKimiK3) {
             throw error;
         }
-        const sanitized = new Error('KIMI_K3_PROVIDER_REQUEST_FAILED');
-        sanitized.name = 'KimiK3ProviderRequestError';
-        sanitized.code = 'KIMI_K3_PROVIDER_REQUEST_FAILED';
-        sanitized.retryable = isRetryableError(error);
+        const sanitized = createKimiProviderRequestError(error, isRetryableError(error));
+        usageLogger.info('kimiProviderRequestFailed', getKimiProviderRequestDiagnostic(sanitized));
         throw sanitized;
     }
 }

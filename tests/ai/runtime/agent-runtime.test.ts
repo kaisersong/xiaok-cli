@@ -630,6 +630,49 @@ describe('AgentRuntime', () => {
     expect(events.at(-1)).toBe('run_completed');
   });
 
+  it('resumes a strict Kimi model failure without replaying a completed tool', async () => {
+    const adapter = createStrictK3Adapter();
+    let requests = 0;
+    const create = vi.fn(async () => {
+      const attempt = ++requests;
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield { choices: [{ delta: { reasoning_content: 'thinking' }, finish_reason: null }] };
+          if (attempt === 1) {
+            yield { choices: [{ delta: { tool_calls: [{ index: 0, id: 'once', type: 'function',
+              function: { name: 'glob', arguments: '{"pattern":"*.ts"}' } }] }, finish_reason: null }] };
+            yield { choices: [{ delta: {}, finish_reason: 'tool_calls' }] };
+          } else if (attempt === 2) {
+            yield { choices: [{ delta: { content: 'interrupted partial' }, finish_reason: null }] };
+            throw Object.assign(new Error('PRIVATE_REASONING_CANARY socket hang up'), { code: 'ECONNRESET' });
+          } else {
+            yield { choices: [{ delta: { content: 'recovery complete' }, finish_reason: null }] };
+            yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+          }
+        },
+      };
+    });
+    (adapter as unknown as { client: unknown }).client = { chat: { completions: { create } } };
+    const execute = vi.fn(async () => 'completed exactly once');
+    const session = new AgentSessionState();
+    const runtime = new AgentRuntime({
+      adapter,
+      registry: createRegistryMock({ executeTool: execute, getToolDefinitions: () => [{
+        name: 'glob', description: 'list files',
+        inputSchema: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] },
+      }] }) as never,
+      session, controller: new AgentRunController(), systemPrompt: 'system',
+    });
+    const events: string[] = [];
+    await runtime.run('list files and report completion', event => events.push(event.type));
+    expect(requests).toBe(3);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(events.filter(type => type === 'model_recovery')).toHaveLength(1);
+    expect(events.at(-1)).toBe('run_completed');
+    expect(JSON.stringify(session.getMessages())).toContain('recovery complete');
+    expect(JSON.stringify(session.getMessages())).not.toContain('PRIVATE_REASONING_CANARY');
+  });
+
   it('binds host-only execution facts and tool_finished to the same invocation id', async () => {
     let streamCalls = 0;
     const adapter: ModelAdapter = {

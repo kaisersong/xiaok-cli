@@ -9,6 +9,7 @@ import type {
 } from '../../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
@@ -55,6 +56,7 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     if (error.name === 'TimeoutError') return true;
     const record = error as unknown as Record<string, unknown>;
+    if (record.retryable === false) return false;
     if (record.retryable === true) return true;
     const status = record.status;
     if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
@@ -297,13 +299,8 @@ async function runProviderOperation<T>(
     if (!strictKimiK3) {
       throw error;
     }
-    const sanitized = new Error('KIMI_K3_PROVIDER_REQUEST_FAILED') as Error & {
-      code: 'KIMI_K3_PROVIDER_REQUEST_FAILED';
-      retryable: boolean;
-    };
-    sanitized.name = 'KimiK3ProviderRequestError';
-    sanitized.code = 'KIMI_K3_PROVIDER_REQUEST_FAILED';
-    sanitized.retryable = isRetryableError(error);
+    const sanitized = createKimiProviderRequestError(error, isRetryableError(error));
+    usageLogger.info('kimiProviderRequestFailed', getKimiProviderRequestDiagnostic(sanitized));
     throw sanitized;
   }
 }
