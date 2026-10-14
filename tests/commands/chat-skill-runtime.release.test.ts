@@ -15,6 +15,12 @@ interface FakeAdapterCall {
   lastToolResult: string;
 }
 
+function requireResizeListener(listener: unknown): asserts listener is () => void {
+  if (typeof listener !== 'function') {
+    throw new TypeError('chat_resize_listener_not_callable');
+  }
+}
+
 const adapterCalls: FakeAdapterCall[] = [];
 
 function resetAdapterState(): void {
@@ -515,6 +521,7 @@ describe('chat skill runtime release validation', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
+          requireResizeListener(listener);
           process.stdout.removeListener('resize', listener);
         }
       }
@@ -597,6 +604,7 @@ describe('chat skill runtime release validation', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
+          requireResizeListener(listener);
           process.stdout.removeListener('resize', listener);
         }
       }
@@ -689,6 +697,7 @@ describe('chat skill runtime release validation', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
+          requireResizeListener(listener);
           process.stdout.removeListener('resize', listener);
         }
       }
@@ -758,6 +767,7 @@ describe('chat skill runtime release validation', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
+          requireResizeListener(listener);
           process.stdout.removeListener('resize', listener);
         }
       }
