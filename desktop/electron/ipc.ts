@@ -1,3 +1,4 @@
+import { registerGoalNativeQueryIpc } from './goal-native-query-typed-ipc.js';
 import { registerMeetingActions10Ipc, captureMeeting10LiveUpdate } from './meeting-actions10-typed-ipc.js';
 import { safeMeeting10Thrown } from './meeting-actions10-error-policy.js';
 import { registerTask7Ipc, callTask7Producer, captureTask7Output, captureTask7Event } from './task7-typed-ipc.js';
@@ -1166,7 +1167,12 @@ export async function registerDesktopIpc(
     if (Object.keys(input).some(key => key !== 'threadId')) throw Error('invalid_goal_publication_field');
     return { threadId: parseGoalThreadId((input as { threadId?: unknown }).threadId), requestSource: 'user' as const };
   };
-  ipcMain.handle('desktop:goal:getNativeMutation', async (_event, input) => services.getGoalNativeMutation(parseGoalPublicationInput(input).threadId));
+  registerGoalNativeQueryIpc(ipcMain,
+    threadId => services.getGoalNativeMutation(threadId),
+    parseGoalPublicationInput,
+    event => {
+      if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_native_query_sender_forbidden');
+    });
   ipcMain.handle('desktop:goal:recoverNativeMutation', async (_event, input) => services.recoverGoalNativeMutation(parseGoalPublicationInput(input)));
   ipcMain.handle('desktop:goal:cancelNativeMutation', async (_event, input) => services.cancelGoalNativeMutation(parseGoalPublicationInput(input)));
   ipcMain.handle('desktop:goal:continueNativeMutation', async (_event, input) => {
