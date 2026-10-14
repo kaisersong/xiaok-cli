@@ -3,7 +3,7 @@ import {createRequire} from 'node:module';
 import {syncBuiltinESMExports} from 'node:module';
 import {createHash} from 'node:crypto';
 const require=createRequire(import.meta.url);
-const capturedDefine=Object.defineProperty,capturedGet=Object.getOwnPropertyDescriptor,capturedError=Error;
+const capturedDefine: (target:object,key:PropertyKey,descriptor:PropertyDescriptor & {__proto__?:null})=>object=Object.defineProperty,capturedGet=Object.getOwnPropertyDescriptor,capturedError=Error;
 const capturedDelete=Reflect.deleteProperty;
 const capturedGetPrototypeOf=Object.getPrototypeOf;
 const capturedSync=syncBuiltinESMExports;

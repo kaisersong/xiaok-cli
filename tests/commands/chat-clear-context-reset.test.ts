@@ -9,7 +9,8 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from 'commander';
-import type { Message, ModelAdapter, StreamChunk, ToolDefinition } from '../../src/types.js';
+import type { Message, StreamChunk, ToolDefinition } from '../../src/types.js';
+import type { CapabilityAwareAdapter } from '../../src/ai/runtime/model-capabilities.js';
 import { Console } from 'node:console';
 import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
@@ -28,7 +29,7 @@ function requireResizeListener(listener: unknown): asserts listener is () => voi
   }
 }
 
-function createEchoAdapter(): ModelAdapter {
+function createEchoAdapter(): CapabilityAwareAdapter {
   return {
     getModelName() {
       return 'echo-test-model';

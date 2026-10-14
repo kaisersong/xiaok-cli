@@ -97,9 +97,9 @@ it('reads only native own kind fields when Intent, Loop body, Loop contract and 
   Object.defineProperty(Object.prototype,'kind',{configurable:true,get(){reads++;return 'builtin-diagnostic';}});
   const intentRaw=structuredClone(intentApplicationCandidate());delete intentRaw.body.kind;
   expect(()=>createIntentApplicationBinding(intentRaw)).toThrow('intent_application_body');
-  const b=loop(),body=structuredClone(b.body);delete body.kind;
+  const b=loop(),body=structuredClone(b.body);if(!Reflect.deleteProperty(body,'kind'))throw new TypeError('fixture_property_delete_failed');
   expect(()=>parseLoopCandidateBody(body,b.subject,b.contract)).toThrow('loop_application_body');
-  const contract=structuredClone(b.contract);delete contract.kind;expect(()=>parseLoopBusinessContract(contract)).toThrow('loop_contract_shape');
+  const contract=structuredClone(b.contract);if(!Reflect.deleteProperty(contract,'kind'))throw new TypeError('fixture_property_delete_failed');expect(()=>parseLoopBusinessContract(contract)).toThrow('loop_contract_shape');
   const {triggerHash:_triggerHash,contractHash:_contractHash,candidatePayloadHash:_candidatePayloadHash,...candidate}=structuredClone(b);
   expect(()=>createLoopApplicationBinding({...candidate,originalTriggerJson:'{}'})).toThrow('loop_application_trigger');
  }finally{if(prior)Object.defineProperty(Object.prototype,'kind',prior);else Reflect.deleteProperty(Object.prototype,'kind');}
@@ -119,7 +119,7 @@ it('reads Intent contract descriptors without inherited Object.prototype.value',
  expect(error).toBe('');expect(reads).toBe(0);
 });
 it('bounds Intent parent artifacts and writes created hashes without inherited accessors',()=>{
- const candidate=intentApplicationCandidate(true),binding=createIntentApplicationBinding(candidate),malformed=structuredClone(binding);delete malformed.body.artifacts;
+ const candidate=intentApplicationCandidate(true),binding=createIntentApplicationBinding(candidate),malformed=structuredClone(binding);if(!Reflect.deleteProperty(malformed.body,'artifacts'))throw new TypeError('fixture_property_delete_failed');
  const priorArtifacts=Object.getOwnPropertyDescriptor(Object.prototype,'artifacts'),priorHash=Object.getOwnPropertyDescriptor(Object.prototype,'contractHash');let reads=0,writes=0,error='';
  try{
   Object.defineProperty(Object.prototype,'artifacts',{configurable:true,get(){reads++;return [];}});
@@ -130,7 +130,7 @@ it('bounds Intent parent artifacts and writes created hashes without inherited a
  expect(error).toBe('intent_application_artifacts');expect(reads).toBe(0);expect(writes).toBe(0);
 });
 it('keeps review envelope purpose errors ahead of invalid nested Intent body errors',()=>{
- const raw:any=review(),valid=createIntentApplicationBinding(intentApplicationCandidate()),binding=structuredClone(valid);delete binding.body.kind;
+ const raw:any=review(),valid=createIntentApplicationBinding(intentApplicationCandidate()),binding=structuredClone(valid);if(!Reflect.deleteProperty(binding.body,'kind'))throw new TypeError('fixture_property_delete_failed');
  raw.binding=binding;raw.owner={profileId:'profile',...businessApplicationOwner(valid)};raw.bindingHash=businessApplicationBindingHash(valid);raw.purpose='wrong-purpose';
  expect(()=>parseApplicationBindingReview(raw)).toThrow('application_review_purpose');
 });

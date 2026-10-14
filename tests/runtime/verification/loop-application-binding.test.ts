@@ -66,8 +66,9 @@ it.each([['non-string',42],['blank',' ']] as const)('preserves trigger text vali
 it('parses the trigger once after complete capture, so JSON.parse reentry cannot alter the bound candidate',()=>{
  const expected=createLoopApplicationBinding(base()),raw=base(),original=JSON.parse;let triggerParses=0;
  try{
-  JSON.parse=function(text:any,...args:any[]){if(text===raw.originalTriggerJson){triggerParses++;raw.body.summary='reentered';}return Reflect.apply(original,this,[text,...args]);} as typeof JSON.parse;
+  JSON.parse=function(this:unknown,text:any,...args:any[]){if(text===raw.originalTriggerJson){triggerParses++;raw.body.summary='reentered';}return Reflect.apply(original,this,[text,...args]);} as typeof JSON.parse;
   const actual=createLoopApplicationBinding(raw);
+  if(actual.body.kind!=='builtin-diagnostic')throw Error('expected_builtin_diagnostic');
   expect(triggerParses).toBe(1);expect(actual.body.summary).toBe('Original scan.');expect(actual.candidatePayloadHash).toBe(expected.candidatePayloadHash);
  }finally{JSON.parse=original;}
 });
