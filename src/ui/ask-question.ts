@@ -303,7 +303,20 @@ export async function askQuestion(params: AskQuestionParams): Promise<AskQuestio
 
     function onKey(data: string | Buffer) {
       if (settled) return;
-      const key = typeof data === 'string' ? data : data.toString('utf8');
+      const input = typeof data === 'string' ? data : data.toString('utf8');
+      // A stdin data event is a byte batch, not a single key. Keep CSI sequences
+      // and multi-digit numbers intact, then apply the keys in arrival order.
+      const keys = input.match(/\x1b\[[0-?]*[ -/]*[@-~]|\d+|[\r\n \x1b\x03\x7f\x08]/g) ?? [];
+      // Preserve the old behavior for arbitrary pasted text in a choice menu.
+      if (keys.join('') !== input) return;
+      for (const key of keys) {
+        if (settled) break;
+        handleKey(key);
+      }
+    }
+
+    function handleKey(key: string) {
+      if (settled) return;
       const UP    = '\x1b[A';
       const DOWN  = '\x1b[B';
       const ENTER = '\r';
