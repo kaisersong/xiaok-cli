@@ -8,10 +8,10 @@ describe('original native snapshot directory hints',()=>{
   let release!:()=>void,ready!:(input:TaskRunnerInput)=>void;const waiting=new Promise<void>(resolve=>release=resolve),started=new Promise<TaskRunnerInput>(resolve=>ready=resolve);
   const host=new InProcessTaskRuntimeHost({snapshotStore:new FileTaskSnapshotStore(join(root,'tasks')),materialRegistry:new MaterialRegistry({workspaceRoot:join(root,'workspace'),maxBytes:1024}),runner:async input=>{ready(input);await waiting;}});
   try{const task=await host.createTask({prompt:'native live hint',materials:[],context:{threadId:'thread'}});const input=await started;
-   const before=(await host.inspectTask(task.taskId))!;const records=reader.records(task.taskId,{sinceIndex:before.events.length,signal:signal.signal});const next=records.next();
+   const before=(await host.inspectTask(task.taskId))!;const records=reader.records(task.taskId,{sinceIndex:before.events.length,signal:signal.signal})[Symbol.asyncIterator]();const next=records.next();
    await input.emitRuntimeEvent({type:'receipt_emitted',sessionId:input.sessionId,turnId:'turn',intentId:'intent',stepId:'step',note:'committed live result'});
    const event=await Promise.race([next,new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error('snapshot_hint_missing')),2000))]);
-   expect(event.value?.event).toMatchObject({type:'result',result:{summary:'committed live result'}});signal.abort();await records.return();
+   expect(event.value?.event).toMatchObject({type:'result',result:{summary:'committed live result'}});signal.abort();if(!records.return)throw Error('activity_record_iterator_return_missing');await records.return();
   }finally{signal.abort();release();await host.drain();reader.close();rmSync(root,{recursive:true,force:true});}
  });
 });
