@@ -3,6 +3,7 @@ import {mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createProductValidationBackend} from '../../../src/runtime/sol-pi/product-validation-backend.js';
+type ValidationAuthorizer = Parameters<typeof createProductValidationBackend>[0]['authorize'];
 it('binds real operation identity and final shell command to user authorization before wrapping a controller plan',async()=>{
  const root=realpathSync(mkdtempSync(join(tmpdir(),'product-validation-'))),hash='a'.repeat(64);
  try{
@@ -10,7 +11,7 @@ it('binds real operation identity and final shell command to user authorization 
  const selectedResult={publicReceipt:{authorizationId:'grant',scopeDigest:hash,invocation:{sessionIdentity:'s',compoundOperationId:'o',validationInvocationId:'v'}}};
  // The product authorizer returns an opaque object; a fabricated public receipt
  // must not be sufficient to acquire an isolated mount plan.
- const authorize=vi.fn(async()=>selectedResult),wrapPreparedValidationInput=vi.fn();
+ const authorize=vi.fn<ValidationAuthorizer>(async()=>selectedResult),wrapPreparedValidationInput=vi.fn();
  const backend=createProductValidationBackend({workspaceRoot:root,expiresAt:Date.now()+60000,client:{execution,materialAuthorization,wrapPreparedValidationInput},authorize,assertCurrent:()=>{}});
  await expect(backend.prepareValidationInput({sessionIdentity:'s',compoundOperationId:'o',validationInvocationId:'v',editedFile:{path:join(root,'source.ts'),beforeHash:null,afterHash:hash},command:{command:'node verify.cjs',workdir:root}})).rejects.toThrow(/plan_missing/);
  expect(authorize.mock.calls[0][0]).toMatchObject({operation:{invocation:selectedResult.publicReceipt.invocation,exactCommand:{argv:['/bin/sh','-c','node verify.cjs'],cwdRelative:'.'},editedFile:{path:join(root,'source.ts'),afterHash:hash}}});
@@ -32,7 +33,7 @@ it.each(['same','different-operation','different-purpose'] as const)('consumes o
  }finally{rmSync(root,{recursive:true,force:true});}
 });
 it('has a distinct direct-command authorization purpose without synthetic edit facts',async()=>{
- const root=realpathSync(mkdtempSync(join(tmpdir(),'product-validation-'))),authorize=vi.fn(async()=>null);
+ const root=realpathSync(mkdtempSync(join(tmpdir(),'product-validation-'))),authorize=vi.fn<ValidationAuthorizer>(async()=>null);
  try{
  const backend=createProductValidationBackend({workspaceRoot:root,expiresAt:Date.now()+60000,client:{execution:{} as any,materialAuthorization:{} as any,wrapPreparedValidationInput:vi.fn()},authorize,assertCurrent:()=>{}});
  await expect(backend.prepareDirectInput!({sessionIdentity:'s',operationId:'direct-op',validationInvocationId:'direct-op:command',command:{command:'node verify.cjs',workdir:root}})).rejects.toThrow(/cancelled/);

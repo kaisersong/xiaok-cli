@@ -15,7 +15,7 @@ const cleanup:Array<()=>void>=[];afterEach(()=>{for(const fn of cleanup.splice(0
 const proposal=(id:string,partition:'control'|'rollback',bytes=1024)=>({operationId:id,resourceId:id,generation:1,partition,bytes,bindingHash:'a'.repeat(64)});
 /** Explicit fixture proof issuer: exercises the actual SQLite ledger, not OS
  * retirement authorization or an installed target owner. */
-function fixture(trace?:(sql:string)=>void){const path=mkdtempSync(join(tmpdir(),'metadata-replacement-')),db=new Database(join(path,'authority.sqlite'),trace?{verbose:trace}:undefined);db.pragma('journal_mode=DELETE');cleanup.push(()=>{if(db.open)db.close();rmSync(path,{recursive:true,force:true});});const bindings=new WeakMap<object,{sessionKey:string;producerKey:string}>(),proof={};
+function fixture(trace?:NonNullable<Database.Options['verbose']>){const path=mkdtempSync(join(tmpdir(),'metadata-replacement-')),db=new Database(join(path,'authority.sqlite'),trace?{verbose:trace}:undefined);db.pragma('journal_mode=DELETE');cleanup.push(()=>{if(db.open)db.close();rmSync(path,{recursive:true,force:true});});const bindings=new WeakMap<object,{sessionKey:string;producerKey:string}>(),proof={};
  const options={database:db,authorityId:'authority',host:{assertCurrent(){},inspectOwner(binding:object){const value=bindings.get(binding);if(!value)throw Error('foreign owner');return value;},assertReleased(receipt:object){if(receipt!==proof)throw Error('foreign proof');},assertMetadataReplacement(receipt:object){if(receipt!==proof)throw Error('foreign replacement');}}},ledger=createSharedCapacityLedger(options);cleanup.push(()=>ledger.close());const binding={};bindings.set(binding,{sessionKey:'session',producerKey:'original'});const owner=ledger.bindOwner(binding);ledger.reserve(owner,proposal('source','control'));ledger.commit(owner,'source');ledger.requestRelease(owner,'source');ledger.reserve(owner,proposal('staging','rollback'));ledger.commit(owner,'staging');const request={replacementId:'replacement',intentId:'import',sources:[{owner,operationId:'source'}],staging:[{owner,operationId:'staging'}],unusedCapacity:[],targets:[{owner,proposal:proposal('target','control'),beneficiaries:[] as CapacityOwner[]},{owner,proposal:proposal('target-future','rollback'),beneficiaries:[] as CapacityOwner[]}],proof};const addOwner=(sessionKey:string,producerKey=sessionKey)=>{const binding={};bindings.set(binding,{sessionKey,producerKey});return ledger.bindOwner(binding);};return{db,ledger,options,binding,owner,proof,request,addOwner};}
 it('freezes original allocation release and attribution before physical retirement, including another actual connection',()=>{
  const f=fixture();f.ledger.prepareMetadataReplacement(f.request);
@@ -53,7 +53,7 @@ it('keeps every claim absent when the actual SQLite page cap prevents preparatio
 });
 
 it('rejects insufficient real page headroom before executing any replacement INSERT',()=>{
- const sql:string[]=[],f=fixture(statement=>sql.push(statement));
+ const sql:string[]=[],f=fixture(statement=>{if(typeof statement!=='string')throw new TypeError('sqlite_trace_not_string');sql.push(statement);});
  const before=f.db.prepare('SELECT * FROM shared_capacity_reservations ORDER BY operation_id').all();
  const pages=f.db.pragma('page_count',{simple:true}) as number;
  expect(f.db.pragma('max_page_count='+(pages+2),{simple:true})).toBe(pages+2);

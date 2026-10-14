@@ -9,7 +9,7 @@ import type { TaskSnapshot } from '../../../src/runtime/task-host/types.js';
 const roots:string[]=[];
 afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>rm(root,{recursive:true,force:true})));});
 const closure={version:1 as const,requiresReauthorization:true as const,observations:[{authorityId:'12345678-1234-1234-1234-123456789abc',profileId:'profile',sourceSessionId:'source',ownerAgentId:'owner',scopeId:'scope',permissionGeneration:1,observationId:'obs',contentHash:'a'.repeat(64),revision:1,policyId:'policy',policyRevision:1}]};
-const task=(extra={})=>({taskId:'task',sessionId:'session',status:'completed',prompt:'input',materials:[],events:[],result:{reply:'protected derived answer',artifacts:[]},createdAt:1,updatedAt:1,...extra}) as TaskSnapshot;
+const task=(extra={}):TaskSnapshot=>({taskId:'task',sessionId:'session',status:'completed',prompt:'input',materials:[],events:[],result:{summary:'protected derived answer',artifacts:[]},createdAt:1,updatedAt:1,...extra});
 describe('Desktop task protected closure durable sidecar',()=>{
  it('keeps closure through a stale task save and a fresh store instance',async()=>{
   const root=await mkdtemp(join(tmpdir(),'desktop-closure-'));roots.push(root);

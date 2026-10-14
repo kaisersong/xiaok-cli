@@ -4,10 +4,11 @@ import {intentApplicationCandidate} from '../../support/intent-application-fixtu
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 import * as decoder from '../../../src/runtime/verification/intent-contract-enrollment.js';
 import {readIntentSqlContract,withIntentSqlParsingContext} from '../../../src/runtime/verification/intent-sql-parsing-context.js';
+import type {IntentContractStage} from '../../../src/runtime/verification/intent-business-contract.js';
 
 function fixture(){
  const db=new Database(':memory:');db.exec('CREATE TABLE receipts(id INTEGER PRIMARY KEY,contract_json TEXT NOT NULL)');
- const candidate=intentApplicationCandidate(),contract=candidate.contract,subjects=[...contract.stages.map(stage=>({...candidate.subject,stageId:stage.stageId})),{...candidate.subject,stageId:null}];
+ const candidate=intentApplicationCandidate(),contract=candidate.contract,subjects=[...contract.stages.map((stage:IntentContractStage)=>({...candidate.subject,stageId:stage.stageId})),{...candidate.subject,stageId:null}];
  subjects.forEach((subject,i)=>db.prepare('INSERT INTO receipts VALUES(?,?)').run(i,json({contract,subject})));
  const read=(id:number)=>readIntentSqlContract(db,(db.prepare('SELECT contract_json FROM receipts WHERE id=?').get(id) as {contract_json:string}).contract_json);
  return {db,candidate,contract,subjects,read};

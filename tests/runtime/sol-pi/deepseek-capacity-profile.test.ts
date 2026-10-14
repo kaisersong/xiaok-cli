@@ -17,7 +17,7 @@ describe('official DeepSeek production capacity qualification', () => {
     expect(() => freezeDeepSeekRecipeCounter({} as never)).toThrow();
   });
   it('rejects unknown platform and missing environment without spawning anything', () => {
-    expect(() => inspectDeepSeekRecipeEnvironment({ pythonExecutable: 'missing', sitePackages: 'missing', tokenizerPath: 'missing' })).toThrow();
+    expect(() => inspectDeepSeekRecipeEnvironment({ pythonExecutable: 'missing', sitePackages: 'missing', tokenizerPath: 'missing', wheelPath: 'missing' })).toThrow();
   });
 
   // These tests consume the real official package, never a fabricated count callback.

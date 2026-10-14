@@ -20,7 +20,7 @@ const H='a'.repeat(64),peer={uid:501,gid:20,auditSessionId:7},account='11111111-
 const cleanups:(()=>void)[]=[];afterEach(()=>{for(const cleanup of cleanups.splice(0).reverse())cleanup();});
 const definition=()=>({version:1,obligations:[{obligationId:'original',predicateId:'original-content',predicateVersion:'1',semantics:'current-subject',recipe:{kind:'artifact-content',checks:[{id:'content',path:'result.md',sha256:H,structure:'utf8'}]}}]});
 function contract(){const result=createIntentPlan({instanceId:'host',sessionId:'actual-session',input:'请写报告，然后生成幻灯片',skills:[]});if(result.kind!=='plan')throw Error('fixture');const {instanceId,continuationMode,steps,...plan}=result.plan;return parseIntentBusinessContract({version:1,...plan,verification:definition(),stages:plan.stages.map(stage=>({...stage,steps:stage.steps.map(({status,...step})=>step),verification:definition()}))});}
-function fixture(publishHook?:(database:ReturnType<typeof openPrivateVerificationDatabase>)=>void,options?:{trace:(sql:string)=>void}){
+function fixture(publishHook?:(database:ReturnType<typeof openPrivateVerificationDatabase>)=>void,options?:{trace:NonNullable<Database.Options['verbose']>}){
  const root=mkdtempSync(join(tmpdir(),'intent-enrollment-')),keys=generateKeyPairSync('ed25519'),markers=join(root,'markers');let database=options?new Database(join(root,'authority.sqlite'),{verbose:options.trace}):openPrivateVerificationDatabase(root);const observations={clock:0,principal:0,qualified:0};mkdirSync(markers,{mode:0o755});let approvals=0,hook:((review:any)=>void|Promise<void>)|undefined;
  const clock=()=>{observations.clock++;return {domainId:'clock',qualificationEpoch:1,lowerBound:1000,upperBound:1001,evidenceHash:H};};
  const makeCompletion=()=>createCompletionBoundary({root,database,authority:{receiverVerifier:createReceiverReplyVerifier({keyId:'receiver',receiverId:'receiver',receiverInstanceEpoch:1,publicKey:keys.publicKey}),issuerId:'authority',verifierHash:H,keyId:'key',serviceEpoch:'boot',privateKey:keys.privateKey,clock,assertQualified:()=>{observations.qualified++;},quiescence:{assertQuiescent:()=>{}}}});
@@ -270,7 +270,7 @@ it.each(['parent','sibling','graph-outside'] as const)('R8 actual Intent stage f
 
 
 it('pure SQL reuse leaves actual unbranded SQL trace, complete read fences, callbacks and DML unchanged',async()=>{
- const trace:string[]=[],f=fixture(undefined,{trace:sql=>trace.push(sql)});for(const stage of f.value.stages)await f.enroll(stage.stageId);await f.enroll(null);
+ const trace:string[]=[],f=fixture(undefined,{trace:sql=>{if(typeof sql!=='string')throw new TypeError('sqlite_trace_not_string');trace.push(sql);}});for(const stage of f.value.stages)await f.enroll(stage.stageId);await f.enroll(null);
  const reset=()=>{trace.length=0;f.observations.clock=0;f.observations.principal=0;f.observations.qualified=0;};
  const changes=()=>((f.database.prepare('SELECT total_changes() AS count').get() as {count:number}).count);
  const before=changes();reset();const original=f.authority.readIntentContract(f.subject(null),peer),originalTrace=[...trace],originalCallbacks={...f.observations};const middle=changes();
