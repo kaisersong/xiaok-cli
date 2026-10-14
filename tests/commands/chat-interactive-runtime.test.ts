@@ -8,6 +8,7 @@ import { createTtyHarness } from '../support/tty.js';
 import { waitFor } from '../support/wait-for.js';
 import { createEmptySessionIntentLedger } from '../../src/runtime/intent-delegation/types.js';
 import { createEmptySessionSkillEvalState } from '../../src/runtime/intent-delegation/skill-eval.js';
+import { normalizeConfig } from '../../src/ai/providers/normalize.js';
 
 const watchdogEvents = vi.hoisted(() => [] as string[]);
 vi.mock('../../src/commands/chat-runtime-config.js', async importOriginal => {
@@ -3410,7 +3411,8 @@ describe('chat interactive runtime', () => {
     });
     const { createAdapter } = await import('../../src/ai/models.js');
     vi.mocked(createAdapter).mockImplementation((nextConfig) => {
-      const entry = nextConfig.models[nextConfig.defaultModelId]!;
+      const normalizedConfig = normalizeConfig(nextConfig);
+      const entry = normalizedConfig.models[normalizedConfig.defaultModelId]!;
       return createFakeAdapter(
         entry.model,
         entry.runtimeOptions?.contextLimit ?? 200_000,
@@ -3551,7 +3553,8 @@ describe('chat interactive runtime', () => {
         failNextAdapter = false;
         throw new Error('adapter failed');
       }
-      const entry = nextConfig.models[nextConfig.defaultModelId]!;
+      const normalizedConfig = normalizeConfig(nextConfig);
+      const entry = normalizedConfig.models[normalizedConfig.defaultModelId]!;
       return createFakeAdapter(
         entry.model,
         entry.runtimeOptions?.contextLimit ?? 200_000,
