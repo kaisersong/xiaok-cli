@@ -1,0 +1,71 @@
+name: Terminal UI
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/ui/**'
+      - 'src/commands/chat.ts'
+      - 'src/ai/tools/ask-user*.ts'
+      - 'tests/ui/**'
+      - 'tests/commands/chat-interactive-runtime.test.ts'
+      - 'tests/ai/tools/ask-user*.test.ts'
+      - 'tests/e2e/inline-image*'
+      - 'tests/e2e/askuser-short-menu.py'
+      - '.github/workflows/terminal-ui.yml'
+  pull_request:
+    paths:
+      - 'src/ui/**'
+      - 'src/commands/chat.ts'
+      - 'src/ai/tools/ask-user*.ts'
+      - 'tests/ui/**'
+      - 'tests/commands/chat-interactive-runtime.test.ts'
+      - 'tests/ai/tools/ask-user*.test.ts'
+      - 'tests/e2e/inline-image*'
+      - 'tests/e2e/askuser-short-menu.py'
+      - '.github/workflows/terminal-ui.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  terminal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3 node-pty
+      - run: npm run build:release
+      - run: npm run test:sandbox:build
+      - name: Test image layout, questions and actual chat entry
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ui/inline-image-block.test.js
+          .test-dist/tests/ui/image-renderer.test.js
+          .test-dist/tests/ui/scroll-region.test.js
+          .test-dist/tests/ui/ask-question.test.js
+          .test-dist/tests/ui/image-input.test.js
+          .test-dist/tests/ui/transcript-buffer.test.js
+          .test-dist/tests/ai/tools/ask-user-question.test.js
+          .test-dist/tests/ai/tools/ask-user.test.js
+          .test-dist/tests/commands/chat-interactive-runtime.test.js
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.13'
+      - name: Install tmux for isolated real TTY tests
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Check retained image cells and short-menu interaction in real TTYs
+        if: runner.os == 'Linux'
+        run: |
+          python tests/e2e/inline-image-scrollback.py
+          python tests/e2e/askuser-short-menu.py

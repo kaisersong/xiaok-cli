@@ -1245,7 +1245,7 @@ describe('chat interactive runtime', () => {
     } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
   }, 15000);
 
-  it.each([24, 12])('keeps pasted images within the actual chat content margin on a %s-row terminal', async rows => {
+  it.each([[24, 'ghostty'], [12, 'ghostty'], [24, 'wezterm'], [12, 'wezterm']] as const)('keeps pasted images within the actual chat content margin on a %s-row %s terminal', async (rows, terminal) => {
     const root = join(tmpdir(), `xiaok-image-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(root);
     const configDir = join(root, 'config'); const projectDir = join(root, 'project');
@@ -1255,7 +1255,7 @@ describe('chat interactive runtime', () => {
     const file = join(projectDir, 'screen.png'); writeFileSync(file, png);
     process.env.XIAOK_CONFIG_DIR = configDir; cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
     const originalEnv = { TMUX: process.env.TMUX, TERM: process.env.TERM, TERM_PROGRAM: process.env.TERM_PROGRAM };
-    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = 'ghostty';
+    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = terminal;
     const { createAdapter } = await import('../../src/ai/models.js');
     const adapter = createFakeAdapter('gpt-4o');
     const originalStream = adapter.stream.bind(adapter);
@@ -1280,13 +1280,24 @@ describe('chat interactive runtime', () => {
       await waitFor(() => expect(observedImages).toHaveLength(1), { timeoutMs: 3000 });
       await waitForInputTurnReady(harness);
       expect(observedImages[0]).toMatchObject({ source: { data: png.toString('base64') } });
-      expect(harness.screen.images()).toHaveLength(1);
-      const placed = harness.screen.images()[0];
       const margin = [...harness.output.raw.matchAll(/\x1b\[1;(\d+)r/g)].at(-1);
       expect(margin).toBeDefined();
-      expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
-      const promptRow = findReadyPromptIndex(harness.screen.lines());
-      expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      if (terminal === 'ghostty') {
+        const header = harness.output.raw.match(/\x1b_G(a=T[^;]+);/);
+        expect(header?.[1]).toContain('U=1');
+        const height = Number(header?.[1].match(/,r=(\d+)/)?.[1]);
+        const width = Number(header?.[1].match(/,c=(\d+)/)?.[1]);
+        expect(height + 2).toBeLessThan(Number(margin![1]));
+        expect(Array.from(harness.output.raw).filter(ch => ch === '\u{10eeee}')).toHaveLength(height * width);
+        expect(harness.output.normalized).not.toContain('[xiaok] UI 已降级');
+      } else {
+        expect(harness.screen.images()).toHaveLength(1);
+        const placed = harness.screen.images()[0];
+        expect(placed.column).toBe(3);
+        expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
+        const promptRow = findReadyPromptIndex(harness.screen.lines());
+        expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      }
       harness.send('/exit'); harness.send('\r'); await pending;
     } finally {
       process.stdout.isTTY = stdoutIsTTY;
