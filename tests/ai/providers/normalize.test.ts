@@ -109,7 +109,8 @@ describe('normalizeConfig', () => {
     // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
     // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
     expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
-    expect(normalized.models['kimi-default'].runtimeConstraints).toBeUndefined();
+    const normalizedModel = normalized.models['kimi-default'];
+    expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
 
   it('recognizes an explicit default HTTPS port in a schema-v1 Kimi endpoint', () => {
@@ -135,7 +136,8 @@ describe('normalizeConfig', () => {
     // kimi-for-coding 有自己的官方 contextLimit（262,144），但不得带 K3 的 reasoning 策略。
     // 只比 contextLimit 无法区分 —— K3 的值恰好相同。
     expect(normalized.models['kimi-default'].runtimeOptions?.reasoningEffort).toBeUndefined();
-    expect(normalized.models['kimi-default'].runtimeConstraints).toBeUndefined();
+    const normalizedModel = normalized.models['kimi-default'];
+    expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
 
   it('detects MiniMax from both the legacy and the current official host', () => {
@@ -212,7 +214,8 @@ describe('normalizeConfig', () => {
     // 非官方 endpoint 上的 K3 完全不得拿到 catalog runtimeOptions —— 包括 contextLimit。
     // 这条不能弱化成「只是不带 reasoningEffort」。
     expect(normalized.models['kimi-default'].runtimeOptions).toBeUndefined();
-    expect(normalized.models['kimi-default'].runtimeConstraints).toBeUndefined();
+    const normalizedModel = normalized.models['kimi-default'];
+    expect('runtimeConstraints' in normalizedModel ? normalizedModel.runtimeConstraints : undefined).toBeUndefined();
   });
 
   it('preserves an existing schema-v2 kimi-default K2.7 entry without K3 options', () => {
