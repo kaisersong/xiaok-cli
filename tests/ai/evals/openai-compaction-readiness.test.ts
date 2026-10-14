@@ -761,6 +761,7 @@ describe('fault injection, live smoke, and fallback integration', () => {
     expect(evaluate(invalid).reasons).toContain('live_smoke_invalid');
 
     const failed = cloneEvidence();
+    if (failed.liveRawLedgerSmoke.status !== 'passed') throw new Error('expected live smoke');
     failed.liveRawLedgerSmoke = {
       ...failed.liveRawLedgerSmoke,
       status: 'failed',

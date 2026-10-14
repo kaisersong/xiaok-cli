@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 import type { ExecuteNamedSubAgentOptions } from '../../../src/ai/agents/subagent-executor.js';
 import * as subagentModule from '../../../src/ai/agents/subagent-executor.js';
 import type { SkillMeta } from '../../../src/ai/skills/loader.js';
@@ -45,7 +46,7 @@ function mockSkillMeta(partial: Partial<SkillMeta>): SkillMeta {
 // ---------------------------------------------------------------------------
 
 describe('Subagent Context Isolation', () => {
-  let executeSpy: ReturnType<typeof vi.spyOn>;
+  let executeSpy: MockInstance<typeof subagentModule.executeNamedSubAgent>;
 
   beforeEach(() => {
     executeSpy = vi.spyOn(subagentModule, 'executeNamedSubAgent').mockResolvedValue('ok');
