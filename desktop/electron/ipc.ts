@@ -1,3 +1,5 @@
+import { registerGoalTaskMutationsIpc } from './goal-task-mutation-typed-ipc.js';
+import { createGoalAttachmentNativeTransportIpc } from './goal-attachment-native-typed-ipc.js';
 import { registerGoalQueuePendingIpc } from './goal-queuepending-typed-ipc.js';
 import { registerGoalGetIpc } from './goal-get-typed-ipc.js';
 import { registerGoalPauseCancelIpc } from './goal-pause-cancel-typed-ipc.js';
@@ -1147,9 +1149,9 @@ export async function registerDesktopIpc(
     event => {
       if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_get_sender_forbidden');
     });
-  ipcMain.handle('desktop:goal:create', async (_event, input) => (
-    services.createGoal(parseGoalInput(input, 'create'))
-  ));
+  registerGoalTaskMutationsIpc(ipcMain, services, parseGoalInput, parseGoalThreadId, parseGoalRequestId, event => {
+    if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_task_mutation_sender_forbidden');
+  });
   registerGoalPauseCancelIpc(ipcMain,
     threadId => services.pauseGoal(threadId),
     threadId => services.cancelGoal(threadId),
@@ -1157,21 +1159,7 @@ export async function registerDesktopIpc(
     event => {
       if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_pause_cancel_sender_forbidden');
     });
-  ipcMain.handle('desktop:goal:resume', async (_event, input) => {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_resume_input');
-    const fields = Object.keys(input).filter(key => !['threadId', 'turnLimit', 'requestId'].includes(key));
-    if (fields.length > 0) throw new Error(`invalid_goal_field:${fields[0]}`);
-    const requestId = parseGoalRequestId(input.requestId);
-    const turnLimit = input.turnLimit;
-    if (turnLimit !== undefined && (!Number.isSafeInteger(turnLimit) || turnLimit < 1 || turnLimit > 50)) {
-      throw new Error('invalid_goal_turn_limit');
-    }
-    return services.resumeGoal({
-      threadId: parseGoalThreadId(input.threadId),
-      ...(requestId === undefined ? {} : { requestId }),
-      ...(turnLimit === undefined ? {} : { turnLimit }),
-    });
-  });
+
   const parseGoalPublicationInput = (input: unknown) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw Error('invalid_goal_publication_input');
     if (Object.keys(input).some(key => key !== 'threadId')) throw Error('invalid_goal_publication_field');
@@ -1183,9 +1171,12 @@ export async function registerDesktopIpc(
     event => {
       if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_native_query_sender_forbidden');
     });
-  ipcMain.handle('desktop:goal:recoverNativeMutation', async (_event, input) => services.recoverGoalNativeMutation(parseGoalPublicationInput(input)));
-  ipcMain.handle('desktop:goal:cancelNativeMutation', async (_event, input) => services.cancelGoalNativeMutation(parseGoalPublicationInput(input)));
-  ipcMain.handle('desktop:goal:continueNativeMutation', async (_event, input) => {
+  const goalAttachmentNativeIpc = createGoalAttachmentNativeTransportIpc(ipcMain, event => {
+    if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_attachment_native_sender_forbidden');
+  });
+  goalAttachmentNativeIpc.handle('desktop:goal:recoverNativeMutation', async (_event, input) => services.recoverGoalNativeMutation(parseGoalPublicationInput(input)));
+  goalAttachmentNativeIpc.handle('desktop:goal:cancelNativeMutation', async (_event, input) => services.cancelGoalNativeMutation(parseGoalPublicationInput(input)));
+  goalAttachmentNativeIpc.handle('desktop:goal:continueNativeMutation', async (_event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['threadId','requestId'].includes(key))) throw Error('invalid_goal_native_input');
     const requestId = parseGoalRequestId(input.requestId);
     return services.continueGoalNativeMutation({ threadId: parseGoalThreadId(input.threadId), requestSource: 'user', ...(requestId === undefined ? {} : { requestId }) });
@@ -1193,10 +1184,8 @@ export async function registerDesktopIpc(
   ipcMain.handle('desktop:goal:recoverPublication', async (_event, input) => services.recoverGoalPublication(parseGoalPublicationInput(input)));
   ipcMain.handle('desktop:goal:continuePublication', async (_event, input) => services.continueGoalPublication(parseGoalPublicationInput(input)));
 
-  ipcMain.handle('desktop:goal:replace', async (_event, input) => (
-    services.replaceGoal(parseGoalInput(input, 'replace'))
-  ));
-  ipcMain.handle('desktop:goal:ackTaskAttached', async (_event, input) => {
+
+  goalAttachmentNativeIpc.handle('desktop:goal:ackTaskAttached', async (_event, input) => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_goal_attachment');
     const attachmentId = typeof input.attachmentId === 'string' ? input.attachmentId.trim() : '';
     if (!attachmentId || attachmentId.length > 200) throw new Error('invalid_goal_attachment');

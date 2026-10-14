@@ -1,3 +1,6 @@
+import { registerGoalTaskMutationsIpc } from '../../electron/goal-task-mutation-typed-ipc.js';
+import { createGoalAttachmentNativeTransportIpc } from '../../electron/goal-attachment-native-typed-ipc.js';
+import { GOAL_ATTACHMENT_NATIVE_METHODS } from '../../shared/goal-attachment-native-ipc-contract.js';
 import { registerGoalNativeQueryIpc } from '../../electron/goal-native-query-typed-ipc.js';
 import { registerGoalGetIpc } from '../../electron/goal-get-typed-ipc.js';
 import { registerGoalPauseCancelIpc } from '../../electron/goal-pause-cancel-typed-ipc.js';
@@ -1069,6 +1072,10 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerGoalGetIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
   registerGoalPauseCancelIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
   registerGoalQueuePendingIpc(goalRegistrar, { setGoalUserQueuePending: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer);
+  registerGoalTaskMutationsIpc(goalRegistrar, { createGoal: unusedGoalProducer, resumeGoal: unusedGoalProducer, replaceGoal: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
+  const attachmentNativeRegistrar = createGoalAttachmentNativeTransportIpc(goalRegistrar, unusedGoalProducer);
+  for (const method of GOAL_ATTACHMENT_NATIVE_METHODS) attachmentNativeRegistrar.handle('desktop:goal:' + method, unusedGoalProducer);
+
 
   // This registrar deliberately generates semantic channels. Execute the real
   // registrar instead of duplicating its command table in this source scanner.
