@@ -78,7 +78,7 @@ it('rejects direct index section accessors before invoking caller getters',()=>{
 });
 it.each(['symbol','extra','accessor'])('rejects own data outside a selection-array index at the reader boundary: %s',mode=>{
  let reads=0;const selections:any[]=[{kind:'local',obligationId:'output',path:'out/report.txt'}];
- if(mode==='symbol')selections[Symbol('approval')]=true;else if(mode==='extra')selections.extra='ignored';else Object.defineProperty(selections,'extra',{enumerable:true,get(){reads++;return true;}});
+ if(mode==='symbol'){if(!Reflect.set(selections,Symbol('approval'),true))throw new TypeError('selection_attack_property_write_failed');}else if(mode==='extra'){if(!Reflect.set(selections,'extra','ignored'))throw new TypeError('selection_attack_property_write_failed');}else Object.defineProperty(selections,'extra',{enumerable:true,get(){reads++;return true;}});
  expect(()=>readPublishedArtifacts(fixture(),selections)).toThrow('published_artifact_selection');expect(reads).toBe(0);
 });
 it('rejects expected root binding proxies before invoking their traps',()=>{
@@ -110,7 +110,7 @@ it('validates payload identity before canonical serialization can inspect it',()
 it('accepts only a native Set for published artifact index filtering',()=>{
  let calls=0;const fake=Object.create(Set.prototype);fake.has=()=>{calls++;return true;};
  expect(()=>createPublishedArtifactIndex(owner,[],fake)).toThrow('published_artifact_shape');expect(calls).toBe(0);
- const proxied=new Proxy(new Set(),{getPrototypeOf(){calls++;throw Error('prototype trap');},get(){calls++;throw Error('get trap');}});
+ const proxied=new Proxy(new Set<string>(),{getPrototypeOf(){calls++;throw Error('prototype trap');},get(){calls++;throw Error('get trap');}});
  expect(()=>createPublishedArtifactIndex(owner,[],proxied)).toThrow('published_artifact_shape');expect(calls).toBe(0);
 });
 it('rejects inherited selection owner Proxies at the complete artifact reader entry',()=>{

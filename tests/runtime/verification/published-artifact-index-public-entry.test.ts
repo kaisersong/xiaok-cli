@@ -17,7 +17,7 @@ it('reader rejects null artifact with the stable shape error before field access
 it('reader validates the artifact path before selection-byte accounting',()=>{
  const path='../reader-order-marker',encoded=payload({path,sha256:'c'.repeat(64),size:0,bytesBase64:''}),original=Buffer.byteLength;let accounted=0;
  try{
-  Buffer.byteLength=function(value:any,...args:any[]){if(typeof value==='string'&&value.startsWith('{"kind":"local"')&&value.includes(path))accounted++;return Reflect.apply(original,this,[value,...args]);} as typeof Buffer.byteLength;
+  Buffer.byteLength=function(this:unknown,value:any,...args:any[]){if(typeof value==='string'&&value.startsWith('{"kind":"local"')&&value.includes(path))accounted++;return Reflect.apply(original,this,[value,...args]);} as typeof Buffer.byteLength;
   expect(()=>readPublishedArtifacts(encoded,[{kind:'local',obligationId:'output',path}])).toThrow('published_artifact_path');
  }finally{Buffer.byteLength=original;}
  expect(accounted).toBe(0);
