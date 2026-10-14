@@ -56,7 +56,7 @@ describe('config', () => {
       JSON.stringify({ ...DEFAULT_CONFIG, contextBudget: 8000 })
     );
     const config = await loadConfig();
-    expect(config.contextBudget).toBe(8000);
+    expect('contextBudget' in config ? config.contextBudget : undefined).toBe(8000);
   });
 
   it('preserves nested default model config when file only overrides part of models', async () => {
@@ -239,7 +239,8 @@ describe.skipIf(process.platform === 'win32')('config file permissions (config.j
     chmodSync(getConfigPath(), 0o644);
     await saveConfig({ ...config, contextBudget: 9000 });
     expect(modeOf(getConfigPath())).toBe(0o600);
-    expect((await loadConfig()).contextBudget).toBe(9000);
+    const loaded = await loadConfig();
+    expect('contextBudget' in loaded ? loaded.contextBudget : undefined).toBe(9000);
   });
 
   it('tightens a legacy 644 config.json on load without changing content or the dir mode', async () => {
