@@ -26,7 +26,7 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
     const postHook = new Promise<string[]>(resolve => { release = resolve; });
     const controller = new AbortController(); const reason = new Error('between actual registry and CLI');
     const events: string[] = []; let modelCalls = 0; const session = new AgentSessionState();
-    const registry = new ToolRegistry({ autoMode: true, hooksRunner: {
+    const registry = new ToolRegistry({ autoMode: true, hookInputMode: 'direct-callback', hooksRunner: {
       runHooks: async () => ({ ok: true }), runPreHooks: async () => ({ ok: true }),
       runPostHooks: () => { entered.release(); return postHook; },
     } }, [{ permission: 'safe', definition: { name: 'probe', description: 'fixture', inputSchema: { type: 'object' } }, execute: async () => 'LATE_SUCCESS' }]);
@@ -44,7 +44,14 @@ describe('M4 MCP original reason at the real CLI AgentRuntime boundary', () => {
       expect(events).not.toContain('run_failed'); expect(modelCalls).toBe(1);
       expect(session.getMessages().flatMap(message => message.content).filter(block => block.type === 'tool_result'))
         .toEqual([{ type: 'tool_result', tool_use_id: 'actual-call', content: '[user-cancelled]', is_error: true }]);
-    } finally { release([]); await outcome; registry.dispose(); }
+    } finally {
+      release([]); await outcome;
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      // Additional cleanup evidence must not replace the original body/abort error.
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it.each(['run_started', 'assistant_text'])('emits run_aborted once when the %s listener cancels synchronously', async stage => {

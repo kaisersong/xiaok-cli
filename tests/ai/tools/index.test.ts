@@ -290,7 +290,7 @@ describe('ToolRegistry', () => {
   it('blocks execution when a pre hook denies the tool call', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runPreHooks: async () => ({ ok: false, message: 'blocked by hook' }),
         runPostHooks: async () => [],
       },
@@ -304,15 +304,22 @@ describe('ToolRegistry', () => {
       execute: async () => 'should not run',
     }]);
 
+    try {
     const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
 
     expect(result).toContain('blocked by hook');
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it('appends post hook warnings without failing the tool result', async () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runPreHooks: async () => ({ ok: true }),
         runPostHooks: async () => ['post hook warning'],
       },
@@ -326,17 +333,24 @@ describe('ToolRegistry', () => {
       execute: async () => 'ok',
     }]);
 
+    try {
     const result = await registry.executeTool('echo_tool', {});
 
     expect(result).toContain('ok');
     expect(result).toContain('Warning: post hook warning');
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it('skips native tool execution when a pre hook requests preventContinuation', async () => {
     const execute = vi.fn(async () => 'native ask menu should not run');
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runPreHooks: async () => ({
           ok: true,
           preventContinuation: true,
@@ -354,12 +368,19 @@ describe('ToolRegistry', () => {
       execute,
     }]);
 
+    try {
     const result = await registry.executeTool('AskUserQuestion', {
       questions: [{ question: '继续还是停止？', options: [{ label: '继续' }, { label: '停止' }] }]
     });
 
     expect(execute).not.toHaveBeenCalled();
     expect(result).toContain('AskUserQuestion has been mirrored to HexDeck.');
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it('merges capability registry matches into tool search results', () => {
@@ -408,7 +429,7 @@ describe('ToolRegistry', () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'default' }),
       onPrompt,
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runHooks,
         runPreHooks: async () => ({ ok: true }),
         runPostHooks: async () => [],
@@ -423,6 +444,7 @@ describe('ToolRegistry', () => {
       execute: async () => 'written by hook-approved path',
     }]);
 
+    try {
     const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
 
     expect(runHooks).toHaveBeenCalledWith('PermissionRequest', expect.objectContaining({
@@ -430,6 +452,12 @@ describe('ToolRegistry', () => {
     }));
     expect(onPrompt).not.toHaveBeenCalled();
     expect(result).toContain('written by hook-approved path');
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it('auto mode runs non-deletion warn-level bash commands without prompting', async () => {
@@ -552,7 +580,7 @@ describe('ToolRegistry', () => {
 
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'plan' }),
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runHooks,
         runPreHooks: async () => ({ ok: true }),
         runPostHooks: async () => [],
@@ -567,12 +595,19 @@ describe('ToolRegistry', () => {
       execute: async () => 'should not run',
     }]);
 
+    try {
     const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
 
     expect(result).toContain('权限');
     expect(runHooks).toHaveBeenCalledWith('PermissionDenied', expect.objectContaining({
       tool_name: 'write',
     }));
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it('emits PermissionDenied hooks when the fallback prompt declines the tool call', async () => {
@@ -582,7 +617,7 @@ describe('ToolRegistry', () => {
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'default' }),
       onPrompt,
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runHooks,
         runPreHooks: async () => ({ ok: true }),
         runPostHooks: async () => [],
@@ -597,6 +632,7 @@ describe('ToolRegistry', () => {
       execute: async () => 'should not run',
     }]);
 
+    try {
     const result = await registry.executeTool('write', { file_path: '/tmp/x', content: 'x' });
 
     expect(onPrompt).toHaveBeenCalled();
@@ -607,6 +643,12 @@ describe('ToolRegistry', () => {
     expect(runHooks).toHaveBeenCalledWith('PermissionDenied', expect.objectContaining({
       tool_name: 'write',
     }));
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 
   it('emits PostToolUseFailure hook when tool execute throws', async () => {
@@ -614,7 +656,7 @@ describe('ToolRegistry', () => {
 
     const registry = new ToolRegistry({
       permissionManager: new PermissionManager({ mode: 'auto' }),
-      hooksRunner: {
+      hookInputMode: 'direct-callback', hooksRunner: {
         runHooks,
         runPreHooks: async () => ({ ok: true }),
         runPostHooks: async () => [],
@@ -629,12 +671,19 @@ describe('ToolRegistry', () => {
       execute: async () => { throw new Error('boom'); },
     }]);
 
+    try {
     const result = await registry.executeTool('failing_tool', {});
 
     expect(result).toContain('Error:');
     expect(runHooks).toHaveBeenCalledWith('PostToolUseFailure', expect.objectContaining({
       tool_name: 'failing_tool',
     }));
+    } finally {
+      const cleanupFailures: unknown[] = [];
+      try { registry.dispose(); } catch (error) { cleanupFailures.push(error); }
+      try { await registry.waitForAcceptedHookCalls(); } catch (error) { cleanupFailures.push(error); }
+      expect.soft(cleanupFailures).toEqual([]);
+    }
   });
 });
 
