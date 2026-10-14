@@ -22,6 +22,12 @@ vi.mock('../../src/ui/model-selector.js', () => ({
   selectModel: vi.fn(async () => null),
 }));
 
+function requireResizeListener(listener: unknown): asserts listener is () => void {
+  if (typeof listener !== 'function') {
+    throw new TypeError('chat_resize_listener_not_callable');
+  }
+}
+
 function createEchoAdapter(): ModelAdapter {
   return {
     getModelName() {
@@ -211,6 +217,7 @@ describe('chat /clear context reset', () => {
       }
       for (const listener of process.stdout.listeners('resize')) {
         if (!stdoutResizeListeners.includes(listener)) {
+          requireResizeListener(listener);
           process.stdout.removeListener('resize', listener);
         }
       }

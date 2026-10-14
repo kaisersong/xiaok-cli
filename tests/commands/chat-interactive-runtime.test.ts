@@ -1099,7 +1099,7 @@ function writeCompletedFeedbackResumeSessionFixture(
     updatedAt: now,
   });
 
-  const skillEval = createEmptySessionSkillEvalState(sessionId, now);
+  const skillEval = createEmptySessionSkillEvalState(now);
   skillEval.observations.push({
     observationId: `${stepId}:skill_eval`,
     sessionId,
