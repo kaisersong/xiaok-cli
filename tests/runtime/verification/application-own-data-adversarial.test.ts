@@ -88,7 +88,15 @@ describe('species-free loops preserve native callback and hole behavior', () => 
   });
   it('preserves thisArg, three callback arguments and the original thrown error', () => {
     const context = {id:'context'}, input = [3,4], sentinel = Error('callback_sentinel');
-    for (const invoke of [ownDataArrayPrototypeMap,ownDataArrayPrototypeFilter,ownDataArrayPrototypeFlatMap]) {
+    type NumberOperation = (
+      value: readonly number[],
+      callback: (value: number, index: number, array: number[]) => number,
+      thisArg?: unknown,
+    ) => number[];
+    const operations: readonly NumberOperation[] = [
+      ownDataArrayPrototypeMap, ownDataArrayPrototypeFilter, ownDataArrayPrototypeFlatMap,
+    ];
+    for (const invoke of operations) {
       const seen: number[] = [];
       expect(() => invoke(input, function(this: typeof context, value, index, array) {
         expect(this).toBe(context); expect(array).toBe(input); expect(value).toBe(input[index]); seen.push(index);
