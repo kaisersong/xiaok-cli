@@ -21,7 +21,7 @@ describe('multi-agent registry integration', () => {
 
   it('requires explicit orchestration tools and lets an authorized child spawn and follow up its grandchild', async () => {
     const requests: Array<{ messages: Message[]; tools: string[] }> = [];
-    const adapter: ModelAdapter = {
+    const adapter: ModelAdapter = { getModelName: () => '',
       async *stream(messages, tools) {
         const names = tools.map((tool) => tool.name);
         requests.push({ messages: structuredClone(messages), tools: names });

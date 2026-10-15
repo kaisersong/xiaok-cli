@@ -41,7 +41,7 @@ describe('real Runtime + registry + native collector + SDK transport + durable o
     const store = new FileSessionStore(join(root, 'sessions'));
     const persist = vi.fn(async snapshot => { await store.save(snapshot); });
     const owner = createObservationSessionOwner({ service, caller, session, destination, persist, capacityProfile: testOnlyCapacity(destination.url, destination.model) }); cleanup.push(() => owner.dispose());
-    const registry = new ToolRegistry({ autoMode: true, ...(warning ? { hooksRunner: { runPreHooks: async () => ({ ok: true }), runPostHooks: async () => [warning], runHooks: async () => ({ ok: true }) } } : {}) }, [createReadTool({ cwd: root }), bashTool, createObservationReadTool(owner)]);
+    const registry = new ToolRegistry(warning ? { autoMode: true, hookInputMode: 'direct-callback', hooksRunner: { runPreHooks: async () => ({ ok: true }), runPostHooks: async () => [warning], runHooks: async () => ({ ok: true }) } } : { autoMode: true }, [createReadTool({ cwd: root }), bashTool, createObservationReadTool(owner)]);
     cleanup.push(() => registry.dispose());
     const execute = vi.spyOn(registry, 'executeTool'); const bodies: string[] = [];
     const raw = vi.fn(async (_input: unknown, init?: RequestInit) => {

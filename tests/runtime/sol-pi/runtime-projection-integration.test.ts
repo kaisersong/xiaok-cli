@@ -37,7 +37,7 @@ describe('P1B pre-open projection through actual Runtime, shared builder and SDK
     const store = new FileSessionStore(join(root, 'sessions'));
     const ownerOptions = { service, caller, session, destination, fullSendCounter: counter, capacityProfile: longSystem || twoReads ? createTestOnlyCapacityProfile({ destination: destination.url, model: destination.model, windowTokens: twoReads ? 35000 : 25000, outputLimitField: 'max_tokens', defaultOutputTokens: 8192, safetyMarginTokens: 1024, countSerializedInput: body => Buffer.byteLength(body) }) : testOnlyCapacity(destination.url, destination.model), persist: (snapshot: ReturnType<AgentSessionState['exportSnapshot']>) => store.save(snapshot) };
     const owner = createObservationSessionOwner(ownerOptions); cleanup.push(() => owner.dispose());
-    const registry = new ToolRegistry({ autoMode: true, hooksRunner: { runPreHooks: async () => ({ ok: true, additionalContext: 'HOST_POLICY_KEEP' }), runPostHooks: async () => [], runHooks: async () => ({ ok: true }) } }, [createReadTool({ cwd: root }), createObservationReadTool(owner)]); cleanup.push(() => registry.dispose());
+    const registry = new ToolRegistry({ autoMode: true, hookInputMode: 'direct-callback', hooksRunner: { runPreHooks: async () => ({ ok: true, additionalContext: 'HOST_POLICY_KEEP' }), runPostHooks: async () => [], runHooks: async () => ({ ok: true }) } }, [createReadTool({ cwd: root }), createObservationReadTool(owner)]); cleanup.push(() => registry.dispose());
     const bodies: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init?: RequestInit) => {
       bodies.push(String(init?.body));
