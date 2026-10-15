@@ -1,3 +1,4 @@
+import type { PersistedSessionSnapshot } from '../../../src/ai/runtime/session-store.js';
 import {afterEach,it,expect,vi} from 'vitest';
 import {setImmediate as yieldEventLoop} from 'node:timers/promises';
 // Let the real worker process pending IPC between synchronous product cases.
@@ -28,7 +29,7 @@ async function fixture(children=false){
  const storeRoot=join(root,'sessions'),store=new FileSessionStore(storeRoot),ledgerStore=new SessionIntentDelegationStore(store),session=new AgentSessionState(),sessionId=randomUUID();
  const planned=createIntentPlan({sessionId,instanceId:'actual-host',input:'写一份报告',skills:[]});if(planned.kind!=='plan')throw Error('fixture_plan');
  const ledger=appendIntentToLedger(createEmptySessionIntentLedger(sessionId,1),planned.plan,1);ledger.instanceId='actual-host';ledger.ownership={state:'owned',ownerInstanceId:'actual-host',updatedAt:1};
- session.restoreSnapshot({...session.exportSnapshot(),sessionId,cwd:root,intentDelegation:ledger});await store.save(session.exportSnapshot());
+ const intentSnapshot: PersistedSessionSnapshot = {...session.exportSnapshot(),sessionId,cwd:root,intentDelegation:ledger};session.restoreSnapshot(intentSnapshot);await store.save(session.exportSnapshot());
  const permission=new PermissionManager({mode:'auto'});
  const product=await createProductObservationOwner({policy:parseObservationPolicyFile(policyFile),session,profileRoot:join(root,'profile'),environmentRoot,credentialSecrets:[],persist:s=>store.save({...s,intentDelegation:store.getIntentNativeLedgerSync(sessionId)}),permissionManager:permission,executionPersistence:{store,root:storeRoot}});cleanup.push(()=>product.dispose());
  const tools=createIntentDelegationTools({ledgerStore,sessionId,instanceId:'actual-host'}).filter(t=>['intent_step_update','intent_stage_artifact'].includes(t.definition.name));
