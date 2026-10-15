@@ -19,7 +19,7 @@ it.each([false,true])('keeps capacity after a lost physical deletion reply and r
  const root=mkdtempSync(join(tmpdir(),'docker-runner-cleanup-')),db=openPrivateVerificationDatabase(root);
  const volumes=new Map<string,unknown>(),containers=new Map<string,any>();let serial=0,lost=true;
  let runner:ReturnType<typeof createDockerRunner>;
- const harness=createPrimitiveMaterialHarness({database:db,authorityId:'docker-runner-cleanup',engineBinding:{engineId:'e',incarnation:'one'},deletion:{assertDeleted(proof,proposal){runner.deletionAuthority.assertDeleted(proof,proposal);}}});const budget=harness.budget;const revoke=()=>db.prepare("UPDATE broker_staging_intents SET state='revoked'").run();
+ const harness=createPrimitiveMaterialHarness({database:db,authorityId:'docker-runner-cleanup',engineBinding:{engineId:'e',incarnation:'one'},deletion:{assertDeleted(proof,proposal:Parameters<typeof runner.deletionAuthority.assertDeleted>[1]){runner.deletionAuthority.assertDeleted(proof,proposal);}}});const budget=harness.budget;const revoke=()=>db.prepare("UPDATE broker_staging_intents SET state='revoked'").run();
  const inputArchive=createPrimitiveInputArchiveEngine();const engine={...inputArchive.engine,
   async createVolume(v:any){volumes.set(v.name,v);},async inspectVolume(v:any){if(!volumes.has(v.name))throw Error('missing');},
   async createMounted(body:any){const Id=(++serial).toString(16).padStart(64,'0');containers.set(Id,{Id,Image:body.Image,HostConfig:body.HostConfig,Config:body,State:{Running:false,Pid:0,Status:'created',ExitCode:0}});return {Id};},

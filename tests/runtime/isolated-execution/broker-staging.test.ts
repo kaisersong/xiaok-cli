@@ -4,7 +4,7 @@ import {createPrimitiveMaterialHarness} from '../../support/primitive-blob-autho
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
 it('charges before broker reads, freezes real bytes and invalidates later reads after grant revoke',async()=>{
  const root=mkdtempSync(join(tmpdir(),'broker-stager-')),db=openPrivateVerificationDatabase(join(root,'db')),bytes=Buffer.from('actual frozen script'),sha=createHash('sha256').update(bytes).digest('hex');let live=true,reads=0;
- const harness=createPrimitiveMaterialHarness({database:db,authorityId:'broker-staging',engineBinding:{engineId:'e',incarnation:'b'},ownerKey:'owner',assertCleanup(){},deletion:{assertDeleted(proof,proposal){harness.pipeline.stager.deletionAuthority.assertDeleted(proof,proposal);}}});
+ const harness=createPrimitiveMaterialHarness({database:db,authorityId:'broker-staging',engineBinding:{engineId:'e',incarnation:'b'},ownerKey:'owner',assertCleanup(){},deletion:{assertDeleted(proof,proposal:Parameters<ReturnType<typeof createPrimitiveMaterialHarness>['pipeline']['stager']['deletionAuthority']['assertDeleted']>[1]){harness.pipeline.stager.deletionAuthority.assertDeleted(proof,proposal);}}});
  try{
   const peer=harness.peer,command={argv:['/bin/true'],cwdRelative:'.'},invocation={sessionIdentity:'s',compoundOperationId:'o',validationInvocationId:'v'},signal=new AbortController().signal;
    const draft={purpose:'isolated-command' as const,invocation,materials:[{path:'/workspace/input',byteLimit:4096}],exactCommand:command,expiresAt:61000};
