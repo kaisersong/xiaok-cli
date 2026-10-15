@@ -47,17 +47,29 @@ describe('production signed controller client protocol (fixture key is not insta
     try {
       const client = createAuthenticatedControllerClient({ authorityId: 'service', publicKey, roundTrip: (bytes, signal) => callControllerIpc(socketPath, bytes, { signal }), roundTripSync: reply });
       const prepared = await client.materialAuthorization.prepareValidationInput({ grantHandle: { id: 'grant', secret: 'g'.repeat(32) }, invocation }, { signal: new AbortController().signal });
-      let nestedWrapRejected = false;
-      const plan = client.wrapPreparedValidationInput(new Proxy(structuredClone(prepared), { getOwnPropertyDescriptor(target, key) { try { client.wrapPreparedValidationInput(prepared); } catch { nestedWrapRejected = true; } return Object.getOwnPropertyDescriptor(target, key); } }));
-      expect(nestedWrapRejected).toBe(true);
+      let nestedWrapRejected = false, wrapDescriptorReads = 0;
+      const proxyPrepared = new Proxy(structuredClone(prepared), { getOwnPropertyDescriptor(target, key) { wrapDescriptorReads++; try { client.wrapPreparedValidationInput(prepared); } catch { nestedWrapRejected = true; } return Object.getOwnPropertyDescriptor(target, key); } });
+      // Canonical protocol input rejects Proxy before descriptor callbacks; the prepared entry is already consumed.
+      expect(() => client.wrapPreparedValidationInput(proxyPrepared)).toThrow('verification_invalid_record');
+      expect(wrapDescriptorReads).toBe(0);
+      expect(nestedWrapRejected).toBe(false);
       expect(() => client.wrapPreparedValidationInput(prepared)).toThrow('controller_mount_plan_unknown');
-      let planReads = 0;
+      const reservationPrepared = await client.materialAuthorization.prepareValidationInput({ grantHandle: { id: 'grant', secret: 'g'.repeat(32) }, invocation }, { signal: new AbortController().signal });
+      const reservationPlan = client.wrapPreparedValidationInput(reservationPrepared);
+      let planReads = 0, commandDescriptorReads = 0;
       let nestedReserve: ReturnType<typeof client.execution.reserveExecution> | undefined;
-      const proxyCommand = new Proxy(command, { getOwnPropertyDescriptor(target, key) { nestedReserve ??= client.execution.reserveExecution({ ...invocation, command, scopeDigest, materializedInput: plan }); void nestedReserve.catch(() => {}); return Object.getOwnPropertyDescriptor(target, key); } });
-      const reserveInput = { ...invocation, command: proxyCommand, scopeDigest, get materializedInput() { return ++planReads === 1 ? plan : {} as any; } };
-      const reserved = await client.execution.reserveExecution(reserveInput);
+      const proxyCommand = new Proxy(command, { getOwnPropertyDescriptor(target, key) { commandDescriptorReads++; nestedReserve ??= client.execution.reserveExecution({ ...invocation, command, scopeDigest, materializedInput: reservationPlan }); void nestedReserve.catch(() => {}); return Object.getOwnPropertyDescriptor(target, key); } });
+      const reserveInput = { ...invocation, command: proxyCommand, scopeDigest, get materializedInput() { return ++planReads === 1 ? reservationPlan : {} as any; } };
+      const reservesBeforeInvalidInput = requests.filter(request => request.method === 'execution.reserve').length;
+      await expect(client.execution.reserveExecution(reserveInput)).rejects.toThrow('verification_invalid_record');
       expect(planReads).toBe(1);
-      await expect(nestedReserve).rejects.toThrow('controller_mount_plan_unknown');
+      expect(commandDescriptorReads).toBe(0);
+      expect(nestedReserve).toBeUndefined();
+      expect(requests.filter(request => request.method === 'execution.reserve')).toHaveLength(reservesBeforeInvalidInput);
+      await expect(client.execution.reserveExecution({ ...invocation, command, scopeDigest, materializedInput: reservationPlan })).rejects.toThrow('controller_mount_plan_unknown');
+      const dispatchPrepared = await client.materialAuthorization.prepareValidationInput({ grantHandle: { id: 'grant', secret: 'g'.repeat(32) }, invocation }, { signal: new AbortController().signal });
+      const plan = client.wrapPreparedValidationInput(dispatchPrepared);
+      const reserved = await client.execution.reserveExecution({ ...invocation, command, scopeDigest, materializedInput: plan });
       let stdout = '', stderr = '';
       const dispatched = await client.execution.dispatchExecution(reserved.expected, { onStdout: text => { stdout += text; }, onStderr: text => { stderr += text; } });
       await expect(client.execution.dispatchExecution(reserved.expected)).rejects.toThrow('controller_execution_handle_missing');
