@@ -3,11 +3,20 @@ import {writeFileAtomicallySync} from '../../utils/atomic-file.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
-import type { Tool } from '../../types.js';
+import type { Tool, ToolExecutionContext } from '../../types.js';
 import { assertWorkspacePath } from '../permissions/workspace.js';
 import type { WorkspaceToolOptions } from './read.js';
 
-export function createWriteTool(options: WorkspaceToolOptions = {}): Tool {
+export type WriteToolExecutionContext = Pick<
+  ToolExecutionContext,
+  'signal' | 'assertPermissionApproval' | 'compoundPhase' | 'toolInvocationId' | 'runtimeFactSink'
+> | ToolExecutionContext;
+
+export type WriteTool = Omit<Tool, 'execute'> & {
+  execute(input: Record<string, unknown>, context?: WriteToolExecutionContext): Promise<string>;
+};
+
+export function createWriteTool(options: WorkspaceToolOptions = {}): WriteTool {
   const cwd = options.cwd ?? process.cwd();
   const allowOutsideCwd = options.allowOutsideCwd ?? false;
 

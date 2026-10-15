@@ -1,6 +1,6 @@
 import { measureCollector, observationMetricsEnabled } from '../../runtime/trace/observation-metrics.js';
 import { spawn, type ChildProcess } from 'child_process';
-import type { Tool } from '../../types.js';
+import type { Tool, ToolExecutionContext } from '../../types.js';
 import { truncateText } from './truncation.js';
 import { classifyBashCommand } from './bash-safety.js';
 import { drainExitedWindowsShell, INHERITED_SHELL_OUTPUT_NOTICE } from '../../utils/shell-output-drain.js';
@@ -48,7 +48,16 @@ function terminateChildProcessTree(child: ChildProcess): void {
 }
 
 
-export const bashTool: Tool = {
+export type BashToolExecutionContext = Pick<
+  ToolExecutionContext,
+  'signal' | 'assertPermissionApproval' | 'compoundPhase' | 'toolInvocationId' | 'runtimeFactSink' | 'observationCollector' | 'executionProgress'
+> | ToolExecutionContext;
+
+export type BashTool = Omit<Tool, 'execute'> & {
+  execute(input: Record<string, unknown>, context?: BashToolExecutionContext): Promise<string>;
+};
+
+export const bashTool: BashTool = {
   permission: 'bash',
   definition: {
     name: 'bash',
