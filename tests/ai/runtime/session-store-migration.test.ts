@@ -11,7 +11,7 @@ const roots:string[]=[];const cleanups:(()=>void)[]=[];
 afterEach(()=>{fault.directorySync=false;for(const f of cleanups.splice(0))f();for(const r of roots.splice(0))rmSync(r,{recursive:true,force:true});});
 for(const kind of ['file','sqlite'] as const)it(`${kind}: active lease exports one snapshot and migration permanently fences all source writers`,async()=>{
  const root=mkdtempSync(join(tmpdir(),'session-migrate-'));roots.push(root);
- const store=kind==='file'?new FileSessionStore(root):new SQLiteSessionStore(join(root,'sessions.sqlite'));if('close'in store)cleanups.push(()=>store.close());
+ const store=kind==='file'?new FileSessionStore(root):new SQLiteSessionStore(join(root,'sessions.sqlite'));if('close'in store)cleanups.push(()=>{const close=store.close;if(typeof close!=='function')throw new TypeError('session_store_close_not_callable');Reflect.apply(close,store,[]);});
  const snapshot={sessionId:'sess_migrate',cwd:root,createdAt:1,updatedAt:1,lineage:['sess_migrate'],messages:[],usage:{inputTokens:0,outputTokens:0},compactions:[],memoryRefs:[],approvalRefs:[],backgroundJobRefs:[]};
  await store.save(snapshot);
  const authority=createSessionExecutionAuthority({root,sessionIdentity:snapshot.sessionId,hostContext:createSessionExecutionContext({requestSource:'user',ownerId:'migration',scopeId:'scope'})});cleanups.push(()=>authority.dispose());
@@ -29,6 +29,6 @@ for(const kind of ['file','sqlite'] as const)it(`${kind}: active lease exports o
  await expect(store.save(exported.snapshot,{lease})).rejects.toThrow('MIGRATED_SESSION');
  await expect(store.compareAndSave({nextSnapshot:exported.snapshot,expectedStoreRevision:exported.storeRevision,expectedHistoryDigest:exported.historyDigest,lease})).rejects.toThrow('MIGRATED_SESSION');
  await lease.releaseAfterDrain();await expect(store.fork(snapshot.sessionId)).rejects.toThrow('MIGRATED_SESSION');
- const reopened=kind==='file'?new FileSessionStore(root):new SQLiteSessionStore(join(root,'sessions.sqlite'));if('close'in reopened)cleanups.push(()=>reopened.close());
+ const reopened=kind==='file'?new FileSessionStore(root):new SQLiteSessionStore(join(root,'sessions.sqlite'));if('close'in reopened)cleanups.push(()=>{const close=reopened.close;if(typeof close!=='function')throw new TypeError('session_store_close_not_callable');Reflect.apply(close,reopened,[]);});
  expect(await reopened.getSessionMigration(snapshot.sessionId)).toEqual(marker);await expect(reopened.save(snapshot)).rejects.toThrow('MIGRATED_SESSION');
 });
