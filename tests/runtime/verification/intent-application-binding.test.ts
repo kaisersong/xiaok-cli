@@ -68,7 +68,7 @@ it('uses captured Array iterator and Set constructor for the Intent parent entry
  const raw=candidate(true),arrayIterator=Array.prototype[Symbol.iterator],setDescriptor=Object.getOwnPropertyDescriptor(globalThis,'Set')!;let iteratorCalls=0,setCalls=0,error:unknown;
  try{
   Object.defineProperty(Array.prototype,Symbol.iterator,{configurable:true,writable:true,value:function(){iteratorCalls++;throw Error('replaced_array_iterator');}});
-  Object.defineProperty(globalThis,'Set',{configurable:true,writable:true,value:class extends setDescriptor.value{constructor(...args:any[]){setCalls++;throw Error('replaced_set_constructor');}}});
+  Object.defineProperty(globalThis,'Set',{configurable:true,writable:true,value:new Proxy(setDescriptor.value,{construct(){setCalls++;throw Error('replaced_set_constructor');}})});
   try{createIntentApplicationBinding(raw);}catch(e){error=e;}
  }finally{Object.defineProperty(Array.prototype,Symbol.iterator,{configurable:true,writable:true,value:arrayIterator});Object.defineProperty(globalThis,'Set',setDescriptor);}
  expect(error).toBeUndefined();expect(iteratorCalls).toBe(0);expect(setCalls).toBe(0);

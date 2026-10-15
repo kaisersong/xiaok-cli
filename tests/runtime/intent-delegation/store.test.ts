@@ -33,6 +33,7 @@ describe('intent delegation store', () => {
     const appended = await ledgerStore.appendIntent('sess_store', plan);
     expect(appended.instanceId).toBe('inst_store');
     expect(appended.activeIntentId).toBe('intent_store');
+    if (appended.latestPlan === null) throw new TypeError('appended_latest_plan_missing');
     expect(appended.latestPlan.intentId).toBe('intent_store');
     expect(appended.intents).toHaveLength(1);
     expect(appended.intents[0]).toMatchObject({
@@ -49,6 +50,7 @@ describe('intent delegation store', () => {
       overallStatus: 'waiting_user',
       blockedReason: 'need user file',
     });
+    if (updated.latestPlan === null) throw new TypeError('updated_latest_plan_missing');
     expect(updated.latestPlan.overallStatus).toBe('waiting_user');
 
     const reloaded = await new SessionIntentDelegationStore(new FileSessionStore(rootDir)).load('sess_store');
@@ -114,6 +116,7 @@ describe('intent delegation store', () => {
       reason: 'missing_material',
       summary: ['materials parsed', 'draft outline captured'],
     }));
+    if (reloaded === null || reloaded.latestPlan === null) throw new TypeError('reloaded_latest_plan_missing');
     expect(reloaded?.latestPlan.latestBreadcrumb).toBe('Collecting source materials');
     expect(reloaded?.latestPlan.latestReceipt).toBe('Collected three inputs');
     expect(reloaded?.latestPlan.salvageSummary).toEqual(['materials parsed', 'draft outline captured']);
