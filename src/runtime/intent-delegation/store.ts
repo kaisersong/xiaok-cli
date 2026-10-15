@@ -5,7 +5,7 @@ import type { PersistedSessionSnapshot, SessionStore } from '../../ai/runtime/se
 import type {
   IntentBreadcrumb,
   IntentLedgerRecord,
-  IntentPlanDraft,
+  IntentPlanInput,
   IntentReceipt,
   IntentSalvage,
   RecordBreadcrumbInput,
@@ -66,7 +66,7 @@ export class SessionIntentDelegationStore {
     return readLedger(snapshot);
   }
 
-  async appendIntent(sessionId: string, plan: IntentPlanDraft): Promise<SessionIntentLedger> {
+  async appendIntent(sessionId: string, plan: IntentPlanInput): Promise<SessionIntentLedger> {
     return this.mutate(sessionId, (ledger) => appendIntentToLedger(ledger, plan));
   }
 
@@ -116,7 +116,7 @@ export class SessionIntentDelegationStore {
 
 export function appendIntentToLedger(
   ledger: SessionIntentLedger,
-  plan: IntentPlanDraft,
+  plan: IntentPlanInput,
   now = Date.now(),
 ): SessionIntentLedger {
   const next = cloneSessionIntentLedger(ledger);

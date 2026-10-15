@@ -20,6 +20,27 @@ export type {
   StepStatus,
 };
 
+/** Bounded compatibility ingress; the modern planner contract stays required. */
+export type LegacyIntentPlanDraft = Omit<
+  IntentPlanDraft,
+  'stages' | 'finalDeliverable' | 'intentMode' | 'segmentationConfidence'
+> & Partial<Pick<
+  IntentPlanDraft,
+  'stages' | 'finalDeliverable' | 'intentMode' | 'segmentationConfidence'
+>>;
+
+export type IntentPlanInput = IntentPlanDraft | LegacyIntentPlanDraft;
+
+/** The creator has built stages, but has not yet normalized scalar metadata. */
+export type IntentLedgerRecordInput = Omit<
+  IntentLedgerRecord,
+  'finalDeliverable' | 'intentMode' | 'segmentationConfidence'
+> & {
+  finalDeliverable: IntentLedgerRecord['finalDeliverable'] | undefined;
+  intentMode: IntentLedgerRecord['intentMode'] | undefined;
+  segmentationConfidence: IntentLedgerRecord['segmentationConfidence'] | undefined;
+};
+
 export type SessionOwnershipState = 'owned' | 'released' | 'resume' | 'takeover';
 
 export interface SessionOwnershipRecord {
@@ -108,11 +129,11 @@ export interface TakeoverSessionOptions {
   confirmHighRisk?: boolean;
 }
 
-export function createIntentLedgerRecord(plan: IntentPlanDraft, now = Date.now()): IntentLedgerRecord {
+export function createIntentLedgerRecord(plan: IntentPlanInput, now = Date.now()): IntentLedgerRecord {
   const stages = cloneStageDrafts(plan.stages, plan);
   const activeStage = stages[0];
   const steps = activeStage ? cloneSteps(activeStage.steps) : cloneSteps(plan.steps);
-  return {
+  const record: IntentLedgerRecordInput = {
     intentId: plan.intentId,
     instanceId: plan.instanceId,
     sessionId: plan.sessionId,
@@ -138,9 +159,16 @@ export function createIntentLedgerRecord(plan: IntentPlanDraft, now = Date.now()
     createdAt: now,
     updatedAt: now,
   };
+  const normalized = cloneIntentRecord(record);
+  return {
+    ...record,
+    finalDeliverable: normalized.finalDeliverable,
+    intentMode: normalized.intentMode,
+    segmentationConfidence: normalized.segmentationConfidence,
+  };
 }
 
-export function cloneIntentRecord(record: IntentLedgerRecord): IntentLedgerRecord {
+export function cloneIntentRecord(record: IntentLedgerRecordInput): IntentLedgerRecord {
   const stages = cloneStages(
     record.stages,
     {

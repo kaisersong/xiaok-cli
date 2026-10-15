@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { IntentPlanDraft, PlannedStep, RiskTier } from '../../../src/ai/intent-delegation/types.js';
+import type { PlannedStep, RiskTier } from '../../../src/ai/intent-delegation/types.js';
+import type { LegacyIntentPlanDraft } from '../../../src/runtime/intent-delegation/types.js';
 import { FileSessionStore } from '../../../src/ai/runtime/session-store.js';
 import { SessionIntentDelegationStore } from '../../../src/runtime/intent-delegation/store.js';
 import { applyIntentStepUpdate, createIntentLedgerRecord } from '../../../src/runtime/intent-delegation/dispatcher.js';
@@ -236,7 +237,7 @@ function createPlanDraft(input: {
   instanceId: string;
   intentId: string;
   riskTier?: RiskTier;
-}): IntentPlanDraft {
+}): LegacyIntentPlanDraft {
   const riskTier = input.riskTier ?? 'medium';
   return {
     instanceId: input.instanceId,
