@@ -114,7 +114,7 @@ describe('registry lifecycle ownership', () => {
       onMcpToolsChanged: (listener: (tools: Tool[]) => void) => { update = listener; return () => {}; },
     } as unknown as PlatformRuntimeContext;
     const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'catalog',
-      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
+      adapter: () => ({ getModelName: () => '', async *stream() {} }), buildSystemPrompt: async () => 'test',
     });
     const main = factory.createRegistry(process.cwd());
     const restricted = factory.createRegistry(process.cwd(), [old.definition.name], 'restricted');
@@ -156,7 +156,7 @@ describe('registry lifecycle ownership', () => {
       onMcpToolsChanged: (listener: typeof update) => { update = listener; return () => {}; },
     } as unknown as PlatformRuntimeContext;
     const factory = createPlatformRegistryFactory({ platform, source: 'chat', sessionId: 'collision',
-      adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => '',
+      adapter: () => ({ getModelName: () => '', async *stream() {} }), buildSystemPrompt: async () => '',
     });
     const registry = factory.createRegistry(process.cwd());
     const builtinRead = registry.getToolDefinitions().find((item) => item.name === 'read');

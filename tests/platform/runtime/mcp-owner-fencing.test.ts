@@ -18,7 +18,7 @@ function fixture(mcpTools: Tool[], workflowTools: Tool[] = [], check = async () 
     onMcpToolsChanged: (listener: typeof update) => { update = listener; return () => {}; },
   } as unknown as PlatformRuntimeContext;
   const factory = createPlatformRegistryFactory({ platform, workflowTools, source: 'review', sessionId: 'owner-fence',
-    adapter: () => ({ async *stream() {} }), buildSystemPrompt: async () => 'test',
+    adapter: () => ({ getModelName: () => '', async *stream() {} }), buildSystemPrompt: async () => 'test',
     permissionManager: { getMode: () => 'auto', getRevision: () => 1, check } as any,
   });
   return { factory, update: (tools: Tool[]) => update(tools), capabilities: platform.capabilityRegistry };
