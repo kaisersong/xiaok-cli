@@ -18,11 +18,14 @@ export interface HarnessMemoryReadable {
   listActive(scope: HarnessMemoryScope): HarnessMemoryRecord[];
 }
 
+export type PromptMemoryReadable = Pick<MemoryStore, 'listRelevant' | 'search'>
+  & Partial<Omit<MemoryStore, 'listRelevant' | 'search'>>;
+
 export class PromptBuilder {
-  constructor(private readonly deps: { memoryStore?: MemoryStore; harnessMemoryStore?: HarnessMemoryReadable } = {}) {}
+  constructor(private readonly deps: { memoryStore?: PromptMemoryReadable; harnessMemoryStore?: HarnessMemoryReadable } = {}) {}
 
   async build(input: PromptBuilderInput | LegacyPromptBuilderInput): Promise<PromptSnapshot> {
-    const memoryStore: MemoryStore = this.deps.memoryStore ?? new FileMemoryStore();
+    const memoryStore: PromptMemoryReadable = this.deps.memoryStore ?? new FileMemoryStore();
     const harnessMemoryStore = this.deps.harnessMemoryStore ?? new JsonHarnessMemoryStore(join(getConfigDir(), 'harness-memory.json'));
     const memories = memoryStore.search
       ? await memoryStore.search(input.cwd, 10)
