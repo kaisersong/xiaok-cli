@@ -237,7 +237,7 @@ describe('ToolRegistry', () => {
       permissionManager: new PermissionManager({ mode: 'auto' }),
       protectedOutputGuard: {
         getProtectedArtifacts: () => [{ artifactId: 'artifact-1', path: '/tmp/final-report.md' }],
-        onDecision: (decision) => guardDecisions.push(decision),
+        onDecision: (decision) => { guardDecisions.push(decision); },
       },
     }, [{
       permission: 'write',
