@@ -123,9 +123,12 @@ describe('provider disclosure actual transport binding', () => {
   it('actual project model cannot activate fallback after an owner mismatch', async () => {
     const owner = fixture(); const foreign = fixture(); const raw = vi.fn(); vi.stubGlobal('fetch', raw);
     const factory = vi.fn(() => openAIAdapter());
-    const config = { schemaVersion: 2, defaultProvider: 'test', defaultModelId: 'current',
+    const config: Config = { schemaVersion: 2, defaultProvider: 'test', defaultModelId: 'current',
+      defaultMode: 'interactive',
+      intentBoundary: { llmClassifier: 'off', ambiguousFallback: 'legacy_validator', confidenceThreshold: 0.75,
+        falseNegativeClarifyThreshold: 0.85, timeoutMs: 1500, maxInputTokens: 200, maxOutputTokens: 100 },
       providers: { test: { type: 'custom', protocol: 'openai_legacy', baseUrl: base, apiKey: 'test' } },
-      models: { current: { provider: 'test', model: 'current', label: 'current' }, selected: { provider: 'test', model: 'selected', label: 'selected' } } } as Config;
+      models: { current: { provider: 'test', model: 'current', label: 'current' }, selected: { provider: 'test', model: 'selected', label: 'selected' } } };
     const model = await createProjectAgentModel({ modelId: 'selected', loadConfig: async () => config, createAdapter: factory });
     await expect(withObservationExecutionOwner(scopeOwner(owner.context), async () => drain(model.stream({
       messages: [{ role: 'user', content: [{ type: 'text', text: 'material' }] }], tools: [], systemPrompt: 'system',
