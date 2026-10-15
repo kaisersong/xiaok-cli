@@ -174,6 +174,9 @@ describe('AgentRuntime', () => {
     expect(Object.isFrozen(projected.promptSnapshot?.segments)).toBe(true);
     expect(Object.isFrozen(projected.promptSnapshot?.segments[0])).toBe(true);
     expect(Object.isFrozen(projected.executionScope)).toBe(true);
+    if (projected.executionScope?.kind !== 'artifact_workspace_generation') {
+      throw new Error('Expected artifact_workspace_generation fixture scope');
+    }
     expect(Object.isFrozen(projected.executionScope?.target)).toBe(true);
   });
 
@@ -381,6 +384,9 @@ describe('AgentRuntime', () => {
 
   it('accepts declared optional execution target fields with undefined values', () => {
     const context = createStrictProjectionContext();
+    if (context.executionScope?.kind !== 'artifact_workspace_generation') {
+      throw new Error('Expected artifact_workspace_generation fixture scope');
+    }
     Object.assign(context.executionScope!.target!, {
       placeholderId: undefined,
       sourceArtifactVersionId: undefined,
@@ -422,6 +428,9 @@ describe('AgentRuntime', () => {
     {
       label: 'execution target deep extra field',
       mutate(context: ToolExecutionContext) {
+        if (context.executionScope?.kind !== 'artifact_workspace_generation') {
+          throw new Error('Expected artifact_workspace_generation fixture scope');
+        }
         Object.assign(
           context.executionScope!.target!,
           { private: 'forged' },
@@ -431,6 +440,9 @@ describe('AgentRuntime', () => {
     {
       label: 'invalid execution target requested kind',
       mutate(context: ToolExecutionContext) {
+        if (context.executionScope?.kind !== 'artifact_workspace_generation') {
+          throw new Error('Expected artifact_workspace_generation fixture scope');
+        }
         Object.assign(
           context.executionScope!.target!,
           { requestedKind: 'future-kind' },
@@ -1581,7 +1593,7 @@ describe('AgentRuntime', () => {
       name: 'AbortError',
     });
 
-    const abortEvent = events.findLast((event) => event.type === 'run_aborted');
+    const abortEvent = [...events].reverse().find((event) => event.type === 'run_aborted');
     expect(abortEvent?.partialText).toContain('partial answer');
     expect(abortEvent?.partialText).toContain('[partial');
     const assistant = session.getMessages().find((message) => message.role === 'assistant');
