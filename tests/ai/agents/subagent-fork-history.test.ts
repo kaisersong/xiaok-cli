@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Message, MessageBlock, ToolExecutionContext } from '../../../src/types.js';
 import { AgentSessionState } from '../../../src/ai/runtime/session.js';
 import { createNamedSubAgentSession, executeNamedSubAgent } from '../../../src/ai/agents/subagent-executor.js';
+import type { SubAgentForkContext } from '../../../src/ai/agents/subagent-executor.js';
 import { createAdapterFromBinding } from '../../../src/ai/models.js';
 import type { OpenAIAdapter } from '../../../src/ai/adapters/openai.js';
 import { ToolRegistry } from '../../../src/ai/tools/index.js';
 import { assertOpenAIToolProtocol, type OpenAIToolProtocolMessage } from '../../support/openai-tool-protocol.js';
 
-function forkContext(tail: Message[] = []): ToolExecutionContext {
+function forkContext(tail: Message[] = []): Pick<ToolExecutionContext, 'session' | 'messages' | 'systemPrompt' | 'toolDefinitions'> {
   const parent = new AgentSessionState();
   parent.appendUserBlocks([{ type: 'text', text: 'PARENT_CONSTRAINT_READ_ONLY' }]);
   parent.appendAssistantBlocks([{ type: 'tool_use', id: 'read_completed', name: 'read', input: {} }]);
@@ -27,7 +28,7 @@ const pendingCalls: Message = {
 };
 const result = (id: string): MessageBlock => ({ type: 'tool_result', tool_use_id: id, content: `result_${id}` });
 
-function createHarness(context?: ToolExecutionContext) {
+function createHarness(context?: SubAgentForkContext) {
   const requests: OpenAIToolProtocolMessage[][] = [];
   const adapter = createAdapterFromBinding({
     providerId: 'test', providerType: 'custom', modelId: 'test', wireModel: 'test-model',

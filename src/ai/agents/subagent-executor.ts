@@ -19,6 +19,20 @@ interface ModelClonableAdapter extends ModelAdapter {
   cloneWithModel(model: string): ModelAdapter;
 }
 
+/** Fork consumption only; not a host-context or authorization producer. */
+type SubAgentForkControls = Pick<ToolExecutionContext, 'signal' | 'settingsStore'>;
+
+type SubAgentForkHistory = Pick<ToolExecutionContext, 'session' | 'messages'>;
+
+/** Full snapshots retain their protected closure; history fields are paired.
+ * A signal in forkContext is consumed by the one-shot wrapper only.
+ * Preserve the complete host shape for existing inline callers without weakening it.
+ */
+export type SubAgentForkContext = ToolExecutionContext | (SubAgentForkControls & (
+  | SubAgentForkHistory
+  | { session?: undefined; messages?: undefined }
+));
+
 export interface ExecuteNamedSubAgentOptions {
   observationExecutionPlan?: DelegatedObservationExecutionPlan;
   onSubAgentEvent?: (event: SubAgentProgressEvent) => void;
@@ -38,7 +52,7 @@ export interface ExecuteNamedSubAgentOptions {
   ): ToolRegistry;
   buildSystemPrompt(cwd: string): Promise<string>;
   worktreeManager?: WorktreeManager;
-  forkContext?: ToolExecutionContext;
+  forkContext?: SubAgentForkContext;
   parentDepth?: number;
   runtimeAgentId?: string;
   collaborationPrompt?: string;
@@ -356,7 +370,7 @@ function resolveSubAgentAdapter(
   adapter: ModelAdapter,
   modelOverride?: string,
   capabilityOverride?: string,
-  ctx?: ToolExecutionContext,
+  ctx?: SubAgentForkContext,
 ): ModelAdapter {
   if (modelOverride && capabilityOverride) {
     throw new Error('model and modelCapability are mutually exclusive');
@@ -375,7 +389,7 @@ function resolveSubAgentAdapter(
   return adapter;
 }
 
-function resolveCapability(capability: string, ctx: ToolExecutionContext): string | null {
+function resolveCapability(capability: string, ctx: SubAgentForkContext): string | null {
   const settings = ctx.settingsStore?.getSettings();
   return settings?.modelCapabilities?.[capability] || null;
 }
