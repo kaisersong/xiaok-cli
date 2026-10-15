@@ -8,6 +8,7 @@ import type {
   StageArtifactRecord,
   StepStatus,
 } from '../../ai/intent-delegation/types.js';
+import { cloneIntentSteps as cloneSteps, cloneStoredIntentRecord, cloneStoredSessionIntentLedger, rekeyStoredSessionIntentLedger } from './stored-intent-clone.js';
 
 export type {
   IntentLedgerRecord,
@@ -169,67 +170,15 @@ export function createIntentLedgerRecord(plan: IntentPlanInput, now = Date.now()
 }
 
 export function cloneIntentRecord(record: IntentLedgerRecordInput): IntentLedgerRecord {
-  const stages = cloneStages(
-    record.stages,
-    {
-      intentId: record.intentId,
-      intentType: record.intentType,
-      deliverable: record.finalDeliverable || record.deliverable,
-      templateId: record.templateId,
-      riskTier: record.riskTier,
-      steps: record.steps,
-      activeStepId: record.activeStepId,
-    },
-  );
-  const activeStageId = record.activeStageId ?? stages[0]?.stageId ?? `${record.intentId}:stage:1`;
-  return {
-    ...record,
-    executionTerminals: record.executionTerminals?.map(terminal=>({...terminal})),
-    providedSourcePaths: [...(record.providedSourcePaths ?? [])],
-    explicitConstraints: [...record.explicitConstraints],
-    delegationBoundary: [...record.delegationBoundary],
-    finalDeliverable: record.finalDeliverable ?? record.deliverable,
-    intentMode: record.intentMode ?? (stages.length > 1 ? 'multi_stage' : 'single_stage'),
-    segmentationConfidence: record.segmentationConfidence ?? (stages.length > 1 ? 'medium' : 'low'),
-    stages,
-    activeStageId,
-    artifacts: cloneArtifacts(record.artifacts),
-    steps: cloneSteps(record.steps),
-    salvageSummary: record.salvageSummary ? [...record.salvageSummary] : undefined,
-  };
+  return cloneStoredIntentRecord(record);
 }
 
 export function cloneSessionIntentLedger(ledger: SessionIntentLedger): SessionIntentLedger {
-  return {
-    ...ledger,
-    ...(ledger.verificationExecutions===undefined?{}:{verificationExecutions:structuredClone(ledger.verificationExecutions)}),
-    ...(ledger.publicationCandidates===undefined?{}:{publicationCandidates:structuredClone(ledger.publicationCandidates)}),
-    ...(ledger.nativeContracts===undefined?{}:{nativeContracts:structuredClone(ledger.nativeContracts)}),
-    latestPlan: ledger.latestPlan ? cloneIntentRecord(ledger.latestPlan) : null,
-    intents: ledger.intents.map(cloneIntentRecord),
-    breadcrumbs: ledger.breadcrumbs.map((entry) => ({ ...entry })),
-    receipt: ledger.receipt ? { ...ledger.receipt } : null,
-    salvage: ledger.salvage ? { ...ledger.salvage, summary: [...ledger.salvage.summary] } : null,
-    ownership: { ...ledger.ownership },
-  };
+  return cloneStoredSessionIntentLedger(ledger);
 }
 
 export function rekeySessionIntentLedger(ledger: SessionIntentLedger, sessionId: string): SessionIntentLedger {
-  const cloned = cloneSessionIntentLedger(ledger);
-  return {
-    ...cloned,
-    sessionId,
-    latestPlan: cloned.latestPlan
-      ? {
-          ...cloned.latestPlan,
-          sessionId,
-        }
-      : null,
-    intents: cloned.intents.map((intent) => ({
-      ...intent,
-      sessionId,
-    })),
-  };
+  return rekeyStoredSessionIntentLedger(ledger, sessionId);
 }
 
 export function createEmptySessionIntentLedger(sessionId: string, now = Date.now()): SessionIntentLedger {
@@ -263,13 +212,6 @@ export function resolveActiveRiskTier(ledger: SessionIntentLedger): RiskTier | n
   return activeStep?.riskTier ?? activeStage?.riskTier ?? activeIntent.riskTier;
 }
 
-function cloneSteps(steps: PlannedStep[]): PlannedStep[] {
-  return steps.map((step) => ({
-    ...step,
-    dependsOn: [...step.dependsOn],
-  }));
-}
-
 function cloneStageDrafts(
   stages: IntentStageDraft[] | undefined,
   legacyPlan?: Pick<IntentPlanDraft, 'intentId' | 'intentType' | 'deliverable' | 'templateId' | 'riskTier' | 'steps'>,
@@ -300,40 +242,4 @@ function cloneStageDrafts(
     semanticValidation: 'pending',
     needsFreshContextHandoff: stage.order > 0,
   }));
-}
-
-function cloneStages(
-  stages: IntentStageRecord[] | undefined,
-  legacyRecord?: Pick<IntentLedgerRecord, 'intentId' | 'intentType' | 'deliverable' | 'templateId' | 'riskTier' | 'steps' | 'activeStepId'>,
-): IntentStageRecord[] {
-  const effectiveStages = stages && stages.length > 0
-    ? stages
-    : legacyRecord
-      ? [{
-          stageId: `${legacyRecord.intentId}:stage:1`,
-          order: 0,
-          label: `生成${legacyRecord.deliverable}`,
-          intentType: legacyRecord.intentType,
-          deliverable: legacyRecord.deliverable,
-          templateId: legacyRecord.templateId,
-          riskTier: legacyRecord.riskTier,
-          dependsOnStageIds: [],
-          steps: legacyRecord.steps,
-          status: 'planned',
-          activeStepId: legacyRecord.activeStepId,
-          structuralValidation: 'pending',
-          semanticValidation: 'pending',
-          needsFreshContextHandoff: false,
-        } satisfies IntentStageRecord]
-      : [];
-
-  return effectiveStages.map((stage) => ({
-    ...stage,
-    dependsOnStageIds: [...stage.dependsOnStageIds],
-    steps: cloneSteps(stage.steps),
-  }));
-}
-
-function cloneArtifacts(artifacts: StageArtifactRecord[] | undefined): StageArtifactRecord[] | undefined {
-  return artifacts?.map((artifact) => ({ ...artifact }));
 }

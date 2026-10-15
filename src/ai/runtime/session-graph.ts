@@ -32,6 +32,9 @@ export interface SessionGraphSnapshot {
   backgroundJobRefs: string[];
 }
 
+export type SessionGraphPersistenceFacts = Pick<SessionGraphSnapshot,
+  'compoundOperations' | 'semanticCompaction' | 'storeRevision' | 'historyDigest' | 'executionProtected'>;
+
 export class AgentSessionGraph {
   private snapshot: SessionGraphSnapshot;
   private revision = 0;
@@ -163,7 +166,7 @@ export class AgentSessionGraph {
   }
 
   /** Durable writer receipt only; message revision and live queued input remain owned here. */
-  updatePersistenceFacts(snapshot: SessionGraphSnapshot): void {
+  updatePersistenceFacts(snapshot: SessionGraphPersistenceFacts): void {
     const compoundOperations = mergeCompoundOperationLedgers(this.snapshot.compoundOperations, snapshot.compoundOperations);
     const semanticCompaction = mergeSemanticCompactionLedgers(this.snapshot.semanticCompaction, snapshot.semanticCompaction);
     this.snapshot.compoundOperations = compoundOperations;

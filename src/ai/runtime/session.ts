@@ -8,11 +8,14 @@ import {
   planCompaction as buildCompactionPlan,
   type CompactionPlan,
 } from './usage.js';
-import { AgentSessionGraph, type CompactionRecord, type SessionGraphSnapshot } from './session-graph.js';
+import { AgentSessionGraph, type CompactionRecord, type SessionGraphSnapshot, type SessionGraphPersistenceFacts } from './session-graph.js';
 
 export type { CompactionRecord } from './session-graph.js';
 export type { CompactionPlan } from './usage.js';
 export interface AgentSessionSnapshot extends SessionGraphSnapshot {}
+
+export type SessionPersistenceFacts = SessionGraphPersistenceFacts
+  & Pick<AgentSessionSnapshot, 'sessionId' | 'cwd' | 'messages'>;
 
 export type CompactionApplyOutcome =
   | { status: 'compacted'; record: CompactionRecord }
@@ -236,7 +239,7 @@ export class AgentSessionState {
     return this.graph.exportSnapshot();
   }
 
-  updatePersistenceFacts(snapshot: AgentSessionSnapshot): void {
+  updatePersistenceFacts(snapshot: SessionPersistenceFacts): void {
     const current = this.graph.exportSnapshot();
     if (snapshot.sessionId !== current.sessionId || snapshot.cwd !== current.cwd
       || !Number.isSafeInteger(snapshot.storeRevision) || (snapshot.storeRevision ?? -1) < (current.storeRevision ?? 0)
