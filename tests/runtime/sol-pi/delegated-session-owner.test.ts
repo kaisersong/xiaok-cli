@@ -543,7 +543,7 @@ it('disposal during successful actual named registry rebind never creates a repl
   const ActualAgent = AgentModule.Agent; let constructors = 0;
   const spy = vi.spyOn(AgentModule, 'Agent').mockImplementation(function(...args: ConstructorParameters<typeof ActualAgent>) {
     constructors++; return new ActualAgent(...args);
-  } as unknown as typeof ActualAgent);
+  });
   const fetch = vi.fn(async () => new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: 'actual named child completed' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }));
   vi.stubGlobal('fetch', fetch);
   const adapter = new OpenAIAdapter({ apiKey: 'test-only', kimiCodingHeadersApplied: false, harnessContext: buildOpenAIHarnessContext({
