@@ -7,7 +7,7 @@ const tool: Tool = { permission: 'safe', definition: { name: 'native_test', desc
 describe('actual registry records host result provenance', () => {
   async function run(contextText: string, getterThrows = false) {
     const port = createNativeObservationProvenance({ hostInvocationId: 'one', ownerGeneration: 0, nativePreview: 'native' });
-    const registry = new ToolRegistry({ autoMode: true, hooksRunner: { runPreHooks: async () => ({ ok: true, additionalContext: contextText }), runPostHooks: async () => ['keep policy'], runHooks: async () => ({ ok: true }) } }, [tool]);
+    const registry = new ToolRegistry({ autoMode: true, hookInputMode: 'direct-callback', hooksRunner: { runPreHooks: async () => ({ ok: true, additionalContext: contextText }), runPostHooks: async () => ['keep policy'], runHooks: async () => ({ ok: true }) } }, [tool]);
     try {
       const result = await registry.executeTool('native_test', {}, { ...mcpTestContext(new AbortController().signal), projectObservationResult: async value => value,
         observationProvenance: () => { if (getterThrows) throw Error('provenance-only-failure'); return port; } });

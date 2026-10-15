@@ -27,7 +27,7 @@ describe('host observation registry isolation',()=>{
  it('notices parent replacement while original pre-hook is awaited',async()=>{
   let unblock!:()=>void,entered!:()=>void;const waiting=new Promise<void>(r=>{unblock=r;}),started=new Promise<void>(r=>{entered=r;});
   let executed=0;const native={...tool('read','old'),execute:async()=>{executed++;return 'old';}};
-  const parent=new ToolRegistry({autoMode:true,hooksRunner:{runPreHooks:async()=>{entered();await waiting;return {ok:true};},runPostHooks:async()=>[],runHooks:async()=>({ok:true})}},[native]);
+  const parent=new ToolRegistry({autoMode:true,hookInputMode:'direct-callback',hooksRunner:{runPreHooks:async()=>{entered();await waiting;return {ok:true};},runPostHooks:async()=>[],runHooks:async()=>({ok:true})}},[native]);
   const fork=parent.forkForObservation([],['read']),pending=fork.executeTool('read',{});await started;parent.unregisterTool('read');unblock();
   expect(await pending).toMatch(/authorization changed/);expect(executed).toBe(0);fork.dispose();parent.dispose();
  });
