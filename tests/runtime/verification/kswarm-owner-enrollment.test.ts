@@ -245,7 +245,7 @@ it.each(['temp-table','temp-view','attached'] as const)('namespace: every actual
 });
 it.each(['temp-table','attached'] as const)('namespace: rejects %s introduced through qualified clock after valid read',async mode=>{
  let attack:(()=>void)|undefined;const f=await installedControllerFixture({completionOwnerSchema:2,onClock(){attack?.();}});try{const result=await enroll(f);attack=()=>{attack=undefined;f.database.exec(mode==='temp-table'?'CREATE TEMP TABLE namespace_late(value TEXT)':"ATTACH DATABASE ':memory:' AS shadow");};expect(()=>f.composition.public.invoke('completion.inspect',result,f.peer)).toThrow('enrollment_kswarm_sql_integrity');if(mode==='temp-table')expect(f.database.prepare("SELECT name FROM temp.sqlite_master WHERE name='namespace_late'").get()).toBeUndefined();
- }finally{attack=undefined;if(f.database.pragma('database_list').some((row:any)=>row.name==='shadow'))f.database.exec('DETACH DATABASE shadow');await f.close();}
+ }finally{attack=undefined;const databaseList=f.database.pragma('database_list');if(!Array.isArray(databaseList))throw new TypeError('pragma_database_list_not_array');if(databaseList.some((row:any)=>row.name==='shadow'))f.database.exec('DETACH DATABASE shadow');await f.close();}
 });
 it.each(['existing','current','principal'] as const)('namespace identity: rejects genuine KSwarm invocation downgraded by %s TEMP callback',async mode=>{
  let attack:(()=>void)|undefined;const f=await installedControllerFixture({completionOwnerSchema:2,onCurrent(){if(mode==='current')attack?.();},onPrincipal(){if(mode==='principal')attack?.();}});try{
