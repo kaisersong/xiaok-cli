@@ -1532,7 +1532,7 @@ describe('OpenAIAdapter', () => {
 
   it('configures strict K3 transport to stop at the first redirect without SDK retries', async () => {
     const originalFetch = globalThis.fetch;
-    const fetchSpy = vi.fn(async () => (
+    const fetchSpy = vi.fn<typeof globalThis.fetch>(async () => (
       { status: 302 } as Response
     ));
     Object.defineProperty(globalThis, 'fetch', {
@@ -2000,7 +2000,7 @@ describe('OpenAIAdapter', () => {
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
-    const chunks = [];
+    const chunks: StreamChunk[] = [];
     await expect((async () => { for await (const chunk of adapter.stream([], [], 'system')) chunks.push(chunk); })())
       .rejects.toMatchObject({ code: 'ERR_STREAM_PREMATURE_CLOSE' });
     expect(chunks[0]).toMatchObject({ type: 'text', delta: 'hi' });
