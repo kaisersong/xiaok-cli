@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';import {spawnSync} from 'node:child_process';import {createHash} from 'node:crypto';
-import {createInputStager} from '../../../src/runtime/isolated-execution/staging.js';
+import {createInputStager, type StagingReadAccess} from '../../../src/runtime/isolated-execution/staging.js';
 it('fails closed when the authorization port returns a rejected Promise',()=>{
 const root=mkdtempSync(join(tmpdir(),'staging-async-auth-'));try{
 const helper=join(root,'read'),workspace=join(root,'workspace');mkdirSync(workspace);writeFileSync(join(workspace,'file'),'denied-body');
@@ -22,7 +22,7 @@ it('checks synchronous live admission and consumption, preserving frozen factory
 const root=mkdtempSync(join(tmpdir(),'staging-live-contract-'));try{
 const helper=join(root,'read'),workspace=join(root,'workspace');mkdirSync(workspace);writeFileSync(join(workspace,'a'),'first');
 expect(spawnSync('/usr/bin/cc',['-O2',resolve('src/runtime/verification/native/secure-read.c'),'-o',helper]).status).toBe(0);
-let bad=false; const access={assertLive(){if(bad)return Promise.reject(Error('revoked'));},assertRead(){}};
+let bad=false; const access: StagingReadAccess={assertLive(){if(bad)return Promise.reject(Error('revoked'));},assertRead(){}};
 const options={root:join(root,'stage'),readerExecutable:helper,access};const stager=createInputStager(options);
 const input={grant:{},workspaceRoot:workspace,files:[{path:'a',expectedContentHash:createHash('sha256').update('first').digest('hex'),byteLimit:100}],purpose:'isolated-command' as const,invocation:{sessionIdentity:'s',compoundOperationId:'o',validationInvocationId:'v'},command:{argv:['/bin/true'],cwdRelative:'.'}};
 const plan=stager.prepareValidationInput(input).materializedInput;
