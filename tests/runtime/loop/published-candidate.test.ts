@@ -14,6 +14,7 @@ import {readCurrentLoopPublishedCandidate} from '../../../src/runtime/loop/publi
 import {createLoopApplicationBinding,loopApplicationBindingHash} from '../../../src/runtime/verification/loop-application-binding.js';
 import {loopHostSubjectOwner} from '../../../src/runtime/verification/loop-host-subject.js';
 import {canonicalVerificationJson as json} from '../../../src/runtime/verification/protocol.js';
+import {parseIndependentRecipeDefinition} from '../../../src/runtime/verification/independent-recipes.js';
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const binding=createLoopApplicationBinding({version:1,kind:'loop',subject:{kind:'loop-run',loopId:'artifact-evidence-regression',runId:'run',stage:null},candidateId:'candidate',candidateRevision:1,
  originalTriggerJson:json({kind:'manual'}),logicalRunKey:null,
@@ -21,7 +22,18 @@ const binding=createLoopApplicationBinding({version:1,kind:'loop',subject:{kind:
  body:{kind:'builtin-diagnostic',scanner:'artifact-evidence-regression',observedAt:1000,summary:'Original scan',nextActionKind:'none',nextActionSummary:null,
  diagnostic:{kind:'artifact-evidence-regression',scannedOwnerCount:1,openAnomalyCount:0,resolvedAnomalyCount:0,anomalies:[]},
  artifacts:[{selection:{kind:'local',obligationId:'obligation',path:'result'},sha256:hash('result'),size:6}]}});
-function setBody(change?:(body:any)=>void){const body={version:1,owner:f.route.owner,application:f.application.current,dependencies:[],evaluations:[{obligationId:'obligation',artifacts:[{path:'result',sha256:hash('result'),size:6,bytesBase64:Buffer.from('result').toString('base64')}]}]};change?.(body);f.payload.bytes=Buffer.from(json(body));f.payload.payloadHash=hash(f.payload.bytes);}
+const artifactDefinition = parseIndependentRecipeDefinition({
+ kind:'artifact-content',
+ checks:[{id:'content',path:'result',sha256:hash('result'),structure:'bytes'}],
+});
+function setBody(change?:(body:any)=>void){
+ const body={version:1,owner:f.route.owner,application:f.application.current,dependencies:[],evaluations:[{
+  application:f.application.current,obligationId:'obligation',definitionHash:artifactDefinition.definitionHash,
+  binding:{},evaluation:{},
+  artifacts:[{path:'result',sha256:hash('result'),size:6,bytesBase64:Buffer.from('result').toString('base64')}],
+ }]};
+ change?.(body);f.payload.bytes=Buffer.from(json(body));f.payload.payloadHash=hash(f.payload.bytes);
+}
 beforeEach(()=>{
  f.opened=0;f.disposed=0;f.calls=[];f.change=undefined;f.failPublisher=false;f.hang=false;f.disposeThrows=false;f.release=undefined;
  f.route={kind:'protected-unregistered',authorityId:'authority',owner:{profileId:'profile',...loopHostSubjectOwner(binding.subject)}};

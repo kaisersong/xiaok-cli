@@ -44,7 +44,7 @@
     "test": "npm run test:sandbox",
     "test:full": "vitest run",
     "test:watch": "vitest",
-    "test:sandbox:build": "tsc -p tsconfig.tests.json && node scripts/copy-test-assets.mjs && node -e \"const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));\"",
+    "test:sandbox:build": "npm run prepare:types && tsc -p tsconfig.tests.json && node scripts/copy-test-assets.mjs && node -e \"const fs=require('fs'); const pkg=JSON.parse(fs.readFileSync('package.json','utf8')); fs.mkdirSync('.test-dist',{recursive:true}); fs.writeFileSync('.test-dist/package.json', JSON.stringify({version:pkg.version,type:'module'}, null, 2));\"",
     "test:sandbox:run": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.sandbox.config.mjs --configLoader runner",
     "test:sandbox:run:cached": "node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --config vitest.sandbox.config.mjs --configLoader runner",
     "test:sandbox": "npm run test:sandbox:build && npm run test:sandbox:run && npm run eval:intent-delegation && npm run eval:skill-quality && npm run eval:skill-adherence",
@@ -89,7 +89,10 @@
     "test:cli-source-bundle": "node --test tests/package/cli-source-bundle.test.mjs",
     "test:desktop-service-contract": "node --test tests/package/desktop-service-contract.test.mjs",
     "verify:pack-dist": "node scripts/verify-pack-dist.mjs",
-    "verify:release-sha": "node scripts/check-release-sha.mjs"
+    "verify:release-sha": "node scripts/check-release-sha.mjs",
+    "prepare:types": "node scripts/repair-better-sqlite3-types.cjs --apply",
+    "check:types": "node scripts/repair-better-sqlite3-types.cjs --check",
+    "test:types-repair": "node --test tests/package/repair-better-sqlite3-types.test.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
@@ -99,7 +102,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "8.20.0",
     "beautiful-mermaid": "^1.1.3",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "13.0.3",
     "commander": "^12.0.0",
     "cross-spawn": "7.0.6",
     "fast-glob": "^3.3.2",
@@ -115,7 +118,7 @@
   "devDependencies": {
     "@modelcontextprotocol/node": "2.1.1",
     "@modelcontextprotocol/server": "2.3.0",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "7.6.13",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
