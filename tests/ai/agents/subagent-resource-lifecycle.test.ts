@@ -45,7 +45,7 @@ describe('production subagent resource lifecycle', () => {
 
   it('disposes the real one-shot session when the provider run fails', async () => {
     const { options, manager, registry, path } = fixture();
-    options.adapter = () => ({ async *stream() { throw new Error('provider run failed'); } });
+    options.adapter = () => ({ getModelName: () => '', async *stream() { throw new Error('provider run failed'); } });
     await expect(executeNamedSubAgent({ ...options, prompt: 'fail in run' })).rejects.toThrow('provider run failed');
     expect(options.releaseRegistry).toHaveBeenCalledExactlyOnceWith(registry);
     expect(registry.getToolDefinitions()).toEqual([]);
@@ -56,7 +56,7 @@ describe('production subagent resource lifecycle', () => {
     const { options, manager, registry } = fixture();
     const controller = new AbortController();
     let actualSignal: AbortSignal | undefined;
-    options.adapter = () => ({ async *stream(_messages, _tools, _prompt, streamOptions) {
+    options.adapter = () => ({ getModelName: () => '', async *stream(_messages, _tools, _prompt, streamOptions) {
       actualSignal = streamOptions?.signal;
       await new Promise<void>((_resolve, reject) => actualSignal?.addEventListener('abort', () => reject(actualSignal?.reason), { once: true }));
     } });
@@ -136,7 +136,7 @@ describe('production subagent resource lifecycle', () => {
     const gate = new Promise<void>(resolve => {finish = resolve;});
     const execute = vi.fn(async () => 'unexpected');
     registry.registerTool({permission:'safe',definition:{name:'late_tool',description:'fixture',inputSchema:{type:'object',properties:{}}},execute});
-    options.adapter = () => ({async *stream() {
+    options.adapter = () => ({getModelName: () => '', async *stream() {
       started = true; await gate;
       yield {type:'tool_use' as const,id:'late',name:'late_tool',input:{}};
       yield {type:'done' as const};
@@ -162,7 +162,7 @@ describe('production subagent resource lifecycle', () => {
   it('publishes actual stalled tool health while retaining the SubAgent execution owner',async()=>{
     const {options,registry}=fixture();let finish!:(s:string)=>void;
     registry.registerTool({permission:'safe',definition:{name:'stalled',description:'test',inputSchema:{}},executionPolicy:{idleTimeoutMs:50},execute:async()=>new Promise(resolve=>{finish=resolve;})});
-    options.adapter=()=>({async *stream(){yield {type:'tool_use' as const,id:'held',name:'stalled',input:{}};yield {type:'done' as const};}});
+    options.adapter=()=>({getModelName: () => '', async *stream(){yield {type:'tool_use' as const,id:'held',name:'stalled',input:{}};yield {type:'done' as const};}});
     const caller={requestSource:'agent' as const,callerId:'main'};const coordinator=createMultiAgentCoordinator();
     try {
       const child=await coordinator.spawn({...caller,taskName:'health',message:'work',createSession:()=>createNamedSubAgentSession(options)});
