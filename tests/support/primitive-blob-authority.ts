@@ -21,7 +21,7 @@ import {createAuthorityBlobBudget} from '../../src/runtime/verification/authorit
  * installed OS authority; actual installed positives use the zero-argument
  * installed start separately. */
 interface Options {database:Database;authorityId:string;assertCurrent():void;deletion:{assertDeleted(proof:object,proposal:object):unknown}}
-interface PrimitiveState {options:Options;layers:Map<string,{phase:'constructing'|'ready';component?:object}>;shared?:object}
+interface PrimitiveState {options:Options;layers:Map<string,{phase:'constructing'|'ready'|'failed';component?:object}>;shared?:object}
 const primitives=new WeakMap<object,PrimitiveState>();
 let patched=false;
 function install(){if(patched)return;patched=true;
