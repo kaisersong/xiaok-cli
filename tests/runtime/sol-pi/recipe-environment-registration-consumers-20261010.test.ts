@@ -26,5 +26,5 @@ it.skipIf(!qualifiedNegativeHost).each(['unknown','partial','directory','danglin
  const pairedSelected=await selectRegisteredRecipeManifest({sourceRoot,environmentRoot:root});expect.soft(pairedSelected).toBe(selected);
  let factoryLoads=0;let error;
  try{await verifyRecipeEnvironment({sourceRoot,registrationSourceRoot:sourceRoot,environmentPath:join(root,'environment.json'),manifestPath:pairedSelected,loadProduction:async file=>{factoryLoads++;return import(new URL('../../../'+file.replace(/\.js$/,'.ts'),import.meta.url).href);}});}catch(e){error=e;}
- expect(error).toBeInstanceOf(Error);expect(error.message).toBe('SOLPI_RECIPE_ENVIRONMENT_INVALID');expect(factoryLoads).toBe(0);
+ expect(error).toBeInstanceOf(Error);if(!(error instanceof Error))throw new TypeError('recipe_error_not_error');expect(error.message).toBe('SOLPI_RECIPE_ENVIRONMENT_INVALID');expect(factoryLoads).toBe(0);
 });

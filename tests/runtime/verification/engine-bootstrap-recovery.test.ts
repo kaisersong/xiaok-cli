@@ -15,7 +15,7 @@ it('recovers the same durable VM without creation, preserving a lost phase respo
  ],async observe(){return {...vm,engineId:'engine'};}};
  try{
  await expect(recoverPrivateEngine({journal,proposal,ports})).rejects.toThrow('lost install response');
- expect(journal.read()?.phases?.['install-engine'].state).toBe('started');journal=createEngineBootstrapJournal(db);
+ expect(journal.read()?.phases?.['install-engine']?.state).toBe('started');journal=createEngineBootstrapJournal(db);
  await expect(recoverPrivateEngine({journal,proposal,ports})).resolves.toMatchObject({engineId:'engine'});
  expect(copies).toBe(1);expect(installs).toBe(1);expect(loaded).toBe(true);
  await expect(recoverPrivateEngine({journal,proposal,ports:{...ports,async observeVm(){return {...vm,bootId:'other'};}}})).rejects.toThrow(/changed/);
@@ -28,5 +28,5 @@ it('does not mark an unobserved phase complete or change its recipe after failed
  const vm={machineId:'machine',bootId:'boot',effectiveConfigHash:p.configHash,creationNonce:p.creationNonce,processUid:500,processStartIdentity:'1:2'};
  const phases=['copy-engine','install-engine','load-worker'].map((name,i)=>({name,digest:String(i+1).repeat(64),async apply(){},async isComplete(){return false;}}));
  const ports={assertCurrent(){},async observeVm(){return vm;},phases,async observe(){return {...vm,engineId:'engine'};}};
- try{await expect(recoverPrivateEngine({journal,proposal:p,ports} as any)).rejects.toThrow('engine_phase_not_complete');expect(journal.read()?.phases?.['copy-engine'].state).toBe('started');phases[0].digest='f'.repeat(64);await expect(recoverPrivateEngine({journal,proposal:p,ports} as any)).rejects.toThrow('engine_phase_conflict');}finally{db.close();rmSync(root,{recursive:true,force:true});}
+ try{await expect(recoverPrivateEngine({journal,proposal:p,ports} as any)).rejects.toThrow('engine_phase_not_complete');expect(journal.read()?.phases?.['copy-engine']?.state).toBe('started');phases[0].digest='f'.repeat(64);await expect(recoverPrivateEngine({journal,proposal:p,ports} as any)).rejects.toThrow('engine_phase_conflict');}finally{db.close();rmSync(root,{recursive:true,force:true});}
 });
