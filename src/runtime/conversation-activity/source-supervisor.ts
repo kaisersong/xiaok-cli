@@ -28,6 +28,30 @@ export class ActivitySourceSupervisor {
   private readonly children = new Map<string, ChildProcess>();
   private readonly receipts = new Map<string, SourceReceipt>();
   private readonly pending = new Map<string, Promise<SourceReceipt>>();
+  private closing = false;
+  private shutdown?: Promise<void>;
+  private readonly stopping = new Set<Promise<void>>();
+  // Actual handles created by this instance, never ledger/PID-derived handles.
+  private readonly childCloses = new Map<ChildProcess, Promise<void>>();
+  private trackChildClose(child: ChildProcess): void {
+    const closed = new Promise<void>(resolve => child.once('close', () => {
+      this.childCloses.delete(child); resolve();
+    }));
+    this.childCloses.set(child, closed);
+  }
+  /** Passive ownership barrier only; does not signal or certify service quiescence. */
+  sealAndDrainSpawned(): Promise<void> {
+    this.closing = true;
+    return this.shutdown ??= (async () => {
+      const admissions = await Promise.allSettled([...this.pending.values(), ...this.stopping]);
+      // Admitted ensures may finish producing a handle; snapshot AFTER they settle.
+      // Never resolve this barrier just because a request's own timeout expired.
+      await Promise.all([...this.childCloses.values()]);
+      const failures = admissions.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+      if (failures.length) throw new AggregateError(failures, 'activity_source_shutdown_failed');
+    })();
+  }
+
   constructor(private readonly root: string, readonly ownerEpoch: string) {
     const ledger = join(root, 'activity-source-supervision.json');
     if (existsSync(ledger)) {
@@ -59,6 +83,7 @@ export class ActivitySourceSupervisor {
     try { process.kill(pid, 0); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw new Error('activity_source_liveness_unconfirmed'); }
   }
   ensure(source: ActivityManagedSource): Promise<SourceReceipt> {
+    if (this.closing) return Promise.reject(new Error('activity_source_closing'));
     const existing = this.pending.get(source.name); if (existing) return existing;
     const pending = this.ensureSource(source).finally(() => { if (this.pending.get(source.name) === pending) this.pending.delete(source.name); });
     this.pending.set(source.name, pending); return pending;
@@ -80,8 +105,12 @@ export class ActivitySourceSupervisor {
       this.receipts.set(source.name, receipt); this.save(); return receipt;
     }
     const log = openSync(join(this.root, `activity-${source.name}.log`), 'a', 0o600);
-    const child = spawn(source.executable, source.args ?? [source.entryPath], { cwd: source.cwd, env: { ...process.env, ...source.env }, detached: true,
-      stdio: ['ignore', log, log], windowsHide: true }); closeSync(log);
+    let child: ChildProcess;
+    try {
+      child = spawn(source.executable, source.args ?? [source.entryPath], { cwd: source.cwd, env: { ...process.env, ...source.env }, detached: true,
+        stdio: ['ignore', log, log], windowsHide: true });
+      this.trackChildClose(child);
+    } finally { closeSync(log); }
     let failure: unknown; child.once('error', error => { failure = error; }); child.unref();
     if (!child.pid) throw new Error('activity_source_spawn_failed');
     this.children.set(source.name, child);
@@ -95,7 +124,12 @@ export class ActivitySourceSupervisor {
     const receipt = [...this.receipts.values()].find(item => !item.external && item.pid === pid);
     return Boolean(receipt && this.alive(pid) && await birth(pid) === receipt.birth);
   }
-  async stopOwned(name: string, expectedOwnerEpoch: string): Promise<void> {
+  stopOwned(name: string, expectedOwnerEpoch: string): Promise<void> {
+    if (this.closing) return Promise.reject(new Error('activity_source_closing'));
+    const pending = this.stopOwnedSource(name, expectedOwnerEpoch).finally(() => { this.stopping.delete(pending); });
+    this.stopping.add(pending); return pending;
+  }
+  private async stopOwnedSource(name: string, expectedOwnerEpoch: string): Promise<void> {
     if (expectedOwnerEpoch !== this.ownerEpoch) throw new Error('activity_source_stale_lease');
     const ledger = JSON.parse(readFileSync(join(this.root, 'activity-source-supervision.json'), 'utf8')) as { sources: SourceReceipt[] };
     if (ledger.sources.find(item => item.name === name)?.ownerEpoch !== this.ownerEpoch) throw new Error('activity_source_stale_lease');

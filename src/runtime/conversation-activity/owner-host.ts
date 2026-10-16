@@ -24,6 +24,25 @@ export class ConversationActivityOwnerHost {
   private readonly clients = new Set<Client>();
   private pending = 0;
   private stopped = false;
+  private closing = false;
+  private sealed?: Promise<void>;
+  private stopping?: Promise<void>;
+  private readonly requestWork = new Set<Promise<void>>();
+  private readonly disconnectWork = new Map<Socket, Promise<void>>();
+  private readonly shutdownErrors: unknown[] = [];
+  /** Seal admission now; own actual accepted request/socket callback completion. */
+  sealAndDrain(): Promise<void> {
+    if (this.sealed) return this.sealed;
+    this.closing = true;
+    const work = [...this.requestWork, ...this.disconnectWork.values()];
+    for (const client of this.clients) client.socket.destroy();
+    this.sealed = (async () => {
+      const outcomes = await Promise.allSettled(work);
+      const failures = [...this.shutdownErrors, ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+      if (failures.length) throw new AggregateError([...new Set(failures)], 'activity_host_drain_failed');
+    })();
+    return this.sealed;
+  }
   private readonly actor;
   constructor(private readonly options: { dataRoot: string; profileId: string; actorId: string;
     configDigest?: string; ready?(): boolean;
@@ -63,7 +82,7 @@ export class ConversationActivityOwnerHost {
       }
       const credentials = createActivityOwnerCredentials(this.address);
       this.server = createServer(socket => {
-        if (this.clients.size >= 64) { socket.destroy(); return; }
+        if (this.closing || this.clients.size >= 64) { socket.destroy(); return; }
         const client: Client = { id: randomUUID(), socket, buffer: '', active: true, pending: 0, subscriptions: new Map() }; this.clients.add(client);
         socket.setEncoding('utf8');
         const handshake = setTimeout(() => { if (!client.role) socket.destroy(); }, 2000); handshake.unref();
@@ -82,7 +101,24 @@ export class ConversationActivityOwnerHost {
             } else void this.request(client, message);
           }
         });
-        socket.on('close', () => { clearTimeout(handshake); client.active = false; this.clients.delete(client); for (const stop of client.subscriptions.values()) stop(); client.subscriptions.clear(); void this.options.disconnected?.(client.id).catch(error => this.options.onError?.(error)); });
+        const disconnected = new Promise<void>((resolve, reject) => socket.once('close', () => {
+          clearTimeout(handshake); client.active = false; this.clients.delete(client);
+          const failures: unknown[] = [];
+          for (const stop of client.subscriptions.values()) { try { stop(); } catch (error) { failures.push(error); } }
+          client.subscriptions.clear();
+          let callback: Promise<void> | undefined;
+          try { callback = this.options.disconnected?.(client.id); } catch (error) { failures.push(error); }
+          const finish = () => {
+            if (failures.length) reject(new AggregateError(failures, 'activity_client_disconnect_failed')); else resolve();
+          };
+          void Promise.resolve(callback).then(finish, error => {
+            failures.push(error); try { this.options.onError?.(error); } catch (observedError) { failures.push(observedError); } finish();
+          });
+        }));
+        this.disconnectWork.set(socket, disconnected);
+        void disconnected.then(() => { this.disconnectWork.delete(socket); }, error => {
+          this.disconnectWork.delete(socket); this.shutdownErrors.push(error);
+        });
         socket.on('error', () => socket.destroy());
       });
       await new Promise<void>((resolve, reject) => { this.server!.once('error', reject); this.server!.listen(this.address.socketPath, () => { this.server!.off('error', reject); resolve(); }); });
@@ -99,11 +135,30 @@ export class ConversationActivityOwnerHost {
     if (Buffer.byteLength(encoded) > ACTIVITY_RESPONSE_BYTES || client.socket.writableLength > ACTIVITY_RESPONSE_BYTES) { client.socket.destroy(); return; }
     client.socket.write(encoded);
   }
-  private async request(client: Client, raw: unknown): Promise<void> {
+  private request(client: Client, raw: unknown): Promise<void> {
+    // Register ownership BEFORE invoking a body whose synchronous prefix may
+    // reenter stop(). This reservation settles only from the real raw Promise.
+    let completed!: () => void, failed!: (error: unknown) => void;
+    const reservation = new Promise<void>((resolve, reject) => { completed = resolve; failed = reject; });
+    this.requestWork.add(reservation);
+    void reservation.then(() => { this.requestWork.delete(reservation); }, error => {
+      this.requestWork.delete(reservation); this.shutdownErrors.push(error);
+    });
+    try {
+      const rawWork = this.performRequest(client, raw);
+      void rawWork.then(completed, failed);
+      return rawWork;
+    } catch (error) {
+      failed(error);
+      return reservation;
+    }
+  }
+  private async performRequest(client: Client, raw: unknown): Promise<void> {
     if (!client.active || this.stopped) return;
     const parsed = z.object({ type: z.literal('request'), id: key, method: key, params: z.record(z.string(), z.unknown()) }).strict().safeParse(raw);
     if (!parsed.success || client.pending >= 64 || this.pending >= 256) { client.socket.destroy(); return; }
     const { id, method, params } = parsed.data;
+    if (this.closing) { this.send(client, { type: 'error', id, code: 'activity_owner_closing' }); return; }
     client.pending++; this.pending++;
     try {
       if (client.role === 'user' && !USER_METHODS.has(method)) throw new Error('activity_method_forbidden');
@@ -191,10 +246,13 @@ export class ConversationActivityOwnerHost {
     }
   }
 
-  async stop(): Promise<void> {
-    if (this.stopped) return; this.stopped = true; this.service.dispose();
-    for (const client of this.clients) client.socket.destroy();
-    if (this.server) await new Promise<void>(resolve => this.server!.close(() => resolve()));
-    this.store.close();
+  stop(): Promise<void> {
+    return this.stopping ??= (async () => {
+      await this.sealAndDrain();
+      await this.service.close();
+      this.stopped = true;
+      if (this.server) await new Promise<void>(resolve => this.server!.close(() => resolve()));
+      this.store.close();
+    })();
   }
 }

@@ -1,3 +1,4 @@
+import { ownPendingClose, type PendingCloseOwner } from './pending-close-owner.js';
 import { readFileSync, existsSync, statSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -24,6 +25,10 @@ export class ActivityOwnerMcp {
   private readonly connecting = new Map<string, Promise<void>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private disposed = false;
+  private closing?: Promise<void>;
+  private readonly ownedConnections = new Set<PendingCloseOwner<McpClientConnection>>();
+  // Real cleanup failures are distinct from a factory failure already owned by its caller.
+  private readonly connectionCloseFailures = new Map<string, unknown>();
   constructor(private readonly options: { root: string; store: ConversationActivityStore; service: ConversationActivityService; actorId: string }) {
     this.activities = new ConversationMcpActivities({ ...options, originThread: async () => null, onError: error => {
       const name = error instanceof Error ? error.name : 'UnknownError';
@@ -43,11 +48,13 @@ export class ActivityOwnerMcp {
       && (this.endpoints.has(reference.endpointId) || this.localClaims.get(reference.endpointId)?.size));
   }
   async register(raw: unknown, clientId: string): Promise<void> {
+    if (this.disposed) throw new Error('activity_mcp_closing');
     const endpoint = endpointSchema.parse(raw);
     if (!endpoint.config) {
       let claims = this.localClaims.get(endpoint.endpointId); if (!claims) this.localClaims.set(endpoint.endpointId, claims = new Set()); claims.add(clientId); return;
     }
     if (await createTaskSessionEndpointId('xiaok-mcp', { serverName: endpoint.name, config: endpoint.config }) !== endpoint.endpointId) throw new Error('activity_mcp_endpoint_mismatch');
+    if (this.disposed) throw new Error('activity_mcp_closing');
     if (this.endpoints.size >= 64 && !this.endpoints.has(endpoint.endpointId)) throw new Error('activity_mcp_endpoint_capacity');
     this.endpoints.set(endpoint.endpointId, endpoint);
     const file = join(this.options.root, 'activity-mcp-endpoints.json'), tmp = `${file}.${process.pid}.tmp`, encoded = JSON.stringify([...this.endpoints.values()]);
@@ -62,20 +69,43 @@ export class ActivityOwnerMcp {
   }
   private connect(endpoint: Endpoint): Promise<void> {
     if (this.disposed || this.connections.has(endpoint.endpointId)) return Promise.resolve();
+    if (this.connectionCloseFailures.has(endpoint.endpointId)) return Promise.reject(this.connectionCloseFailures.get(endpoint.endpointId));
     const old = this.connecting.get(endpoint.endpointId); if (old) return old;
     const pending = (async () => {
       if (!endpoint.config) return;
-      const connection = await createMcpClientConnection(endpoint.name, endpoint.config as McpServerConfig, { cwd: endpoint.cwd, clientName: 'xiaok-activity-owner' });
-      if (this.disposed) { await connection.close(); return; }
-      if (connection.tasks?.endpointId !== endpoint.endpointId) { await connection.close(); throw new Error('activity_mcp_endpoint_mismatch'); }
+      const owned = ownPendingClose(createMcpClientConnection(endpoint.name, endpoint.config as McpServerConfig, { cwd: endpoint.cwd, clientName: 'xiaok-activity-owner' }));
+      this.ownedConnections.add(owned);
+      let connection: McpClientConnection;
+      try { connection = await owned.settled; }
+      catch (error) {
+        // Before shutdown this rejection remains owned by register/retry. There is
+        // no successful connection to keep forever. A close already in progress
+        // still owns this exact factory Promise/reason through its snapshot.
+        if (!this.disposed) this.ownedConnections.delete(owned);
+        throw error;
+      }
+      if (this.disposed) { await owned.close(); return; }
+      if (connection.tasks?.endpointId !== endpoint.endpointId) { await owned.close(); throw new Error('activity_mcp_endpoint_mismatch'); }
       this.connections.set(endpoint.endpointId, connection); this.activities.register(connection);
       const close = connection.client.onclose;
-      connection.client.onclose = () => { try { close?.(); } finally { if (this.connections.get(endpoint.endpointId) === connection) { this.connections.delete(endpoint.endpointId); this.retry(endpoint); } } };
+      connection.client.onclose = () => {
+        try { close?.(); } finally {
+          if (this.connections.get(endpoint.endpointId) === connection) this.connections.delete(endpoint.endpointId);
+          // Keep ownership through real close, then release that settled shell.
+          // Never reconnect on top of an unconfirmed cleanup failure.
+          void owned.close().then(() => {
+            this.ownedConnections.delete(owned); this.retry(endpoint);
+          }, error => {
+            this.ownedConnections.delete(owned);
+            if (!this.connectionCloseFailures.has(endpoint.endpointId)) this.connectionCloseFailures.set(endpoint.endpointId, error);
+          });
+        }
+      };
     })().finally(() => this.connecting.delete(endpoint.endpointId));
     this.connecting.set(endpoint.endpointId, pending); return pending;
   }
   private retry(endpoint: Endpoint): void {
-    if (this.disposed || this.timers.has(endpoint.endpointId)) return;
+    if (this.disposed || this.connectionCloseFailures.has(endpoint.endpointId) || this.timers.has(endpoint.endpointId)) return;
     const timer = setTimeout(() => { this.timers.delete(endpoint.endpointId); void this.connect(endpoint).catch(() => this.retry(endpoint)); }, 15_000); timer.unref(); this.timers.set(endpoint.endpointId, timer);
   }
   bound(watch: WorkWatch): void { const endpoint = this.endpoints.get(watch.logicalSourceId); if (endpoint) void this.connect(endpoint).then(() => { const connection = this.connections.get(endpoint.endpointId); if (connection) this.activities.register(connection); }).catch(() => this.retry(endpoint)); }
@@ -85,5 +115,23 @@ export class ActivityOwnerMcp {
       for (const watch of this.options.store.listWatches()) if (watch.source === 'mcp' && watch.logicalSourceId === endpointId) await this.options.service.sourceUnavailable(watch.watchId, 'unavailable', 'activity_mcp_disconnected');
     }
   }
-  async close(): Promise<void> { this.disposed = true; this.activities.dispose(); for (const timer of this.timers.values()) clearTimeout(timer); await Promise.allSettled([...this.connections.values()].map(connection => connection.close())); this.connections.clear(); }
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.disposed = true;
+    for (const timer of this.timers.values()) clearTimeout(timer); this.timers.clear();
+    const begin = (run: () => Promise<void>): Promise<void> => {
+      try { return run(); } catch (error) { return Promise.reject(error); }
+    };
+    const activityClose = begin(() => this.activities.close());
+    const closes = [...this.ownedConnections].map(owned => begin(() => owned.close()));
+    const pending = [...this.connecting.values()];
+    this.closing = (async () => {
+      // All late factory/SDK close paths and actual observer callbacks settle.
+      const outcomes = await Promise.allSettled([activityClose, ...closes, ...pending]);
+      this.connections.clear(); this.ownedConnections.clear(); this.localClaims.clear();
+      const failures = [...this.connectionCloseFailures.values(), ...outcomes.flatMap(result => result.status === 'rejected' ? [result.reason] : [])];
+      if (failures.length) throw new AggregateError([...new Set(failures)], 'activity_mcp_close_failed');
+    })();
+    return this.closing;
+  }
 }
