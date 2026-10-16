@@ -6,22 +6,34 @@ on:
       - 'src/runtime/hooks-runner.ts'
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/tools/index.ts'
+      - 'src/ui/permission-prompt.ts'
+      - 'src/commands/chat-permission.ts'
+      - 'src/types.ts'
       - 'tests/runtime/*hook*.test.ts'
       - 'tests/ai/tools/index.test.ts'
       - 'tests/e2e/permission-hook-fallback.py'
       - 'tests/ai/adapters/openai-history-images.test.ts'
       - 'tests/e2e/text-model-resume.py'
+      - 'tests/e2e/persistent-command-approval.py'
+      - 'tests/commands/chat-permission*.test.ts'
+      - 'tests/ui/permission-prompt.test.ts'
       - '.github/workflows/permission-hooks.yml'
   pull_request:
     paths:
       - 'src/runtime/hooks-runner.ts'
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/tools/index.ts'
+      - 'src/ui/permission-prompt.ts'
+      - 'src/commands/chat-permission.ts'
+      - 'src/types.ts'
       - 'tests/runtime/*hook*.test.ts'
       - 'tests/ai/tools/index.test.ts'
       - 'tests/e2e/permission-hook-fallback.py'
       - 'tests/ai/adapters/openai-history-images.test.ts'
       - 'tests/e2e/text-model-resume.py'
+      - 'tests/e2e/persistent-command-approval.py'
+      - 'tests/commands/chat-permission*.test.ts'
+      - 'tests/ui/permission-prompt.test.ts'
       - '.github/workflows/permission-hooks.yml'
   workflow_dispatch: {}
 permissions:
@@ -53,6 +65,11 @@ jobs:
           .test-dist/tests/ai/tools/index.test.js
           .test-dist/tests/ai/permissions/manager.test.js
           .test-dist/tests/ui/permission-prompt.test.js
+          .test-dist/tests/commands/chat-permission.test.js
+          .test-dist/tests/commands/chat-permission-persistence.test.js
+          .test-dist/tests/ai/permissions/authz-p0-3-command-rules.test.js
+          .test-dist/tests/ai/permissions/authz-p0-3-round15.test.js
+          .test-dist/tests/ai/permissions/authz-p0-3-adoptions.test.js
           .test-dist/tests/ai/adapters/openai-history-images.test.js
           .test-dist/tests/ai/adapters/openai.test.js
       - uses: actions/setup-python@v5
@@ -67,3 +84,4 @@ jobs:
         run: |
           python tests/e2e/permission-hook-fallback.py
           python tests/e2e/text-model-resume.py
+          python tests/e2e/persistent-command-approval.py

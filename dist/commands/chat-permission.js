@@ -14,11 +14,18 @@ export async function confirmChatPermission(name, input, options) {
         return allowed;
     const choice = terminal.choice;
     try {
-        if (choice?.action === 'allow_session')
-            options.addSessionRule(choice.rule);
+        const rules = choice && 'rule' in choice
+            ? [...new Set(choice.rules?.length ? choice.rules : [choice.rule])]
+            : [];
+        if (choice?.action === 'allow_session') {
+            for (const rule of rules)
+                options.addSessionRule(rule);
+        }
         if (choice?.action === 'allow_project' || choice?.action === 'allow_global') {
-            await options.addAllowRule(choice.action === 'allow_project' ? 'project' : 'global', choice.rule);
-            options.addSessionRule(choice.rule);
+            for (const rule of rules) {
+                await options.addAllowRule(choice.action === 'allow_project' ? 'project' : 'global', rule);
+                options.addSessionRule(rule);
+            }
         }
     }
     catch (err) {

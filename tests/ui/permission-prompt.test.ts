@@ -97,7 +97,10 @@ describe('permission-prompt', () => {
       const commandLine = lines.find((line) => line.includes('命令:'));
       expect(commandLine).toBeDefined();
       expect(strip(commandLine!)).toContain('本次执行命令:');
-      expect(stripAll(lines)).toContain('始终允许的范围: bash(python3 *)（* 表示任意参数，参数变化无需重复确认）');
+      expect(stripAll(lines).join('\n')).not.toContain('始终允许的范围:');
+      expect(buildPermissionPromptOptions('bash(python3 *)', 'bash', {
+        command: "python3 - <<'PY'\nimport importlib\nprint('ok')\nPY",
+      }).map(option => option.choice.action)).toEqual(['allow_once', 'deny']);
       expect(commandLine).toContain("python3 - <<'PY' import importlib print('ok') PY");
       expect(commandLine?.includes('\n')).toBe(false);
     });
@@ -228,17 +231,18 @@ describe('permission-prompt', () => {
     it('re-renders the same approval block instead of accumulating duplicate rows while navigating', async () => {
       const harness = createTtyHarness();
 
-      const pending = showPermissionPrompt('bash', { command: "python3 - <<'PY'\nimport importlib\nPY" });
+      const pending = showPermissionPrompt('bash', { command: 'printf ok\nsleep 0' });
       harness.send('\x1b[B');
       harness.send('\x1b[B');
       harness.send('\r');
 
-      await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(python3 *)' });
+      await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(printf *)',
+        rules: ['bash(printf *)', 'bash(sleep *)'] });
 
       const normalized = harness.output.normalized;
       const titleCount = normalized.split('xiaok 想要执行以下操作').length - 1;
       expect(titleCount).toBe(3);
-      expect(normalized).not.toContain("命令: python3 - <<'PY'\nimport importlib\nPY");
+      expect(normalized).not.toContain('命令: printf ok\nsleep 0');
 
       harness.restore();
     });

@@ -1,4 +1,4 @@
-import { requiresCommandConfirmation, getCommandWriteTargets } from '../ai/permissions/policy-engine.js';
+import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
@@ -78,24 +78,40 @@ function isMandatoryReview(toolName, input) {
     return toolName === 'bash' && typeof input.command === 'string'
         && (classifyBashCommand(input.command).level !== 'safe' || requiresCommandConfirmation(input.command) || getCommandWriteTargets(input.command).length > 0);
 }
-export function buildPermissionPromptOptions(rule, toolName = '', input = {}) {
+function rememberedRules(toolName, input, rule) {
+    if (toolName !== 'bash' || typeof input.command !== 'string')
+        return [rule];
     if (isMandatoryReview(toolName, input))
+        return [];
+    const parsed = parseCommandSegments(input.command);
+    if (!parsed.valid)
+        return [];
+    const rules = [...new Set(parsed.segments.map(command => deriveRule(toolName, { command })))];
+    // Use the execution policy itself to verify that these scopes cover the full
+    // command. An unrepresentable command must not offer ineffective persistence.
+    return matches(rules, toolName, input) ? rules : [];
+}
+export function buildPermissionPromptOptions(rule, toolName = '', input = {}) {
+    const rules = rememberedRules(toolName, input, rule);
+    if (rules.length === 0)
         return [
             { label: '允许一次', choice: { action: 'allow_once' } },
             { label: '拒绝', choice: { action: 'deny' } },
         ];
-    const displayRule = compactRuleForOption(rule);
+    const displayRule = compactRuleForOption(rules.join(' + '));
+    const scopes = rules.length > 1 ? { rules } : {};
     return [
         { label: '允许一次', choice: { action: 'allow_once' } },
-        { label: `本次会话始终允许 ${displayRule}`, choice: { action: 'allow_session', rule } },
-        { label: `始终允许 ${displayRule} (保存到项目)`, choice: { action: 'allow_project', rule } },
-        { label: `始终允许 ${displayRule} (保存到全局)`, choice: { action: 'allow_global', rule } },
+        { label: `本次会话始终允许 ${displayRule}`, choice: { action: 'allow_session', rule: rules[0], ...scopes } },
+        { label: `始终允许 ${displayRule} (保存到项目)`, choice: { action: 'allow_project', rule: rules[0], ...scopes } },
+        { label: `始终允许 ${displayRule} (保存到全局)`, choice: { action: 'allow_global', rule: rules[0], ...scopes } },
         { label: '拒绝', choice: { action: 'deny' } },
     ];
 }
 export function formatPermissionPromptLines(toolName, input, options, locale = 'zh-CN', permissionMode) {
     const copy = getUiCopy(locale);
     const target = extractTarget(input, locale);
+    const rules = rememberedRules(toolName, input, deriveRule(toolName, input));
     const lines = [
         `${yellow('⚡')} ${copy.approvalTitle}`,
         `${copy.toolLabel}: ${boldCyan(toolName)}`,
@@ -109,15 +125,15 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
         lines.push(`${typeof input.command === 'string' ? copy.currentCommandLabel : target.key}: ${dim(target.value)}`);
     }
     if (toolName === 'bash' && typeof input.command === 'string') {
-        if (isMandatoryReview(toolName, input))
+        if (rules.length === 0)
             lines.push(dim(copy.mandatoryReview));
         for (const path of getCommandWriteTargets(input.command))
             lines.push(dim(copy.writeTarget(escapeProjectRuleDisplay(path))));
     }
-    if (typeof input.command === 'string' && !isMandatoryReview(toolName, input)) {
-        const rule = deriveRule(toolName, input);
-        if (rule.endsWith(' *)'))
-            lines.push(dim(copy.commandApprovalScope(rule)));
+    if (typeof input.command === 'string') {
+        for (const rule of rules)
+            if (rule.endsWith(' *)'))
+                lines.push(dim(copy.commandApprovalScope(rule)));
     }
     for (let i = 0; i < options.length; i++) {
         const option = options[i];
