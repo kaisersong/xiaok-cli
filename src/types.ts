@@ -293,9 +293,9 @@ export interface PermissionSettings {
 // Permission choice for interactive prompts
 export type PermissionChoice =
   | { action: 'allow_once' }
-  | { action: 'allow_session'; rule: string }
-  | { action: 'allow_project'; rule: string }
-  | { action: 'allow_global'; rule: string }
+  | { action: 'allow_session'; rule: string; rules?: string[] }
+  | { action: 'allow_project'; rule: string; rules?: string[] }
+  | { action: 'allow_global'; rule: string; rules?: string[] }
   | { action: 'deny' };
 
 export interface MemoryCompactionRequest {

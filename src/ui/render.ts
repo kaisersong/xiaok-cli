@@ -545,28 +545,10 @@ export function formatHistoryBlock(block: HistoryMessageBlock): string {
     return '';
   }
 
-  if (block.type === 'tool_use') {
-    // Resume history uses the same rail grammar as live tool activity. Use the
-    // description without formatToolActivity's bullet to avoid "│ • ...".
-    const activity = describeToolActivity(block.name, block.input as Record<string, unknown>);
-    if (!activity) return '';
-
-    let tone: RailTone = 'neutral';
-    if (block.name === 'write' || block.name === 'edit') tone = 'change';
-    else if (block.name === 'bash') tone = 'run';
-    else if (block.name === 'install_skill' || block.name === 'uninstall_skill') tone = 'skill';
-    else if (['read', 'glob', 'grep', 'tool_search', 'web_search', 'web_fetch'].includes(block.name)) tone = 'explore';
-
-    return `${formatRailLine(activity, tone)}\n`;
-  }
-
-  if (block.type === 'tool_result') {
-    // Persisted results may contain raw multi-line diffs. Normalize before
-    // truncation, then let the rail wrapper prefix every visual line.
-    const normalized = singleLine(block.content);
-    const summary = truncatePlain(normalized, 100);
-    const label = block.is_error ? 'Tool result (error)' : 'Tool result';
-    return `${formatRailLine(`${label}: ${summary}`, block.is_error ? 'error' : 'result')}\n`;
+  if (block.type === 'tool_use' || block.type === 'tool_result') {
+    // The caller records details in TranscriptBuffer for Ctrl+O. Replaying raw
+    // results at startup floods the conversation with implementation output.
+    return '';
   }
 
   if (block.type === 'image') {

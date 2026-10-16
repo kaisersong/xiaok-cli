@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { formatRailLine } from './render.js';
 import { readImageDimensions } from '../shared/media/image.js';
 export { readImageDimensions } from '../shared/media/image.js';
@@ -7,6 +8,18 @@ const DEFAULT_MAX_ROWS = 12;
 const DEFAULT_MAX_COLS = 40;
 const KITTY_CHUNK_BYTES = 4096;
 const KITTY_FAMILY = new Set(['kitty', 'ghostty', 'wezterm', 'warpterminal']);
+// First 40 entries of Kitty's gen/rowcolumn-diacritics.txt (protocol order).
+const PLACEHOLDER_DIACRITICS = [
+    0x0305, 0x030d, 0x030e, 0x0310, 0x0312, 0x033d, 0x033e, 0x033f,
+    0x0346, 0x034a, 0x034b, 0x034c, 0x0350, 0x0351, 0x0352, 0x0357,
+    0x035b, 0x0363, 0x0364, 0x0365, 0x0366, 0x0367, 0x0368, 0x0369,
+    0x036a, 0x036b, 0x036c, 0x036d, 0x036e, 0x036f, 0x0483, 0x0484,
+    0x0485, 0x0486, 0x0487, 0x0592, 0x0593, 0x0594, 0x0595, 0x0597,
+].map(code => String.fromCodePoint(code));
+export function supportsKittyUnicodePlaceholders(env = process.env) {
+    const program = env.TERM_PROGRAM?.toLowerCase();
+    return Boolean(env.KITTY_WINDOW_ID) || program === 'kitty' || program === 'ghostty';
+}
 export function detectImageProtocol(env = process.env, isTty = process.stdout.isTTY === true) {
     if (!isTty)
         return null;
@@ -42,14 +55,14 @@ function computeCellBox(dims, maxCols, maxRows) {
     }
     return { cols, rows };
 }
-function buildKittySequence(data, cols, rows, imageId) {
+function buildKittySequence(data, cols, rows, imageId, virtual = false) {
     const payload = data.toString('base64');
     const chunks = [];
     for (let offset = 0; offset < payload.length; offset += KITTY_CHUNK_BYTES) {
         chunks.push(payload.slice(offset, offset + KITTY_CHUNK_BYTES));
     }
     const multiChunk = chunks.length > 1;
-    const head = `a=T,f=100,q=2,c=${cols},r=${rows},C=1,i=${imageId}${multiChunk ? ',m=1' : ''}`;
+    const head = `a=T,f=100,q=2,c=${cols},r=${rows},C=1,i=${imageId}${virtual ? ',U=1' : ''}${multiChunk ? ',m=1' : ''}`;
     const parts = [`\x1b_G${head};${chunks[0]}\x1b\\`];
     for (let index = 1; index < chunks.length; index += 1) {
         const more = index === chunks.length - 1 ? 0 : 1;
@@ -86,4 +99,42 @@ export function renderImageLines(opts) {
     const sequence = buildIterm2Sequence(opts.data, cols, rows);
     const prefix = rows > 1 ? `\x1b[${rows - 1}A` : '';
     return { lines: [...Array(rows - 1).fill(''), `${prefix}${sequence}`], rows, cols, protocol };
+}
+/** A transcript block whose footprint includes one blank row and two columns on each side. */
+export function renderInlineImageBlock(opts) {
+    // IDs are terminal-global: restarting the CLI must not replace earlier images.
+    const imageId = opts.imageId ?? randomInt(1, 0x1000000);
+    const rendered = renderImageLines({
+        ...opts,
+        imageId,
+        maxCols: Math.min(opts.maxCols ?? DEFAULT_MAX_COLS, DEFAULT_MAX_COLS, (opts.columns ?? 80) - 4),
+        maxRows: Math.min(DEFAULT_MAX_ROWS, (opts.maxRows ?? DEFAULT_MAX_ROWS + 2) - 2),
+    });
+    if (!rendered.protocol) {
+        return { text: `${rendered.lines[0]}\n`, rows: 1, cols: 0, protocol: null, cursorStationary: false };
+    }
+    const { rows, cols, protocol } = rendered;
+    if (protocol === 'kitty') {
+        if (opts.unicodePlaceholders ?? supportsKittyUnicodePlaceholders()) {
+            const sequence = buildKittySequence(opts.data, cols, rows, imageId, true);
+            // Image identity uses RGB directly, independent of theme/color settings.
+            const color = `\x1b[38;2;${(imageId >> 16) & 255};${(imageId >> 8) & 255};${imageId & 255}m`;
+            const lines = Array.from({ length: rows }, (_, row) => {
+                const cells = Array.from({ length: cols }, (_, col) => (`\u{10eeee}${PLACEHOLDER_DIACRITICS[row]}${PLACEHOLDER_DIACRITICS[col]}`)).join('');
+                return `  ${color}${cells}\x1b[0m  `;
+            });
+            lines[0] = sequence + lines[0];
+            return { text: `\n${lines.join('\n')}\n\n`, rows: rows + 2, cols, protocol, cursorStationary: false };
+        }
+        // The raw writer reserves the whole padded block before stationary placement.
+        return {
+            text: `\x1b[1B\x1b[3G${rendered.lines[0]}\x1b[1A\r`,
+            rows: rows + 2, cols, protocol, cursorStationary: true,
+        };
+    }
+    const lines = [...rendered.lines];
+    const last = lines.length - 1;
+    const prefix = rows > 1 ? `\x1b[${rows - 1}A` : '';
+    lines[last] = `${prefix}  ${buildIterm2Sequence(opts.data, cols, rows)}`;
+    return { text: `\n${lines.join('\n')}\n\n`, rows: rows + 2, cols, protocol, cursorStationary: false };
 }

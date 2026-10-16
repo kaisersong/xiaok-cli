@@ -270,11 +270,25 @@ export class ScrollRegionManager {
       }
       return lines.slice(0, maxOverlayRows);
     }
-    // Question/choice overlays (AskUserQuestion / ask_user) put the question at
-    // the top and the options below it. Truncate from the bottom so the question
-    // and the leading options stay visible; the footer hint is the least important.
+    // Question menus need a moving option window: a fixed top slice hides both
+    // the selection and the navigation hint after moving to a later choice.
     if (overlayKind === 'question') {
-      return lines.slice(0, maxOverlayRows);
+      if (lines.length <= maxOverlayRows) return lines;
+      const optionIndices = lines.flatMap((line, index) => (
+        /^\s*(?:❯\s*)?\d+\./u.test(stripAnsi(line)) ? [index] : []
+      ));
+      if (optionIndices.length === 0) return lines.slice(0, maxOverlayRows);
+      const firstOption = optionIndices[0];
+      const lastOption = optionIndices[optionIndices.length - 1];
+      const prefix = lines.slice(0, firstOption);
+      const hasHintRoom = maxOverlayRows >= prefix.length + 2;
+      const visiblePrefix = prefix.slice(0, Math.max(0, maxOverlayRows - 1));
+      const hint = hasHintRoom && lastOption < lines.length - 1 ? lines.at(-1) : undefined;
+      const optionBudget = maxOverlayRows - visiblePrefix.length - (hint ? 1 : 0);
+      const options = lines.slice(firstOption, lastOption + 1);
+      const selected = Math.max(0, options.findIndex(line => /^\s*❯\s*\d+\./u.test(stripAnsi(line))));
+      const start = Math.max(0, Math.min(selected - optionBudget + 1, options.length - optionBudget));
+      return [...visiblePrefix, ...options.slice(start, start + optionBudget), ...(hint ? [hint] : [])];
     }
     return lines.slice(-maxOverlayRows);
   }

@@ -1,4 +1,7 @@
 import { OLD_MODEL_EFFORT_CONFIGS } from '../../support/model-effort-compatibility.js';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { resolveRuntimeModelBinding } from '../../../src/ai/providers/control-plane.js';
 // tests/ai/adapters/openai.test.ts
 import { describe, it, expect, vi } from 'vitest';
@@ -25,6 +28,8 @@ import type { Message, StreamChunk, ToolDefinition, UsageStats } from '../../../
 import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.js';
 import { streamDesktopTaskProviderConversation } from '../../../src/ai/runtime/provider-conversation-authorization.js';
 import { resolveRegisteredStrictKimiK3Profile } from '../../../src/ai/runtime/model-harness-identity.js';
+import { recoverModelStream } from '../../../src/ai/runtime/model-stream-recovery.js';
+import { normalizeRuntimeError } from '../../../src/ai/runtime/runtime-errors.js';
 
 const openAIConstructorCalls: unknown[] = [];
 let nextTestAuthorizationId = 0;
@@ -2487,6 +2492,98 @@ describe('OpenAIAdapter', () => {
     expect((caught as Error).message).toBe('KIMI_K3_PROVIDER_REQUEST_FAILED');
     expect(String(caught)).not.toContain('PRIVATE_REASONING_CANARY');
     expect((caught as Error).cause).toBeUndefined();
+  });
+
+  it('preserves safe HTTP diagnostics without provider text, body, headers or cause', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'xiaok-kimi-diagnostics-'));
+    const previousConfigDir = process.env.XIAOK_CONFIG_DIR;
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    try {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    const raw = Object.assign(new Error('PRIVATE_REASONING_CANARY sk-private-key'), {
+      status: 401,
+      code: 'invalid_api_key',
+      headers: { authorization: 'sk-private-key' },
+      error: { code: 'invalid_api_key', message: 'PRIVATE_REASONING_CANARY' },
+      cause: new Error('PRIVATE_REASONING_CANARY'),
+    });
+    vi.spyOn(instance.chat.completions, 'create').mockRejectedValue(raw);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    let caught: unknown;
+    try { await collectAdapterChunks(adapter); } catch (error) { caught = error; }
+    expect(caught).toMatchObject({
+      code: 'KIMI_K3_PROVIDER_REQUEST_FAILED', status: 401,
+      failureKind: 'authentication', providerCode: 'invalid_api_key', retryable: false,
+    });
+    const normalized = normalizeRuntimeError(caught);
+    expect(normalized).toMatchObject({ code: 'model_failed', retryable: false });
+    expect(normalized.message).toContain('http_status=401');
+    expect(normalized.message).toContain('provider_code=invalid_api_key');
+    for (const output of [String(caught), JSON.stringify(caught), JSON.stringify(normalized)]) {
+      expect(output).not.toContain('PRIVATE_REASONING_CANARY');
+      expect(output).not.toContain('sk-private-key');
+    }
+    expect((caught as Error).cause).toBeUndefined();
+    const log = readFileSync(join(configDir, 'logs', 'xiaok.log'), 'utf8');
+    expect(log).toContain('kimiProviderRequestFailed');
+    expect(log).toContain('"status":401');
+    expect(log).not.toContain('PRIVATE_REASONING_CANARY');
+    expect(log).not.toContain('sk-private-key');
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.XIAOK_CONFIG_DIR;
+      else process.env.XIAOK_CONFIG_DIR = previousConfigDir;
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not internally retry an exhausted Kimi quota', async () => {
+    vi.useFakeTimers();
+    try {
+      const OpenAI = (await import('openai')).default;
+      const instance = new OpenAI({ apiKey: 'test' });
+      const create = vi.spyOn(instance.chat.completions, 'create').mockRejectedValue(
+        Object.assign(new Error('private quota details'), { status: 429, error: { code: 'insufficient_quota' } }),
+      );
+      const adapter = createStrictKimiAdapter();
+      (adapter as unknown as { client: typeof instance }).client = instance;
+      const failed = expect(collectAdapterChunks(adapter)).rejects.toMatchObject({ retryable: false });
+      await vi.runAllTimersAsync();
+      await failed;
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('recovers a strict K3 partial stream through the production recovery owner', async () => {
+    const OpenAI = (await import('openai')).default;
+    const instance = new OpenAI({ apiKey: 'test' });
+    let calls = 0;
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => ({
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { reasoning_content: 'thinking' }, finish_reason: null }] };
+        if (++calls === 1) {
+          yield { choices: [{ delta: { content: 'partial' }, finish_reason: null }] };
+          throw Object.assign(new Error('PRIVATE_REASONING_CANARY socket hang up'), { code: 'ECONNRESET' });
+        }
+        yield { choices: [{ delta: { content: 'finished' }, finish_reason: null }] };
+        yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+      },
+    }) as never);
+    const adapter = createStrictKimiAdapter();
+    (adapter as unknown as { client: typeof instance }).client = instance;
+    const retry = vi.fn();
+    const chunks: StreamChunk[] = [];
+    for await (const chunk of recoverModelStream({
+      signal: new AbortController().signal,
+      policy: { windowMs: 1000, idleMs: 500, initialDelayMs: 1, maxDelayMs: 2 },
+      onRetry: retry,
+      open: signal => streamTestAdapter(adapter, [], [], 'system', { signal }),
+    })) chunks.push(chunk);
+    expect(calls).toBe(2);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(chunks).toContainEqual({ type: 'text', delta: 'finished' });
+    expect(JSON.stringify(chunks)).not.toContain('PRIVATE_REASONING_CANARY');
   });
 
   it('emits thinking chunks from reasoning_details streaming deltas', async () => {

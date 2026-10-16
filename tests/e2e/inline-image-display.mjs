@@ -3,9 +3,11 @@
 // --old reproduces the previous placement order for a visual comparison.
 import { crc32, deflateSync } from 'node:zlib';
 import { ScrollRegionManager } from '../../dist/ui/scroll-region.js';
-import { detectImageProtocol, renderImageLines } from '../../dist/ui/image-renderer.js';
+import { detectImageProtocol, renderImageLines, renderInlineImageBlock } from '../../dist/ui/image-renderer.js';
 
-if (!process.stdout.isTTY || !process.stdin.isTTY || detectImageProtocol() !== 'kitty') {
+// --wire exercises UTF-8 history cells inside an isolated tmux, without GPU claims.
+const wireTest = process.argv.includes('--wire');
+if (!process.stdout.isTTY || !process.stdin.isTTY || (!wireTest && detectImageProtocol() !== 'kitty')) {
   throw new Error('Run this script in a Kitty graphics terminal outside tmux (e.g. Ghostty).');
 }
 const width = 360, height = 216;
@@ -29,12 +31,18 @@ const data = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR'
 const manager = new ScrollRegionManager();
 let imageId = 10000, outputId = 0;
 function image() {
+  if (!process.argv.includes('--old')) {
+    const rendered = renderInlineImageBlock({ data, mediaType: 'image/png', protocol: 'kitty', unicodePlaceholders: wireTest || undefined, columns: process.stdout.columns, maxRows: Math.min(14, manager.maxContentRows - 1), imageId: imageId++ });
+    if (!rendered.protocol) { manager.writeAtContentCursor(rendered.text); return; }
+    manager.writeRawBlock(rendered.text, rendered.rows, { cursorStationary: rendered.cursorStationary });
+    return;
+  }
   const rendered = renderImageLines({ data, mediaType: 'image/png', protocol: 'kitty', columns: process.stdout.columns, maxRows: Math.min(12, manager.maxContentRows - 1), imageId: imageId++ });
   if (!rendered.protocol) { manager.writeAtContentCursor(`${rendered.lines[0]}\n`); return; }
   manager.writeRawBlock(process.argv.includes('--old') ? `${rendered.lines.join('\n')}\n` : rendered.lines[0], rendered.rows, { cursorStationary: !process.argv.includes('--old') });
 }
 manager.begin();
-manager.renderPromptFrame({ inputValue: 'KEEP_DRAFT', cursor: 4, placeholder: '', statusLine: 'n: 3 more lines | i: second image | q: exit' });
+manager.renderPromptFrame({ inputValue: 'KEEP_DRAFT', cursor: 4, placeholder: '', statusLine: 'n: 3 lines | s: 80 lines | i: image | q: exit' });
 for (let i = 1; i < manager.maxContentRows; i++) manager.writeAtContentCursor(`BEFORE_IMAGE_${i}\n`);
 image();
 process.stdin.setRawMode(true); process.stdin.resume();
@@ -47,6 +55,10 @@ process.stdin.on('data', buffer => {
       manager.renderActivity('Working — image should move with the transcript');
     }
     if (key === 'i') image();
+    if (key === 's') {
+      for (let i = 0; i < 80; i++) manager.writeAtContentCursor(`LONG_OUTPUT_${++outputId}\n`);
+      manager.renderActivity('Working — scroll up to see images with padding');
+    }
   }
 });
 process.stdout.on('resize', () => manager.updateSize(process.stdout.rows ?? 24, process.stdout.columns ?? 80));

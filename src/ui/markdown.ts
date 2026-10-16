@@ -234,10 +234,10 @@ export class MarkdownRenderer {
           this.codeLang = "";
           try {
             const ascii = renderMermaidASCII(diagram);
-            return ascii;
+            return this.indentCodeRows(ascii);
           } catch {
             // Fall back to raw source on render error
-            return diagram;
+            return this.indentCodeRows(diagram);
           }
         }
         this.codeLang = "";
@@ -262,8 +262,9 @@ export class MarkdownRenderer {
 
     // Inside code block
     if (this.inCodeBlock) {
+      if (!line) return '';
       const highlighted = this.codeLang ? highlightLine(line, this.codeLang) : green(line);
-      return `${BODY_GUTTER}${highlighted}`;
+      return this.indentCodeRows(highlighted);
     }
 
     // Headings
@@ -326,6 +327,12 @@ export class MarkdownRenderer {
     }
 
     return `${BODY_GUTTER}${this.inlineFormat(line)}`;
+  }
+
+  private indentCodeRows(text: string): string {
+    return text.split('\n').map(row => row
+      ? `${BODY_GUTTER}${LEAD_CONTINUATION_PREFIX}${row}`
+      : row).join('\n');
   }
 
   private countRows(text: string): number {

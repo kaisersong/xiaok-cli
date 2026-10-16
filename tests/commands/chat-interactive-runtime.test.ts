@@ -1245,7 +1245,7 @@ describe('chat interactive runtime', () => {
     } finally { process.stdout.isTTY = stdoutIsTTY; attachSpy.mockRestore(); }
   }, 15000);
 
-  it.each([24, 12])('keeps pasted images within the actual chat content margin on a %s-row terminal', async rows => {
+  it.each([[24, 'ghostty'], [12, 'ghostty'], [24, 'wezterm'], [12, 'wezterm']] as const)('keeps pasted images within the actual chat content margin on a %s-row %s terminal', async (rows, terminal) => {
     const root = join(tmpdir(), `xiaok-image-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     tempDirs.push(root);
     const configDir = join(root, 'config'); const projectDir = join(root, 'project');
@@ -1255,7 +1255,7 @@ describe('chat interactive runtime', () => {
     const file = join(projectDir, 'screen.png'); writeFileSync(file, png);
     process.env.XIAOK_CONFIG_DIR = configDir; cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
     const originalEnv = { TMUX: process.env.TMUX, TERM: process.env.TERM, TERM_PROGRAM: process.env.TERM_PROGRAM };
-    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = 'ghostty';
+    process.env.TMUX = ''; process.env.TERM = 'xterm-256color'; process.env.TERM_PROGRAM = terminal;
     const { createAdapter } = await import('../../src/ai/models.js');
     const adapter = createFakeAdapter('gpt-4o');
     const originalStream = adapter.stream.bind(adapter);
@@ -1280,13 +1280,24 @@ describe('chat interactive runtime', () => {
       await waitFor(() => expect(observedImages).toHaveLength(1), { timeoutMs: 3000 });
       await waitForInputTurnReady(harness);
       expect(observedImages[0]).toMatchObject({ source: { data: png.toString('base64') } });
-      expect(harness.screen.images()).toHaveLength(1);
-      const placed = harness.screen.images()[0];
       const margin = [...harness.output.raw.matchAll(/\x1b\[1;(\d+)r/g)].at(-1);
       expect(margin).toBeDefined();
-      expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
-      const promptRow = findReadyPromptIndex(harness.screen.lines());
-      expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      if (terminal === 'ghostty') {
+        const header = harness.output.raw.match(/\x1b_G(a=T[^;]+);/);
+        expect(header?.[1]).toContain('U=1');
+        const height = Number(header?.[1].match(/,r=(\d+)/)?.[1]);
+        const width = Number(header?.[1].match(/,c=(\d+)/)?.[1]);
+        expect(height + 2).toBeLessThan(Number(margin![1]));
+        expect(Array.from(harness.output.raw).filter(ch => ch === '\u{10eeee}')).toHaveLength(height * width);
+        expect(harness.output.normalized).not.toContain('[xiaok] UI 已降级');
+      } else {
+        expect(harness.screen.images()).toHaveLength(1);
+        const placed = harness.screen.images()[0];
+        expect(placed.column).toBe(3);
+        expect(placed.row + placed.rows - 1).toBeLessThan(Number(margin![1]));
+        const promptRow = findReadyPromptIndex(harness.screen.lines());
+        expect(promptRow + 1).toBeGreaterThan(placed.row + placed.rows - 1);
+      }
       harness.send('/exit'); harness.send('\r'); await pending;
     } finally {
       process.stdout.isTTY = stdoutIsTTY;
@@ -1913,6 +1924,81 @@ describe('chat interactive runtime', () => {
           process.stdout.removeListener('resize', listener);
         }
       }
+      harness.restore();
+    }
+  }, 10_000);
+
+  it.each(['allow', 'deny'] as const)('restores the busy draft after a permission %s while Thinking continues', async (decision) => {
+    const rootDir = join(tmpdir(), `xiaok-chat-permission-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } },
+      defaultMode: 'interactive', contextBudget: 4000, channels: {},
+      memory: { enabled: false }, automations: { enabled: false }, intentBoundary: { enabled: false },
+    }));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    let releaseTool!: () => void;
+    let releaseAnswer!: () => void;
+    const toolGate = new Promise<void>(resolve => { releaseTool = resolve; });
+    const answerGate = new Promise<void>(resolve => { releaseAnswer = resolve; });
+    let streamStarted = false;
+    let resumedAfterTool = false;
+    const adapter = createFakeAdapter();
+    adapter.stream = async function* (messages): AsyncIterable<StreamChunk> {
+      if (!extractLastToolResult(messages)) {
+        streamStarted = true;
+        await toolGate;
+        yield { type: 'tool_use', id: 'permission_draft_probe', name: 'write',
+          input: { file_path: join(projectDir, 'synthetic.txt'), content: 'synthetic' } };
+      } else {
+        resumedAfterTool = true;
+        await answerGate;
+        yield { type: 'text', delta: 'PERMISSION_DRAFT_DONE' };
+      }
+      yield { type: 'done' };
+    };
+    const { createAdapter } = await import('../../src/ai/models.js');
+    vi.mocked(createAdapter).mockImplementation(() => adapter);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(80, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const resizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<unknown> | undefined;
+    try {
+      const program = new Command(); registerChatCommands(program);
+      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      await waitForInputTurnReady(harness);
+      harness.send('Check permission draft handoff'); harness.send('\r');
+      await waitFor(() => { expect(streamStarted).toBe(true); });
+      harness.send('retained draft');
+      expect(harness.screen.text()).toContain('retained draft');
+      releaseTool();
+      await waitFor(() => { expect(harness.screen.text()).toContain('允许一次'); });
+      // Soft assertions keep the scenario running to normal cleanup on old code.
+      expect.soft(harness.emitter.listenerCount('data')).toBe(1);
+      harness.send(decision === 'allow' ? '1' : '5');
+      await waitFor(() => { expect(resumedAfterTool).toBe(true); });
+      expect.soft(harness.screen.text()).toContain('retained draft');
+      expect.soft(harness.screen.text()).not.toContain('retained draft1');
+      harness.send(' edited');
+      expect.soft(harness.screen.text()).toContain('retained draft edited');
+      expect.soft(harness.screen.text()).not.toContain('PERMISSION_DRAFT_DONE');
+      releaseAnswer();
+      await waitFor(() => { expect(harness.screen.text()).toContain('PERMISSION_DRAFT_DONE'); });
+      await waitForInputTurnReady(harness);
+      expect.soft(harness.screen.text()).toContain('retained draft edited');
+      harness.send('\x15'); harness.send('/exit'); harness.send('\r');
+      await pending; pending = undefined;
+    } finally {
+      releaseTool(); releaseAnswer();
+      vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
+      for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener);
       harness.restore();
     }
   }, 10_000);

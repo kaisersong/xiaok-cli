@@ -14,11 +14,12 @@ function recoverable(error: unknown): boolean {
   let transient = false;
   while (current && typeof current === 'object' && !seen.has(current)) {
     seen.add(current);
-    const e = current as { status?: number; code?: string; name?: string; message?: string; cause?: unknown };
+    const e = current as { status?: number; code?: string; name?: string; message?: string; cause?: unknown; retryable?: boolean };
     // A permanent cause always wins over a wrapper's generic network wording.
     if (e.status && e.status >= 400 && e.status < 500 && e.status !== 408 && e.status !== 429) return false;
     if (e.name === 'AbortError') return false;
-    transient ||= e.status === 408 || e.status === 429 || (e.status !== undefined && e.status >= 500)
+    if (e.retryable === false) return false;
+    transient ||= e.retryable === true || e.status === 408 || e.status === 429 || (e.status !== undefined && e.status >= 500)
       || e.name === 'TimeoutError'
       || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|UND_ERR/i.test(e.code ?? '')
       || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|terminated|socket hang up|fetch failed|network|premature close|connection reset|timed?\s*out/i.test(e.message ?? '');

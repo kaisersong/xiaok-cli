@@ -12,6 +12,17 @@ async function withMenu(params: AskQuestionParams, check: (harness: TtyHarness, 
 
 // We test renderFrame logic and key handling separately from the interactive loop
 describe('ask-question', () => {
+  it.each(['string', 'buffer'])('applies coalesced arrows before Enter from a %s stdin chunk', async kind => {
+    await withMenu({ question: 'Batch selection', options: [
+      { label: 'Choice 1' }, { label: 'Choice 2' }, { label: 'Choice 3' },
+      { label: 'Choice 4' }, { label: 'Choice 5' }, { label: 'Other' },
+    ] }, async (harness, pending) => {
+      const input = '\x1b[B'.repeat(10) + '\r';
+      harness.emitter.emit('data', kind === 'buffer' ? Buffer.from(input) : input);
+      await expect(Promise.race([pending, new Promise(resolve => setTimeout(() => resolve('unhandled batch'), 100))])).resolves.toEqual({ selected: [4], labels: ['Choice 5'] });
+    });
+  });
+
   describe('renderFrame basic structure', () => {
     it('produces correct line count for simple options', async () => {
       // Import dynamically to avoid side effects

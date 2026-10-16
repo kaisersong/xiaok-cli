@@ -1,4 +1,11 @@
-import { resolve } from 'path';
+import { resolve, posix, win32 } from 'path';
+function resolvePluginMcpArgument(arg, pluginDir) {
+    if (arg.startsWith('-') || posix.isAbsolute(arg) || win32.isAbsolute(arg)
+        || /^[a-z][a-z0-9+.-]*:/i.test(arg) || arg.startsWith('~'))
+        return arg;
+    const relativeFile = /[\\/]/.test(arg) || /\.(?:[cm]?js|py)$/i.test(arg);
+    return relativeFile ? resolve(pluginDir, arg) : arg;
+}
 export function parsePluginManifest(raw, pluginDir) {
     const toResolvedList = (value) => Array.isArray(value)
         ? value.filter((entry) => typeof entry === 'string').map((entry) => resolve(pluginDir, entry))
@@ -58,8 +65,9 @@ export function parsePluginManifest(raw, pluginDir) {
             const buildBase = () => {
                 if (type === 'stdio') {
                     const rawArgs = Array.isArray(entry.args) ? entry.args.filter((a) => typeof a === 'string') : undefined;
-                    // Resolve relative paths in args against the plugin directory
-                    const resolvedArgs = rawArgs?.map((arg) => arg.startsWith('/') || arg.startsWith('-') ? arg : resolve(pluginDir, arg));
+                    // Bare subcommands/values are not files. Keep bundled script paths
+                    // relative to the plugin while preserving flags, URIs and absolute paths.
+                    const resolvedArgs = rawArgs?.map((arg) => resolvePluginMcpArgument(arg, pluginDir));
                     return {
                         name,
                         type: 'stdio',

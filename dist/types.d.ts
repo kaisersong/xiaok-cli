@@ -260,12 +260,15 @@ export type PermissionChoice = {
 } | {
     action: 'allow_session';
     rule: string;
+    rules?: string[];
 } | {
     action: 'allow_project';
     rule: string;
+    rules?: string[];
 } | {
     action: 'allow_global';
     rule: string;
+    rules?: string[];
 } | {
     action: 'deny';
 };

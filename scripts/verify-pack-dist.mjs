@@ -21,7 +21,18 @@ const IGNORE_DIFF = [/^build-info\.(js|d\.ts)$/];
 const ALLOWED_TGZ_ONLY = [/^runtime\/verification\/native\/win32-[^/]+\//];
 // 必须不再出现 / 必须存在的关键内容（授权修复的代表性证据）。
 const FORBIDDEN = [{ file: 'commands/chat.js', text: 'onPromptOverride: async () => true', why: '云之家工具确认自动批准（P0-1）' }];
-const REQUIRED_FILES = [{ file: 'commands/project-rule-adoption.js', why: '项目放行规则需本机采纳（P0-3）' }];
+const REQUIRED_FILES = [
+  { file: 'commands/project-rule-adoption.js', why: '项目放行规则需本机采纳（P0-3）' },
+  { file: 'channels/turn-origin.js', why: '确认归属：回合来源（P0-1b）' },
+  { file: 'channels/sender-allowlist.js', why: '云之家发送人白名单（P0-5）' },
+];
+const REQUIRED_STRINGS = [
+  { file: 'channels/embedded-yzj.js', text: 'getTurnOrigin', why: '确认按回合来源路由，不再按活动回合数推断（P0-1b）' },
+  { file: 'channels/embedded-yzj.js', text: 'SenderAllowlistGuard', why: '/yzjchannel 入口发送人检查（P0-5）' },
+  { file: 'ai/runtime/runtime-facade.js', text: 'runWithTurnOrigin', why: '回合内携带发起人（P0-1b）' },
+  { file: 'commands/yzj.js', text: 'allowedSenders', why: 'yzj serve 入口发送人检查（P0-5）' },
+  { file: 'ai/permissions/workspace.js', text: 'realpathSync', why: '路径检查解析真实路径（P0-4）' },
+];
 
 const sha = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 function walk(root, dir = root, out = []) {
@@ -55,6 +66,7 @@ try {
   }
   for (const f of b) if (!a.has(f) && !ALLOWED_TGZ_ONLY.some(re => re.test(f))) failures.push(`包内多出（重建结果没有）：dist/${f}`);
   for (const r of REQUIRED_FILES) if (!b.has(r.file)) failures.push(`缺少关键文件 dist/${r.file}（${r.why}）`);
+  for (const r of REQUIRED_STRINGS) if (!b.has(r.file) || !readFileSync(join(packed, r.file), 'utf8').includes(r.text)) failures.push(`dist/${r.file} 缺少「${r.text}」（${r.why}）`);
   for (const r of FORBIDDEN) if (b.has(r.file) && readFileSync(join(packed, r.file), 'utf8').includes(r.text)) failures.push(`dist/${r.file} 仍含「${r.text}」（${r.why}）`);
   const want = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')).version;
   const got = JSON.parse(readFileSync(join(pkg, 'package', 'package.json'), 'utf8')).version;

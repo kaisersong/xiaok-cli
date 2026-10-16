@@ -9,6 +9,7 @@ import type {
 } from '../../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { isAbortError } from '../runtime/abort-utils.js';
+import { createKimiProviderRequestError, getKimiProviderRequestDiagnostic } from '../runtime/provider-request-error.js';
 import type { ModelCapabilities, StreamOptions } from '../runtime/model-capabilities.js';
 import { estimateTokens } from '../runtime/usage.js';
 import { resolveModelRuntimeOptions } from '../providers/model-runtime-options.js';
@@ -55,6 +56,7 @@ function isRetryableError(error: unknown): boolean {
   if (error instanceof Error) {
     if (error.name === 'TimeoutError') return true;
     const record = error as unknown as Record<string, unknown>;
+    if (record.retryable === false) return false;
     if (record.retryable === true) return true;
     const status = record.status;
     if (typeof status === 'number' && RETRYABLE_STATUS.has(status)) return true;
@@ -297,13 +299,8 @@ async function runProviderOperation<T>(
     if (!strictKimiK3) {
       throw error;
     }
-    const sanitized = new Error('KIMI_K3_PROVIDER_REQUEST_FAILED') as Error & {
-      code: 'KIMI_K3_PROVIDER_REQUEST_FAILED';
-      retryable: boolean;
-    };
-    sanitized.name = 'KimiK3ProviderRequestError';
-    sanitized.code = 'KIMI_K3_PROVIDER_REQUEST_FAILED';
-    sanitized.retryable = isRetryableError(error);
+    const sanitized = createKimiProviderRequestError(error, isRetryableError(error));
+    usageLogger.info('kimiProviderRequestFailed', getKimiProviderRequestDiagnostic(sanitized));
     throw sanitized;
   }
 }
@@ -852,7 +849,7 @@ export class OpenAIAdapter implements ModelAdapter {
         })),
       ];
       const imageBlocks = m.content.filter((block) => block.type === 'image');
-      if (imageBlocks.length > 0) {
+      if (imageBlocks.length > 0 && this.getCapabilities().supportsImageInput) {
         const contentParts = [
           ...textBlocks.map((block) => ({
             type: 'text' as const,
@@ -870,10 +867,13 @@ export class OpenAIAdapter implements ModelAdapter {
           role: 'user',
           content: contentParts,
         } as OpenAI.ChatCompletionUserMessageParam);
-      } else if (textBlocks.length > 0) {
+      } else if (textBlocks.length > 0 || imageBlocks.length > 0) {
         openaiMessages.push({
           role: 'user',
-          content: textBlocks.map((block) => block.text).join(''),
+          content: [
+            ...textBlocks.map((block) => block.text),
+            ...imageBlocks.map((block) => `\n[Image omitted from this request (${block.source.media_type}): current model does not support image input. Original image retained in session history.]\n`),
+          ].join(''),
         });
       }
 

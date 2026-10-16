@@ -165,6 +165,7 @@ describe('MarkdownRenderer', () => {
 
       expect(output).toContain('─');   // box-drawing chars present
       expect(output).not.toContain('graph LR');  // raw syntax not leaked
+      expect(stripAnsi(output).split('\n').filter(line => line.trim()).every(line => line.startsWith('  '))).toBe(true);
       expect(output).not.toContain('```');
     });
 
@@ -192,9 +193,34 @@ describe('MarkdownRenderer', () => {
 
       renderer.write('```ts\nconst x = 1;\n```\n');
 
-      expect(stripAnsi(output)).toBe('\nconst x = 1;\n\n');
+      expect(stripAnsi(output)).toBe('\n  const x = 1;\n\n');
       expect(output).not.toContain('graph');
     });
+  });
+
+  it.each(['', 'rust', 'text'])('aligns %s code with prose while preserving source indentation', language => {
+    setColorsEnabled(true);
+    const renderer = new MarkdownRenderer();
+    const body = 'platform.on_change(|| {\n    callback();\n\n});';
+    renderer.write('Intro\nContinuation\n```' + language + '\n' + body + '\n```\n');
+    const lines = stripAnsi(output).split('\n');
+    expect(lines).toContain('  Continuation');
+    expect(lines).toContain('  platform.on_change(|| {');
+    expect(lines).toContain('      callback();');
+    expect(lines).toContain('  });');
+    expect(lines).not.toContain('platform.on_change(|| {');
+  });
+
+  it('aligns the resumed renderer and partial streamed code without rewriting long logical lines', () => {
+    process.stdout.columns = 18;
+    const code = "printf '%s' 'A_LONG_UNBROKEN_LITERAL'";
+    const markdown = 'Intro\n```bash\n' + code;
+    const renderer = new MarkdownRenderer();
+    for (const char of markdown) renderer.write(char);
+    const tail = renderer.flush();
+    expect(stripAnsi(tail.renderedLine)).toBe('  ' + code);
+    expect(stripAnsi(output)).toBe('● Intro\n\n  ' + code);
+    expect(MarkdownRenderer.renderToLines(markdown).map(stripAnsi)).toEqual(['● Intro', '', '  ' + code]);
   });
 
   describe('copyable code blocks', () => {
@@ -205,7 +231,7 @@ describe('MarkdownRenderer', () => {
         const renderer = new MarkdownRenderer();
         const command = "printf '%s\\n' 'COPY_OK' | cat >/dev/null 2>&1";
         renderer.write('```bash\n' + command + '\n```\n');
-        expect(stripAnsi(output)).toBe('\n' + command + '\n\n');
+        expect(stripAnsi(output)).toBe('\n  ' + command + '\n\n');
       } finally {
         setTheme(previousTheme);
       }
@@ -216,15 +242,15 @@ describe('MarkdownRenderer', () => {
       const body = "  printf '│ | ╭─ ╰─'\n\n    echo end";
       for (const char of '```\n' + body + '\n```') renderer.write(char);
       renderer.flush();
-      expect(output).toBe('\n' + body + '\n');
+      expect(output).toBe('\n' + body.split('\n').map(line => line ? '  ' + line : line).join('\n') + '\n');
     });
 
-    it('keeps syntax highlighting without adding visible text', () => {
+    it('keeps syntax highlighting with only the shared display indent', () => {
       setColorsEnabled(true);
       const renderer = new MarkdownRenderer();
       renderer.write('```ts\nconst x = 1;\n```\n');
       expect(output).toContain('\x1b[');
-      expect(stripAnsi(output)).toBe('\nconst x = 1;\n\n');
+      expect(stripAnsi(output)).toBe('\n  const x = 1;\n\n');
     });
   });
 

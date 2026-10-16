@@ -2,6 +2,7 @@ import * as readline from 'readline';
 import { stdin, stdout } from 'process';
 import { StringDecoder } from 'node:string_decoder';
 import { pauseInputForHandoff } from './input-mode.js';
+import { normalizeEnhancedKeys, retainKeyboardProtocol } from './keyboard-protocol.js';
 import { boldCyan, dim } from './render.js';
 import { getSkillCommandNames, type SkillMeta } from '../ai/skills/loader.js';
 import { appendFileSync } from 'fs';
@@ -324,7 +325,7 @@ export class InputReader {
   }
 
   private dispatchInput(data: Buffer, consume: (data: Buffer) => void): void {
-    const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    const bytes = normalizeEnhancedKeys(Buffer.isBuffer(data) ? data : Buffer.from(data));
     if (!this.onInterrupt) { consume(bytes); return; }
     let start = 0;
     for (let i = 0; i <= bytes.length; i++) {
@@ -413,6 +414,7 @@ export class InputReader {
     let active = true;
     let paused = false;
     let attached = false;
+    let releaseKeyboard = () => {};
     let uiErrorNotified = false;
     let renderedBusyFrame = false;
     const pasteController = createInputPasteController({
@@ -587,6 +589,7 @@ export class InputReader {
     const attach = () => {
       if (!active || paused || attached) return;
       stdin.on('data', onData);
+      releaseKeyboard = retainKeyboardProtocol();
       stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
       stdin.setRawMode(true);
       stdin.resume();
@@ -598,6 +601,7 @@ export class InputReader {
     const detach = (reason: 'pause' | 'stop') => {
       if (!attached) return;
       stdin.removeListener('data', onData);
+      releaseKeyboard();
       attached = false;
       reader.transcriptLogger?.record({ type: 'busy_capture_detach', reason, timestamp: Date.now() });
     };
@@ -685,6 +689,7 @@ export class InputReader {
       let input = options?.initialInput?.input ?? '';
       let cursor = Math.max(0, Math.min(input.length, options?.initialInput?.cursor ?? input.length));
       let resolved = false;
+      let releaseKeyboard = () => {};
       const staticOverlayLines = options?.overlayLines ?? [];
       let historyState = pushInputHistory(createInputHistoryState(), input, cursor);
       let richUiEnabled = Boolean(this.renderer) && !this.forcePlainMode;
@@ -1066,6 +1071,7 @@ export class InputReader {
         stdin.removeListener('data', onData);
         stdin.removeListener('end', onEnd);
         options?.signal?.removeEventListener('abort', onAbort);
+        releaseKeyboard();
         pauseInputForHandoff();
         this.readActive = false;
         this.suspendHooks = null;
@@ -1492,15 +1498,18 @@ export class InputReader {
       this.suspendHooks = {
         detach: () => {
           stdin.removeListener('data', onData);
+          releaseKeyboard();
           stdin.setRawMode(false);
           stdin.pause();
         },
         attach: () => {
           stdin.on('data', onData);
+          releaseKeyboard = retainKeyboardProtocol();
           stdin.setRawMode(true);
           stdin.resume();
         },
       };
+      releaseKeyboard = retainKeyboardProtocol();
       // Disable mouse tracking sequences before entering raw mode
       // Ghostty and other terminals may have mouse tracking enabled
       stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');

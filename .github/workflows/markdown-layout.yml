@@ -1,0 +1,67 @@
+name: Markdown layout
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/ui/markdown*.ts'
+      - 'src/ui/highlight.ts'
+      - 'src/ui/text-metrics.ts'
+      - 'tests/ui/markdown*.test.ts'
+      - 'tests/ui/text-metrics.test.ts'
+      - 'tests/e2e/markdown-code-indent.py'
+      - '.github/workflows/markdown-layout.yml'
+  pull_request:
+    paths:
+      - 'src/ui/markdown*.ts'
+      - 'src/ui/highlight.ts'
+      - 'src/ui/text-metrics.ts'
+      - 'tests/ui/markdown*.test.ts'
+      - 'tests/ui/text-metrics.test.ts'
+      - 'tests/e2e/markdown-code-indent.py'
+      - '.github/workflows/markdown-layout.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  markdown:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-14]
+        node: ['22.14.0', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3 node-pty
+      - run: npm run build:release
+      - run: npm run test:sandbox:build
+      - name: Verify renderer, highlights, row accounting and history formatting
+        run: >
+          npm run test:sandbox:run --
+          .test-dist/tests/ui/markdown.test.js
+          .test-dist/tests/ui/markdown-tables.test.js
+          .test-dist/tests/ui/text-metrics.test.js
+          .test-dist/tests/ui/render.test.js
+          .test-dist/tests/ui/scroll-region.test.js
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.13'
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Verify streamed/resumed columns and executable shell copy in a real TTY
+        if: runner.os == 'Linux'
+        run: python tests/e2e/markdown-code-indent.py
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: markdown-layout-failure-${{ matrix.node }}
+          path: /tmp/xiaok-code-indent-*/
+          retention-days: 7

@@ -95,7 +95,7 @@ export declare function resolveMcpResourceTimeoutMs(env?: NodeJS.ProcessEnv): nu
 export declare function resolveMcpClientVersion(): string;
 export declare function createMcpClientOptions(probeTimeoutMs?: number, protocol?: McpProtocolPolicy): ClientOptions;
 export declare function createMcpSdkClient(probeTimeoutMs?: number, protocol?: McpProtocolPolicy, clientName?: string): Client;
-export declare function resolveStdioCommand(command: string, platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): string;
+export declare function resolveStdioCommand(command: string, platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv, homeDir?: string): string;
 /**
  * 创建 MCP client 连接（统一入口）
  */

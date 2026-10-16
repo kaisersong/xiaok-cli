@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, stat, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadSettings, mergeRules, adoptProjectRule, listPendingProjectRules, addAllowRule, addDenyRule } from '../../../src/ai/permissions/settings.js';
@@ -28,7 +28,11 @@ it('project approvals are local and tied to exact rule text', async () => {
     expect(mergeRules(await loadSettings(repo)).allowRules).not.toContain('bash(git diff *)');
     await expect(adoptProjectRule(repo,'bash(git *)')).rejects.toThrow();
     const record = join(root,'global','project-rule-adoptions.json');
-    expect(await readFile(record,'utf8')).toContain(repo);
+    const canonical = await realpath(repo);
+    const projectIdentity = process.platform === 'win32' ? canonical.toLowerCase() : canonical;
+    const adoptions = JSON.parse(await readFile(record,'utf8')).adoptions;
+    expect(Object.keys(adoptions)).toEqual([projectIdentity]);
+    expect(adoptions[projectIdentity]).toHaveLength(1);
     if (process.platform !== 'win32') expect((await stat(record)).mode & 0o777).toBe(0o600);
     await addAllowRule('project','write(/ws/src/*)',repo);
     expect(mergeRules(await loadSettings(repo)).allowRules).toContain('write(/ws/src/*)');

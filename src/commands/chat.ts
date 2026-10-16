@@ -1,4 +1,5 @@
 import { confirmChatPermission } from './chat-permission.js';
+import { getResumeHistoryMessages } from '../ui/resume-history.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
@@ -100,7 +101,7 @@ import { extractSandboxAllowedPaths } from '../platform/sandbox/policy.js';
 import { FileTranscriptLogger } from '../ui/transcript.js';
 import { TranscriptBuffer, recordToolObservation } from '../ui/transcript-buffer.js';
 import { openTranscriptPager, spawnPagerProcess, type TranscriptPagerStatus } from '../ui/transcript-pager.js';
-import { detectImageProtocol, readImageDimensions, renderImageLines, formatImageFallbackLine } from '../ui/image-renderer.js';
+import { detectImageProtocol, readImageDimensions, renderInlineImageBlock, formatImageFallbackLine } from '../ui/image-renderer.js';
 import { setCrashContext, setStreamErrorHandler } from '../utils/crash-reporter.js';
 import { shouldBlockChatOnOldNode, oldNodeMessage } from '../runtime/node-support.js';
 import { createLogger } from '../utils/logger.js';
@@ -411,7 +412,6 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const transcriptBuffer = new TranscriptBuffer({
     onError: (error) => log.debug('transcript_buffer_record_failed', String(error)),
   });
-  let nextInlineImageId = 1;
   let terminalUiSuspended = false;
   let terminalUiFailureNoted = false;
   let terminalUiFallbackStream: 'stdout' | 'stderr' | null = null;
@@ -1373,8 +1373,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const withPausedLiveActivity = async <T>(action: () => Promise<T>): Promise<T> => {
+    // Interactive prompts own stdin exclusively. Their cleanup pauses stdin,
+    // so the previous busy owner must explicitly reattach when they finish.
+    const busy = activeBusyCapture;
+    const resumeBusy = busy?.isActive() ?? false;
+    if (resumeBusy) busy?.pause();
     try { return await runtimeState.withPausedLiveActivity(action); }
-    finally { flushSubAgentNotices(); }
+    finally {
+      if (resumeBusy) busy?.resume();
+      flushSubAgentNotices();
+    }
   };
 
   function ensureBusyInputCapture(): void {
@@ -2812,7 +2820,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       };
 
       writeHistoryChunk('\n');
-      for (const msg of historyMessages) {
+      for (const msg of getResumeHistoryMessages(historyMessages, persistedSession?.compactions)) {
         if (msg.role === 'user') {
           for (const block of msg.content) {
             recordHistoryBlockInBuffer('user', block);
@@ -2886,19 +2894,18 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
         if (terminalUiSuspended) continue;
 
-        const rendered = renderImageLines({
+        const rendered = renderInlineImageBlock({
           data,
           mediaType: block.source.media_type,
           protocol,
           columns: process.stdout.columns ?? 80,
-          maxRows: Math.min(12, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
-          imageId: nextInlineImageId++,
+          maxRows: Math.min(14, Math.max(0, (scrollRegion.isActive() ? scrollRegion.maxContentRows : (process.stdout.rows ?? 24)) - 1)),
         });
         const placeholder = formatImageFallbackLine(dims);
 
         try {
           if (rendered.protocol === null) {
-            const line = `${rendered.lines[0]}\n`;
+            const line = rendered.text;
             if (scrollRegion.isActive()) {
               scrollRegion.writeAtContentCursor(line);
             } else {
@@ -2906,9 +2913,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
             }
             continue;
           }
-          const stationary = rendered.protocol === 'kitty';
-          scrollRegion.writeRawBlock(stationary ? rendered.lines[0] : `${rendered.lines.join('\n')}\n`, rendered.rows, {
-            cursorStationary: stationary,
+          scrollRegion.writeRawBlock(rendered.text, rendered.rows, {
+            cursorStationary: rendered.cursorStationary,
             logger: transcriptLogger,
             placeholder,
           });

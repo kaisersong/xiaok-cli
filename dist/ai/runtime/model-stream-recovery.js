@@ -17,7 +17,9 @@ function recoverable(error) {
             return false;
         if (e.name === 'AbortError')
             return false;
-        transient ||= e.status === 408 || e.status === 429 || (e.status !== undefined && e.status >= 500)
+        if (e.retryable === false)
+            return false;
+        transient ||= e.retryable === true || e.status === 408 || e.status === 429 || (e.status !== undefined && e.status >= 500)
             || e.name === 'TimeoutError'
             || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENETUNREACH|EHOSTUNREACH|EAI_AGAIN|ERR_STREAM_PREMATURE_CLOSE|UND_ERR/i.test(e.code ?? '')
             || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|terminated|socket hang up|fetch failed|network|premature close|connection reset|timed?\s*out/i.test(e.message ?? '');

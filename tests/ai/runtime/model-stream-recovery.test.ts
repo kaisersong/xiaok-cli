@@ -3,6 +3,30 @@ import { recoverModelStream } from '../../../src/ai/runtime/model-stream-recover
 const policy = { windowMs: 100, idleMs: 20, initialDelayMs: 1, maxDelayMs: 2 };
 async function collect(stream: AsyncIterable<unknown>) { const values=[]; for await (const value of stream) values.push(value); return values; }
 describe('model stream recovery', () => {
+  it('honors a sanitized provider retryable marker', async () => {
+    let calls = 0;
+    const retry = vi.fn();
+    const result = await collect(recoverModelStream({
+      signal: new AbortController().signal, policy, onRetry: retry,
+      open: async function* () {
+        if (++calls === 1) throw Object.assign(new Error('KIMI_K3_PROVIDER_REQUEST_FAILED'), {
+          code: 'KIMI_K3_PROVIDER_REQUEST_FAILED', retryable: true,
+        });
+        yield { type: 'text' as const, delta: 'recovered' };
+      },
+    }));
+    expect(calls).toBe(2);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([{ type: 'text', delta: 'recovered' }]);
+  });
+  it.each([400, 401, 403])('permanent HTTP %s overrides a retryable wrapper', async status => {
+    const error = Object.assign(new Error('KIMI_K3_PROVIDER_REQUEST_FAILED'), {
+      retryable: true, cause: Object.assign(new Error('private'), { status }),
+    });
+    const open = vi.fn(async function* () { throw error; });
+    await expect(collect(recoverModelStream({ signal: new AbortController().signal, policy, open }))).rejects.toBe(error);
+    expect(open).toHaveBeenCalledTimes(1);
+  });
   it('recovers a terminated stream', async () => {
     let calls=0;
     const reset=vi.fn();
