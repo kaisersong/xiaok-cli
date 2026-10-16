@@ -4,6 +4,7 @@ import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
 import { getUiCopy } from './locale.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
+import { pauseInputForHandoff } from './input-mode.js';
 function singleLine(text) {
     const line = text.replace(/\s+/g, ' ').trim();
     return line.length > 200 ? `${line.slice(0, 197)}...` : line;
@@ -409,6 +410,5 @@ function stopPermissionInput(onData, onEnd) {
     stdin.removeListener('data', onData);
     if (onEnd)
         stdin.removeListener('end', onEnd);
-    stdin.setRawMode(false);
-    stdin.pause();
+    pauseInputForHandoff();
 }

@@ -11,6 +11,7 @@ on:
       - 'tests/ai/tools/ask-user*.test.ts'
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
+      - 'tests/e2e/thinking-draft-handoff.py'
       - '.github/workflows/terminal-ui.yml'
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - 'tests/ai/tools/ask-user*.test.ts'
       - 'tests/e2e/inline-image*'
       - 'tests/e2e/askuser-short-menu.py'
+      - 'tests/e2e/thinking-draft-handoff.py'
       - '.github/workflows/terminal-ui.yml'
   workflow_dispatch: {}
 permissions:
@@ -51,6 +53,8 @@ jobs:
           .test-dist/tests/ui/input-keyboard-protocol.test.js
           .test-dist/tests/ui/keyboard-protocol.test.js
           .test-dist/tests/ui/windows-input-handoff.test.js
+          .test-dist/tests/ui/busy-input-capture.test.js
+          .test-dist/tests/ui/tui-runtime-state.test.js
           .test-dist/tests/ui/inline-image-block.test.js
           .test-dist/tests/ui/image-renderer.test.js
           .test-dist/tests/ui/scroll-region.test.js
@@ -72,3 +76,11 @@ jobs:
         run: |
           python tests/e2e/inline-image-scrollback.py
           python tests/e2e/askuser-short-menu.py
+          python tests/e2e/thinking-draft-handoff.py
+      - name: Retain synthetic Thinking draft failure evidence
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: thinking-draft-failure-${{ matrix.node }}
+          path: /tmp/xiaok-thinking-draft-*/
+          retention-days: 7

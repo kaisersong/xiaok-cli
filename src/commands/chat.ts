@@ -1373,8 +1373,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const withPausedLiveActivity = async <T>(action: () => Promise<T>): Promise<T> => {
+    // Interactive prompts own stdin exclusively. Their cleanup pauses stdin,
+    // so the previous busy owner must explicitly reattach when they finish.
+    const busy = activeBusyCapture;
+    const resumeBusy = busy?.isActive() ?? false;
+    if (resumeBusy) busy?.pause();
     try { return await runtimeState.withPausedLiveActivity(action); }
-    finally { flushSubAgentNotices(); }
+    finally {
+      if (resumeBusy) busy?.resume();
+      flushSubAgentNotices();
+    }
   };
 
   function ensureBusyInputCapture(): void {

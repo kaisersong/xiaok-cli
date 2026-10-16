@@ -3,9 +3,20 @@ import {InputReader} from '../../src/ui/input.js';
 import {ReplRenderer} from '../../src/ui/repl-renderer.js';
 import {retainRawInputModeForSession} from '../../src/ui/input-mode.js';
 import {createTtyHarness} from '../support/tty.js';
+import {showPermissionPrompt} from '../../src/ui/permission-prompt.js';
 const originalPlatform=Object.getOwnPropertyDescriptor(process,'platform')!;
 afterEach(()=>{Object.defineProperty(process,'platform',originalPlatform);vi.restoreAllMocks()});
 describe('Windows input ownership handoff',()=>{
+ it.each(['win32','darwin'] as const)('hands a permission prompt back without dropping the Windows raw-mode lease (%s)',async platform=>{
+  Object.defineProperty(process,'platform',{...originalPlatform,value:platform});
+  const h=createTtyHarness();const release=retainRawInputModeForSession();
+  try{
+   const pending=showPermissionPrompt('bash',{command:'ls'});h.send('1');
+   expect(await pending).toEqual({action:'allow_once'});
+   if(platform==='win32')expect(process.stdin.setRawMode).not.toHaveBeenCalledWith(false);
+   else expect(process.stdin.setRawMode).toHaveBeenCalledWith(false);
+  }finally{release();h.restore()}
+ });
  it.each(['win32','darwin'] as const)('preserves raw only during a Windows session (%s)',async platform=>{
   Object.defineProperty(process,'platform',{...originalPlatform,value:platform});
   const h=createTtyHarness();const release=retainRawInputModeForSession();

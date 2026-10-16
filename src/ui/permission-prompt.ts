@@ -8,6 +8,7 @@ import type { TranscriptLogger } from './transcript.js';
 import type { ReplRenderer } from './repl-renderer.js';
 import type { PermissionMode } from '../ai/permissions/manager.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../ai/tools/bash-safety.js';
+import { pauseInputForHandoff } from './input-mode.js';
 
 interface PromptOption {
   label: string;
@@ -465,6 +466,5 @@ function startPermissionInput(onData: (data: Buffer) => void, onEnd?: () => void
 function stopPermissionInput(onData: (data: Buffer) => void, onEnd?: () => void): void {
   stdin.removeListener('data', onData);
   if (onEnd) stdin.removeListener('end', onEnd);
-  stdin.setRawMode(false);
-  stdin.pause();
+  pauseInputForHandoff();
 }

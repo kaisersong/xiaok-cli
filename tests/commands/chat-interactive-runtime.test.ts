@@ -1928,6 +1928,81 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it.each(['allow', 'deny'] as const)('restores the busy draft after a permission %s while Thinking continues', async (decision) => {
+    const rootDir = join(tmpdir(), `xiaok-chat-permission-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(rootDir, 'config');
+    const projectDir = join(rootDir, 'project');
+    tempDirs.push(rootDir);
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({
+      schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } },
+      defaultMode: 'interactive', contextBudget: 4000, channels: {},
+      memory: { enabled: false }, automations: { enabled: false }, intentBoundary: { enabled: false },
+    }));
+    process.env.XIAOK_CONFIG_DIR = configDir;
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    let releaseTool!: () => void;
+    let releaseAnswer!: () => void;
+    const toolGate = new Promise<void>(resolve => { releaseTool = resolve; });
+    const answerGate = new Promise<void>(resolve => { releaseAnswer = resolve; });
+    let streamStarted = false;
+    let resumedAfterTool = false;
+    const adapter = createFakeAdapter();
+    adapter.stream = async function* (messages): AsyncIterable<StreamChunk> {
+      if (!extractLastToolResult(messages)) {
+        streamStarted = true;
+        await toolGate;
+        yield { type: 'tool_use', id: 'permission_draft_probe', name: 'write',
+          input: { file_path: join(projectDir, 'synthetic.txt'), content: 'synthetic' } };
+      } else {
+        resumedAfterTool = true;
+        await answerGate;
+        yield { type: 'text', delta: 'PERMISSION_DRAFT_DONE' };
+      }
+      yield { type: 'done' };
+    };
+    const { createAdapter } = await import('../../src/ai/models.js');
+    vi.mocked(createAdapter).mockImplementation(() => adapter);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const harness = createTtyHarness(80, 24);
+    const sigintListeners = process.listeners('SIGINT');
+    const resizeListeners = process.stdout.listeners('resize');
+    let pending: Promise<unknown> | undefined;
+    try {
+      const program = new Command(); registerChatCommands(program);
+      pending = program.parseAsync(['node', 'xiaok', 'chat']);
+      await waitForInputTurnReady(harness);
+      harness.send('Check permission draft handoff'); harness.send('\r');
+      await waitFor(() => { expect(streamStarted).toBe(true); });
+      harness.send('retained draft');
+      expect(harness.screen.text()).toContain('retained draft');
+      releaseTool();
+      await waitFor(() => { expect(harness.screen.text()).toContain('允许一次'); });
+      // Soft assertions keep the scenario running to normal cleanup on old code.
+      expect.soft(harness.emitter.listenerCount('data')).toBe(1);
+      harness.send(decision === 'allow' ? '1' : '5');
+      await waitFor(() => { expect(resumedAfterTool).toBe(true); });
+      expect.soft(harness.screen.text()).toContain('retained draft');
+      expect.soft(harness.screen.text()).not.toContain('retained draft1');
+      harness.send(' edited');
+      expect.soft(harness.screen.text()).toContain('retained draft edited');
+      expect.soft(harness.screen.text()).not.toContain('PERMISSION_DRAFT_DONE');
+      releaseAnswer();
+      await waitFor(() => { expect(harness.screen.text()).toContain('PERMISSION_DRAFT_DONE'); });
+      await waitForInputTurnReady(harness);
+      expect.soft(harness.screen.text()).toContain('retained draft edited');
+      harness.send('\x15'); harness.send('/exit'); harness.send('\r');
+      await pending; pending = undefined;
+    } finally {
+      releaseTool(); releaseAnswer();
+      vi.mocked(createAdapter).mockImplementation(() => createFakeAdapter());
+      for (const listener of process.listeners('SIGINT')) if (!sigintListeners.includes(listener)) process.removeListener('SIGINT', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizeListeners.includes(listener)) process.stdout.removeListener('resize', listener);
+      harness.restore();
+    }
+  }, 10_000);
+
   it('queues input typed during a busy turn and submits it on the next loop', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-queued-input-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
