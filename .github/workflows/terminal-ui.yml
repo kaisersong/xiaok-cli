@@ -48,6 +48,9 @@ jobs:
       - name: Test image layout, questions and actual chat entry
         run: >
           npm run test:sandbox:run --
+          .test-dist/tests/ui/input-keyboard-protocol.test.js
+          .test-dist/tests/ui/keyboard-protocol.test.js
+          .test-dist/tests/ui/windows-input-handoff.test.js
           .test-dist/tests/ui/inline-image-block.test.js
           .test-dist/tests/ui/image-renderer.test.js
           .test-dist/tests/ui/scroll-region.test.js
