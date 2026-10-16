@@ -98,9 +98,11 @@ describe('permission-prompt', () => {
       expect(commandLine).toBeDefined();
       expect(strip(commandLine!)).toContain('本次执行命令:');
       expect(stripAll(lines).join('\n')).not.toContain('始终允许的范围:');
-      expect(buildPermissionPromptOptions('bash(python3 *)', 'bash', {
+      const remembered = buildPermissionPromptOptions('bash(python3 *)', 'bash', {
         command: "python3 - <<'PY'\nimport importlib\nprint('ok')\nPY",
-      }).map(option => option.choice.action)).toEqual(['allow_once', 'deny']);
+      });
+      expect(remembered.map(option => option.choice.action)).toEqual(['allow_once', 'allow_session', 'allow_project', 'allow_global', 'deny']);
+      expect(remembered[1].choice).toHaveProperty('rule', expect.stringMatching(/^bash\(@exact:[a-f0-9]{64}\)$/));
       expect(commandLine).toContain("python3 - <<'PY' import importlib print('ok') PY");
       expect(commandLine?.includes('\n')).toBe(false);
     });

@@ -1,4 +1,5 @@
 export interface PermissionPolicySnapshot {
+    cwd?: string;
     globalAllow: string[];
     globalDeny: string[];
     projectAllow: string[];
@@ -15,7 +16,10 @@ export declare class PermissionPolicyEngine {
     constructor(snapshot: PermissionPolicySnapshot);
     evaluate(toolName: string, input: Record<string, unknown>): Promise<PermissionPolicyDecision>;
 }
-export declare function matches(rules: string[], toolName: string, input: Record<string, unknown>, intent?: 'allow' | 'deny'): boolean;
+export declare function matches(rules: string[], toolName: string, input: Record<string, unknown>, intent?: 'allow' | 'deny', cwd?: string): boolean;
+export declare function isExactCommandApprovalRule(rule: string): boolean;
+/** An explicit full-command grant; never inferred from a prefix/wildcard rule. */
+export declare function getExactCommandApprovalRule(input: Record<string, unknown>, cwd?: string): string | null;
 /** Whether an allow pattern participates, before conservative safety rejection. */
 export declare function hasMatchingCommandAllowRule(rules: string[], command: string): boolean;
 export declare function buildRuleRegex(pattern: string): RegExp;

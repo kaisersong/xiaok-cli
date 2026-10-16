@@ -47,6 +47,8 @@ const UI_COPY = {
   'zh-CN': {
     approvalTitle: 'xiaok 想要执行以下操作',
     mandatoryReview: '这个操作有风险，每次都会询问',
+    exactCommandScope: '当前执行目录中的这条完整命令',
+    exactCommandApprovalHint: '授权范围：相同执行目录和完整命令；脚本、写入目标或命令改变后会重新询问。',
     writeTarget: (path: string) => `写入文件：${path}`,
     autoApprovalReason: (reason: string) => `确认原因: auto 模式仍需确认：${AUTO_APPROVAL_REASONS_ZH[reason] ?? reason}`,
     currentCommandLabel: '本次执行命令',
@@ -74,6 +76,8 @@ const UI_COPY = {
   en: {
     approvalTitle: 'xiaok wants to run',
     mandatoryReview: 'This operation carries risk and requires approval every time',
+    exactCommandScope: 'this exact command in the current execution directory',
+    exactCommandApprovalHint: 'Scope: the same execution directory and complete command; script, output target or command changes require approval again.',
     writeTarget: (path: string) => `Write file: ${path}`,
     autoApprovalReason: (reason: string) => `Approval reason: auto mode still confirms data-loss commands: ${reason}`,
     currentCommandLabel: 'Command to run now',

@@ -1,6 +1,12 @@
 import { classifyBashCommand } from '../tools/bash-safety.js';
 import { posix, win32 } from 'node:path';
+import { resolve, relative, isAbsolute, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { resolveRealPath } from './workspace.js';
+import { isSensitivePath } from './sensitive-paths.js';
 export interface PermissionPolicySnapshot {
+  cwd?: string;
   globalAllow: string[];
   globalDeny: string[];
   projectAllow: string[];
@@ -31,18 +37,20 @@ export class PermissionPolicyEngine {
       ...this.snapshot.sessionAllow,
     ];
 
-    if (matches(denyRules, toolName, input, 'deny')) {
+    if (matches(denyRules, toolName, input, 'deny', this.snapshot.cwd)) {
       return { action: 'deny', rule };
     }
-    if (matches(allowRules, toolName, input)) {
+    if (matches(allowRules, toolName, input, 'allow', this.snapshot.cwd)) {
       return { action: 'allow', rule };
     }
     return { action: 'prompt', rule };
   }
 }
 
-export function matches(rules: string[], toolName: string, input: Record<string, unknown>, intent: 'allow' | 'deny' = 'allow'): boolean {
+export function matches(rules: string[], toolName: string, input: Record<string, unknown>, intent: 'allow' | 'deny' = 'allow', cwd = process.cwd()): boolean {
   if (toolName === 'bash') {
+    const exact = rules.some(isExactCommandApprovalRule) ? commandFingerprint(input, cwd) : null;
+    if (exact && rules.includes(exact)) return intent === 'deny' || getExactCommandApprovalRule(input, cwd) === exact;
     const command = getRuleTarget(input);
     const parsed = parseCommandSegments(command);
     const matchSegment = (segment: string) => matchesTarget(rules, toolName, { command: segment });
@@ -50,6 +58,99 @@ export function matches(rules: string[], toolName: string, input: Record<string,
     return parsed.valid && classifyBashCommand(command).level === 'safe' && !requiresCommandConfirmation(command) && getCommandWriteTargets(command).length === 0 && parsed.segments.length > 0 && parsed.segments.every(matchSegment);
   }
   return matchesTarget(rules, toolName, input);
+}
+
+export function isExactCommandApprovalRule(rule: string): boolean {
+  return /^bash\(@exact:[a-f0-9]{64}\)$/.test(rule);
+}
+
+function commandFingerprint(input: Record<string, unknown>, cwd: string): string | null {
+  if (typeof input.command !== 'string' || !input.command.trim()) return null;
+  if (Object.hasOwn(input, 'workdir') && (typeof input.workdir !== 'string' || !input.workdir)) return null;
+  try {
+    const directory = resolveRealPath(resolve(cwd, typeof input.workdir === 'string' ? input.workdir : '.'));
+    return `bash(@exact:${createHash('sha256').update(JSON.stringify([input.command, directory])).digest('hex')})`;
+  } catch { return null; }
+}
+
+/** Inspect the surrounding shell without interpreting a quoted script body. */
+function exactApprovalShell(command: string): { text: string; script: boolean } | null {
+  if (!command.includes('<<') || parseCommandSegments(command).valid) return { text: command, script: false };
+  const lines = command.split('\n');
+  let marker: RegExpMatchArray | null = null;
+  let markerIndex = -1;
+  let quote = '';
+  for (let index = 0; index < lines[0].length;) {
+    const literal = scanShellLiteral(lines[0], index, quote);
+    if (literal) { quote = literal.quote; index = literal.end; continue; }
+    if (!quote && lines[0].startsWith('<<', index)) {
+      if (marker) return null;
+      marker = lines[0].slice(index).match(/^<<(['"])([A-Za-z_]\w*)\1/);
+      if (!marker) return null;
+      markerIndex = index; index += marker[0].length; continue;
+    }
+    index++;
+  }
+  if (!marker) return null;
+  const end = lines.findIndex((line, index) => index > 0 && line.replace(/\r$/, '') === marker[2]);
+  if (end < 1) return null;
+  const header = lines[0].slice(0, markerIndex) + '< /dev/null' + lines[0].slice(markerIndex + marker[0].length);
+  const parsed = parseCommandSegments(header);
+  const last = shellWords(parsed.segments.at(-1) ?? '');
+  if (!parsed.valid || !/^(?:python[23]?|node|ruby|perl)$/.test(posix.basename(last[0] ?? '')) || last[1] !== '-') return null;
+  return { text: [header, ...lines.slice(end + 1)].join('\n'), script: true };
+}
+
+function withinPath(path: string, root: string): boolean {
+  const child = relative(root, path);
+  return child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+}
+
+/** An explicit full-command grant; never inferred from a prefix/wildcard rule. */
+export function getExactCommandApprovalRule(input: Record<string, unknown>, cwd = process.cwd()): string | null {
+  const fingerprint = commandFingerprint(input, cwd);
+  const command = input.command;
+  if (!fingerprint || typeof command !== 'string' || command.length > 65536
+    || classifyBashCommand(command).level !== 'safe' || requiresAlwaysCommandConfirmation(command)) return null;
+  const shell = exactApprovalShell(command);
+  if (!shell || !parseCommandSegments(shell.text).valid || requiresCommandConfirmation(shell.text)) return null;
+  const targets = getCommandWriteTargets(shell.text);
+  if (!shell.script && targets.length === 0) return null;
+  try {
+    const workspace = resolveRealPath(resolve(cwd));
+    const temporary = resolveRealPath(tmpdir());
+    const roots = [workspace, temporary];
+    if (process.platform !== 'win32') roots.push(resolveRealPath('/tmp'));
+    let directory = resolveRealPath(resolve(cwd, typeof input.workdir === 'string' ? input.workdir : '.'));
+    const safePath = (target: string): boolean => {
+      if (!target || /^[~]|[$`*?\[\]{}]/.test(target)) return false;
+      const lexical = resolve(directory, target);
+      const actual = resolveRealPath(lexical);
+      if (isSensitivePath(lexical) || isSensitivePath(actual)) return false;
+      if (withinPath(lexical, workspace) && !withinPath(actual, workspace)) return false;
+      return roots.some(root => withinPath(actual, root));
+    };
+    if (!roots.some(root => withinPath(directory, root))) return null;
+    for (const segment of parseCommandSegments(shell.text).segments) {
+      let remaining = segment.trimStart();
+      while (remaining) {
+        const word = nextShellWord(remaining);
+        if (word.hasExpansion) return null;
+        remaining = remaining.slice(word.end).trimStart();
+      }
+      const words = shellWords(segment);
+      if (words.some((word, index) => /^(?:sh|bash|zsh|dash|ksh)$/.test(posix.basename(word)) && shellPayloadIndex(words, index) >= 0)
+        || words.some(word => /^(?:eval|pushd|popd)$/.test(word))
+        || (words[0] === 'env' && words.some(word => /^(?:-C|--chdir)(?:=|$)/.test(word)))) return null;
+      if (words[0] === 'cd') {
+        const args = words.slice(1).filter(word => word !== '--');
+        if (args.length !== 1 || args[0] === '-' || !safePath(args[0])) return null;
+        directory = resolveRealPath(resolve(directory, args[0]));
+      }
+      if (getCommandWriteTargets(segment).some(target => !safePath(target))) return null;
+    }
+    return fingerprint;
+  } catch { return null; }
 }
 
 /** Whether an allow pattern participates, before conservative safety rejection. */

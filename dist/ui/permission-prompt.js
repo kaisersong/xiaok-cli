@@ -1,4 +1,4 @@
-import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches } from '../ai/permissions/policy-engine.js';
+import { requiresCommandConfirmation, getCommandWriteTargets, parseCommandSegments, matches, getExactCommandApprovalRule, isExactCommandApprovalRule } from '../ai/permissions/policy-engine.js';
 import { stdin, stdout } from 'process';
 import { dirname } from 'path';
 import { boldCyan, dim, yellow } from './render.js';
@@ -82,11 +82,12 @@ function isMandatoryReview(toolName, input) {
 function rememberedRules(toolName, input, rule) {
     if (toolName !== 'bash' || typeof input.command !== 'string')
         return [rule];
+    const exact = () => { const rule = getExactCommandApprovalRule(input); return rule ? [rule] : []; };
     if (isMandatoryReview(toolName, input))
-        return [];
+        return exact();
     const parsed = parseCommandSegments(input.command);
     if (!parsed.valid)
-        return [];
+        return exact();
     const rules = [...new Set(parsed.segments.map(command => deriveRule(toolName, { command })))];
     // Use the execution policy itself to verify that these scopes cover the full
     // command. An unrepresentable command must not offer ineffective persistence.
@@ -99,7 +100,9 @@ export function buildPermissionPromptOptions(rule, toolName = '', input = {}) {
             { label: '允许一次', choice: { action: 'allow_once' } },
             { label: '拒绝', choice: { action: 'deny' } },
         ];
-    const displayRule = compactRuleForOption(rules.join(' + '));
+    const displayRule = isExactCommandApprovalRule(rules[0])
+        ? getUiCopy('zh-CN').exactCommandScope
+        : compactRuleForOption(rules.join(' + '));
     const scopes = rules.length > 1 ? { rules } : {};
     return [
         { label: '允许一次', choice: { action: 'allow_once' } },
@@ -132,6 +135,8 @@ export function formatPermissionPromptLines(toolName, input, options, locale = '
             lines.push(dim(copy.writeTarget(escapeProjectRuleDisplay(path))));
     }
     if (typeof input.command === 'string') {
+        if (rules.some(isExactCommandApprovalRule))
+            lines.push(dim(copy.exactCommandApprovalHint));
         for (const rule of rules)
             if (rule.endsWith(' *)'))
                 lines.push(dim(copy.commandApprovalScope(rule)));

@@ -1,5 +1,5 @@
 import { posix, win32 } from 'node:path';
-import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation } from './policy-engine.js';
+import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation, getExactCommandApprovalRule, isExactCommandApprovalRule } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
 import { classifyBashCommand, requiresAutoPromptForBashCommand } from '../tools/bash-safety.js';
 function readBashCommand(input) {
@@ -41,6 +41,7 @@ export class PermissionManager {
     }
     async check(toolName, input) {
         const policy = new PermissionPolicyEngine({
+            cwd: this.cwd,
             globalAllow: this.allowRules,
             globalDeny: this.denyRules,
             projectAllow: [],
@@ -63,6 +64,11 @@ export class PermissionManager {
         }
         if (toolName === 'bash') {
             const command = readBashCommand(input);
+            if (evaluation.action === 'allow' && this.allowRules.some(isExactCommandApprovalRule)) {
+                const exact = getExactCommandApprovalRule(input, this.cwd);
+                if (exact && this.allowRules.includes(exact))
+                    return 'allow';
+            }
             const conservative = this.mode !== 'auto' || hasMatchingCommandAllowRule(this.allowRules, command);
             if (conservative ? requiresCommandConfirmation(command) : requiresAlwaysCommandConfirmation(command))
                 return 'prompt';

@@ -7,6 +7,10 @@ on:
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/tools/index.ts'
       - 'src/ui/permission-prompt.ts'
+      - 'src/ui/locale.ts'
+      - 'src/ai/permissions/**'
+      - 'tests/ai/permissions/**'
+      - 'tests/e2e/exact-command-approval.py'
       - 'src/commands/chat-permission.ts'
       - 'src/commands/chat.ts'
       - 'src/ui/resume-history.ts'
@@ -34,6 +38,10 @@ on:
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/tools/index.ts'
       - 'src/ui/permission-prompt.ts'
+      - 'src/ui/locale.ts'
+      - 'src/ai/permissions/**'
+      - 'tests/ai/permissions/**'
+      - 'tests/e2e/exact-command-approval.py'
       - 'src/commands/chat-permission.ts'
       - 'src/commands/chat.ts'
       - 'src/ui/resume-history.ts'
@@ -83,13 +91,10 @@ jobs:
           .test-dist/tests/runtime/hooks-runner.test.js
           .test-dist/tests/runtime/permission-hook-fallback.test.js
           .test-dist/tests/ai/tools/index.test.js
-          .test-dist/tests/ai/permissions/manager.test.js
+          .test-dist/tests/ai/permissions
           .test-dist/tests/ui/permission-prompt.test.js
           .test-dist/tests/commands/chat-permission.test.js
           .test-dist/tests/commands/chat-permission-persistence.test.js
-          .test-dist/tests/ai/permissions/authz-p0-3-command-rules.test.js
-          .test-dist/tests/ai/permissions/authz-p0-3-round15.test.js
-          .test-dist/tests/ai/permissions/authz-p0-3-adoptions.test.js
           .test-dist/tests/ai/adapters/openai-history-images.test.js
           .test-dist/tests/ai/adapters/openai.test.js
           .test-dist/tests/ui/resume-history.test.js
@@ -113,6 +118,7 @@ jobs:
           python tests/e2e/text-model-resume.py
           python tests/e2e/resume-history-visibility.py
           python tests/e2e/persistent-command-approval.py
+          python tests/e2e/exact-command-approval.py
       - name: Retain synthetic TTY failure evidence
         if: failure() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -120,5 +126,6 @@ jobs:
           name: resume-tty-failure-${{ matrix.node }}
           path: |
             /tmp/xiaok-remember-*/
+            /tmp/xiaok-exact-*/
             /tmp/xiaok-resume-visibility-*/
           retention-days: 7
