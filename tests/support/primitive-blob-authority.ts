@@ -6,6 +6,7 @@ import * as profileOwnerRegistry from '../../src/runtime/verification/profile-ow
 import {readBlobCapacityIssuer} from '../../src/runtime/verification/blob-capacity-issuer.js';
 import {buildInputFileArchive} from '../../src/runtime/isolated-execution/input-tar.js';
 import {createControllerMaterialPipeline} from '../../src/runtime/verification/material-pipeline.js';
+import type {ValidationMaterialInvocation} from '../../src/runtime/verification/product-material-authorization.js';
 import {tmpdir} from 'node:os';import {join} from 'node:path';import {mkdtempSync} from 'node:fs';import {createHash,randomUUID} from 'node:crypto';import {canonicalVerificationJson as harnessJson} from '../../src/runtime/verification/protocol.js';
 import {assertMaterialPipelineDeleted} from '../../src/runtime/verification/material-pipeline.js';
 import {assertDockerRunnerDeleted} from '../../src/runtime/isolated-execution/docker-runner.js';
@@ -125,7 +126,7 @@ export interface PrimitiveMaterialHarness {
  pipeline:ReturnType<typeof createControllerMaterialPipeline>;
  peer:{uid:number;gid:number;auditSessionId:number};
  stagingRoot:string;
- stagePlan(invocation:object,command:{argv:string[];cwdRelative:string}):Promise<{plan:any;scopeDigest:string}>;
+ stagePlan(invocation:ValidationMaterialInvocation,command:{argv:string[];cwdRelative:string}):Promise<{plan:any;scopeDigest:string}>;
 }
 export function createPrimitiveMaterialHarness(input:{database:import('better-sqlite3').Database;authorityId:string;ownerKey?:string;engineBinding:{engineId:string;incarnation:string};deletion?:Options['deletion'];wallNow?:()=>number;assertCleanup?():void;readPageFault?():void}):PrimitiveMaterialHarness{
  const owner=createPrimitiveBlobAuthority({database:input.database,authorityId:input.authorityId,assertCurrent(){},deletion:input.deletion??{assertDeleted(){throw Error('no physical deletion receipt');}}});
@@ -133,7 +134,7 @@ export function createPrimitiveMaterialHarness(input:{database:import('better-sq
  const body=Buffer.from(input.authorityId+' material'),materialHash=createHash('sha256').update(body).digest('hex');
  const peer={uid:501,gid:20,auditSessionId:10},resolveOwnerKey=()=>input.ownerKey??'owner';
  const pipeline=createControllerMaterialPipeline({root:stagingRoot,database:input.database,budget:owner.budget,engineBinding:input.engineBinding,assertCurrent(){},assertCleanup:input.assertCleanup??(()=>{throw Error('still in use');}),resolveOwnerKey,createCapacityOwnerBinding(p:{uid:number},invocationInput:object){return createPrimitiveCapacityOwnerBinding({database:input.database,facts:{authorityId:input.authorityId,profileId:'primitive-profile',ownerKey:resolveOwnerKey(),sessionKey:'primitive-session',invocation:invocationInput as Readonly<object>},assertCurrent(){}});},wallNow:input.wallNow??(()=>1000),broker:{clock:()=>({domainId:'clock',qualificationEpoch:1,lowerBound:100,upperBound:100,evidenceHash:'a'.repeat(64)}),async inspectMaterial(){return {sha256:materialHash,size:body.length,executable:false};},async authorizeMaterials(commandInput:any){return {uid:commandInput.uid,auditSessionId:commandInput.auditSessionId,reviewHash:createHash('sha256').update(harnessJson(commandInput.review)).digest('hex')};},async readMaterialPage(pageInput:any){input.readPageFault?.();return {contentHash:materialHash,totalBytes:body.length,offset:pageInput.offset,bytes:body.subarray(pageInput.offset,pageInput.offset+pageInput.length).toString('base64'),executable:false};}}});
- async function stagePlan(invocation:object,command:{argv:string[];cwdRelative:string}){const signal=new AbortController().signal;const challenge=await pipeline.prepare({purpose:'isolated-command',invocation,materials:[{path:'/workspace/input',byteLimit:4096}],exactCommand:command,expiresAt:(input.wallNow?.()??1000)+60000},peer,signal);const grant=await pipeline.authorize(challenge.challengeId,peer,signal);const staged=await pipeline.stage({grantHandle:grant,invocation},peer,signal);const material=pipeline.consumeMountPlan(staged.mountPlanHandle,peer);return {plan:material.plan as any,scopeDigest:staged.scopeDigest};}
+ async function stagePlan(invocation:ValidationMaterialInvocation,command:{argv:string[];cwdRelative:string}){const signal=new AbortController().signal;const challenge=await pipeline.prepare({purpose:'isolated-command',invocation,materials:[{path:'/workspace/input',byteLimit:4096}],exactCommand:command,expiresAt:(input.wallNow?.()??1000)+60000},peer,signal);const grant=await pipeline.authorize(challenge.challengeId,peer,signal);const staged=await pipeline.stage({grantHandle:grant,invocation},peer,signal);const material=pipeline.consumeMountPlan(staged.mountPlanHandle,peer);return {plan:material.plan as any,scopeDigest:staged.scopeDigest};}
  return {owner,budget:owner.budget,pipeline,peer,stagingRoot,stagePlan};
 }
 
