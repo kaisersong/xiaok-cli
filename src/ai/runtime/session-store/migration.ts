@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SessionExecutionLease } from './execution-authority.js';
 import type { PersistedSessionSnapshot } from './store.js';
+import type { StoredSessionSnapshot } from './stored-snapshot-types.js';
 export interface SessionMigrationInput {
   sessionId: string; expectedSnapshotHash: string; expectedStoreRevision: number;
   migrationId: string; targetAuthorityId: string; targetSessionId: string;
@@ -26,7 +27,9 @@ function canonical(value: unknown): unknown {
   return value;
 }
 /** Canonical full durable snapshot; distinct from provider history digest. */
-export function computeSessionSnapshotHash(snapshot: PersistedSessionSnapshot): string {
+export function computeSessionSnapshotHash(snapshot: PersistedSessionSnapshot): string;
+export function computeSessionSnapshotHash(snapshot: StoredSessionSnapshot): string;
+export function computeSessionSnapshotHash(snapshot: PersistedSessionSnapshot | StoredSessionSnapshot): string {
   return createHash('sha256').update(JSON.stringify(canonical(snapshot))).digest('hex');
 }
 export function freezeMigrationSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot {

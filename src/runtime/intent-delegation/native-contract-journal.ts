@@ -27,7 +27,9 @@ const id=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&Buffer.byteLe
 const hash=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 function shape(v:unknown,keys:string):asserts v is Record<string,any>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).sort().join(',')!==keys.split(' ').sort().join(','))throw Error('intent_native_shape');}
 function freeze<T>(v:T):T{if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;}
-export function freezeIntentNativeLedger(value:SessionIntentLedger|undefined):SessionIntentLedger|undefined{return value===undefined?undefined:freeze(captureIntentData(value));}
+export function freezeIntentNativeLedger(value:SessionIntentLedger|undefined):SessionIntentLedger|undefined;
+export function freezeIntentNativeLedger(value:StoredSessionSnapshot['intentDelegation']):StoredSessionSnapshot['intentDelegation'];
+export function freezeIntentNativeLedger(value:SessionIntentLedger|StoredSessionSnapshot['intentDelegation']):SessionIntentLedger|StoredSessionSnapshot['intentDelegation']{return value===undefined?undefined:freeze(captureIntentData(value));}
 const digest=(domain:string,v:unknown)=>createHash('sha256').update(domain+'\0').update(json(captureIntentData(v))).digest('hex');
 export const intentNativeLedgerHash=(v:StoredSessionIntentLedgerInput|undefined)=>digest('xiaok-intent-native-ledger-v1',v??null);
 const draftHash=(v:IntentLedgerRecord)=>digest('xiaok-intent-native-draft-v1',v);
