@@ -1,5 +1,5 @@
-import { Component, useMemo, useState, useEffect, useCallback, type ErrorInfo, type ReactNode } from 'react';
-import { ReactFlow, Background, Controls, MiniMap, Handle, Position, type NodeProps, type Edge } from '@xyflow/react';
+import { Component, useMemo, useState, useEffect, useCallback, useRef, type ErrorInfo, type ReactNode } from 'react';
+import { ReactFlow, Background, Controls, MiniMap, Handle, Position, useNodesInitialized, useReactFlow, useStore, getNodesBounds, type NodeProps, type Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ExternalLink, Workflow, SkipForward, RefreshCw, ArrowLeft, ClipboardList } from 'lucide-react';
 import { useLocale } from '../../contexts/LocaleContext';
@@ -48,7 +48,7 @@ function DagNodeCard({ data }: NodeProps) {
         animation: pulse ? 'dagNodePulse 2s ease-in-out infinite' : undefined,
       }}
     >
-      <Handle type="target" position={Position.Top} style={{ opacity: 0, pointerEvents: 'none' }} />
+      <Handle type="target" position={Position.Left} style={{ opacity: 0, pointerEvents: 'none' }} />
       <div className="flex items-center gap-1">
         {isPo && <ClipboardList size={12} className="shrink-0 text-[var(--c-accent)]" />}
         <span className="flex-1 truncate font-medium text-[var(--c-text-primary)]">{nodeData.title}</span>
@@ -61,12 +61,42 @@ function DagNodeCard({ data }: NodeProps) {
       <div className="text-[10px] text-[var(--c-text-tertiary)]">
         {isPo ? t.projectsDetailGraphPoPlanLabel : (STATUS_LABELS[nodeData.status] ?? '—')}
       </div>
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
+      <Handle type="source" position={Position.Right} style={{ opacity: 0, pointerEvents: 'none' }} />
     </div>
   );
 }
 
 const NODE_TYPES = { dag: DagNodeCard };
+const INITIAL_MIN_ZOOM = 0.8;
+const INITIAL_PADDING = 0.2;
+
+/** Fit compact graphs; start wide graphs at the left without shrinking labels. */
+export function InitialGraphViewport({ graphKey }: { graphKey: string }) {
+  const nodesInitialized = useNodesInitialized({ includeHiddenNodes: true });
+  const width = useStore(state => state.width);
+  const height = useStore(state => state.height);
+  const { getNodes, fitView, setViewport, viewportInitialized } = useReactFlow();
+  const positionedKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!viewportInitialized || !nodesInitialized || width <= 0 || height <= 0 || positionedKey.current === graphKey) return;
+    positionedKey.current = graphKey;
+    const bounds = getNodesBounds(getNodes());
+    const fits = bounds.width * INITIAL_MIN_ZOOM <= width / (1 + INITIAL_PADDING)
+      && bounds.height * INITIAL_MIN_ZOOM <= height / (1 + INITIAL_PADDING);
+    if (fits) {
+      void fitView({ minZoom: INITIAL_MIN_ZOOM, maxZoom: 1, padding: INITIAL_PADDING });
+    } else {
+      void setViewport({
+        x: 24 - bounds.x * INITIAL_MIN_ZOOM,
+        y: Math.max(24, (height - bounds.height * INITIAL_MIN_ZOOM) / 2) - bounds.y * INITIAL_MIN_ZOOM,
+        zoom: INITIAL_MIN_ZOOM,
+      });
+    }
+  }, [viewportInitialized, nodesInitialized, width, height, graphKey, getNodes, fitView, setViewport]);
+
+  return null;
+}
 
 interface DetailBoundaryProps {
   resetKey: string;
@@ -200,6 +230,8 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
         : undefined;
       return {
         ...n,
+        width: 220,
+        height: 76,
         data: nodeData as unknown as Record<string, unknown>,
         className,
         style: highlightTime !== undefined
@@ -237,8 +269,6 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
   if (graph.emptyReason === 'workflow_not_started') return <EmptyState reason="workflow_not_started" />;
   if (graph.emptyReason === 'too_large') return <EmptyState reason="too_large" count={graph.nodes.length} />;
 
-  const fitView = graph.nodes.length <= 8;
-
   return (
     <div className="relative h-full w-full" style={{ minHeight: 400 }}>
       {graph.partial && (
@@ -274,8 +304,6 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
         nodes={nodes}
         edges={edges as unknown as Edge[]}
         nodeTypes={NODE_TYPES}
-        fitView={fitView}
-        fitViewOptions={{ minZoom: 0.8, maxZoom: 1, padding: 0.2 }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
@@ -283,6 +311,7 @@ export default function ProjectDagGraph({ detail, onJumpToBoard }: Props) {
           setSelectedNodeId(node.id);
         }}
       >
+        <InitialGraphViewport graphKey={`${detail.project.id}:${topologyKey}`} />
         <Background />
         <Controls showInteractive={false} />
         {graph.nodes.length > 30 && <MiniMap pannable zoomable />}
