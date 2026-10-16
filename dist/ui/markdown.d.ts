@@ -59,6 +59,7 @@ export declare class MarkdownRenderer {
      */
     beginNewSegment(): void;
     private formatLine;
+    private indentCodeRows;
     private countRows;
     private countRenderedRows;
     private formatLeadParagraphLine;
