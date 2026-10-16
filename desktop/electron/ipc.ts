@@ -1,5 +1,7 @@
 import { registerGoalTaskMutationsIpc } from './goal-task-mutation-typed-ipc.js';
 import { createGoalAttachmentNativeTransportIpc } from './goal-attachment-native-typed-ipc.js';
+import { registerGoalPublicationIpc } from './goal-publication-typed-ipc.js';
+import { registerComputerUseControlIpc } from './computer-use-control-typed-ipc.js';
 import { registerGoalQueuePendingIpc } from './goal-queuepending-typed-ipc.js';
 import { registerGoalGetIpc } from './goal-get-typed-ipc.js';
 import { registerGoalPauseCancelIpc } from './goal-pause-cancel-typed-ipc.js';
@@ -1181,8 +1183,9 @@ export async function registerDesktopIpc(
     const requestId = parseGoalRequestId(input.requestId);
     return services.continueGoalNativeMutation({ threadId: parseGoalThreadId(input.threadId), requestSource: 'user', ...(requestId === undefined ? {} : { requestId }) });
   });
-  ipcMain.handle('desktop:goal:recoverPublication', async (_event, input) => services.recoverGoalPublication(parseGoalPublicationInput(input)));
-  ipcMain.handle('desktop:goal:continuePublication', async (_event, input) => services.continueGoalPublication(parseGoalPublicationInput(input)));
+  registerGoalPublicationIpc(ipcMain, services, parseGoalPublicationInput, event => {
+    if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('goal_publication_sender_forbidden');
+  });
 
 
   goalAttachmentNativeIpc.handle('desktop:goal:ackTaskAttached', async (_event, input) => {
@@ -1346,9 +1349,9 @@ export async function registerDesktopIpc(
   // had no durable desired-state store, and the blanket restart bypassed the CUA
   // preference. Both are deleted; retry is component-scoped and user-sourced.
   registerComputerUseCapabilityReadonlyIpc(ipcMain, () => services.getComputerUseCapabilityStatus());
-  ipcMain.handle('desktop:enableComputerUse', () => services.enableComputerUse({ requestSource: 'user' }));
-  ipcMain.handle('desktop:reconnectComputerUse', () => services.reconnectComputerUse({ requestSource: 'user' }));
-  ipcMain.handle('desktop:disableComputerUse', () => services.disableComputerUse({ requestSource: 'user' }));
+  registerComputerUseControlIpc(ipcMain, services, event => {
+    if (!options.multiAgentAuthorize?.(event) || event.sender.isDestroyed()) throw Error('computer_use_sender_forbidden');
+  });
   const pluginActionProducers = new Map<string, IpcHandlerListener>([
     ['desktop:installPlugin', (_event, name) => services.installPlugin(name, 'user')],
     ['desktop:installPluginDependency', (_event, input) => services.installPluginDependency({ ...input, requestSource: 'user' })],

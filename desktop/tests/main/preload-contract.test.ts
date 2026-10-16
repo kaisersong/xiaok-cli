@@ -1,3 +1,5 @@
+import { registerGoalPublicationIpc } from '../../electron/goal-publication-typed-ipc.js';
+import { registerComputerUseControlIpc } from '../../electron/computer-use-control-typed-ipc.js';
 import { registerGoalTaskMutationsIpc } from '../../electron/goal-task-mutation-typed-ipc.js';
 import { createGoalAttachmentNativeTransportIpc } from '../../electron/goal-attachment-native-typed-ipc.js';
 import { GOAL_ATTACHMENT_NATIVE_METHODS } from '../../shared/goal-attachment-native-ipc-contract.js';
@@ -1073,6 +1075,8 @@ function extractRegisteredHandlerChannels(): Set<string> {
   registerGoalPauseCancelIpc(goalRegistrar, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
   registerGoalQueuePendingIpc(goalRegistrar, { setGoalUserQueuePending: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer);
   registerGoalTaskMutationsIpc(goalRegistrar, { createGoal: unusedGoalProducer, resumeGoal: unusedGoalProducer, replaceGoal: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer, unusedGoalProducer);
+  registerGoalPublicationIpc(goalRegistrar, { recoverGoalPublication: unusedGoalProducer, continueGoalPublication: unusedGoalProducer }, unusedGoalProducer, unusedGoalProducer);
+  registerComputerUseControlIpc(goalRegistrar, { enableComputerUse: unusedGoalProducer, reconnectComputerUse: unusedGoalProducer, disableComputerUse: unusedGoalProducer }, unusedGoalProducer);
   const attachmentNativeRegistrar = createGoalAttachmentNativeTransportIpc(goalRegistrar, unusedGoalProducer);
   for (const method of GOAL_ATTACHMENT_NATIVE_METHODS) attachmentNativeRegistrar.handle('desktop:goal:' + method, unusedGoalProducer);
 
