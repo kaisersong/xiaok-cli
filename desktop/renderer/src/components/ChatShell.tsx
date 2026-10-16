@@ -1860,6 +1860,7 @@ export function ChatShell() {
       historicalSelection={multiAgent.summary.historicalSelection} deleted={multiAgent.summary.deleted}
       taskContent={taskContent} canvasContent={canvasContent} canvasOpen={canvasOpen} canvasExpanded={canvasExpanded}
       canvasRequestId={canvasPreviewModeRequest.id} onCanvasVisibilityChange={setCanvasVisible}
+      approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
       agentsContent={multiAgent.connection && multiAgent.api ? <MultiAgentPanel connection={multiAgent.connection} api={multiAgent.api}
         showApprovals={false} onSelectGroup={groupId => setAgentHistory({ threadId: taskId ?? '', groupId })} /> : <p className="p-4 text-sm">{t.multiAgent.unavailable}</p>}>
       <ObservationControls draftId={observationDraft} onDraft={setObservationDraft} taskId={thread?.currentTaskId ?? undefined} running={status==='running'} activityRevision={currentTaskEventsRef.current.length} />
@@ -1867,7 +1868,6 @@ export function ChatShell() {
         activityContent={taskId ? <ConversationActivityPanel key={taskId} threadId={taskId} /> : undefined}
         executionConnection={multiAgent.connection}
         pendingApprovalCount={multiAgent.summary.pendingApprovalCount}
-        approvalContent={multiAgent.connection && multiAgent.api ? <ChatTaskApprovals connection={multiAgent.connection} api={multiAgent.api} sourceTaskId={thread.currentTaskId} /> : null}
         thread={thread}
         messages={messages}
         streamingText={streamingText}
