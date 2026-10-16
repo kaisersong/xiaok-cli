@@ -86,7 +86,7 @@ function exactApprovalShell(command: string): { text: string; script: boolean } 
     if (!quote && lines[0].startsWith('<<', index)) {
       if (marker) return null;
       marker = lines[0].slice(index).match(/^<<(['"])([A-Za-z_]\w*)\1/);
-      if (!marker) return null;
+      if (!marker || !/^(?:[\s;&|<>]|$)/.test(lines[0].slice(index + marker[0].length))) return null;
       markerIndex = index; index += marker[0].length; continue;
     }
     index++;

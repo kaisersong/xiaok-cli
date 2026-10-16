@@ -45,7 +45,7 @@ arbitrary future interpreter payload.
 - Before implementation, five exact persistence regressions failed against the
   existing UI/policy. The quoted fake-heredoc attack also failed before its
   scanner correction; runtime symlink changes remain in the regression suite.
-- Final focused suite: 33 files, 1417 passed, 57 existing skips; release build,
+- Final focused suite: 33 files, 1418 passed, 57 existing skips; release build,
   governance and architecture changed checks passed without baseline updates.
 - Built entry and actual installed CLI entry both passed project/global ×
   project-log/quoted-Python real TTY cases: one approval, same-process repeat,
@@ -62,3 +62,8 @@ The first expanded Windows CI run exposed two existing workspace-test callback
 fixtures using POSIX-only slash comparisons. Their allowlist now uses the host
 separator and denylist compares basename; the same positive/negative production
 assertions remain mandatory on Windows. No test was excluded or skipped.
+
+A final adversarial case concatenated text onto a quoted heredoc delimiter,
+causing the shell to end the body before the inspection scanner. Its regression
+failed before a delimiter-boundary check; concatenated delimiters now remain
+once-only. This preserves the surrounding-shell path checks.

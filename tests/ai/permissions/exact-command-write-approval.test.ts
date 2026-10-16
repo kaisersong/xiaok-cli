@@ -75,6 +75,7 @@ describe('exact command write approval', () => {
     "python3 - <<PY\nprint('x')\nPY", "python3 - <<'PY'\nprint('unterminated')",
     "python3 - <<'PY'\nprint('x')\nPY\necho x > /outside/synthetic",
     'python3 - "<<\'PY\'"\necho x > /outside/synthetic\n(true)\nPY',
+    "python3 - <<'PY'junk\nprint('x')\nPYjunk\necho x > /outside/synthetic\n(true)\nPY",
     "python3 - <<'PY' <<'MORE'\nprint('x')\nPY\nMORE",
     "python3 - <<'PY'\nprint('x')\nPY\necho $(id) > build.log",
   ])('keeps mandatory confirmation for %s', command => {

@@ -81,7 +81,7 @@ function exactApprovalShell(command) {
             if (marker)
                 return null;
             marker = lines[0].slice(index).match(/^<<(['"])([A-Za-z_]\w*)\1/);
-            if (!marker)
+            if (!marker || !/^(?:[\s;&|<>]|$)/.test(lines[0].slice(index + marker[0].length)))
                 return null;
             markerIndex = index;
             index += marker[0].length;
