@@ -32,7 +32,9 @@ export function computeSessionSnapshotHash(snapshot: StoredSessionSnapshot): str
 export function computeSessionSnapshotHash(snapshot: PersistedSessionSnapshot | StoredSessionSnapshot): string {
   return createHash('sha256').update(JSON.stringify(canonical(snapshot))).digest('hex');
 }
-export function freezeMigrationSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot {
+export function freezeMigrationSnapshot(snapshot: PersistedSessionSnapshot): PersistedSessionSnapshot;
+export function freezeMigrationSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot;
+export function freezeMigrationSnapshot(snapshot: StoredSessionSnapshot): StoredSessionSnapshot {
   const freeze=(value:unknown):void=>{if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value);}};
   const clone=structuredClone(snapshot);freeze(clone);return clone;
 }

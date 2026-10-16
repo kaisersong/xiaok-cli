@@ -251,7 +251,10 @@ export function captureIntentPublicationRetry(raw: RetryIntentPublicationInput &
         throw Error('intent_candidate_input');
     return { input: { ...input, publicationAction: 'retry' as const }, lease: lease.value as SessionExecutionLease };
 }
-export function intentPublicationTarget(ledger: SessionIntentLedger, row: IntentPublicationCandidate) {
+export interface IntentPublicationTargetData {readonly sessionId:string;readonly nativeContracts?:unknown}
+export function intentPublicationTarget(ledger: SessionIntentLedger, row: IntentPublicationCandidate): ReturnType<typeof createIntentApplicationBinding>;
+export function intentPublicationTarget(ledger: IntentPublicationTargetData, row: IntentPublicationCandidate): ReturnType<typeof createIntentApplicationBinding>;
+export function intentPublicationTarget(ledger: IntentPublicationTargetData, row: IntentPublicationCandidate) {
     const native = parseIntentNativeContracts(ledger.nativeContracts, ledger.sessionId).find(n => n.intentId === row.intentId);
     if (!native || native.contractHash !== row.contractHash)
         throw Error('intent_candidate_contract');

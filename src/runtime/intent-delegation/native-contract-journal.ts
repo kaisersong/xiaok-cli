@@ -68,8 +68,11 @@ export function assertIntentNativeJournalRetained(previous:SessionIntentLedger|u
  const before=parseIntentNativeContracts(previous?.nativeContracts,sessionId),after=parseIntentNativeContracts(next?.nativeContracts,sessionId);
  if(!nativeMutation&&!isDeepStrictEqual(before,after))throw Error('intent_native_requires_primitive');
 }
-export function assertNoIntentNativeJournal(snapshot:PersistedSessionSnapshot|undefined|null):void{
- if(snapshot&&snapshot.intentDelegation&&Object.hasOwn(snapshot.intentDelegation,'nativeContracts')){parseIntentNativeContracts(snapshot.intentDelegation.nativeContracts,snapshot.sessionId);if(snapshot.intentDelegation.nativeContracts?.length)throw Error('intent_native_journal_retained');}
+export interface IntentNativeAbsenceData {readonly sessionId:string;readonly intentDelegation?:{readonly nativeContracts?:unknown}}
+export function assertNoIntentNativeJournal(snapshot:PersistedSessionSnapshot|undefined|null):void;
+export function assertNoIntentNativeJournal(snapshot:IntentNativeAbsenceData|undefined|null):void;
+export function assertNoIntentNativeJournal(snapshot:IntentNativeAbsenceData|undefined|null):void{
+ if(snapshot&&snapshot.intentDelegation&&Object.hasOwn(snapshot.intentDelegation,'nativeContracts')){parseIntentNativeContracts(snapshot.intentDelegation.nativeContracts,snapshot.sessionId);const current=snapshot.intentDelegation.nativeContracts;if(current!==undefined&&current!==null){if(!Array.isArray(current))throw Error('intent_native_journal');if(current.length)throw Error('intent_native_journal_retained');}}
 }
 export function captureIntentNativeRequest<K extends IntentNativeMutation['nativeAction']>(kind:K,raw:Omit<Extract<IntentNativeMutation,{nativeAction:K}>,'nativeAction'>&{lease:SessionExecutionLease}):{input:IntentNativeMutation;lease:SessionExecutionLease}{
  if(!raw||typeof raw!=='object'||Array.isArray(raw)||![Object.prototype,null].includes(Object.getPrototypeOf(raw)))throw Error('intent_native_shape');
