@@ -182,7 +182,9 @@ export function cloneSessionIntentLedger(ledger: StoredSessionIntentLedgerInput)
   return cloneStoredSessionIntentLedger(ledger);
 }
 
-export function rekeySessionIntentLedger(ledger: SessionIntentLedger, sessionId: string): SessionIntentLedger {
+export function rekeySessionIntentLedger(ledger: SessionIntentLedger, sessionId: string): SessionIntentLedger;
+export function rekeySessionIntentLedger(ledger: StoredSessionIntentLedgerInput, sessionId: string): NormalizedStoredSessionIntentLedger;
+export function rekeySessionIntentLedger(ledger: StoredSessionIntentLedgerInput, sessionId: string): NormalizedStoredSessionIntentLedger {
   return rekeyStoredSessionIntentLedger(ledger, sessionId);
 }
 
