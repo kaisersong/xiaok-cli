@@ -17,7 +17,7 @@ type Callbacks = {
 type Start = (callbacks: Callbacks) => Owner;
 function frozen(stage: 'before' | 'candidate'): string {
   const bytes = readFileSync(new URL(stage === 'candidate' ? '../fixtures/r299-main-candidate.txt' : '../fixtures/r324-main-before.txt', import.meta.url));
-  const expected = stage === 'before' ? '8a98dde3a2167d32e2044b591603e4ceb2a7cad659b21ffaa90c4d22a1d563d0' : 'aa58d5383cb9457e0d72b7241b3e595c520d6a8afd7eb1eda870ae2277e79096';
+  const expected = stage === 'before' ? '8a98dde3a2167d32e2044b591603e4ceb2a7cad659b21ffaa90c4d22a1d563d0' : '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f';
   expect(createHash('sha256').update(bytes).digest('hex')).toBe(expected);
   return bytes.toString('utf8');
 }

@@ -1687,6 +1687,18 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
 
   assertMcpRegistrationPromiseAmbient();
   if (!desktopShutdownGate.isOpen) return window;
+  // Pre-register before MCP's unshift: final MCP precedes this gateway join.
+  let mobileGatewayStopRetirement: Promise<void> | undefined;
+  let mobileGatewaySuffixFailure: { error: unknown } | undefined;
+  desktopFinalLifetimeSteps.unshift({ name: 'mobile-gateway-stop', run: async () => {
+    const retirement = mobileGatewayStopRetirement;
+    if (!retirement) return; // No stop started; no closed/retired assertion.
+    try { await retirement; }
+    catch (error) {
+      if (mobileGatewaySuffixFailure) throw new AggregateError([error, mobileGatewaySuffixFailure.error], 'mobile_gateway_and_lifetime_cleanup_failed');
+      throw error;
+    }
+  } });
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
   const mcpRegistrationOwner = startOwnedMcpRegistration({
     isOpen: () => desktopShutdownGate.isOpen,
@@ -1893,11 +1905,33 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     timedActionScheduler.stop();
     // SQLite owners close only in the coordinator durable-store phase.
     mobileBonjourAdvertiser.stop();
-    mobileGateway.stop().catch((err) => {
-      debugMain('mobileGateway.stop failed', err instanceof Error ? err.message : String(err));
-    });
-    mobileRelayBridge?.stop();
-    await mcpRegistrationOwner.dispose();
+    // Same known-native async stop/receiver/arguments; own its first exact raw.
+    assertMcpRegistrationPromiseAmbient();
+    let completeGateway!: () => void, failGateway!: (error: unknown) => void;
+    const gatewayRetirement = new McpNativePromise<void>((resolve, reject) => { completeGateway = resolve; failGateway = reject; });
+    mobileGatewayStopRetirement = gatewayRetirement; // Before producer/prefix reentry.
+    void (async () => { try { await gatewayRetirement; } catch {} })();
+    void (async () => {
+      const failures: unknown[] = [];
+      try {
+        const raw = mobileGateway.stop();
+        await raw;
+      } catch (error) {
+        failures.push(error);
+        try { debugMain('mobileGateway.stop failed', error instanceof Error ? error.message : String(error)); }
+        catch (logError) { failures.push(logError); }
+      }
+      if (failures.length === 1) failGateway(failures[0]);
+      else if (failures.length > 1) failGateway(new AggregateError(failures, 'mobile_gateway_stop_failed'));
+      else completeGateway();
+    })();
+    // Keep invocation timing: gateway starts, then relay, then MCP.
+    try { mobileRelayBridge?.stop(); await mcpRegistrationOwner.dispose(); }
+    catch (error) {
+      mobileGatewaySuffixFailure = { error };
+      throw error; // Let existing final MCP run before the gateway fallback join.
+    }
+    await gatewayRetirement; // Normal tail join; error paths join in final fallback.
   });
 
   // Reminder IPC handlers

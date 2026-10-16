@@ -54,7 +54,7 @@ it('A3 actual callsite owns real writer/final fallback before producer-prefix re
       closing = f.close();
     };
     const owner = f.start();
-    expect(prefix).toEqual({ outstanding: 1, finalNames: ['mcp-tools-registration', 'own-final-sentinel'] });
+    expect(prefix).toEqual({ outstanding: 1, finalNames: ['mcp-tools-registration', 'mobile-gateway-stop', 'own-final-sentinel'] });
     if (!closing) throw Error('actual_prefix_close_missing'); expect(f.close()).toBe(closing);
     f.registration.resolve(f.returned); expect(await owner.registered).toBe(true); await closing;
     expect(f.registrationReceivers).toEqual([f.registrationCarrier]); expect(f.gate.outstanding).toBe(0);

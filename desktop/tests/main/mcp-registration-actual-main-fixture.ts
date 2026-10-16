@@ -23,7 +23,7 @@ function isSlice(value: unknown): value is Slice {
     && 'appendOrdinary' in value && typeof value.appendOrdinary === 'function'
     && 'disposeLifetimeResources' in value && typeof value.disposeLifetimeResources === 'function';
 }
-const FINAL_MAIN_SHA = 'aa58d5383cb9457e0d72b7241b3e595c520d6a8afd7eb1eda870ae2277e79096';
+const FINAL_MAIN_SHA = '9c874df44ea458ed7f780355081e5b2b0fa788970393c8d19b20f03895df377f';
 function boundActualMain(): string {
   const actual = readFileSync(new URL('../../electron/main.ts', import.meta.url));
   const snapshot = readFileSync(new URL('../fixtures/r299-main-candidate.txt', import.meta.url));
@@ -78,7 +78,6 @@ function selectedMainCode(source: string): string {
   const entry = one(statements.filter((node): node is ts.ExpressionStatement => ts.isExpressionStatement(node)
     && ts.isCallExpression(node.expression) && node.expression.expression.getText(tree) === 'assertMcpRegistrationPromiseAmbient'), 'actual_registration_entry_check');
   const registrationNodes = new Set<ts.Statement>([entry, owner, status]);
-  const registrationStatements = statements.filter(node => registrationNodes.has(node));
   const stateNames = new Set(['runtimeBridgeStarted', 'runtimeBridgeStartEpoch', 'runtimeBridgeFallbackTimer']);
   const states = statements.filter((node): node is ts.VariableStatement => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => stateNames.has(declaration.name.getText(tree))));
   if (states.length !== 3) throw Error('actual_Main_bridge_state_population_changed');
@@ -93,6 +92,17 @@ function selectedMainCode(source: string): string {
     const matches = normal.filter(node => ts.isCallExpression(node.expression) && node.expression.arguments[0]?.getText(tree) === `'${name}'`);
     if (matches.length !== 1) throw Error(`actual_Main_normal_lifetime_missing:${name}`);
   }
+  const gatewayState = variable('mobileGatewayStopRetirement');
+  const gatewaySuffix = variable('mobileGatewaySuffixFailure');
+  const gatewayFinal = one(statements.filter((node): node is ts.ExpressionStatement => {
+    if (!ts.isExpressionStatement(node) || !ts.isCallExpression(node.expression) || node.expression.expression.getText(tree) !== 'desktopFinalLifetimeSteps.unshift') return false;
+    const argument = node.expression.arguments[0];
+    return argument !== undefined && ts.isObjectLiteralExpression(argument) && argument.properties.some(property => ts.isPropertyAssignment(property)
+      && property.name.getText(tree) === 'name' && ts.isStringLiteral(property.initializer) && property.initializer.text === 'mobile-gateway-stop');
+  }), 'actual_gateway_final_registration');
+  registrationNodes.add(gatewayState); registrationNodes.add(gatewaySuffix); registrationNodes.add(gatewayFinal);
+  const registrationStatements = statements.filter(node => registrationNodes.has(node));
+  const normalSetup = normal;
   const coordinator = one(tree.statements.filter((node): node is ts.VariableStatement => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => declaration.name.getText(tree) === 'desktopShutdownCoordinator')), 'desktopShutdownCoordinator');
   const declaration = one(coordinator.declarationList.declarations.filter(node => node.name.getText(tree) === 'desktopShutdownCoordinator'), 'coordinator_declaration');
   if (!declaration.initializer || !ts.isNewExpression(declaration.initializer)) throw Error('actual_Main_coordinator_constructor_changed');
@@ -105,7 +115,7 @@ function selectedMainCode(source: string): string {
   const code = `${actualPromiseDependencies(tree)}\n${helper.getText(tree)}\n${register.getText(tree)}\n${states.map(node => node.getText(tree)).join('\n')}\nreturn {
     start:()=>{${registrationStatements.map(node => node.getText(tree)).join('\n')}\nreturn {
       registered:mcpRegistrationPromise,dispose:mcpRegistrationOwner.dispose,
-      installNormalCleanup:()=>{${normal.map(node => node.getText(tree)).join('\n')}}
+      installNormalCleanup:()=>{${normalSetup.map(node => node.getText(tree)).join('\n')}}
     };},
     appendOrdinary:(name,run)=>registerLifetimeDisposerStep(name,run),
     disposeLifetimeResources:${lifetime.initializer.getText(tree)}
@@ -122,13 +132,17 @@ function deferred<T>() {
 }
 export const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 
-export function actualMainRegistrationFixture(options: { holdStop?: boolean; holdDispose?: boolean } = {}) {
+type FixtureOptions = { holdStop?: boolean; holdDispose?: boolean; holdGateway?: boolean; bridgeStop?: () => Promise<void> };
+export function actualMainRegistrationFixture(options: FixtureOptions = {}) {
   const gate = new DesktopShutdownGate(), steps: Step[] = [], finalSteps: Step[] = [];
   const events: string[] = [], logs: Array<{ event: string; detail: unknown }> = [];
-  const registration = deferred<{ dispose: () => Promise<void> }>(), stop = deferred<void>(), disposal = deferred<void>();
+  const registration = deferred<{ dispose: () => Promise<void> }>(), stop = deferred<void>(), disposal = deferred<void>(), gateway = deferred<void>();
   if (!options.holdStop) stop.resolve(); if (!options.holdDispose) disposal.resolve();
-  const hooks: { register?: () => void; dispose?: () => void } = {};
+  if (!options.holdGateway) gateway.resolve();
+  const hooks: { register?: () => void; dispose?: () => void; gateway?: () => void; relay?: () => void; log?: (event: string) => void } = {};
   const registrationReceivers: unknown[] = [], disposeReceivers: unknown[] = [];
+  const gatewayReceivers: unknown[] = [], gatewayArguments: unknown[][] = [], groupRaws: Promise<void>[] = [], gatewayFinalRaws: Promise<void>[] = [];
+  const observedSteps: Array<{ name: string; raw: Promise<void> }> = [];
   const expectedErrors = new Set<unknown>(), allowedCleanup = new Set<string>();
   let owner: Owner | undefined;
   const record = (event: string) => { events.push(event); };
@@ -146,15 +160,15 @@ export function actualMainRegistrationFixture(options: { holdStop?: boolean; hol
   const streamCallback = { dispose() { record('callback:stream.dispose'); } };
   const schedulerCallback = { stop() { record('callback:timed.stop'); } };
   const bonjourCallback = { stop() { record('callback:bonjour.stop'); } };
-  const mobileCallback = { async stop() { record('callback:mobile.stop'); } };
-  const relayCallback = { stop() { record('callback:relay.stop'); } };
+  const mobileCallback = { async stop(...args: unknown[]) { gatewayReceivers.push(this); gatewayArguments.push(args); record('callback:mobile.stop'); hooks.gateway?.(); await gateway.promise; } };
+  const relayCallback = { stop() { record('callback:relay.stop'); hooks.relay?.(); } };
   finalSteps.push({ name: 'own-final-sentinel', async run() { record('own:final'); } });
   const produced: unknown = compileFunction(selectedMainCode(boundActualMain()), [
     'desktopShutdownGate', 'desktopLifetimeSteps', 'desktopFinalLifetimeSteps', 'services', 'startRuntimeBridge', 'debugMain',
     'pluginProviderRuntime', 'kswarmStreamBridge', 'stopRuntimeBridge', 'timedActionScheduler', 'mobileBonjourAdvertiser', 'mobileGateway', 'mobileRelayBridge', 'disposeDesktopLifetimeSteps', 'assertStandardIpcPromise',
   ])(gate, steps, finalSteps, registrationCarrier, () => record('callback:bridge.start'),
-    (event: string, detail?: unknown) => { logs.push({ event, detail }); },
-    pluginProviderCallback, streamCallback, () => { record('callback:bridge.stop'); return stop.promise; },
+    (event: string, detail?: unknown) => { logs.push({ event, detail }); hooks.log?.(event); },
+    pluginProviderCallback, streamCallback, () => { record('callback:bridge.stop'); return options.bridgeStop ? options.bridgeStop() : stop.promise; },
     schedulerCallback, bonjourCallback, mobileCallback, relayCallback, disposeDesktopLifetimeSteps, assertStandardIpcPromise);
   if (!isSlice(produced)) throw Error('actual_Main_selected_slice_shape_changed');
   const slice = produced;
@@ -190,13 +204,23 @@ export function actualMainRegistrationFixture(options: { holdStop?: boolean; hol
   }
   function allowError(error: Error) {
     expectedErrors.add(error); allowedCleanup.add('lifetime_resources');
-    for (const name of ['kswarm-and-bridges', 'mcp-tools-registration']) allowedCleanup.add(`lifetime_resources:${name}: ${error.message}`);
+    for (const name of ['kswarm-and-bridges', 'mcp-tools-registration', 'mobile-gateway-stop']) allowedCleanup.add(`lifetime_resources:${name}: ${error.message}`);
   }
   async function cleanup() {
-    registration.resolve(returned); stop.resolve(); disposal.resolve();
-    const inputs = await Promise.allSettled([registration.promise, stop.promise, disposal.promise]);
+    registration.resolve(returned); stop.resolve(); disposal.resolve(); gateway.resolve();
+    const inputs = await Promise.allSettled([registration.promise, stop.promise, disposal.promise, gateway.promise]);
     const unexpected: unknown[] = inputs.flatMap(value => value.status === 'rejected' && !knownError(value.reason) ? [value.reason] : []);
     const report = await close();
+    for (const observation of observedSteps) {
+      const result = (await Promise.allSettled([observation.raw]))[0];
+      if (result?.status === 'rejected') {
+        if (!knownError(result.reason)) unexpected.push(result.reason);
+        else {
+          allowedCleanup.add('lifetime_resources');
+          allowedCleanup.add(`lifetime_resources:${observation.name}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+        }
+      }
+    }
     for (const failure of report.cleanupFailed) if (!allowedCleanup.has(failure)) unexpected.push(Error(failure));
     if (owner) {
       const outcomes = await Promise.allSettled([owner.registered, owner.dispose()]);
@@ -204,10 +228,21 @@ export function actualMainRegistrationFixture(options: { holdStop?: boolean; hol
     }
     if (unexpected.length) throw new AggregateError(unexpected, 'actual_Main_callback_fixture_cleanup_failed');
   }
-  return { gate, coordinator, steps, finalSteps, events, logs, registration, stop, disposal, hooks, returned, registrationCarrier, registrationReceivers, disposeReceivers,
+  return { gate, coordinator, steps, finalSteps, events, logs, registration, stop, disposal, gateway, hooks, returned, registrationCarrier, registrationReceivers, disposeReceivers, gatewayReceivers, gatewayArguments, gatewayCarrier: mobileCallback, groupRaws, gatewayFinalRaws,
     start(settings: { installNormal?: boolean } = {}) {
       if (owner) throw Error('actual_Main_fixture_start_once'); owner = slice.start();
       if (settings.installNormal !== false) owner.installNormalCleanup();
+      // Observational forwarding only: exact original receiver/args and raw Promise.
+      for (const step of [...steps, ...finalSteps]) {
+        if (step.name !== 'kswarm-and-bridges' && step.name !== 'mobile-gateway-stop') continue;
+        const actualRun = step.run;
+        step.run = function (this: Step): Promise<void> {
+          const raw: Promise<void> = Reflect.apply(actualRun, this, []);
+          observedSteps.push({ name: step.name, raw }); if (step.name === 'kswarm-and-bridges') groupRaws.push(raw); else gatewayFinalRaws.push(raw);
+          void (async () => { try { await raw; } catch {} })();
+          return raw;
+        };
+      }
       slice.appendOrdinary('own-after-main-lifetime', async () => { record('own:ordinary.after-main'); });
       return owner;
     },
@@ -216,7 +251,7 @@ export function actualMainRegistrationFixture(options: { holdStop?: boolean; hol
     index(event: string) { const value = events.indexOf(event); if (value < 0) throw Error(`actual_callback_event_missing:${event}`); return value; },
   };
 }
-export async function withActualMainRegistration(body: (fixture: ReturnType<typeof actualMainRegistrationFixture>) => Promise<void>, options: { holdStop?: boolean; holdDispose?: boolean } = {}) {
+export async function withActualMainRegistration(body: (fixture: ReturnType<typeof actualMainRegistrationFixture>) => Promise<void>, options: FixtureOptions = {}) {
   const fixture = actualMainRegistrationFixture(options); let failed = false, primary: unknown;
   try { await body(fixture); }
   catch (error) { failed = true; primary = error; throw error; }
