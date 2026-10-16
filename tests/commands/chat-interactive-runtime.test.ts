@@ -927,16 +927,20 @@ function countOccurrences(text: string, needle: string): number {
 
 async function removeTempDirWithRetry(dir: string): Promise<void> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       rmSync(dir, { recursive: true, force: true });
       return;
     } catch (error) {
       lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(100 * (attempt + 1), 1_000)));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(200 * (attempt + 1), 1_000)));
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  // POSIX 允许 unlink 已打开的文件，Windows 不允许：测试进程里仍在运行的 chat 会话
+  // 持有会话文件句柄时临时目录删不掉，rmSync 报 EPERM（Windows job 上 66 个用例
+  // 因此失败）。清理是收尾动作，不该把用例判成失败；残留目录留在系统临时目录，
+  // 由 CI 机器回收。
+  process.stderr.write(`[chat-interactive-runtime] 未能清理临时目录 ${dir}: ${String(lastError)}\n`);
 }
 
 function normalizeAssistantLine(line: string): string {

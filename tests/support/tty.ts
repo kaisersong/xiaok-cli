@@ -263,6 +263,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
   const originalResume = process.stdin.resume;
   const originalPause = process.stdin.pause;
   const originalOn = process.stdin.on;
+  const originalOnce = process.stdin.once;
   const originalRemoveListener = process.stdin.removeListener;
   let nextStdoutWriteError: Error | null = null;
 
@@ -278,6 +279,13 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
     emitter.on(event, listener);
     return process.stdin;
   }) as typeof process.stdin.on;
+  // 源码用 stdin.once('end', ...) 注册退出回调。漏接这一路会让监听挂到真实
+  // process.stdin 上，CI 里无 TTY 的 stdin 一 EOF 就触发 shutdownTerminal 并
+  // 调 process.exit，被 vitest 记为 unhandled rejection 而整文件失败。
+  process.stdin.once = ((event: string, listener: (...args: any[]) => void) => {
+    emitter.once(event, listener);
+    return process.stdin;
+  }) as typeof process.stdin.once;
   process.stdin.removeListener = ((event: string, listener: (...args: any[]) => void) => {
     emitter.removeListener(event, listener);
     return process.stdin;
@@ -334,6 +342,7 @@ export function createTtyHarness(columns = 80, rows?: number, options?: TtyHarne
       process.stdin.resume = originalResume;
       process.stdin.pause = originalPause;
       process.stdin.on = originalOn;
+      process.stdin.once = originalOnce;
       process.stdin.removeListener = originalRemoveListener;
       emitter.removeAllListeners();
     },
