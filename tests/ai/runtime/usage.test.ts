@@ -352,10 +352,8 @@ describe('truncateToolResult with spill', () => {
     });
     // Sanitized ID should not contain path traversal patterns
     expect(result.spillPath).not.toContain('../');
-    // Session dir should be 's1'
-    expect(result.spillPath).toContain('s1/');
-    // Tool call ID should be sanitized (no path components)
-    expect(result.spillPath).toContain('etc_passwd.txt');
+    // Assert the entire safe path using the host separator.
+    expect(result.spillPath).toBe(join(tmpDir, 's1', 'etc_passwd.txt'));
     expect(existsSync(result.spillPath!)).toBe(true);
     // Verify the actual file content
     expect(readFileSync(result.spillPath!, 'utf-8')).toBe('A'.repeat(20000));
@@ -374,11 +372,15 @@ describe('truncateToolResult with spill', () => {
   });
 
   it('write failure: fallback to truncation, no crash', () => {
-    const readOnlyDir = '/nonexistent/path/cannot/be/created';
+    // A regular file cannot be used as a parent directory on any platform,
+    // even with elevated permissions. An arbitrary missing path may be writable.
+    mkdirSync(tmpDir, { recursive: true });
+    const blockedDir = join(tmpDir, 'parent-is-a-file');
+    writeFileSync(blockedDir, 'synthetic write failure');
     const result = truncateToolResult('A'.repeat(20000), 8000, {
       sessionId: 's1',
       toolCallId: 'tc1',
-      spillDir: readOnlyDir,
+      spillDir: blockedDir,
     });
     expect(result.content.length).toBeLessThan(20000);
     expect(result.content).toContain('truncated');

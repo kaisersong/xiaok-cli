@@ -36,3 +36,10 @@ passed in the combined run. Build, governance and architecture checks passed.
 The real TTY test passed for both the isolated build and the installed CLI,
 including repeated resume, Ctrl+O, retained image display, and model request
 content. Both runs reclaimed all owned CLI processes (zero remaining).
+
+The expanded CI found two pre-existing POSIX assumptions in usage tests on
+Windows: a literal `s1/` separator and a supposedly unwritable absolute path that
+Windows could create. Tests now assert the full path using `join`, and trigger
+real write failure by placing a regular file where a parent directory is needed.
+Traversal/content/fallback checks remain enforced; the 32 usage tests pass
+locally. No production compaction or spill behavior changed for this correction.
