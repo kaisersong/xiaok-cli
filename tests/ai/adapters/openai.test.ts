@@ -26,6 +26,19 @@ import type { StreamOptions } from '../../../src/ai/runtime/model-capabilities.j
 import { streamDesktopTaskProviderConversation } from '../../../src/ai/runtime/provider-conversation-authorization.js';
 import { resolveRegisteredStrictKimiK3Profile } from '../../../src/ai/runtime/model-harness-identity.js';
 
+// Actual public SDK exports and TEST-only factory; no constructor is dispatched during hoist.
+const localOpenAISDK = await vi.hoisted(async () => {
+  const actual = await vi.importActual<typeof import('openai')>('openai');
+  const streaming = await vi.importActual<typeof import('openai/core/streaming')>('openai/core/streaming');
+  const { createLocalChatCompletionFactory } = await import('../../support/local-openai-constructor-return.js');
+  return {
+    Client: actual.default,
+    completionReturns: createLocalChatCompletionFactory({
+      Client: actual.default, APIPromise: actual.APIPromise, Stream: streaming.Stream,
+    }),
+  };
+});
+
 const openAIConstructorCalls: unknown[] = [];
 let nextTestAuthorizationId = 0;
 const automaticallyAuthorizedAdapters = new WeakSet<OpenAIAdapter>();
@@ -52,8 +65,9 @@ type UsageDiagnostic = KimiUsageDiagnostic;
 vi.mock('openai', () => {
   return {
     default: class OpenAI {
-      constructor(opts?: unknown) {
+      constructor(opts?: ConstructorParameters<typeof localOpenAISDK.Client>[0]) {
         openAIConstructorCalls.push(opts);
+        localOpenAISDK.completionReturns.recordOptions(this, opts);
       }
 
       chat = {
@@ -64,6 +78,9 @@ vi.mock('openai', () => {
     },
   };
 });
+
+// All and only the named21 callback sites use the SAME shared TEST factory function.
+const localChatCompletionReturn = localOpenAISDK.completionReturns.create;
 
 async function captureChatCompletionRequest(
   adapter: unknown,
@@ -85,10 +102,10 @@ async function captureChatCompletionRequest(
 
   const OpenAI = (await import('openai')).default;
   const instance = new OpenAI({ apiKey: 'test' });
-  vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+  vi.spyOn(instance.chat.completions, 'create').mockImplementation((params: unknown) => localChatCompletionReturn(instance, async () => {
     capturedRequest = params as CapturedChatCompletionRequest;
     return mockStream as never;
-  });
+  }));
 
   (adapter as { client: typeof instance }).client = instance;
   for await (const _ of streamTestAdapter(
@@ -1200,7 +1217,7 @@ describe('OpenAIAdapter', () => {
     let capturedRequest: unknown;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (request: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((request: unknown) => localChatCompletionReturn(instance, async () => {
       capturedRequest = request;
       return {
         async *[Symbol.asyncIterator]() {
@@ -1214,7 +1231,7 @@ describe('OpenAIAdapter', () => {
           };
         },
       } as never;
-    });
+    }));
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
@@ -1251,7 +1268,7 @@ describe('OpenAIAdapter', () => {
     let capturedRequest: CapturedChatCompletionRequest | undefined;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (request: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((request: unknown) => localChatCompletionReturn(instance, async () => {
       capturedRequest = request as CapturedChatCompletionRequest;
       return {
         async *[Symbol.asyncIterator]() {
@@ -1270,7 +1287,7 @@ describe('OpenAIAdapter', () => {
           };
         },
       } as never;
-    });
+    }));
     const flags = {
       ...resolveKimiHarnessFeatureFlags({}),
       normalizeUsage: false,
@@ -2020,10 +2037,10 @@ describe('OpenAIAdapter', () => {
 
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((params: unknown) => localChatCompletionReturn(instance, async () => {
       capturedMessages = (params as { messages: unknown[] }).messages;
       return mockStream as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -2116,10 +2133,10 @@ describe('OpenAIAdapter', () => {
 
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((params: unknown) => localChatCompletionReturn(instance, async () => {
       capturedMessages = (params as { messages: unknown[] }).messages;
       return mockStream as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'kimi-k2-thinking' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -2421,7 +2438,7 @@ describe('OpenAIAdapter', () => {
     let createCalls = 0;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
       createCalls += 1;
       if (createCalls === 1) {
         return {
@@ -2447,7 +2464,7 @@ describe('OpenAIAdapter', () => {
           yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
         },
       } as never;
-    });
+    }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const adapter = createStrictKimiAdapter();
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -2628,10 +2645,10 @@ describe('OpenAIAdapter', () => {
 
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((params: unknown) => localChatCompletionReturn(instance, async () => {
       capturedMessages = (params as { messages: unknown[] }).messages;
       return mockStream as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'kimi-k2-thinking' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -2937,7 +2954,7 @@ describe('OpenAIAdapter', () => {
     });
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
       createCalls += 1;
       if (createCalls === 1) {
         return {
@@ -2996,7 +3013,7 @@ describe('OpenAIAdapter', () => {
           };
         },
       } as never;
-    });
+    }));
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
 
@@ -3183,10 +3200,10 @@ describe('OpenAIAdapter', () => {
 
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((params: unknown) => localChatCompletionReturn(instance, async () => {
       capturedParams = params as Record<string, unknown>;
       return mockStream as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -3342,7 +3359,7 @@ describe('OpenAIAdapter', () => {
       const requests: CapturedChatCompletionRequest[] = [];
       const OpenAI = (await import('openai')).default;
       const instance = new OpenAI({ apiKey: 'test' });
-      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (request: unknown) => {
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation((request: unknown) => localChatCompletionReturn(instance, async () => {
         requests.push(request as CapturedChatCompletionRequest);
         if (requests.length === 1) {
           throw Object.assign(new Error('retry cache request'), { status: 503 });
@@ -3357,7 +3374,7 @@ describe('OpenAIAdapter', () => {
             };
           },
         } as never;
-      });
+      }));
       const adapter = createStrictKimiAdapter({
         flags: resolveKimiHarnessFeatureFlags({
           XIAOK_EXPERIMENTAL_KIMI_PROMPT_CACHE: '1',
@@ -3395,10 +3412,10 @@ describe('OpenAIAdapter', () => {
 
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (_params: unknown, options: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((_params: unknown, options: unknown) => localChatCompletionReturn(instance, async () => {
       capturedOptions = options as { signal?: AbortSignal };
       return mockStream as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -3424,10 +3441,10 @@ describe('OpenAIAdapter', () => {
 
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (params: unknown) => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation((params: unknown) => localChatCompletionReturn(instance, async () => {
       capturedMessages = (params as { messages: unknown[] }).messages;
       return mockStream as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -3486,7 +3503,7 @@ describe('OpenAIAdapter', () => {
       let calls = 0;
       const OpenAI = (await import('openai')).default;
       const instance = new OpenAI({ apiKey: 'test' });
-      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
         calls += 1;
         if (calls === 1) {
           return {
@@ -3521,7 +3538,7 @@ describe('OpenAIAdapter', () => {
             };
           },
         } as never;
-      });
+      }));
       const adapter = createStrictKimiAdapter();
       (adapter as unknown as { client: typeof instance }).client = instance;
 
@@ -3601,7 +3618,7 @@ describe('OpenAIAdapter', () => {
         Object.assign(new Error(`retry failure ${index + 1}`), { status: 503 }));
       const OpenAI = (await import('openai')).default;
       const instance = new OpenAI({ apiKey: 'test' });
-      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
         const call = calls;
         calls += 1;
         return {
@@ -3616,7 +3633,7 @@ describe('OpenAIAdapter', () => {
             throw sentinels[call];
           },
         } as never;
-      });
+      }));
       const adapter = createStrictKimiAdapter();
       (adapter as unknown as { client: typeof instance }).client = instance;
       const chunks: StreamChunk[] = [];
@@ -3711,7 +3728,7 @@ describe('OpenAIAdapter', () => {
       const controller = new AbortController();
       const OpenAI = (await import('openai')).default;
       const instance = new OpenAI({ apiKey: 'test' });
-      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
         calls += 1;
         return {
           async *[Symbol.asyncIterator]() {
@@ -3721,7 +3738,7 @@ describe('OpenAIAdapter', () => {
             });
           },
         } as never;
-      });
+      }));
       const adapter = createStrictKimiAdapter();
       (adapter as unknown as { client: typeof instance }).client = instance;
 
@@ -3791,7 +3808,7 @@ describe('OpenAIAdapter', () => {
       const controller = new AbortController();
       const OpenAI = (await import('openai')).default;
       const instance = new OpenAI({ apiKey: 'test' });
-      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
         calls += 1;
         return {
           async *[Symbol.asyncIterator]() {
@@ -3805,7 +3822,7 @@ describe('OpenAIAdapter', () => {
             throw Object.assign(new Error('retry me'), { status: 503 });
           },
         } as never;
-      });
+      }));
       const adapter = createStrictKimiAdapter();
       (adapter as unknown as { client: typeof instance }).client = instance;
       const chunks: StreamChunk[] = [];
@@ -3854,10 +3871,10 @@ describe('OpenAIAdapter', () => {
       let calls = 0;
       const OpenAI = (await import('openai')).default;
       const instance = new OpenAI({ apiKey: 'test' });
-      vi.spyOn(instance.chat.completions, 'create').mockImplementation(async (
+      vi.spyOn(instance.chat.completions, 'create').mockImplementation((
         _request: unknown,
         options: unknown,
-      ) => {
+      ) => localChatCompletionReturn(instance, async () => {
         calls += 1;
         const signal = (options as { signal: AbortSignal }).signal;
         return {
@@ -3878,7 +3895,7 @@ describe('OpenAIAdapter', () => {
             });
           },
         } as never;
-      });
+      }));
       const adapter = createStrictKimiAdapter();
       (adapter as unknown as { client: typeof instance }).client = instance;
       const chunks: StreamChunk[] = [];
@@ -3923,7 +3940,7 @@ describe('OpenAIAdapter', () => {
     });
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
       calls += 1;
       if (calls === 1) {
         return {
@@ -3971,7 +3988,7 @@ describe('OpenAIAdapter', () => {
           };
         },
       } as never;
-    });
+    }));
     const adapter = new OpenAIAdapter({
       apiKey: 'test',
       kimiCodingHeadersApplied: true,
@@ -4040,7 +4057,7 @@ describe('OpenAIAdapter', () => {
     let calls = 0;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
       calls += 1;
       if (calls < 2) {
         return {
@@ -4055,7 +4072,7 @@ describe('OpenAIAdapter', () => {
           yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
         },
       } as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -4083,10 +4100,10 @@ describe('OpenAIAdapter', () => {
     let calls = 0;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
       calls += 1;
       throw Object.assign(new Error('user aborted'), { name: 'AbortError' });
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
@@ -4115,7 +4132,7 @@ describe('OpenAIAdapter', () => {
     let calls = 0;
     const OpenAI = (await import('openai')).default;
     const instance = new OpenAI({ apiKey: 'test' });
-    vi.spyOn(instance.chat.completions, 'create').mockImplementation(async () => {
+    vi.spyOn(instance.chat.completions, 'create').mockImplementation(() => localChatCompletionReturn(instance, async () => {
       calls += 1;
       return {
         async *[Symbol.asyncIterator]() {
@@ -4123,7 +4140,7 @@ describe('OpenAIAdapter', () => {
           throw Object.assign(new Error('Premature close'), { code: 'ERR_STREAM_PREMATURE_CLOSE' });
         },
       } as never;
-    });
+    }));
 
     const adapter = createTestAdapter({ wireModel: 'gpt-4o' });
     (adapter as unknown as { client: typeof instance }).client = instance;
