@@ -3,6 +3,7 @@ import { createPlatformRegistryFactory } from '../../../src/platform/runtime/reg
 import type { PlatformRuntimeContext } from '../../../src/platform/runtime/context.js';
 import type { Message, ModelAdapter, ToolExecutionContext } from '../../../src/types.js';
 import { CapabilityRegistry } from '../../../src/platform/runtime/capability-registry.js';
+import { AgentSessionGraph } from '../../../src/ai/runtime/session-graph.js';
 
 function textFromMessages(messages: Message[]): string {
   return messages.flatMap((message) => message.content).map((block) => {
@@ -133,13 +134,17 @@ describe('multi-agent registry integration', () => {
     });
     factories.push(factory);
     const registry = factory.createRegistry('/test/cwd');
-    const context = {
+    const context: ToolExecutionContext = {
       taskId: 'task_main',
-      session: {},
+      // Ordinary in-memory session history, with no protected observation or execution authority.
+      session: new AgentSessionGraph({
+        sessionId: 'sess_multi_agent', cwd: '/test/cwd',
+        createdAt: 0, updatedAt: 0, lineage: ['sess_multi_agent'],
+      }).exportSnapshot(),
       messages: [],
       systemPrompt: 'system prompt',
       toolDefinitions: registry.getToolDefinitions(),
-    } as ToolExecutionContext;
+    };
 
     const spawnResult = JSON.parse(await registry.executeTool('spawn_agent', {
       task_name: 'research',

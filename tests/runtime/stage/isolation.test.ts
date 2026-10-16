@@ -10,6 +10,7 @@ import type { MockInstance } from 'vitest';
 import type { ExecuteNamedSubAgentOptions } from '../../../src/ai/agents/subagent-executor.js';
 import * as subagentModule from '../../../src/ai/agents/subagent-executor.js';
 import type { SkillMeta } from '../../../src/ai/skills/loader.js';
+import { ToolRegistry } from '../../../src/ai/tools/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,11 +66,6 @@ describe('Subagent Context Isolation', () => {
       },
     };
 
-    const mockRegistry = {
-      getToolDefinitions: () => [],
-      executeTool: async () => 'ok',
-    };
-
     const mockBuildSystemPrompt = async () => 'system prompt';
 
     // Call executeNamedSubAgent with explicit forkContext: undefined
@@ -83,7 +79,7 @@ describe('Subagent Context Isolation', () => {
       sessionId: 'test-session',
       cwd: '/tmp',
       adapter: () => mockAdapter,
-      createRegistry: () => mockRegistry,
+      createRegistry: () => new ToolRegistry({}, []),
       buildSystemPrompt: mockBuildSystemPrompt,
       forkContext: undefined,
     });
