@@ -57,3 +57,8 @@ arbitrary future interpreter payload.
 - Installed through scoped copies, preserving unrelated dirty source and tests;
   no real user settings or historical sessions were modified. Existing running
   CLI processes need normal exit/resume to load the new implementation.
+
+The first expanded Windows CI run exposed two existing workspace-test callback
+fixtures using POSIX-only slash comparisons. Their allowlist now uses the host
+separator and denylist compares basename; the same positive/negative production
+assertions remain mandatory on Windows. No test was excluded or skipped.

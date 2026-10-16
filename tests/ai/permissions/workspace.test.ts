@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep, basename } from 'node:path';
 import { assertWorkspacePath } from '../../../src/ai/permissions/workspace.js';
 import { createWriteTool } from '../../../src/ai/tools/write.js';
 
@@ -62,7 +62,7 @@ describe('workspace path guard', () => {
 
     it('keeps legitimate in-workspace paths working (with and without a guard)', () => {
       const { ws } = setup();
-      const insideOnly = (p: string) => ({ allowed: p === ws || p.startsWith(`${ws}/`) });
+      const insideOnly = (p: string) => ({ allowed: p === ws || p.startsWith(`${ws}${sep}`) });
       expect(assertWorkspacePath(join(ws, 'src', 'a.ts'), ws, 'write', true, insideOnly)).toBe(join(ws, 'src', 'a.ts'));
       expect(assertWorkspacePath(`${ws}/src/../b.ts`, ws, 'read')).toBe(join(ws, 'b.ts'));
       expect(assertWorkspacePath(join(ws, 'new', 'deep', 'c.ts'), ws, 'write')).toBe(join(ws, 'new', 'deep', 'c.ts'));
@@ -70,7 +70,7 @@ describe('workspace path guard', () => {
 
     it('in sandbox mode the guard also decides for in-workspace paths (denylist applies)', () => {
       const { ws } = setup();
-      const denyEnv = (p: string) => ({ allowed: !p.endsWith('/.env'), reason: 'path is explicitly denied' });
+      const denyEnv = (p: string) => ({ allowed: basename(p) !== '.env', reason: 'path is explicitly denied' });
       expect(() => assertWorkspacePath(join(ws, '.env'), ws, 'write', true, denyEnv)).toThrow(/denied by sandbox/i);
     });
 
