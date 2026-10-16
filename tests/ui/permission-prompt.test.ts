@@ -97,7 +97,10 @@ describe('permission-prompt', () => {
       const commandLine = lines.find((line) => line.includes('命令:'));
       expect(commandLine).toBeDefined();
       expect(strip(commandLine!)).toContain('本次执行命令:');
-      expect(stripAll(lines)).toContain('始终允许的范围: bash(python3 *)（* 表示任意参数，参数变化无需重复确认）');
+      expect(stripAll(lines).join('\n')).not.toContain('始终允许的范围:');
+      expect(buildPermissionPromptOptions('bash(python3 *)', 'bash', {
+        command: "python3 - <<'PY'\nimport importlib\nprint('ok')\nPY",
+      }).map(option => option.choice.action)).toEqual(['allow_once', 'deny']);
       expect(commandLine).toContain("python3 - <<'PY' import importlib print('ok') PY");
       expect(commandLine?.includes('\n')).toBe(false);
     });
@@ -233,7 +236,7 @@ describe('permission-prompt', () => {
       harness.send('\x1b[B');
       harness.send('\r');
 
-      await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(python3 *)' });
+      await expect(pending).resolves.toEqual({ action: 'allow_once' });
 
       const normalized = harness.output.normalized;
       const titleCount = normalized.split('xiaok 想要执行以下操作').length - 1;
@@ -271,9 +274,9 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
 
-      await expect(pending).resolves.toEqual({ action: 'allow_once' });
+      await expect(pending).resolves.toEqual({ action: 'deny' });
       expect(harness.output.normalized).toContain('[xiaok] UI 已降级：permission_prompt_renderer');
-      expect(harness.output.normalized).toContain('xiaok 想要执行以下操作');
+      expect(harness.output.normalized).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });
@@ -392,7 +395,10 @@ describe('permission-prompt', () => {
       expect(titleIndex).toBeGreaterThanOrEqual(0);
       expect(footerIndex).toBeGreaterThan(titleIndex);
       expect(beforeDecision).not.toContain('Waiting for command output');
-      expect(beforeDecision).toContain('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      // The manager fact is current; this dedicated permission paint retains
+      // its opening footer snapshot until its own repaint or real completion.
+      expect(scrollRegion.getPromptFrameState().statusLine).toBe('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      expect(beforeDecision).toContain('kimi-for-coding · 3% · master · D:\\projects\\xiaok-cli');
 
       harness.send('\x1b[B');
       const afterNavigate = harness.screen.text();
@@ -401,6 +407,13 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_session', rule: 'bash(cmd *)' });
+
+      // Read the actual main buffer restored by production completion. No
+      // manual redraw/status injection is permitted before this assertion.
+      expect(renderer.getState().modal).toBeFalsy();
+      const afterDecision = harness.screen.text();
+      expect(afterDecision).toContain('kimi-for-coding · 4% · master · D:\\projects\\xiaok-cli');
+      expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });
@@ -466,6 +479,11 @@ describe('permission-prompt', () => {
         statusLine: 'kimi-for-coding · 3% · master · xiaok-cli',
       });
 
+      const beforeOpen = harness.screen.text();
+      expect(beforeOpen).toContain('tool-row-1');
+      expect(beforeOpen).toContain('tool-row-2');
+      const contentCursorBefore = scrollRegion.getContentCursor();
+
       const pending = showPermissionPrompt(
         'bash',
         { command: 'git status --short' },
@@ -473,8 +491,14 @@ describe('permission-prompt', () => {
       );
 
       const openScreen = harness.screen.text();
-      expect(openScreen).toContain('tool-row-1');
-      expect(openScreen).toContain('tool-row-2');
+      // DEC1049 temporarily hides the saved main transcript. Its owner cursor
+      // and current footer facts must survive while this menu remains intact.
+      expect(scrollRegion.getContentCursor()).toBe(contentCursorBefore);
+      expect(scrollRegion.getPromptFrameState().statusLine).toBe('kimi-for-coding · 3% · master · xiaok-cli');
+      expect(openScreen).toContain('❯ 1. 允许一次');
+      expect(openScreen).toContain('数字直选');
+      expect(openScreen).not.toContain('tool-row-1');
+      expect(openScreen).not.toContain('tool-row-2');
       expect(openScreen).toContain('xiaok 想要执行以下操作');
       expect(openScreen).toContain('命令: git status --short');
       const openLines = harness.screen.lines();
@@ -483,6 +507,14 @@ describe('permission-prompt', () => {
 
       harness.send('\r');
       await expect(pending).resolves.toEqual({ action: 'allow_once' });
+
+      // Preserve the original row values after the real decision closes the
+      // temporary screen; do not reprint the rows or force a footer repaint.
+      expect(renderer.getState().modal).toBeFalsy();
+      const afterDecision = harness.screen.text();
+      expect(afterDecision).toContain('tool-row-1');
+      expect(afterDecision).toContain('tool-row-2');
+      expect(afterDecision).not.toContain('xiaok 想要执行以下操作');
 
       harness.restore();
     });

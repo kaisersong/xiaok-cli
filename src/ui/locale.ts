@@ -46,6 +46,9 @@ const TOOL_LABELS: Record<UiLocale, Record<string, string>> = {
 const UI_COPY = {
   'zh-CN': {
     approvalTitle: 'xiaok 想要执行以下操作',
+    permissionReviewPage: (page: number, total: number) => `范围 ${page}/${total} · PgUp/PgDn 查看全部后允许`,
+    permissionScreenTooSmall: '终端过小，无法完整审阅；请调整大小或按 Esc 拒绝',
+    permissionUnsafeScope: '范围显示无法安全核对；只能拒绝或按 Esc 取消',
     mandatoryReview: '这个操作有风险，每次都会询问',
     writeTarget: (path: string) => `写入文件：${path}`,
     autoApprovalReason: (reason: string) => `确认原因: auto 模式仍需确认：${AUTO_APPROVAL_REASONS_ZH[reason] ?? reason}`,
@@ -73,6 +76,9 @@ const UI_COPY = {
   },
   en: {
     approvalTitle: 'xiaok wants to run',
+    permissionReviewPage: (page: number, total: number) => `Scopes ${page}/${total} · PgUp/PgDn to review all before allowing`,
+    permissionScreenTooSmall: 'Terminal too small to review; resize or press Esc to deny',
+    permissionUnsafeScope: 'Scope display cannot be verified; deny or press Esc to cancel',
     mandatoryReview: 'This operation carries risk and requires approval every time',
     writeTarget: (path: string) => `Write file: ${path}`,
     autoApprovalReason: (reason: string) => `Approval reason: auto mode still confirms data-loss commands: ${reason}`,

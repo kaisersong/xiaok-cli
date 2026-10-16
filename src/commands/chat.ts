@@ -1867,8 +1867,16 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   };
 
   const withPausedLiveActivity = async <T>(action: () => Promise<T>): Promise<T> => {
+    // Interactive prompts own stdin exclusively. Their cleanup pauses stdin,
+    // so the previous busy owner must explicitly reattach when they finish.
+    const busy = activeBusyCapture;
+    const resumeBusy = busy?.isActive() ?? false;
+    if (resumeBusy) busy?.pause();
     try { return await runtimeState.withPausedLiveActivity(action); }
-    finally { flushSubAgentNotices(); }
+    finally {
+      if (resumeBusy) busy?.resume();
+      flushSubAgentNotices();
+    }
   };
 
   function ensureBusyInputCapture(): void {
@@ -4005,6 +4013,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const exitConfirmation = createExitConfirmation();
   const shutdownTerminal = (reason: ExitSignal) => exitFromSignal(reason);
   finishTerminal = () => {
+    // Leave the alternate permission buffer before resetting the main terminal.
+    try { replRenderer.closeModal(); } catch {}
     stopBusyCapture(); stopActivity();
     try { scrollRegion.end(); } catch {}
     try { releaseRawInputMode(); } catch {}

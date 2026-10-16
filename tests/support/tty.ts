@@ -27,6 +27,10 @@ function replayTerminal(raw: string, maxRows?: number): { lines: string[]; image
   let savedRow = 0;
   let savedCol = 0;
   const viewportRows = maxRows && maxRows > 0 ? maxRows : Number.POSITIVE_INFINITY;
+  let mainBuffer: {
+    lines: string[]; images: TtyImagePlacement[]; row: number; col: number;
+    savedRow: number; savedCol: number; scrollTop: number; scrollBottom: number;
+  } | null = null;
   let scrollTop = 0;
   let scrollBottom = viewportRows === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : viewportRows - 1;
 
@@ -151,6 +155,21 @@ function replayTerminal(raw: string, maxRows?: number): { lines: string[]; image
         j += 1;
       }
       const cmd = raw[j] ?? '';
+      // DECSET/DECRST 1049 switch buffers; this is terminal protocol replay,
+      // not permission layout logic. Preserve cursor and scrolling margins.
+      if (params === '?1049' && cmd === 'h' && !mainBuffer) {
+        mainBuffer = {lines: [...lines], images: images.map(image => ({...image})), row, col, savedRow, savedCol, scrollTop, scrollBottom};
+        lines.splice(0, lines.length, '');
+        images = []; row = 0; col = 0; savedRow = 0; savedCol = 0;
+        scrollTop = 0; scrollBottom = viewportRows === Number.POSITIVE_INFINITY ? Number.POSITIVE_INFINITY : viewportRows - 1;
+      }
+      if (params === '?1049' && cmd === 'l' && mainBuffer) {
+        lines.splice(0, lines.length, ...mainBuffer.lines);
+        images = mainBuffer.images; row = mainBuffer.row; col = mainBuffer.col;
+        savedRow = mainBuffer.savedRow; savedCol = mainBuffer.savedCol;
+        scrollTop = mainBuffer.scrollTop; scrollBottom = mainBuffer.scrollBottom;
+        mainBuffer = null;
+      }
       const parts = params.split(';');
       const firstValue = Number.parseInt(parts[0] || '1', 10) || 1;
       if (cmd === 'A') row = Math.max(0, row - firstValue);
