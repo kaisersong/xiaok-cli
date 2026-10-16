@@ -72,7 +72,7 @@ const owner = new DesktopApplicationWindowOwner({ current: () => window && !wind
   bootstrap: async () => {
     services = createDesktopServices({ dataRoot: join(root, 'data'), knowledgeDbPath: join(root, 'knowledge.sqlite'), workspaceRoot: join(root, 'workspace'),
       pluginRootDir: join(root, 'plugins'), pluginDependencies: [], kswarmService: kswarm });
-    await services.saveModelConfig({ providerId: 'e2e-local', modelName: 'e2e-model', protocol: 'openai_legacy', baseUrl: process.env.XIAOK_MULTI_AGENT_E2E_PROVIDER, apiKey: 'e2e-fixture-only' });
+    await services.saveModelConfig({ providerId: 'e2e-local', modelName: 'e2e-model', protocol: 'openai_legacy', baseUrl: process.env.XIAOK_MULTI_AGENT_E2E_PROVIDER, apiKey: 'e2e-fixture-only' }, undefined, 'user');
     await services.multiAgent.ready;
     if (process.env.XIAOK_ACTIVITY_E2E_OWNER === 'daemon') {
       await services.attachConversationActivityOwner({ kswarm: { url: activityKswarmUrl, mutationToken: 'fixture', brokerUrl: process.env.XIAOK_ACTIVITY_E2E_BROKER_URL, roomToken: 'fixture' } });
