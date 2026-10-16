@@ -1,3 +1,5 @@
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/stored-snapshot-types.js';
+import type { StoredSessionIntentLedgerInput } from './stored-intent-clone.js';
 import {intentHostSubjectOwner} from '../verification/intent-host-subject.js';
 import {intentContractOriginalRegistration} from '../verification/intent-contract-enrollment.js';
 import {createHash,randomUUID} from 'node:crypto';
@@ -27,7 +29,7 @@ function shape(v:unknown,keys:string):asserts v is Record<string,any>{if(!v||typ
 function freeze<T>(v:T):T{if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;}
 export function freezeIntentNativeLedger(value:SessionIntentLedger|undefined):SessionIntentLedger|undefined{return value===undefined?undefined:freeze(captureIntentData(value));}
 const digest=(domain:string,v:unknown)=>createHash('sha256').update(domain+'\0').update(json(captureIntentData(v))).digest('hex');
-export const intentNativeLedgerHash=(v:SessionIntentLedger|undefined)=>digest('xiaok-intent-native-ledger-v1',v??null);
+export const intentNativeLedgerHash=(v:StoredSessionIntentLedgerInput|undefined)=>digest('xiaok-intent-native-ledger-v1',v??null);
 const draftHash=(v:IntentLedgerRecord)=>digest('xiaok-intent-native-draft-v1',v);
 function pristine(contract:Readonly<IntentBusinessContract>,instanceId:string,now:number):IntentLedgerRecord{
  const {version:_,verification:__,...body}=contract;
@@ -77,8 +79,10 @@ export function captureIntentNativeRequest<K extends IntentNativeMutation['nativ
  if(kind==='ownership'&&(!['resume','takeover','release'].includes(v.action)||typeof v.confirmHighRisk!=='boolean'))throw Error('intent_native_ownership');
  return {input:{...v,nativeAction:kind} as IntentNativeMutation,lease:lease.value as SessionExecutionLease};
 }
+export function applyIntentNativeMutation(previous:PersistedSessionSnapshot,input:IntentNativeMutation):PersistedSessionSnapshot;
+export function applyIntentNativeMutation(previous:StoredSessionSnapshot,input:IntentNativeMutation):StoredSessionSnapshot;
 /** Store-private reducer: source/lease must be checked by the actual lock owner. */
-export function applyIntentNativeMutation(previous:PersistedSessionSnapshot,input:IntentNativeMutation):PersistedSessionSnapshot{
+export function applyIntentNativeMutation(previous:StoredSessionSnapshot,input:IntentNativeMutation):StoredSessionSnapshot{
  const next=captureIntentData(previous);if(!next.intentDelegation&&input.nativeAction==='reserve')next.intentDelegation=createEmptySessionIntentLedger(next.sessionId,next.updatedAt);const ledger=next.intentDelegation;if(!ledger||input.sessionId!==next.sessionId)throw Error('intent_native_session');
  const records=captureIntentData(parseIntentNativeContracts(ledger.nativeContracts,next.sessionId));if(input.now<ledger.updatedAt)throw Error('intent_native_time');
  if(input.nativeAction==='ownership'){
