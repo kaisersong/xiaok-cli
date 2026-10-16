@@ -1809,33 +1809,65 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   // Python discovery, venv creation and dependency checks are intentionally
   // post-interactive. Static plugin files are already available, while Python
   // MCP servers remain fail-closed until this main-process-owned command exists.
-  void prepareBundledPluginPythonRuntime(pluginDeployment).then(async (pythonResult) => {
-    managedPythonCommand = pythonResult.pythonCommand;
-    debugMain('createWindow:python-runtime-ready', pythonResult);
-    const mcpRegistered = await mcpRegistrationPromise;
-    if (!mcpRegistered) {
-      services.markDeferredPythonMcpToolsUnavailable();
-      return;
+  if (!desktopShutdownGate.isOpen) return window;
+  // Register ownership before the real producer starts; retirement is not a
+  // physical child/process-tree ACK. Standard native-Promise realm required.
+  const pythonWriter = desktopShutdownGate.acquire('bootstrap_queue', 'plugin-python-runtime');
+  let completePythonRetirement!: () => void;
+  let failPythonRetirement!: (error: unknown) => void;
+  const pythonRetirement = new Promise<void>((resolve, reject) => {
+    completePythonRetirement = resolve; failPythonRetirement = reject;
+  });
+  registerLifetimeDisposerStep('plugin-python-runtime-preparation', () => pythonRetirement);
+  // Observe before producer. The lifecycle receives the exact same reservation
+  // and its original rejected reason, not a swallowed-error replacement.
+  void (async () => {
+    try { await pythonRetirement; }
+    catch (error) {
+      try { debugMain('createWindow:python-retirement-failed', error instanceof Error ? error.message : String(error)); } catch {}
     }
-    if (managedPythonCommand) {
-      await services.registerDeferredPythonMcpTools();
-    } else {
-      services.markDeferredPythonMcpToolsUnavailable();
-    }
-    const started = await services.startPluginProviderRuntime().catch((error) => {
-      debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
-      return { started: false as const };
-    });
-    debugMain('provider-runtime:start', started);
-  }).catch((error) => {
-    debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
-    void mcpRegistrationPromise.then(async (mcpRegistered) => {
+  })();
+  const runPythonPreparation = async (): Promise<void> => {
+    try {
+      const pythonResult = await prepareBundledPluginPythonRuntime(pluginDeployment);
+      if (!desktopShutdownGate.isOpen) return;
+      managedPythonCommand = pythonResult.pythonCommand;
+      debugMain('createWindow:python-runtime-ready', pythonResult);
+      const mcpRegistered = await mcpRegistrationPromise;
+      if (!desktopShutdownGate.isOpen) return;
+      if (!mcpRegistered) {
+        services.markDeferredPythonMcpToolsUnavailable();
+        return;
+      }
+      if (managedPythonCommand) {
+        await services.registerDeferredPythonMcpTools();
+      } else {
+        services.markDeferredPythonMcpToolsUnavailable();
+      }
+      if (!desktopShutdownGate.isOpen) return;
+      const started = await services.startPluginProviderRuntime().catch((error) => {
+        debugMain('provider-runtime:start-failed', error instanceof Error ? error.message : String(error));
+        return { started: false as const };
+      });
+      debugMain('provider-runtime:start', started);
+    } catch (error) {
+      debugMain('createWindow:python-runtime-failed', error instanceof Error ? error.message : String(error));
+      if (!desktopShutdownGate.isOpen) throw error;
+      const mcpRegistered = await mcpRegistrationPromise;
+      if (!desktopShutdownGate.isOpen) throw error;
       services.markDeferredPythonMcpToolsUnavailable();
       if (!mcpRegistered) return;
       const started = await services.startPluginProviderRuntime().catch(() => ({ started: false as const }));
       debugMain('provider-runtime:start-after-python-failure', started);
-    });
-  });
+    }
+  };
+  void (async () => {
+    try {
+      try { await runPythonPreparation(); }
+      finally { pythonWriter.release(); }
+      completePythonRetirement();
+    } catch (error) { failPythonRetirement(error); }
+  })();
   return window;
 }
 
