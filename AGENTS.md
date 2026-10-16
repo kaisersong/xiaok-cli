@@ -70,3 +70,12 @@
 - 报告里的每个数字必须对应一份原始日志；机器恢复后不能用对话摘要当证据，要重测。
 - 只按自己记录的 pid 或自己的工作目录路径清理进程，不按命令名批量杀；起进程时把 pid 记到自己的文件里。
 - 凡写「现在没有行为 / 不生效 / 不存在」类结论，必须附写者自己读到的 `文件:行号` 或运行结果；转引他人结论要标「转引、未核实」，不能当事实往下传。
+
+<!-- CODEGRAPH_START -->
+## CodeGraph 代码定位
+
+- 本机已建索引时，已知符号用 `codegraph query <symbol> --limit 5`；追调用关系用 `codegraph callers <symbol> --limit 5`，先取位置与签名。
+- 结构问题可用 `codegraph context "<symbols>" --max-nodes 3 --no-code`；需要源码再按返回位置用 `codegraph node --file <path> --offset <line> --limit 60`。MCP `codegraph_explore` / CLI `explore` 首次限制 `maxFiles=1` / `--max-files 1`。
+- 精确文本与文件查找仍用 `rg` / `rg --files`。中文描述、泛词或图查询无结果时用 `rg` 补查，不能据此断言代码不存在。
+- 首次使用检查 `codegraph status --json`；有 pending changes 用 `codegraph sync`，提示 `reindexRecommended` 时备份本地缓存后 `codegraph index`。不要将索引、备份或本机路径提交 Git。
+<!-- CODEGRAPH_END -->
