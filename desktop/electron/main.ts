@@ -17,6 +17,7 @@ import { registerDesktopSmallConfigIpc } from './desktop-small-config-typed-ipc.
 import type { ThreadMetadataSnapshotDto } from '../shared/thread-metadata-ipc-contract.js';
 import { createDesktopKSwarmService, startDesktopKSwarmService } from './kswarm-service-lifetime.js';
 import { registerDesktopBeforeQuit, disposeDesktopLifetimeSteps } from './desktop-before-quit.js';
+import { assertStandardIpcPromise } from './ipc-native-promise.js';
 import {deferLoopArtifactPickerWindowDestroy} from './loop-artifact-save-picker.js';
 import {createLoopOutputService,registerLoopOutputIpc} from './loop-output-service.js';
 import {createLoopCurrentViews,registerLoopCurrentViewIpc} from './loop-current-views.js';
@@ -215,6 +216,98 @@ function authorizeDesktopInvoke(event: Electron.IpcMainInvokeEvent): void {
  * unavailable result until `start()` runs.
  */
 const pluginProviderRuntime = new PluginProviderRuntimeFacade();
+
+// Standard bootstrap only; genuine Main async producer, not arbitrary thenables.
+const McpNativePromise = Promise;
+const mcpPromiseGlobal = globalThis;
+const mcpPromiseOwnDescriptor = Object.getOwnPropertyDescriptor;
+const mcpPromisePrototype = McpNativePromise.prototype;
+const mcpPromiseInitialThen = mcpPromiseOwnDescriptor(mcpPromisePrototype, 'then');
+const mcpPreProducerWitness = new McpNativePromise<void>(resolve => resolve());
+function assertMcpRegistrationPromiseAmbient(): void {
+  // Reuse the real descriptor witness FIRST, before any gate/callback/effect.
+  assertStandardIpcPromise(mcpPreProducerWitness, 'mcp_registration_promise_contract');
+  const globalPromise = mcpPromiseOwnDescriptor(mcpPromiseGlobal, 'Promise');
+  const currentThen = mcpPromiseOwnDescriptor(mcpPromisePrototype, 'then');
+  if (!globalPromise || !('value' in globalPromise) || globalPromise.value !== McpNativePromise
+    || !mcpPromiseInitialThen || !currentThen || !('value' in mcpPromiseInitialThen) || !('value' in currentThen)
+    || currentThen.value !== mcpPromiseInitialThen.value || currentThen.writable !== mcpPromiseInitialThen.writable
+    || currentThen.enumerable !== mcpPromiseInitialThen.enumerable || currentThen.configurable !== mcpPromiseInitialThen.configurable) {
+    throw Error('mcp_registration_promise_contract');
+  }
+}
+/** Main-only callback ownership. Native await still reads raw.constructor:
+ * hostile own constructor, foreign raw and mid-producer mutation are unsupported. */
+function startOwnedMcpRegistration(options: {
+  isOpen(): boolean;
+  acquireWriter(): { release(): void };
+  registerFinalLifetime(dispose: () => Promise<void>): void;
+  register(): Promise<{ dispose: () => Promise<void> }>;
+  startBridge(): void;
+  reportRegistrationFailure(error: unknown): void;
+  reportOwnershipFailure(error: unknown): void;
+}): { registered: Promise<boolean>; dispose(): Promise<void> } {
+  assertMcpRegistrationPromiseAmbient();
+  if (!options.isOpen()) throw Error('mcp_registration_shutdown');
+  const writer = options.acquireWriter();
+  let resolveReady!: (dispose: (() => Promise<void>) | undefined) => void;
+  let rejectReady!: (error: unknown) => void;
+  const ready = new McpNativePromise<(() => Promise<void>) | undefined>((resolve, reject) => {
+    resolveReady = resolve; rejectReady = reject;
+  });
+  let resolveRegistered!: (value: boolean) => void, rejectRegistered!: (error: unknown) => void;
+  const registered = new McpNativePromise<boolean>((resolve, reject) => {
+    resolveRegistered = resolve; rejectRegistered = reject;
+  });
+  // Native-await observers, attached before producer; original promises retained.
+  void (async () => { try { await ready; } catch (error) { try { options.reportOwnershipFailure(error); } catch {} } })();
+  void (async () => { try { await registered; } catch (error) { try { options.reportOwnershipFailure(error); } catch {} } })();
+  let disposal: Promise<void> | undefined;
+  const dispose = (): Promise<void> => {
+    if (disposal) return disposal;
+    let complete!: () => void, fail!: (error: unknown) => void;
+    const closing = new McpNativePromise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    disposal = closing; // Memoize before observer body, never self-capture a pending local.
+    void (async () => {
+      try { const returnedDispose = await ready; await returnedDispose?.(); complete(); }
+      catch (error) { fail(error); }
+    })();
+    return closing;
+  };
+  try { options.registerFinalLifetime(dispose); }
+  catch (error) {
+    rejectReady(error); rejectRegistered(error);
+    try { writer.release(); } catch (releaseError) { try { options.reportOwnershipFailure(releaseError); } catch {} }
+    throw error;
+  }
+  void (async () => {
+    let value = false, failure: { reason: unknown } | undefined;
+    try {
+      let outcome: { ok: true; result: { dispose: () => Promise<void> } } | { ok: false; error: unknown };
+      try {
+        if (!options.isOpen()) throw Error('mcp_registration_shutdown');
+        const raw = options.register(); // Exact known-native async output, captured before await.
+        outcome = { ok: true, result: await raw };
+      } catch (error) { outcome = { ok: false, error }; }
+      if (outcome.ok) {
+        resolveReady(outcome.result.dispose);
+        if (options.isOpen()) options.startBridge();
+        value = true;
+      } else {
+        const openAtFailure = options.isOpen();
+        if (openAtFailure) resolveReady(undefined); else rejectReady(outcome.error);
+        options.reportRegistrationFailure(outcome.error);
+        if (openAtFailure && options.isOpen()) options.startBridge();
+      }
+    } catch (error) {
+      failure = { reason: error }; rejectReady(error);
+    }
+    // No downstream lifetime dependency; settle status only after release.
+    try { writer.release(); } catch (error) { failure = { reason: error }; rejectReady(error); }
+    if (failure) rejectRegistered(failure.reason); else resolveRegistered(value);
+  })();
+  return { registered, dispose };
+}
 
 /**
  * Design v58 §5.5: the only Xiaok-owned `before-quit` owner. Registered at module
@@ -674,7 +767,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     ['desktop:kswarm:resumeWorkflowRun', (_event, input) => runtimeActions.resumeWorkflowRun(input, 'user')],
   ]);
   registerRuntimeActionIpc(shutdownAwareIpc, runtimeActionProducers);
-  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): void }> = [];
+  const runtimeBridgeClients: Array<{ start(): Promise<void>; stop(): Promise<void> }> = [];
   let runtimeBridgeStarted = false;
   let restartRuntimeBridgeService: () => Promise<void> = async () => { throw Error('service_runtime_unavailable'); };
   const serviceControl = createDesktopServiceControl({
@@ -1454,26 +1547,56 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   });
 
   // Register MCP plugin tools (connects to MCP servers declared in the plugins dir)
-  let mcpDispose: (() => Promise<void>) | undefined;
   let runtimeBridgeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
-  const stopRuntimeBridge = () => {
+  let runtimeBridgeStartEpoch = 0;
+  let runtimeBridgeStopping: Promise<void> | undefined;
+  const stopRuntimeBridge = (): Promise<void> => {
+    if (runtimeBridgeStopping) return runtimeBridgeStopping;
+    let complete!: () => void, fail!: (error: unknown) => void;
+    const stopping = new Promise<void>((resolve, reject) => { complete = resolve; fail = reject; });
+    runtimeBridgeStopping = stopping; // Capture before a synchronous close can reenter.
+    void (async () => { try { await stopping; } catch {} })();
+    runtimeBridgeStartEpoch += 1;
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
-    for (const client of runtimeBridgeClients.splice(0)) client.stop();
+    const owned = [...runtimeBridgeClients];
     runtimeBridgeStarted = false;
+    // Every original synchronous stop is attempted before the first await.
+    const pending: Promise<void>[] = [], failures: unknown[] = [];
+    for (const client of owned) {
+      try { pending.push(client.stop()); } catch (error) { failures.push(error); }
+    }
+    void (async () => {
+      for (const raw of pending) { try { await raw; } catch (error) { failures.push(error); } }
+      if (failures.length) {
+        fail(new AggregateError(failures, 'runtime_bridge_clients_stop_unconfirmed'));
+        return; // Retain memo and client references; never reopen an unconfirmed generation.
+      }
+      for (const client of owned) {
+        const index = runtimeBridgeClients.indexOf(client);
+        if (index >= 0) runtimeBridgeClients.splice(index, 1);
+      }
+      runtimeBridgeStopping = undefined;
+      complete();
+    })();
+    return stopping;
   };
   const startRuntimeBridge = () => {
-    if (runtimeBridgeStarted) return;
+    if (runtimeBridgeStopping || runtimeBridgeStarted || !desktopShutdownGate.isOpen) return;
+    const startEpoch = ++runtimeBridgeStartEpoch;
     runtimeBridgeStarted = true;
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
     void kswarmStartPromise.then(async () => {
+      if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const { loadConfig } = await import('../../src/utils/config.js');
+      if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const cfg = await loadConfig();
+      if (!desktopShutdownGate.isOpen || startEpoch !== runtimeBridgeStartEpoch) return;
       const rawConcurrency = cfg.kswarm?.maxConcurrentTasks ?? 3;
       const maxConcurrentTasks = Math.max(1, Math.min(10, rawConcurrency));
       const brokerUrl = 'http://127.0.0.1:4318';
@@ -1528,7 +1651,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     });
   };
   restartRuntimeBridgeService = async () => {
-    stopRuntimeBridge();
+    await stopRuntimeBridge();
     startRuntimeBridge();
   };
 
@@ -1558,20 +1681,25 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
     const sleptMs = powerSuspendedAtMs ? Date.now() - powerSuspendedAtMs : 0;
     powerSuspendedAtMs = 0;
     debugMain('powerMonitor:resume');
-    void restartRuntimeBridgeService();
+    void restartRuntimeBridgeService().catch(error => { debugMain('runtime-bridge:restart-unconfirmed', error instanceof Error ? error.message : String(error)); });
     void postRuntimePower('/runtime/resume', { sleptMs });
   });
 
+  assertMcpRegistrationPromiseAmbient();
+  if (!desktopShutdownGate.isOpen) return window;
   runtimeBridgeFallbackTimer = setTimeout(startRuntimeBridge, 10_000);
-  const mcpRegistrationPromise = services.registerMcpTools().then(({ dispose }) => {
-    mcpDispose = dispose;
-    startRuntimeBridge();
-    return true;
-  }).catch((error) => {
-    debugMain('createWindow:mcp-registration-failed', error instanceof Error ? error.message : String(error));
-    startRuntimeBridge();
-    return false;
+  const mcpRegistrationOwner = startOwnedMcpRegistration({
+    isOpen: () => desktopShutdownGate.isOpen,
+    acquireWriter: () => desktopShutdownGate.acquire('bootstrap_queue', 'mcp-tools-registration'),
+    // Original ordinary bridge cleanup still closes first. This early-owned
+    // final fallback also covers startup abort before that step is installed.
+    registerFinalLifetime: dispose => { desktopFinalLifetimeSteps.unshift({ name: 'mcp-tools-registration', run: dispose }); },
+    register: () => services.registerMcpTools(),
+    startBridge: startRuntimeBridge,
+    reportRegistrationFailure: error => debugMain('createWindow:mcp-registration-failed', error instanceof Error ? error.message : String(error)),
+    reportOwnershipFailure: error => debugMain('createWindow:mcp-registration-ownership-failed', error instanceof Error ? error.message : String(error)),
   });
+  const mcpRegistrationPromise = mcpRegistrationOwner.registered;
   debugMain('createWindow:mcp-registration-started');
 
   const loopTimedCompletion=createLoopTimedCompletionHost({
@@ -1754,12 +1882,14 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
   // provider close is actually awaited before the process exits.
   registerLifetimeDisposerStep('provider-runtime', () => pluginProviderRuntime.dispose());
   registerLifetimeDisposerStep('kswarm-and-bridges', async () => {
+    runtimeBridgeStartEpoch += 1;
+    runtimeBridgeStarted = false;
     kswarmStreamBridge.dispose();
     if (runtimeBridgeFallbackTimer) {
       clearTimeout(runtimeBridgeFallbackTimer);
       runtimeBridgeFallbackTimer = null;
     }
-    for (const client of runtimeBridgeClients) client.stop();
+    await stopRuntimeBridge();
     timedActionScheduler.stop();
     // SQLite owners close only in the coordinator durable-store phase.
     mobileBonjourAdvertiser.stop();
@@ -1767,7 +1897,7 @@ async function createInitialWindowResources(): Promise<BrowserWindow> {
       debugMain('mobileGateway.stop failed', err instanceof Error ? err.message : String(err));
     });
     mobileRelayBridge?.stop();
-    await mcpDispose?.();
+    await mcpRegistrationOwner.dispose();
   });
 
   // Reminder IPC handlers

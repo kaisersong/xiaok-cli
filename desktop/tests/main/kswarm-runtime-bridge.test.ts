@@ -254,7 +254,7 @@ describe('kswarm runtime bridge', () => {
     expect(progressPosts.map(post => post.body.payload?.stage)).toContain('started');
     expect(progressPosts.map(post => post.body.payload?.stage)).toContain('running');
     expect(progressPosts.some(post => typeof post.body.payload?.telemetry?.lastHeartbeatAt === 'number')).toBe(true);
-    client.stop();
+    await client.stop();
   });
 
   it('reports queued heartbeats until the actual execution callback runs', async () => {
@@ -280,7 +280,7 @@ describe('kswarm runtime bridge', () => {
     const progress = posts.filter(p => p.body.kind === 'report_progress');
     expect(progress.filter(p => p.body.payload.stage === 'started')).toHaveLength(1);
     expect(progress.some(p => p.body.payload.telemetry?.executionState === 'running')).toBe(true);
-    client.stop();
+    await client.stop();
   });
 
   it('aborts a running request_task and reports task_cancelled when cancel_task arrives', async () => {
@@ -349,7 +349,7 @@ describe('kswarm runtime bridge', () => {
       runId: 'run-1',
       reason: 'user_aborted',
     });
-    client.stop();
+    await client.stop();
   });
 
   it('reports a task_failed intent instead of running when request_task lacks a file handoff', async () => {
@@ -436,7 +436,7 @@ describe('kswarm runtime bridge', () => {
         errorMessage: 'desktop_task_timeout',
       }),
     });
-    client.stop();
+    await client.stop();
   });
 
   it('preserves the hosted logical agent identity when desktop capacity is full', async () => {
@@ -490,7 +490,7 @@ describe('kswarm runtime bridge', () => {
 
     firstTask.resolve({ ok: true });
     await nextTick();
-    client.stop();
+    await client.stop();
   });
 
   it('reports task_cancelled when the desktop handoff is aborted', async () => {
@@ -583,7 +583,7 @@ describe('kswarm runtime bridge', () => {
         reason: 'user_aborted',
       }),
     });
-    client.stop();
+    await client.stop();
   });
 
   it('routes cancel_task broker intents to the bridge cancellation hook', async () => {
