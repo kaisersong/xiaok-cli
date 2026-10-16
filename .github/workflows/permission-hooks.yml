@@ -8,6 +8,12 @@ on:
       - 'src/ai/tools/index.ts'
       - 'src/ui/permission-prompt.ts'
       - 'src/commands/chat-permission.ts'
+      - 'src/commands/chat.ts'
+      - 'src/ui/resume-history.ts'
+      - 'src/ui/render.ts'
+      - 'tests/ui/resume-history.test.ts'
+      - 'tests/ui/render.test.ts'
+      - 'tests/e2e/resume-history-visibility.py'
       - 'src/types.ts'
       - 'tests/runtime/*hook*.test.ts'
       - 'tests/ai/tools/index.test.ts'
@@ -25,6 +31,12 @@ on:
       - 'src/ai/tools/index.ts'
       - 'src/ui/permission-prompt.ts'
       - 'src/commands/chat-permission.ts'
+      - 'src/commands/chat.ts'
+      - 'src/ui/resume-history.ts'
+      - 'src/ui/render.ts'
+      - 'tests/ui/resume-history.test.ts'
+      - 'tests/ui/render.test.ts'
+      - 'tests/e2e/resume-history-visibility.py'
       - 'src/types.ts'
       - 'tests/runtime/*hook*.test.ts'
       - 'tests/ai/tools/index.test.ts'
@@ -72,6 +84,13 @@ jobs:
           .test-dist/tests/ai/permissions/authz-p0-3-adoptions.test.js
           .test-dist/tests/ai/adapters/openai-history-images.test.js
           .test-dist/tests/ai/adapters/openai.test.js
+          .test-dist/tests/ui/resume-history.test.js
+          .test-dist/tests/ui/render.test.js
+          .test-dist/tests/ui/transcript-buffer.test.js
+          .test-dist/tests/ui/transcript-pager.test.js
+          .test-dist/tests/ai/runtime/session.test.js
+          .test-dist/tests/ai/runtime/session-graph.test.js
+          .test-dist/tests/ai/runtime/usage.test.js
       - uses: actions/setup-python@v5
         if: runner.os == 'Linux'
         with:
@@ -84,4 +103,5 @@ jobs:
         run: |
           python tests/e2e/permission-hook-fallback.py
           python tests/e2e/text-model-resume.py
+          python tests/e2e/resume-history-visibility.py
           python tests/e2e/persistent-command-approval.py

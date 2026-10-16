@@ -1,4 +1,5 @@
 import { confirmChatPermission } from './chat-permission.js';
+import { getResumeHistoryMessages } from '../ui/resume-history.js';
 import { normalizeAllowedSenders, SENDER_ALLOWLIST_MIGRATION } from '../channels/sender-allowlist.js';
 import { runPtyCommand } from './cli-pty-command.js';
 import { existsSync, readFileSync } from 'node:fs';
@@ -2399,7 +2400,7 @@ async function runChat(initialInput, opts) {
                 replayedRows += countTerminalRowsForOutput(chunk, historyColumns);
             };
             writeHistoryChunk('\n');
-            for (const msg of historyMessages) {
+            for (const msg of getResumeHistoryMessages(historyMessages, persistedSession?.compactions)) {
                 if (msg.role === 'user') {
                     for (const block of msg.content) {
                         recordHistoryBlockInBuffer('user', block);
