@@ -13,6 +13,7 @@ import { desktopObservationSessionId, DesktopTaskObservationStore } from '../../
 import { mergeProtectedObservationClosures, type ProtectedObservationClosure } from '../../src/ai/runtime/protected-observation-closure.js';
 import type { GroupObservationReferenceTicket } from '../../src/runtime/task-host/task-runtime-host.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { reportDiagnosticSafely } from './diagnostic-isolation.js';
 import { isDeepStrictEqual } from 'node:util';
 import { MultiAgentCoordinator, type AgentExecutionHandle, type AgentIdentity, type ManagedAgentSession, type MultiAgentEvent, type MultiAgentSnapshot, type PreparedAgentHandle } from '../../src/ai/agents/multi-agent-coordinator.js';
 import type { InProcessTaskRuntimeHost, TaskIdentityReservation, TaskCancellationDecision, TaskRunnerInput } from '../../src/runtime/task-host/task-runtime-host.js';
@@ -72,6 +73,18 @@ export interface DesktopPreparedObservationSession {
  session: ManagedAgentSession; owner: ObservationSessionOwner; registry: ToolRegistry; publication: ObservationMessagePublication; observationStore: DesktopTaskObservationStore;
  releasePreparation?():void;
 }
+/** Main-only observation DATA: no actor, lease, ticket, error body, or callable capability. */
+export interface ThreadDeletionDiagnostic {
+  readonly reason: 'same_operation_replay' | 'another_attempt_in_progress' | 'admitted_existing_receipt_return' | 'before_thread_stop_started' | 'before_thread_stop_confirmed' | 'before_thread_stop_failed' | 'scan_already_pending' | 'scan_deadline_elapsed' | 'scan_facts_ready' | 'stop_deadline_elapsed' | 'goal_stop_failed' | 'unknown_task_attribution' | 'goal_stop_not_confirmed' | 'new_uninspected_inflight' | 'target_task_still_inflight' | 'task_stop_failed' | 'prepared_task_stop_not_confirmed' | 'live_group_resources' | 'resource_commands_in_use' | 'persisted_agent_or_disk_resources' | 'observation_group_resources' | 'before_commit' | 'before_commit_returned' | 'history_deleted' | 'observation_commit_returned' | 'committed' | 'caught_error' | 'disposed_unknown' | 'receipt_update_failed_unknown' | 'return_receipt';
+  readonly threadHash: string;
+  readonly operationHash: string;
+  readonly facts?: Readonly<{
+    goalConfirmed?: boolean; goalFailed?: boolean; initialInFlight?: number; inspected?: number; targetTasks?: number;
+    roots?: number; leases?: number; goalDecisions?: number; childExecutions?: number; followups?: number; residentSessions?: number;
+    receiptState?: MultiAgentControlResult['state'];
+  }>;
+}
+
 export interface DesktopMultiAgentServiceOptions {
   store: DesktopMultiAgentStore;
   coordinator: DesktopExecutionCoordinator;
@@ -96,6 +109,8 @@ export interface DesktopMultiAgentServiceOptions {
   prepareObservationFollowup?(preparation:object):Promise<PreparedManagedCompoundFollowup>;
   prepareObservationMessage?(input: { context: DesktopAgentExecutionContext; sourceOwner: ObservationSessionOwner; recipientOwner: ObservationSessionOwner; operationId: string; text: string; assertCurrent(): void }): Promise<ObservationMessagePublication>;
   closeGraceMs?: number;
+  /** Optional main-only diagnostics; return/throw never governs deletion. */
+  onThreadDeletionDiagnostic?(fact: ThreadDeletionDiagnostic): void;
   /** Main Goal owner cancellation. Never an agent tool or renderer callback. */
   beforeThreadDeletion?(threadId: string): Promise<void>;
   /** Synchronous journal prepared after physical cleanup; returned callback follows durable thread deletion. */
@@ -1323,6 +1338,19 @@ export class DesktopMultiAgentService {
     const scope = this.requireUserAccess(input.access);
     if (!this.initialized || this.disposed) throw new Error('multi_agent_runtime_not_ready');
     const threadId = scope.threadId;
+    const diagnosticState = { active: false };
+    const reportDeletion = (reason: ThreadDeletionDiagnostic['reason'], facts?: ThreadDeletionDiagnostic['facts'] | (() => ThreadDeletionDiagnostic['facts'])) => {
+      reportDiagnosticSafely<ThreadDeletionDiagnostic>(diagnosticState,
+        () => this.options.onThreadDeletionDiagnostic,
+        () => {
+          const values = typeof facts === 'function' ? facts() : facts;
+          return Object.freeze({ reason,
+            threadHash: createHash('sha256').update(threadId).digest('hex'),
+            operationHash: createHash('sha256').update(input.operationId).digest('hex'),
+            ...(values ? { facts: Object.freeze({ ...values }) } : {}),
+          });
+        });
+    };
     const commands = this.threadCommands.get(threadId) ?? this.groups.get(this.options.store.getThread(threadId)?.activeGroupId ?? '')?.commands ?? new MultiAgentCommandSequencer();
     const token = Symbol('thread deletion');
     try {
@@ -1332,10 +1360,11 @@ export class DesktopMultiAgentService {
       const requestHash = this.requestHash(input.operationId, { actorId: scope.actorId, threadId, expectedRevision: input.expectedThreadRevision });
       if (thread.deletionReceipt?.operationId === input.operationId) {
         if (thread.deletionReceipt.requestHash !== requestHash) throw new Error('operation_id_conflict');
+        reportDeletion('same_operation_replay');
         return this.readThreadDeletion({ access: input.access }).operation!;
       }
       if (thread.threadRevision !== input.expectedThreadRevision || thread.deleteState === 'deleted') throw new Error('stale thread deletion revision');
-      if (this.deletionAttempts.has(threadId)) return this.readThreadDeletion({ access: input.access }).operation!;
+      if (this.deletionAttempts.has(threadId)) { reportDeletion('another_attempt_in_progress'); return this.readThreadDeletion({ access: input.access }).operation!; }
       this.options.store.transaction((acceptedPort) => {
         acceptedPort.beginThreadDeletion(threadId, { operationId: input.operationId, actorId: scope.actorId, bootId: this.options.store.bootId,
           expectedRevision: input.expectedThreadRevision, requestHash, startedAt: Date.now(), result: { operationId: input.operationId, state: 'cleanup_pending' } });
@@ -1353,7 +1382,7 @@ export class DesktopMultiAgentService {
       this.publishGroupChanged(threadId, thread.activeGroupId ?? null, thread.activeGroupId ?? null);
       return null;
     });
-    if (admitted) return admitted;
+    if (admitted) { reportDeletion('admitted_existing_receipt_return', { receiptState: admitted.state }); return admitted; }
       this.requireUserAccess(input.access);
       if (this.deletionAttempts.get(threadId) !== token || this.disposed) throw new Error('stale thread deletion attempt');
       const deadline = performance.now() + Math.min(this.grace, 500);
@@ -1361,11 +1390,11 @@ export class DesktopMultiAgentService {
       if (!stops || stops.goalFailed) {
         const previousTasks = stops?.tasks;
         const created = { goal: Promise.resolve(), goalConfirmed: false, goalFailed: false, tasks: previousTasks ?? new Map<string, { promise: Promise<void>; executionObserved: boolean; state: 'pending' | 'confirmed' | 'failed' }>() };
-        created.goal = this.trackDeletionStop(Promise.resolve().then(() => this.options.beforeThreadDeletion?.(threadId)).then(() => { created.goalConfirmed = true; }, () => { created.goalFailed = true; }));
+        created.goal = this.trackDeletionStop(Promise.resolve().then(() => { reportDeletion('before_thread_stop_started'); return this.options.beforeThreadDeletion?.(threadId); }).then(() => { created.goalConfirmed = true; reportDeletion('before_thread_stop_confirmed'); }, () => { created.goalFailed = true; reportDeletion('before_thread_stop_failed'); }));
         stops = created; this.deletionStops.set(threadId, stops);
       }
       let scan = this.deletionScans.get(threadId);
-      if (scan && !scan.facts) return this.readThreadDeletion({ access: input.access }).operation!;
+      if (scan && !scan.facts) { reportDeletion('scan_already_pending'); return this.readThreadDeletion({ access: input.access }).operation!; }
       if (!scan) {
         const created: ThreadDeletionScan = { promise: Promise.resolve().then(() => this.collectThreadDeletionScan(threadId, [...stops!.tasks.keys()])) };
         // The tracked promise covers every host IO, not merely this request's
@@ -1375,11 +1404,12 @@ export class DesktopMultiAgentService {
           throw error;
         }));
         scan = created; this.deletionScans.set(threadId, scan);
-        if (!await this.waitForDeletionDeadline(scan.promise, deadline)) return this.readThreadDeletion({ access: input.access }).operation!;
+        if (!await this.waitForDeletionDeadline(scan.promise, deadline)) { reportDeletion('scan_deadline_elapsed'); return this.readThreadDeletion({ access: input.access }).operation!; }
       }
       this.requireUserAccess(input.access);
       if (this.deletionAttempts.get(threadId) !== token || this.disposed) throw new Error('stale thread deletion attempt');
       const { initialInFlight, inspected, targetTasks, terminalTasks, cancellableTasks, unknownAttribution } = scan.facts!;
+      reportDeletion('scan_facts_ready', { initialInFlight: initialInFlight.size, inspected: inspected.size, targetTasks: targetTasks.size });
       for (const taskId of targetTasks) {
         const previous = stops.tasks.get(taskId);
         if (previous && initialInFlight.has(taskId)) previous.executionObserved = true;
@@ -1392,33 +1422,51 @@ export class DesktopMultiAgentService {
           stops.tasks.set(taskId, cancellation);
         }
       }
-      await this.waitForDeletionDeadline(Promise.all([stops.goal, ...[...stops.tasks.values()].map(stop => stop.promise)]), deadline);
+      const stopsReady = await this.waitForDeletionDeadline(Promise.all([stops.goal, ...[...stops.tasks.values()].map(stop => stop.promise)]), deadline);
+      if (!stopsReady) reportDeletion('stop_deadline_elapsed', { goalConfirmed: stops.goalConfirmed, goalFailed: stops.goalFailed });
       await commands.run(() => {
         this.requireUserAccess(input.access);
         if (this.deletionAttempts.get(threadId) !== token || this.disposed) throw new Error('stale thread deletion attempt');
-        if (stops!.goalFailed) throw new Error('multi_agent_thread_goal_cancellation_failed');
-        if (unknownAttribution) { this.deletionScans.delete(threadId); return; }
-        if (!stops!.goalConfirmed) return;
+        if (stops!.goalFailed) { reportDeletion('goal_stop_failed'); throw new Error('multi_agent_thread_goal_cancellation_failed'); }
+        if (unknownAttribution) { reportDeletion('unknown_task_attribution'); this.deletionScans.delete(threadId); return; }
+        if (!stops!.goalConfirmed) { reportDeletion('goal_stop_not_confirmed'); return; }
         const currentInFlight = this.host!.inFlightTaskIds();
-        if (currentInFlight.some(id => !inspected.has(id))) { this.deletionScans.delete(threadId); return; }
-        if (currentInFlight.some(id => targetTasks.has(id))) return;
+        if (currentInFlight.some(id => !inspected.has(id))) { reportDeletion('new_uninspected_inflight'); this.deletionScans.delete(threadId); return; }
+        if (currentInFlight.some(id => targetTasks.has(id))) { reportDeletion('target_task_still_inflight'); return; }
         // Prepared tasks never registered an execution, so an empty execution
         // map cannot prove they were stopped. Actual terminal history or a
         // confirmed stop is required; late audit ACKs of exited runs are not.
         for (const [taskId, stop] of stops!.tasks) {
           if (stop.executionObserved || terminalTasks.has(taskId)) continue;
-          if (stop.state === 'failed') throw new Error('multi_agent_thread_task_cancellation_failed');
-          if (stop.state !== 'confirmed') return;
+          if (stop.state === 'failed') { reportDeletion('task_stop_failed'); throw new Error('multi_agent_thread_task_cancellation_failed'); }
+          if (stop.state !== 'confirmed') { reportDeletion('prepared_task_stop_not_confirmed'); return; }
         }
         const groups = [...this.groups.values()].filter(group => this.options.store.requireGroup(group.id).threadId === threadId);
         if (groups.some(group => group.root || group.lease && !group.lease.released || this.goalDecisions.has(group.id)
-          || [...group.children.values()].some(child => child.execution || child.followups.length || child.sessionResident))) return;
-        if ([...this.resourceCommands].some(([id, owner]) => owner.users > 0 && this.options.store.getGroup(id)?.threadId === threadId)) return;
-        if (this.options.store.threadHasUnreleasedResources(threadId)||groups.some(group=>this.observationResources.has(group.id))) return;
+          || [...group.children.values()].some(child => child.execution || child.followups.length || child.sessionResident))) {
+          reportDeletion('live_group_resources', () => ({
+            roots: groups.filter(group => !!group.root).length, leases: groups.filter(group => !!group.lease && !group.lease.released).length,
+            goalDecisions: groups.filter(group => this.goalDecisions.has(group.id)).length,
+            childExecutions: groups.reduce((n, group) => n + [...group.children.values()].filter(child => !!child.execution).length, 0),
+            followups: groups.reduce((n, group) => n + [...group.children.values()].reduce((n, child) => n + child.followups.length, 0), 0),
+            residentSessions: groups.reduce((n, group) => n + [...group.children.values()].filter(child => child.sessionResident).length, 0),
+          }));
+          return;
+        }
+        if ([...this.resourceCommands].some(([id, owner]) => owner.users > 0 && this.options.store.getGroup(id)?.threadId === threadId)) { reportDeletion('resource_commands_in_use'); return; }
+        let persistedResourcesPending = false;
+        if ((persistedResourcesPending = this.options.store.threadHasUnreleasedResources(threadId))||groups.some(group=>this.observationResources.has(group.id))) {
+          reportDeletion(persistedResourcesPending ? 'persisted_agent_or_disk_resources' : 'observation_group_resources');
+          return;
+        }
         const oldGroupId = this.options.store.getThread(threadId)!.activeGroupId ?? null;
+        reportDeletion('before_commit');
         const commitObservationDeletion=this.options.beforeThreadDeletionCommit?.(threadId,input.operationId);
+        reportDeletion('before_commit_returned');
         this.options.store.deleteThreadHistory(threadId, input.operationId);
+        reportDeletion('history_deleted');
         commitObservationDeletion?.();
+        reportDeletion('observation_commit_returned');
         for (const group of groups) {
           group.deactivating = true; clearTimeout(group.deadlineTimer);
           for (const child of group.children.values()) { clearTimeout(child.ttl); clearTimeout(child.stopTimer); }
@@ -1429,18 +1477,22 @@ export class DesktopMultiAgentService {
         this.deletionStops.delete(threadId);
         this.deletionScans.delete(threadId);
         this.publishGroupChanged(threadId, oldGroupId, null);
+        reportDeletion('committed');
       });
     } catch (error) {
+      reportDeletion('caught_error');
       if (this.deletionAttempts.get(threadId) !== token) throw error;
-      if (this.disposed) return { operationId: input.operationId, state: 'unknown' };
+      if (this.disposed) { reportDeletion('disposed_unknown'); return { operationId: input.operationId, state: 'unknown' }; }
       if (this.deletionAttempts.get(threadId) === token) {
         try { this.options.store.updateThreadDeletion(threadId, input.operationId, { operationId: input.operationId, state: 'unknown', error: truncateMultiAgentText(String(error), 512).text }); }
-        catch { return { operationId: input.operationId, state: 'unknown' }; }
+        catch { reportDeletion('receipt_update_failed_unknown'); return { operationId: input.operationId, state: 'unknown' }; }
       }
     } finally {
       if (this.deletionAttempts.get(threadId) === token) { this.deletionAttempts.delete(threadId); if (this.threadCommands.get(threadId) === commands) this.threadCommands.delete(threadId); }
     }
-    return this.readThreadDeletion({ access: input.access }).operation!;
+    const result = this.readThreadDeletion({ access: input.access }).operation!;
+    reportDeletion('return_receipt', { receiptState: result.state });
+    return result;
   }
 
   private async collectThreadDeletionScan(threadId: string, previousTasks: string[]): Promise<ThreadDeletionScanFacts> {

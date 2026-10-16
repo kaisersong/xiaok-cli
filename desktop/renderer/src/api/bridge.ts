@@ -1,3 +1,4 @@
+import { emitThreadDeletionPhase, type ThreadDeletionPhase } from './thread-deletion-diagnostics';
 import { AUTOMATION_CONFIG_SCHEMA, AUTOMATION_OVERVIEW_SCHEMA } from '../../../shared/automation-config-ipc-contract';
 import type { MobileRelaySignInResult } from '../../../shared/mobile-signin-ipc-contract';
 import type { ManagedAgentInput, ManagedAgentResult } from '../../../shared/model-provider-ipc-contract.js';
@@ -212,6 +213,8 @@ async function createTaskWithRetry(input: {
 }
 
 const log = createLogger('api-bridge');
+const threadDeletionDiagnosticState = { active: false };
+let threadDeletionDiagnosticAttemptOrdinal = 0;
 
 export const api = {
   // ---------------------
@@ -324,42 +327,81 @@ export const api = {
 
   async deleteThread(id: string): Promise<void> {
     if (isDesktop()) {
+      const attemptOrdinal = ++threadDeletionDiagnosticAttemptOrdinal;
+      const reportPhase = (phase: ThreadDeletionPhase, taskOrdinal?: number) => {
+        emitThreadDeletionPhase(threadDeletionDiagnosticState, () => console, () => ({
+          attemptOrdinal, phase, ...(taskOrdinal === undefined ? {} : { taskOrdinal }),
+        }));
+      };
+      reportPhase('delete_enter');
+      try {
       const desktop = getDesktopApi();
       if (!desktop?.getMultiAgentThreadDeletion || !desktop.deleteMultiAgentThread) {
+        reportPhase('desktop_api_unavailable');
         throw new Error('thread_deletion_unavailable');
       }
+      reportPhase('thread_read_start');
       const thread = await api.getThread(id), identity = threadTaskIdentity(thread);
+      reportPhase('thread_read_done');
+      reportPhase('receipt_read_start');
       const snapshot = await desktop.getMultiAgentThreadDeletion({ threadId: id });
+      reportPhase('receipt_read_done');
       if (snapshot.threadId !== id || !Number.isSafeInteger(snapshot.threadRevision) || snapshot.threadRevision < 0) {
+        reportPhase('receipt_invalid');
         throw new Error('thread_deletion_unknown');
       }
-      if (!thread && !(snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed')) throw new Error('thread_deletion_pending');
+      if (!thread && !(snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed')) { reportPhase('thread_absent_pending'); throw new Error('thread_deletion_pending'); }
       const taskIds = [...new Set([...(thread?.taskIds ?? []), ...(thread?.currentTaskId ? [thread.currentTaskId] : [])])];
       const recoveringCompletion = thread?.deletionPending && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed';
-      for (let offset = 0; !recoveringCompletion && offset < taskIds.length; offset += 8) {
+      // A same-thread Main receipt and an existing local reservation route an
+      // explicit retry through Main's original authorization and cleanup path.
+      const resumingDeletion = thread?.deletionPending === true && snapshot.deleteState === 'delete_pending'
+        && (snapshot.operation?.state === 'cleanup_pending' || snapshot.operation?.state === 'unknown');
+      for (let offset = 0; !recoveringCompletion && !resumingDeletion && offset < taskIds.length; offset += 8) {
+        let nextTaskOrdinal = offset;
         await Promise.all(taskIds.slice(offset, offset + 8).map(async taskId => {
-          if (!desktop.recoverTask) throw new Error('thread_deletion_unavailable');
-          const recovered = await desktop.recoverTask(taskId).catch(() => { throw new Error('thread_deletion_unknown'); });
-          if (recovered.snapshot?.context?.threadId !== id) throw new Error('thread_deletion_unavailable');
+          const taskOrdinal = nextTaskOrdinal++;
+          reportPhase('recover_start', taskOrdinal);
+          if (!desktop.recoverTask) { reportPhase('recover_api_unavailable', taskOrdinal); throw new Error('thread_deletion_unavailable'); }
+          const recovered = await desktop.recoverTask(taskId).catch(() => { reportPhase('recover_rejected', taskOrdinal); throw new Error('thread_deletion_unknown'); });
+          reportPhase('recover_resolved', taskOrdinal);
+          if (recovered.snapshot?.context?.threadId !== id) { reportPhase('recover_context_mismatch', taskOrdinal); throw new Error('thread_deletion_unavailable'); }
+          reportPhase('recover_context_match', taskOrdinal);
         }));
       }
-      if (thread) await mutateStoredThread(id, current => {
-        if (!current && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed') return null;
-        if (!current || threadTaskIdentity(current) !== identity) throw new Error('thread_deletion_pending');
+      if (thread) {
+        reportPhase('reservation_start');
+        await mutateStoredThread(id, current => {
+        if (!current && snapshot.deleteState === 'deleted' && snapshot.operation?.state === 'completed') { reportPhase('reservation_completed_tombstone'); return null; }
+        if (!current || threadTaskIdentity(current) !== identity || (resumingDeletion && current.deletionPending !== true)) { reportPhase('reservation_identity_mismatch'); throw new Error('thread_deletion_pending'); }
+        reportPhase('reservation_identity_match');
         return { ...current, deletionPending: true };
-      });
+        });
+        reportPhase('reservation_done');
+      }
+      // This marks the original conditional expression, not IPC dispatch/admission.
+      reportPhase('main_expression_enter');
       const result = snapshot.deleteState === 'deleted' ? snapshot.operation : await desktop.deleteMultiAgentThread({
         threadId: id, expectedThreadRevision: snapshot.threadRevision,
         operationId: `delete:${snapshot.threadRevision}:${crypto.randomUUID()}`, confirmTerminate: true,
       });
+      reportPhase('main_expression_resolved');
       if (result?.state !== 'completed') {
+        reportPhase('main_result_not_completed');
         throw new Error(result?.state === 'cleanup_pending' ? 'thread_deletion_pending' : 'thread_deletion_unknown');
       }
+      reportPhase('completion_cas_start');
       await mutateStoredThread(id, current => {
-        if (current && threadTaskIdentity(current) !== identity) throw new Error('thread_deletion_pending');
+        if (current && threadTaskIdentity(current) !== identity) { reportPhase('completion_identity_mismatch'); throw new Error('thread_deletion_pending'); }
         return null;
       });
+      reportPhase('completion_cas_done');
+      reportPhase('delete_return');
       return;
+      } catch (error) {
+        reportPhase('delete_reject');
+        throw error;
+      }
     }
     await withStore('readwrite', (store) => store.delete(id));
   },
