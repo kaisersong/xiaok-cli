@@ -306,6 +306,27 @@ describe('permission-prompt', () => {
       harness.restore();
     });
 
+    it.each(['string', 'buffer'] as const)('handles coalesced approval navigation and Enter as %s', async (inputType) => {
+      const harness = createTtyHarness();
+      try {
+        const pending = showPermissionPrompt('bash', { command: 'ls' });
+        const keys = '\x1b[B\x1b[B\r';
+        harness.emitter.emit('data', inputType === 'buffer' ? Buffer.from(keys) : keys);
+        // Complete a broken implementation without leaving an unresolved prompt.
+        harness.send('\x1b');
+        await expect(pending).resolves.toEqual({ action: 'allow_project', rule: 'bash(ls *)' });
+      } finally { harness.restore(); }
+    });
+
+    it('stops a coalesced approval batch immediately after cancellation', async () => {
+      const harness = createTtyHarness();
+      try {
+        const pending = showPermissionPrompt('bash', { command: 'ls' });
+        harness.send('\x1b\x1b[B\r'); harness.send('\x1b');
+        await expect(pending).resolves.toEqual({ action: 'deny' });
+      } finally { harness.restore(); }
+    });
+
     it('re-renders the approval block in place when used with the shared repl renderer', async () => {
       const harness = createTtyHarness();
       const renderer = new ReplRenderer(process.stdout);

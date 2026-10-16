@@ -105,3 +105,12 @@ jobs:
           python tests/e2e/text-model-resume.py
           python tests/e2e/resume-history-visibility.py
           python tests/e2e/persistent-command-approval.py
+      - name: Retain synthetic TTY failure evidence
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-tty-failure-${{ matrix.node }}
+          path: |
+            /tmp/xiaok-remember-*/
+            /tmp/xiaok-resume-visibility-*/
+          retention-days: 7

@@ -57,8 +57,7 @@ def run(project: Path, entry: Path, scope: str):
         start(); turn(0)
         screen = wait_for(lambda s: '保存到全局' in s and '保存到项目' in s, 'first-prompt')
         for program in ['sleep', 'tail', 'grep', 'head']: assert f'bash({program} *)' in screen, screen
-        for _ in range(2 if scope == 'project' else 3): tty.send_key('Down')
-        tty.send_key('Enter')
+        tty.tmux('send-keys', '-t', tty.session, *(['Down'] * (2 if scope == 'project' else 3)), 'Enter')
         wait_for(lambda s: 'CONFIRMED_SCOPE_0' in s and helpers.has_ready_input_prompt(s), 'saved')
         turn(1)
         wait_for(lambda s: 'CONFIRMED_SCOPE_1' in s and helpers.has_ready_input_prompt(s), 'same-process')
@@ -72,8 +71,7 @@ def run(project: Path, entry: Path, scope: str):
         assert prompt_count() == 1, 'saved scope prompted again after resume'
         turn(3)
         wait_for(lambda s: 'bash(wc *)' in s and '拒绝' in s, 'unknown-suffix-prompt')
-        for _ in range(4): tty.send_key('Down')
-        tty.send_key('Enter')
+        tty.tmux('send-keys', '-t', tty.session, *(['Down'] * 4), 'Enter')
         wait_for(lambda s: 'SUFFIX_DENIED' in s and helpers.has_ready_input_prompt(s), 'suffix-denied')
         assert prompt_count() == 2
         replies = {m.get('tool_call_id'): m.get('content', '') for m in server.requests[-1]['messages'] if m.get('role') == 'tool'}

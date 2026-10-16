@@ -261,8 +261,9 @@ export async function showPermissionPrompt(toolName, input, config) {
             }
             resolve(choice);
         };
-        const onData = (data) => {
-            const key = data.toString('utf8');
+        const handleKey = (key) => {
+            if (resolved)
+                return;
             // Ctrl-C / Esc → 拒绝
             if (key === '\x03' || key === '\x1b') {
                 done({ action: 'deny' });
@@ -328,6 +329,19 @@ export async function showPermissionPrompt(toolName, input, config) {
                     renderAll();
                 }
                 return;
+            }
+        };
+        const onData = (data) => {
+            const input = data.toString();
+            // stdin batches can contain multiple complete keys. Unknown/pasted text
+            // remains ignored as a whole; multi-digit numbers stay a single token.
+            const keys = input.match(/\x1b\[[AB]|\d+|[\r\n\x1b\x03]/g) ?? [];
+            if (keys.join('') !== input)
+                return;
+            for (const key of keys) {
+                if (resolved)
+                    break;
+                handleKey(key);
             }
         };
         const onAbort = () => done({ action: 'deny' });
