@@ -668,7 +668,7 @@ export class OpenAIAdapter {
                 })),
             ];
             const imageBlocks = m.content.filter((block) => block.type === 'image');
-            if (imageBlocks.length > 0) {
+            if (imageBlocks.length > 0 && this.getCapabilities().supportsImageInput) {
                 const contentParts = [
                     ...textBlocks.map((block) => ({
                         type: 'text',
@@ -686,10 +686,13 @@ export class OpenAIAdapter {
                     content: contentParts,
                 });
             }
-            else if (textBlocks.length > 0) {
+            else if (textBlocks.length > 0 || imageBlocks.length > 0) {
                 openaiMessages.push({
                     role: 'user',
-                    content: textBlocks.map((block) => block.text).join(''),
+                    content: [
+                        ...textBlocks.map((block) => block.text),
+                        ...imageBlocks.map((block) => `\n[Image omitted from this request (${block.source.media_type}): current model does not support image input. Original image retained in session history.]\n`),
+                    ].join(''),
                 });
             }
         }
