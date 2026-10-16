@@ -307,7 +307,7 @@ xiaok yzjchannel serve             # 可选云之家网关
 /clear                        清屏并重新显示欢迎页
 /compact                      压缩较早对话上下文
 /context                      查看已加载的仓库上下文
-/mode [default|auto|plan]     查看或切换权限模式
+/mode [default|auto|plan|yolo]     查看或切换权限模式
 /models                       切换模型
 /goal <objective>              创建持久目标
 /goal status|pause|cancel      查看、暂停或取消目标
@@ -322,6 +322,8 @@ xiaok yzjchannel serve             # 可选云之家网关
 /help                         查看帮助
 /<skill-name> [args]          调用技能
 ```
+
+明确开启完全免确认：启动时用 `xiaok --yolo`，或在会话内输入 `/mode yolo`。该模式跳过 CLI 工具审批规则与命令风险拦截，包括强推和删除；恢复会话用 `xiaok --yolo --resume <id>`。它仅对当前进程生效，单独 resume 或普通模式循环不会自动开启。`auto` 仍只自动放行低风险操作；系统认证和已配置的执行 hook 仍按原规则运行。
 
 权限模式与用户意图分开：`auto` 不替用户回答待定问题，也不覆盖“分派前先问我”。
 

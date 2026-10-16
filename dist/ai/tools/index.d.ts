@@ -4,7 +4,8 @@ import type { HooksRunner } from '../../runtime/hooks-runner.js';
 import type { CapabilityRegistry } from '../../platform/runtime/capability-registry.js';
 import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { type WorkspaceToolOptions } from './read.js';
-export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[]): Tool[];
+import { type BashApprovalOptions } from './bash.js';
+export declare function buildToolList(skillTool?: Tool, workspace?: WorkspaceToolOptions, extraTools?: Tool[], bashApproval?: BashApprovalOptions): Tool[];
 export interface RegistryOptions {
     toolIdleTimeoutMs?: number;
     capabilityRegistry?: CapabilityRegistry;

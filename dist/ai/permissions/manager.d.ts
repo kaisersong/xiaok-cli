@@ -1,4 +1,4 @@
-export type PermissionMode = 'default' | 'auto' | 'plan';
+export type PermissionMode = 'default' | 'auto' | 'plan' | 'yolo';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
 export interface PermissionManagerOptions {
     mode: PermissionMode;

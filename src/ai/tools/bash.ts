@@ -45,7 +45,13 @@ function terminateChildProcessTree(child: ChildProcess): void {
 }
 
 
-export const bashTool: Tool = {
+export interface BashApprovalOptions {
+  /** Live host authority; never derived from model tool input. */
+  isYolo?: () => boolean;
+}
+
+export function createBashTool(options: BashApprovalOptions = {}): Tool {
+  return {
   permission: 'bash',
   definition: {
     name: 'bash',
@@ -76,7 +82,7 @@ export const bashTool: Tool = {
     };
 
     const risk = classifyBashCommand(command);
-    if (risk.level === 'block') {
+    if (risk.level === 'block' && !options.isYolo?.()) {
       return `Error: 命令被安全策略拦截: ${risk.reason}`;
     }
 
@@ -198,16 +204,20 @@ export const bashTool: Tool = {
       if (context?.signal?.aborted) onAbort();
     });
   },
-};
+  };
+}
+
+export const bashTool: Tool = createBashTool();
 
 /** Installed only by the interactive CLI host, before sandbox wrapping. */
-export function createInteractiveBashTool(run: Tool['execute']): Tool {
-  return { ...bashTool, async execute(input, context) {
+export function createInteractiveBashTool(run: Tool['execute'], options: BashApprovalOptions = {}): Tool {
+  const tool = createBashTool(options);
+  return { ...tool, async execute(input, context) {
     context?.signal?.throwIfAborted();
     const command = String(input.command ?? '');
-    if (!/\bsudo\b/.test(command)) return bashTool.execute(input, context);
+    if (!/\bsudo\b/.test(command)) return tool.execute(input, context);
     const risk = classifyBashCommand(command);
-    if (risk.level === 'block') return `Error: 命令被安全策略拦截: ${risk.reason}`;
+    if (risk.level === 'block' && !options.isYolo?.()) return `Error: 命令被安全策略拦截: ${risk.reason}`;
     return run(input, context);
   } };
 }

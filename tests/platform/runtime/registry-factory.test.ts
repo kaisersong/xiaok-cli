@@ -101,7 +101,7 @@ describe('registry-factory sandbox auto mode', () => {
     vi.clearAllMocks();
   });
 
-  it('auto-expands sandbox denials in auto mode without prompting', async () => {
+  it.each(['auto', 'yolo'] as const)('auto-expands sandbox denials in %s mode without prompting', async mode => {
     const expandAllowedPaths = vi.fn();
     const onSandboxDenied = vi.fn(async () => ({ shouldProceed: false }));
     const factory = createPlatformRegistryFactory({
@@ -109,7 +109,7 @@ describe('registry-factory sandbox auto mode', () => {
       source: 'chat',
       sessionId: 'test-session',
       adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
-      permissionManager: new PermissionManager({ mode: 'auto' }),
+      permissionManager: new PermissionManager({ mode }),
       onSandboxDenied,
       buildSystemPrompt: async () => 'prompt',
     });
@@ -138,7 +138,24 @@ describe('registry-factory sandbox auto mode', () => {
       undefined,
       { cwd: '/test/cwd', allowOutsideCwd: true, outsideCwdGuard: expect.any(Function) },
       expect.any(Array),
+      { isYolo: expect.any(Function) },
     );
+  });
+
+  it('shares live YOLO authority with newly created child executors and revokes it on exit', () => {
+    const manager = new PermissionManager({ mode: 'yolo' });
+    const factory = createPlatformRegistryFactory({
+      platform: makeMockPlatform(), source: 'chat', sessionId: 'test-session',
+      adapter: () => ({ name: 'test', generate: vi.fn(), stream: vi.fn() } as unknown as ModelAdapter),
+      permissionManager: manager, buildSystemPrompt: async () => 'prompt',
+    });
+    factory.createRegistry('/test/cwd');
+    factory.createRegistry('/test/cwd', undefined, 'child');
+    const authorities = vi.mocked(buildToolList).mock.calls.slice(-2).map(args => args[3]);
+    expect(authorities).toHaveLength(2);
+    for (const authority of authorities) expect(authority?.isYolo?.()).toBe(true);
+    manager.setMode('auto');
+    for (const authority of authorities) expect(authority?.isYolo?.()).toBe(false);
   });
 
   it('routes outside-cwd tool paths through the sandbox policy check', () => {

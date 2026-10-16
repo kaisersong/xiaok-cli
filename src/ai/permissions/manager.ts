@@ -1,5 +1,5 @@
 import { posix, win32 } from 'node:path';
-export type PermissionMode = 'default' | 'auto' | 'plan';
+export type PermissionMode = 'default' | 'auto' | 'plan' | 'yolo';
 export type PermissionDecision = 'allow' | 'deny' | 'prompt';
 import { PermissionPolicyEngine, requiresCommandConfirmation, getCommandWriteTargets, hasMatchingCommandAllowRule, requiresAlwaysCommandConfirmation, getExactCommandApprovalRule, isExactCommandApprovalRule } from './policy-engine.js';
 import { isScreenAutomationFallbackInvocation, isSensitiveToolInvocation } from './sensitive-paths.js';
@@ -56,6 +56,7 @@ export class PermissionManager {
   }
 
   async check(toolName: string, input: Record<string, unknown>): Promise<PermissionDecision> {
+    if (this.mode === 'yolo') return 'allow';
     const policy = new PermissionPolicyEngine({
       cwd: this.cwd,
       globalAllow: this.allowRules,

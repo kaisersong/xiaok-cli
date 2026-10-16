@@ -40,6 +40,8 @@ export class PermissionManager {
         return 'default';
     }
     async check(toolName, input) {
+        if (this.mode === 'yolo')
+            return 'allow';
         const policy = new PermissionPolicyEngine({
             cwd: this.cwd,
             globalAllow: this.allowRules,

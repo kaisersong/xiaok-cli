@@ -6,6 +6,12 @@ on:
       - 'src/runtime/hooks-runner.ts'
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/tools/index.ts'
+      - 'src/ai/tools/bash.ts'
+      - 'src/platform/runtime/registry-factory.ts'
+      - 'src/commands/registry.ts'
+      - 'tests/platform/runtime/registry-factory.test.ts'
+      - 'tests/e2e/yolo-mode.py'
+      - 'vitest.yolo.config.mjs'
       - 'src/ui/permission-prompt.ts'
       - 'src/ui/locale.ts'
       - 'src/ai/permissions/**'
@@ -37,6 +43,12 @@ on:
       - 'src/runtime/hooks-runner.ts'
       - 'src/ai/adapters/openai.ts'
       - 'src/ai/tools/index.ts'
+      - 'src/ai/tools/bash.ts'
+      - 'src/platform/runtime/registry-factory.ts'
+      - 'src/commands/registry.ts'
+      - 'tests/platform/runtime/registry-factory.test.ts'
+      - 'tests/e2e/yolo-mode.py'
+      - 'vitest.yolo.config.mjs'
       - 'src/ui/permission-prompt.ts'
       - 'src/ui/locale.ts'
       - 'src/ai/permissions/**'
@@ -93,6 +105,8 @@ jobs:
           .test-dist/tests/ai/tools/index.test.js
           .test-dist/tests/ai/permissions
           .test-dist/tests/ui/permission-prompt.test.js
+          .test-dist/tests/ui/input.test.js
+          .test-dist/tests/ai/tools/bash-sudo.test.js
           .test-dist/tests/commands/chat-permission.test.js
           .test-dist/tests/commands/chat-permission-persistence.test.js
           .test-dist/tests/ai/adapters/openai-history-images.test.js
@@ -104,6 +118,8 @@ jobs:
           .test-dist/tests/ai/runtime/session.test.js
           .test-dist/tests/ai/runtime/session-graph.test.js
           .test-dist/tests/ai/runtime/usage.test.js
+      - name: Verify live YOLO authority in registry factory
+        run: node -r ./tests/support/vite-net-use-patch.cjs ./node_modules/vitest/vitest.mjs run --no-cache --config vitest.yolo.config.mjs --configLoader runner
       - uses: actions/setup-python@v5
         if: runner.os == 'Linux'
         with:
@@ -119,6 +135,7 @@ jobs:
           python tests/e2e/resume-history-visibility.py
           python tests/e2e/persistent-command-approval.py
           python tests/e2e/exact-command-approval.py
+          python tests/e2e/yolo-mode.py
       - name: Retain synthetic TTY failure evidence
         if: failure() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
@@ -127,5 +144,6 @@ jobs:
           path: |
             /tmp/xiaok-remember-*/
             /tmp/xiaok-exact-*/
+            /tmp/xiaok-yolo-*/
             /tmp/xiaok-resume-visibility-*/
           retention-days: 7

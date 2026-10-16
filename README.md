@@ -307,7 +307,7 @@ xiaok yzjchannel serve             # Optional Yunzhijia gateway
 /clear                        Clear screen and redisplay the welcome page
 /compact                      Compact earlier conversation context
 /context                      Show loaded repository context
-/mode [default|auto|plan]     Inspect or change permission mode
+/mode [default|auto|plan|yolo]     Inspect or change permission mode
 /models                       Switch model
 /goal <objective>              Start a persistent goal
 /goal status|pause|cancel      Inspect, pause, or cancel the goal
@@ -322,6 +322,8 @@ xiaok yzjchannel serve             # Optional Yunzhijia gateway
 /help                         Show help
 /<skill-name> [args]          Invoke a skill
 ```
+
+Explicit full approval bypass: `xiaok --yolo`, or `/mode yolo` inside a session. This skips CLI tool approval rules and command risk blocks, including force pushes and deletion. Use `xiaok --yolo --resume <id>` to resume in this mode. It applies only to the current process; resume without the flag and the ordinary mode cycle never enable it automatically. `auto` keeps its existing low-risk behavior. OS authentication and configured execution hooks still apply.
 
 Permission mode is separate from user intent: `auto` does not answer an unresolved question or override “ask before delegating.”
 

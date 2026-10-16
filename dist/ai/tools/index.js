@@ -8,7 +8,7 @@ import { evaluateProtectedOutputGuard } from '../../runtime/guards/protected-out
 import { createReadTool } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
-import { bashTool } from './bash.js';
+import { createBashTool } from './bash.js';
 import { grepTool } from './grep.js';
 import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
@@ -20,12 +20,12 @@ import { validateSkillTool } from './validate-skill.js';
 import { createRenderUiTool } from './render-ui.js';
 import { sanitizeToolOutput } from '../../shared/stream-safety/redact.js';
 import { buildCapabilityToolDefinition, buildToolSearchEntry, dedupeToolSearchEntries, getCanonicalToolId, selectToolEntries, } from './tool-identity.js';
-export function buildToolList(skillTool, workspace, extraTools = []) {
+export function buildToolList(skillTool, workspace, extraTools = [], bashApproval) {
     const tools = [
         createReadTool(workspace),
         createWriteTool(workspace),
         createEditTool(workspace),
-        bashTool,
+        createBashTool(bashApproval),
         grepTool,
         globTool,
         webFetchTool,
@@ -67,7 +67,7 @@ export class ToolRegistry {
             onPrompt: options.onPrompt ?? (async () => false),
             permissionManager: this.permissionManager,
         };
-        for (const tool of tools ?? buildToolList()) {
+        for (const tool of tools ?? buildToolList(undefined, undefined, [], { isYolo: () => this.permissionManager.getMode() === 'yolo' })) {
             this.registerTool(tool);
         }
         this.registerTool(createToolSearchTool(this));

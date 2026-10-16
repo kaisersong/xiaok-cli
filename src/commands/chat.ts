@@ -216,6 +216,7 @@ export function __setShellEscapeExecutorForTests(
 
 interface ChatOptions {
   auto: boolean;
+  yolo?: boolean;
   dryRun: boolean;
   print?: boolean;
   json?: boolean;
@@ -308,8 +309,8 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   }
 
   // 检测 CI 环境
-  const autoMode = opts.auto || !isTTY();
-  if (!isTTY() && !opts.auto) {
+  const autoMode = opts.auto || opts.yolo || !isTTY();
+  if (!isTTY() && !opts.auto && !opts.yolo) {
     console.warn('\x1b[33m[警告]\x1b[0m stdin 非 TTY，自动切换为 --auto 模式');
   }
 
@@ -938,7 +939,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
 
   const permissionManager = new PermissionManager({
     cwd,
-    mode: autoMode ? 'auto' : 'default',
+    mode: opts.yolo ? 'yolo' : autoMode ? 'auto' : 'default',
     allowRules: persistedPermissionRules.allowRules,
     denyRules: persistedPermissionRules.denyRules,
   });
@@ -2732,7 +2733,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
       model: getActiveProviderLabel(),
       cwd: process.cwd(),
       sessionId,
-      mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+      mode: opts.dryRun ? 'dry-run' : permissionManager.getMode(),
       version: cliVersion,
     });
 
@@ -3552,7 +3553,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         model: getActiveProviderLabel(),
         cwd: process.cwd(),
         sessionId,
-        mode: opts.auto ? 'auto' : opts.dryRun ? 'dry-run' : 'default',
+        mode: opts.dryRun ? 'dry-run' : permissionManager.getMode(),
         version: cliVersion,
       });
       scrollRegion.setWelcomeRows(contentRows);
@@ -3770,12 +3771,12 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
         continue;
       }
 
-      if (!['default', 'auto', 'plan'].includes(requestedMode)) {
-        writeCommandOutput(trimmed, '用法：/mode [default|auto|plan]\n\n');
+      if (!['default', 'auto', 'plan', 'yolo'].includes(requestedMode)) {
+        writeCommandOutput(trimmed, '用法：/mode [default|auto|plan|yolo]\n\n');
         continue;
       }
 
-      permissionManager.setMode(requestedMode as 'default' | 'auto' | 'plan');
+      permissionManager.setMode(requestedMode as 'default' | 'auto' | 'plan' | 'yolo');
       statusBar.updateMode(requestedMode);
       writeCommandOutput(trimmed, `权限模式已切换为 ${requestedMode}\n\n`);
       continue;
@@ -4334,6 +4335,7 @@ export function registerChatCommands(program: Command): void {
     .command('chat', { isDefault: true })
     .description('启动 AI skill 任务交付工作台（默认命令）')
     .option('--auto', '自动批准低风险工具调用，高风险命令仍需确认或被阻断')
+    .option('--yolo', '跳过所有 CLI 工具审批与命令风险拦截（包括强推和删除），仅本次进程生效')
     .option('--dry-run', '打印工具调用但不执行')
     .option('-p, --print', '以纯文本模式输出单次结果')
     .option('--json', '以 JSON 模式输出单次结果')

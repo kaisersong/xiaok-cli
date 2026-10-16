@@ -12,7 +12,7 @@ import type { GuardDecision } from '../../runtime/guards/policy.js';
 import { createReadTool, type WorkspaceToolOptions } from './read.js';
 import { createWriteTool } from './write.js';
 import { createEditTool } from './edit.js';
-import { bashTool } from './bash.js';
+import { createBashTool, type BashApprovalOptions } from './bash.js';
 import { grepTool } from './grep.js';
 import { globTool } from './glob.js';
 import { createToolSearchTool } from './search.js';
@@ -36,12 +36,13 @@ export function buildToolList(
   skillTool?: Tool,
   workspace?: WorkspaceToolOptions,
   extraTools: Tool[] = [],
+  bashApproval?: BashApprovalOptions,
 ): Tool[] {
   const tools: Tool[] = [
     createReadTool(workspace),
     createWriteTool(workspace),
     createEditTool(workspace),
-    bashTool,
+    createBashTool(bashApproval),
     grepTool,
     globTool,
     webFetchTool,
@@ -116,7 +117,7 @@ export class ToolRegistry {
       onPrompt: options.onPrompt ?? (async () => false),
       permissionManager: this.permissionManager,
     };
-    for (const tool of tools ?? buildToolList()) {
+    for (const tool of tools ?? buildToolList(undefined, undefined, [], { isYolo: () => this.permissionManager.getMode() === 'yolo' })) {
       this.registerTool(tool);
     }
     this.registerTool(createToolSearchTool(this));
