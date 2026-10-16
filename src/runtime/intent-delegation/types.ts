@@ -1,3 +1,4 @@
+import type { StoredIntentRecordInput, NormalizedStoredIntentRecord, StoredSessionIntentLedgerInput, NormalizedStoredSessionIntentLedger } from './stored-intent-clone.js';
 import type {
   IntentLedgerRecord,
   IntentPlanDraft,
@@ -169,11 +170,15 @@ export function createIntentLedgerRecord(plan: IntentPlanInput, now = Date.now()
   };
 }
 
-export function cloneIntentRecord(record: IntentLedgerRecordInput): IntentLedgerRecord {
+export function cloneIntentRecord(record: IntentLedgerRecordInput): IntentLedgerRecord;
+export function cloneIntentRecord(record: StoredIntentRecordInput): NormalizedStoredIntentRecord;
+export function cloneIntentRecord(record: StoredIntentRecordInput): NormalizedStoredIntentRecord {
   return cloneStoredIntentRecord(record);
 }
 
-export function cloneSessionIntentLedger(ledger: SessionIntentLedger): SessionIntentLedger {
+export function cloneSessionIntentLedger(ledger: SessionIntentLedger): SessionIntentLedger;
+export function cloneSessionIntentLedger(ledger: StoredSessionIntentLedgerInput): NormalizedStoredSessionIntentLedger;
+export function cloneSessionIntentLedger(ledger: StoredSessionIntentLedgerInput): NormalizedStoredSessionIntentLedger {
   return cloneStoredSessionIntentLedger(ledger);
 }
 
@@ -198,7 +203,9 @@ export function createEmptySessionIntentLedger(sessionId: string, now = Date.now
   };
 }
 
-export function resolveActiveRiskTier(ledger: SessionIntentLedger): RiskTier | null {
+export function resolveActiveRiskTier(ledger: SessionIntentLedger): RiskTier | null;
+export function resolveActiveRiskTier(ledger: NormalizedStoredSessionIntentLedger): unknown;
+export function resolveActiveRiskTier(ledger: NormalizedStoredSessionIntentLedger): unknown {
   const activeIntent = ledger.activeIntentId
     ? ledger.intents.find((intent) => intent.intentId === ledger.activeIntentId)
     : undefined;

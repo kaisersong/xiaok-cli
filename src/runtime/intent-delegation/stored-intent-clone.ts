@@ -48,6 +48,9 @@ export interface StoredIntentRecordInput {
   attemptCount: number;
   createdAt: number;
   updatedAt: number;
+  latestBreadcrumb?: unknown;
+  latestReceipt?: unknown;
+  blockedReason?: unknown;
   finalDeliverable?: unknown;
   intentMode?: unknown;
   segmentationConfidence?: unknown;
@@ -76,14 +79,14 @@ export interface NormalizedStoredIntentRecord extends Omit<StoredIntentRecordInp
 
 export interface StoredSessionIntentLedgerInput {
   sessionId: string;
-  instanceId?: string;
+  instanceId?: unknown;
   activeIntentId?: string;
   latestPlan: StoredIntentRecordInput | null;
   intents: StoredIntentRecordInput[];
   breadcrumbs: object[];
   receipt: object | null;
   salvage: { summary: string[] } | null;
-  ownership: object;
+  ownership: { state?: unknown; ownerInstanceId?: unknown; previousOwnerInstanceId?: unknown; updatedAt?: unknown };
   updatedAt: number;
   verificationExecutions?: unknown;
   publicationCandidates?: unknown;
