@@ -3,12 +3,11 @@ import type {IntentStageContext} from './stage-context.js';
 import {isDeepStrictEqual} from 'node:util';
 import {captureIntentData} from './data.js';
 import {applyIntentStepUpdate} from './dispatcher.js';
-import {intentPublicationTarget,applyIntentPublicationMutation,type IntentPublicationCandidate} from './publication-candidate-journal.js';
+import {intentPublicationTarget,applyIntentPublicationCapture,type IntentPublicationCandidate} from './publication-candidate-journal.js';
 import {intentNativeLedgerHash} from './native-contract-journal.js';
 import {intentHostSubjectOwner} from '../verification/intent-host-subject.js';
 import {canonicalVerificationJson as json} from '../verification/protocol.js';
 import type {SessionIntentLedger} from './types.js';
-import type {PersistedSessionSnapshot} from '../../ai/runtime/session-store/store.js';
 import type {ReceiverClockEvidence} from '../verification/receiver-store.js';
 import type {VerificationOwner} from '../verification/proof-authority.js';
 export interface IntentBusinessProjection {
@@ -42,8 +41,8 @@ export function projectIntentBusinessLedger(ledger:SessionIntentLedger,candidate
  }
  if(!record||!stage||next.activeIntentId!==record.intentId||record.activeStageId!==stage.stageId||record.overallStatus!=='publication_pending'||stage.status!=='publication_pending'||stage.steps.some(s=>s.status!=='completed')||projection.appliedAt<next.updatedAt)throw Error('intent_projection_current');
  // Reuse the original complete candidate capture, including every report/artifact/selection.
- const snapshot={sessionId:next.sessionId,intentDelegation:next,updatedAt:next.updatedAt} as PersistedSessionSnapshot;
- applyIntentPublicationMutation(snapshot,{publicationAction:'reserve',sessionId:next.sessionId,instanceId:next.ownership.ownerInstanceId!,expectedLedgerHash:intentNativeLedgerHash(next),requestSource:'user',now:projection.appliedAt,artifactSelections:candidate.body.artifacts.map(a=>({artifactId:a.artifactId,obligationId:a.selection.obligationId,path:a.selection.path})),fileObservations:candidate.fileObservations});
+ const snapshot={sessionId:next.sessionId,intentDelegation:next,updatedAt:next.updatedAt};
+ applyIntentPublicationCapture(snapshot,{publicationAction:'reserve',sessionId:next.sessionId,instanceId:next.ownership.ownerInstanceId!,expectedLedgerHash:intentNativeLedgerHash(next),requestSource:'user',now:projection.appliedAt,artifactSelections:candidate.body.artifacts.map(a=>({artifactId:a.artifactId,obligationId:a.selection.obligationId,path:a.selection.path})),fileObservations:candidate.fileObservations});
  let updated=applyIntentStepUpdate(record,{stepId:record.activeStepId,status:'completed',now:projection.appliedAt});if(updated.overallStatus==='completed')updated.overallStatus='publication_pending';
  const completed=updated.stages.find(s=>s.stageId===stage.stageId)!;updated.artifacts=updated.artifacts?.map(a=>a.stageId===stage.stageId?{...a,structuralValidation:completed.structuralValidation,semanticValidation:completed.semanticValidation}:a);
  if(projection.nextStageContext!==undefined){const nextStage=updated.activeStageId===stage.stageId?undefined:updated.stages.find(s=>s.stageId===updated.activeStageId);if(nextStage){if(projection.nextStageContext?.stageId!==nextStage.stageId)throw Error('intent_stage_context_stage');nextStage.needsFreshContextHandoff=false;}else if(projection.nextStageContext!==null)throw Error('intent_stage_context_stage');}

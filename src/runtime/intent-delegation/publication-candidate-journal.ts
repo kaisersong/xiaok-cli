@@ -338,6 +338,17 @@ export function parseIntentPublicationCandidates(ledger: SessionIntentLedger | u
 export function applyIntentPublicationMutation(previous: PersistedSessionSnapshot, input: IntentPublicationMutation): PersistedSessionSnapshot {
     if (input.publicationAction === 'receiver') return applyIntentReceiverMutation(previous,input);
     if (input.publicationAction === 'verification') return applyIntentVerificationMutation(previous,input);
+    return applyIntentPublicationCapture(previous, input);
+}
+
+/** Snapshot fields consumed by the existing capture branches; not a full durable snapshot. */
+export type IntentPublicationCaptureSnapshot = Pick<PersistedSessionSnapshot, 'sessionId' | 'intentDelegation' | 'updatedAt'>;
+export type IntentPublicationCaptureMutation = Exclude<IntentPublicationMutation, IntentReceiverMutation | IntentVerificationMutation>;
+
+/** Plain DATA capture only. Existing owner/hash/journal/route checks remain in the body. */
+export function applyIntentPublicationCapture(previous: PersistedSessionSnapshot, input: IntentPublicationCaptureMutation): PersistedSessionSnapshot;
+export function applyIntentPublicationCapture(previous: IntentPublicationCaptureSnapshot, input: IntentPublicationCaptureMutation): IntentPublicationCaptureSnapshot;
+export function applyIntentPublicationCapture(previous: IntentPublicationCaptureSnapshot, input: IntentPublicationCaptureMutation): IntentPublicationCaptureSnapshot {
     const next = captureIntentData(previous), ledger = next.intentDelegation;
     if (!ledger || next.sessionId !== input.sessionId)
         throw Error('intent_candidate_session');
@@ -371,7 +382,7 @@ export function applyIntentPublicationMutation(previous: PersistedSessionSnapsho
         const route = readInstalledCurrentOwner(intentHostSubjectOwner({ version: 1, sessionId: input.sessionId, intentId: record.intentId, stageId: original.stageId }));
         if (!['migrated', 'protected-unregistered'].includes(route.kind) || json(route) !== (input.publicationAction === 'claim' ? input.route : attempt.route))
             throw Error('intent_candidate_route');
-        const fresh = applyIntentPublicationMutation(previous, { sessionId: input.sessionId, instanceId: input.instanceId, expectedLedgerHash: input.expectedLedgerHash, requestSource: 'user', now: input.now, fileObservations: original.fileObservations,...(original.body.kind==='intent-parent'?{publicationAction:'reserve-parent',references:original.body.stages}:{publicationAction:'reserve',artifactSelections:original.body.artifacts.map(a=>({artifactId:a.artifactId,obligationId:a.selection.obligationId,path:a.selection.path}))}) });
+        const fresh = applyIntentPublicationCapture(previous, { sessionId: input.sessionId, instanceId: input.instanceId, expectedLedgerHash: input.expectedLedgerHash, requestSource: 'user', now: input.now, fileObservations: original.fileObservations,...(original.body.kind==='intent-parent'?{publicationAction:'reserve-parent',references:original.body.stages}:{publicationAction:'reserve',artifactSelections:original.body.artifacts.map(a=>({artifactId:a.artifactId,obligationId:a.selection.obligationId,path:a.selection.path}))}) });
         const changed = captureIntentData(original);
         if (input.publicationAction === 'retry')
             changed.applicationAttempts.push({ requestId: randomUUID(), revision: 1, phase: 'reserved', route: null, observation: null, retirementReason: null, createdAt: input.now, updatedAt: input.now });
