@@ -1,13 +1,12 @@
 import {ownDataBufferByteLength,ownDataString} from '../verification/application-native-intrinsics.js';
 import { types } from 'node:util';
-import { capturedArrayIterator, capturedSetAdd, capturedSetDelete, capturedSetHas, createCapturedSet } from '../verification/application-iteration-intrinsics.js';
+import { capturedSetAdd, capturedSetDelete, capturedSetHas, createCapturedSet } from '../verification/application-iteration-intrinsics.js';
 const arrayIsArray = Array.isArray;
 const numberIsFinite = Number.isFinite;
 const numberIsSafeInteger = Number.isSafeInteger;
 const getPrototypeOf = Object.getPrototypeOf;
 const getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
 const ownKeys = Reflect.ownKeys;
-const getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const hasOwn = Object.prototype.hasOwnProperty;
 const objectCreate = Object.create;
 const defineProperty = Object.defineProperty;
@@ -30,19 +29,20 @@ export function captureIntentData<T>(raw: T): T {
         if (array ? prototype !== arrayPrototype : prototype !== objectPrototype && prototype !== null)
             throw Error('intent_commit_data');
         const keys = ownKeys(value), descriptors = getOwnPropertyDescriptors(value);
-        for (const key of capturedArrayIterator(keys))
-            if (typeof key !== 'string')
+        for (let i = 0; i < keys.length; i++)
+            if (typeof keys[i] !== 'string')
                 throw Error('intent_commit_accessor');
         capturedSetAdd(seen, value);
         try {
             if (array) {
-                const lengthEntry = getOwnPropertyDescriptor(descriptors, 'length'), lengthDescriptor = lengthEntry && apply(hasOwn, lengthEntry, ['value']) ? lengthEntry.value : undefined;
+                const lengthDescriptor = apply(hasOwn, descriptors, ['length']) ? descriptors.length : undefined;
                 const length = lengthDescriptor && apply(hasOwn, lengthDescriptor, ['value']) ? lengthDescriptor.value : undefined;
                 if (!numberIsSafeInteger(length) || length < 0 || keys.length !== length + 1)
                     throw Error('intent_commit_array');
                 const result: unknown[] = [];
                 for (let index = 0; index < length; index++) {
-                    const entry = getOwnPropertyDescriptor(descriptors, ownDataString(index)), descriptor = entry && apply(hasOwn, entry, ['value']) ? entry.value : undefined;
+                    const key = ownDataString(index);
+                    const descriptor = apply(hasOwn, descriptors, [key]) ? descriptors[key] : undefined;
                     if (!descriptor || !apply(hasOwn, descriptor, ['value']))
                         throw Error('intent_commit_data');
                     defineProperty(result, ownDataString(index), ({ __proto__: null, value: copy(descriptor.value, depth + 1), enumerable: true, writable: true, configurable: true } as PropertyDescriptor));
@@ -50,8 +50,11 @@ export function captureIntentData<T>(raw: T): T {
                 return result;
             }
             const result = objectCreate(objectPrototype) as Record<string, unknown>;
-            for (const key of capturedArrayIterator(keys)) {
-                const entry = getOwnPropertyDescriptor(descriptors, key), descriptor = entry && apply(hasOwn, entry, ['value']) ? entry.value : undefined;
+            for (let i = 0; i < keys.length; i++) {
+                const key = keys[i]!;
+                if (typeof key !== 'string')
+                    throw Error('intent_commit_accessor');
+                const descriptor = apply(hasOwn, descriptors, [key]) ? descriptors[key] : undefined;
                 if (!descriptor || !apply(hasOwn, descriptor, ['value']))
                     throw Error('intent_commit_accessor');
                 if (descriptor.value !== undefined)
