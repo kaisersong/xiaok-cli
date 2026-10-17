@@ -97,7 +97,7 @@ def run(entry):
             try: text('/exit'); key('enter'); time.sleep(.5)
             except Exception: pass
         if win:
-            try: osa('on run a\ntell application "Ghostty" to close window id (item 1 of a)\nend run', win)
+            try: osa('on run a\ntell application "Ghostty"\nset ownedWindow to first window whose id is (item 1 of a)\nclose window ownedWindow\nend tell\nend run', win)
             except Exception: pass
         server.close()
         remaining = []

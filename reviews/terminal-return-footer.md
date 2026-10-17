@@ -48,3 +48,10 @@ CI mechanism: Terminal UI runs the new unit regressions on Linux/macOS/Windows
 at minimum/current Node versions and the isolated TTY regression on Linux,
 retaining synthetic failure evidence. Native screenshots are a local manual
 acceptance because hosted runners do not provide the user's Ghostty desktop.
+
+Installed-entry verification: the global CLI entry passed the same six geometry
+cases, plus both allow/deny Thinking-to-permission handoffs with resize, editable
+multiline draft and exact next queued input. Owned CLI processes remaining: zero.
+The native harness now refuses to create a window while macOS is locked; cleanup
+uses the owned Ghostty window object, as required by its scripting dictionary.
+Previously created probe windows were closed by their recorded IDs only.
