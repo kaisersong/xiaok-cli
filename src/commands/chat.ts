@@ -167,6 +167,8 @@ import {
   takeoverSessionOwnership,
 } from '../runtime/intent-delegation/ownership.js';
 import type { IntentLedgerRecord, SessionIntentLedger } from '../runtime/intent-delegation/types.js';
+import type {StoredSessionSnapshot} from '../ai/runtime/session-store/stored-snapshot-types.js';
+import type {NormalizedStoredSessionIntentLedger} from '../runtime/intent-delegation/stored-intent-clone.js';
 import { EmbeddedYZJChannel } from '../channels/embedded-yzj.js';
 import { selectYZJChannel } from '../ui/channel-selector.js';
 import { resolveYZJConfig } from '../channels/yzj.js';
@@ -560,7 +562,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
     try{guard();lease.assertCurrent();return await lease.trackInFlight(Promise.resolve().then(()=>work(lease)));}finally{await lease.releaseAfterDrain();}
   }});
   const skillScoreStore = new FileSkillScoreStore();
-  let persistedSession: PersistedSessionSnapshot | null = null;
+  let persistedSession: Awaited<ReturnType<typeof sessionStore.load>> = null;
 
   if (opts.continue) {
     persistedSession = await sessionStore.loadLast();
@@ -656,7 +658,7 @@ async function runChat(initialInput: string | undefined, opts: ChatOptions): Pro
   const intentTurnState = createChatIntentTurnState();
   let preparedIntentTurnSequence = 0;
   let currentTurnStageObservedSkillNames = new Map<number, Set<string>>();
-  let currentIntentLedger: SessionIntentLedger;
+  let currentIntentLedger: NonNullable<ReturnType<typeof sessionStore.getIntentNativeLedgerSync>>;
   let currentGoalState: GoalState | null = null;
   let goalActivation: GoalActivation = 'disarmed';
   let pendingGoalCompleteSummary: string | null = null;
@@ -4979,13 +4981,15 @@ function resolveChatInstanceId(): string {
   return `inst_${process.pid}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function initializeChatIntentLedger(intentLedger:PersistedSessionSnapshot['intentDelegation']|null,sessionId:string,instanceId:string,ownershipMode:ChatIntentOwnershipMode,options?:{confirmHighRiskTakeover?:boolean}):SessionIntentLedger;
+export function initializeChatIntentLedger(intentLedger:StoredSessionSnapshot['intentDelegation']|null,sessionId:string,instanceId:string,ownershipMode:ChatIntentOwnershipMode,options?:{confirmHighRiskTakeover?:boolean}):NormalizedStoredSessionIntentLedger;
 export function initializeChatIntentLedger(
-  intentLedger: PersistedSessionSnapshot['intentDelegation'] | null,
+  intentLedger: StoredSessionSnapshot['intentDelegation'] | null,
   sessionId: string,
   instanceId: string,
   ownershipMode: ChatIntentOwnershipMode,
   options: { confirmHighRiskTakeover?: boolean } = {},
-) {
+): NormalizedStoredSessionIntentLedger {
   if (!intentLedger) {
     return markSessionOwned(createEmptySessionIntentLedger(sessionId, Date.now()), instanceId);
   }
