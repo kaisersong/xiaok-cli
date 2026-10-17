@@ -4,6 +4,10 @@ import type { RuntimeHooks } from '../hooks.js';
 import type { IntentBreadcrumb, IntentLedgerRecord, SessionIntentLedger } from './types.js';
 import { cloneSessionIntentLedger } from './types.js';
 import { SessionIntentDelegationStore } from './store.js';
+import type { StoredSessionSnapshot } from '../../ai/runtime/session-store/stored-snapshot-types.js';
+
+type RawIntentLedgerData = NonNullable<StoredSessionSnapshot['intentDelegation']>;
+type RawIntentRecordData = RawIntentLedgerData['intents'][number];
 
 export interface IntentRuntimeSyncOptions {
   hooks: RuntimeHooks;
@@ -20,7 +24,7 @@ interface SyncEntry {
 
 type IntentSyncToolName = 'intent_create' | 'intent_step_update' | 'intent_stage_artifact' | 'intent_salvage';
 
-const TERMINAL_INTENT_STATUSES = new Set<IntentLedgerRecord['overallStatus']>(['completed', 'failed', 'cancelled']);
+const TERMINAL_INTENT_STATUSES = new Set<unknown>(['completed', 'failed', 'cancelled']);
 
 export function wireIntentDelegationToRuntimeSync(options: IntentRuntimeSyncOptions): () => Promise<void> {
   let latestLedger: SessionIntentLedger | null | undefined;
@@ -396,10 +400,12 @@ function isIntentSyncTool(toolName: string): toolName is IntentSyncToolName {
     || toolName === 'intent_salvage';
 }
 
+function resolveCreatedIntentFromInput(after: SessionIntentLedger, toolInput: Record<string, unknown>): IntentLedgerRecord | undefined;
+function resolveCreatedIntentFromInput(after: RawIntentLedgerData, toolInput: Record<string, unknown>): RawIntentRecordData | undefined;
 function resolveCreatedIntentFromInput(
-  after: SessionIntentLedger,
+  after: RawIntentLedgerData,
   toolInput: Record<string, unknown>,
-): IntentLedgerRecord | undefined {
+): RawIntentRecordData | undefined {
   const rawIntent = typeof toolInput.raw_intent === 'string' ? toolInput.raw_intent : undefined;
   const deliverable = typeof toolInput.deliverable === 'string' ? toolInput.deliverable : undefined;
   return after.intents.find((intent) => intent.rawIntent === rawIntent && intent.deliverable === deliverable)
@@ -407,10 +413,12 @@ function resolveCreatedIntentFromInput(
     ?? undefined;
 }
 
+function resolveIntentForInput(ledger: SessionIntentLedger, toolInput: Record<string, unknown>): IntentLedgerRecord | undefined;
+function resolveIntentForInput(ledger: RawIntentLedgerData, toolInput: Record<string, unknown>): RawIntentRecordData | undefined;
 function resolveIntentForInput(
-  ledger: SessionIntentLedger,
+  ledger: RawIntentLedgerData,
   toolInput: Record<string, unknown>,
-): IntentLedgerRecord | undefined {
+): RawIntentRecordData | undefined {
   const intentId = typeof toolInput.intent_id === 'string' ? toolInput.intent_id : ledger.activeIntentId;
   if (!intentId) {
     return undefined;
@@ -418,7 +426,7 @@ function resolveIntentForInput(
   return ledger.intents.find((intent) => intent.intentId === intentId);
 }
 
-function isStepRunning(intent: IntentLedgerRecord, stepId: string): boolean {
+function isStepRunning(intent: {readonly steps: readonly {readonly stepId?: unknown; readonly status?: unknown}[]}, stepId: string): boolean {
   return intent.steps.some((step) => step.stepId === stepId && step.status === 'running');
 }
 

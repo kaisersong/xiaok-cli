@@ -32,7 +32,7 @@ export async function prepareIntentProviderCurrent(input:{store:SessionStore;ses
  const stage=record.stages.find(value=>value.stageId===record.activeStageId);
  if(!stage||!stage.steps.some(step=>step.stepId===record.activeStepId)||!isDeepStrictEqual(record.steps,stage.steps)||record.activeStepId!==stage.activeStepId)throw Error('intent_provider_stage_changed');
  if(record.executionTerminals?.some(terminal=>terminal.kind==='step'&&terminal.identity===record.activeStepId))throw Error('intent_provider_execution_pending');
- if(['completed','publication_pending','waiting_user'].includes(record.overallStatus)||['completed','publication_pending','failed'].includes(stage.status))throw Error('intent_provider_execution_pending');
+ if((['completed','publication_pending','waiting_user'] as readonly unknown[]).includes(record.overallStatus)||(['completed','publication_pending','failed'] as readonly unknown[]).includes(stage.status))throw Error('intent_provider_execution_pending');
  const subject={version:1 as const,sessionId,intentId:record.intentId,stageId:stage.stageId},owner=intentHostSubjectOwner(subject),route=readInstalledCurrentOwner(owner);
  if(route.kind!=='migrated'&&route.kind!=='protected-unregistered')throw Error('intent_provider_owner_unavailable');
  const observed=await readCurrentIntentPublicationDependencies(subject,signal);current();
