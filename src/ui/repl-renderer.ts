@@ -18,6 +18,7 @@ export class ReplRenderer {
   private readonly terminalRenderer: TerminalRenderer;
 
   private scrollRegion: ScrollRegionManager | null = null;
+  private inputOverlayKind: 'generic' | 'question' = 'generic';
 
   constructor(private readonly stream: NodeJS.WriteStream = process.stdout) {
     this.controller = createTerminalController({ prompt: '' });
@@ -88,7 +89,7 @@ export class ReplRenderer {
           ? state.overlay.lines
           : [];
       this.scrollRegion.renderPromptFrame(
-        this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : 'generic'),
+        this.getScrollPromptFrame(overlayLines, permissionModal ? 'permission' : this.inputOverlayKind),
       );
       return;
     }
@@ -99,7 +100,8 @@ export class ReplRenderer {
     return this.controller.getState();
   }
 
-  renderInput(frame: ReplInputFrame): void {
+  renderInput(frame: ReplInputFrame, overlayKind: 'generic' | 'question' = 'generic'): void {
+    this.inputOverlayKind = overlayKind;
     this.controller.closeModal();
     this.controller.setPrompt(frame.prompt);
     this.controller.replaceInput(frame.input, frame.cursor);
@@ -109,6 +111,7 @@ export class ReplRenderer {
   }
 
   renderOverlayAtCursor(lines: string[]): void {
+    this.inputOverlayKind = 'generic';
     this.controller.setOverlayLines(lines);
     this.render();
   }
@@ -124,6 +127,7 @@ export class ReplRenderer {
   }
 
   clearOverlay(): void {
+    this.inputOverlayKind = 'generic';
     this.controller.clearOverlay();
     this.render();
   }

@@ -3078,6 +3078,43 @@ describe('chat interactive runtime', () => {
     }
   }, 10_000);
 
+  it('sets permission mode through the single /mode selector and preserves cancel and typed compatibility', async () => {
+    const root = join(tmpdir(), `xiaok-mode-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const configDir = join(root, 'config'); const projectDir = join(root, 'project');
+    tempDirs.push(root); mkdirSync(configDir, { recursive: true }); mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(configDir, 'config.json'), JSON.stringify({ schemaVersion: 1, defaultModel: 'claude', models: { claude: { model: 'claude-test' } }, defaultMode: 'interactive', contextBudget: 4000, channels: {} }));
+    process.env.XIAOK_CONFIG_DIR = configDir; cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
+    const { registerChatCommands } = await import('../../src/commands/chat.js');
+    const h = createTtyHarness(110, 30);
+    const sigints = process.listeners('SIGINT'); const resizes = process.stdout.listeners('resize');
+    try {
+      const program = new Command(); registerChatCommands(program);
+      const pending = program.parseAsync(['node', 'xiaok', 'chat', '--auto']);
+      await waitForInputTurnReady(h);
+      h.send('/mode\r');
+      await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：auto）'));
+      h.send('\x1b[B'); h.send('\x1b[B'); h.send('\r');
+      await waitFor(() => expect(h.output.normalized).toContain('权限模式已切换为 yolo'));
+      await waitForInputTurnReady(h); h.send('/mode\r');
+      await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：yolo）'));
+      h.send('\x1b'); await waitForInputTurnReady(h);
+      expect(h.output.normalized).toContain('已取消模式切换');
+      h.send('/mode plan\r');
+      await waitFor(() => expect(h.output.normalized).toContain('权限模式已切换为 plan'));
+      await waitForInputTurnReady(h); h.send('/mode\r');
+      await waitFor(() => expect(h.screen.text()).toContain('选择权限模式（当前：plan）'));
+      h.send('\x1b[A'); h.send('\r');
+      await waitForInputTurnReady(h);
+      expect(h.output.normalized).toContain('权限模式已切换为 auto');
+      expectSingleFooter(h.screen.lines());
+      h.send('/exit\r'); await pending;
+    } finally {
+      for (const listener of process.listeners('SIGINT')) if (!sigints.includes(listener)) process.removeListener('SIGINT', listener);
+      for (const listener of process.stdout.listeners('resize')) if (!resizes.includes(listener)) process.stdout.removeListener('resize', listener);
+      h.restore();
+    }
+  }, 20_000);
+
   it('routes a slash-selected /models command to the model selector instead of the /mode branch and keeps the footer singular', async () => {
     const rootDir = join(tmpdir(), `xiaok-chat-interactive-models-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const configDir = join(rootDir, 'config');
@@ -3981,8 +4018,11 @@ describe('chat interactive runtime', () => {
       harness.send('/mode');
       harness.send('\r');
       await waitFor(() => {
-        expect(harness.output.normalized).toContain('当前权限模式：auto');
+        expect(harness.screen.text()).toContain('选择权限模式（当前：auto）');
       }, { timeoutMs: 3_000 });
+      harness.send('\x1b');
+      await waitForInputTurnReady(harness);
+      expect(harness.output.normalized).toContain('已取消模式切换');
 
       harness.send('请先问我一句');
       harness.send('\r');

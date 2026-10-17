@@ -52,11 +52,7 @@ describe('getSlashCommands', () => {
     expect(commands).toContainEqual({ cmd: '/context', desc: '查看当前自动加载的仓库上下文' });
     expect(commands).toContainEqual({ cmd: '/compact', desc: '压缩较早对话，减少上下文占用' });
     expect(commands).toContainEqual({ cmd: '/models', desc: '打开模型选择器' });
-    expect(commands).toContainEqual({ cmd: '/mode', desc: '查看当前权限模式' });
-    expect(commands).toContainEqual({ cmd: '/mode default', desc: '切到 default：危险操作前询问确认' });
-    expect(commands).toContainEqual({ cmd: '/mode auto', desc: '切到 auto：自动放行低风险工具，高风险仍确认' });
-    expect(commands).toContainEqual({ cmd: '/mode yolo', desc: '切到 yolo：所有命令免确认，跳过命令风险拦截' });
-    expect(commands).toContainEqual({ cmd: '/mode plan', desc: '切到 plan：禁止写入和 bash，只做计划' });
+    expect(commands.filter(command => /^\/mode(?: |$)/.test(command.cmd))).toEqual([{ cmd: '/mode', desc: '设置权限模式' }]);
     expect(commands).toContainEqual({ cmd: '/reminder', desc: 'Manage reminders: create, list, or cancel' });
     expect(commands).toContainEqual({ cmd: '/skills-reload', desc: '强制刷新 skill 目录（通常不需要，默认会自动热更新）' });
     expect(commands).toContainEqual({ cmd: '/yzjchannel', desc: '连接嵌入式云之家 channel' });
@@ -70,7 +66,7 @@ describe('getSlashCommands', () => {
     expect(commands.some((command) => command.cmd === '/remind')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminders')).toBe(false);
     expect(commands.some((command) => command.cmd === '/reminder-cancel')).toBe(false);
-    expect(commands.length).toBe(17);
+    expect(commands.length).toBe(13);
   });
 
   it('should include skills in command list', () => {
@@ -86,7 +82,7 @@ describe('getSlashCommands', () => {
     const commands = getSlashCommands(skills);
 
     expect(commands).toContainEqual({ cmd: '/test-skill', desc: 'A test skill' });
-    expect(commands.length).toBe(18); // 17 base + 1 skill
+    expect(commands.length).toBe(14); // 13 base + 1 skill
   });
 
   it('should sort commands alphabetically', () => {
@@ -124,7 +120,7 @@ describe('getSlashCommands', () => {
 
     const commands = getSlashCommands(skills);
 
-    expect(commands.length).toBe(20); // 17 base + 3 skills
+    expect(commands.length).toBe(16); // 13 base + 3 skills
   });
 
   it('builds base slash commands from shared chat command metadata rather than a local constant table', () => {
@@ -919,8 +915,8 @@ describe('InputReader', () => {
 
       const commands = getSlashCommands(skills);
 
-      // 17 base commands + 20 skills = 37 total
-      expect(commands.length).toBe(37);
+      // 13 base commands + 20 skills = 33 total
+      expect(commands.length).toBe(33);
     });
 
     it('should preserve command descriptions', () => {

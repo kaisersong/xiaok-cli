@@ -6,6 +6,7 @@ export declare class ReplRenderer {
     private readonly controller;
     private readonly terminalRenderer;
     private scrollRegion;
+    private inputOverlayKind;
     constructor(stream?: NodeJS.WriteStream);
     private syncTerminalSize;
     setScrollRegion(region: ScrollRegionManager): void;
@@ -14,7 +15,7 @@ export declare class ReplRenderer {
     private buildPermissionOverlayLines;
     private render;
     getState(): import("./surface-state.js").SurfaceState;
-    renderInput(frame: ReplInputFrame): void;
+    renderInput(frame: ReplInputFrame, overlayKind?: 'generic' | 'question'): void;
     renderOverlayAtCursor(lines: string[]): void;
     openPermissionModal(request: PermissionModalRequest): void;
     handleKey(key: string): void;

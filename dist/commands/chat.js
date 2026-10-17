@@ -59,6 +59,7 @@ import { ToolExplorer } from '../ui/tool-explorer.js';
 import { TurnLayout } from '../ui/turn-layout.js';
 import { parseInputBlocks, clearPastedImagePaths } from '../ui/image-input.js';
 import { selectModel } from '../ui/model-selector.js';
+import { selectPermissionMode } from '../ui/mode-selector.js';
 import { getCurrentBranch } from '../utils/git.js';
 import { executeReminderSlashCommand } from './chat-reminder.js';
 import { parseShellEscapeInput, runInteractiveShellCommand } from './chat-shell-escape.js';
@@ -3330,13 +3331,21 @@ async function runChat(initialInput, opts) {
                 continue;
             }
             if (trimmed === '/mode' || trimmed.startsWith('/mode ')) {
-                const [, requestedMode] = trimmed.split(/\s+/, 2);
+                let [, requestedMode] = trimmed.split(/\s+/, 2);
                 if (!requestedMode) {
-                    writeCommandOutput(trimmed, `当前权限模式：${permissionManager.getMode()}\n\n`);
-                    continue;
+                    if (scrollRegion.isActive() && !terminalUiSuspended) {
+                        scrollRegion.clearOverlayPromptState();
+                        replRenderer.prepareForInput();
+                    }
+                    const selected = await selectPermissionMode(permissionManager.getMode(), { renderer: replRenderer });
+                    if (!selected) {
+                        writeCommandOutput(trimmed, '已取消模式切换。\n\n');
+                        continue;
+                    }
+                    requestedMode = selected;
                 }
                 if (!['default', 'auto', 'plan', 'yolo'].includes(requestedMode)) {
-                    writeCommandOutput(trimmed, '用法：/mode [default|auto|plan|yolo]\n\n');
+                    writeCommandOutput(trimmed, '未知权限模式，请执行 /mode 选择。\n\n');
                     continue;
                 }
                 permissionManager.setMode(requestedMode);
